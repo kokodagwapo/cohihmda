@@ -105,6 +105,7 @@ export interface SessionListItem {
   id: string;
   topic: string | null;
   phase: string;
+  isOwner?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -124,6 +125,8 @@ export function useResearchSession(tenantId?: string | null) {
   const [isRunning, setIsRunning] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
+  const [sessionVisibility, setSessionVisibility] = useState<string>("private");
+  const [sessionSharedWithUserIds, setSessionSharedWithUserIds] = useState<string[]>([]);
 
   const abortRef = useRef<AbortController | null>(null);
   const sessionIdRef = useRef<string | null>(null);
@@ -382,6 +385,8 @@ export function useResearchSession(tenantId?: string | null) {
         setError(data.error || null);
         setIsRunning(false);
         setIsPaused(false);
+        setSessionVisibility(data.visibility ?? "private");
+        setSessionSharedWithUserIds(Array.isArray(data.sharedWithUserIds) ? data.sharedWithUserIds : []);
       } catch (err: any) {
         console.error("[Research] Failed to load session:", err);
         setError(err.message);
@@ -460,6 +465,27 @@ export function useResearchSession(tenantId?: string | null) {
     [tenantParam]
   );
 
+  // ── Update session sharing ──
+  const updateSessionSharing = useCallback(
+    async (visibility: string, sharedWithUserIds: string[]) => {
+      const id = sessionIdRef.current;
+      if (!id) return false;
+      try {
+        await api.request(`/api/research/sessions/${id}/sharing${tenantParam}`, {
+          method: "PUT",
+          body: JSON.stringify({ visibility, shared_with_user_ids: sharedWithUserIds }),
+        });
+        setSessionVisibility(["shared", "global"].includes(visibility) ? visibility : "private");
+        setSessionSharedWithUserIds(sharedWithUserIds);
+        return true;
+      } catch (err: any) {
+        console.error("[Research] Failed to update sharing:", err);
+        return false;
+      }
+    },
+    [tenantParam]
+  );
+
   // ── Reset to initial state ──
   const reset = useCallback(() => {
     if (abortRef.current) {
@@ -476,6 +502,8 @@ export function useResearchSession(tenantId?: string | null) {
     setError(null);
     setIsRunning(false);
     setIsPaused(false);
+    setSessionVisibility("private");
+    setSessionSharedWithUserIds([]);
   }, []);
 
   return {
@@ -489,6 +517,9 @@ export function useResearchSession(tenantId?: string | null) {
     isRunning,
     isPaused,
     sessions,
+    sessionVisibility,
+    sessionSharedWithUserIds,
+    updateSessionSharing,
     startSession,
     runSession,
     steer,

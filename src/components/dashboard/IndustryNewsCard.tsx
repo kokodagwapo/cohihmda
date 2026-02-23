@@ -45,7 +45,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
-import { ExportShareMenu } from "@/components/common/ExportShareMenu";
+import { ExportMenu } from "@/components/common/ExportMenu";
 
 // Sample data for Daily Morning Brief charts (from Markets & Economy brief)
 const FIXED_RATE_DATA = [
@@ -1378,10 +1378,9 @@ export const IndustryNewsCard = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <ExportShareMenu
+            <ExportMenu
               title="Industry News"
               targetRef={cardRef}
-              shareTarget={{ type: "industry-news", label: "Industry News" }}
             />
             <button
               onClick={() => {

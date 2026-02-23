@@ -7,7 +7,7 @@ import { DashboardCard } from '@/components/dashboard/DashboardCard';
 import { DataTable } from '@/components/dashboard/DataTable';
 import { useCompanyData } from '@/hooks/useCompanyData';
 import { useCompanyMetrics } from '@/hooks/useCompanyMetrics';
-import { ExportShareMenu } from '@/components/common/ExportShareMenu';
+import { ExportMenu } from '@/components/common/ExportMenu';
 import type { ExportData } from '@/utils/exportUtils';
 
 interface CompanyDetailViewProps {
@@ -244,11 +244,10 @@ export const CompanyDetailView = ({ onBack, onTabChange }: CompanyDetailViewProp
               Company Detail
             </h2>
             <div className="flex items-center gap-2">
-              <ExportShareMenu
+              <ExportMenu
                 title="Company Detail"
                 targetRef={sectionRef}
                 getExportData={getExportData}
-                shareTarget={{ type: "company-detail", label: "Company Detail" }}
               />
               <button onClick={onBack} className="p-2 hover:bg-slate-50 dark:hover:bg-slate-800/50 rounded-lg transition-colors" title="Back to Company Overview">
                 <ChevronLeft className="w-4 h-4 text-slate-500 dark:text-slate-400" />

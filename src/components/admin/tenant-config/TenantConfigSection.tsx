@@ -1,8 +1,7 @@
 /**
  * Tenant Configuration Section
- * Self-service mapping tool for lender admins
- * Manages field mappings, filters, and scoring weights
- * Note: Personas/user profiles are managed in Access & Permissions section
+ * Renders a single config area: field mapping, revenue, scoring, or data transfer.
+ * Each area is a separate admin sidebar section.
  */
 
 import { useState, useEffect, useCallback } from "react";
@@ -14,7 +13,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import {
   Calculator,
@@ -24,7 +22,6 @@ import {
   Settings2,
   Link2,
   Building2,
-  Upload,
   ArrowLeftRight,
 } from "lucide-react";
 import { api } from "@/lib/api";
@@ -36,18 +33,49 @@ import { ScoringWeightsTab } from "./ScoringWeightsTab";
 import { LegacyConfigImportTab } from "./LegacyConfigImportTab";
 import { TenantConfigTransferDialog } from "./TenantConfigTransferDialog";
 
-export function TenantConfigSection() {
-  const { toast } = useToast();
+const SECTION_META: Record<
+  string,
+  { title: string; description: string; icon: typeof Link2 }
+> = {
+  mapping: {
+    title: "Field Mapping",
+    description: "Map LOS fields to Coheus columns and configure sync",
+    icon: Link2,
+  },
+  revenue: {
+    title: "Revenue",
+    description: "Define revenue and margin calculation formulas",
+    icon: Calculator,
+  },
+  scoring: {
+    title: "Scoring & Weights",
+    description: "Scorecard weights, loan complexity, and unit targets",
+    icon: BarChart3,
+  },
+  transfer: {
+    title: "Import / Export",
+    description: "Legacy config import and tenant config transfer",
+    icon: ArrowLeftRight,
+  },
+};
 
-  // Use admin tenant context
-  const { selectedTenantId, isTenantAdmin, isPlatformAdmin, currentTenantName } =
-    useAdminTenant();
-  const [activeTab, setActiveTab] = useState("mapping");
+export type TenantConfigSectionId =
+  | "mapping"
+  | "revenue"
+  | "scoring"
+  | "transfer";
+
+export interface TenantConfigSectionProps {
+  section: TenantConfigSectionId;
+}
+
+export function TenantConfigSection({ section }: TenantConfigSectionProps) {
+  const { toast } = useToast();
+  const { selectedTenantId, isTenantAdmin, isPlatformAdmin } = useAdminTenant();
   const [loading, setLoading] = useState(false);
   const [initialLoadDone, setInitialLoadDone] = useState(false);
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
 
-  // Data states
   const [scoringWeights, setScoringWeights] = useState<Record<string, any[]>>(
     {}
   );
@@ -62,9 +90,10 @@ export function TenantConfigSection() {
   } | null>(null);
   const [losConnections, setLosConnections] = useState<any[]>([]);
 
-  // Load all data
+  const needsLos = section === "mapping" || section === "transfer";
+  const needsScoring = section === "scoring";
+
   const loadData = useCallback(async () => {
-    // For platform admins, require a tenant to be selected
     if (!isTenantAdmin && !selectedTenantId) {
       setLosConnections([]);
       setScoringWeights({});
@@ -76,45 +105,57 @@ export function TenantConfigSection() {
 
     setLoading(true);
     try {
-      // Build tenant query param for platform admins
       const tenantParam = selectedTenantId
         ? `?tenant_id=${selectedTenantId}`
         : "";
 
-      const [
-        salesWeightsRes,
-        opsWeightsRes,
-        complexityRes,
-        losRes,
-        staffingTargetsRes,
-      ] = await Promise.all([
-        api.request<{ weights: Record<string, any[]> }>(
-          `/api/tenant-config/scoring-weights/sales${tenantParam}`
-        ),
-        api.request<{ weights: Record<string, any[]> }>(
-          `/api/tenant-config/scoring-weights/operations${tenantParam}`
-        ),
-        api.request<{ components: Record<string, any[]> }>(
-          `/api/tenant-config/complexity${tenantParam}`
-        ),
-        api.request<{ connections: any[] }>(
-          `/api/los/connections${tenantParam}`
-        ),
-        api.request<{
-          processor: number;
-          underwriter: number;
-          closer: number;
-          other: number;
-        }>(`/api/tenant-config/staffing-unit-targets${tenantParam}`),
-      ]);
+      const promises: Promise<unknown>[] = [];
+      if (needsLos) {
+        promises.push(
+          api.request<{ connections: any[] }>(`/api/los/connections${tenantParam}`)
+        );
+      }
+      if (needsScoring) {
+        promises.push(
+          api.request<{ weights: Record<string, any[]> }>(
+            `/api/tenant-config/scoring-weights/sales${tenantParam}`
+          ),
+          api.request<{ weights: Record<string, any[]> }>(
+            `/api/tenant-config/scoring-weights/operations${tenantParam}`
+          ),
+          api.request<{ components: Record<string, any[]> }>(
+            `/api/tenant-config/complexity${tenantParam}`
+          ),
+          api.request<{
+            processor: number;
+            underwriter: number;
+            closer: number;
+            other: number;
+          }>(`/api/tenant-config/staffing-unit-targets${tenantParam}`)
+        );
+      }
 
-      setScoringWeights({
-        sales: salesWeightsRes.weights?.default || [],
-        operations: opsWeightsRes.weights?.default || [],
-      });
-      setComplexityComponents(complexityRes.components || {});
-      setStaffingUnitTargets(staffingTargetsRes ?? null);
-      setLosConnections(losRes.connections || []);
+      const results = await Promise.all(promises);
+      let idx = 0;
+      if (needsLos) {
+        const losRes = results[idx++] as { connections: any[] };
+        setLosConnections(losRes?.connections || []);
+      }
+      if (needsScoring) {
+        const [salesWeightsRes, opsWeightsRes, complexityRes, staffingTargetsRes] =
+          results.slice(idx) as [
+            { weights: Record<string, any[]> },
+            { weights: Record<string, any[]> },
+            { components: Record<string, any[]> },
+            { processor: number; underwriter: number; closer: number; other: number },
+          ];
+        setScoringWeights({
+          sales: salesWeightsRes?.weights?.default || [],
+          operations: opsWeightsRes?.weights?.default || [],
+        });
+        setComplexityComponents(complexityRes?.components || {});
+        setStaffingUnitTargets(staffingTargetsRes ?? null);
+      }
       setInitialLoadDone(true);
     } catch (error: any) {
       console.error("Error loading tenant config:", error);
@@ -126,18 +167,14 @@ export function TenantConfigSection() {
     } finally {
       setLoading(false);
     }
-  }, [toast, selectedTenantId, isTenantAdmin]);
+  }, [toast, selectedTenantId, isTenantAdmin, section, needsLos, needsScoring]);
 
   useEffect(() => {
     loadData();
   }, [loadData, selectedTenantId]);
 
-  const tabs = [
-    { id: "mapping", label: "Field Mapping", icon: Link2 },
-    { id: "calculations", label: "Revenue Calculations", icon: Calculator },
-    { id: "scoring", label: "Scoring Weights", icon: BarChart3 },
-    { id: "import", label: "Legacy Import", icon: Upload },
-  ];
+  const meta = SECTION_META[section];
+  const Icon = meta.icon;
 
   return (
     <motion.div
@@ -146,25 +183,22 @@ export function TenantConfigSection() {
       transition={{ duration: 0.3 }}
       className="space-y-6"
     >
-      {/* Header */}
       <Card className="border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
         <CardHeader>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <Settings2 className="h-6 w-6 text-indigo-600 dark:text-indigo-400" />
+              <Icon className="h-6 w-6 text-indigo-600 dark:text-indigo-400" />
               <div>
                 <CardTitle className="text-xl font-thin text-slate-900 dark:text-white tracking-tight">
-                  Data Configuration
+                  {meta.title}
                 </CardTitle>
                 <CardDescription className="text-sm text-slate-600 dark:text-slate-400 font-light">
-                  {isTenantAdmin
-                    ? "Manage field mappings, guideline rules, filters, and scoring for your organization"
-                    : "Configure tenant data mappings, rules, and scoring weights"}
+                  {meta.description}
                 </CardDescription>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              {isPlatformAdmin && selectedTenantId && (
+              {section === "transfer" && isPlatformAdmin && selectedTenantId && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -194,7 +228,6 @@ export function TenantConfigSection() {
         </CardHeader>
       </Card>
 
-      {/* No tenant selected message for platform admins */}
       {!isTenantAdmin && !selectedTenantId && (
         <Card className="border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20">
           <CardContent className="flex items-center gap-4 py-8">
@@ -207,34 +240,16 @@ export function TenantConfigSection() {
                 Select a Tenant
               </h3>
               <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
-                Use the tenant selector above to choose which organization's
-                configuration to manage.
+                Use the tenant selector above to choose which organization to
+                manage.
               </p>
             </div>
           </CardContent>
         </Card>
       )}
 
-      {/* Tabs - only show when tenant is selected (or for tenant admins) */}
       {(isTenantAdmin || selectedTenantId) && (
-        <Tabs
-          value={activeTab}
-          onValueChange={setActiveTab}
-          className="space-y-4"
-        >
-          <TabsList className="grid w-full grid-cols-4 gap-2 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
-            {tabs.map((tab) => (
-              <TabsTrigger
-                key={tab.id}
-                value={tab.id}
-                className="flex items-center gap-2 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700 font-light"
-              >
-                <tab.icon className="h-4 w-4" />
-                <span className="hidden sm:inline">{tab.label}</span>
-              </TabsTrigger>
-            ))}
-          </TabsList>
-
+        <>
           {loading && !initialLoadDone ? (
             <Card className="border-slate-200 dark:border-slate-700">
               <CardContent className="flex items-center justify-center py-12">
@@ -243,35 +258,30 @@ export function TenantConfigSection() {
             </Card>
           ) : (
             <>
-              <TabsContent value="mapping">
+              {section === "mapping" && (
                 <FieldMappingTab
                   losConnections={losConnections}
                   onRefresh={loadData}
                 />
-              </TabsContent>
-
-              <TabsContent value="calculations">
-                <RevenueFormulaTab onRefresh={loadData} />
-              </TabsContent>
-
-              <TabsContent value="scoring">
+              )}
+              {section === "revenue" && <RevenueFormulaTab onRefresh={loadData} />}
+              {section === "scoring" && (
                 <ScoringWeightsTab
                   weights={scoringWeights}
                   complexityComponents={complexityComponents}
                   staffingUnitTargets={staffingUnitTargets}
                   onRefresh={loadData}
                 />
-              </TabsContent>
-
-              <TabsContent value="import">
+              )}
+              {section === "transfer" && (
                 <LegacyConfigImportTab tenantId={selectedTenantId || ""} />
-              </TabsContent>
+              )}
             </>
           )}
-        </Tabs>
+        </>
       )}
-      {/* Config Transfer Dialog (platform admin only) */}
-      {isPlatformAdmin && (
+
+      {section === "transfer" && isPlatformAdmin && (
         <TenantConfigTransferDialog
           open={transferDialogOpen}
           onOpenChange={setTransferDialogOpen}

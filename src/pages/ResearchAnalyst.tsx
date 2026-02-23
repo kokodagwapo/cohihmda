@@ -35,7 +35,17 @@ import {
   ThumbsUp,
   ThumbsDown,
   MessageSquarePlus,
+  Share2,
 } from "lucide-react";
+import { ExportMenu } from "@/components/common/ExportMenu";
+import { UserSharePicker } from "@/components/common/UserSharePicker";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -91,7 +101,7 @@ function SessionSidebar({
   collapsed,
   onToggle,
 }: {
-  sessions: Array<{ id: string; topic: string | null; phase: string; createdAt: string; updatedAt: string }>;
+  sessions: Array<{ id: string; topic: string | null; phase: string; createdAt: string; updatedAt: string; isOwner?: boolean }>;
   currentSessionId: string | null;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
@@ -99,6 +109,9 @@ function SessionSidebar({
   collapsed: boolean;
   onToggle: () => void;
 }) {
+  const mySessions = sessions.filter((s) => s.isOwner !== false);
+  const sharedWithMe = sessions.filter((s) => s.isOwner === false);
+
   if (collapsed) {
     return (
       <div className="border-r flex flex-col items-center py-3 px-1 gap-2">
@@ -129,38 +142,71 @@ function SessionSidebar({
         {sessions.length === 0 ? (
           <p className="text-xs text-muted-foreground text-center py-6">No sessions yet</p>
         ) : (
-          sessions.map((s) => (
-            <div
-              key={s.id}
-              className={cn(
-                "group flex items-start gap-2 px-3 py-2.5 cursor-pointer hover:bg-accent/50 transition-colors border-b border-transparent",
-                currentSessionId === s.id && "bg-accent"
-              )}
-              onClick={() => onSelect(s.id)}
-            >
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium truncate">{s.topic || "Open Analysis"}</p>
-                <div className="flex items-center gap-1.5 mt-0.5">
-                  <PhaseBadge phase={s.phase} />
-                  <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
-                    <Clock className="h-2.5 w-2.5" />
-                    {new Date(s.updatedAt || s.createdAt).toLocaleDateString()}
-                  </span>
+          <>
+            {mySessions.length > 0 && (
+              <div className="px-2 pt-2 pb-1">
+                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">My sessions</span>
+              </div>
+            )}
+            {mySessions.map((s) => (
+              <div
+                key={s.id}
+                className={cn(
+                  "group flex items-start gap-2 px-3 py-2.5 cursor-pointer hover:bg-accent/50 transition-colors border-b border-transparent",
+                  currentSessionId === s.id && "bg-accent"
+                )}
+                onClick={() => onSelect(s.id)}
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-medium truncate">{s.topic || "Open Analysis"}</p>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <PhaseBadge phase={s.phase} />
+                    <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                      <Clock className="h-2.5 w-2.5" />
+                      {new Date(s.updatedAt || s.createdAt).toLocaleDateString()}
+                    </span>
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 opacity-0 group-hover:opacity-100 flex-shrink-0"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete(s.id);
+                  }}
+                >
+                  <Trash2 className="h-3 w-3 text-muted-foreground" />
+                </Button>
+              </div>
+            ))}
+            {sharedWithMe.length > 0 && (
+              <div className="px-2 pt-3 pb-1">
+                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Shared with me</span>
+              </div>
+            )}
+            {sharedWithMe.map((s) => (
+              <div
+                key={s.id}
+                className={cn(
+                  "group flex items-start gap-2 px-3 py-2.5 cursor-pointer hover:bg-accent/50 transition-colors border-b border-transparent",
+                  currentSessionId === s.id && "bg-accent"
+                )}
+                onClick={() => onSelect(s.id)}
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-medium truncate">{s.topic || "Open Analysis"}</p>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <PhaseBadge phase={s.phase} />
+                    <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                      <Clock className="h-2.5 w-2.5" />
+                      {new Date(s.updatedAt || s.createdAt).toLocaleDateString()}
+                    </span>
+                  </div>
                 </div>
               </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 opacity-0 group-hover:opacity-100 flex-shrink-0"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDelete(s.id);
-                }}
-              >
-                <Trash2 className="h-3 w-3 text-muted-foreground" />
-              </Button>
-            </div>
-          ))
+            ))}
+          </>
         )}
       </div>
     </div>
@@ -250,6 +296,9 @@ export default function ResearchAnalyst() {
     isRunning,
     isPaused,
     sessions: sessionList,
+    sessionVisibility,
+    sessionSharedWithUserIds,
+    updateSessionSharing,
     startSession,
     runSession,
     steer,
@@ -270,6 +319,13 @@ export default function ResearchAnalyst() {
   const [drillDownFinding, setDrillDownFinding] = useState<Finding | null>(null);
   const steerInputRef = useRef<HTMLInputElement>(null);
   const lastReportRef = useRef<boolean>(false);
+  const reportContainerRef = useRef<HTMLDivElement>(null);
+  const currentSessionTopic = sessionList.find((s) => s.id === sessionId)?.topic ?? null;
+  const { toast } = useToast();
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [shareDialogVisibility, setShareDialogVisibility] = useState<"private" | "shared" | "global">("private");
+  const [shareDialogSharedIds, setShareDialogSharedIds] = useState<string[]>([]);
+  const [shareDialogSaving, setShareDialogSaving] = useState(false);
 
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -499,10 +555,62 @@ export default function ResearchAnalyst() {
                     </TabsList>
                     <PhaseBadge phase={phase} />
                   </div>
-                  <Button variant="outline" size="sm" onClick={handleNewInvestigation}>
-                    <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
-                    New Investigation
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    {sessionId && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-2"
+                        onClick={() => {
+                          setShareDialogVisibility(
+                            sessionVisibility === "global" ? "global" :
+                            sessionVisibility === "shared" ? "shared" : "private"
+                          );
+                          setShareDialogSharedIds([...sessionSharedWithUserIds]);
+                          setShareDialogOpen(true);
+                        }}
+                      >
+                        <Share2 className="w-4 h-4" />
+                        Share
+                      </Button>
+                    )}
+                    {report && (
+                      <ExportMenu
+                        title={currentSessionTopic ? `Research Report - ${currentSessionTopic}` : "Research Report"}
+                        targetRef={reportContainerRef}
+                        getExportData={() => ({
+                          title: currentSessionTopic ? `Research Report - ${currentSessionTopic}` : "Research Report",
+                          tables: report
+                            ? [
+                                {
+                                  name: "Executive Summary",
+                                  headers: ["Section", "Content"],
+                                  rows: [["Summary", report.executiveSummary || ""]],
+                                },
+                                ...(report.rankedInsights?.length
+                                  ? [
+                                      {
+                                        name: "Insights",
+                                        headers: ["Rank", "Headline", "Detail", "Impact"],
+                                        rows: report.rankedInsights.map((insight) => [
+                                          insight.rank,
+                                          insight.headline || "",
+                                          insight.detail || "",
+                                          insight.impact || "",
+                                        ]),
+                                      },
+                                    ]
+                                  : []),
+                              ]
+                            : [],
+                        })}
+                      />
+                    )}
+                    <Button variant="outline" size="sm" onClick={handleNewInvestigation}>
+                      <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+                      New Investigation
+                    </Button>
+                  </div>
                 </div>
 
                 {/* Timeline Tab */}
@@ -523,6 +631,7 @@ export default function ResearchAnalyst() {
                     <FindingDrillDown
                       finding={drillDownFinding}
                       onClose={() => setDrillDownFinding(null)}
+                      sessionId={sessionId}
                     />
                   </div>
                 ) : (
@@ -572,7 +681,7 @@ export default function ResearchAnalyst() {
                 {/* Report Tab */}
                 <TabsContent value="report" className="flex-1 overflow-y-auto m-0 px-6 pb-4">
                   {report ? (
-                    <div className="space-y-4 py-2">
+                    <div ref={reportContainerRef} className="space-y-4 py-2">
                       {phase === "complete" && (
                         <SessionFeedback onSubmit={handleSessionFeedback} />
                       )}
@@ -666,6 +775,49 @@ export default function ResearchAnalyst() {
           )}
         </div>
       </div>
+
+      <Dialog open={shareDialogOpen} onOpenChange={setShareDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Share2 className="h-4 w-4" />
+              Share session
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <UserSharePicker
+              visibility={shareDialogVisibility}
+              sharedWithUserIds={shareDialogSharedIds}
+              onVisibilityChange={setShareDialogVisibility}
+              onSharedWithUserIdsChange={setShareDialogSharedIds}
+              allowGlobal={['super_admin', 'platform_admin', 'tenant_admin', 'admin'].includes(user?.role || '')}
+            />
+            <Button
+              className="w-full"
+              disabled={shareDialogSaving}
+              onClick={async () => {
+                setShareDialogSaving(true);
+                try {
+                  const ok = await updateSessionSharing(
+                    shareDialogVisibility,
+                    shareDialogSharedIds,
+                  );
+                  if (ok) {
+                    toast({ title: "Sharing updated", description: "Session sharing settings saved." });
+                    setShareDialogOpen(false);
+                  } else {
+                    toast({ title: "Failed to update", variant: "destructive" });
+                  }
+                } finally {
+                  setShareDialogSaving(false);
+                }
+              }}
+            >
+              {shareDialogSaving ? "Saving…" : "Save sharing settings"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

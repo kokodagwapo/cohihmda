@@ -1541,6 +1541,11 @@ function buildWhereClause(
     clauses.push(`(l.lock_date IS NOT NULL)`);
   }
 
+  // Credit Pulls: credit_pull_date IS NOT NULL (matches credit_pulls metric)
+  if (filters.credit_pull_filter) {
+    clauses.push(`(l.credit_pull_date IS NOT NULL)`);
+  }
+
   // Loan purpose filter
   if (filters.loan_purpose) {
     clauses.push(`l.loan_purpose = $${paramOffset + params.length + 1}`);

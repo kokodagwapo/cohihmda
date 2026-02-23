@@ -39,6 +39,7 @@ import {
 import { getPromptConfig, buildPrompt } from "../services/promptConfigService.js";
 import { decryptAPIKeys } from "../services/encryption.js";
 import { tenantDbManager } from "../config/tenantDatabaseManager.js";
+import { loadSession as loadResearchSession } from "../services/research/orchestrator.js";
 
 const router = Router();
 
@@ -59,7 +60,14 @@ interface CanvasStateSnapshot {
       loanOfficer?: string;
     };
   }[];
-  standaloneWidgets: { id: string; type: string; title?: string }[];
+  standaloneWidgets: {
+    id: string;
+    type: string;
+    title?: string;
+    sourceType?: 'research' | 'chat';
+    sourceSessionId?: string;
+    sql?: string;
+  }[];
   totalItems: number;
   /** Actual data from rendered widgets */
   widgetData?: {
@@ -260,7 +268,11 @@ function buildCanvasContext(state: CanvasStateSnapshot): string {
   if (state.standaloneWidgets.length > 0) {
     lines.push(`### Standalone Items (${state.standaloneWidgets.length})`);
     for (const w of state.standaloneWidgets) {
-      lines.push(`- ${w.id} (${w.type})${w.title ? ": " + w.title : ""}`);
+      const source = w.sourceType === 'research' ? ' [research-lab widget]' : '';
+      lines.push(`- ${w.id} (${w.type})${w.title ? ": " + w.title : ""}${source}`);
+      if (w.sql) {
+        lines.push(`  SQL: \`${w.sql.substring(0, 300)}${w.sql.length > 300 ? '...' : ''}\``);
+      }
     }
     lines.push("");
   }
@@ -307,6 +319,59 @@ function buildCanvasContext(state: CanvasStateSnapshot): string {
   return lines.join("\n");
 }
 
+/**
+ * Build LLM context from research sessions referenced by canvas widgets.
+ * Returns a markdown block with the research topic, findings, and SQL.
+ */
+async function buildResearchContext(
+  state: CanvasStateSnapshot | undefined,
+  tenantPool: import("pg").Pool | null
+): Promise<string> {
+  if (!state || !tenantPool) return "";
+  const sessionIds = new Set<string>();
+  for (const w of state.standaloneWidgets) {
+    if (w.sourceType === "research" && w.sourceSessionId) {
+      sessionIds.add(w.sourceSessionId);
+    }
+  }
+  if (sessionIds.size === 0) return "";
+
+  const blocks: string[] = ["\n## RESEARCH LAB CONTEXT\n"];
+  blocks.push(
+    "The canvas contains widgets created from Research Lab sessions. " +
+    "When the user asks to modify a research widget, use the research context " +
+    "below to understand the analytical intent, then generate a new SQL query " +
+    "that achieves the requested change. Use the modify_widget action with a " +
+    "new `sql` field.\n"
+  );
+
+  for (const sid of sessionIds) {
+    try {
+      const session = await loadResearchSession(sid, tenantPool);
+      if (!session) continue;
+      blocks.push(`### Research Session: ${session.topic || "Untitled"}`);
+      blocks.push(`Session ID: ${sid}`);
+      if (session.findings && session.findings.length > 0) {
+        blocks.push(`\n**Findings (${session.findings.length}):**`);
+        for (const f of session.findings.slice(0, 5)) {
+          blocks.push(`- **${f.title}** (${f.confidence} confidence): ${f.summary.substring(0, 200)}`);
+          if (f.evidence && f.evidence.length > 0) {
+            for (const ev of f.evidence.slice(0, 2)) {
+              blocks.push(`  SQL: \`${ev.sql.substring(0, 200)}${ev.sql.length > 200 ? "..." : ""}\``);
+              if (ev.explanation) blocks.push(`  Purpose: ${ev.explanation.substring(0, 150)}`);
+            }
+          }
+        }
+      }
+      blocks.push("");
+    } catch (err) {
+      console.warn(`[CohiWorkbench] Failed to load research session ${sid}:`, err);
+    }
+  }
+
+  return blocks.join("\n");
+}
+
 const WORKBENCH_SYSTEM_PROMPT = `You are Cohi, a senior mortgage industry analyst and executive intelligence engine embedded in a workbench for mortgage data analytics.
 You serve as a trusted chief of staff — turning raw data into clear, confident narratives and board-ready presentations instantly.
 You help users build, modify, and understand data visualizations on their canvas.
@@ -348,7 +413,11 @@ Each action in the "actions" array must be one of:
    IMPORTANT: The config.type MUST be one of: bar, line, pie, area, table, kpi, donut, horizontal_bar, stacked_bar, grouped_bar, treemap, pivot. NEVER use "chart" as a type.
 
 4. **modify_widget**: Change an existing canvas widget
-   {"type": "modify_widget", "instanceId": "<canvas item id>", "changes": {...}, "explanation": "What changed"}
+   {"type": "modify_widget", "instanceId": "<canvas item id>", "changes": {...}, "sql": "SELECT ...", "title": "New Title", "explanation": "What changed"}
+   - "changes" accepts partial VisualizationConfig overrides (type, xKey, yKey, etc.)
+   - "sql" (optional) replaces the widget's SQL query — use this for cohi_widget items when the user wants different data, date ranges, groupings, or columns
+   - "title" (optional) updates the widget title
+   - For research-lab widgets: these use complex CTEs and derived columns. When modifying them, always provide a complete new SQL query. Reference the RESEARCH LAB CONTEXT section below to understand the analytical intent behind the original query.
 
 5. **delete_widget**: Remove a widget from canvas
    {"type": "delete_widget", "instanceId": "<canvas item id>", "explanation": "Why removing"}
@@ -688,6 +757,17 @@ router.post(
         ? buildCanvasContext(canvasState)
         : "No canvas state provided.";
 
+      // Build research session context for any research-sourced widgets
+      let researchContext = "";
+      try {
+        const tenantPool = tenantId
+          ? await tenantDbManager.getTenantPool(tenantId)
+          : null;
+        researchContext = await buildResearchContext(canvasState, tenantPool);
+      } catch (err) {
+        console.warn("[CohiWorkbench] Could not load research context:", err);
+      }
+
       // Build full system prompt
       const now = new Date();
       const systemPrompt = WORKBENCH_SYSTEM_PROMPT.replace(
@@ -696,7 +776,7 @@ router.post(
       )
         .replace("{{SCHEMA_CONTEXT}}", schemaContext + verifiedMetricsBlock)
         .replace("{{WIDGET_CATALOG}}", widgetCatalog || "No widget catalog provided.")
-        .replace("{{CANVAS_STATE}}", canvasContext);
+        .replace("{{CANVAS_STATE}}", canvasContext + researchContext);
 
       // Build message history
       const history: OpenAIChatMessage[] = (conversationHistory || [])

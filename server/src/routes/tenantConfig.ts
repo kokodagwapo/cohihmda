@@ -1717,9 +1717,9 @@ router.get(
       const { tenantPool } = getTenantContext(req);
 
       const result = await tenantPool.query(`
-      SELECT id, component_name, condition_value, weight, description, is_active, created_at, updated_at
+      SELECT id, component_name, condition_value, weight, description, is_active, created_at, updated_at, range_min, range_max
       FROM public.complexity_components
-      ORDER BY component_name, condition_value
+      ORDER BY component_name, COALESCE(range_min, 0), condition_value
     `);
 
       // Group by component_name
@@ -1761,6 +1761,8 @@ router.put(
             weight: z.number(),
             description: z.string().optional(),
             is_active: z.boolean().optional(),
+            range_min: z.number().nullable().optional(),
+            range_max: z.number().nullable().optional(),
           })
         ),
       });
@@ -1771,20 +1773,25 @@ router.put(
       for (const v of data.values) {
         const result = await tenantPool.query(
           `
-        INSERT INTO public.complexity_components (component_name, condition_value, weight, description, is_active, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO public.complexity_components (component_name, condition_value, weight, description, is_active, created_by, range_min, range_max)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         ON CONFLICT (component_name, condition_value)
-        DO UPDATE SET weight = $3, description = COALESCE($4, complexity_components.description), 
-                      is_active = COALESCE($5, complexity_components.is_active), updated_at = NOW()
+        DO UPDATE SET weight = $3, description = COALESCE($4, complexity_components.description),
+                      is_active = COALESCE($5, complexity_components.is_active),
+                      range_min = COALESCE($7, complexity_components.range_min),
+                      range_max = COALESCE($8, complexity_components.range_max),
+                      updated_at = NOW()
         RETURNING *
       `,
           [
             componentName,
             v.condition_value,
             v.weight,
-            v.description || null,
+            v.description ?? null,
             v.is_active ?? true,
             req.userId,
+            v.range_min ?? null,
+            v.range_max ?? null,
           ]
         );
         results.push(result.rows[0]);
@@ -1801,6 +1808,114 @@ router.put(
         componentName: req.params.componentName,
       });
       res.status(500).json({ error: "Failed to update complexity components" });
+    }
+  }
+);
+
+/**
+ * POST /api/tenant-config/complexity/:componentName/condition
+ * Add a single complexity condition (e.g. a new loan amount range)
+ */
+router.post(
+  "/complexity/:componentName/condition",
+  authenticateToken,
+  attachTenantContext,
+  requireRole("tenant_admin", "super_admin"),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { tenantPool } = getTenantContext(req);
+      const { componentName } = req.params;
+
+      const schema = z.object({
+        condition_value: z.string(),
+        weight: z.number(),
+        description: z.string().optional(),
+        is_active: z.boolean().optional(),
+        range_min: z.number().nullable().optional(),
+        range_max: z.number().nullable().optional(),
+      });
+
+      const data = schema.parse(req.body);
+
+      const result = await tenantPool.query(
+        `
+        INSERT INTO public.complexity_components (component_name, condition_value, weight, description, is_active, created_by, range_min, range_max)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ON CONFLICT (component_name, condition_value)
+        DO UPDATE SET weight = $3, description = COALESCE($4, complexity_components.description),
+                      is_active = COALESCE($5, complexity_components.is_active),
+                      range_min = COALESCE($7, complexity_components.range_min),
+                      range_max = COALESCE($8, complexity_components.range_max),
+                      updated_at = NOW()
+        RETURNING *
+      `,
+        [
+          componentName,
+          data.condition_value,
+          data.weight,
+          data.description ?? null,
+          data.is_active ?? true,
+          req.userId,
+          data.range_min ?? null,
+          data.range_max ?? null,
+        ]
+      );
+
+      logInfo("Complexity condition added/updated", {
+        userId: req.userId,
+        componentName,
+        condition_value: data.condition_value,
+      });
+      res.status(201).json({ component: result.rows[0] });
+    } catch (error: any) {
+      logError("Error adding complexity condition", error, {
+        userId: req.userId,
+        componentName: req.params.componentName,
+      });
+      res.status(500).json({ error: "Failed to add complexity condition" });
+    }
+  }
+);
+
+/**
+ * DELETE /api/tenant-config/complexity/:componentName/:conditionValue
+ * Remove a complexity condition (conditionValue is URL-decoded)
+ */
+router.delete(
+  "/complexity/:componentName/:conditionValue",
+  authenticateToken,
+  attachTenantContext,
+  requireRole("tenant_admin", "super_admin"),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { tenantPool } = getTenantContext(req);
+      const { componentName, conditionValue } = req.params;
+
+      const result = await tenantPool.query(
+        `
+        DELETE FROM public.complexity_components
+        WHERE component_name = $1 AND condition_value = $2
+        RETURNING id
+      `,
+        [componentName, conditionValue]
+      );
+
+      if (result.rowCount === 0) {
+        return res.status(404).json({ error: "Complexity condition not found" });
+      }
+
+      logInfo("Complexity condition deleted", {
+        userId: req.userId,
+        componentName,
+        condition_value: conditionValue,
+      });
+      res.json({ deleted: true });
+    } catch (error: any) {
+      logError("Error deleting complexity condition", error, {
+        userId: req.userId,
+        componentName: req.params.componentName,
+      });
+      res.status(500).json({ error: "Failed to delete complexity condition" });
     }
   }
 );

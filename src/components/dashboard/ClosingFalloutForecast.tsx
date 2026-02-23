@@ -65,7 +65,7 @@ import {
   transformLoanToCard,
   aggregateLoanOfficers,
 } from "@/utils/loanDataTransform";
-import { ExportShareMenu } from "@/components/common/ExportShareMenu";
+import { ExportMenu } from "@/components/common/ExportMenu";
 import type { ExportData } from "@/utils/exportUtils";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -3386,15 +3386,10 @@ export const ClosingFalloutForecast = ({
                       </div>
                     </div>
                     <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0 flex-wrap">
-                      <ExportShareMenu
+                      <ExportMenu
                         title="Closing & Fallout Forecast"
                         targetRef={forecastRef}
                         getExportData={getExportData}
-                        shareTarget={{
-                          type: "closing-fallout-forecast",
-                          tenantId: selectedTenantId || undefined,
-                          label: "Closing & Fallout Forecast",
-                        }}
                       />
                       {/* Start Prediction - manual trigger; disabled until run completes */}
                       <Button
@@ -3431,7 +3426,10 @@ export const ClosingFalloutForecast = ({
                         <div className="text-center space-y-1 sm:space-y-2 md:space-y-3 lg:space-y-4 group/stat transition-all duration-300">
                           <div className="flex items-center gap-1.5 sm:gap-2 justify-center">
                             <p className="text-[9px] sm:text-[10px] md:text-[11px] lg:text-sm font-semibold uppercase tracking-widest leading-tight text-slate-500 dark:text-slate-400">
-                              Active Loans Today
+                              Active Loans{" "}
+                              <span className="normal-case font-medium text-slate-400 dark:text-slate-500">
+                                ({ACTIVE_LOANS_PERIOD_OPTIONS.find((o) => o.value === activeLoansPeriod)?.label ?? "All Time"})
+                              </span>
                             </p>
                             <span className="px-1 sm:px-1.5 py-0.5 rounded text-[6px] sm:text-[7px] font-bold uppercase tracking-wide bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400">
                               Live

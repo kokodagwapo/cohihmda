@@ -9,7 +9,8 @@
  *   - SQL queries (collapsible, debug-mode only)
  */
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   BarChart,
   Bar,
@@ -30,6 +31,10 @@ import {
   HelpCircle,
   X,
   Search,
+  Download,
+  FileSpreadsheet,
+  FileText,
+  Bookmark,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -49,6 +54,8 @@ import {
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { useDebugMode } from "@/contexts/DebugModeContext";
+import { exportDataAsExcel } from "@/utils/exportUtils";
+import { SaveToWorkbenchModal, type SaveToWorkbenchPayload } from "@/components/research/SaveToWorkbenchModal";
 import {
   FIELD_REGISTRY,
   SUMMARY_REGISTRY,
@@ -63,6 +70,7 @@ import type { Finding, EvidenceItem } from "@/hooks/useResearchSession";
 interface FindingDrillDownProps {
   finding: Finding;
   onClose: () => void;
+  sessionId?: string | null;
 }
 
 type SortDirection = "asc" | "desc" | null;
@@ -241,11 +249,25 @@ function KPICard({ metricKey, value, description, agentFormat }: { metricKey: st
 // Sortable Data Table
 // ============================================================================
 
-function EvidenceTable({ evidence, index }: { evidence: EvidenceItem; index: number }) {
+const EVIDENCE_ROW_HEIGHT = 28;
+const EVIDENCE_INITIAL_ROWS = 100;
+const EVIDENCE_LOAD_MORE_STEP = 100;
+
+interface EvidenceTableProps {
+  evidence: EvidenceItem;
+  index: number;
+  findingTitle?: string;
+  sessionId?: string | null;
+  onSaveToWorkbench?: (payload: SaveToWorkbenchPayload) => void;
+}
+
+function EvidenceTable({ evidence, index, findingTitle, sessionId, onSaveToWorkbench }: EvidenceTableProps) {
   const { isDebugMode } = useDebugMode();
   const [sort, setSort] = useState<SortState>({ column: "", direction: null });
   const [filter, setFilter] = useState("");
   const [sqlOpen, setSqlOpen] = useState(false);
+  const [visibleRowCount, setVisibleRowCount] = useState(EVIDENCE_INITIAL_ROWS);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const toggleSort = (column: string) => {
     setSort((prev) => {
@@ -325,6 +347,64 @@ function EvidenceTable({ evidence, index }: { evidence: EvidenceItem; index: num
   const isNumericFormat = (fmt: FieldFormat) =>
     ["currency", "number", "percent", "rate", "days", "bps"].includes(fmt);
 
+  const handleExportCSV = () => {
+    const escape = (v: string) => {
+      const s = String(v ?? "");
+      if (s.includes(",") || s.includes('"') || s.includes("\n")) return `"${s.replace(/"/g, '""')}"`;
+      return s;
+    };
+    const headers = evidence.fields.map((f) => escape(humanizeKey(f)));
+    const rows = evidence.rows.map((row) =>
+      evidence.fields.map((f) => {
+        const fmt = columnFormats[f] || "text";
+        return escape(row[f] == null ? "" : formatValue(row[f], fmt));
+      }),
+    );
+    const csv = [headers, ...rows].map((row) => row.join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `evidence-query-${index + 1}-${new Date().toISOString().split("T")[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportExcel = () => {
+    const tableRows = evidence.rows.map((row) =>
+      evidence.fields.map((f) => {
+        const fmt = columnFormats[f] || "text";
+        return row[f] == null ? "" : formatValue(row[f], fmt);
+      }),
+    );
+    exportDataAsExcel(
+      {
+        title: `Evidence Query ${index + 1}`,
+        tables: [
+          {
+            name: `Query ${index + 1}`,
+            headers: evidence.fields.map(humanizeKey),
+            rows: tableRows,
+          },
+        ],
+      },
+      `evidence-query-${index + 1}-${new Date().toISOString().split("T")[0]}`,
+    );
+  };
+
+  const totalFiltered = filteredAndSorted.length;
+  const count = Math.min(visibleRowCount, totalFiltered);
+  const rowVirtualizer = useVirtualizer({
+    count,
+    getScrollElement: () => scrollContainerRef.current,
+    estimateSize: () => EVIDENCE_ROW_HEIGHT,
+    overscan: 5,
+  });
+  const virtualItems = rowVirtualizer.getVirtualItems();
+  const totalBodyHeight = rowVirtualizer.getTotalSize();
+  const gridCols = { display: "grid" as const, gridTemplateColumns: `repeat(${evidence.fields.length}, minmax(80px, 1fr))` };
+  const canLoadMore = totalFiltered > visibleRowCount;
+
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
@@ -335,6 +415,45 @@ function EvidenceTable({ evidence, index }: { evidence: EvidenceItem; index: num
           </span>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={handleExportCSV}>
+            <FileText className="h-3 w-3" />
+            CSV
+          </Button>
+          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={handleExportExcel}>
+            <FileSpreadsheet className="h-3 w-3" />
+            Excel
+          </Button>
+          {onSaveToWorkbench && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs gap-1"
+              onClick={() =>
+                onSaveToWorkbench({
+                  sql: evidence.sql,
+                  title: [findingTitle, evidence.explanation].filter(Boolean).join(" — ").slice(0, 120) || "Research table",
+                  vizConfig: {
+                    type: "table",
+                    title: [findingTitle, evidence.explanation].filter(Boolean).join(" — ").slice(0, 80) || "Table",
+                    data: [],
+                    tableConfig: {
+                      columns: evidence.fields.map((f) => ({
+                        key: f,
+                        label: humanizeKey(f),
+                        format: columnFormats[f] || "text",
+                      })),
+                    },
+                  },
+                  explanation: evidence.explanation,
+                  sourceType: "research",
+                  sourceSessionId: sessionId ?? undefined,
+                })
+              }
+            >
+              <Bookmark className="h-3 w-3" />
+              Save to Workbench
+            </Button>
+          )}
           <div className="relative">
             <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
             <Input
@@ -353,16 +472,27 @@ function EvidenceTable({ evidence, index }: { evidence: EvidenceItem; index: num
         </p>
       )}
 
-      {/* Data table */}
-      <div className="border rounded-md overflow-x-auto max-h-72">
-        <table className="w-full text-xs">
-          <thead className="sticky top-0 z-10">
-            <tr className="border-b bg-muted/80">
+      {/* Data table: virtualized body with progressive "Show more" */}
+      <div className="border rounded-md overflow-hidden flex flex-col max-h-72">
+        <div
+          ref={scrollContainerRef}
+          className="flex-1 min-h-0 overflow-auto overflow-x-auto"
+          role="grid"
+          aria-label="Evidence table"
+        >
+          <div style={{ minWidth: "max-content" }}>
+            {/* Sticky header */}
+            <div
+              className="sticky top-0 z-10 border-b bg-muted/80 text-xs"
+              style={{ ...gridCols }}
+              role="row"
+            >
               {evidence.fields.map((f) => {
                 const fmt = columnFormats[f] || "text";
                 return (
-                  <th
+                  <div
                     key={f}
+                    role="columnheader"
                     className={cn(
                       "px-2 py-1.5 font-medium whitespace-nowrap cursor-pointer hover:bg-accent/50 select-none",
                       isNumericFormat(fmt) ? "text-right" : "text-left",
@@ -381,45 +511,81 @@ function EvidenceTable({ evidence, index }: { evidence: EvidenceItem; index: num
                         <ArrowUpDown className="h-3 w-3 opacity-30" />
                       )}
                     </div>
-                  </th>
+                  </div>
                 );
               })}
-            </tr>
-          </thead>
-          <tbody>
-            {filteredAndSorted.slice(0, 100).map((row, i) => (
-              <tr key={i} className="border-b last:border-b-0 hover:bg-muted/30">
-                {evidence.fields.map((f) => {
-                  const fmt = columnFormats[f] || "text";
+            </div>
+            {totalFiltered === 0 ? (
+              <div className="px-3 py-4 text-xs text-muted-foreground text-center">
+                No matching rows
+              </div>
+            ) : (
+              <div
+                style={{
+                  height: `${totalBodyHeight}px`,
+                  width: "100%",
+                  position: "relative",
+                }}
+              >
+                {virtualItems.map((virtualRow) => {
+                  const row = filteredAndSorted[virtualRow.index];
+                  if (!row) return null;
                   return (
-                    <td
-                      key={f}
-                      className={cn(
-                        "px-2 py-1 whitespace-nowrap max-w-[200px] truncate",
-                        isNumericFormat(fmt) ? "text-right tabular-nums" : "text-left",
-                        fmt === "mono" && "font-mono",
-                      )}
+                    <div
+                      key={virtualRow.key}
+                      className="absolute left-0 border-b last:border-b-0 hover:bg-muted/30 text-xs"
+                      style={{
+                        ...gridCols,
+                        top: 0,
+                        left: 0,
+                        width: "100%",
+                        height: `${virtualRow.size}px`,
+                        transform: `translateY(${virtualRow.start}px)`,
+                      }}
+                      role="row"
                     >
-                      {row[f] == null ? (
-                        <span className="text-muted-foreground italic">-</span>
-                      ) : (
-                        formatValue(row[f], fmt)
-                      )}
-                    </td>
+                      {evidence.fields.map((f) => {
+                        const fmt = columnFormats[f] || "text";
+                        return (
+                          <div
+                            key={f}
+                            className={cn(
+                              "px-2 py-1 whitespace-nowrap max-w-[200px] truncate",
+                              isNumericFormat(fmt) ? "text-right tabular-nums" : "text-left",
+                              fmt === "mono" && "font-mono",
+                            )}
+                            role="cell"
+                          >
+                            {row[f] == null ? (
+                              <span className="text-muted-foreground italic">-</span>
+                            ) : (
+                              formatValue(row[f], fmt)
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   );
                 })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {filteredAndSorted.length > 100 && (
-          <div className="px-2 py-1 text-xs text-muted-foreground bg-muted/30 border-t">
-            Showing 100 of {filteredAndSorted.length} rows
+              </div>
+            )}
           </div>
-        )}
-        {filteredAndSorted.length === 0 && (
-          <div className="px-3 py-4 text-xs text-muted-foreground text-center">
-            No matching rows
+        </div>
+        {(totalFiltered > EVIDENCE_INITIAL_ROWS || canLoadMore) && totalFiltered > 0 && (
+          <div className="px-2 py-1.5 text-xs text-muted-foreground bg-muted/30 border-t flex items-center justify-between gap-2 flex-shrink-0">
+            <span>
+              Showing {count} of {totalFiltered} rows
+            </span>
+            {canLoadMore && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 text-xs"
+                onClick={() => setVisibleRowCount((prev) => Math.min(prev + EVIDENCE_LOAD_MORE_STEP, totalFiltered))}
+              >
+                Show more
+              </Button>
+            )}
           </div>
         )}
       </div>
@@ -447,7 +613,14 @@ function EvidenceTable({ evidence, index }: { evidence: EvidenceItem; index: num
 // Auto Chart
 // ============================================================================
 
-function AutoChart({ evidence }: { evidence: EvidenceItem }) {
+interface AutoChartProps {
+  evidence: EvidenceItem;
+  findingTitle?: string;
+  sessionId?: string | null;
+  onSaveToWorkbench?: (payload: SaveToWorkbenchPayload) => void;
+}
+
+function AutoChart({ evidence, findingTitle, sessionId, onSaveToWorkbench }: AutoChartProps) {
   const { fields, rows } = evidence;
   if (rows.length < 2 || rows.length > 30) return null;
 
@@ -549,6 +722,32 @@ function AutoChart({ evidence }: { evidence: EvidenceItem }) {
           </BarChart>
         </ResponsiveContainer>
       </div>
+      {onSaveToWorkbench && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 text-xs gap-1 mt-1"
+          onClick={() =>
+            onSaveToWorkbench({
+              sql: evidence.sql,
+              title: [findingTitle, `${humanizeKey(bestField)} by ${humanizeKey(labelField)}`].filter(Boolean).join(" — ").slice(0, 120) || "Research chart",
+              vizConfig: {
+                type: "bar",
+                title: [findingTitle, humanizeKey(bestField)].filter(Boolean).join(" — ").slice(0, 80) || "Chart",
+                data: [],
+                xKey: labelField,
+                yKey: bestField,
+              },
+              explanation: evidence.explanation,
+              sourceType: "research",
+              sourceSessionId: sessionId ?? undefined,
+            })
+          }
+        >
+          <Bookmark className="h-3 w-3" />
+          Save to Workbench
+        </Button>
+      )}
     </div>
   );
 }
@@ -565,7 +764,8 @@ function truncateLabel(s: string): string {
 // Main Component
 // ============================================================================
 
-export function FindingDrillDown({ finding, onClose }: FindingDrillDownProps) {
+export function FindingDrillDown({ finding, onClose, sessionId }: FindingDrillDownProps) {
+  const [saveToWorkbenchPayload, setSaveToWorkbenchPayload] = useState<SaveToWorkbenchPayload | null>(null);
   const hasMetrics = Object.keys(finding.keyMetrics).length > 0;
   const hasEvidence = finding.evidence.length > 0;
 
@@ -625,7 +825,12 @@ export function FindingDrillDown({ finding, onClose }: FindingDrillDownProps) {
             {chartableEvidence.map((ev, i) => (
               <Card key={i}>
                 <CardContent className="pt-4 pb-3">
-                  <AutoChart evidence={ev} />
+                  <AutoChart
+                    evidence={ev}
+                    findingTitle={finding.title}
+                    sessionId={sessionId}
+                    onSaveToWorkbench={setSaveToWorkbenchPayload}
+                  />
                 </CardContent>
               </Card>
             ))}
@@ -644,11 +849,24 @@ export function FindingDrillDown({ finding, onClose }: FindingDrillDownProps) {
           </h4>
           <div className="space-y-5">
             {finding.evidence.map((ev, i) => (
-              <EvidenceTable key={i} evidence={ev} index={i} />
+              <EvidenceTable
+                key={i}
+                evidence={ev}
+                index={i}
+                findingTitle={finding.title}
+                sessionId={sessionId}
+                onSaveToWorkbench={setSaveToWorkbenchPayload}
+              />
             ))}
           </div>
         </div>
       )}
+
+      <SaveToWorkbenchModal
+        open={saveToWorkbenchPayload !== null}
+        onClose={() => setSaveToWorkbenchPayload(null)}
+        payload={saveToWorkbenchPayload}
+      />
     </div>
   );
 }

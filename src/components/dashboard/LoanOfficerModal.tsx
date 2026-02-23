@@ -10,7 +10,7 @@ import {
 import { X } from "lucide-react";
 import { LoanCardContent, type LoanCardContentLoan } from "./LoanCardContent";
 import { LoanDrilldownModal } from "./LoanDrilldownModal";
-import { ExportShareMenu } from "@/components/common/ExportShareMenu";
+import { ExportMenu } from "@/components/common/ExportMenu";
 import type { ExportData } from "@/utils/exportUtils";
 
 interface OfficerData {
@@ -492,15 +492,10 @@ export const LoanOfficerModal: React.FC<LoanOfficerModalProps> = ({
             <DialogDescription>Portfolio Analysis</DialogDescription>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <ExportShareMenu
+            <ExportMenu
               title={`${officerName} Loans`}
               targetRef={modalRef}
               getExportData={getExportData}
-              shareTarget={{
-                type: "loan-officer-detail",
-                id: officerName,
-                label: officerName,
-              }}
             />
             <DialogClose className="rounded-lg p-2 bg-slate-50/80 dark:bg-slate-800/80 text-slate-600 dark:text-slate-400 border-0 shadow-sm opacity-70 ring-offset-background transition-all hover:opacity-100 hover:bg-slate-100 dark:hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2">
               <X className="h-4 w-4" />

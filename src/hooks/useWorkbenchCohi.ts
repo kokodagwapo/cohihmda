@@ -227,6 +227,8 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
           filters,
         });
       } else {
+        const isCohiWidget = item.payload.type === 'cohi_widget';
+        const cohiPayload = isCohiWidget ? (item.payload as any) : undefined;
         standaloneWidgets.push({
           id: item.i,
           type: item.payload.type,
@@ -234,6 +236,9 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
             'title' in item.payload
               ? (item.payload as any).title
               : undefined,
+          sourceType: cohiPayload?.sourceType,
+          sourceSessionId: cohiPayload?.sourceSessionId,
+          sql: cohiPayload?.sql,
         });
       }
     }

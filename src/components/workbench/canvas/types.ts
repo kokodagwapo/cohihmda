@@ -156,7 +156,7 @@ export type CanvasWidgetPayload =
   | { type: 'text_block'; content: string; title?: string }
   | { type: 'rich_text'; html: string }
   | { type: 'image'; src: string; alt?: string }
-  | { type: 'cohi_widget'; sql: string; title: string; vizConfig: VisualizationConfig; explanation?: string };
+  | { type: 'cohi_widget'; sql: string; title: string; vizConfig: VisualizationConfig; explanation?: string; sourceType?: 'research' | 'chat'; sourceSessionId?: string };
 
 export const DEFAULT_LAYOUT_ITEM: Partial<CanvasLayoutItem> = {
   w: 360,

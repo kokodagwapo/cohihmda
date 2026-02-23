@@ -822,11 +822,13 @@ export const SALES_TTS_WEIGHTS = {
 export interface LoanComplexityData {
   loan_type?: string | null;
   loan_purpose?: string | null;
+  loan_amount?: number | null;
   fico_score?: number | null;
   ltv_ratio?: number | null;
   be_dti_ratio?: number | null;
   occupancy_type?: string | null;
   borr_self_employed?: boolean | string | null;
+  non_qm?: boolean | string | null;
 }
 
 /**
@@ -855,6 +857,25 @@ export interface ComplexityConfig {
 }
 
 /**
+ * Single rule for complexity (categorical or range-based).
+ * For range-based components, range_min <= value < range_max.
+ * Weight is in points (same as stored * 100 from DB decimal).
+ */
+export interface ComplexityRangeRule {
+  condition_value: string;
+  weight: number;
+  range_min?: number | null;
+  range_max?: number | null;
+}
+
+/**
+ * V2 complexity config: per-component arrays of rules.
+ * Categorical: loan_type, loan_purpose, occupancy, employment, non_qm.
+ * Range-based: loan_amount, fico, ltv, dti.
+ */
+export type ComplexityConfigV2 = Record<string, ComplexityRangeRule[]>;
+
+/**
  * Default complexity weights (in points).
  * These are used when no database configuration exists.
  */
@@ -878,30 +899,278 @@ export const DEFAULT_COMPLEXITY_WEIGHTS: ComplexityConfig = {
   employment_w2: 0,
 };
 
+/** Type guard: config is V2 (per-component arrays). */
+function isComplexityConfigV2(
+  c: ComplexityConfigV2 | ComplexityConfig | undefined,
+): c is ComplexityConfigV2 {
+  if (!c || typeof c !== "object") return false;
+  const k = Object.keys(c)[0];
+  if (!k) return false;
+  const val = (c as Record<string, unknown>)[k];
+  return Array.isArray(val);
+}
+
+/** Normalize string for categorical matching (trim, single space, uppercase). */
+function norm(s: string): string {
+  return (s || "").trim().replace(/\s+/g, " ").toUpperCase();
+}
+
+/** Find weight for a numeric value from range rules (range_min <= value < range_max). */
+function weightForRange(
+  value: number,
+  rules: ComplexityRangeRule[],
+): number {
+  for (const r of rules) {
+    const min = r.range_min ?? -Infinity;
+    const max = r.range_max ?? Infinity;
+    if (value >= min && value < max) return r.weight;
+  }
+  return 0;
+}
+
+/** Find weight for a categorical value (exact or normalized match). */
+function weightForCategorical(
+  value: string | boolean | null | undefined,
+  rules: ComplexityRangeRule[],
+): number {
+  const normalized =
+    typeof value === "string"
+      ? norm(value)
+      : value === true
+        ? "Y"
+        : "N";
+  let otherWeight: number | null = null;
+  for (const r of rules) {
+    const cond = norm(r.condition_value);
+    if (cond === "OTHER") {
+      otherWeight = r.weight;
+      continue;
+    }
+    if (cond === normalized) return r.weight;
+    if (
+      typeof value === "string" &&
+      (norm(value).includes(cond) || cond.includes(norm(value)))
+    )
+      return r.weight;
+  }
+  return otherWeight ?? 0;
+}
+
+/**
+ * Calculate loan complexity score using V2 config (dynamic ranges and categorical rules).
+ */
+function calcLoanComplexityV2(
+  loan: LoanComplexityData,
+  config: ComplexityConfigV2,
+): number {
+  let complexity = 100; // Baseline
+
+  // Loan Type (categorical)
+  const loanTypeRules = config.loan_type;
+  if (loanTypeRules?.length && loan.loan_type != null) {
+    const loanType = String(loan.loan_type);
+    complexity += weightForCategorical(loanType, loanTypeRules);
+  }
+
+  // Loan Purpose (categorical)
+  const loanPurposeRules = config.loan_purpose;
+  if (loanPurposeRules?.length && loan.loan_purpose != null) {
+    complexity += weightForCategorical(loan.loan_purpose, loanPurposeRules);
+  }
+
+  // Loan Amount (range)
+  const loanAmountRules = config.loan_amount;
+  if (loanAmountRules?.length && loan.loan_amount != null && loan.loan_amount > 0) {
+    complexity += weightForRange(loan.loan_amount, loanAmountRules);
+  }
+
+  // FICO (range)
+  const ficoRules = config.fico;
+  if (ficoRules?.length && loan.fico_score != null && loan.fico_score > 0) {
+    complexity += weightForRange(loan.fico_score, ficoRules);
+  }
+
+  // LTV (range)
+  const ltvRules = config.ltv;
+  if (ltvRules?.length && loan.ltv_ratio != null && loan.ltv_ratio >= 0) {
+    complexity += weightForRange(loan.ltv_ratio, ltvRules);
+  }
+
+  // DTI (range)
+  const dtiRules = config.dti;
+  if (dtiRules?.length && loan.be_dti_ratio != null && loan.be_dti_ratio >= 0) {
+    complexity += weightForRange(loan.be_dti_ratio, dtiRules);
+  }
+
+  // Occupancy (categorical)
+  const occupancyRules = config.occupancy;
+  if (occupancyRules?.length && loan.occupancy_type != null) {
+    complexity += weightForCategorical(loan.occupancy_type, occupancyRules);
+  }
+
+  // Employment (categorical: self_employed / w2)
+  const employmentRules = config.employment;
+  if (employmentRules?.length) {
+    const selfEmployed = loan.borr_self_employed;
+    const isSelfEmployed =
+      selfEmployed === true ||
+      selfEmployed === "Y" ||
+      selfEmployed === "Yes" ||
+      selfEmployed === "1" ||
+      selfEmployed === "y";
+    complexity += weightForCategorical(
+      isSelfEmployed ? "self_employed" : "w2",
+      employmentRules,
+    );
+  }
+
+  // Non-QM (categorical: Y/N)
+  const nonQmRules = config.non_qm;
+  if (nonQmRules?.length) {
+    const isNonQm =
+      loan.non_qm === true ||
+      loan.non_qm === "Y" ||
+      loan.non_qm === "Yes" ||
+      loan.non_qm === "1";
+    complexity += weightForCategorical(isNonQm ? "Y" : "N", nonQmRules);
+  }
+
+  return complexity;
+}
+
+/** Component breakdown item for complexity (name, condition, weight in points, applied). */
+export interface ComplexityBreakdownItem {
+  name: string;
+  condition: string;
+  weight: number;
+  applied: boolean;
+}
+
+/**
+ * Calculate loan complexity with per-component breakdown using V2 config.
+ * Used by LoanComplexityService for detailed score display.
+ */
+export function calcLoanComplexityWithBreakdown(
+  loan: LoanComplexityData,
+  config: ComplexityConfigV2,
+): { totalScore: number; components: ComplexityBreakdownItem[] } {
+  const components: ComplexityBreakdownItem[] = [];
+  let totalScore = 100;
+
+  const add = (
+    name: string,
+    condition: string,
+    weight: number,
+  ) => {
+    components.push({
+      name,
+      condition,
+      weight,
+      applied: weight !== 0,
+    });
+    totalScore += weight;
+  };
+
+  const loanTypeRules = config.loan_type;
+  if (loanTypeRules?.length && loan.loan_type != null) {
+    const w = weightForCategorical(loan.loan_type, loanTypeRules);
+    add("Loan Type", String(loan.loan_type), w);
+  }
+
+  const loanPurposeRules = config.loan_purpose;
+  if (loanPurposeRules?.length && loan.loan_purpose != null) {
+    const w = weightForCategorical(loan.loan_purpose, loanPurposeRules);
+    add("Loan Purpose", loan.loan_purpose, w);
+  }
+
+  const loanAmountRules = config.loan_amount;
+  if (loanAmountRules?.length && loan.loan_amount != null && loan.loan_amount > 0) {
+    const w = weightForRange(loan.loan_amount, loanAmountRules);
+    const label = loanAmountRules.find(
+      (r) =>
+        (r.range_min ?? -Infinity) <= loan.loan_amount! &&
+        loan.loan_amount! < (r.range_max ?? Infinity),
+    )?.condition_value ?? String(loan.loan_amount);
+    add("Loan Amount", label, w);
+  }
+
+  const ficoRules = config.fico;
+  if (ficoRules?.length && loan.fico_score != null && loan.fico_score > 0) {
+    const w = weightForRange(loan.fico_score, ficoRules);
+    add("FICO Score", `${loan.fico_score}`, w);
+  }
+
+  const ltvRules = config.ltv;
+  if (ltvRules?.length && loan.ltv_ratio != null && loan.ltv_ratio >= 0) {
+    const w = weightForRange(loan.ltv_ratio, ltvRules);
+    add("LTV", `${loan.ltv_ratio.toFixed(1)}%`, w);
+  }
+
+  const dtiRules = config.dti;
+  if (dtiRules?.length && loan.be_dti_ratio != null && loan.be_dti_ratio >= 0) {
+    const w = weightForRange(loan.be_dti_ratio, dtiRules);
+    add("DTI", `${loan.be_dti_ratio.toFixed(1)}%`, w);
+  }
+
+  const occupancyRules = config.occupancy;
+  if (occupancyRules?.length && loan.occupancy_type != null) {
+    const w = weightForCategorical(loan.occupancy_type, occupancyRules);
+    add("Occupancy", loan.occupancy_type, w);
+  }
+
+  const employmentRules = config.employment;
+  if (employmentRules?.length) {
+    const selfEmployed = loan.borr_self_employed;
+    const isSelfEmployed =
+      selfEmployed === true ||
+      selfEmployed === "Y" ||
+      selfEmployed === "Yes" ||
+      selfEmployed === "1" ||
+      selfEmployed === "y";
+    const w = weightForCategorical(
+      isSelfEmployed ? "self_employed" : "w2",
+      employmentRules,
+    );
+    add("Employment", isSelfEmployed ? "self_employed" : "w2", w);
+  }
+
+  const nonQmRules = config.non_qm;
+  if (nonQmRules?.length) {
+    const isNonQm =
+      loan.non_qm === true ||
+      loan.non_qm === "Y" ||
+      loan.non_qm === "Yes" ||
+      loan.non_qm === "1";
+    const w = weightForCategorical(isNonQm ? "Y" : "N", nonQmRules);
+    add("Non-QM", isNonQm ? "Y" : "N", w);
+  }
+
+  return {
+    totalScore: Math.round(totalScore * 100) / 100,
+    components,
+  };
+}
+
 /**
  * Calculate loan complexity score.
- * Based on Qlik's Transform.qvs Loan Complexity Score calculation.
- *
- * Factors:
- * - Government loans (FHA, VA, USDA) = more complex
- * - Purchase transactions = more complex than refinance
- * - Low FICO, High LTV, High DTI = more complex
- * - Non-owner occupied = more complex
- * - Self-employed borrower = more complex
+ * Supports both legacy ComplexityConfig and ComplexityConfigV2 (from DB).
  *
  * @param loan - Loan data for complexity calculation
- * @param config - Optional complexity weights from database (defaults to hardcoded weights)
+ * @param config - Optional complexity config (V2 preferred; legacy supported)
  * @returns Complexity score (100 = baseline, >100 = higher complexity)
  */
 export const calcLoanComplexity = (
   loan: LoanComplexityData,
-  config?: ComplexityConfig,
+  config?: ComplexityConfigV2 | ComplexityConfig,
 ): number => {
-  // Use provided config or fall back to defaults
+  if (isComplexityConfigV2(config)) {
+    return calcLoanComplexityV2(loan, config);
+  }
+
+  // Legacy ComplexityConfig path
   const weights = config || DEFAULT_COMPLEXITY_WEIGHTS;
   let complexity = 100; // Baseline
 
-  // Loan Type
   const loanType = (loan.loan_type || "").toUpperCase();
   if (
     ["FHA", "VA", "USDA", "FARMERSHOMEA", "FARMERSHOMEADMINISTRATION"].includes(
@@ -913,7 +1182,6 @@ export const calcLoanComplexity = (
     complexity += weights.loan_type_conventional ?? 0;
   }
 
-  // Loan Purpose
   const loanPurpose = (loan.loan_purpose || "").toUpperCase();
   if (loanPurpose === "PURCHASE") {
     complexity += weights.loan_purpose_purchase ?? 5;
@@ -921,7 +1189,6 @@ export const calcLoanComplexity = (
     complexity += weights.loan_purpose_refinance ?? 0;
   }
 
-  // FICO Score ranges
   const fico = loan.fico_score || 0;
   if (fico > 0) {
     if (fico >= 760) {
@@ -935,7 +1202,6 @@ export const calcLoanComplexity = (
     }
   }
 
-  // LTV Ratio
   const ltv = loan.ltv_ratio || 0;
   if (ltv > 80) {
     complexity += weights.ltv_high ?? 5;
@@ -943,7 +1209,6 @@ export const calcLoanComplexity = (
     complexity += weights.ltv_standard ?? 0;
   }
 
-  // DTI Ratio
   const dti = loan.be_dti_ratio || 0;
   if (dti > 43) {
     complexity += weights.dti_high ?? 5;
@@ -951,7 +1216,6 @@ export const calcLoanComplexity = (
     complexity += weights.dti_standard ?? 0;
   }
 
-  // Occupancy Type
   const occupancy = (loan.occupancy_type || "").toUpperCase();
   if (occupancy.includes("INVEST")) {
     complexity += weights.occupancy_investment ?? 5;
@@ -964,11 +1228,9 @@ export const calcLoanComplexity = (
   ) {
     complexity += weights.occupancy_primary ?? 0;
   } else {
-    // Unknown occupancy - treat as investment
     complexity += weights.occupancy_investment ?? 5;
   }
 
-  // Employment Type
   const selfEmployed = loan.borr_self_employed;
   if (
     selfEmployed === true ||
@@ -984,12 +1246,18 @@ export const calcLoanComplexity = (
   return complexity;
 };
 
+/** DB row shape for complexity_components (with optional range columns). */
+export interface ComplexityComponentRow {
+  component_name: string;
+  condition_value: string;
+  weight: number;
+  range_min?: number | null;
+  range_max?: number | null;
+}
+
 /**
  * Convert database complexity_components rows to ComplexityConfig.
  * Database stores weights as decimals (0.10 = 10%), this converts to points.
- *
- * @param rows - Array of complexity_component rows from database
- * @returns ComplexityConfig object with weights in points
  */
 export const parseComplexityConfig = (
   rows: Array<{
@@ -1003,8 +1271,40 @@ export const parseComplexityConfig = (
   for (const row of rows) {
     const key =
       `${row.component_name}_${row.condition_value}` as keyof ComplexityConfig;
-    // Database stores as decimal (0.10), we need points (10)
     config[key] = Math.round(row.weight * 100);
+  }
+
+  return config;
+};
+
+/**
+ * Convert database complexity_components rows (with range_min/range_max) to ComplexityConfigV2.
+ * Database weight is decimal (0.10 = 10 points); converted to points.
+ */
+export const parseComplexityConfigV2 = (
+  rows: ComplexityComponentRow[],
+): ComplexityConfigV2 => {
+  const config: ComplexityConfigV2 = {};
+
+  for (const row of rows) {
+    const name = row.component_name;
+    if (!config[name]) config[name] = [];
+    config[name].push({
+      condition_value: row.condition_value,
+      weight: Math.round(Number(row.weight) * 100),
+      range_min: row.range_min != null ? Number(row.range_min) : undefined,
+      range_max: row.range_max != null ? Number(row.range_max) : undefined,
+    });
+  }
+
+  // Sort range-based rules by range_min so first match wins
+  const rangeComponents = ["loan_amount", "fico", "ltv", "dti"];
+  for (const name of rangeComponents) {
+    if (config[name]) {
+      config[name] = [...config[name]].sort(
+        (a, b) => (a.range_min ?? 0) - (b.range_min ?? 0),
+      );
+    }
   }
 
   return config;

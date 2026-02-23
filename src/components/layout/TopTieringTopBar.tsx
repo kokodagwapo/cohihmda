@@ -1,6 +1,6 @@
 import type { RefObject } from 'react';
 import { PanelLeft } from 'lucide-react';
-import { ExportShareMenu } from '@/components/common/ExportShareMenu';
+import { ExportMenu } from '@/components/common/ExportMenu';
 import type { ExportData } from '@/utils/exportUtils';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -11,7 +11,6 @@ export interface TopTieringTopBarProps {
   onOpenSidebar?: () => void;
   className?: string;
   exportTargetRef?: RefObject<HTMLElement>;
-  shareTargetType?: string;
 }
 
 export function TopTieringTopBar({
@@ -19,7 +18,6 @@ export function TopTieringTopBar({
   onOpenSidebar,
   className,
   exportTargetRef,
-  shareTargetType = 'toptiering-page',
 }: TopTieringTopBarProps) {
   const isMobile = useIsMobile();
   const getExportData = (): ExportData => ({
@@ -50,11 +48,10 @@ export function TopTieringTopBar({
       </h1>
       <div className="ml-auto">
         {exportTargetRef && (
-          <ExportShareMenu
+          <ExportMenu
             title={title}
             targetRef={exportTargetRef}
             getExportData={getExportData}
-            shareTarget={{ type: shareTargetType, label: title }}
           />
         )}
       </div>

@@ -471,6 +471,64 @@ router.delete('/sessions/:sessionId', authenticateToken, attachTenantContext, as
   }
 });
 
+// ---------------------------------------------------------------------------
+// CTE-safe SQL helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Find the character offset where the final (outermost) SELECT begins.
+ * For CTE queries (WITH ... AS (...) SELECT ...) this skips past all
+ * CTE definitions by tracking parenthesis depth. For non-CTE queries
+ * returns 0 so the entire SQL is treated as the "final body".
+ */
+function findFinalSelectOffset(sql: string): number {
+  if (!/^\s*WITH\b/i.test(sql)) return 0;
+  let depth = 0;
+  let lastSelectAtZero = 0;
+  const upper = sql.toUpperCase();
+  for (let i = 0; i < sql.length; i++) {
+    if (sql[i] === '(') { depth++; continue; }
+    if (sql[i] === ')') { depth--; continue; }
+    if (depth === 0 && upper.startsWith('SELECT', i) &&
+        (i === 0 || /[\s\n),]/.test(sql[i - 1])) &&
+        (i + 6 >= sql.length || /[\s\n]/.test(sql[i + 6]))) {
+      lastSelectAtZero = i;
+    }
+  }
+  return lastSelectAtZero;
+}
+
+/**
+ * Inject a SQL condition into the WHERE clause of a SQL body string.
+ * If a WHERE exists, appends with AND before the nearest boundary clause.
+ * If no WHERE exists, inserts one before GROUP BY / ORDER BY / LIMIT.
+ */
+function injectConditionIntoBody(body: string, condition: string): string {
+  const whereRegex = /\bWHERE\b/gi;
+  let lastWhereIdx = -1;
+  let m: RegExpExecArray | null;
+  while ((m = whereRegex.exec(body)) !== null) {
+    lastWhereIdx = m.index;
+  }
+
+  if (lastWhereIdx >= 0) {
+    const afterWhere = body.substring(lastWhereIdx + 5);
+    const boundary = /\b(GROUP\s+BY|ORDER\s+BY|LIMIT|HAVING|UNION|INTERSECT|EXCEPT)\b/i.exec(afterWhere);
+    if (boundary) {
+      const insertAt = lastWhereIdx + 5 + boundary.index;
+      return body.substring(0, insertAt) + ` AND ${condition} ` + body.substring(insertAt);
+    }
+    return body + ` AND ${condition}`;
+  }
+
+  const boundary = /\b(GROUP\s+BY|ORDER\s+BY|LIMIT|HAVING)\b/i.exec(body);
+  if (boundary) {
+    const insertAt = boundary.index;
+    return body.substring(0, insertAt) + `WHERE ${condition} ` + body.substring(insertAt);
+  }
+  return body + ` WHERE ${condition}`;
+}
+
 /**
  * POST /api/cohi-chat/execute-sql
  * Execute a previously-generated SQL query directly without going through the LLM.
@@ -484,148 +542,103 @@ router.post('/execute-sql', authenticateToken, attachTenantContext, async (req: 
       return res.status(400).json({ error: 'sql is required' });
     }
 
-    // Optionally inject a date-range filter into the SQL.
-    // dateFilter: { column: string, start: string (YYYY-MM-DD), end: string (YYYY-MM-DD) }
-    //
-    // Strategy:
-    //   1. Strip any existing date comparison conditions on the same column
-    //      (including aliased references like l.column or loans.column) so we
-    //      don't end up with contradictory ranges.
-    //   2. Inject our own condition into the WHERE clause using parameterized values.
     let effectiveSql = sql;
     const queryParams: any[] = [];
     let paramIdx = 1;
 
+    // Split SQL into CTE prefix and final SELECT body so that filter
+    // injection never accidentally targets WHERE clauses inside CTEs.
+    const finalSelectOffset = findFinalSelectOffset(effectiveSql);
+
     if (dateFilter && dateFilter.column && dateFilter.start && dateFilter.end) {
-      const col = dateFilter.column.replace(/[^a-zA-Z0-9_.]/g, ''); // sanitise column name
+      const col = dateFilter.column.replace(/[^a-zA-Z0-9_.]/g, '');
       if (!/^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(col)) {
         return res.status(400).json({ error: 'Invalid date filter column name' });
       }
-      const dateStartParam = paramIdx++;
-      const dateEndParam = paramIdx++;
-      queryParams.push(dateFilter.start, dateFilter.end);
-      const cond = `${col} >= $${dateStartParam}::date AND ${col} <= $${dateEndParam}::date`;
 
-      // --- Step 1: Strip existing date conditions on this column ---
-      // Match patterns like:
-      //   l.application_date >= '2024-01-01'
-      //   application_date < '2025-01-01'::date
-      //   l.application_date BETWEEN '...' AND '...'
-      //   DATE_TRUNC('year', CURRENT_DATE) (when used as bound for the column)
-      // Handles optional table alias (e.g. l. or loans.)
+      // Check whether the date column is accessible in the final SELECT body.
+      // For CTE queries where the column only exists inside CTEs (not the
+      // outer SELECT), injecting a filter would cause a runtime error.
       const colEscaped = col.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      // Match any alias prefix followed by the column name
-      const colPattern = `(?:[a-zA-Z_][a-zA-Z0-9_]*\\.)?${colEscaped}`;
+      const finalBody = effectiveSql.substring(finalSelectOffset);
+      const colInFinalBody = new RegExp(`\\b(?:[a-zA-Z_][a-zA-Z0-9_]*\\.)?${colEscaped}\\b`, 'i').test(finalBody);
 
-      // Remove simple comparison conditions: column >=/<=/>/< 'date-literal'(::date/::timestamp)?
-      // Also handles DATE_TRUNC(...) and CURRENT_DATE expressions on the right-hand side
-      const dateComparisonPattern = new RegExp(
-        `\\b${colPattern}\\s*(?:>=|<=|>|<)\\s*(?:'[^']*'(?:::(?:date|timestamp))?|DATE_TRUNC\\s*\\([^)]*\\)|CURRENT_DATE(?:\\s*-\\s*INTERVAL\\s*'[^']*')?)`,
-        'gi'
-      );
-      // Remove BETWEEN ... AND ... on this column
-      const betweenPattern = new RegExp(
-        `\\b${colPattern}\\s+BETWEEN\\s+'[^']*'(?:::(?:date|timestamp))?\\s+AND\\s+'[^']*'(?:::(?:date|timestamp))?`,
-        'gi'
-      );
-
-      // Strip the conditions and clean up leftover AND/OR operators
-      effectiveSql = effectiveSql.replace(betweenPattern, ' TRUE ');
-      effectiveSql = effectiveSql.replace(dateComparisonPattern, ' TRUE ');
-
-      // Clean up: collapse "TRUE AND TRUE" → "TRUE", "WHERE TRUE AND" → "WHERE", etc.
-      // Repeated passes to handle nested cleanup
-      for (let pass = 0; pass < 3; pass++) {
-        effectiveSql = effectiveSql
-          .replace(/\bTRUE\s+AND\s+TRUE\b/gi, 'TRUE')
-          .replace(/\bTRUE\s+OR\s+TRUE\b/gi, 'TRUE')
-          .replace(/\bAND\s+TRUE\b/gi, '')
-          .replace(/\bTRUE\s+AND\b/gi, '')
-          .replace(/\bOR\s+TRUE\b/gi, '')
-          .replace(/\bTRUE\s+OR\b/gi, '')
-          .replace(/\bWHERE\s+TRUE\s*(?=\bGROUP\b|\bORDER\b|\bLIMIT\b|\bHAVING\b|\bUNION\b|\bINTERSECT\b|\bEXCEPT\b|\)|$)/gi, '')
-          .replace(/\bWHERE\s+TRUE\s+(?=AND|OR)\s*/gi, 'WHERE ');
-      }
-      // Remove any "WHERE" that's now empty (only whitespace before GROUP BY etc.)
-      effectiveSql = effectiveSql.replace(/\bWHERE\s+(?=GROUP\s+BY|ORDER\s+BY|LIMIT|HAVING|UNION|INTERSECT|EXCEPT|\)|$)/gi, '');
-
-      // --- Step 2: Inject the new date condition ---
-      const whereRegex = /\bWHERE\b/gi;
-      let lastWhereIdx = -1;
-      let m: RegExpExecArray | null;
-      while ((m = whereRegex.exec(effectiveSql)) !== null) {
-        lastWhereIdx = m.index;
-      }
-
-      if (lastWhereIdx >= 0) {
-        const afterWhere = effectiveSql.substring(lastWhereIdx + 5);
-        const boundary = /\b(GROUP\s+BY|ORDER\s+BY|LIMIT|HAVING|UNION|INTERSECT|EXCEPT)\b/i.exec(afterWhere);
-        if (boundary) {
-          const insertAt = lastWhereIdx + 5 + boundary.index;
-          effectiveSql = effectiveSql.substring(0, insertAt) + ` AND ${cond} ` + effectiveSql.substring(insertAt);
-        } else {
-          effectiveSql = effectiveSql + ` AND ${cond}`;
-        }
+      if (!colInFinalBody && finalSelectOffset > 0) {
+        console.log(`[CohiChat] Skipping date filter: column ${col} not accessible in final SELECT (CTE query)`);
       } else {
-        // No WHERE clause – insert one before the first GROUP BY / ORDER BY / LIMIT
-        const boundary = /\b(GROUP\s+BY|ORDER\s+BY|LIMIT|HAVING)\b/i.exec(effectiveSql);
-        if (boundary) {
-          const insertAt = boundary.index;
-          effectiveSql = effectiveSql.substring(0, insertAt) + `WHERE ${cond} ` + effectiveSql.substring(insertAt);
-        } else {
-          effectiveSql = effectiveSql + ` WHERE ${cond}`;
-        }
-      }
+        const dateStartParam = paramIdx++;
+        const dateEndParam = paramIdx++;
+        queryParams.push(dateFilter.start, dateFilter.end);
+        const cond = `${col} >= $${dateStartParam}::date AND ${col} <= $${dateEndParam}::date`;
 
-      console.log(`[CohiChat] Date filter applied on ${col} [${dateFilter.start} → ${dateFilter.end}]`);
+        const colPattern = `(?:[a-zA-Z_][a-zA-Z0-9_]*\\.)?${colEscaped}`;
+
+        const dateComparisonPattern = new RegExp(
+          `\\b${colPattern}\\s*(?:>=|<=|>|<)\\s*(?:'[^']*'(?:::(?:date|timestamp))?|DATE_TRUNC\\s*\\([^)]*\\)|CURRENT_DATE(?:\\s*-\\s*INTERVAL\\s*'[^']*')?)`,
+          'gi'
+        );
+        const betweenPattern = new RegExp(
+          `\\b${colPattern}\\s+BETWEEN\\s+'[^']*'(?:::(?:date|timestamp))?\\s+AND\\s+'[^']*'(?:::(?:date|timestamp))?`,
+          'gi'
+        );
+
+        // Step 1: Strip existing date conditions — only in the final body
+        const ctePrefix = effectiveSql.substring(0, finalSelectOffset);
+        let body = effectiveSql.substring(finalSelectOffset);
+
+        body = body.replace(betweenPattern, ' TRUE ');
+        body = body.replace(dateComparisonPattern, ' TRUE ');
+
+        for (let pass = 0; pass < 3; pass++) {
+          body = body
+            .replace(/\bTRUE\s+AND\s+TRUE\b/gi, 'TRUE')
+            .replace(/\bTRUE\s+OR\s+TRUE\b/gi, 'TRUE')
+            .replace(/\bAND\s+TRUE\b/gi, '')
+            .replace(/\bTRUE\s+AND\b/gi, '')
+            .replace(/\bOR\s+TRUE\b/gi, '')
+            .replace(/\bTRUE\s+OR\b/gi, '')
+            .replace(/\bWHERE\s+TRUE\s*(?=\bGROUP\b|\bORDER\b|\bLIMIT\b|\bHAVING\b|\bUNION\b|\bINTERSECT\b|\bEXCEPT\b|\)|$)/gi, '')
+            .replace(/\bWHERE\s+TRUE\s+(?=AND|OR)\s*/gi, 'WHERE ');
+        }
+        body = body.replace(/\bWHERE\s+(?=GROUP\s+BY|ORDER\s+BY|LIMIT|HAVING|UNION|INTERSECT|EXCEPT|\)|$)/gi, '');
+
+        // Step 2: Inject the new condition into the final body
+        body = injectConditionIntoBody(body, cond);
+        effectiveSql = ctePrefix + body;
+
+        console.log(`[CohiChat] Date filter applied on ${col} [${dateFilter.start} → ${dateFilter.end}]`);
+      }
     } else {
       console.log(`[CohiChat] No date filter applied — SQL will use its own date scoping`);
     }
 
     // ---------------------------------------------------------------------------
     // Dimension filters: inject equality conditions (branch, loan_officer, etc.)
-    // dimensionFilters: Array<{ column: string, value: string }>
     // ---------------------------------------------------------------------------
     if (Array.isArray(dimensionFilters) && dimensionFilters.length > 0) {
       for (const df of dimensionFilters) {
         if (!df.column || !df.value || typeof df.column !== 'string' || typeof df.value !== 'string') continue;
         const dimCol = df.column.replace(/[^a-zA-Z0-9_.]/g, '');
         if (!/^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(dimCol)) continue;
+
+        // Only inject if the column is accessible in the final SELECT body
+        const dimOffset = findFinalSelectOffset(effectiveSql);
+        const dimBody = effectiveSql.substring(dimOffset);
+        const colEscaped = dimCol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const hasColumn = new RegExp(`\\b(?:[a-zA-Z_][a-zA-Z0-9_]*\\.)?${colEscaped}\\b`, 'i').test(dimBody);
+        if (!hasColumn) {
+          console.log(`[CohiChat] Skipping dimension filter: column ${dimCol} not accessible in final SELECT`);
+          continue;
+        }
+
         const dimParamIdx = paramIdx++;
         queryParams.push(df.value);
         const dimCond = `${dimCol} = $${dimParamIdx}`;
 
-        // Check if the SQL references this column (with or without alias)
-        const colEscaped = dimCol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const hasColumn = new RegExp(`\\b(?:[a-zA-Z_][a-zA-Z0-9_]*\\.)?${colEscaped}\\b`, 'i').test(effectiveSql);
-        if (!hasColumn) continue; // Skip if column not referenced in SQL
-
-        // Inject into WHERE clause (same strategy as date filter)
-        const whereCheck = /\bWHERE\b/gi;
-        let lastIdx = -1;
-        let match: RegExpExecArray | null;
-        while ((match = whereCheck.exec(effectiveSql)) !== null) {
-          lastIdx = match.index;
-        }
-
-        if (lastIdx >= 0) {
-          const afterWhere = effectiveSql.substring(lastIdx + 5);
-          const boundary = /\b(GROUP\s+BY|ORDER\s+BY|LIMIT|HAVING|UNION|INTERSECT|EXCEPT)\b/i.exec(afterWhere);
-          if (boundary) {
-            const insertAt = lastIdx + 5 + boundary.index;
-            effectiveSql = effectiveSql.substring(0, insertAt) + ` AND ${dimCond} ` + effectiveSql.substring(insertAt);
-          } else {
-            effectiveSql = effectiveSql + ` AND ${dimCond}`;
-          }
-        } else {
-          const boundary = /\b(GROUP\s+BY|ORDER\s+BY|LIMIT|HAVING)\b/i.exec(effectiveSql);
-          if (boundary) {
-            const insertAt = boundary.index;
-            effectiveSql = effectiveSql.substring(0, insertAt) + `WHERE ${dimCond} ` + effectiveSql.substring(insertAt);
-          } else {
-            effectiveSql = effectiveSql + ` WHERE ${dimCond}`;
-          }
-        }
+        const ctePrefix = effectiveSql.substring(0, dimOffset);
+        let body = effectiveSql.substring(dimOffset);
+        body = injectConditionIntoBody(body, dimCond);
+        effectiveSql = ctePrefix + body;
 
         console.log(`[CohiChat] Dimension filter applied: ${dimCol} = $${dimParamIdx}`);
       }

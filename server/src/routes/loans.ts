@@ -53,6 +53,7 @@ import {
   buildActorNotMissingClause,
   calcLoanRevenue,
   calcLoanComplexity,
+  type LoanComplexityData,
   getVMaxDate,
   formatDateForSQL,
   formatMonthKey,
@@ -75,6 +76,33 @@ function daysBetween(
   const d2 = new Date(date2);
   if (isNaN(d1.getTime()) || isNaN(d2.getTime())) return null;
   return Math.round((d2.getTime() - d1.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+/** Map a loan row to LoanComplexityData for calcLoanComplexity. */
+function toLoanComplexityData(l: any): LoanComplexityData {
+  return {
+    loan_type: l.loan_type,
+    loan_purpose: l.loan_purpose,
+    loan_amount:
+      l.loan_amount != null && l.loan_amount !== ""
+        ? parseFloat(l.loan_amount)
+        : undefined,
+    fico_score:
+      l.fico_score != null && l.fico_score !== ""
+        ? parseInt(String(l.fico_score), 10)
+        : undefined,
+    ltv_ratio:
+      l.ltv_ratio != null && l.ltv_ratio !== ""
+        ? parseFloat(l.ltv_ratio)
+        : undefined,
+    be_dti_ratio:
+      l.be_dti_ratio != null && l.be_dti_ratio !== ""
+        ? parseFloat(l.be_dti_ratio)
+        : undefined,
+    occupancy_type: l.occupancy_type,
+    borr_self_employed: l.borr_self_employed,
+    non_qm: l.non_qm,
+  };
 }
 
 /**
@@ -2109,9 +2137,9 @@ router.get(
         () =>
           tenantPool.query(
             `SELECT 
-          loan_id, borrower_name, loan_amount, loan_type, status, channel,
+          loan_id, loan_amount, loan_type, current_loan_status, channel,
           application_date, closing_date, lock_date, funding_date, ctc_date, interest_rate
-         FROM loans 
+         FROM public.loans 
          WHERE ${whereClause}
          ORDER BY application_date DESC`,
             params,
@@ -2124,18 +2152,16 @@ router.get(
 
       // Active Pipeline - smart detection, filtered by date range
       const activeLoans = allLoans.filter((l) => {
-        const status = (l.status || "").toString().toUpperCase();
-        const isStateCode = /^[A-Z]{2}$/.test(status);
-        const isActive = isStateCode
-          ? !(l.closing_date || l.funding_date)
-          : ![
-              "CLOSED",
-              "FUNDED",
-              "ORIGINATED",
-              "WITHDRAWN",
-              "DENIED",
-              "COMPLETED",
-            ].includes(status);
+        const status = (l.current_loan_status || "").toString().toUpperCase();
+        const isActive = ![
+          "CLOSED",
+          "FUNDED",
+          "ORIGINATED",
+          "WITHDRAWN",
+          "DENIED",
+          "COMPLETED",
+          "PURCHASED",
+        ].some((s) => status.includes(s));
 
         if (!isActive) return false;
 
@@ -3198,92 +3224,6 @@ router.get(
         return Math.round(diffMs / (1000 * 60 * 60 * 24));
       };
 
-      /**
-       * Calculate Loan Complexity Score per Qlik Transform.qvs
-       * Sum of 8 components: Loan Purpose, Loan Type, Loan Amount, Occupancy, FICO, LTV, DTI, Employment
-       */
-      const calcLoanComplexity = (l: any): number => {
-        let complexity = 0;
-
-        // 1. Loan Purpose Complexity
-        const loanPurpose = (l.loan_purpose || "").toUpperCase().trim();
-        if (
-          loanPurpose.includes("C TO P") ||
-          loanPurpose.includes("CONSTRUCTION")
-        ) {
-          complexity += 0.3;
-        } else if (loanPurpose.includes("PURCHASE")) {
-          complexity += 0.1;
-        } else if (loanPurpose.includes("REFI") && loanPurpose.includes("CO")) {
-          complexity += 0.1; // Refi CO (cash out)
-        }
-        // Refi No CO = 0, default = 0
-
-        // 2. Loan Type Complexity
-        const loanType = (l.loan_type || "").toUpperCase().trim();
-        if (loanType === "FHA" || loanType.includes("FHA")) {
-          complexity += 0.1;
-        } else if (loanType === "VA" || loanType.includes("VA")) {
-          complexity += 0.05;
-        }
-        // Conventional = 0, default = 0
-
-        // 3. Loan Amount Complexity (Jumbo >= $1M)
-        const loanAmount = parseFloat(l.loan_amount) || 0;
-        if (loanAmount >= 1000000) {
-          complexity += 0.1;
-        }
-
-        // 4. Occupancy Complexity
-        const occupancy = (l.occupancy_type || "").toUpperCase().trim();
-        if (occupancy.includes("SECOND") || occupancy === "SECONDHOME") {
-          complexity += 0.1;
-        } else if (occupancy.includes("INVEST") || occupancy === "INVESTOR") {
-          complexity += 0.1;
-        }
-        // Primary = 0, default = 0
-
-        // 5. FICO Complexity (note: excellent FICO reduces complexity)
-        const fico = parseInt(l.fico_score) || 0;
-        if (fico > 0) {
-          if (fico > 760) {
-            complexity -= 0.1; // Excellent credit reduces complexity
-          } else if (fico > 681) {
-            complexity += 0; // Good credit = neutral
-          } else if (fico > 620) {
-            complexity += 0.05; // Fair credit
-          } else {
-            complexity += 0.15; // Poor credit
-          }
-        }
-
-        // 6. LTV Complexity (high LTV >= 95%)
-        const ltv = parseFloat(l.ltv_ratio) || 0;
-        if (ltv >= 95) {
-          complexity += 0.05;
-        }
-
-        // 7. DTI Complexity (high DTI >= 43%)
-        const dti = parseFloat(l.be_dti_ratio) || 0;
-        if (dti >= 43) {
-          complexity += 0.05;
-        }
-
-        // 8. Employment Complexity (self-employed)
-        const selfEmployed = l.borr_self_employed;
-        if (
-          selfEmployed === true ||
-          selfEmployed === "Y" ||
-          selfEmployed === "y" ||
-          selfEmployed === "true" ||
-          selfEmployed === "1"
-        ) {
-          complexity += 0.2;
-        }
-
-        return complexity;
-      };
-
       // PHASE 6: Group funded loans by actor and calculate raw metrics
       interface ActorMetrics {
         units: number;
@@ -3471,8 +3411,8 @@ router.get(
           actorData.concessions.push(concessionDollars);
         }
 
-        // Track loan complexity score per Qlik Transform.qvs
-        const complexityScore = calcLoanComplexity(l);
+        // Track loan complexity score (canonical calcLoanComplexity from scorecard-utils)
+        const complexityScore = calcLoanComplexity(toLoanComplexityData(l));
         actorData.complexityScores.push(complexityScore);
 
         // Complexity logging removed for cleaner output
@@ -4718,42 +4658,6 @@ router.get(
         return days > 0 ? days : null;
       };
 
-      // Helper: Calculate loan complexity score
-      // Formula: (1 + complexity_factor) * 100 where complexity_factor considers govt loans, purchase, risk
-      const calcLoanComplexity = (l: any): number => {
-        let complexity = 0;
-
-        // Government loan bonus (15%)
-        const loanType = (l.loan_type || "").toUpperCase();
-        if (
-          loanType.includes("FHA") ||
-          loanType.includes("VA") ||
-          loanType.includes("USDA")
-        ) {
-          complexity += 0.15;
-        }
-
-        // Purchase transaction bonus (10%)
-        const loanPurpose = (l.loan_purpose || "").toUpperCase();
-        if (loanPurpose.includes("PURCHASE")) {
-          complexity += 0.1;
-        }
-
-        // Risk factors (5% total)
-        const fico = parseFloat(l.fico_score) || 0;
-        const ltv = parseFloat(l.ltv_ratio) || 0;
-        const dti = parseFloat(l.be_dti_ratio) || 0;
-
-        // Low FICO risk
-        if (fico > 0 && fico < 680) complexity += 0.02;
-        // High LTV risk
-        if (ltv > 80) complexity += 0.02;
-        // High DTI risk
-        if (dti > 43) complexity += 0.01;
-
-        return (1 + complexity) * 100;
-      };
-
       // Aggregate by actor
       // CRITICAL: Use Set to track DISTINCT loan_numbers (Qlik uses COUNT(DISTINCT [Loan Number]))
       interface OpsActorMetrics {
@@ -4784,7 +4688,7 @@ router.get(
         const loanNumber = String(l.loan_number || l.loan_id); // Use loan_number for distinct counting
         const loanAmount = parseFloat(l.loan_amount) || 0;
         const turnTime = calcTurnTime(l);
-        const complexity = calcLoanComplexity(l);
+        const complexity = calcLoanComplexity(toLoanComplexityData(l));
 
         if (!actorMap.has(actorName)) {
           actorMap.set(actorName, {
@@ -5392,35 +5296,6 @@ router.get(
         return null;
       };
 
-      // Helper: Calculate loan complexity score
-      const calcLoanComplexity = (l: any): number => {
-        let complexity = 0;
-
-        const loanType = (l.loan_type || "").toUpperCase();
-        if (
-          loanType.includes("FHA") ||
-          loanType.includes("VA") ||
-          loanType.includes("USDA")
-        ) {
-          complexity += 0.15;
-        }
-
-        const loanPurpose = (l.loan_purpose || "").toUpperCase();
-        if (loanPurpose.includes("PURCHASE")) {
-          complexity += 0.1;
-        }
-
-        const fico = parseFloat(l.fico_score) || 0;
-        const ltv = parseFloat(l.ltv_ratio) || 0;
-        const dti = parseFloat(l.be_dti_ratio) || 0;
-
-        if (fico > 0 && fico < 680) complexity += 0.02;
-        if (ltv > 80) complexity += 0.02;
-        if (dti > 43) complexity += 0.01;
-
-        return (1 + complexity) * 100;
-      };
-
       // Helper: Format month key (e.g., "Jan-2026")
       const formatMonthKey = (date: Date): string => {
         const months = [
@@ -5482,7 +5357,7 @@ router.get(
 
         const loanAmount = parseFloat(l.loan_amount) || 0;
         const turnTime = calcTurnTime(l);
-        const complexity = calcLoanComplexity(l);
+        const complexity = calcLoanComplexity(toLoanComplexityData(l));
 
         if (!actorMap.has(actorName)) {
           actorMap.set(actorName, {

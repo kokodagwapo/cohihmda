@@ -990,8 +990,35 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
           })();
           break;
         }
+        case 'modify_widget': {
+          const targetIdx = items.findIndex((it) => it.i === action.instanceId);
+          if (targetIdx < 0) {
+            toast({ title: 'Widget not found', description: `No widget with id ${action.instanceId}`, variant: 'destructive' });
+            break;
+          }
+          const target = items[targetIdx];
+          if (target.payload.type === 'cohi_widget') {
+            const updated = [...items];
+            updated[targetIdx] = {
+              ...target,
+              payload: {
+                ...target.payload,
+                ...(action.sql ? { sql: action.sql } : {}),
+                ...(action.title ? { title: action.title } : {}),
+                ...(action.changes && Object.keys(action.changes).length > 0
+                  ? { vizConfig: { ...target.payload.vizConfig, ...action.changes } }
+                  : {}),
+              },
+            };
+            setItemsWithHistory(updated);
+            toast({ title: 'Widget updated', description: action.explanation?.substring(0, 80) || 'Changes applied' });
+          } else {
+            toast({ title: 'Cannot modify', description: 'Only SQL-backed widgets can be modified via chat', variant: 'destructive' });
+          }
+          break;
+        }
         default:
-          // explain_widget, explain_schema, modify_widget – handled in chat only
+          // explain_widget, explain_schema – handled in chat only
           break;
       }
     },
