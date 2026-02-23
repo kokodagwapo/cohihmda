@@ -488,7 +488,8 @@ function ArticlePage() {
                     article.relatedTour === 'research' ? '/research' :
                     article.relatedTour === 'admin' ? '/admin' :
                     '/insights');
-                  setTimeout(() => startTour(article.relatedTour as TourId), 500);
+                  // Delay so the target page mounts and tour targets exist in the DOM
+                  setTimeout(() => startTour(article.relatedTour as TourId), 800);
                 }}
                 className="gap-1"
               >

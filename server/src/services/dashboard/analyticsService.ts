@@ -1130,25 +1130,31 @@ export async function getClosingFalloutForecast(
         startDate = null;
     }
 
-    // Get active loans with aging days calculation
+    // Get active loans with aging days calculation (current_loan_status = still in pipeline, not terminal)
+    const activePipelineCondition = `(
+      current_loan_status NOT ILIKE '%withdrawn%' AND current_loan_status NOT ILIKE '%cancelled%'
+      AND current_loan_status NOT ILIKE '%denied%' AND current_loan_status NOT ILIKE '%declined%'
+      AND current_loan_status NOT ILIKE '%funded%' AND current_loan_status NOT ILIKE '%closed%'
+      AND current_loan_status NOT ILIKE '%originated%'
+    )`;
     const activeLoansQuery = startDate
       ? `SELECT 
           COUNT(*) as active_count,
           SUM(loan_amount) as active_volume,
-          AVG(CASE WHEN status NOT IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated')
+          AVG(CASE WHEN ${activePipelineCondition}
             AND application_date IS NOT NULL 
             THEN FLOOR(CURRENT_DATE - application_date) ELSE NULL END) as avg_aging_days
          FROM public.loans
          WHERE application_date >= $1
-           AND status NOT IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated')`
+           AND ${activePipelineCondition}`
       : `SELECT 
           COUNT(*) as active_count,
           SUM(loan_amount) as active_volume,
-          AVG(CASE WHEN status NOT IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated')
+          AVG(CASE WHEN ${activePipelineCondition}
             AND application_date IS NOT NULL 
             THEN FLOOR(CURRENT_DATE - application_date) ELSE NULL END) as avg_aging_days
          FROM public.loans
-         WHERE status NOT IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated')`;
+         WHERE ${activePipelineCondition}`;
 
     const activeLoansResult = await tenantPool.query(
       activeLoansQuery,
@@ -1210,7 +1216,7 @@ export async function getClosingFalloutForecast(
           SUM(loan_amount) as active_volume
          FROM public.loans
          WHERE application_date >= $1
-           AND status NOT IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated')
+           AND ${activePipelineCondition}
            AND loan_type IS NOT NULL
          GROUP BY loan_type`
       : `SELECT 
@@ -1218,7 +1224,7 @@ export async function getClosingFalloutForecast(
           COUNT(*) as active_count,
           SUM(loan_amount) as active_volume
          FROM public.loans
-         WHERE status NOT IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated')
+         WHERE ${activePipelineCondition}
            AND loan_type IS NOT NULL
          GROUP BY loan_type`;
 

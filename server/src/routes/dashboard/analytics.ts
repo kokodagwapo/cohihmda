@@ -23,7 +23,12 @@ import {
 } from "../../services/dashboard/workflowConversionService.js";
 import { getStaffingUnitTargets } from "../../utils/staffingUnitTargets.js";
 import { deleteInsightById } from "../../services/insights/llmInsightGenerator.js";
-import { runInsightGeneration, isGenerationRunning } from "../../services/insights/agents/insightOrchestrator.js";
+import {
+  runInsightGeneration,
+  isGenerationRunning,
+  generateMoreForBucketAgent,
+  isBucketGenerationRunning,
+} from "../../services/insights/agents/insightOrchestrator.js";
 import { createJob, updateProgress, completeJob, failJob } from "../../services/jobManager.js";
 
 const router = Router();
@@ -480,9 +485,12 @@ router.post(
   }
 );
 
+const VALID_BUCKETS = ["critical", "attention", "working", "context"];
+
 /**
  * POST /api/dashboard/insights/generate-more
  * Generates additional insights for a single bucket and APPENDS them (does not remove existing).
+ * Platform admin only. Uses agent pipeline with bucket-focused planner.
  * Query params:
  * - dateFilter: 'today' | 'mtd' | 'ytd' (default: 'ytd')
  * - bucket: 'working' | 'attention' | 'critical' | 'context'
@@ -493,10 +501,87 @@ router.post(
   authenticateToken,
   attachTenantContext,
   async (req: AuthRequest, res) => {
-    return res.status(410).json({
-      error: "Legacy generate-more archived",
-      message: "Use /api/dashboard/insights/refresh (agentic workflow).",
-    });
+    try {
+      const userRole = (req as any).userRole || (req as any).role;
+      if (!["super_admin", "platform_admin"].includes(userRole)) {
+        return res.status(403).json({ error: "Platform admin access required" });
+      }
+
+      const bucket = (req.query.bucket as string)?.toLowerCase();
+      if (!bucket || !VALID_BUCKETS.includes(bucket)) {
+        return res.status(400).json({
+          error: "Invalid or missing bucket",
+          message: `bucket must be one of: ${VALID_BUCKETS.join(", ")}`,
+        });
+      }
+
+      const tenantContext = getTenantContext(req);
+      const running = isBucketGenerationRunning(tenantContext.tenantId, bucket);
+      if (running.running) {
+        return res.status(409).json({
+          success: false,
+          error: "Generate-more already in progress for this bucket",
+          generationBatch: running.batch,
+        });
+      }
+
+      const accessCtx = await getLoanAccessContext(req, tenantContext.tenantPool);
+      if (accessCtx.hasNoAccess) {
+        return res.json({
+          insights: [],
+          metrics: {},
+          accessFiltered: true,
+          noAccess: true,
+        });
+      }
+
+      const { dateFilter = "ytd", channel_group } = req.query;
+      const job = createJob("insight-generate-more", req.userId!, tenantContext.tenantId);
+      res.status(202).json({ jobId: job.id, status: "processing" });
+
+      setImmediate(async () => {
+        try {
+          updateProgress(job.id, 5, `Starting generate-more for "${bucket}"...`);
+          const result = await generateMoreForBucketAgent(
+            tenantContext.tenantId,
+            tenantContext.tenantPool,
+            bucket,
+            (event) => {
+              const phaseProgress: Record<string, number> = {
+                init: 5, context: 10, planning: 20,
+                investigating: 50, evaluating: 80, persisting: 90, complete: 100,
+              };
+              updateProgress(job.id, phaseProgress[event.phase] ?? 50, event.detail);
+            }
+          );
+
+          if (!result.success) {
+            failJob(job.id, result.error || "Generate-more failed");
+            return;
+          }
+
+          const refreshed = await getInsights(
+            tenantContext.tenantPool,
+            dateFilter as string,
+            undefined,
+            {
+              useLLM: true,
+              tenantId: tenantContext.tenantId,
+              userAccessFilter: accessCtx.getFilter("l"),
+              channelGroup: channel_group as string | undefined,
+              generationMethod: "agent",
+            }
+          );
+          completeJob(job.id, refreshed);
+        } catch (error: any) {
+          console.error("Error in generate-more for bucket:", error);
+          failJob(job.id, error.message || "Failed to generate more insights");
+        }
+      });
+    } catch (error: any) {
+      console.error("Error starting generate-more:", error);
+      res.status(500).json({ error: "Failed to start generate-more" });
+    }
   }
 );
 

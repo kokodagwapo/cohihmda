@@ -166,6 +166,29 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
     >
   >({});
 
+  // Cycle Time "Time By Stage" - from /api/loans/operations-overview
+  const [cycleTimeStageData, setCycleTimeStageData] = useState<{
+    turnTimeByStage?: {
+      appToLock: { target: number; actual: number; overTarget: number };
+      lockToCTC: { target: number; actual: number; overTarget: number };
+      ctcToFunding: { target: number; actual: number; overTarget: number };
+    };
+  } | null>(null);
+  const [cycleTimeStageLoading, setCycleTimeStageLoading] = useState(false);
+
+  // Cycle Time "By Loan Type" - from /api/metrics/query with groupBy loan_type
+  const [cycleTimeByTypeData, setCycleTimeByTypeData] = useState<
+    { groupKey: string; value: number }[] | null
+  >(null);
+  const [cycleTimeByTypeLoading, setCycleTimeByTypeLoading] = useState(false);
+
+  // Pull-Through modal: By Loan Type from closing-fallout-forecast; Fallout from loan-mix (withdrawn)
+  const [pullThroughModalData, setPullThroughModalData] = useState<{
+    pullThroughByLoanType: { loanType: string; pullThroughRate: number; historicalCount: number }[];
+    withdrawnByType: LoanMixRow[];
+  } | null>(null);
+  const [pullThroughModalLoading, setPullThroughModalLoading] = useState(false);
+
   // Track which KPIs have been fetched to avoid redundant calls
   const fetchedKpisRef = React.useRef<Set<string>>(new Set());
 
@@ -205,9 +228,11 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
             dateField: "funding_date",
           };
         case "creditPulls":
-          // Credit pulls happen during application process
-          // Uses application_date for date filtering, no special status filter
-          return { dateField: "application_date" };
+          // Credit pulls: count loans with credit_pull_date in range (matches credit_pulls metric)
+          return {
+            additionalFilters: { credit_pull_filter: true },
+            dateField: "credit_pull_date",
+          };
         default:
           return {};
       }
@@ -225,12 +250,12 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
     ) => {
       // Skip if not a KPI that has breakdown data
       // pullThrough requires ratio calculation that loan-mix can't provide
+      // cycleTime uses operations-overview + metrics/query groupBy instead of loan-mix
       if (
         ![
           "activeLoans",
           "closedLoans",
           "lockedLoans",
-          "cycleTime",
           "creditPulls",
         ].includes(kpiId)
       ) {
@@ -437,9 +462,191 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
     }
   }, [selectedCard, fetchModalLoanMixData, kpiTimeframes, kpiCustomDates]);
 
+  // Fetch Cycle Time "Time By Stage" and "By Loan Type" when cycleTime modal opens
+  useEffect(() => {
+    if (selectedCard !== "cycleTime") {
+      setCycleTimeStageData(null);
+      setCycleTimeByTypeData(null);
+      setCycleTimeStageLoading(false);
+      setCycleTimeByTypeLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const period: PeriodValue = kpiTimeframes.cycleTime || "mtd";
+    const customDates = kpiCustomDates.cycleTime;
+    let startDate: string | null = null;
+    let endDate: string | null = null;
+    if (period === "custom" && customDates?.start && customDates?.end) {
+      startDate = customDates.start.toISOString().split("T")[0];
+      endDate = customDates.end.toISOString().split("T")[0];
+    } else if (period !== "all") {
+      const range = getPeriodRange(period, new Date(), year);
+      startDate = range.start ? range.start.toISOString().split("T")[0] : null;
+      endDate = range.end ? range.end.toISOString().split("T")[0] : null;
+    }
+    if (period === "all") {
+      setCycleTimeStageData(null);
+      setCycleTimeByTypeData(null);
+      setCycleTimeStageLoading(false);
+      setCycleTimeByTypeLoading(false);
+      return;
+    }
+    setCycleTimeStageLoading(true);
+    setCycleTimeByTypeLoading(true);
+    const params = new URLSearchParams();
+    if (selectedTenantId) params.set("tenant_id", selectedTenantId);
+    if (startDate) params.set("startDate", startDate);
+    if (endDate) params.set("endDate", endDate);
+    if (selectedChannel && selectedChannel !== "All")
+      params.set("channel_group", selectedChannel);
+    // Time By Stage from operations-overview
+    api
+      .request<{
+        turnTimeByStage?: {
+          appToLock: { target: number; actual: number; overTarget: number };
+          lockToCTC: { target: number; actual: number; overTarget: number };
+          ctcToFunding: { target: number; actual: number; overTarget: number };
+        };
+      }>(`/api/loans/operations-overview?${params.toString()}`)
+      .then((res) => {
+        if (!cancelled) {
+          setCycleTimeStageData(res.turnTimeByStage ? { turnTimeByStage: res.turnTimeByStage } : null);
+          setCycleTimeStageLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCycleTimeStageData(null);
+          setCycleTimeStageLoading(false);
+        }
+      });
+    // By Loan Type from metrics query with groupBy
+    const queryParams = new URLSearchParams();
+    if (selectedTenantId) queryParams.append("tenant_id", selectedTenantId);
+    const additionalFilters: Record<string, string | boolean> = { closed_loan_filter: true };
+    if (selectedChannel && selectedChannel !== "All")
+      additionalFilters.consolidated_channel = selectedChannel;
+    api
+      .request<{
+        metrics: Record<string, { groupKey: string; value: number | string }[]>;
+        groupedBy: string;
+      }>(`/api/metrics/query${queryParams.toString() ? `?${queryParams.toString()}` : ""}`, {
+        method: "POST",
+        body: JSON.stringify({
+          metricIds: ["avg_cycle_time"],
+          dateRange: { start: startDate, end: endDate },
+          dateField: "funding_date",
+          groupBy: "loan_type",
+          additionalFilters,
+        }),
+      })
+      .then((res) => {
+        if (!cancelled) {
+          const rows = res.metrics?.avg_cycle_time ?? [];
+          setCycleTimeByTypeData(
+            rows.map((r) => ({
+              groupKey: r.groupKey,
+              value: typeof r.value === "number" ? r.value : parseFloat(String(r.value)) || 0,
+            }))
+          );
+          setCycleTimeByTypeLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCycleTimeByTypeData(null);
+          setCycleTimeByTypeLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCard, kpiTimeframes, kpiCustomDates, year, selectedTenantId, selectedChannel]);
+
+  // Fetch Pull-Through "By Loan Type" and Fallout (withdrawn by type) when pullThrough modal opens
+  useEffect(() => {
+    if (selectedCard !== "pullThrough") {
+      setPullThroughModalData(null);
+      setPullThroughModalLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setPullThroughModalLoading(true);
+    const period = kpiTimeframes.pullThrough || "rolling_90_days";
+    const dateFilter =
+      period === "rolling_90_days" ? "ytd" : period === "custom" ? "ytd" : period;
+    const range =
+      dateFilter === "ytd"
+        ? getPeriodRange("ytd", new Date(), year)
+        : dateFilter === "mtd"
+          ? getPeriodRange("mtd", new Date(), year)
+          : null;
+    const dateRange =
+      range?.start && range?.end
+        ? {
+            start: range.start.toISOString().split("T")[0],
+            end: range.end.toISOString().split("T")[0],
+          }
+        : undefined;
+    const queryParams = new URLSearchParams();
+    if (selectedTenantId) queryParams.set("tenant_id", selectedTenantId);
+    const baseUrl = `/api/metrics/loan-mix${queryParams.toString() ? `?${queryParams.toString()}` : ""}`;
+    // 1) Closing-fallout-forecast for pull-through by loan type
+    const forecastParams = new URLSearchParams();
+    forecastParams.set("dateFilter", dateFilter);
+    if (selectedTenantId) forecastParams.set("tenant_id", selectedTenantId);
+    api
+      .request<{
+        pullThroughByLoanType: { loanType: string; pullThroughRate: number; historicalCount: number }[];
+      }>(`/api/dashboard/closing-fallout-forecast?${forecastParams.toString()}`)
+      .then((res) => {
+        if (cancelled) return;
+        const pullThroughByLoanType = res.pullThroughByLoanType ?? [];
+        // 2) Loan-mix with withdrawn_filter for fallout breakdown by type
+        api
+          .request<{ loanMix: LoanMixRow[] }>(baseUrl, {
+            method: "POST",
+            body: JSON.stringify({
+              groupBy: "loan_type",
+              dateRange,
+              dateField: "application_date",
+              additionalFilters: { withdrawn_filter: true },
+            }),
+          })
+          .then((loanMixRes) => {
+            if (!cancelled) {
+              setPullThroughModalData({
+                pullThroughByLoanType,
+                withdrawnByType: loanMixRes.loanMix ?? [],
+              });
+            }
+          })
+          .catch(() => {
+            if (!cancelled) {
+              setPullThroughModalData({ pullThroughByLoanType, withdrawnByType: [] });
+            }
+          })
+          .finally(() => {
+            if (!cancelled) setPullThroughModalLoading(false);
+          });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPullThroughModalData(null);
+          setPullThroughModalLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCard, kpiTimeframes.pullThrough, selectedTenantId, year]);
+
   // Clear cached modal data when tenant changes
   useEffect(() => {
     setModalLoanMixData({});
+    setCycleTimeStageData(null);
+    setCycleTimeByTypeData(null);
+    setPullThroughModalData(null);
     fetchedKpisRef.current.clear();
   }, [selectedTenantId]);
 
@@ -962,7 +1169,7 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
           byExpirationDays: [],
         },
         cycleTime: { avgDaysToFunding: "--", byStage: [], byLoanType: [] },
-        pullThrough: { avgPercent: "--", byLoanType: [], falloutBreakdown: [] },
+        pullThrough: { avgPercent: "--", totalCompleted: 0, totalFallout: 0, byLoanType: [], falloutBreakdown: [] },
         creditPulls: { byLoanType: [], byLoanPurpose: [] },
       };
     }
@@ -1005,9 +1212,21 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
         ? metricsData.avg_cycle_time.value
         : parseFloat(metricsData.avg_cycle_time?.value as string) || 0;
 
-    // Cycle time by stage - no backend endpoint for stage-specific cycle times yet
-    // Show empty instead of fake estimated data
+    // Cycle time by stage - from /api/loans/operations-overview turnTimeByStage
     const cycleTimeByStage: Array<{ label: string; values: string[] }> = [];
+    if (cycleTimeStageData?.turnTimeByStage) {
+      const t = cycleTimeStageData.turnTimeByStage;
+      const fmt = (actual: number, target: number, overTarget: number) => [
+        `${actual} days`,
+        `${target} days`,
+        (overTarget >= 0 ? "+" : "") + overTarget + " days",
+      ];
+      cycleTimeByStage.push(
+        { label: "App to Lock", values: fmt(t.appToLock.actual, t.appToLock.target, t.appToLock.overTarget) },
+        { label: "Lock to CTC", values: fmt(t.lockToCTC.actual, t.lockToCTC.target, t.lockToCTC.overTarget) },
+        { label: "CTC to Funding", values: fmt(t.ctcToFunding.actual, t.ctcToFunding.target, t.ctcToFunding.overTarget) },
+      );
+    }
 
     // Pull-Through calculation - use metrics data
     const pullThroughPercent =
@@ -1143,18 +1362,66 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
       formatDistributionRow
     );
 
-    // Cycle Time breakdown - shows funded loans by type (cycle time applies to funded loans)
-    // Note: We show loan mix data, not per-type cycle time (which would require a different backend endpoint)
-    const cycleTimeData = getModalData("cycleTime");
-    const cycleTimeByLoanType = cycleTimeData.byType.map(formatLoanMixRow);
+    // Cycle Time "By Loan Type" - from /api/metrics/query groupBy loan_type (avg days, trend, status vs overall avg)
+    const cycleTimeByLoanType: Array<{ label: string; values: string[] }> = [];
+    if (cycleTimeByTypeData && cycleTimeByTypeData.length > 0) {
+      cycleTimeByTypeData.forEach((row) => {
+        const days = row.value;
+        const status =
+          avgDaysToFunding > 0
+            ? days < avgDaysToFunding
+              ? "Above Avg"
+              : "Below Avg"
+            : "--";
+        cycleTimeByLoanType.push({
+          label: row.groupKey,
+          values: [`${Math.round(days)} days`, "--", status],
+        });
+      });
+    }
 
-    // Pull-Through by loan type - requires ratio calculation (funded/applications) that loan-mix can't provide
-    // Show empty until we have a dedicated endpoint
-    const pullThroughByLoanType: Array<{ label: string; values: string[] }> =
-      [];
+    // Pull-Through by loan type - from /api/dashboard/closing-fallout-forecast
+    const pullThroughByLoanType: Array<{ label: string; values: string[] }> = [];
+    if (pullThroughModalData?.pullThroughByLoanType?.length) {
+      const companyAvg = pullThroughPercent;
+      pullThroughModalData.pullThroughByLoanType.forEach((row) => {
+        const rate = row.pullThroughRate;
+        const variance = rate - companyAvg;
+        pullThroughByLoanType.push({
+          label: row.loanType,
+          values: [
+            `${rate.toFixed(1)}%`,
+            `${companyAvg.toFixed(1)}%`,
+            (variance >= 0 ? "+" : "") + variance.toFixed(1) + "%",
+            row.historicalCount.toLocaleString(),
+            rate >= companyAvg ? "Above" : "Below",
+          ],
+        });
+      });
+    }
 
-    // Fallout breakdown - no backend endpoint for withdrawn/denied metrics yet
+    // Fallout breakdown - withdrawn by loan type from loan-mix with withdrawn_filter
     const falloutBreakdown: Array<{ label: string; values: string[] }> = [];
+    if (pullThroughModalData?.withdrawnByType?.length) {
+      const totalUnits = pullThroughModalData.withdrawnByType.reduce(
+        (sum, r) => sum + r.units,
+        0
+      );
+      pullThroughModalData.withdrawnByType.forEach((row) => {
+        const pct =
+          totalUnits > 0
+            ? ((row.units / totalUnits) * 100).toFixed(1) + "%"
+            : "--";
+        falloutBreakdown.push({
+          label: row.category,
+          values: [
+            formatBusinessValue(row.units, "units"),
+            formatBusinessValue(row.volume, "volume"),
+            pct,
+          ],
+        });
+      });
+    }
 
     // Credit Pulls breakdown - shows all loans by type with credit activity
     const creditPullsTotal =
@@ -1258,6 +1525,12 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
           pullThroughPercent > 0
             ? formatBusinessValue(pullThroughPercent, "percent")
             : "--",
+        totalCompleted: pullThroughModalData?.pullThroughByLoanType?.reduce(
+          (sum, r) => sum + r.historicalCount, 0
+        ) ?? 0,
+        totalFallout: pullThroughModalData?.withdrawnByType?.reduce(
+          (sum, r) => sum + r.units, 0
+        ) ?? 0,
         byLoanType: pullThroughByLoanType,
         falloutBreakdown: falloutBreakdown,
       },
@@ -1272,7 +1545,7 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
   const businessOverviewData = useMemo(() => {
     return calculateBusinessOverviewData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [metricsData, kpiTimeframes, modalLoanMixData]);
+  }, [metricsData, kpiTimeframes, modalLoanMixData, cycleTimeStageData, cycleTimeByTypeData, pullThroughModalData]);
 
   const metricsHeaders = [
     "Units",
@@ -1284,7 +1557,8 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
   ];
   const cycleTimeHeaders = ["Avg Days", "Target", "Variance"];
   const cycleTypeHeaders = ["Avg Days", "Trend", "Status"];
-  const pullThroughHeaders = ["Value", "Co. Avg", "Status"];
+  const pullThroughHeaders = ["Rate", "Co. Avg", "Variance", "Loans", "Status"];
+  const falloutBreakdownHeaders = ["Units", "Volume", "% of Fallout"];
   const creditPullHeaders = ["MTD", "Last Mo."];
 
   // Helper to get timeframe label for modal subtitle
@@ -1429,19 +1703,28 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
       case "pullThrough":
         return {
           title: "Pull-Through Rate",
-          subtitle: `${businessOverviewData.pullThrough.avgPercent}% • ${timeframeLabel}`,
+          subtitle: `${businessOverviewData.pullThrough.avgPercent} • ${timeframeLabel}`,
           color: "bg-rose-50",
           borderColor: "border-rose-200",
           accentColor: "text-rose-600",
           sections: [
+            {
+              title: "Summary",
+              headers: ["Pull-Through Rate", "Completed Loans", "Withdrawn/Fallout"],
+              summaryData: {
+                rate: businessOverviewData.pullThrough.avgPercent,
+                completed: businessOverviewData.pullThrough.totalCompleted.toLocaleString(),
+                fallout: businessOverviewData.pullThrough.totalFallout.toLocaleString(),
+              },
+            },
             {
               title: "By Loan Type",
               headers: pullThroughHeaders,
               rows: businessOverviewData.pullThrough.byLoanType,
             },
             {
-              title: "Fallout Breakdown",
-              headers: pullThroughHeaders,
+              title: "Fallout Breakdown (Withdrawn)",
+              headers: falloutBreakdownHeaders,
               rows: businessOverviewData.pullThrough.falloutBreakdown,
             },
           ],
@@ -1870,8 +2153,20 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
                         {/* Data Table (if rows exist) */}
                         {section.rows && (
                           <div className="bg-slate-50 dark:bg-slate-800/40 rounded-lg border border-slate-200 dark:border-slate-700 p-2 sm:p-2.5 md:p-3 w-full">
-                            {modalLoanMixData[selectedCard]?.loading &&
-                            section.rows.length === 0 ? (
+                            {(modalLoanMixData[selectedCard]?.loading &&
+                              section.rows.length === 0) ||
+                            (selectedCard === "cycleTime" &&
+                              section.title === "Time By Stage" &&
+                              cycleTimeStageLoading) ||
+                            (selectedCard === "cycleTime" &&
+                              section.title === "By Loan Type" &&
+                              cycleTimeByTypeLoading) ||
+                            (selectedCard === "pullThrough" &&
+                              section.title === "By Loan Type" &&
+                              pullThroughModalLoading) ||
+                            (selectedCard === "pullThrough" &&
+                              section.title === "Fallout Breakdown" &&
+                              pullThroughModalLoading) ? (
                               <div className="flex items-center justify-center py-8">
                                 <div className="flex items-center gap-2 text-slate-500">
                                   <div className="w-4 h-4 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />

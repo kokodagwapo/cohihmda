@@ -233,6 +233,8 @@ interface CohiWidgetRendererProps {
    * the title visible.
    */
   hideTitle?: boolean;
+  /** Source type — research widgets skip the date filter bar entirely. */
+  sourceType?: 'research' | 'chat';
 }
 
 // ---------------------------------------------------------------------------
@@ -555,6 +557,8 @@ function renderChart(config: VisualizationConfig, data: any[], w: number, h: num
 
     case 'table': {
       const tableCols = config.tableConfig?.columns || Object.keys(chartData[0] || {}).map(k => ({ key: k, label: k }));
+      const TABLE_RENDER_CAP = 500;
+      const displayRows = chartData.slice(0, TABLE_RENDER_CAP);
       return (
         <div className="overflow-auto max-h-full">
           <table className="w-full text-xs border-collapse">
@@ -568,7 +572,7 @@ function renderChart(config: VisualizationConfig, data: any[], w: number, h: num
               </tr>
             </thead>
             <tbody>
-              {chartData.slice(0, 50).map((row: any, i: number) => (
+              {displayRows.map((row: any, i: number) => (
                 <tr key={i} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/30">
                   {tableCols.map((col: any) => {
                     const val = row[col.key];
@@ -583,8 +587,8 @@ function renderChart(config: VisualizationConfig, data: any[], w: number, h: num
               ))}
             </tbody>
           </table>
-          {chartData.length > 50 && (
-            <p className="text-xs text-slate-500 px-2 py-1">Showing 50 of {chartData.length} rows</p>
+          {chartData.length > TABLE_RENDER_CAP && (
+            <p className="text-xs text-slate-500 px-2 py-1">Showing {TABLE_RENDER_CAP} of {chartData.length} rows</p>
           )}
         </div>
       );
@@ -1023,6 +1027,7 @@ export function CohiWidgetRenderer({
   onVizTypeChange,
   canvasItemId,
   hideTitle,
+  sourceType,
 }: CohiWidgetRendererProps) {
   const reportWidgetData = useCanvasDataStore((s) => s.reportWidgetData);
   const removeWidgetFromStore = useCanvasDataStore((s) => s.removeWidget);
@@ -1109,9 +1114,11 @@ export function CohiWidgetRenderer({
     return null; // no filter → original SQL range
   }, [activePreset, activeYear, dateField]);
 
+  // Research widgets skip all date/dimension filtering — their SQL has its own scoping.
   // When sync is enabled, group filter wins. Otherwise, use the widget's own controls.
-  const effectiveDateFilter = filterSyncEnabled ? (groupDateFilter ?? null) : localDateFilter;
-  const effectiveDimFilters = filterSyncEnabled ? (groupDimensionFilters ?? null) : null;
+  const isResearch = sourceType === 'research';
+  const effectiveDateFilter = isResearch ? null : (filterSyncEnabled ? (groupDateFilter ?? null) : localDateFilter);
+  const effectiveDimFilters = isResearch ? null : (filterSyncEnabled ? (groupDimensionFilters ?? null) : null);
 
   const { data, loading, error, refetch } = useCohiWidgetData(sql, tenantId, effectiveDateFilter, effectiveDimFilters);
   const effectiveConfig = { ...vizConfig, type: chartType };
@@ -1218,8 +1225,8 @@ export function CohiWidgetRenderer({
         </div>
       )}
 
-      {/* ─── Compact filter toolbar ─── */}
-      {!filterSyncEnabled && (
+      {/* ─── Compact filter toolbar (hidden for research widgets) ─── */}
+      {!filterSyncEnabled && !isResearch && (
         <div className="shrink-0 border-b border-slate-200/70 dark:border-slate-700/70 bg-slate-50/60 dark:bg-slate-800/40">
           {/* Collapsed: single compact row with toggle + summary + actions */}
           <div className="flex items-center gap-1 px-1.5 h-6 min-h-[24px]">

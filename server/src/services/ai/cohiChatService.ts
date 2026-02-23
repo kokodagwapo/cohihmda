@@ -624,7 +624,7 @@ async function executeQuery(
   const sanitizedSql = sanitizeGeneratedSQL(sql);
   const normalizedSql = sanitizedSql.trim().toUpperCase();
 
-  if (!normalizedSql.startsWith("SELECT")) {
+  if (!normalizedSql.startsWith("SELECT") && !normalizedSql.startsWith("WITH")) {
     throw new Error("Only SELECT queries are allowed");
   }
 

@@ -253,7 +253,10 @@ export const Admin = () => {
       { id: "sso", label: "SSO Configuration" },
       { id: "org", label: "Organization Settings" },
       { id: "data-quality", label: "Data Quality" },
-      { id: "data-config", label: "Field Mapping & Rules" },
+      { id: "data-config", label: "Field Mapping" },
+      { id: "revenue", label: "Revenue" },
+      { id: "scoring-weights", label: "Scoring & Weights" },
+      { id: "data-transfer", label: "Import / Export" },
       { id: "connections", label: "Connections & Integrations" },
       { id: "rag-voice", label: "AI Assistant" },
       { id: "knowledge-library", label: "Global Knowledge Library" },
@@ -368,8 +371,22 @@ export const Admin = () => {
               {/* Data Quality Section */}
               {activeSection === "data-quality" && <DataQualitySection />}
 
-              {/* Data Configuration Section */}
-              {activeSection === "data-config" && <TenantConfigSection />}
+              {/* Field Mapping */}
+              {activeSection === "data-config" && (
+                <TenantConfigSection section="mapping" />
+              )}
+              {/* Revenue */}
+              {activeSection === "revenue" && (
+                <TenantConfigSection section="revenue" />
+              )}
+              {/* Scoring & Weights */}
+              {activeSection === "scoring-weights" && (
+                <TenantConfigSection section="scoring" />
+              )}
+              {/* Import / Export (platform admin only) */}
+              {activeSection === "data-transfer" && (
+                <TenantConfigSection section="transfer" />
+              )}
 
               {/* Infrastructure Section (formerly System) */}
               {activeSection === "infrastructure" && isPlatform && (

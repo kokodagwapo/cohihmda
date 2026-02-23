@@ -40,7 +40,7 @@ import {
 import { Calendar } from "@/components/ui/calendar";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { ExportShareMenu } from "@/components/common/ExportShareMenu";
+import { ExportMenu } from "@/components/common/ExportMenu";
 import type { ExportData } from "@/utils/exportUtils";
 
 /** Golden certificate seal icon (scalloped border, star ring, blank center) for rank badge */
@@ -448,15 +448,10 @@ export const LeaderBoardSection = ({
 
         {/* Period Picker - DatePeriodPicker style */}
         <div className="flex items-center gap-2 flex-wrap">
-          <ExportShareMenu
+          <ExportMenu
             title="Leaderboard"
             targetRef={sectionRef}
             getExportData={getExportData}
-            shareTarget={{
-              type: "leaderboard",
-              tenantId: selectedTenantId || undefined,
-              label: "Leaderboard",
-            }}
           />
           {/* To-Date periods */}
           <div className="flex gap-0.5 sm:gap-1 p-0.5 sm:p-1 bg-slate-100/80 dark:bg-slate-800/50 rounded-lg">
