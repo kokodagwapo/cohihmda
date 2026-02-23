@@ -20,6 +20,8 @@ export interface InvestigationQuestion {
   approach: string;
   priority: "high" | "medium" | "low";
   category: string;
+  /** When the user asks for a specific output format (e.g. table showing X by Y), describe it here. */
+  outputHint?: string | null;
 }
 
 export interface ResearchPlan {
@@ -48,7 +50,8 @@ Your output is a JSON object with:
       "hypothesis": "What you expect to find or investigate",
       "approach": "How a data analyst should investigate this — what tables to query, what comparisons to make, what date ranges to use",
       "priority": "high" | "medium" | "low",
-      "category": "performance" | "risk" | "personnel" | "pipeline" | "compliance" | "trends"
+      "category": "performance" | "risk" | "personnel" | "pipeline" | "compliance" | "trends",
+      "outputHint": "optional: describe the exact output format the user wants (e.g. 'table showing personnel name then hours per loan', 'breakdown of X by Y', 'trend over time') or null"
     }
   ]
 }
@@ -64,7 +67,8 @@ RULES:
 - Focus on questions that can reveal actionable patterns, not just descriptive statistics
 - NEVER suggest queries that modify data
 - Today's date context will be provided separately
-- DATA QUALITY: "Active Loan" status often includes stale records not properly closed out in the LOS. When planning pipeline-related questions, instruct the analyst to check for and segment stale active loans (application_date > 6 months old). Data quality issues (missing fields, stale statuses, impossible dates) are high-value findings — include them when relevant.`;
+- DATA QUALITY: "Active Loan" status often includes stale records not properly closed out in the LOS. When planning pipeline-related questions, instruct the analyst to check for and segment stale active loans (application_date > 6 months old). Data quality issues (missing fields, stale statuses, impossible dates) are high-value findings — include them when relevant.
+- If the user's request implies a specific output format (e.g. "create a table showing...", "break down X by Y", "show me hours per loan per user"), include an outputHint on the relevant question describing that format. The data analyst will use it to shape the final query so the user gets the exact table or visualization they asked for.`;
 
 // ============================================================================
 // Training Examples
