@@ -45,7 +45,7 @@ import { InsightDetailModal } from "./InsightDetailModal";
 import { TrackedInsightsWatchlist } from "./TrackedInsightsWatchlist";
 import { FindingDrillDown } from "@/components/research/FindingDrillDown";
 import { InsightChat } from "./InsightChat";
-import { ExportShareMenu } from "@/components/common/ExportShareMenu";
+import { ExportMenu } from "@/components/common/ExportMenu";
 import type { ExportData } from "@/utils/exportUtils";
 import type { Finding } from "@/hooks/useResearchSession";
 
@@ -1004,6 +1004,20 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                     {allInsights.length} insights
                   </span>
                 )}
+                {metadata?.generatedAt && (
+                  <span className="text-slate-400 dark:text-slate-500 text-[10px] sm:text-xs" title={new Date(metadata.generatedAt).toLocaleString()}>
+                    Generated {(() => {
+                      const ms = Date.now() - new Date(metadata.generatedAt).getTime();
+                      const mins = Math.floor(ms / 60000);
+                      if (mins < 1) return "just now";
+                      if (mins < 60) return `${mins}m ago`;
+                      const hrs = Math.floor(mins / 60);
+                      if (hrs < 24) return `${hrs}h ago`;
+                      const days = Math.floor(hrs / 24);
+                      return `${days}d ago`;
+                    })()}
+                  </span>
+                )}
               </p>
             </div>
           </div>
@@ -1034,7 +1048,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                 )}
               </button>
             )}
-            <ExportShareMenu
+            <ExportMenu
               title="Cohi Insights"
               targetRef={sectionRef}
               getExportData={(): ExportData => ({
@@ -1059,11 +1073,6 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                   },
                 ],
               })}
-              shareTarget={{
-                type: "cohi-insights",
-                tenantId: selectedTenantId || undefined,
-                label: "Cohi Insights",
-              }}
             />
             {isAdmin && (
               <button

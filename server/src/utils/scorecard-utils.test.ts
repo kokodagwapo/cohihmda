@@ -17,6 +17,8 @@ import {
   buildChannelGroupCaseExpr,
   buildActorNotMissingClause,
   parseComplexityConfig,
+  parseComplexityConfigV2,
+  calcLoanComplexityWithBreakdown,
   DEFAULT_COMPLEXITY_WEIGHTS,
 } from "./scorecard-utils.js";
 
@@ -374,6 +376,57 @@ describe("calcLoanComplexity", () => {
     );
     expect(complexity).toBe(120);
   });
+
+  it("should use V2 config with range-based FICO", () => {
+    const configV2 = {
+      fico: [
+        { condition_value: "excellent", weight: -10, range_min: 760, range_max: 850 },
+        { condition_value: "good", weight: 0, range_min: 681, range_max: 759 },
+        { condition_value: "fair", weight: 5, range_min: 620, range_max: 680 },
+        { condition_value: "poor", weight: 15, range_min: 300, range_max: 619 },
+      ],
+    };
+    expect(calcLoanComplexity({ fico_score: 800 }, configV2)).toBe(90);
+    expect(calcLoanComplexity({ fico_score: 650 }, configV2)).toBe(105);
+    expect(calcLoanComplexity({ fico_score: 500 }, configV2)).toBe(115);
+  });
+
+  it("should use V2 config with loan_amount ranges", () => {
+    const configV2 = {
+      loan_amount: [
+        { condition_value: "0-100k", weight: 0, range_min: 0, range_max: 100000 },
+        { condition_value: "100k-1M", weight: 5, range_min: 100000, range_max: 1000000 },
+        { condition_value: "1M+", weight: 10, range_min: 1000000, range_max: 999999999 },
+      ],
+    };
+    expect(calcLoanComplexity({ loan_amount: 50000 }, configV2)).toBe(100);
+    expect(calcLoanComplexity({ loan_amount: 500000 }, configV2)).toBe(105);
+    expect(calcLoanComplexity({ loan_amount: 2000000 }, configV2)).toBe(110);
+  });
+
+  it("should use V2 config with categorical loan_type", () => {
+    const configV2 = {
+      loan_type: [
+        { condition_value: "FHA", weight: 10 },
+        { condition_value: "VA", weight: 5 },
+        { condition_value: "Conventional", weight: 0 },
+      ],
+    };
+    expect(calcLoanComplexity({ loan_type: "FHA" }, configV2)).toBe(110);
+    expect(calcLoanComplexity({ loan_type: "VA" }, configV2)).toBe(105);
+    expect(calcLoanComplexity({ loan_type: "Conventional" }, configV2)).toBe(100);
+  });
+
+  it("should use V2 config for non_qm", () => {
+    const configV2 = {
+      non_qm: [
+        { condition_value: "Y", weight: 10 },
+        { condition_value: "N", weight: 0 },
+      ],
+    };
+    expect(calcLoanComplexity({ non_qm: "Y" }, configV2)).toBe(110);
+    expect(calcLoanComplexity({ non_qm: "N" }, configV2)).toBe(100);
+  });
 });
 
 // ============================================================================
@@ -388,6 +441,64 @@ describe("parseComplexityConfig", () => {
     const config = parseComplexityConfig(rows);
     expect(config.loan_type_government).toBe(15);
     expect(config.fico_poor).toBe(20);
+  });
+});
+
+// ============================================================================
+// parseComplexityConfigV2
+// ============================================================================
+describe("parseComplexityConfigV2", () => {
+  it("should group rows by component_name and include range_min/range_max", () => {
+    const rows = [
+      {
+        component_name: "fico",
+        condition_value: "excellent",
+        weight: 0.1,
+        range_min: 760,
+        range_max: 850,
+      },
+      {
+        component_name: "fico",
+        condition_value: "poor",
+        weight: 0.15,
+        range_min: 300,
+        range_max: 619,
+      },
+    ];
+    const config = parseComplexityConfigV2(rows);
+    expect(config.fico).toHaveLength(2);
+    // Sorted by range_min: poor (300) first, then excellent (760)
+    expect(config.fico[0].condition_value).toBe("poor");
+    expect(config.fico[0].weight).toBe(15);
+    expect(config.fico[0].range_min).toBe(300);
+    expect(config.fico[0].range_max).toBe(619);
+    expect(config.fico[1].condition_value).toBe("excellent");
+    expect(config.fico[1].weight).toBe(10);
+    expect(config.fico[1].range_min).toBe(760);
+    expect(config.fico[1].range_max).toBe(850);
+  });
+});
+
+// ============================================================================
+// calcLoanComplexityWithBreakdown
+// ============================================================================
+describe("calcLoanComplexityWithBreakdown", () => {
+  it("should return totalScore and components array", () => {
+    const config: Record<string, Array<{ condition_value: string; weight: number; range_min?: number; range_max?: number }>> = {
+      fico: [
+        { condition_value: "excellent", weight: -10, range_min: 760, range_max: 850 },
+        { condition_value: "poor", weight: 15, range_min: 300, range_max: 619 },
+      ],
+    };
+    const result = calcLoanComplexityWithBreakdown(
+      { fico_score: 800 },
+      config
+    );
+    expect(result.totalScore).toBe(90);
+    expect(result.components).toHaveLength(1);
+    expect(result.components[0].name).toBe("FICO Score");
+    expect(result.components[0].weight).toBe(-10);
+    expect(result.components[0].applied).toBe(true);
   });
 });
 

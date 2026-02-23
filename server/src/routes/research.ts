@@ -31,6 +31,8 @@ import {
   resumeSession,
   runResearchPipeline,
   runFollowUp,
+  updateSessionSharing,
+  canAccessSession,
   type SSEEvent,
 } from "../services/research/orchestrator.js";
 
@@ -378,10 +380,15 @@ router.get(
   attachTenantContext,
   async (req: AuthRequest, res: Response) => {
     const id = req.params.id as string;
+    const userId = req.userId || "";
     const { tenantPool } = getTenantContext(req);
     const session = getSession(id) || await loadSession(id, tenantPool);
 
     if (!session) {
+      res.status(404).json({ error: "Session not found" });
+      return;
+    }
+    if (!canAccessSession(session, userId)) {
       res.status(404).json({ error: "Session not found" });
       return;
     }
@@ -398,7 +405,41 @@ router.get(
       followUpHistory: session.followUpHistory,
       error: session.error,
       createdAt: session.createdAt,
+      visibility: session.visibility ?? "private",
+      sharedWithUserIds: session.sharedWithUserIds ?? [],
     });
+  }
+);
+
+// ============================================================================
+// PUT /sessions/:id/sharing — Update session visibility and shared users
+// ============================================================================
+
+router.put(
+  "/sessions/:id/sharing",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res: Response) => {
+    const id = req.params.id as string;
+    const userId = req.userId || "";
+    const { visibility, shared_with_user_ids: sharedWithUserIds } = req.body || {};
+    const { tenantPool } = getTenantContext(req);
+
+    const GLOBAL_VISIBILITY_ROLES = ['super_admin', 'platform_admin', 'tenant_admin', 'admin'];
+    let validVisibility: string = ["shared", "global"].includes(visibility) ? visibility : "private";
+
+    if (validVisibility === "global" && !GLOBAL_VISIBILITY_ROLES.includes(req.userRole || "")) {
+      return res.status(403).json({ error: "Only admins can set global visibility" });
+    }
+
+    const ids = Array.isArray(sharedWithUserIds) ? sharedWithUserIds.filter((x: unknown) => typeof x === "string") : [];
+
+    const success = await updateSessionSharing(id, tenantPool, userId, validVisibility, ids);
+    if (success) {
+      res.json({ success: true, visibility: validVisibility, sharedWithUserIds: ids });
+    } else {
+      res.status(404).json({ error: "Session not found or you are not the owner" });
+    }
   }
 );
 

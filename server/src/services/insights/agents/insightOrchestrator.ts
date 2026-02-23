@@ -80,6 +80,11 @@ const MAX_CONCURRENT_INVESTIGATORS = 5;
 // Per-tenant concurrency lock — prevents duplicate runs
 const activeGenerations = new Map<string, { startedAt: number; batch: string }>();
 
+// Per-tenant:bucket lock for generate-more — allows different buckets in parallel
+const activeBucketGenerations = new Map<string, { startedAt: number; batch: string }>();
+
+const VALID_BUCKETS = ["critical", "attention", "working", "context"] as const;
+
 export function isGenerationRunning(tenantId: string): { running: boolean; startedAt?: number; batch?: string } {
   const active = activeGenerations.get(tenantId);
   if (!active) return { running: false };
@@ -323,6 +328,197 @@ export async function runInsightGeneration(
 }
 
 // ============================================================================
+// Generate more for a single bucket (append-only, bucket-focused)
+// ============================================================================
+
+export function isBucketGenerationRunning(
+  tenantId: string,
+  bucket: string
+): { running: boolean; startedAt?: number; batch?: string } {
+  const key = `${tenantId}:${bucket}`;
+  const active = activeBucketGenerations.get(key);
+  if (!active) return { running: false };
+  if (Date.now() - active.startedAt > 10 * 60 * 1000) {
+    activeBucketGenerations.delete(key);
+    return { running: false };
+  }
+  return { running: true, startedAt: active.startedAt, batch: active.batch };
+}
+
+export async function generateMoreForBucketAgent(
+  tenantId: string,
+  tenantPool: pg.Pool,
+  targetBucket: string,
+  onProgress?: OnProgress
+): Promise<InsightGenerationResult> {
+  if (!VALID_BUCKETS.includes(targetBucket as (typeof VALID_BUCKETS)[number])) {
+    return {
+      success: false,
+      insightCount: 0,
+      generationBatch: "",
+      durationMs: 0,
+      error: `Invalid bucket: ${targetBucket}`,
+    };
+  }
+
+  const lockKey = `${tenantId}:${targetBucket}`;
+  const existing = activeBucketGenerations.get(lockKey);
+  if (existing) {
+    const elapsed = Math.round((Date.now() - existing.startedAt) / 1000);
+    return {
+      success: false,
+      insightCount: 0,
+      generationBatch: existing.batch,
+      durationMs: 0,
+      error: `Generate-more for "${targetBucket}" already in progress (${elapsed}s)`,
+    };
+  }
+
+  const startTime = Date.now();
+  const generationBatch = uuidv4();
+  activeBucketGenerations.set(lockKey, { startedAt: startTime, batch: generationBatch });
+
+  const emit = (phase: string, detail: string) => {
+    logInfo(`[InsightOrchestrator] [generate-more:${targetBucket}] [${phase}] ${detail}`);
+    onProgress?.({ phase, detail, timestamp: Date.now() });
+  };
+
+  try {
+    emit("init", `Generate more for bucket "${targetBucket}" (tenant: ${tenantId})`);
+
+    const apiKey = await getOpenAIKey(tenantId);
+
+    emit("context", "Gathering context...");
+    const [schemaContext, metricDefinitions, knowledgeContext, marketContext, industryNewsContext, staleLoanStats] =
+      await Promise.all([
+        getSchemaContext(tenantId),
+        Promise.resolve(getMetricDefinitions()),
+        getKnowledgeContext(tenantPool, tenantId, "mortgage pipeline performance and risk analysis"),
+        fetchMarketContext(),
+        fetchIndustryNewsContext(),
+        fetchStaleLoanStats(tenantPool),
+      ]);
+
+    const staleLoanContext = buildStaleLoanContext(staleLoanStats);
+    const previousHeadlines = await fetchPreviousHeadlines(tenantPool);
+    const trackedInsights = await fetchTrackedInsights(tenantPool);
+    const fieldPopStats = await fetchFieldPopulationSummary(tenantPool);
+
+    emit("planning", `Running planner focused on "${targetBucket}"...`);
+    const plannerContext: InsightPlannerContext = {
+      schemaContext,
+      metricDefinitions,
+      fieldPopulationStats: fieldPopStats,
+      previousInsightHeadlines: previousHeadlines,
+      trackedInsights,
+      knowledgeContext: knowledgeContext || undefined,
+      marketContext: marketContext || undefined,
+      industryNewsContext: industryNewsContext || undefined,
+      staleLoanContext: staleLoanContext || undefined,
+      bucketFocus: targetBucket,
+    };
+
+    const plan = await runInsightPlannerAgent(apiKey, plannerContext);
+    plan.questions = augmentPlanQuestions(
+      plan.questions,
+      !!marketContext,
+      !!industryNewsContext
+    );
+    // Keep at most 6 questions for generate-more to limit cost/time
+    const questions = plan.questions.slice(0, 6);
+    emit("planning", `Plan: ${plan.summary} — ${questions.length} questions`);
+
+    emit("investigating", `Running ${questions.length} investigators...`);
+    const allFindings: InsightFinding[] = [];
+    for (let i = 0; i < questions.length; i += MAX_CONCURRENT_INVESTIGATORS) {
+      const batch = questions.slice(i, i + MAX_CONCURRENT_INVESTIGATORS);
+      const results = await Promise.allSettled(
+        batch.map((question) =>
+          runInsightInvestigator(
+            question,
+            schemaContext,
+            metricDefinitions,
+            tenantPool,
+            apiKey,
+            () => {},
+            marketContext || undefined,
+            industryNewsContext || undefined
+          )
+        )
+      );
+      for (const result of results) {
+        if (result.status === "fulfilled") allFindings.push(result.value);
+      }
+    }
+
+    emit("investigating", `Collected ${allFindings.length} findings`);
+
+    if (allFindings.length === 0) {
+      activeBucketGenerations.delete(lockKey);
+      return {
+        success: true,
+        insightCount: 0,
+        generationBatch,
+        durationMs: Date.now() - startTime,
+        planSummary: plan.summary,
+        questionsCount: questions.length,
+        findingsCount: 0,
+        droppedCount: 0,
+      };
+    }
+
+    emit("evaluating", "Running evaluator...");
+    const evaluation = await runInsightEvaluator(allFindings, apiKey, previousHeadlines);
+    const forBucket = evaluation.insights.filter((ins) => ins.bucket === targetBucket);
+
+    for (const ins of forBucket) {
+      const finding = allFindings[ins.findingIndex];
+      ins.value_score = finding ? computeValueScore(ins, finding) : ins.severity_score;
+    }
+    forBucket.sort((a, b) => (b.value_score ?? b.severity_score) - (a.value_score ?? a.severity_score));
+
+    const existingHeadlines = new Set(
+      (await tenantPool.query(`SELECT headline FROM generated_insights`)).rows.map(
+        (r: { headline: string }) => r.headline.toLowerCase()
+      )
+    );
+    const newInsights = forBucket.filter((ins) => !existingHeadlines.has(ins.headline.toLowerCase()));
+
+    if (newInsights.length > 0) {
+      emit("persisting", `Appending ${newInsights.length} new insights for "${targetBucket}"...`);
+      await appendAgentInsights(tenantPool, newInsights, allFindings, generationBatch);
+    } else {
+      emit("persisting", "No new unique insights after dedup — nothing to append.");
+    }
+
+    activeBucketGenerations.delete(lockKey);
+    const duration = Date.now() - startTime;
+    emit("complete", `Done in ${Math.round(duration / 1000)}s — ${newInsights.length} new insights appended`);
+
+    return {
+      success: true,
+      insightCount: newInsights.length,
+      generationBatch,
+      durationMs: duration,
+      planSummary: plan.summary,
+      questionsCount: questions.length,
+      findingsCount: allFindings.length,
+      droppedCount: evaluation.dropped.length,
+    };
+  } catch (err: any) {
+    activeBucketGenerations.delete(lockKey);
+    logError(`[InsightOrchestrator] Generate-more for ${targetBucket} failed: ${err.message}`, err);
+    return {
+      success: false,
+      insightCount: 0,
+      generationBatch,
+      durationMs: Date.now() - startTime,
+      error: err.message,
+    };
+  }
+}
+
+// ============================================================================
 // Persistence — writes to the same generated_insights table
 // ============================================================================
 
@@ -417,6 +613,93 @@ async function persistAgentInsights(
 
   logInfo(
     `[InsightOrchestrator] Persisted ${insights.length} agent insights (batch: ${generationBatch})`
+  );
+}
+
+/** Append agent insights without deleting existing ones. Used by generate-more per bucket. */
+async function appendAgentInsights(
+  tenantPool: pg.Pool,
+  insights: EvaluatedInsight[],
+  findings: InsightFinding[],
+  generationBatch: string
+): Promise<void> {
+  if (insights.length === 0) return;
+
+  let hasDetailDataCol = false;
+  let hasGenerationMethodCol = false;
+  let hasValueScoreCol = false;
+  try {
+    const colCheck = await tenantPool.query(`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'generated_insights'
+        AND column_name IN ('detail_data', 'generation_method', 'value_score')
+    `);
+    for (const row of colCheck.rows) {
+      if (row.column_name === "detail_data") hasDetailDataCol = true;
+      if (row.column_name === "generation_method") hasGenerationMethodCol = true;
+      if (row.column_name === "value_score") hasValueScoreCol = true;
+    }
+  } catch { /* pre-migration tenant */ }
+
+  const values: any[] = [];
+  const placeholders: string[] = [];
+  let paramIdx = 1;
+
+  for (const ins of insights) {
+    const finding = findings[ins.findingIndex];
+    const detailData = finding
+      ? buildDetailDataFromFinding(ins, finding)
+      : null;
+
+    const baseCount = 16;
+    const extraCount = (hasDetailDataCol ? 1 : 0) + (hasValueScoreCol ? 1 : 0);
+    const totalParams = baseCount + extraCount;
+    const ph = Array.from({ length: totalParams }, () => `$${paramIdx++}`);
+    placeholders.push(`(${ph.join(", ")})`);
+
+    values.push(
+      ins.bucket,
+      ins.priority,
+      ins.headline,
+      ins.understory,
+      ins.insight_type,
+      ins.source,
+      ins.severity_score,
+      JSON.stringify(ins.impact || {}),
+      JSON.stringify(ins.evidence || {}),
+      false,
+      "ytd",
+      null,
+      generationBatch,
+      new Date().toISOString(),
+      null,
+      hasGenerationMethodCol ? "agent" : "pipeline",
+    );
+
+    if (hasDetailDataCol) {
+      values.push(detailData ? JSON.stringify(detailData) : null);
+    }
+    if (hasValueScoreCol) {
+      values.push(ins.value_score ?? ins.severity_score);
+    }
+  }
+
+  let columnList = `bucket, priority, headline, understory, insight_type, source,
+       severity_score, impact, evidence, for_podcast,
+       date_filter, channel_group, generation_batch, generated_at, detail_query,
+       generation_method`;
+  if (hasDetailDataCol) columnList += `, detail_data`;
+  if (hasValueScoreCol) columnList += `, value_score`;
+  const columns = `(${columnList})`;
+
+  await tenantPool.query(
+    `INSERT INTO generated_insights ${columns}
+     VALUES ${placeholders.join(", ")}`,
+    values
+  );
+
+  logInfo(
+    `[InsightOrchestrator] Appended ${insights.length} agent insights (batch: ${generationBatch})`
   );
 }
 

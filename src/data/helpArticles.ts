@@ -19,27 +19,78 @@ export interface HelpCategory {
 }
 
 export const helpCategories: HelpCategory[] = [
-  { slug: 'getting-started', label: 'Getting Started', icon: 'Rocket', description: 'First steps and platform overview' },
-  { slug: 'insights', label: 'Insights', icon: 'Zap', description: 'Daily briefings, news, and dashboards' },
-  { slug: 'workbench', label: 'Workbench', icon: 'LayoutPanelLeft', description: 'Custom dashboards and widgets' },
-  { slug: 'research-lab', label: 'Research Lab', icon: 'FlaskConical', description: 'AI-powered data investigation' },
-  { slug: 'toptiering', label: 'TopTiering Analytics', icon: 'TrendingUp', description: 'Funnels, scorecards, and comparisons' },
-  { slug: 'cohi-chat', label: 'Cohi Chat', icon: 'MessageSquare', description: 'AI assistant and natural language queries' },
-  { slug: 'settings', label: 'Settings', icon: 'Settings', description: 'Account preferences and security' },
-  { slug: 'admin', label: 'Admin', icon: 'Shield', description: 'User management, LOS, and configuration', adminOnly: true },
-  { slug: 'faq', label: 'FAQ', icon: 'HelpCircle', description: 'Common questions and troubleshooting' },
-  { slug: 'glossary', label: 'Glossary', icon: 'BookOpen', description: 'Mortgage terms and metric definitions' },
+  {
+    slug: "getting-started",
+    label: "Getting Started",
+    icon: "Rocket",
+    description: "First steps and platform overview",
+  },
+  {
+    slug: "insights",
+    label: "Insights",
+    icon: "Zap",
+    description: "Daily briefings, news, and dashboards",
+  },
+  {
+    slug: "workbench",
+    label: "Workbench",
+    icon: "LayoutPanelLeft",
+    description: "Custom dashboards and widgets",
+  },
+  {
+    slug: "research-lab",
+    label: "Research Lab",
+    icon: "FlaskConical",
+    description: "AI-powered data investigation",
+  },
+  {
+    slug: "toptiering",
+    label: "TopTiering Analytics",
+    icon: "TrendingUp",
+    description: "Funnels, scorecards, and comparisons",
+  },
+  {
+    slug: "cohi-chat",
+    label: "Cohi Chat",
+    icon: "MessageSquare",
+    description: "AI assistant and natural language queries",
+  },
+  {
+    slug: "settings",
+    label: "Settings",
+    icon: "Settings",
+    description: "Account preferences and security",
+  },
+  {
+    slug: "admin",
+    label: "Admin",
+    icon: "Shield",
+    description: "User management, LOS, and configuration",
+    adminOnly: true,
+  },
+  {
+    slug: "faq",
+    label: "FAQ",
+    icon: "HelpCircle",
+    description: "Common questions and troubleshooting",
+  },
+  {
+    slug: "glossary",
+    label: "Glossary",
+    icon: "BookOpen",
+    description: "Mortgage terms and metric definitions",
+  },
 ];
 
 export const helpArticles: HelpArticle[] = [
   // ─── Getting Started ───────────────────────────────────────────────
   {
-    id: 'gs-first-steps',
-    slug: 'first-steps',
-    title: 'First Steps After Login',
-    category: 'Getting Started',
-    categorySlug: 'getting-started',
-    summary: 'What to do when you first log in to Cohi.',
+    id: "gs-first-steps",
+    slug: "first-steps",
+    title: "First Steps After Login",
+    category: "Getting Started",
+    categorySlug: "getting-started",
+    summary: "What to do when you first log in to Cohi.",
     content: `# First Steps After Login
 
 When you first log in to Cohi, you'll be greeted with the **Insights** dashboard. Here's what to do:
@@ -64,12 +115,12 @@ Use the top navigation bar to access:
 Visit **Settings** (from the user menu, top-right) to change your password, enable MFA for security, and set your preferred theme.`,
   },
   {
-    id: 'gs-understanding-dashboard',
-    slug: 'understanding-dashboard',
-    title: 'Understanding Your Dashboard',
-    category: 'Getting Started',
-    categorySlug: 'getting-started',
-    summary: 'Learn what each section of the Insights dashboard shows you.',
+    id: "gs-understanding-dashboard",
+    slug: "understanding-dashboard",
+    title: "Understanding Your Dashboard",
+    category: "Getting Started",
+    categorySlug: "getting-started",
+    summary: "Learn what each section of the Insights dashboard shows you.",
     content: `# Understanding Your Dashboard
 
 The Insights dashboard is divided into several sections, each providing a different perspective on your business:
@@ -97,19 +148,19 @@ ML-powered predictions showing which loans are at risk of falling out and which 
 The left sidebar lets you toggle section visibility. Click the section names to jump directly to them.`,
   },
   {
-    id: 'gs-navigating',
-    slug: 'navigating-the-platform',
-    title: 'Navigating the Platform',
-    category: 'Getting Started',
-    categorySlug: 'getting-started',
-    summary: 'How to find your way around Cohi.',
+    id: "gs-navigating",
+    slug: "navigating-the-platform",
+    title: "Navigating the Platform",
+    category: "Getting Started",
+    categorySlug: "getting-started",
+    summary: "How to find your way around Cohi.",
     content: `# Navigating the Platform
 
 ## Top Navigation Bar
 The navigation bar at the top of every page provides access to all major sections:
 
 - **Insights** (dropdown) — Jump to Daily Briefings or Mortgage News
-- **Dashboard** (dropdown) — Access TopTiering analytics including Loan Funnel, Scorecards, Credit Risk, Financial Modeling, and more
+- **Dashboard** (dropdown) — Access TopTiering analytics including Scorecards, Credit Risk, Financial Modeling, and more
 - **My Workbench** — Your custom dashboard builder
 - **Research Lab** — AI-powered data investigation tool
 
@@ -130,12 +181,12 @@ On the Insights page, a collapsible sidebar on the left provides quick navigatio
 - Press **Escape** to close dropdowns`,
   },
   {
-    id: 'gs-profile',
-    slug: 'setting-up-profile',
-    title: 'Setting Up Your Profile',
-    category: 'Getting Started',
-    categorySlug: 'getting-started',
-    summary: 'Configure your account preferences and security.',
+    id: "gs-profile",
+    slug: "setting-up-profile",
+    title: "Setting Up Your Profile",
+    category: "Getting Started",
+    categorySlug: "getting-started",
+    summary: "Configure your account preferences and security.",
     content: `# Setting Up Your Profile
 
 Visit **Settings** from the user menu (top-right) to configure your account.
@@ -153,12 +204,12 @@ Your name, email, and role are managed by your administrator. Contact them if yo
 
   // ─── Insights ──────────────────────────────────────────────────────
   {
-    id: 'ins-daily-briefings',
-    slug: 'daily-briefings',
-    title: 'Reading Your Daily Briefings',
-    category: 'Insights',
-    categorySlug: 'insights',
-    summary: 'How AI-generated insights work and how to use them.',
+    id: "ins-daily-briefings",
+    slug: "daily-briefings",
+    title: "Reading Your Daily Briefings",
+    category: "Insights",
+    categorySlug: "insights",
+    summary: "How AI-generated insights work and how to use them.",
     content: `# Reading Your Daily Briefings
 
 Cohi's AI analyzes your loan data continuously and generates executive-level insights about significant changes, emerging risks, and opportunities.
@@ -184,12 +235,12 @@ Click the bookmark icon on any insight to add it to your watchlist. Tracked insi
 Open any insight's detail view and use the chat feature to ask follow-up questions. For example: "Which specific loans are contributing to this trend?" or "How does this compare to last quarter?"`,
   },
   {
-    id: 'ins-tracking',
-    slug: 'tracking-insights',
-    title: 'Tracking Insights to Your Watchlist',
-    category: 'Insights',
-    categorySlug: 'insights',
-    summary: 'Monitor important insights over time.',
+    id: "ins-tracking",
+    slug: "tracking-insights",
+    title: "Tracking Insights to Your Watchlist",
+    category: "Insights",
+    categorySlug: "insights",
+    summary: "Monitor important insights over time.",
     content: `# Tracking Insights to Your Watchlist
 
 ## Adding to Watchlist
@@ -207,12 +258,12 @@ Tracking is useful for:
 - Insights update automatically as new data arrives`,
   },
   {
-    id: 'ins-details',
-    slug: 'insight-details',
-    title: 'Drilling into Insight Details',
-    category: 'Insights',
-    categorySlug: 'insights',
-    summary: 'Get the full picture behind any insight.',
+    id: "ins-details",
+    slug: "insight-details",
+    title: "Drilling into Insight Details",
+    category: "Insights",
+    categorySlug: "insights",
+    summary: "Get the full picture behind any insight.",
     content: `# Drilling into Insight Details
 
 ## Opening Detail View
@@ -234,12 +285,12 @@ Use the built-in chat within the insight detail to ask questions like:
 The AI will respond with data-backed answers specific to the insight you're viewing.`,
   },
   {
-    id: 'ins-followup',
-    slug: 'insight-chat',
-    title: 'Asking Follow-Up Questions via Insight Chat',
-    category: 'Insights',
-    categorySlug: 'insights',
-    summary: 'Use AI chat to dig deeper into any insight.',
+    id: "ins-followup",
+    slug: "insight-chat",
+    title: "Asking Follow-Up Questions via Insight Chat",
+    category: "Insights",
+    categorySlug: "insights",
+    summary: "Use AI chat to dig deeper into any insight.",
     content: `# Asking Follow-Up Questions via Insight Chat
 
 ## Accessing Insight Chat
@@ -271,13 +322,13 @@ Here are some examples of effective follow-up questions:
 
   // ─── Workbench ─────────────────────────────────────────────────────
   {
-    id: 'wb-first-canvas',
-    slug: 'first-canvas',
-    title: 'Creating Your First Canvas',
-    category: 'Workbench',
-    categorySlug: 'workbench',
-    summary: 'Get started building custom dashboards.',
-    relatedTour: 'workbench',
+    id: "wb-first-canvas",
+    slug: "first-canvas",
+    title: "Creating Your First Canvas",
+    category: "Workbench",
+    categorySlug: "workbench",
+    summary: "Get started building custom dashboards.",
+    relatedTour: "workbench",
     content: `# Creating Your First Canvas
 
 ## What is a Canvas?
@@ -309,12 +360,12 @@ Open the AI assistant panel and describe what you want:
 Your canvas auto-saves as you make changes. No need to manually save.`,
   },
   {
-    id: 'wb-ai-widgets',
-    slug: 'ai-widgets',
-    title: 'Adding Widgets: Manual vs AI',
-    category: 'Workbench',
-    categorySlug: 'workbench',
-    summary: 'Two ways to build your dashboard.',
+    id: "wb-ai-widgets",
+    slug: "ai-widgets",
+    title: "Adding Widgets: Manual vs AI",
+    category: "Workbench",
+    categorySlug: "workbench",
+    summary: "Two ways to build your dashboard.",
     content: `# Adding Widgets: Manual vs AI
 
 ## Manual Widget Creation
@@ -345,12 +396,12 @@ Select any widget and:
 - Ask the AI: "Change this chart to a line chart" or "Add a filter for Retail channel"`,
   },
   {
-    id: 'wb-customize',
-    slug: 'customizing-widgets',
-    title: 'Customizing Widget Appearance',
-    category: 'Workbench',
-    categorySlug: 'workbench',
-    summary: 'Fine-tune your dashboard visuals.',
+    id: "wb-customize",
+    slug: "customizing-widgets",
+    title: "Customizing Widget Appearance",
+    category: "Workbench",
+    categorySlug: "workbench",
+    summary: "Fine-tune your dashboard visuals.",
     content: `# Customizing Widget Appearance
 
 ## Widget Configuration
@@ -380,12 +431,12 @@ Click the **more options menu** (three-dot icon) on any widget to access its con
 - **Text Blocks** — Add notes and narrative context`,
   },
   {
-    id: 'wb-ai-assistant',
-    slug: 'workbench-ai',
-    title: 'Using the AI Assistant to Build Dashboards',
-    category: 'Workbench',
-    categorySlug: 'workbench',
-    summary: 'Build dashboards with natural language.',
+    id: "wb-ai-assistant",
+    slug: "workbench-ai",
+    title: "Using the AI Assistant to Build Dashboards",
+    category: "Workbench",
+    categorySlug: "workbench",
+    summary: "Build dashboards with natural language.",
     content: `# Using the AI Assistant to Build Dashboards
 
 ## Opening the AI Assistant
@@ -414,12 +465,12 @@ You can build entire dashboards through conversation:
 5. "Generate a PowerPoint report from this canvas"`,
   },
   {
-    id: 'wb-sharing',
-    slug: 'sharing-dashboards',
-    title: 'Sharing Dashboards and Team Folders',
-    category: 'Workbench',
-    categorySlug: 'workbench',
-    summary: 'Collaborate with your team on dashboards.',
+    id: "wb-sharing",
+    slug: "sharing-dashboards",
+    title: "Sharing Dashboards and Team Folders",
+    category: "Workbench",
+    categorySlug: "workbench",
+    summary: "Collaborate with your team on dashboards.",
     content: `# Sharing Dashboards and Team Folders
 
 ## Sharing a Canvas
@@ -445,12 +496,12 @@ Star any canvas to add it to your Favorites for quick access.
 - Canvas owners always retain full control`,
   },
   {
-    id: 'wb-reports',
-    slug: 'generating-reports',
-    title: 'Generating Reports (PPTX/PDF)',
-    category: 'Workbench',
-    categorySlug: 'workbench',
-    summary: 'Export dashboards as presentations or documents.',
+    id: "wb-reports",
+    slug: "generating-reports",
+    title: "Generating Reports (PPTX/PDF)",
+    category: "Workbench",
+    categorySlug: "workbench",
+    summary: "Export dashboards as presentations or documents.",
     content: `# Generating Reports (PPTX/PDF)
 
 ## Building a Report
@@ -483,13 +534,13 @@ Ask the AI assistant: "Generate a report on our Q1 pipeline performance." The AI
 
   // ─── Research Lab ──────────────────────────────────────────────────
   {
-    id: 'rl-starting',
-    slug: 'starting-research',
-    title: 'Starting a Research Session',
-    category: 'Research Lab',
-    categorySlug: 'research-lab',
-    summary: 'How to use the AI research analyst.',
-    relatedTour: 'research',
+    id: "rl-starting",
+    slug: "starting-research",
+    title: "Starting a Research Session",
+    category: "Research Lab",
+    categorySlug: "research-lab",
+    summary: "How to use the AI research analyst.",
+    relatedTour: "research",
     content: `# Starting a Research Session
 
 ## What is the Research Lab?
@@ -518,12 +569,12 @@ If you're not sure what to ask, click on one of the pre-built topic suggestions:
 - Revenue driver investigation`,
   },
   {
-    id: 'rl-findings',
-    slug: 'interpreting-findings',
-    title: 'Interpreting Research Findings',
-    category: 'Research Lab',
-    categorySlug: 'research-lab',
-    summary: 'Understanding what the AI discovered.',
+    id: "rl-findings",
+    slug: "interpreting-findings",
+    title: "Interpreting Research Findings",
+    category: "Research Lab",
+    categorySlug: "research-lab",
+    summary: "Understanding what the AI discovered.",
     content: `# Interpreting Research Findings
 
 ## Finding Structure
@@ -552,12 +603,12 @@ Click on any finding card to see:
 Use the chat below the findings to ask follow-up questions about any discovery. The AI retains context from the full research session.`,
   },
   {
-    id: 'rl-followup',
-    slug: 'research-followup',
-    title: 'Following Up with the AI Analyst',
-    category: 'Research Lab',
-    categorySlug: 'research-lab',
-    summary: 'Continue the conversation after initial research.',
+    id: "rl-followup",
+    slug: "research-followup",
+    title: "Following Up with the AI Analyst",
+    category: "Research Lab",
+    categorySlug: "research-lab",
+    summary: "Continue the conversation after initial research.",
     content: `# Following Up with the AI Analyst
 
 ## Continuing the Conversation
@@ -578,14 +629,14 @@ After the initial research completes, you can ask follow-up questions in the cha
   },
 
   // ─── TopTiering ────────────────────────────────────────────────────
-  {
-    id: 'tt-funnel',
-    slug: 'loan-funnel',
-    title: 'Loan Funnel Analysis',
-    category: 'TopTiering Analytics',
-    categorySlug: 'toptiering',
-    summary: 'Understanding conversion rates at each milestone.',
-    relatedTour: 'toptiering',
+  /*   {
+    id: "tt-funnel",
+    slug: "loan-funnel",
+    title: "Loan Funnel Analysis",
+    category: "TopTiering Analytics",
+    categorySlug: "toptiering",
+    summary: "Understanding conversion rates at each milestone.",
+    relatedTour: "toptiering",
     content: `# Loan Funnel Analysis
 
 ## What is the Loan Funnel?
@@ -613,14 +664,14 @@ Filter the funnel by:
 - Loan officer
 
 This helps identify where specific segments are underperforming.`,
-  },
+  }, */
   {
-    id: 'tt-comparison',
-    slug: 'toptiering-comparison',
-    title: 'TopTiering Comparison',
-    category: 'TopTiering Analytics',
-    categorySlug: 'toptiering',
-    summary: 'Compare performance across tiers.',
+    id: "tt-comparison",
+    slug: "toptiering-comparison",
+    title: "TopTiering Comparison",
+    category: "TopTiering Analytics",
+    categorySlug: "toptiering",
+    summary: "Compare performance across tiers.",
     content: `# TopTiering Comparison
 
 ## What is TopTiering?
@@ -645,12 +696,12 @@ TopTiering segments your loan officers, branches, or channels into performance t
 - Track improvement over time`,
   },
   {
-    id: 'tt-credit-risk',
-    slug: 'credit-risk',
-    title: 'Credit Risk Management',
-    category: 'TopTiering Analytics',
-    categorySlug: 'toptiering',
-    summary: 'Monitor credit quality and risk concentration.',
+    id: "tt-credit-risk",
+    slug: "credit-risk",
+    title: "Credit Risk Management",
+    category: "TopTiering Analytics",
+    categorySlug: "toptiering",
+    summary: "Monitor credit quality and risk concentration.",
     content: `# Credit Risk Management
 
 ## Overview
@@ -674,12 +725,12 @@ The Credit Risk Management dashboard monitors the credit quality of your loan po
 - Support compliance reporting and audits`,
   },
   {
-    id: 'tt-scorecards',
-    slug: 'scorecards',
-    title: 'Company & Operations Scorecards',
-    category: 'TopTiering Analytics',
-    categorySlug: 'toptiering',
-    summary: 'Monitor organizational performance.',
+    id: "tt-scorecards",
+    slug: "scorecards",
+    title: "Company & Operations Scorecards",
+    category: "TopTiering Analytics",
+    categorySlug: "toptiering",
+    summary: "Monitor organizational performance.",
     content: `# Company & Operations Scorecards
 
 ## Company Scorecard
@@ -707,12 +758,12 @@ Focused on sales team performance:
 Both Operations and Sales have companion Trends pages showing how metrics change over time. Use these to identify improvements or degradation in performance.`,
   },
   {
-    id: 'tt-sales-trends',
-    slug: 'sales-trends',
-    title: 'Sales Trends',
-    category: 'TopTiering Analytics',
-    categorySlug: 'toptiering',
-    summary: 'Track sales performance over time.',
+    id: "tt-sales-trends",
+    slug: "sales-trends",
+    title: "Sales Trends",
+    category: "TopTiering Analytics",
+    categorySlug: "toptiering",
+    summary: "Track sales performance over time.",
     content: `# Sales Trends
 
 ## What Sales Trends Shows
@@ -731,13 +782,13 @@ The Sales Trends view tracks sales team performance metrics over time, helping y
 - Set realistic targets based on historical data`,
   },
   {
-    id: 'tt-fms',
-    slug: 'financial-modeling',
-    title: 'Financial Modeling Sandbox',
-    category: 'TopTiering Analytics',
-    categorySlug: 'toptiering',
-    summary: 'Run what-if scenarios and projections.',
-    relatedTour: 'financial-modeling',
+    id: "tt-fms",
+    slug: "financial-modeling",
+    title: "Financial Modeling Sandbox",
+    category: "TopTiering Analytics",
+    categorySlug: "toptiering",
+    summary: "Run what-if scenarios and projections.",
+    relatedTour: "financial-modeling",
     content: `# Financial Modeling Sandbox
 
 ## What Is It?
@@ -763,12 +814,12 @@ Create multiple scenarios and compare them side by side to evaluate different st
 Export your scenario results for presentations and strategic planning meetings.`,
   },
   {
-    id: 'tt-workflow-conversion',
-    slug: 'workflow-conversion',
-    title: 'Workflow Conversion',
-    category: 'TopTiering Analytics',
-    categorySlug: 'toptiering',
-    summary: 'Analyze milestone-to-milestone conversion rates and turn times.',
+    id: "tt-workflow-conversion",
+    slug: "workflow-conversion",
+    title: "Workflow Conversion",
+    category: "TopTiering Analytics",
+    categorySlug: "toptiering",
+    summary: "Analyze milestone-to-milestone conversion rates and turn times.",
     content: `# Workflow Conversion
 
 ## What Is It?
@@ -797,12 +848,12 @@ Click the loan count on a segment card to open a modal listing the individual lo
 - Compare individual loan officer conversion rates to the team average`,
   },
   {
-    id: 'tt-loan-detail',
-    slug: 'loan-detail',
-    title: 'Loan Detail',
-    category: 'TopTiering Analytics',
-    categorySlug: 'toptiering',
-    summary: 'Browse and export a detailed table of all loans.',
+    id: "tt-loan-detail",
+    slug: "loan-detail",
+    title: "Loan Detail",
+    category: "TopTiering Analytics",
+    categorySlug: "toptiering",
+    summary: "Browse and export a detailed table of all loans.",
     content: `# Loan Detail
 
 ## What Is It?
@@ -830,12 +881,12 @@ The table uses virtualized rendering, meaning only the rows visible on screen ar
 The table respects the global Channel and Tenant selectors in the navigation bar, so you only see loans matching your current context.`,
   },
   {
-    id: 'tt-high-performers',
-    slug: 'high-performers',
-    title: 'High Performers',
-    category: 'TopTiering Analytics',
-    categorySlug: 'toptiering',
-    summary: 'View rankings of top loan officers and teams.',
+    id: "tt-high-performers",
+    slug: "high-performers",
+    title: "High Performers",
+    category: "TopTiering Analytics",
+    categorySlug: "toptiering",
+    summary: "View rankings of top loan officers and teams.",
     content: `# High Performers
 
 ## What Is It?
@@ -872,12 +923,12 @@ Use the export button to download rankings as an Excel file. Multiple export for
 
   // ─── Cohi Chat ─────────────────────────────────────────────────────
   {
-    id: 'cc-overview',
-    slug: 'what-you-can-ask',
-    title: 'What You Can Ask Cohi',
-    category: 'Cohi Chat',
-    categorySlug: 'cohi-chat',
-    summary: 'Understand the AI assistant capabilities.',
+    id: "cc-overview",
+    slug: "what-you-can-ask",
+    title: "What You Can Ask Cohi",
+    category: "Cohi Chat",
+    categorySlug: "cohi-chat",
+    summary: "Understand the AI assistant capabilities.",
     content: `# What You Can Ask Cohi
 
 ## Overview
@@ -909,12 +960,12 @@ Cohi Chat is an AI assistant available on every page. It understands your loan d
 - Specify filters: "for Retail channel" or "in the West region"`,
   },
   {
-    id: 'cc-examples',
-    slug: 'example-queries',
-    title: 'Example Queries',
-    category: 'Cohi Chat',
-    categorySlug: 'cohi-chat',
-    summary: 'Sample questions to try with Cohi Chat.',
+    id: "cc-examples",
+    slug: "example-queries",
+    title: "Example Queries",
+    category: "Cohi Chat",
+    categorySlug: "cohi-chat",
+    summary: "Sample questions to try with Cohi Chat.",
     content: `# Example Queries for Cohi Chat
 
 ## Pipeline Overview
@@ -948,12 +999,12 @@ Cohi Chat is an AI assistant available on every page. It understands your loan d
 - "Find all jumbo loans over $1M"`,
   },
   {
-    id: 'cc-workbench',
-    slug: 'chat-in-workbench',
-    title: 'Using Cohi Chat in the Workbench',
-    category: 'Cohi Chat',
-    categorySlug: 'cohi-chat',
-    summary: 'AI-powered dashboard building.',
+    id: "cc-workbench",
+    slug: "chat-in-workbench",
+    title: "Using Cohi Chat in the Workbench",
+    category: "Cohi Chat",
+    categorySlug: "cohi-chat",
+    summary: "AI-powered dashboard building.",
     content: `# Using Cohi Chat in the Workbench
 
 ## Workbench-Specific Capabilities
@@ -986,12 +1037,12 @@ The Workbench AI assistant is context-aware — it knows which canvas and widget
 
   // ─── Settings ──────────────────────────────────────────────────────
   {
-    id: 'set-password',
-    slug: 'changing-password',
-    title: 'Changing Your Password',
-    category: 'Settings',
-    categorySlug: 'settings',
-    summary: 'Update your login credentials.',
+    id: "set-password",
+    slug: "changing-password",
+    title: "Changing Your Password",
+    category: "Settings",
+    categorySlug: "settings",
+    summary: "Update your login credentials.",
     content: `# Changing Your Password
 
 ## Steps
@@ -1013,12 +1064,12 @@ The Workbench AI assistant is context-aware — it knows which canvas and widget
 If you can't log in, use the **Forgot Password** link on the login page to receive a reset email.`,
   },
   {
-    id: 'set-mfa',
-    slug: 'setting-up-mfa',
-    title: 'Setting Up MFA',
-    category: 'Settings',
-    categorySlug: 'settings',
-    summary: 'Add multi-factor authentication for security.',
+    id: "set-mfa",
+    slug: "setting-up-mfa",
+    title: "Setting Up MFA",
+    category: "Settings",
+    categorySlug: "settings",
+    summary: "Add multi-factor authentication for security.",
     content: `# Setting Up Multi-Factor Authentication (MFA)
 
 ## Why Use MFA?
@@ -1038,12 +1089,12 @@ After entering your password, you'll be prompted for a 6-digit code from your au
 You can disable MFA from Settings, but we recommend keeping it enabled for security.`,
   },
   {
-    id: 'set-preferences',
-    slug: 'preferences',
-    title: 'Theme Preferences',
-    category: 'Settings',
-    categorySlug: 'settings',
-    summary: 'Customize your theme and display settings.',
+    id: "set-preferences",
+    slug: "preferences",
+    title: "Theme Preferences",
+    category: "Settings",
+    categorySlug: "settings",
+    summary: "Customize your theme and display settings.",
     content: `# Theme Preferences
 
 ## Theme
@@ -1060,14 +1111,44 @@ You can change the theme in two ways:
 
   // ─── Admin ─────────────────────────────────────────────────────────
   {
-    id: 'adm-users',
-    slug: 'managing-users',
-    title: 'Managing Users and Roles',
-    category: 'Admin',
-    categorySlug: 'admin',
-    summary: 'Add users, assign roles, control access.',
+    id: "adm-overview",
+    slug: "admin-overview",
+    title: "Admin Overview",
+    category: "Admin",
+    categorySlug: "admin",
+    summary: "Tour of all admin sections: users, data, revenue, and more.",
     adminOnly: true,
-    relatedTour: 'admin',
+    relatedTour: "admin",
+    content: `# Admin Overview
+
+The Admin panel is where you manage your organization's users, data connections, revenue formulas, scorecard weights, and AI settings.
+
+## Main Sections (Tenant Admin)
+
+- **Organization Settings** — Profile, display name, branding
+- **Users** — Add users, assign roles, manage access
+- **Access & Permissions** — Custom roles, section access, field and row-level restrictions
+- **SSO Configuration** — Single Sign-On with your IdP
+- **Connections & Integrations** — LOS (e.g. Encompass) connection and sync
+- **Field Mapping** — Map LOS fields to Cohi (default + additional fields)
+- **Revenue** — Revenue and margin formulas for scorecards
+- **Scoring & Weights** — Sales/Operations weights, loan complexity, unit targets
+- **Data Quality** — Monitor completeness and fix mapping/sync issues
+- **Knowledge Center** — Documents for Cohi Chat (RAG)
+- **AI Assistant** — Voice and rules for Cohi Chat
+- **Import / Export** — Legacy import, config backup/restore (platform admin)
+
+Use the **Start Tour** button below to walk through each section in the Admin sidebar. For step-by-step help on a topic, use the other articles in this Admin category.`,
+  },
+  {
+    id: "adm-users",
+    slug: "managing-users",
+    title: "Managing Users and Roles",
+    category: "Admin",
+    categorySlug: "admin",
+    summary: "Add users, assign roles, control access.",
+    adminOnly: true,
+    relatedTour: "admin",
     content: `# Managing Users and Roles
 
 ## Adding Users
@@ -1098,49 +1179,43 @@ Create custom roles with specific permissions:
 - **Monitor login activity** to ensure security`,
   },
   {
-    id: 'adm-los',
-    slug: 'connecting-los',
-    title: 'Configuring LOS Connections',
-    category: 'Admin',
-    categorySlug: 'admin',
-    summary: 'Set up your Loan Origination System integration.',
+    id: "adm-los",
+    slug: "connecting-los",
+    title: "Configuring LOS Connections",
+    category: "Admin",
+    categorySlug: "admin",
+    summary:
+      "Set up your Loan Origination System in Connections & Integrations.",
     adminOnly: true,
     content: `# Configuring LOS Connections
 
+LOS connections are managed under **Admin > Connections & Integrations**. See also the **Connections & Integrations** and **Field Mapping** help articles for full details.
+
 ## Supported Systems
 Cohi integrates with:
-- **Encompass** — Full integration with API sync, webhooks, and field mapping
+- **Encompass** — Full API integration with sync, field mapping, and optional webhooks
 - **Other LOS** — Via Universal Connector (CSV/SFTP import)
 
 ## Setting Up Encompass
-1. Go to **Admin > LOS Connections**
-2. Click **Add Connection**
+1. Go to **Admin > Connections & Integrations**
+2. Click **Add Connection** (or Add Encompass Connection)
 3. Enter your Encompass credentials (Client ID, Client Secret, Instance ID)
-4. Configure sync settings:
-   - **Sync frequency** — How often to pull new data (default: every 15 minutes)
-   - **Loan folders** — Which folders to sync
-   - **Field mappings** — Map Encompass fields to Cohi fields
+4. Configure sync frequency (e.g. every 15 minutes) and which loan folders to sync
+5. Save and run an initial sync
 
 ## Field Mapping
-Cohi automatically maps most standard Encompass fields. For custom fields:
-1. Go to **Field Mappings** in the LOS connection settings
-2. Use the **Field Discovery** tool to find your custom fields
-3. Map custom fields to Cohi's data model
-4. Run a test sync to verify
+After the connection is created, configure which Encompass fields map to Cohi in **Admin > Field Mapping**. Cohi maps most standard fields automatically; use Field Discovery there for custom fields.
 
 ## Monitoring Sync
-View sync status and history in the Admin panel. Check for:
-- Last successful sync timestamp
-- Number of loans synced
-- Any sync errors or warnings`,
+In **Connections & Integrations**, view last sync timestamp, loan counts, and any errors. Fix sync or mapping issues there or in **Data Quality**.`,
   },
   {
-    id: 'adm-knowledge',
-    slug: 'knowledge-base',
-    title: 'Knowledge Base Management',
-    category: 'Admin',
-    categorySlug: 'admin',
-    summary: 'Enhance Cohi Chat with your organization\'s documents.',
+    id: "adm-knowledge",
+    slug: "knowledge-base",
+    title: "Knowledge Base Management",
+    category: "Admin",
+    categorySlug: "admin",
+    summary: "Enhance Cohi Chat with your organization's documents.",
     adminOnly: true,
     content: `# Knowledge Base Management
 
@@ -1173,12 +1248,12 @@ When a user asks Cohi Chat a question, the AI:
 - Re-index documents after updates`,
   },
   {
-    id: 'adm-sso',
-    slug: 'sso-configuration',
-    title: 'SSO Configuration',
-    category: 'Admin',
-    categorySlug: 'admin',
-    summary: 'Set up Single Sign-On for your organization.',
+    id: "adm-sso",
+    slug: "sso-configuration",
+    title: "SSO Configuration",
+    category: "Admin",
+    categorySlug: "admin",
+    summary: "Set up Single Sign-On for your organization.",
     adminOnly: true,
     content: `# SSO Configuration
 
@@ -1209,52 +1284,216 @@ When SSO is enabled:
 - SSO sessions follow your IdP's session timeout policies`,
   },
   {
-    id: 'adm-data-quality',
-    slug: 'data-quality',
-    title: 'Field Mapping and Data Quality',
-    category: 'Admin',
-    categorySlug: 'admin',
-    summary: 'Ensure your loan data is clean and complete.',
+    id: "adm-data-quality",
+    slug: "data-quality",
+    title: "Data Quality",
+    category: "Admin",
+    categorySlug: "admin",
+    summary: "Monitor and resolve data completeness and mapping issues.",
     adminOnly: true,
-    content: `# Field Mapping and Data Quality
+    content: `# Data Quality
 
-## Data Quality Dashboard
-Monitor the health of your data:
-- **Field Population Rates** — What percentage of loans have each field populated
-- **Data Completeness** — Overall completeness score
-- **Mapping Validation** — Verify field mappings are correct
+The **Data Quality** section in Admin (under Data) helps you monitor and resolve issues that affect your loan data and metrics.
+
+## What the Data Quality Section Shows
+- **Data completeness** — How complete your synced data is across key fields
+- **Field population rates** — Percentage of loans with each field populated
+- **Issues and alerts** — Missing or inconsistent data that may affect scorecards and reports
 
 ## Common Issues
-- **Missing Fields** — Important fields not being synced from LOS
-- **Incorrect Mappings** — Fields mapped to wrong Cohi columns
-- **Data Type Mismatches** — Dates stored as text, numbers as strings
-- **Stale Data** — Sync not running or failing
+- **Missing fields** — Important fields not synced from the LOS (fix in **Field Mapping** and **Connections & Integrations**)
+- **Incorrect mappings** — Fields mapped to wrong Cohi columns (fix in **Field Mapping**)
+- **Stale data** — Sync not running or failing (check **Connections & Integrations**)
 
 ## Fixing Issues
-1. Review the data quality report
-2. Identify fields with low population rates
-3. Check field mappings in LOS Connection settings
-4. Use the Field Discovery tool to find unmapped custom fields
-5. Run a test sync to verify fixes
+1. Use the Data Quality dashboard to identify low population or problem areas
+2. For mapping problems, go to **Admin > Field Mapping** to adjust Encompass field mappings
+3. For sync problems, go to **Admin > Connections & Integrations** to check sync status and errors
+4. Revenue metrics depend on correct mapping of Gain on Sale, SRP, fees, and concessions — verify those in Field Mapping and Revenue if numbers look wrong`,
+  },
+  {
+    id: "adm-org",
+    slug: "organization-settings",
+    title: "Organization Settings",
+    category: "Admin",
+    categorySlug: "admin",
+    summary: "Organization profile, display name, and branding.",
+    adminOnly: true,
+    content: `# Organization Settings
 
-## Revenue Fields
-Revenue calculations depend on correct field mapping for:
-- Gain on Sale
-- SRP (Service Release Premium)
-- Origination Points/Fees
-- Price Concessions
+## Overview
+The **Organization Settings** section in Admin lets you manage your tenant's profile and how your organization appears across Cohi.
 
-If revenue metrics look wrong, check these field mappings first.`,
+## What You Can Configure
+- **Organization name** — Display name used in the app and in reports
+- **Branding** — Logo and visual identity (where supported)
+- **Profile details** — Contact and company information used for support and reporting
+
+## Where to Find It
+Go to **Admin** from the user menu, then select **Organization Settings** in the sidebar under the Organization category.
+
+## Who Can Edit
+Only users with admin or tenant admin access can change organization settings. Changes apply to the entire organization.`,
+  },
+  {
+    id: "adm-connections",
+    slug: "connections",
+    title: "Connections & Integrations",
+    category: "Admin",
+    categorySlug: "admin",
+    summary: "LOS setup, sync schedules, and vendor integrations.",
+    adminOnly: true,
+    content: `# Connections & Integrations
+
+## Overview
+The **Connections & Integrations** section is where you add and manage your Loan Origination System (LOS) connection and other data sources.
+
+## Supported LOS
+- **Encompass** — Full API integration with field mapping, sync schedules, and optional webhooks
+- **Other LOS** — Via Universal Connector (CSV/SFTP) for bulk import
+
+## Setting Up an Encompass Connection
+1. Go to **Admin > Connections & Integrations**
+2. Click **Add Connection** (or **Add Encompass Connection**)
+3. Enter your Encompass API credentials (Client ID, Client Secret, Instance ID)
+4. Configure sync frequency (e.g. every 15 minutes)
+5. Choose which loan folders to sync
+6. Save and run an initial sync
+
+## After Connection
+- **Field Mapping** — Configure which Encompass fields map to Cohi (see Field Mapping section)
+- **Sync status** — View last sync time, loan counts, and any errors
+- **Multiple connections** — Some tenants use more than one Encompass instance; you can add multiple connections
+
+## Monitoring
+Check sync status and history regularly. Failed syncs or rate limits will appear in the connection details.`,
+  },
+  {
+    id: "adm-revenue",
+    slug: "revenue-configuration",
+    title: "Revenue Configuration",
+    category: "Admin",
+    categorySlug: "admin",
+    summary: "Revenue and margin formulas, component weights.",
+    adminOnly: true,
+    content: `# Revenue Configuration
+
+## Overview
+The **Revenue** section in Admin defines how Cohi calculates revenue and margin for scorecards, reports, and Financial Modeling.
+
+## What You Configure
+- **Revenue formula** — Which LOS fields contribute to total revenue (e.g. Gain on Sale, SRP, origination fees, concessions)
+- **Component weights** — How much each component counts toward the total (e.g. 50% GoS, 50% SRP)
+- **Margin and unit metrics** — How margin and revenue-per-unit are derived
+
+## Prerequisites
+Revenue fields must be correctly mapped in **Field Mapping** (Admin > Field Mapping). If revenue numbers look wrong, verify those mappings first, then adjust the formula here.
+
+## Where It's Used
+- Sales Scorecard and Sales Trends
+- Financial Modeling sandbox
+- Workbench widgets and reports that use revenue metrics
+- Leaderboards and pipeline value
+
+## Saving Changes
+After you save the revenue formula, existing scorecards and reports will use the new definition. No need to re-sync loan data.`,
+  },
+  {
+    id: "adm-scoring",
+    slug: "scoring-weights",
+    title: "Scoring & Weights",
+    category: "Admin",
+    categorySlug: "admin",
+    summary: "Scorecard weights, loan complexity, unit targets.",
+    adminOnly: true,
+    content: `# Scoring & Weights
+
+## Overview
+The **Scoring & Weights** section configures how Cohi computes Sales and Operations scorecards, loan complexity, and monthly unit targets.
+
+## Sales Weights
+Set the weight of each metric in the Sales Scorecard, for example:
+- Volume, margin, unit count, pull-through, turn time, concession
+- Weights are percentages that sum to 100
+
+## Operations Weights
+Set the weight of each metric in the Operations Scorecard, for example:
+- Units, turn time, complexity
+- Adjust to reflect what matters most for your operations
+
+## Loan Complexity
+Configure how loan complexity is calculated for the Operations Scorecard:
+- **Categories** — Loan type, purpose, product (e.g. FHA, Conventional, Refinance)
+- **Ranges** — Loan amount, FICO, DTI, LTV with min/max bands
+- **Weights** — How much each component contributes to the complexity score
+
+You can add or remove conditions and set weights per category or range. This affects the complexity component of the Operations Scorecard.
+
+## Unit Targets
+Set monthly unit targets by role (Processor, Underwriter, Closer, Other). These are used by:
+- Financial Modeling (capacity and staffing scenarios)
+- Operations Scorecard (performance vs target)
+
+## Saving
+Save each tab (Sales Weights, Operations Weights, Complexity, Unit Targets) as needed. Changes apply to the current tenant.`,
+  },
+  {
+    id: "adm-ai-assistant",
+    slug: "ai-assistant",
+    title: "AI Assistant Configuration",
+    category: "Admin",
+    categorySlug: "admin",
+    summary: "Voice settings, RAG topics, and rules for Cohi Chat.",
+    adminOnly: true,
+    content: `# AI Assistant Configuration
+
+## Overview
+The **AI Assistant** (RAG & Voice) section configures how Cohi Chat behaves for your organization — including voice settings, topics, and rules.
+
+## What You Can Configure
+- **Voice settings** — If voice input/output is enabled for your tenant
+- **Topics** — Curated topics or data areas the AI can focus on
+- **Rules and guardrails** — Instructions or constraints that apply to AI responses (e.g. compliance wording, disclaimers)
+
+## Knowledge Base
+The documents that feed Cohi Chat are managed in **Knowledge Center** (Admin > Knowledge Center). Upload PDFs, DOCX, or text files there; the AI Assistant settings control how that knowledge is used in conversation.
+
+## Who Can Access
+Typically only platform admins and tenant admins can change AI Assistant settings. Check your role if you don't see this section.`,
+  },
+  {
+    id: "adm-transfer",
+    slug: "import-export",
+    title: "Import / Export",
+    category: "Admin",
+    categorySlug: "admin",
+    summary: "Legacy config import and tenant config export/import.",
+    adminOnly: true,
+    content: `# Import / Export
+
+## Overview
+The **Import / Export** section (under Admin > Data) is used for legacy configuration import and for exporting or importing tenant configuration between environments.
+
+## Typical Uses
+- **Legacy import** — Migrate configuration from an older or external system into Cohi
+- **Export** — Download the current tenant's configuration (e.g. field mappings, revenue formula, scoring weights) for backup or audit
+- **Import** — Apply a previously exported configuration to this tenant (e.g. after cloning a tenant or moving from staging to production)
+
+## Who Can Use It
+Import/Export is usually restricted to **platform admins** (e.g. super_admin, platform_admin). Tenant admins may only see this section if their role allows it.
+
+## Caution
+Importing configuration will overwrite existing settings for the areas included in the import. Export a backup first if you are unsure.`,
   },
 
   // ─── FAQ ───────────────────────────────────────────────────────────
   {
-    id: 'faq-data-delay',
-    slug: 'data-delay',
-    title: 'Why is my data not up to date?',
-    category: 'FAQ',
-    categorySlug: 'faq',
-    summary: 'Data syncs every 15 minutes from your LOS.',
+    id: "faq-data-delay",
+    slug: "data-delay",
+    title: "Why is my data not up to date?",
+    category: "FAQ",
+    categorySlug: "faq",
+    summary: "Data syncs every 15 minutes from your LOS.",
     content: `# Why is my data not up to date?
 
 Cohi syncs data from your LOS on a schedule (typically every 15 minutes). There are a few reasons data might appear delayed:
@@ -1276,12 +1515,12 @@ Cohi syncs data from your LOS on a schedule (typically every 15 minutes). There 
 4. A manual sync can be triggered from Admin > LOS Connections`,
   },
   {
-    id: 'faq-missing-loans',
-    slug: 'missing-loans',
-    title: 'Why can\'t I see certain loans?',
-    category: 'FAQ',
-    categorySlug: 'faq',
-    summary: 'Access controls and filters may be limiting your view.',
+    id: "faq-missing-loans",
+    slug: "missing-loans",
+    title: "Why can't I see certain loans?",
+    category: "FAQ",
+    categorySlug: "faq",
+    summary: "Access controls and filters may be limiting your view.",
     content: `# Why can't I see certain loans?
 
 ## Possible Reasons
@@ -1310,12 +1549,12 @@ Contact your administrator to:
 - Grant access to specific loan folders`,
   },
   {
-    id: 'faq-metric-calculation',
-    slug: 'metric-calculations',
-    title: 'How are metrics calculated?',
-    category: 'FAQ',
-    categorySlug: 'faq',
-    summary: 'Understanding how Cohi computes key metrics.',
+    id: "faq-metric-calculation",
+    slug: "metric-calculations",
+    title: "How are metrics calculated?",
+    category: "FAQ",
+    categorySlug: "faq",
+    summary: "Understanding how Cohi computes key metrics.",
     content: `# How Are Metrics Calculated?
 
 ## Pull-Through Rate
@@ -1348,12 +1587,12 @@ Contact your admin if metrics don't match your expectations — field mapping ma
 
   // ─── Glossary ──────────────────────────────────────────────────────
   {
-    id: 'gl-terms',
-    slug: 'mortgage-terms',
-    title: 'Mortgage Industry Terms',
-    category: 'Glossary',
-    categorySlug: 'glossary',
-    summary: 'Common mortgage terms used in Cohi.',
+    id: "gl-terms",
+    slug: "mortgage-terms",
+    title: "Mortgage Industry Terms",
+    category: "Glossary",
+    categorySlug: "glossary",
+    summary: "Common mortgage terms used in Cohi.",
     content: `# Mortgage Industry Terms
 
 ## Loan Types
@@ -1393,12 +1632,12 @@ Contact your admin if metrics don't match your expectations — field mapping ma
 - **Funding** — The disbursement of loan funds`,
   },
   {
-    id: 'gl-metrics',
-    slug: 'metric-definitions',
-    title: 'Metric Definitions',
-    category: 'Glossary',
-    categorySlug: 'glossary',
-    summary: 'How key metrics in Cohi are defined.',
+    id: "gl-metrics",
+    slug: "metric-definitions",
+    title: "Metric Definitions",
+    category: "Glossary",
+    categorySlug: "glossary",
+    summary: "How key metrics in Cohi are defined.",
     content: `# Metric Definitions in Cohi
 
 ## Volume Metrics
@@ -1436,20 +1675,26 @@ Contact your admin if metrics don't match your expectations — field mapping ma
 ];
 
 export function getArticlesByCategory(categorySlug: string): HelpArticle[] {
-  return helpArticles.filter(a => a.categorySlug === categorySlug);
+  return helpArticles.filter((a) => a.categorySlug === categorySlug);
 }
 
-export function getArticleBySlug(categorySlug: string, articleSlug: string): HelpArticle | undefined {
-  return helpArticles.find(a => a.categorySlug === categorySlug && a.slug === articleSlug);
+export function getArticleBySlug(
+  categorySlug: string,
+  articleSlug: string,
+): HelpArticle | undefined {
+  return helpArticles.find(
+    (a) => a.categorySlug === categorySlug && a.slug === articleSlug,
+  );
 }
 
 export function searchArticles(query: string): HelpArticle[] {
   const q = query.toLowerCase().trim();
   if (!q) return [];
-  return helpArticles.filter(a =>
-    a.title.toLowerCase().includes(q) ||
-    a.summary.toLowerCase().includes(q) ||
-    a.content.toLowerCase().includes(q) ||
-    a.category.toLowerCase().includes(q)
+  return helpArticles.filter(
+    (a) =>
+      a.title.toLowerCase().includes(q) ||
+      a.summary.toLowerCase().includes(q) ||
+      a.content.toLowerCase().includes(q) ||
+      a.category.toLowerCase().includes(q),
   );
 }

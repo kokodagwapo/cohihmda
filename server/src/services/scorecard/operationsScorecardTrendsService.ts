@@ -14,8 +14,10 @@ import {
   isActorMissing,
   OPERATIONS_ACTOR_CONFIGS,
   assignTiersByCumulativeValue,
+  calcLoanComplexity,
   type ActorConfig,
   type TTSTier,
+  type LoanComplexityData,
 } from "../../utils/scorecard-utils.js";
 import { getStaffingUnitTargets } from "../../utils/staffingUnitTargets.js";
 
@@ -155,20 +157,17 @@ export async function getOperationsScorecardTrends(
     return days > 0 ? days : null;
   };
 
-  const calcLoanComplexity = (l: any): number => {
-    let complexity = 0;
-    const loanType = (l.loan_type || "").toUpperCase();
-    if (["FHA", "VA", "USDA"].some((t) => loanType.includes(t))) complexity += 0.15;
-    const loanPurpose = (l.loan_purpose || "").toUpperCase();
-    if (loanPurpose.includes("PURCHASE")) complexity += 0.1;
-    const fico = parseFloat(l.fico_score) || 0;
-    const ltv = parseFloat(l.ltv_ratio) || 0;
-    const dti = parseFloat(l.be_dti_ratio) || 0;
-    if (fico > 0 && fico < 680) complexity += 0.02;
-    if (ltv > 80) complexity += 0.02;
-    if (dti > 43) complexity += 0.01;
-    return (1 + complexity) * 100;
-  };
+  const toLoanComplexityData = (l: any): LoanComplexityData => ({
+    loan_type: l.loan_type,
+    loan_purpose: l.loan_purpose,
+    loan_amount: l.loan_amount != null && l.loan_amount !== "" ? parseFloat(l.loan_amount) : undefined,
+    fico_score: l.fico_score != null && l.fico_score !== "" ? parseInt(String(l.fico_score), 10) : undefined,
+    ltv_ratio: l.ltv_ratio != null && l.ltv_ratio !== "" ? parseFloat(l.ltv_ratio) : undefined,
+    be_dti_ratio: l.be_dti_ratio != null && l.be_dti_ratio !== "" ? parseFloat(l.be_dti_ratio) : undefined,
+    occupancy_type: l.occupancy_type,
+    borr_self_employed: l.borr_self_employed,
+    non_qm: l.non_qm,
+  });
 
   const actorMap = new Map<string, ActorAggregation>();
 
@@ -182,7 +181,7 @@ export async function getOperationsScorecardTrends(
 
     const loanAmount = parseFloat(l.loan_amount) || 0;
     const turnTime = calcTurnTime(l);
-    const complexity = calcLoanComplexity(l);
+    const complexity = calcLoanComplexity(toLoanComplexityData(l));
 
     if (!actorMap.has(actorName)) {
       actorMap.set(actorName, {

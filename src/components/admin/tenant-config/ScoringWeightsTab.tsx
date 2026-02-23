@@ -38,6 +38,8 @@ import {
   HelpCircle,
   AlertCircle,
   Target,
+  Trash2,
+  Plus,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -119,157 +121,21 @@ const SCORECARD_METRICS = {
   ],
 };
 
-// Default complexity components with conditions and default weights
-// These match the hardcoded values in calcLoanComplexity()
-const DEFAULT_COMPLEXITY_CONFIG = [
-  {
-    component: "loan_type",
-    label: "Loan Type",
-    conditions: [
-      {
-        value: "government",
-        label: "Government (FHA, VA, USDA)",
-        defaultWeight: 10,
-        description:
-          "Government loans require more documentation and have stricter guidelines",
-      },
-      {
-        value: "conventional",
-        label: "Conventional",
-        defaultWeight: 0,
-        description: "Standard conventional loans",
-      },
-    ],
-  },
-  {
-    component: "loan_purpose",
-    label: "Loan Purpose",
-    conditions: [
-      {
-        value: "purchase",
-        label: "Purchase",
-        defaultWeight: 5,
-        description:
-          "Purchase transactions involve more parties and tighter timelines",
-      },
-      {
-        value: "refinance",
-        label: "Refinance",
-        defaultWeight: 0,
-        description: "Standard refinance transactions",
-      },
-    ],
-  },
-  {
-    component: "fico",
-    label: "FICO Score",
-    conditions: [
-      {
-        value: "poor",
-        label: "Poor (< 680)",
-        defaultWeight: 10,
-        description:
-          "Lower credit scores require additional documentation and risk assessment",
-      },
-      {
-        value: "fair",
-        label: "Fair (680-719)",
-        defaultWeight: 0,
-        description: "Average credit range",
-      },
-      {
-        value: "good",
-        label: "Good (720-759)",
-        defaultWeight: 0,
-        description: "Good credit range",
-      },
-      {
-        value: "excellent",
-        label: "Excellent (760+)",
-        defaultWeight: -5,
-        description: "Excellent credit can simplify processing",
-      },
-    ],
-  },
-  {
-    component: "ltv",
-    label: "LTV Ratio",
-    conditions: [
-      {
-        value: "high",
-        label: "High LTV (> 80%)",
-        defaultWeight: 5,
-        description: "Higher LTV loans may require PMI and additional review",
-      },
-      {
-        value: "standard",
-        label: "Standard (≤ 80%)",
-        defaultWeight: 0,
-        description: "Standard LTV range",
-      },
-    ],
-  },
-  {
-    component: "dti",
-    label: "DTI Ratio",
-    conditions: [
-      {
-        value: "high",
-        label: "High DTI (> 43%)",
-        defaultWeight: 5,
-        description: "Higher DTI ratios require additional income verification",
-      },
-      {
-        value: "standard",
-        label: "Standard (≤ 43%)",
-        defaultWeight: 0,
-        description: "Standard DTI range",
-      },
-    ],
-  },
-  {
-    component: "occupancy",
-    label: "Occupancy Type",
-    conditions: [
-      {
-        value: "investment",
-        label: "Investment Property",
-        defaultWeight: 5,
-        description: "Investment properties have stricter requirements",
-      },
-      {
-        value: "second_home",
-        label: "Second Home",
-        defaultWeight: 5,
-        description: "Second homes require additional documentation",
-      },
-      {
-        value: "primary",
-        label: "Primary Residence",
-        defaultWeight: 0,
-        description: "Standard primary residence",
-      },
-    ],
-  },
-  {
-    component: "employment",
-    label: "Employment Type",
-    conditions: [
-      {
-        value: "self_employed",
-        label: "Self-Employed",
-        defaultWeight: 5,
-        description:
-          "Self-employed borrowers require additional income documentation",
-      },
-      {
-        value: "w2",
-        label: "W-2 Employee",
-        defaultWeight: 0,
-        description: "Standard W-2 employment",
-      },
-    ],
-  },
+// Complexity component metadata: order, labels, and whether they use range_min/range_max
+const COMPLEXITY_COMPONENT_META: Array<{
+  component: string;
+  label: string;
+  isRangeBased: boolean;
+}> = [
+  { component: "loan_type", label: "Loan Type", isRangeBased: false },
+  { component: "loan_purpose", label: "Loan Purpose", isRangeBased: false },
+  { component: "loan_amount", label: "Loan Amount", isRangeBased: true },
+  { component: "fico", label: "FICO Score", isRangeBased: true },
+  { component: "ltv", label: "LTV Ratio", isRangeBased: true },
+  { component: "dti", label: "DTI Ratio", isRangeBased: true },
+  { component: "occupancy", label: "Occupancy Type", isRangeBased: false },
+  { component: "employment", label: "Employment Type", isRangeBased: false },
+  { component: "non_qm", label: "Non-QM Loan", isRangeBased: false },
 ];
 
 const DEFAULT_STAFFING_TARGETS: StaffingUnitTargetsState = {
@@ -295,7 +161,18 @@ export function ScoringWeightsTab({
   const [editedComplexity, setEditedComplexity] = useState<
     Record<string, number>
   >({});
+  const [editedRange, setEditedRange] = useState<
+    Record<string, { range_min?: number; range_max?: number }>
+  >({});
   const [savingComplexity, setSavingComplexity] = useState(false);
+  const [addingRange, setAddingRange] = useState<{
+    component: string;
+    condition_value: string;
+    range_min: number;
+    range_max: number;
+    weight: number;
+  } | null>(null);
+  const [deletingCondition, setDeletingCondition] = useState<string | null>(null);
   const [unitTargetsDraft, setUnitTargetsDraft] =
     useState<StaffingUnitTargetsState>(DEFAULT_STAFFING_TARGETS);
   const [savingUnitTargets, setSavingUnitTargets] = useState(false);
@@ -533,7 +410,7 @@ export function ScoringWeightsTab({
     );
   };
 
-  // Get complexity weight value (edited or from props or default)
+  // Get complexity weight in points (edited or from DB; DB stores decimal)
   const getComplexityWeight = (
     component: string,
     condition: string
@@ -542,22 +419,30 @@ export function ScoringWeightsTab({
     if (editedComplexity[key] !== undefined) {
       return editedComplexity[key];
     }
-    // Check props from database
     const componentData = complexityComponents[component] || [];
     const found = componentData.find(
       (c: any) => c.condition_value === condition
     );
-    if (found) {
-      return found.weight * 100; // Convert from decimal to points
+    if (found && found.weight != null) {
+      return Number(found.weight) * 100;
     }
-    // Fall back to default
-    const defaultConfig = DEFAULT_COMPLEXITY_CONFIG.find(
-      (c) => c.component === component
-    );
-    const defaultCondition = defaultConfig?.conditions.find(
-      (c) => c.value === condition
-    );
-    return defaultCondition?.defaultWeight ?? 0;
+    return 0;
+  };
+
+  const getRangeMin = (component: string, condition: string): number | null => {
+    const key = `${component}_${condition}`;
+    if (editedRange[key]?.range_min !== undefined) return editedRange[key].range_min!;
+    const componentData = complexityComponents[component] || [];
+    const found = componentData.find((c: any) => c.condition_value === condition);
+    return found?.range_min != null ? Number(found.range_min) : null;
+  };
+
+  const getRangeMax = (component: string, condition: string): number | null => {
+    const key = `${component}_${condition}`;
+    if (editedRange[key]?.range_max !== undefined) return editedRange[key].range_max!;
+    const componentData = complexityComponents[component] || [];
+    const found = componentData.find((c: any) => c.condition_value === condition);
+    return found?.range_max != null ? Number(found.range_max) : null;
   };
 
   const handleComplexityWeightChange = (
@@ -572,44 +457,127 @@ export function ScoringWeightsTab({
     }));
   };
 
+  const handleRangeChange = (
+    component: string,
+    condition: string,
+    field: "range_min" | "range_max",
+    value: number | null
+  ) => {
+    const key = `${component}_${condition}`;
+    setEditedRange((prev) => ({
+      ...prev,
+      [key]: {
+        ...(prev[key] || {}),
+        [field]: value ?? undefined,
+      },
+    }));
+  };
+
   const hasComplexityChanges = (): boolean => {
-    return Object.keys(editedComplexity).length > 0;
+    return (
+      Object.keys(editedComplexity).length > 0 ||
+      Object.keys(editedRange).length > 0 ||
+      addingRange != null
+    );
   };
 
   const handleResetComplexity = () => {
     setEditedComplexity({});
+    setEditedRange({});
+    setAddingRange(null);
+  };
+
+  const handleAddRange = (component: string) => {
+    setAddingRange({
+      component,
+      condition_value: "",
+      range_min: 0,
+      range_max: 100,
+      weight: 0,
+    });
+  };
+
+  const handleCreateRange = async () => {
+    if (!addingRange) return;
+    const tenantParam = selectedTenantId ? `?tenant_id=${selectedTenantId}` : "";
+    setSavingComplexity(true);
+    try {
+      await api.request(
+        `/api/tenant-config/complexity/${addingRange.component}/condition${tenantParam}`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            condition_value: addingRange.condition_value,
+            weight: addingRange.weight / 100,
+            range_min: addingRange.range_min,
+            range_max: addingRange.range_max,
+          }),
+        }
+      );
+      toast({ title: "Success", description: "Range added." });
+      setAddingRange(null);
+      onRefresh();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to add range",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingComplexity(false);
+    }
+  };
+
+  const handleDeleteCondition = async (component: string, conditionValue: string) => {
+    const tenantParam = selectedTenantId ? `?tenant_id=${selectedTenantId}` : "";
+    setDeletingCondition(`${component}_${conditionValue}`);
+    try {
+      await api.request(
+        `/api/tenant-config/complexity/${component}/${encodeURIComponent(conditionValue)}${tenantParam}`,
+        { method: "DELETE" }
+      );
+      toast({ title: "Success", description: "Condition removed." });
+      onRefresh();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: (error as Error).message || "Failed to delete",
+        variant: "destructive",
+      });
+    } finally {
+      setDeletingCondition(null);
+    }
   };
 
   const handleSaveComplexity = async () => {
     setSavingComplexity(true);
     try {
-      // Group changes by component
-      const changesByComponent: Record<
-        string,
-        Array<{ condition_value: string; weight: number }>
-      > = {};
+      const tenantParam = selectedTenantId ? `?tenant_id=${selectedTenantId}` : "";
 
-      for (const config of DEFAULT_COMPLEXITY_CONFIG) {
-        const values: Array<{ condition_value: string; weight: number }> = [];
-        for (const condition of config.conditions) {
-          const weight = getComplexityWeight(config.component, condition.value);
-          values.push({
-            condition_value: condition.value,
-            weight: weight / 100, // Convert from points to decimal
-          });
-        }
-        changesByComponent[config.component] = values;
-      }
+      for (const meta of COMPLEXITY_COMPONENT_META) {
+        const rows = complexityComponents[meta.component] || [];
+        if (rows.length === 0) continue;
 
-      // Save each component
-      const tenantParam = selectedTenantId
-        ? `?tenant_id=${selectedTenantId}`
-        : "";
-      for (const [componentName, values] of Object.entries(
-        changesByComponent
-      )) {
+        const values: Array<{
+          condition_value: string;
+          weight: number;
+          range_min?: number | null;
+          range_max?: number | null;
+        }> = rows.map((row: any) => {
+          const w = getComplexityWeight(meta.component, row.condition_value);
+          const out: (typeof values)[0] = {
+            condition_value: row.condition_value,
+            weight: w / 100,
+          };
+          if (meta.isRangeBased) {
+            out.range_min = getRangeMin(meta.component, row.condition_value);
+            out.range_max = getRangeMax(meta.component, row.condition_value);
+          }
+          return out;
+        });
+
         await api.request(
-          `/api/tenant-config/complexity/${componentName}${tenantParam}`,
+          `/api/tenant-config/complexity/${meta.component}${tenantParam}`,
           {
             method: "PUT",
             body: JSON.stringify({ values }),
@@ -622,11 +590,12 @@ export function ScoringWeightsTab({
         description: "Loan complexity weights saved successfully",
       });
       setEditedComplexity({});
+      setEditedRange({});
       onRefresh();
     } catch (error: any) {
       toast({
         title: "Error",
-        description: error.message || "Failed to save complexity weights",
+        description: (error as Error).message || "Failed to save complexity weights",
         variant: "destructive",
       });
     } finally {
@@ -634,14 +603,15 @@ export function ScoringWeightsTab({
     }
   };
 
-  // Calculate example complexity score based on current weights
+  // Example complexity score (first condition per component summed)
   const exampleComplexityScore = useMemo(() => {
-    // Example: Government loan, Purchase, Poor FICO, High LTV = high complexity
-    const govLoan = getComplexityWeight("loan_type", "government");
-    const purchase = getComplexityWeight("loan_purpose", "purchase");
-    const poorFico = getComplexityWeight("fico", "poor");
-    const highLtv = getComplexityWeight("ltv", "high");
-    return 100 + govLoan + purchase + poorFico + highLtv;
+    let sum = 100;
+    for (const meta of COMPLEXITY_COMPONENT_META) {
+      const rows = complexityComponents[meta.component] || [];
+      const first = rows[0];
+      if (first) sum += getComplexityWeight(meta.component, first.condition_value);
+    }
+    return sum;
   }, [editedComplexity, complexityComponents]);
 
   const renderComplexityComponents = () => {
@@ -721,7 +691,7 @@ export function ScoringWeightsTab({
             </div>
           </div>
           <p className="text-xs text-slate-500 mt-3 text-center">
-            Example complex loan (Gov + Purchase + Poor FICO + High LTV):{" "}
+            Example score (sum of first condition per factor):{" "}
             <strong>{exampleComplexityScore}</strong> points
           </p>
         </div>
@@ -733,91 +703,246 @@ export function ScoringWeightsTab({
           </h4>
           <p className="text-sm text-slate-600 dark:text-slate-400">
             Adjust the point values for each loan characteristic. Positive
-            values increase complexity, negative values decrease it.
+            values increase complexity, negative values decrease it. For range-based
+            factors you can edit boundaries and add or remove ranges.
           </p>
 
-          {DEFAULT_COMPLEXITY_CONFIG.map((config) => (
-            <div
-              key={config.component}
-              className="border rounded-lg p-4 space-y-3"
-            >
-              <h5 className="font-medium text-slate-800 dark:text-slate-200">
-                {config.label}
-              </h5>
-              <div className="grid gap-3">
-                {config.conditions.map((condition) => {
-                  const weight = getComplexityWeight(
-                    config.component,
-                    condition.value
-                  );
-                  const isModified =
-                    editedComplexity[
-                      `${config.component}_${condition.value}`
-                    ] !== undefined;
+          {COMPLEXITY_COMPONENT_META.map((meta) => {
+            const rows = complexityComponents[meta.component] || [];
+            return (
+              <div
+                key={meta.component}
+                className="border rounded-lg p-4 space-y-3"
+              >
+                <h5 className="font-medium text-slate-800 dark:text-slate-200">
+                  {meta.label}
+                </h5>
+                <div className="grid gap-3">
+                  {rows.map((row: any) => {
+                    const conditionValue = row.condition_value;
+                    const weight = getComplexityWeight(meta.component, conditionValue);
+                    const key = `${meta.component}_${conditionValue}`;
+                    const isModified = editedComplexity[key] !== undefined;
+                    const isDeleting =
+                      deletingCondition === key;
 
-                  return (
-                    <div
-                      key={condition.value}
-                      className="flex items-center gap-4"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                            {condition.label}
-                          </span>
-                          {isModified && (
-                            <Badge variant="secondary" className="text-xs">
-                              Modified
-                            </Badge>
+                    return (
+                      <div
+                        key={conditionValue}
+                        className="flex flex-wrap items-center gap-4"
+                      >
+                        <div className="flex-1 min-w-0 flex flex-wrap items-center gap-3">
+                          {meta.isRangeBased && (
+                            <>
+                              <div className="flex items-center gap-1">
+                                <Label className="text-xs whitespace-nowrap">Min</Label>
+                                <Input
+                                  type="number"
+                                  className="w-24 h-8 text-sm"
+                                  value={
+                                    getRangeMin(meta.component, conditionValue) ??
+                                    ""
+                                  }
+                                  onChange={(e) =>
+                                    handleRangeChange(
+                                      meta.component,
+                                      conditionValue,
+                                      "range_min",
+                                      e.target.value === ""
+                                        ? null
+                                        : parseFloat(e.target.value)
+                                    )
+                                  }
+                                />
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <Label className="text-xs whitespace-nowrap">Max</Label>
+                                <Input
+                                  type="number"
+                                  className="w-24 h-8 text-sm"
+                                  value={
+                                    getRangeMax(meta.component, conditionValue) ??
+                                    ""
+                                  }
+                                  onChange={(e) =>
+                                    handleRangeChange(
+                                      meta.component,
+                                      conditionValue,
+                                      "range_max",
+                                      e.target.value === ""
+                                        ? null
+                                        : parseFloat(e.target.value)
+                                    )
+                                  }
+                                />
+                              </div>
+                            </>
+                          )}
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                              {row.description || conditionValue}
+                            </span>
+                            {isModified && (
+                              <Badge variant="secondary" className="text-xs">
+                                Modified
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Slider
+                            value={[weight]}
+                            onValueChange={([v]) =>
+                              handleComplexityWeightChange(
+                                meta.component,
+                                conditionValue,
+                                v
+                              )
+                            }
+                            min={-20}
+                            max={20}
+                            step={5}
+                            className="w-32"
+                          />
+                          <div className="w-16 text-right">
+                            <span
+                              className={`font-mono text-sm ${
+                                weight > 0
+                                  ? "text-red-600"
+                                  : weight < 0
+                                    ? "text-green-600"
+                                    : "text-slate-500"
+                              }`}
+                            >
+                              {weight > 0 ? "+" : ""}
+                              {weight}
+                            </span>
+                          </div>
+                          {weight > 0 ? (
+                            <TrendingUp className="h-4 w-4 text-red-500" />
+                          ) : weight < 0 ? (
+                            <TrendingDown className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <Minus className="h-4 w-4 text-slate-400" />
+                          )}
+                          {meta.isRangeBased && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-slate-500 hover:text-red-600"
+                              disabled={isDeleting}
+                              onClick={() =>
+                                handleDeleteCondition(meta.component, conditionValue)
+                              }
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
                           )}
                         </div>
-                        <p className="text-xs text-slate-500 truncate">
-                          {condition.description}
-                        </p>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <Slider
-                          value={[weight]}
-                          onValueChange={([v]) =>
-                            handleComplexityWeightChange(
-                              config.component,
-                              condition.value,
-                              v
+                    );
+                  })}
+                  {meta.isRangeBased && (
+                    addingRange?.component === meta.component ? (
+                      <div className="flex flex-wrap items-center gap-2 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border">
+                        <Input
+                          placeholder="Label (e.g. 500K-1M)"
+                          className="w-32"
+                          value={addingRange.condition_value}
+                          onChange={(e) =>
+                            setAddingRange((p) =>
+                              p ? { ...p, condition_value: e.target.value } : null
                             )
                           }
-                          min={-20}
-                          max={20}
-                          step={5}
-                          className="w-32"
                         />
-                        <div className="w-16 text-right">
-                          <span
-                            className={`font-mono text-sm ${
-                              weight > 0
-                                ? "text-red-600"
-                                : weight < 0
-                                ? "text-green-600"
-                                : "text-slate-500"
-                            }`}
-                          >
-                            {weight > 0 ? "+" : ""}
-                            {weight}
-                          </span>
-                        </div>
-                        {weight > 0 ? (
-                          <TrendingUp className="h-4 w-4 text-red-500" />
-                        ) : weight < 0 ? (
-                          <TrendingDown className="h-4 w-4 text-green-500" />
-                        ) : (
-                          <Minus className="h-4 w-4 text-slate-400" />
-                        )}
+                        <Input
+                          type="number"
+                          placeholder="Min"
+                          className="w-20"
+                          value={addingRange.range_min || ""}
+                          onChange={(e) =>
+                            setAddingRange((p) =>
+                              p
+                                ? {
+                                    ...p,
+                                    range_min: e.target.value === "" ? 0 : parseFloat(e.target.value),
+                                  }
+                                : null
+                            )
+                          }
+                        />
+                        <Input
+                          type="number"
+                          placeholder="Max"
+                          className="w-20"
+                          value={addingRange.range_max || ""}
+                          onChange={(e) =>
+                            setAddingRange((p) =>
+                              p
+                                ? {
+                                    ...p,
+                                    range_max: e.target.value === "" ? 0 : parseFloat(e.target.value),
+                                  }
+                                : null
+                            )
+                          }
+                        />
+                        <Input
+                          type="number"
+                          placeholder="Points"
+                          className="w-16"
+                          value={addingRange.weight || ""}
+                          onChange={(e) =>
+                            setAddingRange((p) =>
+                              p
+                                ? {
+                                    ...p,
+                                    weight: e.target.value === "" ? 0 : parseFloat(e.target.value),
+                                  }
+                                : null
+                            )
+                          }
+                        />
+                        <Button
+                          size="sm"
+                          onClick={handleCreateRange}
+                          disabled={
+                            !addingRange.condition_value || savingComplexity
+                          }
+                        >
+                          Add
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setAddingRange(null)}
+                        >
+                          Cancel
+                        </Button>
                       </div>
-                    </div>
-                  );
-                })}
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-1"
+                        onClick={() => handleAddRange(meta.component)}
+                      >
+                        <Plus className="h-4 w-4" />
+                        Add range
+                      </Button>
+                    )
+                  )}
+                </div>
+                {rows.length === 0 && !meta.isRangeBased && (
+                  <p className="text-xs text-slate-500">
+                    No conditions configured. Seed data is set in tenant migration.
+                  </p>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Action Buttons */}

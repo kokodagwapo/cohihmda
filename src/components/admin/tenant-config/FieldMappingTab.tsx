@@ -22,6 +22,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
 import { 
   Link2, 
   AlertCircle,
@@ -35,7 +40,9 @@ import {
   Save,
   RefreshCw,
   CheckCircle2 as CheckIcon,
-  AlertTriangle as AlertIcon
+  AlertTriangle as AlertIcon,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import { EncompassFieldMapping } from '@/components/encompass/EncompassFieldMapping';
 import { FieldMappingWizardDialog } from '@/components/encompass/FieldMappingWizard';
@@ -68,8 +75,8 @@ interface WebhookStatsResponse {
 export function FieldMappingTab({ losConnections, onRefresh }: FieldMappingTabProps) {
   const { toast } = useToast();
   
-  // Use admin tenant context for tenant ID
-  const { selectedTenantId, isTenantAdmin } = useAdminTenant();
+  // Use admin tenant context for tenant ID and platform-admin check
+  const { selectedTenantId, isTenantAdmin, isPlatformAdmin } = useAdminTenant();
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(
     losConnections.length > 0 ? losConnections[0].id : null
   );
@@ -82,6 +89,7 @@ export function FieldMappingTab({ losConnections, onRefresh }: FieldMappingTabPr
   const [savingWebhookConfig, setSavingWebhookConfig] = useState(false);
   const [webhookStats, setWebhookStats] = useState<WebhookStatsResponse | null>(null);
   const [loadingWebhookStats, setLoadingWebhookStats] = useState(false);
+  const [webhookSectionOpen, setWebhookSectionOpen] = useState(false);
   const [reconciling, setReconciling] = useState(false);
   const [readinessLoading, setReadinessLoading] = useState(false);
   const [readinessResult, setReadinessResult] = useState<any | null>(null);
@@ -385,44 +393,55 @@ export function FieldMappingTab({ losConnections, onRefresh }: FieldMappingTabPr
               </div>
             )}
 
-            {/* Webhook Priority Field Configuration */}
-            {selectedConnection && selectedConnection.los_type === 'encompass' && (
-              <div className="p-4 border rounded-lg bg-slate-50/60 dark:bg-slate-900/20 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="text-sm font-medium text-slate-900 dark:text-white">
-                      Webhook Priority Field Configuration
-                    </h4>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Configure high-value fieldchange subscriptions (start with 20 fields, tenant-configurable).
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={loadWebhookStats}
-                      disabled={loadingWebhookStats}
-                    >
-                      <RefreshCw className={`h-4 w-4 mr-2 ${loadingWebhookStats ? 'animate-spin' : ''}`} />
-                      Refresh Stats
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleRunReadiness}
-                      disabled={readinessLoading}
-                    >
-                      {readinessLoading ? (
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            {/* Webhook Priority Field Configuration — platform admin only, collapsed by default */}
+            {isPlatformAdmin && selectedConnection && selectedConnection.los_type === 'encompass' && (
+              <Collapsible open={webhookSectionOpen} onOpenChange={setWebhookSectionOpen}>
+                <div className="p-4 border rounded-lg bg-slate-50/60 dark:bg-slate-900/20 space-y-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <CollapsibleTrigger className="flex items-center gap-2 text-left hover:opacity-80">
+                      {webhookSectionOpen ? (
+                        <ChevronDown className="h-4 w-4 text-slate-500 shrink-0" />
                       ) : (
-                        <CheckIcon className="h-4 w-4 mr-2" />
+                        <ChevronRight className="h-4 w-4 text-slate-500 shrink-0" />
                       )}
-                      V3 Readiness
-                    </Button>
+                      <div>
+                        <h4 className="text-sm font-medium text-slate-900 dark:text-white">
+                          Webhook Priority Field Configuration
+                        </h4>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          Configure high-value fieldchange subscriptions (platform admin only).
+                        </p>
+                      </div>
+                    </CollapsibleTrigger>
+                    {webhookSectionOpen && (
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={loadWebhookStats}
+                          disabled={loadingWebhookStats}
+                        >
+                          <RefreshCw className={`h-4 w-4 mr-2 ${loadingWebhookStats ? 'animate-spin' : ''}`} />
+                          Refresh Stats
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleRunReadiness}
+                          disabled={readinessLoading}
+                        >
+                          {readinessLoading ? (
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          ) : (
+                            <CheckIcon className="h-4 w-4 mr-2" />
+                          )}
+                          V3 Readiness
+                        </Button>
+                      </div>
+                    )}
                   </div>
-                </div>
 
+                  <CollapsibleContent>
                 {loadingWebhookConfig ? (
                   <div className="flex items-center gap-2 text-sm text-slate-500">
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -611,7 +630,9 @@ export function FieldMappingTab({ losConnections, onRefresh }: FieldMappingTabPr
                     Webhook config not available for this connection.
                   </div>
                 )}
-              </div>
+                  </CollapsibleContent>
+                </div>
+              </Collapsible>
             )}
 
             {/* Onboarding Analysis Panel */}

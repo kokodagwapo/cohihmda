@@ -14,7 +14,6 @@ import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { ScrollToTop } from "@/components/ScrollToTop";
 import { useUserTimezone } from "@/hooks/useUserTimezone";
 import Index from "./pages/Index";
-import ShareLink from "./pages/ShareLink";
 import Dashboard from "./pages/Dashboard";
 import DashboardLegacy from "./pages/DashboardLegacy";
 import Admin from "./pages/Admin";
@@ -47,6 +46,7 @@ import { GlobalCohiChat } from "./components/cohi/GlobalCohiChat";
 import { CohiDemoExperience } from "./components/demo/CohiDemoExperience";
 import { TutorialProvider } from "@/contexts/TutorialContext";
 import { WelcomeTourTrigger } from "@/components/tutorial/WelcomeTourTrigger";
+import { ActiveTourRunner } from "@/components/tutorial/ActiveTourRunner";
 // Workbench pages
 import SharedWithMe from "./pages/workbench/SharedWithMe";
 import TeamFolders from "./pages/workbench/TeamFolders";
@@ -119,8 +119,7 @@ const App = () => (
               <Route path="/forgot-password" element={<ForgotPassword />} />
               <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/auth/sso/callback" element={<SSOCallback />} />
-              <Route path="/share/:token" element={<ShareLink />} />
-              
+
               {/* Protected routes - require authentication */}
               <Route path="/settings" element={
                 <ProtectedRoute>
@@ -276,6 +275,7 @@ const App = () => (
               <GlobalCohiChat />
               <CohiDemoExperience />
               <WelcomeTourTrigger />
+              <ActiveTourRunner />
           </Router>
         </TooltipProvider>
       </EditProvider>

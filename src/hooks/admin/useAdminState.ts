@@ -9,7 +9,10 @@ export type AdminSection =
   | "sso"
   | "org"
   | "data-quality"
-  | "data-config" // Tenant data configuration (field mappings, ranges, filters, scoring)
+  | "data-config" // Field mapping only
+  | "revenue" // Revenue formulas (own section)
+  | "scoring-weights" // Scorecard weights and loan complexity (own section)
+  | "data-transfer" // Legacy import, export/import (platform admin only)
   | "infrastructure" // Renamed from 'system' for clarity
   | "security-compliance" // Combined security and SOC 2
   | "connections" // Combined LOS + Synapse integrations

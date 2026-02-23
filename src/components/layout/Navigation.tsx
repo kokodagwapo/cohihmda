@@ -75,12 +75,12 @@ const topTieringMenuGroups = {
   coreAnalytics: {
     label: "TopTiering",
     items: [
-      {
+      /*       {
         id: "loanFunnel",
         label: "Loan Funnel",
         icon: Filter,
         iconColor: "blue" as const,
-      },
+      }, */
       {
         id: "topTieringComparison",
         label: "TopTiering Comparison",

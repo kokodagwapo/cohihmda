@@ -28,7 +28,6 @@ import platformSettingsRoutes from "./admin/platformSettings.js";
 import tenantConfigExportRoutes from "./admin/tenantConfigExport.js";
 import insightFeedbackRoutes from "./admin/insightFeedback.js";
 import knowledgeCenterRoutes from "./knowledgeCenter.js";
-import shareLinksRoutes from "./shareLinks.js";
 import workbenchRoutes from "./workbench.js";
 import reportRoutes from "./reports.js";
 import researchRoutes from "./research.js";
@@ -90,7 +89,6 @@ export function setupRoutes(app: Express) {
   app.use("/api/admin/tenant-config-transfer", tenantConfigExportRoutes);
   app.use("/api/admin/insight-feedback", insightFeedbackRoutes);
   app.use("/api/knowledge-center", knowledgeCenterRoutes);
-  app.use("/api/share-links", shareLinksRoutes);
   app.use("/api/workbench/canvases", workbenchRoutes); // Workbench canvas CRUD (tenant DB)
   app.use("/api/workbench/reports", reportRoutes); // Report generation (PPTX/PDF)
   app.use("/api/research", researchRoutes); // Research Analyst agentic system

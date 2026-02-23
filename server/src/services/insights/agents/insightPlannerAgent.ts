@@ -149,6 +149,8 @@ export interface InsightPlannerContext {
   marketContext?: string;
   industryNewsContext?: string;
   staleLoanContext?: string;
+  /** When set, planner generates 4-6 questions targeting this bucket only. */
+  bucketFocus?: string;
 }
 
 function buildUserPrompt(ctx: InsightPlannerContext): string {
@@ -202,6 +204,16 @@ function buildUserPrompt(ctx: InsightPlannerContext): string {
 
   if (ctx.staleLoanContext) {
     prompt += `## Stale Loan Data\n${ctx.staleLoanContext}\n\n`;
+  }
+
+  if (ctx.bucketFocus) {
+    const bucket = ctx.bucketFocus;
+    prompt += `## FOCUS DIRECTIVE\nGenerate 4-6 investigation questions specifically targeting the "${bucket}" severity level.\n`;
+    prompt += `- "critical": risks, compliance exposure, financial threats, operational failures\n`;
+    prompt += `- "attention": concerning trends, emerging risks, metrics needing monitoring\n`;
+    prompt += `- "working": positive signals, performance strengths, improving trends\n`;
+    prompt += `- "context": market context, portfolio composition, background trends\n`;
+    prompt += `Do NOT repeat existing insight headlines listed above.\n\n`;
   }
 
   prompt += `Produce your investigation plan as a JSON object with "summary" and "questions".`;

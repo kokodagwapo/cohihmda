@@ -869,6 +869,7 @@ function CohiWidgetRendererWithTenant({
         width={width}
         height={height}
         canvasItemId={canvasItemId}
+        sourceType={payload.sourceType}
       />
     </div>
   );

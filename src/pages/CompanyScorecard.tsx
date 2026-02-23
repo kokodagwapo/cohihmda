@@ -16,7 +16,7 @@ import { useTenantStore } from '@/stores/tenantStore';
 import { useAuth } from '@/contexts/AuthContext';
 import { TopTieringSidebar } from '@/components/layout/TopTieringSidebar';
 import { TopTieringTopBar } from '@/components/layout/TopTieringTopBar';
-import { ExportShareMenu } from '@/components/common/ExportShareMenu';
+import { ExportMenu } from '@/components/common/ExportMenu';
 import { CompanyScorecardDetailTable, SortKey } from '@/components/scorecard/CompanyScorecardDetailTable';
 import type { ExportData } from '@/utils/exportUtils';
 import { KPICard, formatKPIValue } from '@/components/widgets/components/KPICard';
@@ -723,14 +723,10 @@ const CompanyScorecard = () => {
                   ))}
                 </SelectContent>
               </Select>
-              <ExportShareMenu
+              <ExportMenu
                 title="Company Scorecard"
                 targetRef={pageRef}
                 getExportData={getExportData}
-                shareTarget={{
-                  type: "company-scorecard",
-                  label: "Company Scorecard",
-                }}
               />
             </div>
           </div>
