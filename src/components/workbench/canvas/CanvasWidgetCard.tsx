@@ -14,7 +14,7 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
-import { MoreVertical, Copy, Trash2, EyeOff, Check, ArrowUpToLine, ArrowDownToLine, FolderInput, Sparkles } from 'lucide-react';
+import { MoreVertical, Copy, Trash2, EyeOff, Check, ArrowUpToLine, ArrowDownToLine, FolderInput, Sparkles, FileSpreadsheet } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 /** Optional: for dashboard_section widgets, allow hiding sub-sections (e.g. Executive summary). */
@@ -57,6 +57,8 @@ interface CanvasWidgetCardProps {
   onWrapInGroup?: () => void;
   /** Called when the user wants to edit this widget with Cohi AI */
   onEditWithCohi?: () => void;
+  /** Called when the user wants to export this widget's data to Excel */
+  onExportExcel?: () => void;
 }
 
 export function CanvasWidgetCard({
@@ -78,6 +80,7 @@ export function CanvasWidgetCard({
   onMoveToGroup,
   onWrapInGroup,
   onEditWithCohi,
+  onExportExcel,
 }: CanvasWidgetCardProps) {
   const hasHideableSections = hideableSections.length > 0 && typeof onToggleSection === 'function';
   const hasLayerActions = typeof onBringToFront === 'function' || typeof onSendToBack === 'function';
@@ -220,6 +223,15 @@ export function CanvasWidgetCard({
                 <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onEditWithCohi(); }} className="gap-2">
                   <Sparkles className="h-4 w-4 text-violet-500" />
                   Edit with Cohi
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </>
+            )}
+            {onExportExcel && (
+              <>
+                <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onExportExcel(); }} className="gap-2">
+                  <FileSpreadsheet className="h-4 w-4" />
+                  Export to Excel
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
               </>

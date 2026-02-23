@@ -2720,6 +2720,76 @@ export function WorkbenchCanvas({
     }
   }, [items, saveTitle, toast]);
 
+  /** Per-widget Excel export: pulls data from canvasDataStore and writes a single-sheet workbook. */
+  const handleExportWidgetExcel = useCallback(
+    (widgetId: string) => {
+      const entry = useCanvasDataStore.getState().widgets[widgetId];
+      if (!entry || !entry.data) {
+        toast({
+          title: "No data to export",
+          description: "This widget has no data loaded yet.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const sanitizeSheetName = (name: string) =>
+        name.replace(/[\s\\/*?:[\]]/g, "_").slice(0, 31) || "Sheet";
+
+      const wb = XLSX.utils.book_new();
+      const widgetData = entry.data as { vizType?: string; data?: any[]; xKey?: string; yKey?: string };
+      const rows = Array.isArray(widgetData.data) ? widgetData.data : [];
+
+      if (rows.length === 0) {
+        toast({
+          title: "No data to export",
+          description: "This widget returned no rows.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const columns = Object.keys(rows[0]);
+      const header = columns;
+      const dataRows = rows.map((row: any) =>
+        columns.map((c) => {
+          const val = row[c];
+          if (val == null) return "";
+          if (typeof val === "object") return JSON.stringify(val);
+          return val;
+        }),
+      );
+
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.aoa_to_sheet([header, ...dataRows]),
+        sanitizeSheetName(entry.widgetName || "Data"),
+      );
+
+      try {
+        const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+        const blob = new Blob([out], {
+          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        const safeName = (entry.widgetName || "widget").replace(/[^a-z0-9]/gi, "_");
+        a.download = `${safeName}.xlsx`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast({ title: "Downloaded", description: `${entry.widgetName || "Widget"} exported as Excel.` });
+      } catch (err) {
+        toast({
+          title: "Export failed",
+          description: err instanceof Error ? err.message : "Could not create Excel file",
+          variant: "destructive",
+        });
+      }
+    },
+    [toast],
+  );
+
   // ---- Report Generation: Quick Report from Canvas ----
   const handleQuickReport = useCallback(
     async (format: "pptx" | "pdf" = "pptx") => {
@@ -3929,71 +3999,7 @@ Structure it as a narrative-first executive briefing:
                 </Tooltip>
               ) : null}
             </div>
-            {!showReportBuilder && (
-              <div className="flex items-center gap-1 shrink-0">
-                <DropdownMenu>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          className="h-8 w-8 shrink-0"
-                        >
-                          <Download className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">Export</TooltipContent>
-                  </Tooltip>
-                  <DropdownMenuContent align="end" className="w-52">
-                    <DropdownMenuLabel className="text-xs font-medium text-slate-500 dark:text-slate-400">
-                      Export Canvas
-                    </DropdownMenuLabel>
-                    <DropdownMenuItem
-                      onClick={handleExportPng}
-                      className="gap-2"
-                    >
-                      <Download className="h-4 w-4" /> Image (PNG)
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={handleExportPdf}
-                      className="gap-2"
-                    >
-                      <FileText className="h-4 w-4" /> PDF
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={handleExportPptx}
-                      className="gap-2"
-                    >
-                      <Presentation className="h-4 w-4" /> PowerPoint
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={handleExportExcel}
-                      className="gap-2"
-                    >
-                      <FileSpreadsheet className="h-4 w-4" /> Excel
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuLabel className="text-xs font-medium text-slate-500 dark:text-slate-400">
-                      Share
-                    </DropdownMenuLabel>
-                    <DropdownMenuItem
-                      onClick={handleEmailScreenshot}
-                      className="gap-2"
-                    >
-                      <Mail className="h-4 w-4" /> Email screenshot
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={handleEmailLink}
-                      className="gap-2"
-                    >
-                      <LinkIcon className="h-4 w-4" /> Email link
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            )}
+            {/* Per-widget export is available in each widget's context menu */}
           </div>
 
           {/* Inline Report Builder — always mounted, hidden when inactive to preserve state */}
@@ -4292,8 +4298,8 @@ Structure it as a narrative-first executive briefing:
                         availableGroups={availableGroups}
                         onMoveToGroup={handleMoveToGroup}
                         onWrapInGroup={handleWrapInGroup}
+                        onExportExcel={() => handleExportWidgetExcel(item.i)}
                         onEditWithCohi={() => {
-                          // Open Cohi panel with context about this widget
                           setShowCohiPanel(true);
                           const widgetTitle =
                             (payload as any).title ||
