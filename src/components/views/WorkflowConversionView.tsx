@@ -34,10 +34,14 @@ import {
 } from "recharts";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
-import { AlertCircle, Loader2, Minus, Plus, RotateCcw } from "lucide-react";
+import { AlertCircle, Loader2, Maximize2, Minus, Plus, RotateCcw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { WorkflowSegmentLoansModal } from "@/components/views/WorkflowSegmentLoansModal";
 import type { WorkflowSegmentLoanFilter } from "@/hooks/useWorkflowConversionSegmentLoans";
+import {
+  Dialog,
+  DialogContent,
+} from "@/components/ui/dialog";
 
 const PERIOD_PRESETS: PeriodPreset[] = [
   "mtd",
@@ -81,6 +85,7 @@ export function WorkflowConversionView({
   const [segments, setSegments] = useState<{ from: string; to: string }[]>(() => [
     ...DEFAULT_WORKFLOW_SEGMENTS,
   ]);
+  const [fullscreenSegmentIndex, setFullscreenSegmentIndex] = useState<number | null>(null);
 
   const dateRange = periodSelection.dateRange;
   const { data, loading, error } = useWorkflowConversionData({
@@ -309,9 +314,37 @@ export function WorkflowConversionView({
             selectedChannel={selectedChannel}
             segments={segments}
             grouping={grouping}
+            chartHeight={280}
+            showFullscreenButton
+            onFullscreenClick={() => setFullscreenSegmentIndex(index)}
           />
         ))}
       </div>
+      {fullscreenSegmentIndex !== null && (
+        <Dialog open onOpenChange={(open) => !open && setFullscreenSegmentIndex(null)}>
+          <DialogContent className="max-w-[95vw] w-full max-h-[90vh] flex flex-col p-2 sm:p-4" hideCloseButton>
+            <WorkflowSegmentCard
+              index={fullscreenSegmentIndex}
+              segment={segments[fullscreenSegmentIndex]}
+              result={segmentResults[fullscreenSegmentIndex]}
+              dateRange={dateRange}
+              calculationType={calculationType}
+              loading={loading}
+              fromOptions={getFromOptions(fullscreenSegmentIndex)}
+              getToOptions={getToOptions}
+              onFromChange={(value) => updateSegment(fullscreenSegmentIndex, "from", value)}
+              onToChange={(value) => updateSegment(fullscreenSegmentIndex, "to", value)}
+              selectedTenantId={selectedTenantId}
+              selectedChannel={selectedChannel}
+              segments={segments}
+              grouping={grouping}
+              chartHeight={420}
+              showFullscreenButton={false}
+              onCloseFullscreen={() => setFullscreenSegmentIndex(null)}
+            />
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
@@ -331,6 +364,10 @@ interface WorkflowSegmentCardProps {
   selectedChannel?: string | null;
   segments: { from: string; to: string }[];
   grouping: WorkflowGrouping;
+  chartHeight?: number;
+  showFullscreenButton?: boolean;
+  onFullscreenClick?: () => void;
+  onCloseFullscreen?: () => void;
 }
 
 /** True when range is ≤31 days (backend uses day bucket); else months. */
@@ -356,6 +393,10 @@ function WorkflowSegmentCard({
   selectedChannel,
   segments,
   grouping,
+  chartHeight = 280,
+  showFullscreenButton = false,
+  onFullscreenClick,
+  onCloseFullscreen,
 }: WorkflowSegmentCardProps) {
   const [loansModalOpen, setLoansModalOpen] = React.useState(false);
   const [loansModalFilter, setLoansModalFilter] = React.useState<WorkflowSegmentLoanFilter | null>(null);
@@ -380,40 +421,66 @@ function WorkflowSegmentCard({
 
   return (
     <Card className="flex min-h-[460px] flex-col overflow-hidden border-slate-200/80 bg-white shadow-sm dark:border-slate-700/50 dark:bg-slate-900/50">
-      <CardHeader className="h-[48px] shrink-0 px-4 py-2">
-        <div className="flex h-[36px] items-center justify-center gap-2">
-          <Select value={segment.from} onValueChange={onFromChange}>
-            <SelectTrigger className="h-9 w-[140px] text-sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {fromOptions.map((m) => (
-                <SelectItem key={m.id} value={m.id}>
-                  {m.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <span className="text-slate-500 dark:text-slate-400">→</span>
-          <Select
-            value={segment.to}
-            onValueChange={onToChange}
-            disabled={toOptions.length === 0}
-          >
-            <SelectTrigger className="h-9 w-[140px] text-sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {toOptions.map((m) => (
-                <SelectItem key={m.id} value={m.id}>
-                  {m.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      <CardHeader className="h-[48px] shrink-0 px-3 py-2">
+        <div className="flex h-[36px] items-center gap-2 w-full">
+          <div className="flex flex-1 items-center justify-center gap-2 min-w-0">
+            <Select value={segment.from} onValueChange={onFromChange}>
+              <SelectTrigger className="h-9 w-[140px] text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {fromOptions.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="text-slate-500 dark:text-slate-400">→</span>
+            <Select
+              value={segment.to}
+              onValueChange={onToChange}
+              disabled={toOptions.length === 0}
+            >
+              <SelectTrigger className="h-9 w-[140px] text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {toOptions.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {showFullscreenButton && onFullscreenClick && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+              onClick={onFullscreenClick}
+              aria-label="View fullscreen"
+            >
+              <Maximize2 className="h-4 w-4" />
+            </Button>
+          )}
+          {onCloseFullscreen && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+              onClick={onCloseFullscreen}
+              aria-label="Close fullscreen"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          )}
         </div>
       </CardHeader>
-      <CardContent className="flex flex-1 flex-col gap-2 px-4 pb-3 pt-0">
+      <CardContent className="flex flex-1 flex-col gap-2 px-2 pb-3 pt-0">
         {/* KPIs - fixed height so chart starts at same position in every card */}
         <div className="grid h-[64px] shrink-0 grid-cols-3 items-center gap-2 text-center">
           <div>
@@ -476,7 +543,12 @@ function WorkflowSegmentCard({
         )}
 
         {/* Chart or message - fixed height so same in every card, bottom-aligned */}
-        <div className="mt-auto h-[280px] min-h-[280px] max-h-[280px] w-full shrink-0 rounded-lg border border-slate-100 bg-slate-50/50 dark:border-slate-800 dark:bg-slate-900/30">
+        <div
+          className={cn(
+            "mt-auto w-full shrink-0 rounded-lg border border-slate-100 bg-slate-50/50 dark:border-slate-800 dark:bg-slate-900/30",
+          )}
+          style={{ minHeight: chartHeight, maxHeight: chartHeight, height: chartHeight }}
+        >
           {!valid ? (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm text-slate-500 dark:text-slate-400">
               <AlertCircle className="h-8 w-8 shrink-0" />
@@ -494,7 +566,7 @@ function WorkflowSegmentCard({
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart
                 data={series}
-                margin={{ top: 10, right: 46, left: 46, bottom: 28 }}
+                margin={{ top: 24, right: 18, left: 18, bottom: 24 }}
                 barCategoryGap="12%"
                 barGap={2}
               >
@@ -516,14 +588,14 @@ function WorkflowSegmentCard({
                 />
                 <YAxis
                   yAxisId="left"
-                  width={42}
+                  width={28}
                   tick={{ fontSize: 10 }}
                   label={{ value: "Units", angle: -90, position: "insideLeft", fontSize: 11 }}
                 />
                 <YAxis
                   yAxisId="right"
                   orientation="right"
-                  width={42}
+                  width={28}
                   tick={{ fontSize: 10 }}
                   domain={calculationType === "conversion" ? [0, 100] : undefined}
                   label={{
