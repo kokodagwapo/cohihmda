@@ -151,37 +151,83 @@ async function waitIfPaused(session: ResearchSession, emit: SSEEmitter): Promise
 // DB Persistence
 // ============================================================================
 
+function getPrimaryCategory(plan: ResearchPlan | undefined): string | null {
+  const first = plan?.questions?.[0];
+  return (first?.category as string) || null;
+}
+
+const SAVE_SESSION_WITH_CATEGORY = `
+  INSERT INTO research_sessions (id, tenant_id, user_id, user_email, topic, phase, plan, findings, report, events, follow_up_history, error, primary_category, created_at, updated_at)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, to_timestamp($14::double precision / 1000), NOW())
+  ON CONFLICT (id) DO UPDATE SET
+    phase = EXCLUDED.phase,
+    plan = EXCLUDED.plan,
+    findings = EXCLUDED.findings,
+    report = EXCLUDED.report,
+    events = EXCLUDED.events,
+    follow_up_history = EXCLUDED.follow_up_history,
+    error = EXCLUDED.error,
+    primary_category = EXCLUDED.primary_category,
+    updated_at = NOW()`;
+
+const SAVE_SESSION_WITHOUT_CATEGORY = `
+  INSERT INTO research_sessions (id, tenant_id, user_id, user_email, topic, phase, plan, findings, report, events, follow_up_history, error, created_at, updated_at)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, to_timestamp($13::double precision / 1000), NOW())
+  ON CONFLICT (id) DO UPDATE SET
+    phase = EXCLUDED.phase,
+    plan = EXCLUDED.plan,
+    findings = EXCLUDED.findings,
+    report = EXCLUDED.report,
+    events = EXCLUDED.events,
+    follow_up_history = EXCLUDED.follow_up_history,
+    error = EXCLUDED.error,
+    updated_at = NOW()`;
+
 export async function saveSession(session: ResearchSession, tenantPool: pg.Pool): Promise<void> {
+  const primaryCategory = getPrimaryCategory(session.plan);
+  const paramsWithCategory = [
+    session.id,
+    session.tenantId,
+    session.userId,
+    session.userEmail,
+    session.topic || null,
+    session.phase,
+    session.plan ? JSON.stringify(session.plan) : null,
+    JSON.stringify(session.findings),
+    session.report ? JSON.stringify(session.report) : null,
+    JSON.stringify(session.events),
+    JSON.stringify(session.followUpHistory),
+    session.error || null,
+    primaryCategory,
+    session.createdAt,
+  ];
+  const paramsWithoutCategory = [
+    session.id,
+    session.tenantId,
+    session.userId,
+    session.userEmail,
+    session.topic || null,
+    session.phase,
+    session.plan ? JSON.stringify(session.plan) : null,
+    JSON.stringify(session.findings),
+    session.report ? JSON.stringify(session.report) : null,
+    JSON.stringify(session.events),
+    JSON.stringify(session.followUpHistory),
+    session.error || null,
+    session.createdAt,
+  ];
   try {
-    await tenantPool.query(`
-      INSERT INTO research_sessions (id, tenant_id, user_id, user_email, topic, phase, plan, findings, report, events, follow_up_history, error, created_at, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, to_timestamp($13::double precision / 1000), NOW())
-      ON CONFLICT (id) DO UPDATE SET
-        phase = EXCLUDED.phase,
-        plan = EXCLUDED.plan,
-        findings = EXCLUDED.findings,
-        report = EXCLUDED.report,
-        events = EXCLUDED.events,
-        follow_up_history = EXCLUDED.follow_up_history,
-        error = EXCLUDED.error,
-        updated_at = NOW()
-    `, [
-      session.id,
-      session.tenantId,
-      session.userId,
-      session.userEmail,
-      session.topic || null,
-      session.phase,
-      session.plan ? JSON.stringify(session.plan) : null,
-      JSON.stringify(session.findings),
-      session.report ? JSON.stringify(session.report) : null,
-      JSON.stringify(session.events),
-      JSON.stringify(session.followUpHistory),
-      session.error || null,
-      session.createdAt,
-    ]);
+    await tenantPool.query(SAVE_SESSION_WITH_CATEGORY, paramsWithCategory);
   } catch (err: any) {
-    console.error(`[Research] Failed to save session ${session.id}:`, err.message);
+    if (err.message?.includes("primary_category") && err.message?.includes("does not exist")) {
+      try {
+        await tenantPool.query(SAVE_SESSION_WITHOUT_CATEGORY, paramsWithoutCategory);
+      } catch (fallbackErr: any) {
+        console.error(`[Research] Failed to save session ${session.id}:`, fallbackErr.message);
+      }
+    } else {
+      console.error(`[Research] Failed to save session ${session.id}:`, err.message);
+    }
   }
 }
 
@@ -227,25 +273,44 @@ export async function loadSession(sessionId: string, tenantPool: pg.Pool): Promi
   }
 }
 
+const LIST_SESSIONS_WITH_CATEGORY = `
+  SELECT id, topic, phase, primary_category, created_at, updated_at, (user_id = $1) AS is_owner
+  FROM research_sessions
+  WHERE user_id = $1
+     OR visibility = 'global'
+     OR (visibility = 'shared' AND $1 = ANY(shared_with_user_ids))
+  ORDER BY updated_at DESC
+  LIMIT 50`;
+
+const LIST_SESSIONS_WITHOUT_CATEGORY = `
+  SELECT id, topic, phase, created_at, updated_at, (user_id = $1) AS is_owner
+  FROM research_sessions
+  WHERE user_id = $1
+     OR visibility = 'global'
+     OR (visibility = 'shared' AND $1 = ANY(shared_with_user_ids))
+  ORDER BY updated_at DESC
+  LIMIT 50`;
+
 export async function listSessions(
   tenantPool: pg.Pool,
   userId: string
-): Promise<Array<{ id: string; topic: string | null; phase: string; createdAt: string; updatedAt: string; isOwner: boolean }>> {
+): Promise<Array<{ id: string; topic: string | null; phase: string; primaryCategory: string | null; createdAt: string; updatedAt: string; isOwner: boolean }>> {
   try {
-    const result = await tenantPool.query(
-      `SELECT id, topic, phase, created_at, updated_at, (user_id = $1) AS is_owner
-       FROM research_sessions
-       WHERE user_id = $1
-          OR visibility = 'global'
-          OR (visibility = 'shared' AND $1 = ANY(shared_with_user_ids))
-       ORDER BY updated_at DESC
-       LIMIT 50`,
-      [userId]
-    );
+    let result: pg.QueryResult;
+    try {
+      result = await tenantPool.query(LIST_SESSIONS_WITH_CATEGORY, [userId]);
+    } catch (colErr: any) {
+      if (colErr.message?.includes("primary_category") && colErr.message?.includes("does not exist")) {
+        result = await tenantPool.query(LIST_SESSIONS_WITHOUT_CATEGORY, [userId]);
+      } else {
+        throw colErr;
+      }
+    }
     return result.rows.map((r: any) => ({
       id: r.id,
       topic: r.topic,
       phase: r.phase,
+      primaryCategory: r.primary_category ?? null,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
       isOwner: r.is_owner ?? true,
@@ -593,7 +658,7 @@ export async function runResearchPipeline(
       timestamp: Date.now(),
     });
 
-    const report = await runSynthesisAgent(plan, allFindings, apiKey);
+    const report = await runSynthesisAgent(plan, allFindings, apiKey, session.topic);
     session.report = report;
     emit({ type: "synthesis", data: report, timestamp: Date.now() });
 

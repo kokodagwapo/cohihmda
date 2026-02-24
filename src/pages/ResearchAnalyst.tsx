@@ -102,7 +102,7 @@ function SessionSidebar({
   collapsed,
   onToggle,
 }: {
-  sessions: Array<{ id: string; topic: string | null; phase: string; createdAt: string; updatedAt: string; isOwner?: boolean }>;
+  sessions: Array<{ id: string; topic: string | null; phase: string; primaryCategory?: string | null; createdAt: string; updatedAt: string; isOwner?: boolean }>;
   currentSessionId: string | null;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
@@ -110,8 +110,12 @@ function SessionSidebar({
   collapsed: boolean;
   onToggle: () => void;
 }) {
-  const mySessions = sessions.filter((s) => s.isOwner !== false);
-  const sharedWithMe = sessions.filter((s) => s.isOwner === false);
+  const [search, setSearch] = useState("");
+  const searchLower = search.trim().toLowerCase();
+  const matchesSearch = (s: { topic: string | null }) =>
+    !searchLower || (s.topic?.toLowerCase().includes(searchLower) ?? false);
+  const mySessions = sessions.filter((s) => s.isOwner !== false).filter(matchesSearch);
+  const sharedWithMe = sessions.filter((s) => s.isOwner === false).filter(matchesSearch);
 
   if (collapsed) {
     return (
@@ -139,9 +143,20 @@ function SessionSidebar({
           </Button>
         </div>
       </div>
+      <div className="px-2 py-1.5 border-b">
+        <Input
+          type="search"
+          placeholder="Search sessions..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="h-8 text-xs"
+        />
+      </div>
       <div className="flex-1 overflow-y-auto">
         {sessions.length === 0 ? (
           <p className="text-xs text-muted-foreground text-center py-6">No sessions yet</p>
+        ) : mySessions.length === 0 && sharedWithMe.length === 0 ? (
+          <p className="text-xs text-muted-foreground text-center py-6">No sessions match your search</p>
         ) : (
           <>
             {mySessions.length > 0 && (
@@ -159,8 +174,13 @@ function SessionSidebar({
                 onClick={() => onSelect(s.id)}
               >
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium truncate">{s.topic || "Open Analysis"}</p>
-                  <div className="flex items-center gap-1.5 mt-0.5">
+                  <p className="text-sm font-medium line-clamp-2">{s.topic || "Open Analysis"}</p>
+                  <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                    {s.primaryCategory && (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 capitalize">
+                        {s.primaryCategory}
+                      </Badge>
+                    )}
                     <PhaseBadge phase={s.phase} />
                     <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
                       <Clock className="h-2.5 w-2.5" />
@@ -196,8 +216,13 @@ function SessionSidebar({
                 onClick={() => onSelect(s.id)}
               >
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium truncate">{s.topic || "Open Analysis"}</p>
-                  <div className="flex items-center gap-1.5 mt-0.5">
+                  <p className="text-sm font-medium line-clamp-2">{s.topic || "Open Analysis"}</p>
+                  <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                    {s.primaryCategory && (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 capitalize">
+                        {s.primaryCategory}
+                      </Badge>
+                    )}
                     <PhaseBadge phase={s.phase} />
                     <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
                       <Clock className="h-2.5 w-2.5" />
@@ -345,7 +370,7 @@ export default function ResearchAnalyst() {
       sessionParamHandled.current = true;
       setSearchParams({}, { replace: true });
       runSession(sessionParam);
-      setActiveTab("timeline");
+      // Tab will switch to report/findings when session data is available
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
@@ -365,6 +390,17 @@ export default function ResearchAnalyst() {
       setActiveTab("report");
     }
   }, [report]);
+
+  // Switch to findings tab when first finding arrives (so results are primary view during investigation)
+  useEffect(() => {
+    if (
+      findings.length > 0 &&
+      !report &&
+      (phase === "investigating" || phase === "synthesizing")
+    ) {
+      setActiveTab("findings");
+    }
+  }, [findings.length, report, phase]);
 
   // Reset report tracking and drill-down when session changes
   useEffect(() => {
@@ -652,6 +688,7 @@ export default function ResearchAnalyst() {
                     isRunning={isRunning}
                     isPaused={isPaused}
                     sessionId={sessionId}
+                    totalQuestions={plan?.questions?.length}
                     onSubmitFeedback={submitFeedback}
                   />
                 </TabsContent>
@@ -739,6 +776,13 @@ export default function ResearchAnalyst() {
                             console.error("Error tracking insight:", err);
                           }
                         }}
+                        onRunFurtherInvestigation={(question) => {
+                          reset();
+                          setTopicInput(question);
+                          lastReportRef.current = false;
+                          startSession(question);
+                          setActiveTab("timeline");
+                        }}
                       />
                     </div>
                   ) : (
@@ -760,7 +804,18 @@ export default function ResearchAnalyst() {
 
               {/* Bottom Input Bar: Steering (running) or Follow-up (complete) */}
               {showBottomInput && (
-                <div className="border-t px-6 py-3" data-tour="research-followup">
+                <div
+                  className={cn(
+                    "border-t px-6 py-3",
+                    phase === "complete" && "bg-muted/40"
+                  )}
+                  data-tour="research-followup"
+                >
+                  {phase === "complete" && (
+                    <p className="text-sm font-medium text-foreground mb-2">
+                      Continue the conversation
+                    </p>
+                  )}
                   <div className="flex gap-2 max-w-2xl">
                     {isRunning && (
                       isPaused ? (
@@ -793,6 +848,27 @@ export default function ResearchAnalyst() {
                       <SendHorizontal className="h-4 w-4" />
                     </Button>
                   </div>
+                  {phase === "complete" && report?.furtherInvestigation && report.furtherInvestigation.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      <span className="text-xs text-muted-foreground self-center mr-1">Suggested:</span>
+                      {report.furtherInvestigation.map((item, i) => (
+                        <Badge
+                          key={i}
+                          variant="secondary"
+                          className="cursor-pointer hover:bg-primary/20 hover:text-primary transition-colors py-1 px-2 text-xs font-normal"
+                          onClick={() => {
+                            reset();
+                            setTopicInput(item.question);
+                            lastReportRef.current = false;
+                            startSession(item.question);
+                            setActiveTab("timeline");
+                          }}
+                        >
+                          {item.question}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
                   <p className="text-xs text-muted-foreground mt-1">
                     {phase === "complete"
                       ? "Ask a follow-up and the agent will investigate using the existing context."

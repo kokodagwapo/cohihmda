@@ -81,6 +81,8 @@ interface ResearchReportProps {
   ) => void;
   onDrillDown?: (finding: Finding) => void;
   onTrackInsight?: (headline: string, detail: string) => void;
+  /** When user clicks "Run this investigation" on a further-investigation suggestion. */
+  onRunFurtherInvestigation?: (question: string) => void;
 }
 
 type ViewMode = "brief" | "full";
@@ -375,6 +377,14 @@ function SectionNav({
 // Sub-components
 // ============================================================================
 
+function DirectAnswerSection({ directAnswer }: { directAnswer: string }) {
+  return (
+    <div className="rounded-lg border border-primary/20 bg-primary/5 p-4">
+      <p className="text-sm font-medium text-foreground leading-snug">{directAnswer}</p>
+    </div>
+  );
+}
+
 function ExecutiveSummary({ summary }: { summary: string }) {
   return (
     <Card>
@@ -462,8 +472,14 @@ function ThemeAccordion({
   );
 }
 
-function CollapsibleEvidence({ children }: { children: React.ReactNode }) {
-  const [open, setOpen] = useState(false);
+function CollapsibleEvidence({
+  children,
+  defaultOpen = false,
+}: {
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
@@ -483,6 +499,7 @@ function InsightCard({
   onDrillDown,
   onTrackInsight,
   selectedTenantId,
+  defaultEvidenceOpen = false,
 }: {
   insight: RankedInsight;
   findings: Finding[];
@@ -490,6 +507,8 @@ function InsightCard({
   onDrillDown?: (finding: Finding) => void;
   onTrackInsight?: (headline: string, detail: string) => void;
   selectedTenantId?: string | null;
+  /** Open the evidence (table/chart) by default for top insights. */
+  defaultEvidenceOpen?: boolean;
 }) {
   const [chatOpen, setChatOpen] = useState(false);
   const relatedFindings = findings.filter((f) =>
@@ -689,9 +708,9 @@ function InsightCard({
             const firstEvidence = firstWithEvidence?.evidence?.[0];
             if (!firstEvidence?.rows?.length) return null;
             return (
-              <CollapsibleEvidence>
+              <CollapsibleEvidence defaultOpen={defaultEvidenceOpen}>
                 <div className="space-y-3 pt-1">
-                  <EvidencePreviewTable evidence={firstEvidence} maxRows={10} />
+                  <EvidencePreviewTable evidence={firstEvidence} maxRows={defaultEvidenceOpen ? 20 : 10} />
                   <AutoChart evidence={firstEvidence} />
                 </div>
               </CollapsibleEvidence>
@@ -732,17 +751,29 @@ function InsightCard({
 
 function FurtherInvestigationCard({
   item,
+  onRun,
 }: {
   item: { question: string; rationale: string };
+  onRun?: (question: string) => void;
 }) {
   return (
     <div className="flex gap-2 p-2.5 rounded-md border border-dashed bg-muted/30">
       <Search className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" />
-      <div>
+      <div className="min-w-0 flex-1">
         <p className="text-sm font-medium">{item.question}</p>
         <p className="text-xs text-muted-foreground mt-0.5">
           {item.rationale}
         </p>
+        {onRun && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-2"
+            onClick={() => onRun(item.question)}
+          >
+            Run this investigation
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -760,6 +791,7 @@ export function ResearchReport({
   onSubmitFeedback,
   onDrillDown,
   onTrackInsight,
+  onRunFurtherInvestigation,
 }: ResearchReportProps) {
   const [viewMode, setViewMode] = useState<ViewMode>("brief");
   const [activeSection, setActiveSection] = useState("summary");
@@ -861,6 +893,17 @@ export function ResearchReport({
         </div>
       </div>
 
+      {/* ========== Direct Answer (when user asked a specific question) ========== */}
+      {report.directAnswer && (
+        <div className="space-y-1">
+          <h3 className="text-sm font-semibold flex items-center gap-2">
+            Answer
+            <InfoTip text="Direct response to your question based on the data" />
+          </h3>
+          <DirectAnswerSection directAnswer={report.directAnswer} />
+        </div>
+      )}
+
       {/* ========== Executive Summary ========== */}
       <div ref={summaryRef}>
         <ExecutiveSummary summary={report.executiveSummary} />
@@ -916,6 +959,7 @@ export function ResearchReport({
                 onDrillDown={onDrillDown}
                 onTrackInsight={onTrackInsight}
                 selectedTenantId={selectedTenantId}
+                defaultEvidenceOpen={insight.rank <= 2}
               />
             ))}
           </div>
@@ -936,7 +980,11 @@ export function ResearchReport({
               </h3>
               <div className="space-y-2">
                 {report.furtherInvestigation.map((item, i) => (
-                  <FurtherInvestigationCard key={i} item={item} />
+                  <FurtherInvestigationCard
+                    key={i}
+                    item={item}
+                    onRun={onRunFurtherInvestigation}
+                  />
                 ))}
               </div>
             </div>

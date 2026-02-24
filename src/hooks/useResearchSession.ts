@@ -78,6 +78,8 @@ export interface FurtherInvestigation {
 }
 
 export interface ResearchReport {
+  /** Optional 1-2 sentence direct answer to the user's original question. */
+  directAnswer?: string | null;
   executiveSummary: string;
   themes: ResearchTheme[];
   rankedInsights: RankedInsight[];
@@ -105,6 +107,8 @@ export interface SessionListItem {
   id: string;
   topic: string | null;
   phase: string;
+  /** From planner (e.g. performance, risk, pipeline) for sidebar badges. */
+  primaryCategory?: string | null;
   isOwner?: boolean;
   createdAt: string;
   updatedAt: string;

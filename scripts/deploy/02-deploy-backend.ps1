@@ -94,6 +94,18 @@ if ($COGNITO_USER_POOL_ID) {
     Write-Status "Cognito SSO not configured for $ENVIRONMENT - skipping" "Yellow"
 }
 
+# Email / SES configuration
+$params += "ParameterKey=EmailFromAddress,ParameterValue=noreply@coheus1.com"
+
+# Platform SSO configuration
+if ($COGNITO_USER_POOL_ID) {
+    $platformIdpName = if ($ENVIRONMENT -eq "prod") { "" } else { "TestAccCognito" }
+    if ($platformIdpName) {
+        $params += "ParameterKey=PlatformSsoIdpName,ParameterValue=$platformIdpName"
+    }
+    $params += "ParameterKey=PlatformJitDomains,ParameterValue=teraverde.com"
+}
+
 # FRED API key (optional - market rate sync disabled if not provided)
 if ($FRED_API_KEY) {
     Write-Status "FRED API key configured"

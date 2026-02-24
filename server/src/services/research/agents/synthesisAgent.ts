@@ -35,6 +35,8 @@ export interface FurtherInvestigation {
 }
 
 export interface ResearchReport {
+  /** Optional 1-2 sentence direct answer to the user's original question. */
+  directAnswer?: string | null;
   executiveSummary: string;
   themes: ResearchTheme[];
   rankedInsights: RankedInsight[];
@@ -54,6 +56,7 @@ You will receive:
 
 Your output is a JSON object:
 {
+  "directAnswer": "Optional: if the user asked a specific question, give a 1-2 sentence direct answer to that question with the key result (e.g. the main number or table takeaway). Omit or null if the request was broad / exploratory.",
   "executiveSummary": "2-3 sentence high-level summary of the most important findings",
   "themes": [
     {
@@ -81,8 +84,10 @@ Your output is a JSON object:
 }
 
 RULES:
+- DATA BUILD requests: When the user asked for a specific output (a table, a breakdown, "show me X"), set directAnswer to a 1-2 sentence response telling them what was produced (e.g. "The table below shows hours per personnel across all loans."). The finding that contains the user's requested table MUST be the basis for the rank-1 insight so its evidence data is displayed first and prominently.
+- INVESTIGATION requests: When the request was broad/exploratory, omit directAnswer or set to null, and rank insights by business impact.
 - Themes should group related findings and identify cross-cutting patterns
-- Ranked insights should be ordered by business impact (most impactful first)
+- Ranked insights: For data-build requests, the finding that directly answers the user's question is ALWAYS rank 1. For investigations, rank by business impact.
 - Use specific numbers from the findings — do not generalize or invent data
 - Severity levels: "critical" = requires immediate attention, "warning" = concerning trend, "info" = noteworthy, "positive" = good performance
 - Only suggest further investigation for genuinely unresolved questions
@@ -96,7 +101,8 @@ RULES:
 export async function runSynthesisAgent(
   plan: ResearchPlan,
   findings: Finding[],
-  apiKey: string
+  apiKey: string,
+  userTopic?: string | null
 ): Promise<ResearchReport> {
   const planSummary = plan.questions
     .map((q) => `Q${q.id}: [${q.category}] ${q.topic}`)
@@ -123,12 +129,15 @@ export async function runSynthesisAgent(
     .join("\n\n");
 
   const userPrompt = [
+    userTopic ? `## User's question / topic\n${userTopic}\n` : "",
     `## Research Plan`,
     planSummary,
     `\n## Findings from Data Analysts`,
     findingsSummary,
-    `\nSynthesize these findings into a cohesive research report. Respond with JSON.`,
-  ].join("\n");
+    `\nSynthesize these findings into a cohesive research report.${userTopic ? " If the user asked a specific question above, include a directAnswer field with a 1-2 sentence direct response." : ""} Respond with JSON.`,
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   const messages: LLMMessage[] = [
     { role: "system", content: SYNTHESIS_SYSTEM_PROMPT },

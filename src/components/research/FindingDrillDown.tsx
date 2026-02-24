@@ -620,7 +620,7 @@ function EvidenceTable({ evidence, index, findingTitle, sessionId, onSaveToWorkb
 // Evidence Preview Table (lightweight, for inline use in Report)
 // ============================================================================
 
-const EVIDENCE_PREVIEW_MAX_ROWS = 10;
+const EVIDENCE_PREVIEW_MAX_ROWS = 20;
 
 export interface EvidencePreviewTableProps {
   evidence: EvidenceItem;

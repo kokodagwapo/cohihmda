@@ -19,7 +19,6 @@ import { listTenants } from "../services/tenantProvisioningService.js";
 import { createEncompassUserSyncService } from "../services/encompassUserSyncService.js";
 import ssoConfigRoutes from "./admin/ssoConfig.js";
 import * as cognitoAuth from "../services/cognito/cognitoAuthService.js";
-import { requestEmailVerification } from "../services/sesVerificationService.js";
 
 const router = Router();
 
@@ -443,9 +442,6 @@ router.post(
       }
 
       const sendInvite = !validated.password;
-      if (sendInvite) {
-        await requestEmailVerification(validated.email);
-      }
       try {
         let cognitoResult = await cognitoAuth.createUser(
           validated.email,
@@ -1054,9 +1050,6 @@ router.post(
       }
 
       const sendInvite = !validated.password;
-      if (sendInvite) {
-        await requestEmailVerification(validated.email);
-      }
       try {
         const cognitoResult = await cognitoAuth.createUser(
           validated.email,
