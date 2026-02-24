@@ -74,59 +74,18 @@ export const ChannelSelector = ({
 
         // Filter out any channels/groups with empty string values (breaks Radix Select)
         const validChannels = (data.channels || []).filter(
-          (c) => c.channel && c.channel.trim() !== ""
+          (c) => c.channel && c.channel.trim() !== "",
         );
         const validChannelGroups = (data.channelGroups || []).filter(
-          (g) => g.group && g.group.trim() !== ""
+          (g) => g.group && g.group.trim() !== "",
         );
 
         setChannels(validChannels);
         setChannelGroups(validChannelGroups);
 
-        // Auto-select only on first visit (when selectedChannel is null and not "All")
-        // If user has explicitly selected "All", don't override it
-        // Note: selectedChannel === "All" means user chose "All Channels"
-        //       selectedChannel === null means never selected (first visit)
+        // Default to "All Channels" on first visit (when selectedChannel is null)
         if (selectedChannel === null) {
-          if (
-            useGroupedView &&
-            data.channelGroups &&
-            data.channelGroups.length > 0
-          ) {
-            // Find the channel group with the most loans
-            const mostPopulated = data.channelGroups.reduce(
-              (max, group) => (group.loanCount > max.loanCount ? group : max),
-              data.channelGroups[0]
-            );
-
-            if (mostPopulated && mostPopulated.loanCount > 0) {
-              console.log(
-                "[ChannelSelector] Auto-selecting most populated channel group:",
-                mostPopulated.group,
-                "with",
-                mostPopulated.loanCount,
-                "loans"
-              );
-              onChannelChange(mostPopulated.group);
-            }
-          } else if (!useGroupedView && validChannels.length > 0) {
-            // Find the individual channel with the most loans
-            const mostPopulated = validChannels.reduce(
-              (max, ch) => (ch.loanCount > max.loanCount ? ch : max),
-              validChannels[0]
-            );
-
-            if (mostPopulated && mostPopulated.loanCount > 0) {
-              console.log(
-                "[ChannelSelector] Auto-selecting most populated channel:",
-                mostPopulated.channel,
-                "with",
-                mostPopulated.loanCount,
-                "loans"
-              );
-              onChannelChange(mostPopulated.channel);
-            }
-          }
+          onChannelChange("All");
         }
       } catch (err: any) {
         console.error("[ChannelSelector] Error fetching channels:", err);
@@ -155,14 +114,14 @@ export const ChannelSelector = ({
       const group = channelGroups.find((g) => g.group === selectedChannel);
       if (group) {
         return `${formatChannelName(
-          group.group
+          group.group,
         )} (${group.loanCount.toLocaleString()})`;
       }
     } else {
       const channel = channels.find((c) => c.channel === selectedChannel);
       if (channel) {
         return `${formatChannelName(
-          channel.channel
+          channel.channel,
         )} (${channel.loanCount.toLocaleString()})`;
       }
     }
