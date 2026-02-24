@@ -573,7 +573,7 @@ function GridCellWidget({
       {/* Widget content */}
       <div className="flex-1 min-h-0 overflow-hidden">
         {item.kind === 'registry' ? (
-          <GridCellRegistryWidget defId={item.defId} canvasItemId={itemId} width={width} height={height - 20} />
+          <GridCellRegistryWidget defId={item.defId} configOverrides={item.configOverrides} canvasItemId={itemId} width={width} height={height - 20} />
         ) : (
           <GridCellCohiWidget item={item} canvasItemId={itemId} width={width} height={height - 20} dateFilter={dateFilter} dimensionFilters={dimensionFilters} filterSyncEnabled={filterSyncEnabled} onFilterChange={onFilterChange} onVizTypeChange={onVizTypeChange} />
         )}
@@ -633,11 +633,13 @@ function getLoanDetailFilterSummary(filters: SectionFilters): string | undefined
 
 function GridCellRegistryWidget({
   defId,
+  configOverrides,
   canvasItemId,
   width,
   height,
 }: {
   defId: string;
+  configOverrides?: Record<string, unknown>;
   canvasItemId: string;
   width: number;
   height: number;
@@ -702,6 +704,7 @@ function GridCellRegistryWidget({
     ...(filterSummary != null && { filterSummary }),
     ...(customColumns != null && { customColumns }),
     ...highPerformersConfig,
+    ...configOverrides,
   };
 
   return (

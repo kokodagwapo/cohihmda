@@ -14,8 +14,10 @@ import type {
   CanvasStateSnapshot,
 } from '@/types/widgetActions';
 import type { CanvasLayoutItem } from '@/components/workbench/canvas/types';
+import type { GroupWidgetItem } from '@/components/workbench/canvas/types';
 import { useCanvasDataStore } from '@/stores/canvasDataStore';
 import { useWidgetSectionStore } from '@/stores/widgetSectionStore';
+import { getWidgetDefinition } from '@/components/widgets/registry';
 
 // ---------------------------------------------------------------------------
 // Tenant resolution helper – mirrors logic from useCohiChat
@@ -221,11 +223,39 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
             }
           : undefined;
 
+        // Build widget list and include grid layouts for agent context
+        const items = item.payload.items ?? item.payload.widgetIds?.map((defId: string) => ({ kind: 'registry' as const, defId })) ?? [];
+        const widgets: CanvasStateSnapshot['groups'][0]['widgets'] = [];
+        function itemKey(groupItem: GroupWidgetItem, idx: number): string {
+          if (groupItem.kind === 'registry') return `${groupItem.defId}__${idx}`;
+          return `cohi__${groupItem.id}__${idx}`;
+        }
+        items.forEach((groupItem: GroupWidgetItem, idx: number) => {
+          const key = itemKey(groupItem, idx);
+          if (groupItem.kind === 'registry') {
+            const def = getWidgetDefinition(groupItem.defId);
+            widgets.push({
+              id: key,
+              kind: 'registry',
+              defId: groupItem.defId,
+              name: def?.name,
+            });
+          } else {
+            widgets.push({
+              id: key,
+              kind: 'cohi',
+              title: groupItem.title,
+            });
+          }
+        });
+
         groups.push({
           groupId: item.payload.groupId,
           title: item.payload.title,
           sectionType: item.payload.sectionType,
           widgetIds: item.payload.widgetIds,
+          widgets: widgets.length > 0 ? widgets : undefined,
+          widgetLayouts: item.payload.widgetLayouts,
           filters,
         });
       } else {
@@ -335,7 +365,9 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
         if (response.actions?.length && onAutoExecuteActions) {
           const executableTypes = new Set([
             'add_existing_widget', 'create_widget', 'create_canvas',
-            'suggest_dashboard', 'modify_widget', 'delete_widget',
+            'suggest_dashboard', 'modify_widget', 'modify_group',
+            'modify_registry_widget', 'create_dashboard', 'convert_to_sql_widget',
+            'delete_widget',
           ]);
           const autoActions = response.actions.filter((a) => executableTypes.has(a.type));
           if (autoActions.length > 0) {

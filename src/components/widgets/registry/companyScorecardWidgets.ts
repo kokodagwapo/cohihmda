@@ -87,6 +87,13 @@ export const companyScorecardUnits: WidgetDefinition<KPIData> = {
   defaultSize: { w: 100, h: 48 },
   minSize: { w: 50, h: 28 },
   component: KPICard,
+  configurableProperties: [
+    { key: 'format', label: 'Number format', type: 'select', default: 'number', options: [
+      { value: 'number', label: 'Number' },
+      { value: 'currency', label: 'Currency' },
+      { value: 'percent', label: 'Percent' },
+    ] },
+  ],
 };
 
 export const companyScorecardVolume: WidgetDefinition<KPIData> = {
@@ -107,6 +114,13 @@ export const companyScorecardVolume: WidgetDefinition<KPIData> = {
   defaultSize: { w: 100, h: 48 },
   minSize: { w: 50, h: 28 },
   component: KPICard,
+  configurableProperties: [
+    { key: 'format', label: 'Number format', type: 'select', default: 'currency', options: [
+      { value: 'number', label: 'Number' },
+      { value: 'currency', label: 'Currency' },
+      { value: 'percent', label: 'Percent' },
+    ] },
+  ],
 };
 
 export const companyScorecardAvgLoanSize: WidgetDefinition<KPIData> = {
@@ -240,6 +254,14 @@ export const companyScorecardVolumeByBranch: WidgetDefinition<ChartData> = {
   defaultSize: { w: 250, h: 160 },
   minSize: { w: 130, h: 80 },
   component: ChartCard,
+  configurableProperties: [
+    { key: 'chartType', label: 'Chart type', type: 'select', default: 'bar', options: [
+      { value: 'bar', label: 'Bar' },
+      { value: 'line', label: 'Line' },
+      { value: 'area', label: 'Area' },
+      { value: 'pie', label: 'Pie' },
+    ] },
+  ],
 };
 
 export const companyScorecardPullThroughByBranch: WidgetDefinition<ChartData> = {

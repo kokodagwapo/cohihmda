@@ -134,7 +134,7 @@ export function KPICard({
             isCompact ? 'text-lg' : 'text-2xl',
           )}
         >
-          {data ? formatKPIValue(data.value, data.format) : '\u2014'}
+          {data ? formatKPIValue(data.value, (config?.format as KPIFormat) ?? data.format) : '\u2014'}
         </p>
 
         {/* Trend */}

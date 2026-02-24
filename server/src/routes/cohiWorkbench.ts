@@ -54,6 +54,10 @@ interface CanvasStateSnapshot {
     title: string;
     sectionType: string;
     widgetIds: string[];
+    /** Widgets in this group with stable ids (for modify_group operations) */
+    widgets?: { id: string; kind: "registry" | "cohi"; defId?: string; title?: string; name?: string }[];
+    /** Grid layout per widget (key = widgets[].id); 36 cols, 16px rows */
+    widgetLayouts?: Record<string, { x: number; y: number; w: number; h: number }>;
     filters?: {
       dateRange?: string;
       dateField?: string;
@@ -135,6 +139,21 @@ async function getOpenAIKey(tenantId?: string): Promise<string> {
   if (envKey) return envKey;
   throw new Error("OpenAI API key not configured.");
 }
+
+/**
+ * Data source to base SQL hint (for convert_to_sql_widget).
+ * Registry widgets are backed by data hooks; when converting to SQL the LLM
+ * should use the tenant schema. These hints document typical tables/columns
+ * per source for prompt context. Expand as needed.
+ */
+const DATA_SOURCE_SQL_HINTS: Partial<Record<string, string>> = {
+  "company-scorecard":
+    "Typical tables: public.loans, public.loan_officers, public.branches. Common columns: application_date, funding_date, loan_amount, status, branch_id, loan_officer_id.",
+  "sales-scorecard":
+    "Similar to company-scorecard; often filtered by sales channel or product.",
+  "operations-scorecard":
+    "Loans and operational metrics; cycle time, fallout, pipeline stages.",
+};
 
 // ============================================================================
 // Build workbench system prompt
@@ -218,7 +237,7 @@ function buildCanvasContext(state: CanvasStateSnapshot): string {
 
   const lines: string[] = ["## CURRENT CANVAS STATE\n"];
 
-  // ---- Structural info with filter context ----
+  // ---- Structural info with filter context and group widget/layout detail ----
   if (state.groups.length > 0) {
     lines.push(`### Dashboard Groups on Canvas (${state.groups.length})`);
     for (const g of state.groups) {
@@ -231,9 +250,18 @@ function buildCanvasContext(state: CanvasStateSnapshot): string {
         if (g.filters.loanOfficer) parts.push(`LO: ${g.filters.loanOfficer}`);
         if (parts.length > 0) filterStr = ` [Filters: ${parts.join(", ")}]`;
       }
+      const widgetCount = g.widgets?.length ?? g.widgetIds.length;
       lines.push(
-        `- **${g.title}** (${g.sectionType}, ${g.widgetIds.length} widgets)${filterStr}`
+        `- **${g.title}** groupId=\`${g.groupId}\` (${g.sectionType}, ${widgetCount} widgets)${filterStr}`
       );
+      if (g.widgets && g.widgets.length > 0) {
+        for (const w of g.widgets) {
+          const label = w.kind === "registry" ? (w.name || w.defId) : w.title;
+          const layout = g.widgetLayouts?.[w.id];
+          const layoutStr = layout ? ` @ grid(${layout.x},${layout.y}) size ${layout.w}x${layout.h}` : "";
+          lines.push(`  - \`${w.id}\` (${w.kind}) ${label ?? ""}${layoutStr}`);
+        }
+      }
     }
     lines.push("");
   }
@@ -417,16 +445,44 @@ Each action in the "actions" array must be one of:
 5. **delete_widget**: Remove a widget from canvas
    {"type": "delete_widget", "instanceId": "<canvas item id>", "explanation": "Why removing"}
 
-6. **explain_widget**: Teach about a widget
+6. **modify_group**: Rearrange, add, remove, or resize widgets within a dashboard group
+   {"type": "modify_group", "groupId": "<groupId from canvas>", "operations": [...], "explanation": "What changed"}
+   The canvas state lists each group with groupId= and its widgets with stable ids (e.g. company-scorecard-units__0, cohi__abc123__1). Use these exact ids in operations.
+   Operations (array, applied in order):
+   - {"op": "add_registry", "defId": "<widget id from catalog>", "gridPosition": {"x": 0, "y": 10, "w": 5, "h": 4}} — add a pre-built widget (grid: 36 cols, 16px rows)
+   - {"op": "add_cohi", "sql": "SELECT ...", "title": "...", "vizConfig": {...}, "gridPosition": {...}} — add a SQL-backed widget
+   - {"op": "remove", "widgetId": "<id from group widget list>"} — remove that widget
+   - {"op": "resize", "widgetId": "<id>", "w": 12, "h": 8} — change grid size
+   - {"op": "reorder", "widgetIds": ["<id1>", "<id2>", ...]} — new order (all current ids in desired order)
+   - {"op": "set_title", "title": "New Section Title"}
+   - {"op": "set_filters", "filters": {"year": 2025, ...}}
+   Use modify_group when the user asks to add/remove widgets in a dashboard section, reorder them, resize, or change the section title.
+
+6a. **modify_registry_widget**: Change config on a pre-built catalog widget inside a group
+   {"type": "modify_registry_widget", "groupId": "<groupId>", "widgetId": "<widget id from group list, e.g. company-scorecard-units__0>", "configOverrides": {"format": "currency", "chartType": "line"}, "explanation": "What changed"}
+   Use when the user wants to change how a catalog widget displays (e.g. number format, chart type) without converting it to SQL. The widgetId is the stable id shown in the canvas state for that widget (e.g. company-scorecard-units__0 or cohi__abc__1). Only keys that the widget supports (e.g. format, chartType) will take effect.
+
+6b. **create_dashboard**: Build an entirely new dashboard from scratch (mix of catalog widgets and SQL widgets)
+   {"type": "create_dashboard", "title": "My Dashboard", "groups": [{"title": "Section Title", "sectionType": "company-scorecard", "widgets": [{"kind": "registry", "defId": "company-scorecard-units"}, {"kind": "cohi", "sql": "SELECT ...", "title": "Custom Chart", "vizConfig": {...}}], "canvasPosition": {"x": 20, "y": 20, "w": 1000, "h": 800}}], "standaloneWidgets": [{"kind": "cohi", "sql": "SELECT ...", "title": "Standalone", "vizConfig": {...}}], "explanation": "What this dashboard shows"}
+   - groups: array of sections; each has title, optional sectionType (company-scorecard, sales-scorecard, etc.), widgets (registry defIds or cohi sql+title+vizConfig), optional canvasPosition (pixel x, y, w, h).
+   - standaloneWidgets: optional array of cohi widgets to place on the canvas outside any group.
+   - Layout: use canvasPosition to place groups; if omitted, groups are stacked vertically. Grid inside groups: 36 columns, 16px row height.
+   - Use create_dashboard when the user asks for a "new dashboard", "custom dashboard", or to "build a dashboard from scratch" with a specific mix of widgets.
+
+6c. **convert_to_sql_widget**: Replace a catalog widget inside a group with a SQL-backed widget (for deep customization)
+   {"type": "convert_to_sql_widget", "groupId": "<groupId>", "widgetId": "<widget id from group list>", "sql": "SELECT ...", "title": "...", "vizConfig": {...}, "explanation": "Why converted"}
+   Use when the user needs changes that go beyond config overrides (e.g. filter by a specific branch, add a custom WHERE clause, change the underlying query). The registry widget is replaced by a cohi_widget that runs your SQL. Base your SQL on the tenant schema and the widget's data source (see DATA SOURCE HINTS below). The widgetId is the same stable id as in modify_registry_widget (e.g. company-scorecard-units__0).
+
+7. **explain_widget**: Teach about a widget
    {"type": "explain_widget", "widgetId": "<id>", "explanation": "Detailed explanation"}
 
-7. **explain_schema**: Teach about data fields
+8. **explain_schema**: Teach about data fields
    {"type": "explain_schema", "fields": ["field1", "field2"], "explanation": "What these fields mean"}
 
-8. **create_canvas**: Build a full multi-section dashboard canvas at once
+9. **create_canvas**: Build a full multi-section dashboard canvas at once
    {"type": "create_canvas", "title": "Monthly Executive Review", "sectionKeys": ["executiveDashboard", "companyScorecard", "salesScorecard"], "explanation": "Why this combination"}
 
-9. **query_data**: Run a SQL query to answer a data question (results are returned to you automatically)
+10. **query_data**: Run a SQL query to answer a data question (results are returned to you automatically)
    {"type": "query_data", "sql": "SELECT ...", "explanation": "What this query checks"}
    Use query_data when:
    - The user asks a question that requires data NOT visible on the canvas
@@ -435,7 +491,7 @@ Each action in the "actions" array must be one of:
    PREFER answering from canvas data when possible (faster, no extra query needed).
    The query results will be automatically provided back to you so you can formulate a data-driven answer.
 
-10. **generate_report**: Generate a full multi-slide PowerPoint/PDF report
+11. **generate_report**: Generate a full multi-slide PowerPoint/PDF report
     {"type": "generate_report", "reportDefinition": {
       "title": "Report Title",
       "subtitle": "Optional subtitle",
@@ -696,6 +752,10 @@ Current date: {{currentDate}}
 
 {{WIDGET_CATALOG}}
 
+## Data source hints (for convert_to_sql_widget)
+When replacing a catalog widget with a SQL-backed widget, use the tenant schema and these hints for the widget's data source:
+{{DATA_SOURCE_HINTS}}
+
 {{CANVAS_STATE}}
 `;
 
@@ -771,6 +831,12 @@ router.post(
       )
         .replace("{{SCHEMA_CONTEXT}}", schemaContext + verifiedMetricsBlock)
         .replace("{{WIDGET_CATALOG}}", widgetCatalog || "No widget catalog provided.")
+        .replace(
+          "{{DATA_SOURCE_HINTS}}",
+          Object.entries(DATA_SOURCE_SQL_HINTS)
+            .map(([src, hint]) => `- ${src}: ${hint}`)
+            .join("\n") || "Use the schema context above and the widget's data source (e.g. company-scorecard, sales-scorecard) to write equivalent SQL."
+        )
         .replace("{{CANVAS_STATE}}", canvasContext + researchContext);
 
       // Build message history
@@ -819,6 +885,10 @@ router.post(
         "modify_widget",
         "delete_widget",
         "suggest_dashboard",
+        "modify_group",
+        "modify_registry_widget",
+        "create_dashboard",
+        "convert_to_sql_widget",
         "explain_widget",
         "explain_schema",
         "query_data",
