@@ -170,6 +170,8 @@ export interface CanvasStateSnapshot {
     sourceSessionId?: string;
     /** For cohi_widget items: the SQL backing the widget */
     sql?: string;
+    /** True when this widget is the one the user is editing via Cohi */
+    selected?: boolean;
   }[];
   /** Total item count */
   totalItems: number;

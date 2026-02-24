@@ -67,17 +67,18 @@ async function resolveEffectiveTenantId(
  * This is a lightweight endpoint that skips the LLM pipeline entirely,
  * only running the saved SQL against the tenant database.
  *
- * When `dateFilter` is provided, the server wraps the SQL in a CTE
- * that filters to the given date range on the specified column.
+ * When `runAsIs` is true (e.g. research-lab widgets), the server runs the SQL
+ * exactly as stored with no sanitization or filter injection — same as research lab.
  *
- * When `dimensionFilters` are provided, the server injects additional
- * WHERE conditions (e.g. branch = 'X', loan_officer = 'Y').
+ * When `dateFilter` is provided (and not runAsIs), the server injects date conditions.
+ * When `dimensionFilters` are provided (and not runAsIs), the server injects WHERE conditions.
  */
 export function useCohiWidgetData(
   sql: string | undefined,
   tenantId?: string | null,
   dateFilter?: DateFilter | null,
   dimensionFilters?: DimensionFilter[] | null,
+  runAsIs?: boolean,
 ): CohiWidgetDataState {
   const [data, setData] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -105,10 +106,13 @@ export function useCohiWidgetData(
           : '/api/cohi-chat/execute-sql';
 
         const body: Record<string, unknown> = { sql };
-        if (dateFilter) {
+        if (runAsIs) {
+          body.runAsIs = true;
+        }
+        if (dateFilter && !runAsIs) {
           body.dateFilter = dateFilter;
         }
-        if (dimensionFilters && dimensionFilters.length > 0) {
+        if (dimensionFilters && dimensionFilters.length > 0 && !runAsIs) {
           body.dimensionFilters = dimensionFilters;
         }
 
@@ -142,7 +146,7 @@ export function useCohiWidgetData(
     return () => {
       cancelled = true;
     };
-  }, [sql, tenantId, dateFilter?.column, dateFilter?.start, dateFilter?.end, dimKey, trigger]);
+  }, [sql, tenantId, dateFilter?.column, dateFilter?.start, dateFilter?.end, dimKey, trigger, runAsIs]);
 
   return { data, loading, error, refetch };
 }

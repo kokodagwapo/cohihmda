@@ -782,6 +782,8 @@ export function WorkbenchCanvas({
   const [width, setWidth] = useState(1200);
   const [isUploading, setIsUploading] = useState(false);
   const [selectedWidgetId, setSelectedWidgetId] = useState<string | null>(null);
+  /** Widget being edited via Cohi panel; set only by "Edit with Cohi", cleared when panel closes */
+  const [editingWidgetId, setEditingWidgetId] = useState<string | null>(null);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<
     string | null
   >(null);
@@ -929,6 +931,14 @@ export function WorkbenchCanvas({
 
   // --- Cohi Workbench Intelligence ---
   const widgetCatalog = React.useMemo(() => serializeWidgetCatalog(), []);
+  const editingWidget = useMemo(() => {
+    if (!editingWidgetId) return null;
+    const item = items.find((it) => it.i === editingWidgetId);
+    if (!item) return { id: editingWidgetId, title: editingWidgetId };
+    const p = item.payload as { title?: string; sectionId?: string };
+    const title = p?.title ?? p?.sectionId ?? item.type ?? editingWidgetId;
+    return { id: editingWidgetId, title: String(title) };
+  }, [editingWidgetId, items]);
 
   // Ref to hold the latest handleCohiAction for auto-execution (avoids circular dep with hook)
   const cohiActionRef = useRef<(action: WidgetAction) => void>(() => {});
@@ -945,6 +955,7 @@ export function WorkbenchCanvas({
     widgetCatalog,
     canvasId,
     sourceInsight,
+    selectedWidgetId: editingWidgetId,
     onAutoExecuteActions: useCallback(
       (actions: WidgetAction[]) => {
         // Batch-execute all canvas actions to avoid stale-state issues
@@ -952,7 +963,26 @@ export function WorkbenchCanvas({
         const createWidgetActions = actions.filter(
           (a) => a.type === "create_widget",
         );
-        const otherActions = actions.filter((a) => a.type !== "create_widget");
+        let otherActions: WidgetAction[] = actions.filter(
+          (a) => a.type !== "create_widget",
+        );
+        // Deduplicate modify_widget by instanceId — keep only the last one per widget
+        const modifyActions = otherActions.filter(
+          (a): a is WidgetAction & { type: "modify_widget"; instanceId: string } =>
+            a.type === "modify_widget" && "instanceId" in a,
+        );
+        if (modifyActions.length > 0) {
+          const lastByInstanceId = new Map<
+            string,
+            WidgetAction & { type: "modify_widget"; instanceId: string }
+          >();
+          for (const a of modifyActions) lastByInstanceId.set(a.instanceId, a);
+          const dedupedModify = [...lastByInstanceId.values()];
+          otherActions = [
+            ...otherActions.filter((a) => a.type !== "modify_widget"),
+            ...dedupedModify,
+          ];
+        }
 
         // Execute non-create_widget actions normally (one at a time)
         for (const action of otherActions) {
@@ -1344,6 +1374,15 @@ export function WorkbenchCanvas({
           break;
         }
         case "modify_widget": {
+          if (editingWidgetId && action.instanceId !== editingWidgetId) {
+            toast({
+              title: "Wrong widget",
+              description:
+                "Cohi tried to modify a different widget. Only the widget you're editing (with the ring) can be modified. Click 'Stop editing' or select the correct widget and use Edit with Cohi.",
+              variant: "destructive",
+            });
+            break;
+          }
           const targetIdx = items.findIndex((it) => it.i === action.instanceId);
           if (targetIdx < 0) {
             toast({
@@ -1355,7 +1394,49 @@ export function WorkbenchCanvas({
           }
           const target = items[targetIdx];
           if (target.payload.type === "cohi_widget") {
+            const hasSql = !!(action.sql && String(action.sql).trim());
+            const hasChanges = action.changes && Object.keys(action.changes).length > 0;
+            const hasTitle = !!(action.title && String(action.title).trim());
+            if (!hasSql && !hasChanges && !hasTitle) {
+              toast({
+                title: "No changes applied",
+                description:
+                  "Cohi didn't provide SQL or config changes. Try asking to remove a column or change the query explicitly.",
+                variant: "destructive",
+              });
+              break;
+            }
+            if (hasSql) {
+              const trimmed = String(action.sql).trim();
+              const upper = trimmed.toUpperCase();
+              if (!upper.startsWith("SELECT") && !upper.startsWith("WITH")) {
+                toast({
+                  title: "Invalid SQL",
+                  description:
+                    "Widget SQL must start with SELECT or WITH. The change was not applied.",
+                  variant: "destructive",
+                });
+                break;
+              }
+            }
             const updated = [...items];
+            const existingViz = target.payload.vizConfig || {};
+            const changes = action.changes as Partial<typeof existingViz> & { tableConfig?: Record<string, unknown> };
+            const mergedViz =
+              action.changes && Object.keys(action.changes).length > 0
+                ? {
+                    ...existingViz,
+                    ...action.changes,
+                    ...(changes.tableConfig
+                      ? {
+                          tableConfig: {
+                            ...((existingViz as { tableConfig?: Record<string, unknown> }).tableConfig || {}),
+                            ...changes.tableConfig,
+                          },
+                        }
+                      : {}),
+                  }
+                : existingViz;
             updated[targetIdx] = {
               ...target,
               payload: {
@@ -1363,12 +1444,7 @@ export function WorkbenchCanvas({
                 ...(action.sql ? { sql: action.sql } : {}),
                 ...(action.title ? { title: action.title } : {}),
                 ...(action.changes && Object.keys(action.changes).length > 0
-                  ? {
-                      vizConfig: {
-                        ...target.payload.vizConfig,
-                        ...action.changes,
-                      },
-                    }
+                  ? { vizConfig: mergedViz as typeof target.payload.vizConfig }
                   : {}),
               },
             };
@@ -1392,7 +1468,7 @@ export function WorkbenchCanvas({
           break;
       }
     },
-    [items, setItemsWithHistory, toast, width, tenantId],
+    [items, setItemsWithHistory, toast, width, tenantId, editingWidgetId],
   );
 
   // Keep the ref in sync so auto-execute callback always uses latest handler
@@ -4276,6 +4352,7 @@ Structure it as a narrative-first executive briefing:
                       <CanvasWidgetCard
                         widgetId={item.i}
                         selected={selectedWidgetId === item.i}
+                        editing={editingWidgetId === item.i}
                         onSelect={() => setSelectedWidgetId(item.i)}
                         onDuplicate={() => duplicateWidget(item.i)}
                         onDelete={() => removeWidget(item.i)}
@@ -4300,6 +4377,8 @@ Structure it as a narrative-first executive briefing:
                         onWrapInGroup={handleWrapInGroup}
                         onExportExcel={() => handleExportWidgetExcel(item.i)}
                         onEditWithCohi={() => {
+                          setEditingWidgetId(item.i);
+                          setSelectedWidgetId(item.i);
                           setShowCohiPanel(true);
                           const widgetTitle =
                             (payload as any).title ||
@@ -4649,7 +4728,10 @@ Structure it as a narrative-first executive briefing:
         {/* Cohi Assistant Panel (docks right) */}
         <WorkbenchCohiPanel
           open={showCohiPanel}
-          onClose={() => setShowCohiPanel(false)}
+          onClose={() => {
+            setShowCohiPanel(false);
+            setEditingWidgetId(null);
+          }}
           messages={cohiMessages}
           isLoading={cohiLoading}
           suggestedQuestions={cohiSuggestions}

@@ -84,6 +84,8 @@ export interface UseWorkbenchCohiOptions {
   canvasId?: string | null;
   /** Source insight context when canvas was created via deep-dive */
   sourceInsight?: SourceInsightContext | null;
+  /** ID of the widget the user is editing (from "Edit with Cohi") — marked as selected in snapshot */
+  selectedWidgetId?: string | null;
   onError?: (error: Error) => void;
   /** Called when the AI returns executable actions — auto-executes them on the canvas */
   onAutoExecuteActions?: (actions: WidgetAction[]) => void;
@@ -94,7 +96,7 @@ export interface UseWorkbenchCohiOptions {
 // ---------------------------------------------------------------------------
 
 export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
-  const { tenantId, canvasItems = [], widgetCatalog = '', canvasId, sourceInsight, onError, onAutoExecuteActions } = options;
+  const { tenantId, canvasItems = [], widgetCatalog = '', canvasId, sourceInsight, selectedWidgetId, onError, onAutoExecuteActions } = options;
 
   const [messages, setMessages] = useState<WorkbenchChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -239,6 +241,7 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
           sourceType: cohiPayload?.sourceType,
           sourceSessionId: cohiPayload?.sourceSessionId,
           sql: cohiPayload?.sql,
+          selected: item.i === selectedWidgetId,
         });
       }
     }
@@ -258,7 +261,7 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
       totalItems: canvasItems.length,
       widgetData: widgetData.length > 0 ? widgetData : undefined,
     };
-  }, [canvasItems]);
+  }, [canvasItems, selectedWidgetId]);
 
   // -------------------------------------------------------------------------
   // Send a message

@@ -40,6 +40,7 @@ import { getPromptConfig, buildPrompt } from "../services/promptConfigService.js
 import { decryptAPIKeys } from "../services/encryption.js";
 import { tenantDbManager } from "../config/tenantDatabaseManager.js";
 import { loadSession as loadResearchSession } from "../services/research/orchestrator.js";
+import { callLLM, type LLMMessage } from "../services/research/tools.js";
 
 const router = Router();
 
@@ -67,6 +68,7 @@ interface CanvasStateSnapshot {
     sourceType?: 'research' | 'chat';
     sourceSessionId?: string;
     sql?: string;
+    selected?: boolean;
   }[];
   totalItems: number;
   /** Actual data from rendered widgets */
@@ -78,14 +80,28 @@ interface CanvasStateSnapshot {
   }[];
 }
 
-interface OpenAIChatMessage {
-  role: "system" | "user" | "assistant";
-  content: string;
-}
-
 // ============================================================================
 // Helpers
 // ============================================================================
+
+/** Pre-validates SQL for create_widget/modify_widget: must be SELECT/WITH and not obviously hallucinated. */
+function isValidWidgetSql(sql: string): boolean {
+  const trimmed = sql.trim();
+  if (!trimmed) return false;
+  const upper = trimmed.toUpperCase();
+  if (!upper.startsWith("SELECT") && !upper.startsWith("WITH")) return false;
+  const hallucinated = [
+    "some_other_table",
+    "example_table",
+    "your_table",
+    "table_name",
+  ];
+  const lower = trimmed.toLowerCase();
+  for (const phrase of hallucinated) {
+    if (lower.includes(phrase)) return false;
+  }
+  return true;
+}
 
 async function getOpenAIKey(tenantId?: string): Promise<string> {
   if (tenantId) {
@@ -118,49 +134,6 @@ async function getOpenAIKey(tenantId?: string): Promise<string> {
   const envKey = process.env.OPENAI_API_KEY;
   if (envKey) return envKey;
   throw new Error("OpenAI API key not configured.");
-}
-
-async function callOpenAI(
-  messages: OpenAIChatMessage[],
-  apiKey: string,
-  options: {
-    temperature?: number;
-    maxTokens?: number;
-    jsonMode?: boolean;
-  } = {}
-): Promise<string> {
-  const body: any = {
-    model: "gpt-4o",
-    messages,
-    temperature: options.temperature ?? 0.3,
-    max_tokens: options.maxTokens ?? 3000,
-  };
-  if (options.jsonMode) {
-    body.response_format = { type: "json_object" };
-  }
-
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const error = (await response.json()) as {
-      error?: { message?: string };
-    };
-    throw new Error(
-      `OpenAI API error: ${error.error?.message || "Unknown error"}`
-    );
-  }
-
-  const data = (await response.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-  return data.choices?.[0]?.message?.content || "";
 }
 
 // ============================================================================
@@ -269,9 +242,12 @@ function buildCanvasContext(state: CanvasStateSnapshot): string {
     lines.push(`### Standalone Items (${state.standaloneWidgets.length})`);
     for (const w of state.standaloneWidgets) {
       const source = w.sourceType === 'research' ? ' [research-lab widget]' : '';
-      lines.push(`- ${w.id} (${w.type})${w.title ? ": " + w.title : ""}${source}`);
+      const selectedLabel = w.selected ? ' [SELECTED]' : '';
+      lines.push(`- ${w.id} (${w.type})${w.title ? ": " + w.title : ""}${source}${selectedLabel}`);
       if (w.sql) {
-        lines.push(`  SQL: \`${w.sql.substring(0, 300)}${w.sql.length > 300 ? '...' : ''}\``);
+        const sqlLimit = w.selected ? w.sql.length : 1000;
+        const sqlSnippet = w.sql.length <= sqlLimit ? w.sql : w.sql.substring(0, sqlLimit) + '...';
+        lines.push(`  SQL: \`${sqlSnippet}\``);
       }
     }
     lines.push("");
@@ -388,6 +364,21 @@ You help users build, modify, and understand data visualizations on their canvas
 9. **See actual data** on the canvas (KPI values, chart data, table rows) — use this to give data-driven answers
 10. **Generate reports** — create full multi-slide PowerPoint/PDF presentations using the "generate_report" action
 
+## Clarification Before Action
+When the user's request is ambiguous or underspecified, ASK a clarifying question
+instead of guessing. Return an empty "actions" array and put your question in "message".
+
+Ask when:
+- The user says "make a chart" but doesn't specify what data, metrics, or grouping
+- The user says "modify the widget" but there is no [SELECTED] widget, or the change is unclear
+- The user asks for analysis but multiple interpretations exist (e.g. "show me performance" -- by LO? by branch? by month?)
+- The user references a field or concept you can't map to the schema
+
+Do NOT ask when:
+- The request is clear and specific (e.g. "create a bar chart of funded volume by month")
+- The user is clearly referring to the [SELECTED] widget and the change is unambiguous
+- You can confidently infer intent from context (canvas state, conversation history)
+
 ## Response Format
 You MUST respond with valid JSON in this exact format:
 {
@@ -414,10 +405,14 @@ Each action in the "actions" array must be one of:
 
 4. **modify_widget**: Change an existing canvas widget
    {"type": "modify_widget", "instanceId": "<canvas item id>", "changes": {...}, "sql": "SELECT ...", "title": "New Title", "explanation": "What changed"}
-   - "changes" accepts partial VisualizationConfig overrides (type, xKey, yKey, etc.)
-   - "sql" (optional) replaces the widget's SQL query — use this for cohi_widget items when the user wants different data, date ranges, groupings, or columns
-   - "title" (optional) updates the widget title
+   - The instanceId MUST be the id of the widget marked [SELECTED] in the Standalone Items list. Only that widget can be modified; if you use a different id the change will be rejected. The full SQL for the [SELECTED] widget is provided so you can edit it.
+   - When removing a column from a table you may use EITHER: (1) Provide a new "sql" with that column omitted from the SELECT list (copy the exact SQL above and remove only that column from the SELECT clause). (2) Provide "changes" with tableConfig.columns set to an array of {key: "<column_key>", label: "<display label>"} for every column that should REMAIN — omit the column to remove. Use the exact keys from the LIVE DATA VALUES table for that widget. Option (1) is required for research-lab widgets with complex SQL; option (2) works for any table and is simpler.
+   - Do not SELECT NULL AS column_name or invent table/CTE names. Base all SQL on the EXACT SQL shown for that widget.
+   - "changes" also accepts other VisualizationConfig overrides (type, xKey, yKey, etc.) for visual-only changes when data is unchanged.
+   - "title" (optional) updates the widget title.
    - For research-lab widgets: these use complex CTEs and derived columns. When modifying them, always provide a complete new SQL query. Reference the RESEARCH LAB CONTEXT section below to understand the analytical intent behind the original query.
+   - When modifying a widget's SQL, you MUST base your new query on the EXACT SQL shown for that widget in the canvas state. Do NOT invent table names, CTEs, or columns that don't appear in the original SQL. Copy the original SQL and make only the specific change the user requested.
+   - Return EXACTLY ONE modify_widget action per user request. Do NOT return multiple modify_widget actions for the same widget.
 
 5. **delete_widget**: Remove a widget from canvas
    {"type": "delete_widget", "instanceId": "<canvas item id>", "explanation": "Why removing"}
@@ -779,14 +774,14 @@ router.post(
         .replace("{{CANVAS_STATE}}", canvasContext + researchContext);
 
       // Build message history
-      const history: OpenAIChatMessage[] = (conversationHistory || [])
+      const history: LLMMessage[] = (conversationHistory || [])
         .slice(-6)
         .map((m) => ({
           role: m.role as "user" | "assistant",
           content: m.content,
         }));
 
-      const messages: OpenAIChatMessage[] = [
+      const messages: LLMMessage[] = [
         { role: "system", content: systemPrompt },
         ...history,
         { role: "user", content: question },
@@ -798,9 +793,9 @@ router.post(
 
       // Use higher token limit when user appears to be requesting a report
       const isReportRequest = /\b(report|presentation|powerpoint|pptx|pdf|slide|deck)\b/i.test(question);
-      const rawResponse = await callOpenAI(messages, apiKey, {
+      const rawResponse = await callLLM(messages, apiKey, {
         temperature: 0.3,
-        maxTokens: isReportRequest ? 8000 : 3000,
+        maxTokens: isReportRequest ? 8000 : 4096,
         jsonMode: true,
       });
 
@@ -854,6 +849,19 @@ router.post(
         }
       }
 
+      // Log modify_widget actions for debugging (instanceId, sql provided?, changes keys)
+      for (const action of validActions) {
+        if (action.type === "modify_widget") {
+          const hasSql = !!(action.sql && String(action.sql).trim());
+          const changesKeys = action.changes && typeof action.changes === "object"
+            ? Object.keys(action.changes)
+            : [];
+          console.log(
+            `[CohiWorkbench] modify_widget: instanceId=${action.instanceId} hasSql=${hasSql} changesKeys=[${changesKeys.join(", ")}] title=${action.title ? "set" : "unset"}`
+          );
+        }
+      }
+
       // ------------------------------------------------------------------
       // Two-pass flow: if the LLM emitted query_data actions, execute
       // the SQL and make a second LLM call with the results.
@@ -862,6 +870,22 @@ router.post(
       let finalMessage = parsed.message || "I processed your request.";
       let finalTeachingNotes = parsed.teachingNotes || undefined;
       let finalSuggestions = parsed.suggestedQuestions || [];
+
+      // SQL pre-validation: drop create_widget/modify_widget actions with invalid SQL
+      const invalidSqlActions: string[] = [];
+      validActions = validActions.filter((a: any) => {
+        if ((a.type !== "create_widget" && a.type !== "modify_widget") || !a.sql) return true;
+        const sql = String(a.sql).trim();
+        if (isValidWidgetSql(sql)) return true;
+        invalidSqlActions.push(a.type);
+        return false;
+      });
+      if (invalidSqlActions.length > 0) {
+        finalMessage += "\n\nOne or more widget SQL statements were rejected (invalid or placeholder SQL). Please try a more specific request.";
+        console.log(
+          `[CohiWorkbench] SQL pre-validation stripped ${invalidSqlActions.length} action(s): ${invalidSqlActions.join(", ")}`
+        );
+      }
 
       if (queryActions.length > 0 && tenantId) {
         console.log(
@@ -934,7 +958,7 @@ router.post(
         }).join("\n\n");
 
         // Second LLM call with query results
-        const followUpMessages: OpenAIChatMessage[] = [
+        const followUpMessages: LLMMessage[] = [
           ...messages,
           { role: "assistant", content: rawResponse },
           {
@@ -944,7 +968,7 @@ router.post(
         ];
 
         try {
-          const secondResponse = await callOpenAI(followUpMessages, apiKey, {
+          const secondResponse = await callLLM(followUpMessages, apiKey, {
             temperature: 0.3,
             maxTokens: 3000,
             jsonMode: true,
