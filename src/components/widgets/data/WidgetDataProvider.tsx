@@ -33,6 +33,8 @@ import {
   type HighPerformersDateType,
   type HighPerformersTimePeriod,
 } from '@/hooks/useHighPerformersData';
+import { useActorsData } from '@/hooks/useActorsData';
+import type { ActorDimension } from '@/hooks/useActorsData';
 import type { DataSourceId } from '../registry/types';
 
 /** Build dimension filter array from section dynamicFilters (for APIs that accept them). */
@@ -204,6 +206,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
   const lbFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'leaderboard'), [sections, scopedFilters]);
   const ldFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'loan-detail'), [sections, scopedFilters]);
   const hpFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'high-performers'), [sections, scopedFilters]);
+  const actorsFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'actors'), [sections, scopedFilters]);
 
   // ---- Hook calls with dynamic filter values ----
 
@@ -355,6 +358,33 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
   const highPerformersLoading = hpLeftLoading || hpRightLoading;
   const highPerformersError = hpLeftError || hpRightError;
 
+  // Actors: period + calculation/turn/measure/actor/status from section filters
+  const actorsDateRange = useMemo(() => {
+    const range = actorsFilters?.periodSelection?.dateRange ?? actorsFilters?.dateRange;
+    if (range?.start && range?.end) return { start: range.start, end: range.end };
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    return { start: start.toISOString().slice(0, 10), end: now.toISOString().slice(0, 10) };
+  }, [actorsFilters?.periodSelection?.dateRange, actorsFilters?.dateRange]);
+  const actorsTableDims = useMemo((): [ActorDimension, ActorDimension, ActorDimension, ActorDimension] => {
+    const d = actorsFilters?.actorsTableDimensions;
+    if (Array.isArray(d) && d.length === 4) return d as [ActorDimension, ActorDimension, ActorDimension, ActorDimension];
+    return ['loan_officer', 'processor', 'underwriter', 'closer'];
+  }, [actorsFilters?.actorsTableDimensions]);
+  const { data: actorsData, loading: actorsLoading, error: actorsError } = useActorsData({
+    startDate: actorsDateRange.start,
+    endDate: actorsDateRange.end,
+    calculation: (actorsFilters?.actorsCalculation as 'average' | 'median') ?? 'average',
+    turnTimeType: (actorsFilters?.actorsTurnTimeType as 'app_to_fund_days' | 'app_to_closing_days') ?? 'app_to_fund_days',
+    dateRangeType: (actorsFilters?.actorsDateRangeType as 'calendar_days' | 'business_days') ?? 'calendar_days',
+    measure: (actorsFilters?.actorsMeasure as 'units' | 'volume') ?? 'units',
+    selectedTenantId,
+    channelGroup: selectedChannel,
+    selectedActor: actorsFilters?.actorsSelectedActor ?? null,
+    selectedStatus: actorsFilters?.actorsSelectedStatus ?? null,
+    tableDimensions: actorsTableDims,
+  });
+
   // Build lookup
   const sourceMap = useMemo<Record<string, SourceResult>>(() => ({
     'company-scorecard': {
@@ -444,6 +474,11 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
       loading: highPerformersLoading,
       error: highPerformersError,
     },
+    'actors': {
+      data: actorsData,
+      loading: actorsLoading,
+      error: actorsError,
+    },
   }), [
     companyScorecard.data, companyScorecard.loading, companyScorecard.error,
     creditRisk.data, creditRisk.loading, creditRisk.error,
@@ -456,6 +491,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     leaderboardData, leaderboardLoading,
     loanDetail.data, loanDetail.loading, loanDetail.error,
     highPerformersData, highPerformersLoading, highPerformersError,
+    actorsData, actorsLoading, actorsError,
   ]);
 
   const contextValue = useMemo<WidgetDataContextValue>(

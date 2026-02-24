@@ -23,7 +23,8 @@ export type SectionType =
   | 'executive-dashboard'
   | 'loan-detail'
   | 'workflow-conversion'
-  | 'high-performers';
+  | 'high-performers'
+  | 'actors';
 
 /**
  * A dynamic (user-added) filter dimension.
@@ -61,9 +62,37 @@ export interface SectionFilters {
   highPerformersLeftPeriod?: string;
   /** High Performers: right column period */
   highPerformersRightPeriod?: string;
+  /** Actors: calculation (average | median) */
+  actorsCalculation?: 'average' | 'median';
+  /** Actors: turn time type (app_to_fund_days | app_to_closing_days) */
+  actorsTurnTimeType?: 'app_to_fund_days' | 'app_to_closing_days';
+  /** Actors: date range type (calendar_days | business_days) */
+  actorsDateRangeType?: 'calendar_days' | 'business_days';
+  /** Actors: measure (units | volume) */
+  actorsMeasure?: 'units' | 'volume';
+  /** Actors: selected actor filter */
+  actorsSelectedActor?: { type: string; name: string } | null;
+  /** Actors: selected status filter (from bar chart) */
+  actorsSelectedStatus?: string | null;
+  /** Actors: which dimension each of the 4 table slots shows */
+  actorsTableDimensions?: [string, string, string, string];
+  /** Actors: ordered list of column ids to show in workbench actor tables (empty = all default) */
+  actorsTableColumnIds?: string[];
   /** User-added dynamic filters (column = value conditions) */
   dynamicFilters?: DynamicFilterEntry[];
 }
+
+/** Default column ids for actor tables (workbench). Order determines display order. */
+export const ACTORS_TABLE_DEFAULT_COLUMN_IDS = [
+  'name',
+  'units',
+  'volume',
+  'avgAppToFund',
+  'approvalPct',
+  'deniedPct',
+  'withdrawnPct',
+  'loanComplexity',
+] as const;
 
 const currentYear = new Date().getFullYear();
 
@@ -141,6 +170,26 @@ export const useWidgetSectionStore = create<WidgetSectionState>((set, get) => ({
           highPerformersDateType: 'funding_date',
           highPerformersLeftPeriod: 'mtd',
           highPerformersRightPeriod: 'ytd',
+        };
+      } else if (sectionType === 'actors') {
+        const now = new Date();
+        const start = new Date(now.getFullYear(), now.getMonth(), 1);
+        const range = {
+          start: start.toISOString().slice(0, 10),
+          end: now.toISOString().slice(0, 10),
+        };
+        filters = {
+          ...base,
+          periodSelection: { type: 'preset' as const, preset: 'mtd' as const, dateRange: range },
+          dateRange: range,
+          actorsCalculation: 'average',
+          actorsTurnTimeType: 'app_to_fund_days',
+          actorsDateRangeType: 'calendar_days',
+          actorsMeasure: 'units',
+          actorsSelectedActor: null,
+          actorsSelectedStatus: null,
+          actorsTableDimensions: ['loan_officer', 'processor', 'underwriter', 'closer'],
+          actorsTableColumnIds: [...ACTORS_TABLE_DEFAULT_COLUMN_IDS],
         };
       }
       return {

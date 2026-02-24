@@ -112,6 +112,12 @@ const topTieringMenuGroups = {
         iconColor: "amber" as const,
       },
       {
+        id: "actors",
+        label: "Actors",
+        icon: Users,
+        iconColor: "blue" as const,
+      },
+      {
         id: "loanDetail",
         label: "Loan Detail",
         icon: FileText,
@@ -214,6 +220,7 @@ const routeMap: Record<string, string> = {
   workflowConversion: "/workflow-conversion",
   loanDetail: "/loan-detail",
   highPerformers: "/high-performers",
+  actors: "/actors",
   salesScorecard: "/sales-scorecard",
   salesTrends: "/sales-trends",
   operationsScorecard: "/performance/operation-scorecard",

@@ -14,6 +14,7 @@ import {
   FileText,
   BarChart3,
   Trophy,
+  Users,
 } from "lucide-react";
 import {
   Sheet,
@@ -87,6 +88,12 @@ const topTieringNavLinks = [
     label: "High Performers",
     icon: Trophy,
     variant: "amber" as const,
+  },
+  {
+    path: "/actors",
+    label: "Actors",
+    icon: Users,
+    variant: "sky" as const,
   },
   {
     path: "/loan-detail",

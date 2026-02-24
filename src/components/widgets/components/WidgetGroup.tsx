@@ -37,6 +37,7 @@ import {
   Minimize2,
   Plus,
   Trash2,
+  X,
   Pencil,
   Check,
   Sparkles,
@@ -60,6 +61,7 @@ import {
   type SectionFilters,
   type SectionType,
   type DynamicFilterEntry,
+  ACTORS_TABLE_DEFAULT_COLUMN_IDS,
 } from '@/stores/widgetSectionStore';
 import {
   getWidgetDefinition,
@@ -70,6 +72,7 @@ import { CohiWidgetRenderer } from '@/components/workbench/canvas/CohiWidgetRend
 import { EditWidgetDialog } from '@/components/widgets/components/EditWidgetDialog';
 import { AddWidgetDialog } from '@/components/widgets/components/AddWidgetDialog';
 import { LoanDetailColumnsModal } from '@/components/widgets/components/LoanDetailColumnsModal';
+import { ActorsTableColumnsModal } from '@/components/widgets/components/ActorsTableColumnsModal';
 import { WidgetDataProvider } from '@/components/widgets/data';
 import { useLoanDetailColumnsStore } from '@/stores/loanDetailColumnsStore';
 import { useTenantStore } from '@/stores/tenantStore';
@@ -140,7 +143,7 @@ const HEADER_HEIGHT = 90; // approx header+filters height
  */
 const MIN_GRID_WIDTH = 400;
 /** Bump this any time you change GRID_COLS / ROW_HEIGHT so stale saved layouts get discarded */
-const LAYOUT_VERSION = 8; // bumped from 7 → 8 for workflow-conversion-embed full-height default
+const LAYOUT_VERSION = 9; // bumped from 8 → 9 for actors chart + KPIs same size side-by-side default
 
 // ---------------------------------------------------------------------------
 // Section-specific filter options
@@ -210,6 +213,7 @@ const SECTION_FILTER_CONFIG: Partial<Record<SectionType, SectionFilterField[]>> 
     { key: 'actorType', label: 'View', allLabel: '', staticOptions: ACTOR_TYPE_OPTIONS },
   ],
   'high-performers': [],
+  'actors': [],
 };
 
 const HIGH_PERFORMERS_DATE_TYPE_OPTIONS: { value: 'funding_date' | 'closing_date' | 'application_date'; label: string }[] = [
@@ -217,6 +221,18 @@ const HIGH_PERFORMERS_DATE_TYPE_OPTIONS: { value: 'funding_date' | 'closing_date
   { value: 'closing_date', label: 'Closed Loans' },
   { value: 'application_date', label: 'Applications Taken' },
 ];
+
+const ACTORS_DIMENSION_OPTIONS = ['channel', 'processor', 'closer', 'underwriter', 'loan_officer', 'branch', 'investor', 'warehouse_co_name'] as const;
+const ACTORS_DIMENSION_LABELS: Record<string, string> = {
+  channel: 'Channel',
+  processor: 'Processor',
+  closer: 'Closer',
+  underwriter: 'Underwriter',
+  loan_officer: 'Loan Officer',
+  branch: 'Branch',
+  investor: 'Investor',
+  warehouse_co_name: 'Warehouse Co Name',
+};
 
 // ---------------------------------------------------------------------------
 // Available dimension filter catalog — users can add these via the "+" button
@@ -254,6 +270,7 @@ const SECTION_COLORS: Record<SectionType, { border: string; bg: string; accent: 
   'loan-detail':          { border: 'border-sky-400/50',     bg: 'bg-sky-50/50 dark:bg-sky-950/20',       accent: 'text-sky-600 dark:text-sky-400',     dot: 'bg-sky-500' },
   'workflow-conversion':  { border: 'border-teal-400/50',    bg: 'bg-teal-50/50 dark:bg-teal-950/20',    accent: 'text-teal-600 dark:text-teal-400',    dot: 'bg-teal-500' },
   'high-performers':      { border: 'border-amber-400/50',  bg: 'bg-amber-50/50 dark:bg-amber-950/20',   accent: 'text-amber-600 dark:text-amber-400',  dot: 'bg-amber-500' },
+  'actors':              { border: 'border-cyan-400/50',   bg: 'bg-cyan-50/50 dark:bg-cyan-950/20',    accent: 'text-cyan-600 dark:text-cyan-400',   dot: 'bg-cyan-500' },
 };
 
 /**
@@ -308,6 +325,17 @@ function getGridSizeForItem(item: GroupWidgetItem): GridSize {
   // High Performers: 2x2 grid (two columns of 18 units each)
   if (item.kind === 'registry' && item.defId.startsWith('high-performers-')) {
     return { w: 18, h: 16, minW: 12, minH: 8 };
+  }
+  // Actors: chart and KPIs side-by-side same size (18x20); tables below
+  if (item.kind === 'registry' && item.defId.startsWith('actors-')) {
+    if (item.defId.startsWith('actors-table-')) {
+      return { w: 18, h: 20, minW: 12, minH: 12 };
+    }
+    if (item.defId === 'actors-status-chart' || item.defId === 'actors-kpis') {
+      return { w: 18, h: 20, minW: 10, minH: 14 };
+    }
+    const def = getWidgetDefinition(item.defId);
+    return (def && GRID_SIZES[def.category]) || DEFAULT_GRID;
   }
   const def = getWidgetDefinition(item.defId);
   return (def && GRID_SIZES[def.category]) || DEFAULT_GRID;
@@ -647,6 +675,7 @@ function GridCellRegistryWidget({
   const removeWidget = useCanvasDataStore((s) => s.removeWidget);
   const groupId = canvasItemId.split('__')[0] ?? '';
   const filters = useWidgetSectionStore((s) => s.getFilters(groupId));
+  const updateFilters = useWidgetSectionStore((s) => s.updateFilters);
 
   const { data: selectedData, loading, error } = useWidgetData(
     definition?.dataSource ?? '',
@@ -696,12 +725,62 @@ function GridCellRegistryWidget({
             : (filters.highPerformersRightPeriod ?? 'ytd'),
       }
     : {};
+
+  const isActors = definition.dataSource === 'actors';
+  const actorsCalculation = filters.actorsCalculation ?? 'average';
+  const actorsTurnTimeType = filters.actorsTurnTimeType ?? 'app_to_fund_days';
+  const actorsTurnTimeLabel =
+    actorsCalculation === 'median'
+      ? actorsTurnTimeType === 'app_to_fund_days'
+        ? 'Median App to Fund'
+        : 'Median App to Closing'
+      : actorsTurnTimeType === 'app_to_fund_days'
+        ? 'Avg App to Fund'
+        : 'Avg App to Closing';
+  const actorsTableDims = (filters.actorsTableDimensions ?? ['loan_officer', 'processor', 'underwriter', 'closer']) as string[];
+  const tableIndex = (definition.config?.tableIndex as number) ?? 0;
+  const actorsConfig = isActors
+    ? {
+        measure: filters.actorsMeasure ?? 'units',
+        onStatusClick:
+          definition.id === 'actors-status-chart'
+            ? (status: string) => {
+                const next = filters.actorsSelectedStatus === status ? null : status;
+                updateFilters(groupId, { actorsSelectedStatus: next });
+              }
+            : undefined,
+        turnTimeLabel: actorsTurnTimeLabel,
+        dimension: actorsTableDims[tableIndex] ?? 'loan_officer',
+        dimensionLabel: ACTORS_DIMENSION_LABELS[actorsTableDims[tableIndex] ?? 'loan_officer'] ?? 'Loan Officer',
+        dimensionOptions: ACTORS_DIMENSION_OPTIONS,
+        onDimensionChange:
+          definition.id?.startsWith('actors-table-')
+            ? (index: number, value: string) => {
+                const next = [...actorsTableDims] as [string, string, string, string];
+                next[index] = value;
+                updateFilters(groupId, { actorsTableDimensions: next });
+              }
+            : undefined,
+        onRowClick:
+          definition.id?.startsWith('actors-table-')
+            ? (dimension: string, name: string) => {
+                updateFilters(groupId, { actorsSelectedActor: { type: dimension, name } });
+              }
+            : undefined,
+        visibleColumnIds:
+          filters.actorsTableColumnIds?.length
+            ? filters.actorsTableColumnIds
+            : [...ACTORS_TABLE_DEFAULT_COLUMN_IDS],
+      }
+    : {};
+
   const config = {
     ...definition.config,
     ...(periodLabel != null && { periodLabel }),
     ...(filterSummary != null && { filterSummary }),
     ...(customColumns != null && { customColumns }),
     ...highPerformersConfig,
+    ...actorsConfig,
   };
 
   return (
@@ -909,6 +988,7 @@ export function WidgetGroup({
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingItemIdx, setEditingItemIdx] = useState<number | null>(null);
+  const [actorsColumnsModalOpen, setActorsColumnsModalOpen] = useState(false);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const filtersRestoredRef = useRef(false);
 
@@ -1263,6 +1343,8 @@ export function WidgetGroup({
         return { presets: ['mtd', 'qtd', 'last-month', 'last-quarter', 'last-year'], showYears: false };
       case 'executive-dashboard':
         return { presets: ['mtd', 'ytd', 'last-month', 'last-year'], showYears: false };
+      case 'actors':
+        return { presets: ['mtd', 'last-month', 'qtd', 'last-quarter', 'ytd', 'last-year'], showYears: false };
       default:
         return {}; // default behavior: rolling-13, rolling-12 + year buttons
     }
@@ -1422,7 +1504,147 @@ export function WidgetGroup({
         {/* Expanded filter controls — compact row below header, only when sync ON and filters expanded */}
         {!collapsed && !SELF_MANAGED_SECTIONS.has(sectionType) && filterSync && !filtersCollapsed && (
           <div className="flex items-center gap-1.5 px-2.5 pb-1.5 flex-wrap">
-            {sectionType === 'high-performers' ? (
+            {sectionType === 'actors' ? (
+              <>
+                <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mr-0.5">Period</span>
+                <DatePeriodPicker
+                  year={filters.year}
+                  onYearChange={handleYearChange}
+                  onDateRangeChange={handleDateRangeChange}
+                  onPeriodChange={handlePeriodChange}
+                  presets={sectionPresetConfig.presets}
+                  showYears={sectionPresetConfig.showYears}
+                  size="sm"
+                  showLabel={false}
+                  yearsToShow={4}
+                  defaultPreset="mtd"
+                  periodSelectionFromStore={filters.periodSelection}
+                />
+                <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mr-0.5">Calculation</span>
+                <div className="flex rounded-lg border border-slate-200 dark:border-slate-700 p-0.5 bg-slate-100/50 dark:bg-slate-800/50">
+                  {(['average', 'median'] as const).map((val) => {
+                    const selected = (filters.actorsCalculation ?? 'average') === val;
+                    return (
+                      <Button
+                        key={val}
+                        variant="ghost"
+                        size="sm"
+                        className={cn(
+                          '!h-7 !py-0 !min-h-0 px-2.5 text-xs',
+                          selected
+                            ? 'bg-white dark:bg-slate-900 shadow-sm border border-slate-200 dark:border-slate-600 text-slate-900 dark:text-slate-100'
+                            : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 hover:text-blue-600 dark:hover:text-blue-400'
+                        )}
+                        onClick={() => updateFilters(groupId, { actorsCalculation: val })}
+                      >
+                        {val === 'average' ? 'Average' : 'Median'}
+                      </Button>
+                    );
+                  })}
+                </div>
+                <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mr-0.5">Turn Time</span>
+                <div className="flex rounded-lg border border-slate-200 dark:border-slate-700 p-0.5 bg-slate-100/50 dark:bg-slate-800/50">
+                  {(['app_to_fund_days', 'app_to_closing_days'] as const).map((val) => {
+                    const selected = (filters.actorsTurnTimeType ?? 'app_to_fund_days') === val;
+                    return (
+                      <Button
+                        key={val}
+                        variant="ghost"
+                        size="sm"
+                        className={cn(
+                          '!h-7 !py-0 !min-h-0 px-2.5 text-xs',
+                          selected
+                            ? 'bg-white dark:bg-slate-900 shadow-sm border border-slate-200 dark:border-slate-600 text-slate-900 dark:text-slate-100'
+                            : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 hover:text-blue-600 dark:hover:text-blue-400'
+                        )}
+                        onClick={() => updateFilters(groupId, { actorsTurnTimeType: val })}
+                      >
+                        {val === 'app_to_fund_days' ? 'App to Fund' : 'App to Closing'}
+                      </Button>
+                    );
+                  })}
+                </div>
+                <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mr-0.5">Date Range</span>
+                <div className="flex rounded-lg border border-slate-200 dark:border-slate-700 p-0.5 bg-slate-100/50 dark:bg-slate-800/50">
+                  {(['calendar_days', 'business_days'] as const).map((val) => {
+                    const selected = (filters.actorsDateRangeType ?? 'calendar_days') === val;
+                    return (
+                      <Button
+                        key={val}
+                        variant="ghost"
+                        size="sm"
+                        className={cn(
+                          '!h-7 !py-0 !min-h-0 px-2.5 text-xs',
+                          selected
+                            ? 'bg-white dark:bg-slate-900 shadow-sm border border-slate-200 dark:border-slate-600 text-slate-900 dark:text-slate-100'
+                            : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 hover:text-blue-600 dark:hover:text-blue-400'
+                        )}
+                        onClick={() => updateFilters(groupId, { actorsDateRangeType: val })}
+                      >
+                        {val === 'calendar_days' ? 'Calendar' : 'Business'}
+                      </Button>
+                    );
+                  })}
+                </div>
+                <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mr-0.5">Measure</span>
+                <div className="flex rounded-lg border border-slate-200 dark:border-slate-700 p-0.5 bg-slate-100/50 dark:bg-slate-800/50">
+                  {(['units', 'volume'] as const).map((val) => {
+                    const selected = (filters.actorsMeasure ?? 'units') === val;
+                    return (
+                      <Button
+                        key={val}
+                        variant="ghost"
+                        size="sm"
+                        className={cn(
+                          '!h-7 !py-0 !min-h-0 px-2.5 text-xs',
+                          selected
+                            ? 'bg-white dark:bg-slate-900 shadow-sm border border-slate-200 dark:border-slate-600 text-slate-900 dark:text-slate-100'
+                            : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 hover:text-blue-600 dark:hover:text-blue-400'
+                        )}
+                        onClick={() => updateFilters(groupId, { actorsMeasure: val })}
+                      >
+                        {val === 'units' ? 'Units' : 'Volume'}
+                      </Button>
+                    );
+                  })}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="!h-7 gap-1.5 border-slate-300 dark:border-slate-600 text-xs"
+                  onClick={() => setActorsColumnsModalOpen(true)}
+                >
+                  <SlidersHorizontal className="h-3.5 w-3.5" />
+                  Columns
+                </Button>
+                {filters.actorsSelectedStatus != null && filters.actorsSelectedStatus !== '' && (
+                  <span className="inline-flex items-center gap-1 rounded-md bg-cyan-100 dark:bg-cyan-900/40 px-2 py-0.5 text-xs">
+                    Status: {filters.actorsSelectedStatus}
+                    <button
+                      type="button"
+                      onClick={() => updateFilters(groupId, { actorsSelectedStatus: null })}
+                      className="p-0.5 rounded hover:bg-cyan-200 dark:hover:bg-cyan-800"
+                      aria-label="Clear status filter"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                )}
+                {filters.actorsSelectedActor != null && (
+                  <span className="inline-flex items-center gap-1 rounded-md bg-cyan-100 dark:bg-cyan-900/40 px-2 py-0.5 text-xs">
+                    {filters.actorsSelectedActor.type}: {filters.actorsSelectedActor.name}
+                    <button
+                      type="button"
+                      onClick={() => updateFilters(groupId, { actorsSelectedActor: null })}
+                      className="p-0.5 rounded hover:bg-cyan-200 dark:hover:bg-cyan-800"
+                      aria-label="Clear actor filter"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                )}
+              </>
+            ) : sectionType === 'high-performers' ? (
               <>
                 <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mr-0.5">Loan:</span>
                 {HIGH_PERFORMERS_DATE_TYPE_OPTIONS.map((opt) => (
@@ -1608,6 +1830,17 @@ export function WidgetGroup({
         dimensionFilters={groupDimensionFilters}
         filterSyncEnabled={filterSync}
       />
+
+      {/* Actors table columns modal (workbench only) */}
+      {sectionType === 'actors' && (
+        <ActorsTableColumnsModal
+          open={actorsColumnsModalOpen}
+          onClose={() => setActorsColumnsModalOpen(false)}
+          sectionId={groupId}
+          columnIds={filters.actorsTableColumnIds ?? []}
+          onSave={(sid, columnIds) => updateFilters(sid, { actorsTableColumnIds: columnIds })}
+        />
+      )}
 
       {/* Edit Widget Dialog */}
       {editingItemIdx !== null && items[editingItemIdx]?.kind === 'cohi' && (

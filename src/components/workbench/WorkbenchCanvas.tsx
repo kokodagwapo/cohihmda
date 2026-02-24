@@ -661,6 +661,17 @@ const SECTION_TO_WIDGETS: Record<
       "high-performers-lo-right",
     ],
   },
+  actors: {
+    sectionType: "actors",
+    widgetIds: [
+      "actors-status-chart",
+      "actors-kpis",
+      "actors-table-0",
+      "actors-table-1",
+      "actors-table-2",
+      "actors-table-3",
+    ],
+  },
 };
 
 /**
@@ -1936,6 +1947,7 @@ export function WorkbenchCanvas({
           loanDetail: 550,
           workflowConversion: 1100,
           highPerformers: 720,
+          actors: 900,
         };
         const embedOverride = EMBED_MIN_HEIGHTS[sectionId];
         let groupH: number;
@@ -1944,7 +1956,8 @@ export function WorkbenchCanvas({
           embedOverride &&
           (widgetLayout.widgetIds.length <= 2 ||
             sectionId === "workflowConversion" ||
-            sectionId === "highPerformers")
+            sectionId === "highPerformers" ||
+            sectionId === "actors")
         ) {
           groupH = embedOverride;
         } else {

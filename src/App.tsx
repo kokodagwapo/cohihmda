@@ -41,6 +41,7 @@ import HighPerformers from "./pages/HighPerformers";
 import CreditRiskManagement from "./pages/CreditRiskManagement";
 import LoanDetail from "./pages/LoanDetail";
 import WorkflowConversion from "./pages/WorkflowConversion";
+import Actors from "./pages/Actors";
 import { KnowledgeBaseEditor } from "./components/admin/KnowledgeBaseEditor";
 import { GlobalCohiChat } from "./components/cohi/GlobalCohiChat";
 import { CohiDemoExperience } from "./components/demo/CohiDemoExperience";
@@ -205,6 +206,11 @@ const App = () => (
               <Route path="/high-performers" element={
                 <ProtectedRoute>
                   <HighPerformers />
+                </ProtectedRoute>
+              } />
+              <Route path="/actors" element={
+                <ProtectedRoute>
+                  <Actors />
                 </ProtectedRoute>
               } />
               <Route path="/performance/toptiering-comparison" element={

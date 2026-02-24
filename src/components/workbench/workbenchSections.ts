@@ -18,6 +18,7 @@ import {
   LineChart,
   FileText,
   GitBranch,
+  Users,
 } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
@@ -69,6 +70,7 @@ export const DASHBOARD_SECTION_GROUPS: { label: string; items: DashboardSectionI
       { id: 'creditRiskManagement', title: 'Credit Risk Management', icon: Shield, iconClass: 'text-emerald-500' },
       { id: 'loanDetail', title: 'Loan Detail', icon: FileText, iconClass: 'text-sky-500' },
       { id: 'highPerformers', title: 'High Performers', icon: Trophy, iconClass: 'text-amber-500' },
+      { id: 'actors', title: 'Actors', icon: Users, iconClass: 'text-cyan-500' },
     ],
   },
   {

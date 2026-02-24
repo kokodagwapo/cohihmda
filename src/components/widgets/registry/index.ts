@@ -23,6 +23,7 @@ import { industryNewsWidgets } from './industryNewsWidgets';
 import { loanDetailWidgets } from './loanDetailWidgets';
 import { workflowConversionWidgets } from './workflowConversionWidgets';
 import { highPerformersWidgets } from './highPerformersWidgets';
+import { actorsWidgets } from './actorsWidgets';
 
 // ---------------------------------------------------------------------------
 // Aggregate all widgets
@@ -46,6 +47,7 @@ const allWidgets: WidgetDefinition[] = [
   ...loanDetailWidgets,
   ...workflowConversionWidgets,
   ...highPerformersWidgets,
+  ...actorsWidgets,
 ];
 
 // ---------------------------------------------------------------------------
