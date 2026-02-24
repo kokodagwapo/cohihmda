@@ -19,6 +19,8 @@ export interface SyncResult {
   loans_updated: number;
   errors: string[];
   duration: number;
+  /** Hint when a new field is mostly NULL after incremental sync; run full sync to backfill */
+  backfill_hint?: string;
 }
 
 export interface SyncOptions {
@@ -239,6 +241,27 @@ export class EncompassEtlService {
         );
       }
 
+      // After incremental sync: detect when a new field (e.g. is_archived) is mostly NULL so user knows to run full sync to backfill
+      let backfillHint: string | undefined;
+      if (options.modifiedFrom && totalLoansAfter > 0) {
+        try {
+          const nullCheck = await this.tenantPool.query(
+            `SELECT COUNT(*) FILTER (WHERE is_archived IS NULL) AS null_count, COUNT(*) AS total FROM public.loans`
+          );
+          const row = nullCheck.rows[0];
+          const nullCount = parseInt(row?.null_count || "0", 10);
+          const total = parseInt(row?.total || "0", 10);
+          if (total > 0 && nullCount / total > 0.5) {
+            backfillHint = `is_archived is NULL for ${nullCount.toLocaleString()} of ${total.toLocaleString()} loans. Run a full sync (fullSync=true) to backfill this field.`;
+            console.warn(`[Sync] ${backfillHint}`);
+          }
+        } catch (colErr: any) {
+          if (colErr?.code !== "42703") {
+            console.warn("[Sync] Could not check is_archived for backfill hint:", colErr?.message);
+          }
+        }
+      }
+
       return {
         success: recordsFailed === 0,
         records_synced: recordsSynced,
@@ -247,6 +270,7 @@ export class EncompassEtlService {
         loans_updated: loansUpdated,
         errors: errors.slice(0, 10),
         duration: Date.now() - startTime,
+        backfill_hint: backfillHint,
       };
     } catch (error: any) {
       console.error("[Sync] Failed:", error.message);
@@ -286,6 +310,7 @@ export class EncompassEtlService {
         loans_updated: loansUpdated,
         errors: [error.message],
         duration: Date.now() - startTime,
+        backfill_hint: undefined,
       };
     }
   }

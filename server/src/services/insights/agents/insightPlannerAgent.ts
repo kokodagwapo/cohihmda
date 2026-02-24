@@ -70,8 +70,21 @@ BALANCED COVERAGE — INCLUDE STRATEGIC REVIEW (POSITIVE SIGNALS):
 
 DATA QUALITY — FOCUS ON REAL PIPELINE:
 - The active pipeline filter (current_loan_status = 'Active Loan' AND application_date IS NOT NULL) is already applied. Loans without application_date are pre-excluded data artifacts — do NOT plan questions about missing application_date or count those records. That is a known data artifact, not a discovery.
-- Within the real active pipeline (loans WITH application_date), look for genuine data quality issues: stale loans (application_date > 6 months old — likely abandoned), missing lock dates on loans that should be locked, impossible date sequences, loans stuck in early milestones for abnormally long periods.
-- Data quality findings about the REAL pipeline are valuable. "40% of your active pipeline is 6+ months old and likely abandoned" is actionable. But "X% of Active Loan records have no application_date" is NOT — those are just import artifacts.`;
+- Within the real active pipeline (loans WITH application_date), look for genuine data quality issues: missing lock dates on loans that should be locked, impossible date sequences, loans stuck in early milestones for abnormally long periods.
+- IMPORTANT: The "Stale Loan Data" section below will tell you whether this tenant has stale loans. If the tenant has virtually no stale loans, do NOT waste investigation questions on stale/abandoned pipeline. If stale loans are significant, you may include one question about it.
+- Data quality findings about the REAL pipeline are valuable. But "X% of Active Loan records have no application_date" is NOT — those are just import artifacts.
+
+MARKET RATE CONTEXT:
+- When market context is provided, include 1-2 questions that investigate the relationship between rate movements and pipeline behavior (lock expirations, withdrawal spikes, refi vs purchase mix shifts, borrower rate sensitivity).
+- Market data comes from OBMMIC30YF (30-Year Fixed Conforming). Use the provided trend to contextualize pipeline risk findings.
+- Examples: "How does the recent 25bps rate increase correlate with withdrawal activity in the last 30 days?", "What % of the locked pipeline has rates above the current market rate, indicating potential borrower regret?", "Has the refi vs purchase mix shifted in response to rate changes?"
+- If rates are rising: prioritize lock expiration risk, withdrawal risk, and pipeline velocity questions.
+- If rates are falling: look for refi surge opportunities and borrower regret on recently locked loans.
+
+INDUSTRY NEWS CONTEXT:
+- When industry news context is provided, include 1-2 questions that test whether recent external events are visible in this tenant's pipeline data.
+- Focus on measurable relationships between headlines and portfolio behavior (application volume shifts, lock behavior changes, product mix movement, denial/withdrawal movement, cycle-time impacts).
+- If the news is regulatory/compliance-focused (CFPB/FHFA), include at least one question to check operational or compliance exposure in current pipeline composition.`;
 
 // ============================================================================
 // Training Examples
@@ -133,6 +146,11 @@ export interface InsightPlannerContext {
   trackedInsights?: Array<{ headline: string; metric_signature: any }>;
   dataQualityFlags?: string[];
   knowledgeContext?: string;
+  marketContext?: string;
+  industryNewsContext?: string;
+  staleLoanContext?: string;
+  /** When set, planner generates 4-6 questions targeting this bucket only. */
+  bucketFocus?: string;
 }
 
 function buildUserPrompt(ctx: InsightPlannerContext): string {
@@ -174,6 +192,28 @@ function buildUserPrompt(ctx: InsightPlannerContext): string {
 
   if (ctx.knowledgeContext) {
     prompt += `## Organization Knowledge Base Context\nThe following context comes from the organization's knowledge center and may contain domain-specific definitions, processes, or priorities that should inform your investigation planning:\n${ctx.knowledgeContext}\n\n`;
+  }
+
+  if (ctx.marketContext) {
+    prompt += `## Market Rate Context (OBMMIC30YF — 30-Year Fixed Conforming)\n${ctx.marketContext}\n\n`;
+  }
+
+  if (ctx.industryNewsContext) {
+    prompt += `## Industry News Context\n${ctx.industryNewsContext}\n\n`;
+  }
+
+  if (ctx.staleLoanContext) {
+    prompt += `## Stale Loan Data\n${ctx.staleLoanContext}\n\n`;
+  }
+
+  if (ctx.bucketFocus) {
+    const bucket = ctx.bucketFocus;
+    prompt += `## FOCUS DIRECTIVE\nGenerate 4-6 investigation questions specifically targeting the "${bucket}" severity level.\n`;
+    prompt += `- "critical": risks, compliance exposure, financial threats, operational failures\n`;
+    prompt += `- "attention": concerning trends, emerging risks, metrics needing monitoring\n`;
+    prompt += `- "working": positive signals, performance strengths, improving trends\n`;
+    prompt += `- "context": market context, portfolio composition, background trends\n`;
+    prompt += `Do NOT repeat existing insight headlines listed above.\n\n`;
   }
 
   prompt += `Produce your investigation plan as a JSON object with "summary" and "questions".`;

@@ -12,6 +12,13 @@ interface EmailOptions {
   text?: string;
 }
 
+export interface DailyBriefEmailOptions {
+  to: string;
+  subject: string;
+  html: string;
+  text?: string;
+}
+
 /**
  * Send email using configured provider
  */
@@ -40,6 +47,12 @@ async function sendEmail(options: EmailOptions): Promise<void> {
     // Don't throw - email failures shouldn't break the flow
     // Log for manual retry
   }
+}
+
+export async function sendDailyBriefNewsletterEmail(
+  options: DailyBriefEmailOptions,
+): Promise<void> {
+  await sendEmail(options);
 }
 
 /**

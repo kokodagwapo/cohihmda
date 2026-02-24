@@ -109,9 +109,33 @@ export const useAletheiaData = (
     }));
   };
 
-  // Refresh insights via POST — generates for ALL channels in parallel,
-  // then loads the current channel's insights from the DB.
-  const refreshInsights = useCallback(async () => {
+  const reloadInsightsFromDb = useCallback(async () => {
+    const tenantParam = selectedTenantId
+      ? `&tenant_id=${selectedTenantId}`
+      : "";
+    const channelParam =
+      selectedChannel && selectedChannel !== "All"
+        ? `&channel_group=${encodeURIComponent(selectedChannel)}`
+        : "";
+
+    const data = await api.request<any>(
+      `/api/dashboard/insights?dateFilter=${dateFilter}&useLLM=true${tenantParam}${channelParam}&generation_method=pipeline`
+    );
+
+    setMetadata({
+      usedLLM: data.usedLLM ?? true,
+      generatedAt: data.generatedAt || new Date().toISOString(),
+      summaryForPodcast: data.summaryForPodcast,
+      needsGeneration: false,
+    });
+
+    const mapped = mapInsights(data);
+    setAllInsights(mapped);
+    setInsightsLoading(false);
+  }, [dateFilter, selectedTenantId, selectedChannel]);
+
+  // Refresh insights — fires async job, returns jobId for progress tracking
+  const refreshInsights = useCallback(async (): Promise<string | null> => {
     setInsightsLoading(true);
     setInsightsError(null);
     setNeedsGeneration(false);
@@ -121,42 +145,25 @@ export const useAletheiaData = (
         ? `&tenant_id=${selectedTenantId}`
         : "";
 
-      // Generate insights for ALL channels (Retail, TPO, All) in parallel
-      await api.request<any>(
+      const resp = await api.request<{ jobId: string }>(
         `/api/dashboard/insights/refresh-all-channels?dateFilter=${dateFilter}${tenantParam}`,
         { method: "POST" }
       );
 
-      // Load the current channel's freshly-generated insights from DB
-      const channelParam =
-        selectedChannel && selectedChannel !== "All"
-          ? `&channel_group=${encodeURIComponent(selectedChannel)}`
-          : "";
-
-      const data = await api.request<any>(
-        `/api/dashboard/insights?dateFilter=${dateFilter}&useLLM=true${tenantParam}${channelParam}&generation_method=pipeline`
-      );
-
-      setMetadata({
-        usedLLM: data.usedLLM ?? true,
-        generatedAt: data.generatedAt || new Date().toISOString(),
-        summaryForPodcast: data.summaryForPodcast,
-        needsGeneration: false,
-      });
-
-      const mapped = mapInsights(data);
-      setAllInsights(mapped);
+      return resp.jobId;
     } catch (error: any) {
       console.error("Error refreshing insights:", error);
       setInsightsError(error.message || "Failed to refresh insights");
-    } finally {
       setInsightsLoading(false);
+      return null;
     }
   }, [dateFilter, selectedTenantId, selectedChannel]);
 
-  // Refresh a single bucket (regenerates only that section)
-  const refreshBucket = useCallback(
-    async (bucket: string) => {
+  const loadInsightsByMethod = useCallback(
+    async (method: "pipeline" | "agent") => {
+      setAllInsights([]);
+      setInsightsLoading(true);
+      setInsightsError(null);
       try {
         const tenantParam = selectedTenantId
           ? `&tenant_id=${selectedTenantId}`
@@ -167,51 +174,127 @@ export const useAletheiaData = (
             : "";
 
         const data = await api.request<any>(
-          `/api/dashboard/insights/refresh-bucket?dateFilter=${dateFilter}&bucket=${bucket}${tenantParam}${channelParam}`,
-          { method: "POST" }
+          `/api/dashboard/insights?dateFilter=${dateFilter}&useLLM=true${tenantParam}${channelParam}&generation_method=${method}`
         );
 
         const mapped = mapInsights(data);
-        if (mapped.length > 0) {
-          setAllInsights(mapped);
-        }
-        return data;
+        setAllInsights(mapped);
+        setNeedsGeneration(false);
+        setMetadata({
+          usedLLM: data.usedLLM ?? true,
+          generatedAt: data.generatedAt || new Date().toISOString(),
+          summaryForPodcast: data.summaryForPodcast,
+          needsGeneration: false,
+        });
       } catch (error: any) {
-        console.error(`Error refreshing bucket "${bucket}":`, error);
-        throw error;
+        console.error(`Error loading ${method} insights:`, error);
+        setAllInsights([]);
+        setInsightsError(error.message || `Failed to load ${method} insights`);
+      } finally {
+        setInsightsLoading(false);
       }
     },
     [dateFilter, selectedTenantId, selectedChannel]
   );
 
-  // Generate MORE insights for a bucket (appends, does not replace)
-  const generateMoreInsights = useCallback(
-    async (bucket: string) => {
-      try {
-        const tenantParam = selectedTenantId
-          ? `&tenant_id=${selectedTenantId}`
+  const POLL_INTERVAL_MS = 2000;
+
+  /** Refreshes all insights via agent pipeline (legacy refresh-bucket endpoint was archived). */
+  const refreshBucket = useCallback(
+    async (bucket: string): Promise<string | null> => {
+      const tenantParam = selectedTenantId
+        ? `&tenant_id=${selectedTenantId}`
+        : "";
+      const channelParam =
+        selectedChannel && selectedChannel !== "All"
+          ? `&channel_group=${encodeURIComponent(selectedChannel)}`
           : "";
-        const channelParam =
-          selectedChannel && selectedChannel !== "All"
-            ? `&channel_group=${encodeURIComponent(selectedChannel)}`
-            : "";
 
-        const data = await api.request<any>(
-          `/api/dashboard/insights/generate-more?dateFilter=${dateFilter}&bucket=${bucket}${tenantParam}${channelParam}`,
-          { method: "POST" }
-        );
+      const resp = await api.request<{ jobId: string }>(
+        `/api/dashboard/insights/refresh?dateFilter=${dateFilter}${tenantParam}${channelParam}`,
+        { method: "POST" }
+      );
 
-        const mapped = mapInsights(data);
-        if (mapped.length > 0) {
-          setAllInsights(mapped);
-        }
-        return data;
-      } catch (error: any) {
-        console.error(`Error generating more for bucket "${bucket}":`, error);
-        throw error;
-      }
+      const jobId = resp.jobId;
+      if (!jobId) return null;
+
+      const poll = (): Promise<void> =>
+        new Promise((resolve, reject) => {
+          const run = async () => {
+            try {
+              const data = await api.request<{ status: string; error?: string }>(
+                `/api/jobs/${jobId}`
+              );
+              if (data.status === "complete") {
+                await loadInsightsByMethod("agent");
+                resolve();
+                return;
+              }
+              if (data.status === "failed") {
+                reject(new Error(data.error || "Refresh failed"));
+                return;
+              }
+              setTimeout(run, POLL_INTERVAL_MS);
+            } catch (err: any) {
+              reject(err);
+            }
+          };
+          run();
+        });
+
+      await poll();
+      return jobId;
     },
-    [dateFilter, selectedTenantId, selectedChannel]
+    [dateFilter, selectedTenantId, selectedChannel, loadInsightsByMethod]
+  );
+
+  const generateMoreInsights = useCallback(
+    async (bucket: string): Promise<string | null> => {
+      const tenantParam = selectedTenantId
+        ? `&tenant_id=${selectedTenantId}`
+        : "";
+      const channelParam =
+        selectedChannel && selectedChannel !== "All"
+          ? `&channel_group=${encodeURIComponent(selectedChannel)}`
+          : "";
+
+      const resp = await api.request<{ jobId: string }>(
+        `/api/dashboard/insights/generate-more?dateFilter=${dateFilter}&bucket=${bucket}${tenantParam}${channelParam}`,
+        { method: "POST" }
+      );
+
+      const jobId = resp.jobId;
+      if (!jobId) return null;
+
+      // Poll until job completes or fails
+      const poll = (): Promise<void> =>
+        new Promise((resolve, reject) => {
+          const run = async () => {
+            try {
+              const data = await api.request<{ status: string; data?: any; error?: string }>(
+                `/api/jobs/${jobId}`
+              );
+              if (data.status === "complete") {
+                await loadInsightsByMethod("agent");
+                resolve();
+                return;
+              }
+              if (data.status === "failed") {
+                reject(new Error(data.error || "Generate-more failed"));
+                return;
+              }
+              setTimeout(run, POLL_INTERVAL_MS);
+            } catch (err: any) {
+              reject(err);
+            }
+          };
+          run();
+        });
+
+      await poll();
+      return jobId;
+    },
+    [dateFilter, selectedTenantId, selectedChannel, loadInsightsByMethod]
   );
 
   // Submit feedback (thumbs up/down + optional tags/comment) for a specific insight
@@ -393,44 +476,6 @@ export const useAletheiaData = (
     }
   }, [allInsights.length, insightsLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const loadInsightsByMethod = useCallback(
-    async (method: "pipeline" | "agent") => {
-      setAllInsights([]);
-      setInsightsLoading(true);
-      setInsightsError(null);
-      try {
-        const tenantParam = selectedTenantId
-          ? `&tenant_id=${selectedTenantId}`
-          : "";
-        const channelParam =
-          selectedChannel && selectedChannel !== "All"
-            ? `&channel_group=${encodeURIComponent(selectedChannel)}`
-            : "";
-
-        const data = await api.request<any>(
-          `/api/dashboard/insights?dateFilter=${dateFilter}&useLLM=true${tenantParam}${channelParam}&generation_method=${method}`
-        );
-
-        const mapped = mapInsights(data);
-        setAllInsights(mapped);
-        setNeedsGeneration(false);
-        setMetadata({
-          usedLLM: data.usedLLM ?? true,
-          generatedAt: data.generatedAt || new Date().toISOString(),
-          summaryForPodcast: data.summaryForPodcast,
-          needsGeneration: false,
-        });
-      } catch (error: any) {
-        console.error(`Error loading ${method} insights:`, error);
-        setAllInsights([]);
-        setInsightsError(error.message || `Failed to load ${method} insights`);
-      } finally {
-        setInsightsLoading(false);
-      }
-    },
-    [dateFilter, selectedTenantId, selectedChannel]
-  );
-
   return {
     allInsights,
     insightsLoading,
@@ -441,6 +486,7 @@ export const useAletheiaData = (
     refreshInsights,
     refreshBucket,
     generateMoreInsights,
+    reloadInsightsFromDb,
     deleteInsight,
     submitFeedback,
     getFeedback,

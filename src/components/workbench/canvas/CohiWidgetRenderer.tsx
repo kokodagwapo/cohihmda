@@ -49,6 +49,9 @@ import {
   GitBranch,
   TreePine,
   Table2,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -233,6 +236,8 @@ interface CohiWidgetRendererProps {
    * the title visible.
    */
   hideTitle?: boolean;
+  /** Source type — research widgets skip the date filter bar entirely. */
+  sourceType?: 'research' | 'chat';
 }
 
 // ---------------------------------------------------------------------------
@@ -353,6 +358,118 @@ function formatNumber(
   if (abs >= 10_000) return compact(value);
   if (Number.isInteger(value)) return value.toLocaleString();
   return value.toFixed(2);
+}
+
+// ---------------------------------------------------------------------------
+// SortableTable – used by the 'table' chart type
+// ---------------------------------------------------------------------------
+
+const TABLE_RENDER_CAP = 500;
+
+type SortDir = 'asc' | 'desc' | null;
+
+const ID_COLUMN_PATTERN = /\b(id|number|num|no|code|key|loan_number|loan_no|loan_id|account|acct|ssn|ein|fein|zip|phone|fax|routing|aba)\b/i;
+
+function isIdentifierColumn(key: string): boolean {
+  return ID_COLUMN_PATTERN.test(key);
+}
+
+function displayValue(val: any): string {
+  if (val == null) return '-';
+  if (typeof val === 'object') return JSON.stringify(val);
+  return String(val);
+}
+
+function formatTableCell(val: any, colKey: string): string {
+  if (val == null) return '-';
+  if (typeof val === 'object') return JSON.stringify(val);
+  if (typeof val === 'number') {
+    if (isIdentifierColumn(colKey)) return val.toLocaleString('en-US', { useGrouping: false });
+    return formatNumber(val);
+  }
+  return String(val);
+}
+
+function SortableTable({ columns, data, cap = TABLE_RENDER_CAP }: {
+  columns: { key: string; label: string }[];
+  data: any[];
+  cap?: number;
+}) {
+  const [sortKey, setSortKey] = React.useState<string | null>(null);
+  const [sortDir, setSortDir] = React.useState<SortDir>(null);
+
+  const toggleSort = (key: string) => {
+    if (sortKey !== key) {
+      setSortKey(key);
+      setSortDir('asc');
+    } else if (sortDir === 'asc') {
+      setSortDir('desc');
+    } else {
+      setSortKey(null);
+      setSortDir(null);
+    }
+  };
+
+  const sortedData = useMemo(() => {
+    if (!sortKey || !sortDir) return data;
+    return [...data].sort((a, b) => {
+      const av = a[sortKey];
+      const bv = b[sortKey];
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === 'number' && typeof bv === 'number') {
+        return sortDir === 'asc' ? av - bv : bv - av;
+      }
+      const cmp = displayValue(av).localeCompare(displayValue(bv), undefined, { numeric: true, sensitivity: 'base' });
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+  }, [data, sortKey, sortDir]);
+
+  const displayRows = sortedData.slice(0, cap);
+
+  return (
+    <div className="overflow-auto max-h-full">
+      <table className="w-full text-xs border-collapse">
+        <thead>
+          <tr className="border-b border-slate-200 dark:border-slate-700">
+            {columns.map((col) => {
+              const active = sortKey === col.key;
+              const SortIcon = active
+                ? sortDir === 'asc' ? ArrowUp : ArrowDown
+                : ArrowUpDown;
+              return (
+                <th
+                  key={col.key}
+                  className="text-left py-1.5 px-2 font-medium text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/50 sticky top-0 cursor-pointer select-none hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors"
+                  onClick={() => toggleSort(col.key)}
+                >
+                  <span className="inline-flex items-center gap-1">
+                    {col.label}
+                    <SortIcon className={cn('w-3 h-3 shrink-0', active ? 'text-indigo-500' : 'text-slate-300 dark:text-slate-600')} />
+                  </span>
+                </th>
+              );
+            })}
+          </tr>
+        </thead>
+        <tbody>
+          {displayRows.map((row: any, i: number) => (
+            <tr key={i} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/30">
+              {columns.map((col) => (
+                <td key={col.key} className="py-1 px-2 text-slate-700 dark:text-slate-300">
+                  {formatTableCell(row[col.key], col.key)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {data.length > cap && (
+        <p className="text-xs text-slate-500 px-2 py-1">Showing {cap} of {data.length} rows</p>
+      )}
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -555,39 +672,7 @@ function renderChart(config: VisualizationConfig, data: any[], w: number, h: num
 
     case 'table': {
       const tableCols = config.tableConfig?.columns || Object.keys(chartData[0] || {}).map(k => ({ key: k, label: k }));
-      return (
-        <div className="overflow-auto max-h-full">
-          <table className="w-full text-xs border-collapse">
-            <thead>
-              <tr className="border-b border-slate-200 dark:border-slate-700">
-                {tableCols.map((col: any) => (
-                  <th key={col.key} className="text-left py-1.5 px-2 font-medium text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/50 sticky top-0">
-                    {col.label}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {chartData.slice(0, 50).map((row: any, i: number) => (
-                <tr key={i} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/30">
-                  {tableCols.map((col: any) => {
-                    const val = row[col.key];
-                    const formatted = val == null ? '-' : typeof val === 'number' ? formatNumber(val) : String(val);
-                    return (
-                      <td key={col.key} className="py-1 px-2 text-slate-700 dark:text-slate-300">
-                        {formatted}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {chartData.length > 50 && (
-            <p className="text-xs text-slate-500 px-2 py-1">Showing 50 of {chartData.length} rows</p>
-          )}
-        </div>
-      );
+      return <SortableTable columns={tableCols} data={chartData} />;
     }
 
     case 'kpi': {
@@ -1023,6 +1108,7 @@ export function CohiWidgetRenderer({
   onVizTypeChange,
   canvasItemId,
   hideTitle,
+  sourceType,
 }: CohiWidgetRendererProps) {
   const reportWidgetData = useCanvasDataStore((s) => s.reportWidgetData);
   const removeWidgetFromStore = useCanvasDataStore((s) => s.removeWidget);
@@ -1109,9 +1195,11 @@ export function CohiWidgetRenderer({
     return null; // no filter → original SQL range
   }, [activePreset, activeYear, dateField]);
 
+  // Research widgets skip all date/dimension filtering — their SQL has its own scoping.
   // When sync is enabled, group filter wins. Otherwise, use the widget's own controls.
-  const effectiveDateFilter = filterSyncEnabled ? (groupDateFilter ?? null) : localDateFilter;
-  const effectiveDimFilters = filterSyncEnabled ? (groupDimensionFilters ?? null) : null;
+  const isResearch = sourceType === 'research';
+  const effectiveDateFilter = isResearch ? null : (filterSyncEnabled ? (groupDateFilter ?? null) : localDateFilter);
+  const effectiveDimFilters = isResearch ? null : (filterSyncEnabled ? (groupDimensionFilters ?? null) : null);
 
   const { data, loading, error, refetch } = useCohiWidgetData(sql, tenantId, effectiveDateFilter, effectiveDimFilters);
   const effectiveConfig = { ...vizConfig, type: chartType };
@@ -1218,8 +1306,8 @@ export function CohiWidgetRenderer({
         </div>
       )}
 
-      {/* ─── Compact filter toolbar ─── */}
-      {!filterSyncEnabled && (
+      {/* ─── Compact filter toolbar (hidden for research widgets) ─── */}
+      {!filterSyncEnabled && !isResearch && (
         <div className="shrink-0 border-b border-slate-200/70 dark:border-slate-700/70 bg-slate-50/60 dark:bg-slate-800/40">
           {/* Collapsed: single compact row with toggle + summary + actions */}
           <div className="flex items-center gap-1 px-1.5 h-6 min-h-[24px]">

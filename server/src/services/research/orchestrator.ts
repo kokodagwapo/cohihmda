@@ -86,6 +86,9 @@ export interface ResearchSession {
   _pauseResolver?: () => void;
   // Active SSE emitter (set when streaming)
   _activeEmitter?: SSEEmitter;
+  // Sharing (in-app user picker)
+  visibility?: string;
+  sharedWithUserIds?: string[];
 }
 
 // ============================================================================
@@ -212,6 +215,8 @@ export async function loadSession(sessionId: string, tenantPool: pg.Pool): Promi
       error: row.error,
       pauseRequested: false,
       paused: false,
+      visibility: row.visibility ?? "private",
+      sharedWithUserIds: Array.isArray(row.shared_with_user_ids) ? row.shared_with_user_ids : [],
     };
 
     sessions.set(session.id, session);
@@ -225,12 +230,14 @@ export async function loadSession(sessionId: string, tenantPool: pg.Pool): Promi
 export async function listSessions(
   tenantPool: pg.Pool,
   userId: string
-): Promise<Array<{ id: string; topic: string | null; phase: string; createdAt: string; updatedAt: string }>> {
+): Promise<Array<{ id: string; topic: string | null; phase: string; createdAt: string; updatedAt: string; isOwner: boolean }>> {
   try {
     const result = await tenantPool.query(
-      `SELECT id, topic, phase, created_at, updated_at
+      `SELECT id, topic, phase, created_at, updated_at, (user_id = $1) AS is_owner
        FROM research_sessions
        WHERE user_id = $1
+          OR visibility = 'global'
+          OR (visibility = 'shared' AND $1 = ANY(shared_with_user_ids))
        ORDER BY updated_at DESC
        LIMIT 50`,
       [userId]
@@ -241,11 +248,49 @@ export async function listSessions(
       phase: r.phase,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
+      isOwner: r.is_owner ?? true,
     }));
   } catch (err: any) {
     console.error("[Research] Failed to list sessions:", err.message);
     return [];
   }
+}
+
+export async function updateSessionSharing(
+  sessionId: string,
+  tenantPool: pg.Pool,
+  userId: string,
+  visibility: string,
+  sharedWithUserIds: string[]
+): Promise<boolean> {
+  try {
+    const result = await tenantPool.query(
+      `UPDATE research_sessions
+       SET visibility = $1, shared_with_user_ids = $2, updated_at = NOW()
+       WHERE id = $3 AND user_id = $4
+       RETURNING id`,
+      [["shared", "global"].includes(visibility) ? visibility : "private", sharedWithUserIds, sessionId, userId]
+    );
+    if (result.rows.length > 0) {
+      const session = sessions.get(sessionId);
+      if (session) {
+        session.visibility = ["shared", "global"].includes(visibility) ? visibility as "shared" | "global" : "private";
+        session.sharedWithUserIds = sharedWithUserIds;
+      }
+      return true;
+    }
+    return false;
+  } catch (err: any) {
+    console.error(`[Research] Failed to update sharing for session ${sessionId}:`, err.message);
+    return false;
+  }
+}
+
+export function canAccessSession(session: ResearchSession, userId: string): boolean {
+  if (session.userId === userId) return true;
+  if (session.visibility === "global") return true;
+  if (session.visibility === "shared" && session.sharedWithUserIds?.includes(userId)) return true;
+  return false;
 }
 
 export async function deleteSession(sessionId: string, tenantPool: pg.Pool): Promise<boolean> {

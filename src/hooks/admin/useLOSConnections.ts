@@ -68,12 +68,12 @@ export const useLOSConnections = () => {
     }
   }, [toast]);
 
-  const syncConnection = useCallback(async (connectionId: string, tenantId?: string, clearDatabase: boolean = false, testMode: boolean = false, limit?: number) => {
+    const syncConnection = useCallback(async (connectionId: string, tenantId?: string, clearDatabase: boolean = false, testMode: boolean = false, limit?: number, fullSync: boolean = false) => {
     try {
       const params = new URLSearchParams();
       if (tenantId) params.append('tenant_id', tenantId);
       if (clearDatabase) params.append('clearDatabase', 'true');
-      if (clearDatabase) params.append('fullSync', 'true'); // Full sync when clearing
+      if (clearDatabase || fullSync) params.append('fullSync', 'true'); // Full sync when clearing or when backfilling new fields
       if (testMode) params.append('testMode', 'true');
       if (limit) params.append('limit', limit.toString());
       

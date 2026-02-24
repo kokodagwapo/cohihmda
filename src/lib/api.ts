@@ -175,10 +175,12 @@ export class ApiClient {
     new Map();
   private pendingRequests: Map<string, Promise<any>> = new Map();
   private readonly CACHE_TTL = 30000; // 30 seconds cache
+  private refreshPromise: Promise<boolean> | null = null;
 
   constructor(baseUrl: string = API_URL) {
     this.baseUrl = baseUrl;
     this.token = localStorage.getItem("auth_token");
+    this.scheduleProactiveRefresh();
   }
 
   setUserRole(role: string | null) {
@@ -211,6 +213,64 @@ export class ApiClient {
     this.requestCache.clear();
     this.pendingRequests.clear();
     console.log("[API] Cache cleared");
+  }
+
+  /**
+   * Attempt to refresh the auth token using the stored Cognito refresh token.
+   * Returns true if refresh succeeded, false otherwise.
+   * Deduplicates concurrent refresh attempts.
+   */
+  private async tryRefreshToken(): Promise<boolean> {
+    if (this.refreshPromise) return this.refreshPromise;
+
+    this.refreshPromise = (async () => {
+      const refreshToken = localStorage.getItem("refresh_token");
+      if (!refreshToken) return false;
+
+      try {
+        const url = this.baseUrl
+          ? `${this.baseUrl}/api/auth/refresh`
+          : "/api/auth/refresh";
+
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refreshToken }),
+        });
+
+        if (!response.ok) return false;
+
+        const data = await response.json();
+        if (data.token) {
+          this.setToken(data.token);
+          this.scheduleProactiveRefresh();
+          return true;
+        }
+        return false;
+      } catch {
+        return false;
+      } finally {
+        this.refreshPromise = null;
+      }
+    })();
+
+    return this.refreshPromise;
+  }
+
+  /**
+   * Decode JWT exp claim and schedule a proactive refresh 5 minutes before expiry.
+   */
+  private scheduleProactiveRefresh() {
+    if (!this.token) return;
+    try {
+      const payload = JSON.parse(atob(this.token.split(".")[1]));
+      const expiresAt = payload.exp * 1000;
+      const refreshAt = expiresAt - 5 * 60 * 1000;
+      const delay = refreshAt - Date.now();
+      if (delay > 0) {
+        setTimeout(() => this.tryRefreshToken(), delay);
+      }
+    } catch {}
   }
 
   // Get API Gateway URLs from environment
@@ -346,22 +406,20 @@ export class ApiClient {
     } else {
     }
 
-    // Request timeouts — must exceed CloudFront OriginReadTimeout (180s max).
-    // The frontend should never be the layer that kills a request.
+    // Request timeouts — async job endpoints return 202 in <1s,
+    // so only file uploads and chat streams need extended timeouts.
     const isFileUpload = options.body instanceof FormData;
     const isImportEndpoint = endpoint.includes("/import/");
     const isSlowEndpoint =
       endpoint.includes("/loans/funnel") ||
-      endpoint.includes("/dashboard/analytics") ||
-      endpoint.includes("/dashboard/insights") ||
-      (endpoint.includes("/api/predictions") && options.method === "POST");
+      endpoint.includes("/dashboard/analytics");
     const isChatEndpoint = endpoint.includes("/cohi-chat/");
     const timeoutMs =
       isFileUpload || isImportEndpoint
         ? 600000   // 10 minutes for file uploads/imports
         : isChatEndpoint
         ? 300000   // 5 minutes for AI chat (streaming)
-        : 200000;  // 3 min 20s — above CloudFront's 180s max
+        : 60000;   // 60s default — async job endpoints return 202 immediately
 
     // Create abort controller for timeout (more compatible than AbortSignal.timeout)
     const controller = new AbortController();
@@ -401,6 +459,25 @@ export class ApiClient {
             errorData.error ||
               "Service temporarily unavailable. Please try again."
           );
+        }
+
+        // On 401, try refreshing the token once before giving up
+        if (
+          response.status === 401 &&
+          retries === 0 &&
+          !endpoint.includes("/auth/signin") &&
+          !endpoint.includes("/auth/refresh")
+        ) {
+          const refreshed = await this.tryRefreshToken();
+          if (refreshed) {
+            return this.request<T>(endpoint, options, retries + 1);
+          }
+          // Refresh failed -- clear everything and redirect to login
+          this.clearToken();
+          localStorage.removeItem("refresh_token");
+          if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+            window.location.href = "/login";
+          }
         }
 
         throw new Error(errorData.error || "Request failed");
@@ -806,6 +883,54 @@ export class ApiClient {
     }>("/api/news/insights", {
       method: "POST",
       body: JSON.stringify(article),
+    });
+  }
+
+  async getNewsDetails(article: {
+    title: string;
+    source: string;
+    link: string;
+  }) {
+    return this.request<{
+      articleParagraphs: string[];
+      fullArticleUrl: string;
+      fetchedAt: string;
+      error?: string;
+    }>("/api/news/details", {
+      method: "POST",
+      body: JSON.stringify(article),
+    });
+  }
+
+  async getDailyBriefNewsletterSubscription() {
+    return this.request<{
+      enabled: boolean;
+      email: string;
+    }>("/api/news/newsletter/subscription");
+  }
+
+  async updateDailyBriefNewsletterSubscription(payload: {
+    enabled: boolean;
+    email: string;
+  }) {
+    return this.request<{
+      success: boolean;
+      enabled: boolean;
+      email: string;
+    }>("/api/news/newsletter/subscription", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async sendDailyBriefPreviewEmail(payload?: { email?: string }) {
+    return this.request<{
+      success: boolean;
+      message: string;
+      recipient: string;
+    }>("/api/news/newsletter/send-preview", {
+      method: "POST",
+      body: JSON.stringify(payload || {}),
     });
   }
 

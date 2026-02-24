@@ -27,7 +27,7 @@ import {
   buildActorNotMissingClause,
   calcLoanRevenue,
   calcLoanComplexity,
-  parseComplexityConfig,
+  parseComplexityConfigV2,
   DEFAULT_COMPLEXITY_WEIGHTS,
   getVMaxDate,
   formatDateForSQL,
@@ -50,6 +50,7 @@ import {
   type ActorMissingMode,
   type TTSTier,
   type ComplexityConfig,
+  type ComplexityConfigV2,
 } from "../../utils/scorecard-utils.js";
 import { getOperationsScorecardTrends } from "../../services/scorecard/operationsScorecardTrendsService.js";
 
@@ -60,17 +61,18 @@ const router = Router();
 // =============================================================================
 
 /**
- * Load loan complexity weights from the complexity_components table.
- * Falls back to default weights if no configuration exists.
+ * Load loan complexity config from the complexity_components table (V2 with range_min/range_max).
+ * Falls back to default legacy weights if no configuration exists.
  */
 async function loadComplexityConfig(
   tenantPool: any
-): Promise<ComplexityConfig> {
+): Promise<ComplexityConfigV2 | ComplexityConfig> {
   try {
     const result = await tenantPool.query(`
-      SELECT component_name, condition_value, weight
+      SELECT component_name, condition_value, weight, range_min, range_max
       FROM public.complexity_components
       WHERE is_active = true
+      ORDER BY component_name, COALESCE(range_min, 0), condition_value
     `);
 
     if (result.rows.length === 0) {
@@ -78,8 +80,8 @@ async function loadComplexityConfig(
       return DEFAULT_COMPLEXITY_WEIGHTS;
     }
 
-    const config = parseComplexityConfig(result.rows);
-    logDebug("[Scorecard] Loaded complexity config", {
+    const config = parseComplexityConfigV2(result.rows);
+    logDebug("[Scorecard] Loaded complexity config V2", {
       rowCount: result.rows.length,
     });
     return config;

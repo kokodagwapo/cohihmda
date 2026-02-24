@@ -1,4 +1,4 @@
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
   Filter,
@@ -11,24 +11,95 @@ import {
   LineChart,
   PanelLeftClose,
   PanelLeftOpen,
-} from 'lucide-react';
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { Button } from '@/components/ui/button';
-import { IconBadge } from '@/components/workbench/IconBadge';
-import { useIsMobile } from '@/hooks/use-mobile';
-import { cn } from '@/lib/utils';
+  FileText,
+  BarChart3,
+  Trophy,
+} from "lucide-react";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { Button } from "@/components/ui/button";
+import { IconBadge } from "@/components/workbench/IconBadge";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { cn } from "@/lib/utils";
 
 const topTieringNavLinks = [
-  { path: '/loan-funnel', label: 'Loan Funnel', icon: Filter, variant: 'amber' as const },
-  { path: '/performance/toptiering-comparison', label: 'TopTiering Comparison', icon: ArrowLeftRight, variant: 'violet' as const },
-  { path: '/credit-risk-management', label: 'Credit Risk Management', icon: Shield, variant: 'mint' as const },
-  { path: '/company-scorecard', label: 'Company Scorecard', icon: ClipboardList, variant: 'violet' as const },
-  { path: '/performance/financial-modeling-sandbox', label: 'Financial Modeling', icon: Calculator, variant: 'sky' as const },
-  { path: '/sales-scorecard', label: 'Sales Scorecard', icon: Target, variant: 'sky' as const },
-  { path: '/sales-trends', label: 'Sales Trends', icon: TrendingUp, variant: 'mint' as const },
-  { path: '/performance/operation-scorecard', label: 'Operations Scorecard', icon: Target, variant: 'sky' as const },
-  { path: '/performance/operation-scorecard-trends', label: 'Operations Trends', icon: LineChart, variant: 'fuchsia' as const },
-  { path: '/my-dashboard', label: 'My Workbench', icon: LayoutDashboard, variant: 'violet' as const },
+  /* { path: '/loan-funnel', label: 'Loan Funnel', icon: Filter, variant: 'amber' as const }, */
+  {
+    path: "/performance/toptiering-comparison",
+    label: "TopTiering Comparison",
+    icon: ArrowLeftRight,
+    variant: "violet" as const,
+  },
+  {
+    path: "/credit-risk-management",
+    label: "Credit Risk Management",
+    icon: Shield,
+    variant: "mint" as const,
+  },
+  {
+    path: "/company-scorecard",
+    label: "Company Scorecard",
+    icon: ClipboardList,
+    variant: "violet" as const,
+  },
+  {
+    path: "/performance/financial-modeling-sandbox",
+    label: "Financial Modeling",
+    icon: Calculator,
+    variant: "sky" as const,
+  },
+  {
+    path: "/sales-scorecard",
+    label: "Sales Scorecard",
+    icon: Target,
+    variant: "sky" as const,
+  },
+  {
+    path: "/sales-trends",
+    label: "Sales Trends",
+    icon: TrendingUp,
+    variant: "mint" as const,
+  },
+  {
+    path: "/performance/operation-scorecard",
+    label: "Operations Scorecard",
+    icon: Target,
+    variant: "sky" as const,
+  },
+  {
+    path: "/performance/operation-scorecard-trends",
+    label: "Operations Trends",
+    icon: LineChart,
+    variant: "fuchsia" as const,
+  },
+  {
+    path: "/workflow-conversion",
+    label: "Workflow Conversion",
+    icon: BarChart3,
+    variant: "sky" as const,
+  },
+  {
+    path: "/high-performers",
+    label: "High Performers",
+    icon: Trophy,
+    variant: "amber" as const,
+  },
+  {
+    path: "/loan-detail",
+    label: "Loan Detail",
+    icon: FileText,
+    variant: "sky" as const,
+  },
+  {
+    path: "/my-dashboard",
+    label: "My Workbench",
+    icon: LayoutDashboard,
+    variant: "violet" as const,
+  },
 ];
 
 export interface TopTieringSidebarProps {
@@ -68,17 +139,18 @@ function SidebarNav({
       </div>
       <nav className="space-y-0.5 flex-1 overflow-y-auto">
         {topTieringNavLinks.map(({ path, label, icon: Icon, variant }) => {
-          const active = pathname === path || (path !== '/' && pathname.startsWith(path));
+          const active =
+            pathname === path || (path !== "/" && pathname.startsWith(path));
           return (
             <Link
               key={path}
               to={path}
               onClick={onItemClick}
               className={cn(
-                'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200',
+                "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200",
                 active
-                  ? 'bg-violet-100/90 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 shadow-sm'
-                  : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100/80 dark:hover:bg-slate-800/80'
+                  ? "bg-violet-100/90 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 shadow-sm"
+                  : "text-slate-700 dark:text-slate-300 hover:bg-slate-100/80 dark:hover:bg-slate-800/80",
               )}
             >
               <IconBadge icon={Icon} variant={variant} size="sm" rounded="lg" />
@@ -107,7 +179,9 @@ export function TopTieringSidebar({
   const sidebarBody = (
     <SidebarNav
       onItemClick={closeSheet}
-      onToggleCollapse={!isMobile && !collapsed ? () => onCollapsed(true) : undefined}
+      onToggleCollapse={
+        !isMobile && !collapsed ? () => onCollapsed(true) : undefined
+      }
       pathname={location.pathname}
     />
   );
@@ -115,7 +189,10 @@ export function TopTieringSidebar({
   if (isMobile) {
     return (
       <Sheet open={sidebarOpen} onOpenChange={onSidebarOpenChange}>
-        <SheetContent side="left" className="w-[280px] p-0 flex flex-col border-r border-slate-200/70 dark:border-slate-700/50">
+        <SheetContent
+          side="left"
+          className="w-[280px] p-0 flex flex-col border-r border-slate-200/70 dark:border-slate-700/50"
+        >
           <SheetHeader className="px-4 py-3.5 border-b border-slate-200/70 dark:border-slate-700/50">
             <SheetTitle className="text-base font-semibold flex items-center gap-2">
               <IconBadge icon={Filter} variant="amber" size="sm" rounded="lg" />
@@ -131,9 +208,9 @@ export function TopTieringSidebar({
   return (
     <aside
       className={cn(
-        'flex-shrink-0 border-r border-slate-200/70 dark:border-slate-700/50 bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm flex flex-col shadow-sm shadow-slate-200/20 dark:shadow-none transition-[width] duration-200 ease-out',
-        collapsed ? 'w-12' : 'w-64',
-        className
+        "flex-shrink-0 border-r border-slate-200/70 dark:border-slate-700/50 bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm flex flex-col shadow-sm shadow-slate-200/20 dark:shadow-none transition-[width] duration-200 ease-out",
+        collapsed ? "w-12" : "w-64",
+        className,
       )}
     >
       {collapsed ? (

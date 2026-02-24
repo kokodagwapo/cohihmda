@@ -114,7 +114,7 @@ export async function safeExecuteSQL(
     await tenantPool.query(`SET statement_timeout = '${QUERY_TIMEOUT_MS}'`);
     const result = await tenantPool.query(sanitized);
     const executionTimeMs = Date.now() - startTime;
-    const rows = result.rows.slice(0, 200);
+    const rows = result.rows.slice(0, 1000);
 
     return {
       rows,
@@ -339,7 +339,7 @@ export async function getKnowledgeContext(
 // Utility: Format query results for LLM context
 // ============================================================================
 
-export function formatResultsForLLM(result: QueryResult, maxRows: number = 30): string {
+export function formatResultsForLLM(result: QueryResult, maxRows: number = 50): string {
   if (result.rowCount === 0) return "(No rows returned)";
 
   const { fields, rows } = result;

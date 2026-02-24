@@ -10,9 +10,7 @@ import { setupWebSocket } from "./services/websocket.js";
 import { initDatabase } from "./config/database.js";
 import {
   initSentry,
-  sentryRequestHandler,
-  sentryTracingHandler,
-  sentryErrorHandler,
+  setupSentryErrorHandler,
 } from "./middleware/sentry.js";
 import { apiLimiter } from "./middleware/rateLimiter.js";
 import { devLogger, prodLogger } from "./middleware/logger.js";
@@ -84,10 +82,6 @@ const allowedOrigins = (
     }
     return [origin];
   });
-
-// Sentry request handler (must be before other middleware)
-app.use(sentryRequestHandler);
-app.use(sentryTracingHandler);
 
 // CORS - Allow CloudFront and all configured origins
 app.use(
@@ -255,8 +249,8 @@ const startServer = () => {
   // Setup routes
   setupRoutes(app);
 
-  // Sentry error handler (must be after routes)
-  app.use(sentryErrorHandler);
+  // Sentry error handler (must be after routes, before other error handlers)
+  setupSentryErrorHandler(app);
 
   // Final catch-all error handler to ensure all errors return JSON
   // This prevents empty responses that cause "Unexpected end of JSON input" errors
@@ -316,6 +310,9 @@ const startServer = () => {
     if (envValid) {
       console.log("✅ Environment variables validated");
     }
+    const cognitoPasswordAuth = process.env.COGNITO_PASSWORD_AUTH === "true";
+    const cognitoSso = !!(process.env.COGNITO_USER_POOL_ID && process.env.COGNITO_DOMAIN);
+    console.log(`🔐 Auth: SSO=${cognitoSso ? "cognito" : "off"}, Password=${cognitoPasswordAuth ? "cognito" : "bcrypt"}`);
   });
 };
 
@@ -336,6 +333,17 @@ if (SKIP_DB) {
           console.warn("⚠️ Failed to start LOS sync scheduler:", error);
         }
 
+        if (process.env.ENCOMPASS_WEBHOOK_SCHEDULER_ENABLED !== "false") {
+          try {
+            const { startEncompassWebhookScheduler } = await import(
+              "./services/encompassWebhookScheduler.js"
+            );
+            startEncompassWebhookScheduler();
+          } catch (error) {
+            console.warn("⚠️ Failed to start Encompass webhook scheduler:", error);
+          }
+        }
+
         // Register post-sync hooks (insight generation + tracked insight evaluation)
         try {
           const { registerInsightHooks } =
@@ -349,6 +357,16 @@ if (SKIP_DB) {
         // When vendor outbound integrations (accounting, capital markets, servicing) are needed,
         // re-enable and fix to use tenant-specific database pools instead of management pool.
         // See: server/src/services/vendorSyncScheduler.ts
+
+        // Refresh industry news cache daily at 5:00 AM
+        try {
+          const { startNewsRefreshScheduler } = await import(
+            "./services/newsRefreshScheduler.js"
+          );
+          startNewsRefreshScheduler();
+        } catch (error) {
+          console.warn("⚠️ Failed to start news refresh scheduler:", error);
+        }
       }
     })
     .catch((error) => {

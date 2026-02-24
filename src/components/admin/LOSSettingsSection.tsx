@@ -53,7 +53,7 @@ interface LOSSettingsSectionProps {
   } | null;
   loadingMetrics?: boolean;
   onTest: (connectionId: string, tenantId?: string) => Promise<any>;
-  onSync: (connectionId: string, tenantId?: string, clearDatabase?: boolean, testMode?: boolean, limit?: number) => Promise<any>;
+  onSync: (connectionId: string, tenantId?: string, clearDatabase?: boolean, testMode?: boolean, limit?: number, fullSync?: boolean) => Promise<any>;
   onToggle: (connectionId: string, isActive: boolean) => Promise<any>;
   onCreate: (data: any, tenantId?: string) => Promise<any>;
   onUpdate?: (connectionId: string, updates: any, tenantId?: string) => Promise<any>;
@@ -270,7 +270,7 @@ export const LOSSettingsSection = ({
     setFieldMappingConnectionId(null);
   };
 
-  const handleSyncConnection = async (connectionId: string, clearDatabase: boolean = false, testMode: boolean = false) => {
+  const handleSyncConnection = async (connectionId: string, clearDatabase: boolean = false, testMode: boolean = false, fullSync: boolean = false) => {
     try {
       if (clearDatabase) {
         // Confirm before clearing database
@@ -279,7 +279,13 @@ export const LOSSettingsSection = ({
         );
         if (!confirmed) return;
       }
-      
+      if (fullSync && !clearDatabase) {
+        const confirmed = window.confirm(
+          'Full sync will re-fetch all loans from Encompass (no date filter). Use this after adding new field mappings to backfill data. Continue?'
+        );
+        if (!confirmed) return;
+      }
+
       // Initialize progress tracking
       setSyncProgress(prev => {
         const newMap = new Map(prev);
@@ -295,8 +301,8 @@ export const LOSSettingsSection = ({
         });
         return newMap;
       });
-      
-      await onSync(connectionId, selectedTenantId || undefined, clearDatabase, testMode);
+
+      await onSync(connectionId, selectedTenantId || undefined, clearDatabase, testMode, undefined, fullSync);
       
       // Start polling for progress
       const pollInterval = setInterval(() => {
@@ -310,11 +316,13 @@ export const LOSSettingsSection = ({
       
       toast({
         title: 'Sync Started',
-        description: clearDatabase 
-          ? 'Database cleared and full sync initiated.' 
-          : testMode
-            ? 'Test sync initiated (limited records).'
-            : 'Connection sync has been initiated.',
+        description: clearDatabase
+          ? 'Database cleared and full sync initiated.'
+          : fullSync
+            ? 'Full sync initiated (re-fetching all loans).'
+            : testMode
+              ? 'Test sync initiated (limited records).'
+              : 'Connection sync has been initiated.',
       });
     } catch (error) {
       // Remove progress on error
@@ -738,10 +746,20 @@ export const LOSSettingsSection = ({
                                 size="sm"
                                 className="h-8 w-8 p-0"
                                 onClick={() => handleSyncConnection(connection.id, false, false)}
-                                title="Sync Now"
+                                title="Sync Now (incremental)"
                                 disabled={syncProgress.has(connection.id) && syncProgress.get(connection.id)?.status !== 'complete' && syncProgress.get(connection.id)?.status !== 'error'}
                               >
                                 <RefreshCw className={`h-4 w-4 ${syncProgress.has(connection.id) && syncProgress.get(connection.id)?.status !== 'complete' && syncProgress.get(connection.id)?.status !== 'error' ? 'animate-spin' : ''}`} />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
+                                onClick={() => handleSyncConnection(connection.id, false, false, true)}
+                                title="Full sync (re-fetch all loans; use after adding new fields)"
+                                disabled={syncProgress.has(connection.id) && syncProgress.get(connection.id)?.status !== 'complete' && syncProgress.get(connection.id)?.status !== 'error'}
+                              >
+                                <BarChart3 className="h-4 w-4" />
                               </Button>
                               <Button
                                 variant="ghost"

@@ -31,6 +31,8 @@ import {
   resumeSession,
   runResearchPipeline,
   runFollowUp,
+  updateSessionSharing,
+  canAccessSession,
   type SSEEvent,
 } from "../services/research/orchestrator.js";
 
@@ -46,6 +48,23 @@ function setupSSE(res: Response): void {
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
+}
+
+/**
+ * Start a periodic SSE keepalive that sends a comment every 30s.
+ * Prevents CloudFront / ALB from killing the connection during
+ * long-running LLM calls where no data events are emitted.
+ * Returns a cleanup function to stop the heartbeat.
+ */
+function startSSEHeartbeat(res: Response): () => void {
+  const interval = setInterval(() => {
+    try {
+      res.write(":heartbeat\n\n");
+    } catch {
+      clearInterval(interval);
+    }
+  }, 30_000);
+  return () => clearInterval(interval);
 }
 
 function sseEmitter(res: Response, session: { events: SSEEvent[] }) {
@@ -131,6 +150,7 @@ router.get(
     }
 
     setupSSE(res);
+    const stopHeartbeat = startSSEHeartbeat(res);
 
     // Replay existing events on reconnect
     if (session.events.length > 0) {
@@ -138,6 +158,7 @@ router.get(
         res.write(`data: ${JSON.stringify(event)}\n\n`);
       }
       if (session.phase === "complete" || session.phase === "error") {
+        stopHeartbeat();
         res.end();
         return;
       }
@@ -148,6 +169,7 @@ router.get(
     let clientDisconnected = false;
     req.on("close", () => {
       clientDisconnected = true;
+      stopHeartbeat();
       console.log(`[Research] Client disconnected from session ${id}`);
     });
 
@@ -161,6 +183,7 @@ router.get(
       }
     }
 
+    stopHeartbeat();
     if (!clientDisconnected) res.end();
   }
 );
@@ -378,10 +401,15 @@ router.get(
   attachTenantContext,
   async (req: AuthRequest, res: Response) => {
     const id = req.params.id as string;
+    const userId = req.userId || "";
     const { tenantPool } = getTenantContext(req);
     const session = getSession(id) || await loadSession(id, tenantPool);
 
     if (!session) {
+      res.status(404).json({ error: "Session not found" });
+      return;
+    }
+    if (!canAccessSession(session, userId)) {
       res.status(404).json({ error: "Session not found" });
       return;
     }
@@ -398,7 +426,41 @@ router.get(
       followUpHistory: session.followUpHistory,
       error: session.error,
       createdAt: session.createdAt,
+      visibility: session.visibility ?? "private",
+      sharedWithUserIds: session.sharedWithUserIds ?? [],
     });
+  }
+);
+
+// ============================================================================
+// PUT /sessions/:id/sharing — Update session visibility and shared users
+// ============================================================================
+
+router.put(
+  "/sessions/:id/sharing",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res: Response) => {
+    const id = req.params.id as string;
+    const userId = req.userId || "";
+    const { visibility, shared_with_user_ids: sharedWithUserIds } = req.body || {};
+    const { tenantPool } = getTenantContext(req);
+
+    const GLOBAL_VISIBILITY_ROLES = ['super_admin', 'platform_admin', 'tenant_admin', 'admin'];
+    let validVisibility: string = ["shared", "global"].includes(visibility) ? visibility : "private";
+
+    if (validVisibility === "global" && !GLOBAL_VISIBILITY_ROLES.includes(req.userRole || "")) {
+      return res.status(403).json({ error: "Only admins can set global visibility" });
+    }
+
+    const ids = Array.isArray(sharedWithUserIds) ? sharedWithUserIds.filter((x: unknown) => typeof x === "string") : [];
+
+    const success = await updateSessionSharing(id, tenantPool, userId, validVisibility, ids);
+    if (success) {
+      res.json({ success: true, visibility: validVisibility, sharedWithUserIds: ids });
+    } else {
+      res.status(404).json({ error: "Session not found or you are not the owner" });
+    }
   }
 );
 

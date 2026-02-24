@@ -53,6 +53,7 @@ import {
   buildActorNotMissingClause,
   calcLoanRevenue,
   calcLoanComplexity,
+  type LoanComplexityData,
   getVMaxDate,
   formatDateForSQL,
   formatMonthKey,
@@ -75,6 +76,33 @@ function daysBetween(
   const d2 = new Date(date2);
   if (isNaN(d1.getTime()) || isNaN(d2.getTime())) return null;
   return Math.round((d2.getTime() - d1.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+/** Map a loan row to LoanComplexityData for calcLoanComplexity. */
+function toLoanComplexityData(l: any): LoanComplexityData {
+  return {
+    loan_type: l.loan_type,
+    loan_purpose: l.loan_purpose,
+    loan_amount:
+      l.loan_amount != null && l.loan_amount !== ""
+        ? parseFloat(l.loan_amount)
+        : undefined,
+    fico_score:
+      l.fico_score != null && l.fico_score !== ""
+        ? parseInt(String(l.fico_score), 10)
+        : undefined,
+    ltv_ratio:
+      l.ltv_ratio != null && l.ltv_ratio !== ""
+        ? parseFloat(l.ltv_ratio)
+        : undefined,
+    be_dti_ratio:
+      l.be_dti_ratio != null && l.be_dti_ratio !== ""
+        ? parseFloat(l.be_dti_ratio)
+        : undefined,
+    occupancy_type: l.occupancy_type,
+    borr_self_employed: l.borr_self_employed,
+    non_qm: l.non_qm,
+  };
 }
 
 /**
@@ -706,6 +734,214 @@ router.get(
 );
 
 /**
+ * GET /api/loans/detail-list
+ * Returns all loans for the Loan Detail table with a wide set of columns.
+ * Optional filters (workbench): date_field, date_from, date_to, branch, loan_officer,
+ * and dimension filters (loan_purpose, channel, loan_type, property_state, etc.).
+ * Query: limit, offset, date_field, date_from, date_to, branch, loan_officer, plus any whitelisted dimension column.
+ */
+const DETAIL_LIST_DATE_COLUMNS: Record<string, string> = {
+  application_date: "application_date",
+  started_date: "started_date",
+  funding_date: "funding_date",
+  closing_date: "closing_date",
+  credit_pull_date: "credit_pull_date",
+  investor_lock_date: "investor_lock_date",
+  investor_purchase_date: "investor_purchase_date",
+};
+
+/** Whitelist of columns allowed as dimension filters (ADD FILTER DIMENSION). Must exist on public.loans. */
+const DETAIL_LIST_DIMENSION_FILTER_COLUMNS: Record<string, string> = {
+  channel: "channel",
+  loan_type: "loan_type",
+  loan_purpose: "loan_purpose",
+  property_state: "property_state",
+  property_county: "property_county",
+  occupancy_type: "occupancy_type",
+  property_type: "property_type",
+  current_loan_status: "current_loan_status",
+  investor: "investor",
+};
+router.get(
+  "/detail-list",
+  authenticateToken,
+  attachTenantContext,
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantPool = getTenantContext(req).tenantPool;
+      const limit = Math.min(
+        Math.max(parseInt((req.query.limit as string) || "100", 10) || 100, 1),
+        50000,
+      );
+      const offset = Math.max(parseInt((req.query.offset as string) || "0", 10) || 0);
+
+      const conditions: string[] = [];
+      const params: any[] = [];
+      let paramIndex = 1;
+
+      if (req.userId) {
+        const accessFilter = await getUserLoanAccessFilter(
+          req.userId,
+          tenantPool,
+          { loanTableAlias: "", startParamIndex: paramIndex },
+        );
+        if (accessFilter) {
+          if (accessFilter.sql === "FALSE") {
+            return res.json({
+              loans: [],
+              total: 0,
+              limit,
+              offset,
+              page: 1,
+              totalPages: 0,
+            });
+          }
+          conditions.push(accessFilter.sql);
+          params.push(...accessFilter.params);
+          paramIndex += accessFilter.paramOffset;
+        }
+      }
+
+      const dateField = (req.query.date_field as string) || "application_date";
+      const dateFrom = req.query.date_from as string | undefined;
+      const dateTo = req.query.date_to as string | undefined;
+      const branch = req.query.branch as string | undefined;
+      const loanOfficer = req.query.loan_officer as string | undefined;
+
+      if (dateFrom && dateTo && DETAIL_LIST_DATE_COLUMNS[dateField]) {
+        conditions.push(
+          `(${DETAIL_LIST_DATE_COLUMNS[dateField]} IS NOT NULL AND ${DETAIL_LIST_DATE_COLUMNS[dateField]}::date >= $${paramIndex} AND ${DETAIL_LIST_DATE_COLUMNS[dateField]}::date <= $${paramIndex + 1})`,
+        );
+        params.push(dateFrom, dateTo);
+        paramIndex += 2;
+      }
+      if (branch && branch !== "all") {
+        conditions.push(`branch = $${paramIndex}`);
+        params.push(branch);
+        paramIndex += 1;
+      }
+      if (loanOfficer && loanOfficer !== "all") {
+        conditions.push(`loan_officer = $${paramIndex}`);
+        params.push(loanOfficer);
+        paramIndex += 1;
+      }
+
+      // Apply additional dimension filters (loan_purpose, channel, etc.) from workbench "ADD FILTER DIMENSION"
+      for (const [queryKey, dbColumn] of Object.entries(
+        DETAIL_LIST_DIMENSION_FILTER_COLUMNS,
+      )) {
+        const value = req.query[queryKey] as string | undefined;
+        if (value && value !== "all") {
+          conditions.push(`${dbColumn} = $${paramIndex}`);
+          params.push(value);
+          paramIndex += 1;
+        }
+      }
+
+      const whereClause =
+        conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+      const selectColumns = [
+        "loan_id",
+        "loan_number",
+        "loan_amount",
+        "interest_rate",
+        "fico_score",
+        "ltv_ratio",
+        "be_dti_ratio",
+        "channel",
+        "branch",
+        "loan_officer",
+        "processor",
+        "underwriter",
+        "closer",
+        "investor",
+        "property_street",
+        "property_city",
+        "property_state",
+        "property_county",
+        "property_zip",
+        "loan_term",
+        "current_loan_status",
+        "current_milestone",
+        "loan_folder",
+        "loan_type",
+        "loan_program",
+        "loan_purpose",
+        "occupancy_type",
+        "property_type",
+        "lien_position",
+        "started_date",
+        "credit_pull_date",
+        "application_date",
+        "loan_estimate_sent_date",
+        "loan_estimate_received_date",
+        "uw_final_approval_date",
+        "uw_suspended_date",
+        "uw_denied_date",
+        "denial_date",
+        "investor_lock_date",
+        "lock_expiration_date",
+        "lock_days",
+        "estimated_closing_date",
+        "ctc_date",
+        "closing_disclosure_sent_date",
+        "closing_disclosure_received_date",
+        "closing_date",
+        "funding_date",
+        "investor_purchase_date",
+        "shipped_date",
+        "mers_min",
+        "number_of_months_interest_only_payments",
+        "income_total_mo_income",
+        "origination_points",
+        "orig_fee_borr_pd",
+        "subject_property_type_fannie_mae",
+        "fees_va_fund_fee_borr",
+        "fha_lender_id",
+        "fees_loan_discount_fee",
+        "fees_loan_discount_fee_borr",
+        "rush_closing_on_file",
+        "scrub_rating_of_file",
+      ].join(", ");
+
+      const query = `
+        SELECT ${selectColumns}
+        FROM public.loans
+        ${whereClause}
+        ORDER BY COALESCE(application_date, started_date, created_at) DESC NULLS LAST
+        LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+      `;
+      params.push(limit, offset);
+
+      const result = await tenantPool.query(query, params);
+      const countParams = params.slice(0, -2);
+      const countQuery = `SELECT COUNT(*) FROM public.loans ${whereClause}`;
+      const countResult = await tenantPool.query(countQuery, countParams);
+      const total = parseInt(countResult.rows[0].count, 10);
+
+      res.json({
+        loans: result.rows,
+        total,
+        limit,
+        offset,
+        page: Math.floor(offset / limit) + 1,
+        totalPages: Math.ceil(total / limit) || 1,
+      });
+    } catch (error: any) {
+      logError("Error fetching loan detail list", error, { userId: req.userId });
+      if (handleDatabaseError(error, res, "Failed to fetch loan detail list")) {
+        return;
+      }
+      res
+        .status(500)
+        .json({ error: error.message || "Failed to fetch loan detail list" });
+    }
+  },
+);
+
+/**
  * GET /api/loans/stats
  * Get aggregated loan statistics for business overview
  * Uses tenant-specific database via attachTenantContext middleware
@@ -802,6 +1038,7 @@ router.get(
             WHEN l.current_loan_status = 'Active Loan' 
             AND l.application_date IS NOT NULL 
             AND l.application_date::text != ''
+            AND (l.is_archived IS DISTINCT FROM TRUE)
             THEN l.loan_amount ELSE 0 END) as active_volume,
           SUM(CASE WHEN l.funding_date IS NOT NULL THEN l.loan_amount ELSE 0 END) as closed_volume,
           SUM(CASE WHEN l.lock_date IS NOT NULL THEN l.loan_amount ELSE 0 END) as locked_volume
@@ -911,15 +1148,16 @@ router.get(
 
 /**
  * GET /api/loans/active-loans-count
- * Get active loans count with optional date filtering on application_date
+ * Get active loans count with optional date and channel filtering.
  *
  * Query params:
  *   - startDate: ISO date string (optional) - filter application_date >= startDate
  *   - endDate: ISO date string (optional) - filter application_date < endDate
  *   - period: string (optional) - rolling period shorthand (rolling_3_months, rolling_6_months, etc.)
+ *   - consolidated_channel: string (optional) - filter by channel (Retail, TPO, 99-missing, or specific channel). Omit or "All" for no filter. Matches Executive Dashboard / metrics.
  *
  * Active loan definition (matches METRICS_CATALOG.active_loans):
- *   current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND application_date::text != ''
+ *   current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND application_date::text != '' AND (is_archived IS DISTINCT FROM TRUE)
  */
 router.get(
   "/active-loans-count",
@@ -1009,7 +1247,27 @@ router.get(
         paramIdx++;
       }
 
-      // Query active loans count with date filter
+      // Optional channel filter - same logic as metrics POST /query (consolidated_channel)
+      // When provided, active count matches Executive Dashboard Active Loans card
+      let channelClause = "";
+      const consolidatedChannel = (req.query.consolidated_channel as string)?.trim();
+      if (consolidatedChannel) {
+        const cc = consolidatedChannel.toLowerCase();
+        const tpoPat = `(l.channel ILIKE '%broker%' OR l.channel ILIKE '%brokered%' OR l.channel ILIKE '%wholesale%' OR l.channel ILIKE '%correspondent%' OR l.channel ILIKE '%corresp%' OR l.channel ILIKE '%tpo%')`;
+        if (cc === "retail") {
+          channelClause = ` AND ((l.channel ILIKE '%retail%') OR (${tpoPat} AND (l.account_executive IS NULL OR TRIM(l.account_executive) = '')))`;
+        } else if (cc === "tpo") {
+          channelClause = ` AND (${tpoPat} AND l.account_executive IS NOT NULL AND TRIM(l.account_executive) != '')`;
+        } else if (cc === "99-missing") {
+          channelClause = ` AND (l.channel IS NULL OR TRIM(l.channel) = '')`;
+        } else if (cc !== "all" && cc !== "*") {
+          channelClause = ` AND LOWER(TRIM(l.channel)) = LOWER($${paramIdx})`;
+          params.push(consolidatedChannel);
+          paramIdx++;
+        }
+      }
+
+      // Query active loans count with date and optional channel filter
       // This is the EXACT same definition as METRICS_CATALOG.active_loans
       const result = await tenantPool.query(
         `
@@ -1020,8 +1278,10 @@ router.get(
         WHERE l.current_loan_status = 'Active Loan'
           AND l.application_date IS NOT NULL
           AND l.application_date::text != ''
+          AND (l.is_archived IS DISTINCT FROM TRUE)
           ${accessClause}
           ${dateClause}
+          ${channelClause}
         `,
         params,
       );
@@ -1877,9 +2137,9 @@ router.get(
         () =>
           tenantPool.query(
             `SELECT 
-          loan_id, borrower_name, loan_amount, loan_type, status, channel,
+          loan_id, loan_amount, loan_type, current_loan_status, channel,
           application_date, closing_date, lock_date, funding_date, ctc_date, interest_rate
-         FROM loans 
+         FROM public.loans 
          WHERE ${whereClause}
          ORDER BY application_date DESC`,
             params,
@@ -1892,18 +2152,16 @@ router.get(
 
       // Active Pipeline - smart detection, filtered by date range
       const activeLoans = allLoans.filter((l) => {
-        const status = (l.status || "").toString().toUpperCase();
-        const isStateCode = /^[A-Z]{2}$/.test(status);
-        const isActive = isStateCode
-          ? !(l.closing_date || l.funding_date)
-          : ![
-              "CLOSED",
-              "FUNDED",
-              "ORIGINATED",
-              "WITHDRAWN",
-              "DENIED",
-              "COMPLETED",
-            ].includes(status);
+        const status = (l.current_loan_status || "").toString().toUpperCase();
+        const isActive = ![
+          "CLOSED",
+          "FUNDED",
+          "ORIGINATED",
+          "WITHDRAWN",
+          "DENIED",
+          "COMPLETED",
+          "PURCHASED",
+        ].some((s) => status.includes(s));
 
         if (!isActive) return false;
 
@@ -2966,92 +3224,6 @@ router.get(
         return Math.round(diffMs / (1000 * 60 * 60 * 24));
       };
 
-      /**
-       * Calculate Loan Complexity Score per Qlik Transform.qvs
-       * Sum of 8 components: Loan Purpose, Loan Type, Loan Amount, Occupancy, FICO, LTV, DTI, Employment
-       */
-      const calcLoanComplexity = (l: any): number => {
-        let complexity = 0;
-
-        // 1. Loan Purpose Complexity
-        const loanPurpose = (l.loan_purpose || "").toUpperCase().trim();
-        if (
-          loanPurpose.includes("C TO P") ||
-          loanPurpose.includes("CONSTRUCTION")
-        ) {
-          complexity += 0.3;
-        } else if (loanPurpose.includes("PURCHASE")) {
-          complexity += 0.1;
-        } else if (loanPurpose.includes("REFI") && loanPurpose.includes("CO")) {
-          complexity += 0.1; // Refi CO (cash out)
-        }
-        // Refi No CO = 0, default = 0
-
-        // 2. Loan Type Complexity
-        const loanType = (l.loan_type || "").toUpperCase().trim();
-        if (loanType === "FHA" || loanType.includes("FHA")) {
-          complexity += 0.1;
-        } else if (loanType === "VA" || loanType.includes("VA")) {
-          complexity += 0.05;
-        }
-        // Conventional = 0, default = 0
-
-        // 3. Loan Amount Complexity (Jumbo >= $1M)
-        const loanAmount = parseFloat(l.loan_amount) || 0;
-        if (loanAmount >= 1000000) {
-          complexity += 0.1;
-        }
-
-        // 4. Occupancy Complexity
-        const occupancy = (l.occupancy_type || "").toUpperCase().trim();
-        if (occupancy.includes("SECOND") || occupancy === "SECONDHOME") {
-          complexity += 0.1;
-        } else if (occupancy.includes("INVEST") || occupancy === "INVESTOR") {
-          complexity += 0.1;
-        }
-        // Primary = 0, default = 0
-
-        // 5. FICO Complexity (note: excellent FICO reduces complexity)
-        const fico = parseInt(l.fico_score) || 0;
-        if (fico > 0) {
-          if (fico > 760) {
-            complexity -= 0.1; // Excellent credit reduces complexity
-          } else if (fico > 681) {
-            complexity += 0; // Good credit = neutral
-          } else if (fico > 620) {
-            complexity += 0.05; // Fair credit
-          } else {
-            complexity += 0.15; // Poor credit
-          }
-        }
-
-        // 6. LTV Complexity (high LTV >= 95%)
-        const ltv = parseFloat(l.ltv_ratio) || 0;
-        if (ltv >= 95) {
-          complexity += 0.05;
-        }
-
-        // 7. DTI Complexity (high DTI >= 43%)
-        const dti = parseFloat(l.be_dti_ratio) || 0;
-        if (dti >= 43) {
-          complexity += 0.05;
-        }
-
-        // 8. Employment Complexity (self-employed)
-        const selfEmployed = l.borr_self_employed;
-        if (
-          selfEmployed === true ||
-          selfEmployed === "Y" ||
-          selfEmployed === "y" ||
-          selfEmployed === "true" ||
-          selfEmployed === "1"
-        ) {
-          complexity += 0.2;
-        }
-
-        return complexity;
-      };
-
       // PHASE 6: Group funded loans by actor and calculate raw metrics
       interface ActorMetrics {
         units: number;
@@ -3239,8 +3411,8 @@ router.get(
           actorData.concessions.push(concessionDollars);
         }
 
-        // Track loan complexity score per Qlik Transform.qvs
-        const complexityScore = calcLoanComplexity(l);
+        // Track loan complexity score (canonical calcLoanComplexity from scorecard-utils)
+        const complexityScore = calcLoanComplexity(toLoanComplexityData(l));
         actorData.complexityScores.push(complexityScore);
 
         // Complexity logging removed for cleaner output
@@ -4486,42 +4658,6 @@ router.get(
         return days > 0 ? days : null;
       };
 
-      // Helper: Calculate loan complexity score
-      // Formula: (1 + complexity_factor) * 100 where complexity_factor considers govt loans, purchase, risk
-      const calcLoanComplexity = (l: any): number => {
-        let complexity = 0;
-
-        // Government loan bonus (15%)
-        const loanType = (l.loan_type || "").toUpperCase();
-        if (
-          loanType.includes("FHA") ||
-          loanType.includes("VA") ||
-          loanType.includes("USDA")
-        ) {
-          complexity += 0.15;
-        }
-
-        // Purchase transaction bonus (10%)
-        const loanPurpose = (l.loan_purpose || "").toUpperCase();
-        if (loanPurpose.includes("PURCHASE")) {
-          complexity += 0.1;
-        }
-
-        // Risk factors (5% total)
-        const fico = parseFloat(l.fico_score) || 0;
-        const ltv = parseFloat(l.ltv_ratio) || 0;
-        const dti = parseFloat(l.be_dti_ratio) || 0;
-
-        // Low FICO risk
-        if (fico > 0 && fico < 680) complexity += 0.02;
-        // High LTV risk
-        if (ltv > 80) complexity += 0.02;
-        // High DTI risk
-        if (dti > 43) complexity += 0.01;
-
-        return (1 + complexity) * 100;
-      };
-
       // Aggregate by actor
       // CRITICAL: Use Set to track DISTINCT loan_numbers (Qlik uses COUNT(DISTINCT [Loan Number]))
       interface OpsActorMetrics {
@@ -4552,7 +4688,7 @@ router.get(
         const loanNumber = String(l.loan_number || l.loan_id); // Use loan_number for distinct counting
         const loanAmount = parseFloat(l.loan_amount) || 0;
         const turnTime = calcTurnTime(l);
-        const complexity = calcLoanComplexity(l);
+        const complexity = calcLoanComplexity(toLoanComplexityData(l));
 
         if (!actorMap.has(actorName)) {
           actorMap.set(actorName, {
@@ -5160,35 +5296,6 @@ router.get(
         return null;
       };
 
-      // Helper: Calculate loan complexity score
-      const calcLoanComplexity = (l: any): number => {
-        let complexity = 0;
-
-        const loanType = (l.loan_type || "").toUpperCase();
-        if (
-          loanType.includes("FHA") ||
-          loanType.includes("VA") ||
-          loanType.includes("USDA")
-        ) {
-          complexity += 0.15;
-        }
-
-        const loanPurpose = (l.loan_purpose || "").toUpperCase();
-        if (loanPurpose.includes("PURCHASE")) {
-          complexity += 0.1;
-        }
-
-        const fico = parseFloat(l.fico_score) || 0;
-        const ltv = parseFloat(l.ltv_ratio) || 0;
-        const dti = parseFloat(l.be_dti_ratio) || 0;
-
-        if (fico > 0 && fico < 680) complexity += 0.02;
-        if (ltv > 80) complexity += 0.02;
-        if (dti > 43) complexity += 0.01;
-
-        return (1 + complexity) * 100;
-      };
-
       // Helper: Format month key (e.g., "Jan-2026")
       const formatMonthKey = (date: Date): string => {
         const months = [
@@ -5250,7 +5357,7 @@ router.get(
 
         const loanAmount = parseFloat(l.loan_amount) || 0;
         const turnTime = calcTurnTime(l);
-        const complexity = calcLoanComplexity(l);
+        const complexity = calcLoanComplexity(toLoanComplexityData(l));
 
         if (!actorMap.has(actorName)) {
           actorMap.set(actorName, {
@@ -6870,7 +6977,7 @@ router.post(
       // Fetch ONLY active loans with essential columns for processing
       // Column names from tenant migrations (see migrations/tenant/)
       // Use EXACT same criteria as metricsService.ts active_loans definition:
-      //   current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND application_date::text != ''
+      //   current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND application_date::text != '' AND (is_archived IS DISTINCT FROM TRUE)
       const activeLoansQuery = `
       SELECT 
         loan_id, guid, loan_number, loan_amount, interest_rate, loan_type,
@@ -6884,6 +6991,7 @@ router.post(
       WHERE current_loan_status = 'Active Loan'
         AND application_date IS NOT NULL
         AND application_date::text != ''
+        AND (is_archived IS DISTINCT FROM TRUE)
         ${cutoffDate ? `AND application_date >= $1` : ""}
       ORDER BY application_date DESC
       LIMIT ${Math.min(limit, 2000)}
@@ -7310,6 +7418,51 @@ router.post(
       res.status(500).json({
         error: error.message || "Failed to sync market rates from FRED API",
       });
+    }
+  },
+);
+
+/**
+ * GET /api/loans/market-rates/current
+ * Returns current market rate data for the OBMMI ticker display.
+ * Uses cached FRED OBMMIC30YF data from the management database.
+ */
+router.get(
+  "/market-rates/current",
+  authenticateToken,
+  async (_req: AuthRequest, res) => {
+    try {
+      const {
+        getMostRecentMarketRate,
+        getMarketRateForDate,
+        initializeMarketRateCache,
+      } = await import("../services/dashboard/marketRateService.js");
+
+      await initializeMarketRateCache();
+      const currentRate = await getMostRecentMarketRate();
+
+      if (currentRate === null) {
+        return res.json({ available: false, rates: [] });
+      }
+
+      const today = new Date();
+      const fmt = (d: Date) => d.toISOString().split("T")[0];
+      const d1 = new Date(today);
+      d1.setDate(d1.getDate() - 1);
+      const yesterdayRate = await getMarketRateForDate(fmt(d1));
+      const delta = yesterdayRate !== null ? currentRate - yesterdayRate : 0;
+
+      return res.json({
+        available: true,
+        conforming30yr: {
+          rate: currentRate,
+          delta: Math.round(delta * 1000) / 1000,
+          trend: delta > 0.001 ? "up" : delta < -0.001 ? "down" : "flat",
+        },
+      });
+    } catch (error: any) {
+      logError("Error fetching current market rates", error);
+      return res.status(500).json({ error: "Failed to fetch market rates" });
     }
   },
 );

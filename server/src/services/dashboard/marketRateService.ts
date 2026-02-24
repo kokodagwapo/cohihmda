@@ -326,7 +326,11 @@ export async function autoSyncMarketRatesIfNeeded(): Promise<number> {
   }
 
   if (!getFredApiKey()) {
-    console.log('[FRED API] ⚠️ FRED_API_KEY not configured, skipping market rate sync');
+    console.warn(
+      '[FRED API] ⚠️ FRED_API_KEY not set in environment — market rates will be missing on loan cards. ' +
+      'Set FRED_API_KEY in ECS task definition (CloudFormation FredApiKey) and redeploy, or pass it when running 02-deploy-backend.ps1 (config.ps1 has $FRED_API_KEY).'
+    );
+    logInfo('Market rate sync skipped: FRED_API_KEY not configured');
     return 0;
   }
 

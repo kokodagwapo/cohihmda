@@ -456,7 +456,7 @@ function FindingDetail({ finding }: { finding: any }) {
           {Object.entries(finding.keyMetrics).map(([key, value]) => (
             <div key={key} className="bg-background rounded px-2 py-1 text-xs">
               <span className="text-muted-foreground">{key}:</span>{" "}
-              <span className="font-medium">{String(value)}</span>
+              <span className="font-medium">{typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value)}</span>
             </div>
           ))}
         </div>
@@ -466,7 +466,10 @@ function FindingDetail({ finding }: { finding: any }) {
 }
 
 function QueryResultTable({ fields, rows }: { fields: string[]; rows: Record<string, any>[] }) {
-  const displayRows = rows.slice(0, 10);
+  const [expanded, setExpanded] = useState(false);
+  const initialRows = 10;
+  const displayRows = expanded ? rows : rows.slice(0, initialRows);
+  const hasMore = rows.length > initialRows;
   return (
     <div className="border rounded-md overflow-x-auto max-h-60">
       <table className="w-full text-xs">
@@ -482,16 +485,25 @@ function QueryResultTable({ fields, rows }: { fields: string[]; rows: Record<str
             <tr key={i} className="border-b last:border-b-0">
               {fields.map((f) => (
                 <td key={f} className="px-2 py-1 whitespace-nowrap max-w-[200px] truncate">
-                  {row[f] == null ? <span className="text-muted-foreground">NULL</span> : String(row[f])}
+                  {row[f] == null ? <span className="text-muted-foreground">NULL</span> : typeof row[f] === 'object' ? JSON.stringify(row[f]) : String(row[f])}
                 </td>
               ))}
             </tr>
           ))}
         </tbody>
       </table>
-      {rows.length > 10 && (
-        <div className="px-2 py-1 text-xs text-muted-foreground bg-muted/30 border-t">
-          Showing 10 of {rows.length} rows
+      {hasMore && (
+        <div className="px-2 py-1 text-xs text-muted-foreground bg-muted/30 border-t flex items-center justify-between gap-2">
+          <span>
+            Showing {displayRows.length} of {rows.length} rows
+          </span>
+          <button
+            type="button"
+            onClick={() => setExpanded((e) => !e)}
+            className="text-primary hover:underline font-medium"
+          >
+            {expanded ? "Show less" : `View all ${rows.length} rows`}
+          </button>
         </div>
       )}
     </div>

@@ -1,0 +1,25 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowCognitoToSendFromCoheus",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "email.cognito-idp.amazonaws.com"
+      },
+      "Action": [
+        "SES:SendEmail",
+        "SES:SendRawEmail"
+      ],
+      "Resource": "arn:aws:ses:us-east-2:339712788893:identity/coheus1.com",
+      "Condition": {
+        "StringEquals": {
+          "aws:SourceAccount": "339712788893"
+        },
+        "ArnLike": {
+          "aws:SourceArn": "arn:aws:cognito-idp:us-east-2:339712788893:userpool/*"
+        }
+      }
+    }
+  ]
+}

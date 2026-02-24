@@ -29,6 +29,8 @@ import {
   BookOpen,
   MessageSquareHeart,
   RefreshCw,
+  Calculator,
+  ArrowLeftRight,
 } from "lucide-react";
 import type { AdminSection, AdminMode } from "@/hooks/admin/useAdminState";
 
@@ -231,11 +233,41 @@ const allAdminSections: AdminSectionDef[] = [
   },
   {
     id: "data-config" as AdminSection,
-    label: "Field Mapping & Rules",
-    icon: Settings,
-    description: "Field mappings, ranges, filters, and scoring",
+    label: "Field Mapping",
+    icon: Link2,
+    description: "Map LOS fields to Coheus data",
     color: "text-indigo-300 dark:text-indigo-400/70",
     allowedRoles: ["super_admin", "platform_admin", "tenant_admin"],
+    category: "Data",
+    mode: "tenant",
+  },
+  {
+    id: "revenue" as AdminSection,
+    label: "Revenue",
+    icon: Calculator,
+    description: "Revenue and margin formulas",
+    color: "text-emerald-300 dark:text-emerald-400/70",
+    allowedRoles: ["super_admin", "platform_admin", "tenant_admin"],
+    category: "Data",
+    mode: "tenant",
+  },
+  {
+    id: "scoring-weights" as AdminSection,
+    label: "Scoring & Weights",
+    icon: BarChart3,
+    description: "Scorecard weights and loan complexity",
+    color: "text-violet-300 dark:text-violet-400/70",
+    allowedRoles: ["super_admin", "platform_admin", "tenant_admin"],
+    category: "Data",
+    mode: "tenant",
+  },
+  {
+    id: "data-transfer" as AdminSection,
+    label: "Import / Export",
+    icon: ArrowLeftRight,
+    description: "Legacy config import and tenant config transfer",
+    color: "text-amber-300 dark:text-amber-400/70",
+    allowedRoles: ["super_admin", "platform_admin"],
     category: "Data",
     mode: "tenant",
   },
@@ -385,6 +417,7 @@ export const AdminLayout = ({
     return (
       <motion.button
         key={section.id}
+        data-tour={`admin-${section.id}`}
         onClick={handleClick}
         className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-all duration-200 rounded-lg group ${
           isActive

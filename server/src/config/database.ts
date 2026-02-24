@@ -106,12 +106,12 @@ function getPool(): pg.Pool {
       user: dbConfig.user,
       password: dbConfig.password,
       ssl: sslEnabled ? { rejectUnauthorized: false } : false,
-      max: 10, // Reduced from 50 — most queries complete in <50ms; high max wastes DB connections
-      min: 0, // Don't hold idle connections unnecessarily
-      idleTimeoutMillis: 10000, // 10s idle timeout — release connections faster
+      max: 15, // Enough headroom for concurrent audit logging + tenant lookups during job bursts
+      min: 2, // Keep a couple warm connections to avoid cold-start timeouts on audit logs
+      idleTimeoutMillis: 30000, // 30s idle timeout — balance between releasing and keeping warm
       connectionTimeoutMillis: 15000, // 15 seconds connection timeout
       query_timeout: 60000, // 60 seconds for long-running queries (imports, etc.)
-      allowExitOnIdle: true, // Release all connections when idle to reduce DB load
+      allowExitOnIdle: false, // Keep min connections alive to prevent timeout errors on audit logging
     });
 
     // Handle connection errors

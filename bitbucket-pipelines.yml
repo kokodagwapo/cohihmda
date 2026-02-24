@@ -83,7 +83,7 @@ definitions:
           - |
             FRONTEND_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(src/|public/|index\.html|package\.json|vite\.config|tailwind\.config|tsconfig)' || true)
             BACKEND_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(server/|Dockerfile\.backend)' || true)
-            INFRA_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(infrastructure/cloudformation/|scripts/deploy/config)' || true)
+            INFRA_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(infrastructure/cloudformation/|scripts/deploy/config|scripts/bitbucket/)' || true)
             echo "Frontend changed: ${FRONTEND_CHANGED:-none}"
             echo "Backend changed: ${BACKEND_CHANGED:-none}"
             echo "Infrastructure changed: ${INFRA_CHANGED:-none}"
@@ -96,9 +96,9 @@ definitions:
             else
               echo ">>> Skipping Infrastructure (no changes)"
             fi
-          # Deploy frontend if changed
+          # Deploy frontend if changed (or if infra changed - ensures no stale frontend after partial failures)
           - |
-            if [ -n "$FRONTEND_CHANGED" ]; then
+            if [ -n "$FRONTEND_CHANGED" ] || [ -n "$INFRA_CHANGED" ]; then
               echo ">>> Deploying Frontend..."
               chmod +x ./scripts/bitbucket/deploy-frontend.sh
               ./scripts/bitbucket/deploy-frontend.sh
@@ -128,7 +128,7 @@ definitions:
           - |
             FRONTEND_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(src/|public/|index\.html|package\.json|vite\.config|tailwind\.config|tsconfig)' || true)
             BACKEND_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(server/|Dockerfile\.backend)' || true)
-            INFRA_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(infrastructure/cloudformation/|scripts/deploy/config)' || true)
+            INFRA_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(infrastructure/cloudformation/|scripts/deploy/config|scripts/bitbucket/)' || true)
             echo "Frontend changed: ${FRONTEND_CHANGED:-none}"
             echo "Backend changed: ${BACKEND_CHANGED:-none}"
             echo "Infrastructure changed: ${INFRA_CHANGED:-none}"
@@ -141,9 +141,9 @@ definitions:
             else
               echo ">>> Skipping Infrastructure (no changes)"
             fi
-          # Deploy frontend if changed
+          # Deploy frontend if changed (or if infra changed - ensures no stale frontend after partial failures)
           - |
-            if [ -n "$FRONTEND_CHANGED" ]; then
+            if [ -n "$FRONTEND_CHANGED" ] || [ -n "$INFRA_CHANGED" ]; then
               echo ">>> Deploying Frontend..."
               chmod +x ./scripts/bitbucket/deploy-frontend.sh
               ./scripts/bitbucket/deploy-frontend.sh

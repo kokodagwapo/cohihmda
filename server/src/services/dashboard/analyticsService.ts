@@ -234,6 +234,7 @@ type ExtendedTimeframe =
   | "lm"
   | "lq"
   | "ly"
+  | "rolling_13"
   | "custom";
 
 /**
@@ -287,6 +288,11 @@ function getDateRangeForTimeframe(
       // Last Year: Full previous year
       start = new Date(now.getFullYear() - 1, 0, 1);
       end = new Date(now.getFullYear() - 1, 11, 31);
+      break;
+    case "rolling_13":
+      // Rolling 13 months: from 13 months ago through today
+      start = new Date(now.getFullYear(), now.getMonth() - 13, now.getDate());
+      end = new Date(now);
       break;
     case "custom":
       // Custom date range - parse as local dates (not UTC)
@@ -662,6 +668,157 @@ export async function getLeaderboardData(
   }
 }
 
+// High Performers leaderboard row (branch or loan officer)
+export interface HighPerformerRow {
+  name: string;
+  units: number;
+  volume: number;
+  rank: number;
+  pctGovt: number;
+  pctConv: number;
+  pctRefi: number;
+  pctPurch: number;
+}
+
+export type HighPerformersDateType = "funding_date" | "closing_date" | "application_date";
+export type HighPerformersTimePeriod = "mtd" | "lm" | "ytd" | "ly" | "rolling_13";
+
+/**
+ * Get High Performers rankings: branch and loan officer tables by date type and time period.
+ * dateType: which loan date to filter on (funding_date, closing_date, application_date).
+ * timePeriod: mtd, last month, ytd, last year, rolling 13 months.
+ */
+export async function getHighPerformersRankings(
+  tenantPool: pg.Pool,
+  options: {
+    dateType: HighPerformersDateType;
+    timePeriod: HighPerformersTimePeriod;
+    userAccessFilter?: LoanAccessFilter;
+    channelGroup?: string;
+  }
+): Promise<{ branchRankings: HighPerformerRow[]; loanOfficerRankings: HighPerformerRow[] }> {
+  try {
+    const dateRange = getDateRangeForTimeframe(
+      options.timePeriod as ExtendedTimeframe,
+      undefined,
+      undefined
+    );
+    const startDate = dateRange.start;
+    const endDate = dateRange.end;
+    const dateCol = options.dateType;
+
+    // Use local date strings (YYYY-MM-DD) so filters match user's timezone
+    const toLocalDateStr = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const startStr = toLocalDateStr(startDate);
+    const endStr = toLocalDateStr(endDate);
+
+    const conditions: string[] = [];
+    const params: (string | number)[] = [startStr, endStr];
+    if (options.userAccessFilter?.sql) {
+      conditions.push(options.userAccessFilter.sql);
+      params.push(...(options.userAccessFilter.params || []));
+    }
+    const channelClause = buildChannelWhereClause(options.channelGroup);
+    if (channelClause) {
+      conditions.push(channelClause.replace(/^AND\s+/i, ""));
+    }
+    const extraWhere = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
+
+    const actorExpression = getActorSqlExpression(options.channelGroup, "l");
+
+    const dateFilter = `${dateCol}::date >= $1::date AND ${dateCol}::date <= $2::date`;
+    // % Govt = loan_type is not Conventional (FHA/VA/USDA); % Conv = Conventional
+    const loanTypeGovt = `(UPPER(COALESCE(l.loan_type, '')) LIKE '%FHA%' OR UPPER(COALESCE(l.loan_type, '')) LIKE '%VA%' OR UPPER(COALESCE(l.loan_type, '')) LIKE '%USDA%')`;
+    const loanTypeConv = `(NOT (UPPER(COALESCE(l.loan_type, '')) LIKE '%FHA%' OR UPPER(COALESCE(l.loan_type, '')) LIKE '%VA%' OR UPPER(COALESCE(l.loan_type, '')) LIKE '%USDA%'))`;
+    // % Refi = loan_purpose contains "refinance" or "refi"; % Purch = contains "Purchase"
+    const loanPurposeRefi = `(UPPER(COALESCE(l.loan_purpose, '')) LIKE '%REFINANCE%' OR UPPER(COALESCE(l.loan_purpose, '')) LIKE '%REFI%')`;
+    const loanPurposePurch = `(UPPER(COALESCE(l.loan_purpose, '')) LIKE '%PURCHASE%')`;
+
+    // Branch rankings
+    const branchQuery = `
+      SELECT
+        COALESCE(l.branch, 'Unassigned') as name,
+        COUNT(*) FILTER (WHERE ${dateFilter}) as units,
+        COALESCE(SUM(l.loan_amount) FILTER (WHERE ${dateFilter}), 0) as volume,
+        COUNT(*) FILTER (WHERE ${dateFilter} AND ${loanTypeGovt}) as govt_count,
+        COUNT(*) FILTER (WHERE ${dateFilter} AND ${loanTypeConv}) as conv_count,
+        COUNT(*) FILTER (WHERE ${dateFilter} AND ${loanPurposeRefi}) as refi_count,
+        COUNT(*) FILTER (WHERE ${dateFilter} AND ${loanPurposePurch}) as purch_count
+      FROM public.loans l
+      WHERE ${dateCol} IS NOT NULL ${extraWhere}
+      GROUP BY l.branch
+      HAVING COUNT(*) FILTER (WHERE ${dateFilter}) > 0
+      ORDER BY volume DESC, units DESC
+    `;
+    const branchResult = await tenantPool.query(branchQuery, params);
+
+    const branchRankings: HighPerformerRow[] = branchResult.rows.map((row, idx) => {
+      const units = parseInt(row.units, 10) || 0;
+      const volume = parseFloat(row.volume) || 0;
+      const govtCount = parseInt(row.govt_count, 10) || 0;
+      const convCount = parseInt(row.conv_count, 10) || 0;
+      const refiCount = parseInt(row.refi_count, 10) || 0;
+      const purchCount = parseInt(row.purch_count, 10) || 0;
+      return {
+        name: row.name || "Unassigned",
+        units,
+        volume,
+        rank: idx + 1,
+        pctGovt: units > 0 ? (govtCount / units) * 100 : 0,
+        pctConv: units > 0 ? (convCount / units) * 100 : 0,
+        pctRefi: units > 0 ? (refiCount / units) * 100 : 0,
+        pctPurch: units > 0 ? (purchCount / units) * 100 : 0,
+      };
+    });
+
+    // Loan officer rankings (same metrics, group by actor)
+    const loQuery = `
+      SELECT
+        ${actorExpression} as name,
+        COUNT(*) FILTER (WHERE ${dateFilter}) as units,
+        COALESCE(SUM(l.loan_amount) FILTER (WHERE ${dateFilter}), 0) as volume,
+        COUNT(*) FILTER (WHERE ${dateFilter} AND ${loanTypeGovt}) as govt_count,
+        COUNT(*) FILTER (WHERE ${dateFilter} AND ${loanTypeConv}) as conv_count,
+        COUNT(*) FILTER (WHERE ${dateFilter} AND ${loanPurposeRefi}) as refi_count,
+        COUNT(*) FILTER (WHERE ${dateFilter} AND ${loanPurposePurch}) as purch_count
+      FROM public.loans l
+      WHERE ${dateCol} IS NOT NULL ${extraWhere}
+      GROUP BY ${actorExpression}
+      HAVING COUNT(*) FILTER (WHERE ${dateFilter}) > 0
+      ORDER BY volume DESC, units DESC
+    `;
+    const loResult = await tenantPool.query(loQuery, params);
+
+    const loanOfficerRankings: HighPerformerRow[] = loResult.rows.map((row, idx) => {
+      const units = parseInt(row.units, 10) || 0;
+      const volume = parseFloat(row.volume) || 0;
+      const govtCount = parseInt(row.govt_count, 10) || 0;
+      const convCount = parseInt(row.conv_count, 10) || 0;
+      const refiCount = parseInt(row.refi_count, 10) || 0;
+      const purchCount = parseInt(row.purch_count, 10) || 0;
+      return {
+        name: row.name || "Unknown",
+        units,
+        volume,
+        rank: idx + 1,
+        pctGovt: units > 0 ? (govtCount / units) * 100 : 0,
+        pctConv: units > 0 ? (convCount / units) * 100 : 0,
+        pctRefi: units > 0 ? (refiCount / units) * 100 : 0,
+        pctPurch: units > 0 ? (purchCount / units) * 100 : 0,
+      };
+    });
+
+    return { branchRankings, loanOfficerRankings };
+  } catch (dbError: any) {
+    console.error("[HighPerformers] Error:", dbError.message);
+    if (dbError.code === "42P01") {
+      return { branchRankings: [], loanOfficerRankings: [] };
+    }
+    throw dbError;
+  }
+}
+
 /**
  * Get TopTiering rankings with productivity, profitability, and complexity scoring
  */
@@ -973,25 +1130,31 @@ export async function getClosingFalloutForecast(
         startDate = null;
     }
 
-    // Get active loans with aging days calculation
+    // Get active loans with aging days calculation (current_loan_status = still in pipeline, not terminal)
+    const activePipelineCondition = `(
+      current_loan_status NOT ILIKE '%withdrawn%' AND current_loan_status NOT ILIKE '%cancelled%'
+      AND current_loan_status NOT ILIKE '%denied%' AND current_loan_status NOT ILIKE '%declined%'
+      AND current_loan_status NOT ILIKE '%funded%' AND current_loan_status NOT ILIKE '%closed%'
+      AND current_loan_status NOT ILIKE '%originated%'
+    )`;
     const activeLoansQuery = startDate
       ? `SELECT 
           COUNT(*) as active_count,
           SUM(loan_amount) as active_volume,
-          AVG(CASE WHEN status NOT IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated')
+          AVG(CASE WHEN ${activePipelineCondition}
             AND application_date IS NOT NULL 
             THEN FLOOR(CURRENT_DATE - application_date) ELSE NULL END) as avg_aging_days
          FROM public.loans
          WHERE application_date >= $1
-           AND status NOT IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated')`
+           AND ${activePipelineCondition}`
       : `SELECT 
           COUNT(*) as active_count,
           SUM(loan_amount) as active_volume,
-          AVG(CASE WHEN status NOT IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated')
+          AVG(CASE WHEN ${activePipelineCondition}
             AND application_date IS NOT NULL 
             THEN FLOOR(CURRENT_DATE - application_date) ELSE NULL END) as avg_aging_days
          FROM public.loans
-         WHERE status NOT IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated')`;
+         WHERE ${activePipelineCondition}`;
 
     const activeLoansResult = await tenantPool.query(
       activeLoansQuery,
@@ -1053,7 +1216,7 @@ export async function getClosingFalloutForecast(
           SUM(loan_amount) as active_volume
          FROM public.loans
          WHERE application_date >= $1
-           AND status NOT IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated')
+           AND ${activePipelineCondition}
            AND loan_type IS NOT NULL
          GROUP BY loan_type`
       : `SELECT 
@@ -1061,7 +1224,7 @@ export async function getClosingFalloutForecast(
           COUNT(*) as active_count,
           SUM(loan_amount) as active_volume
          FROM public.loans
-         WHERE status NOT IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated')
+         WHERE ${activePipelineCondition}
            AND loan_type IS NOT NULL
          GROUP BY loan_type`;
 
@@ -1214,13 +1377,19 @@ export async function getInsights(
     tenantId,
     forceRefresh = false,
     channelGroup,
-    generationMethod,
   } = options;
+  // Legacy generation methods are archived: always read agent outputs.
+  const effectiveGenerationMethod = "agent";
 
   // Try reading persisted insights from the database first (fast path)
   if (useLLM) {
     try {
-      const stored = await loadStoredInsights(tenantPool, dateFilter, channelGroup, generationMethod);
+      const stored = await loadStoredInsights(
+        tenantPool,
+        dateFilter,
+        channelGroup,
+        effectiveGenerationMethod
+      );
 
       if (stored && stored.insights.length > 0) {
         console.log(
@@ -2461,10 +2630,10 @@ export async function getDashboardOverview(
           `
         SELECT 
           COUNT(*) as total,
-          COUNT(CASE WHEN current_loan_status = 'Active Loan' AND application_date IS NOT NULL THEN 1 END) as active,
+          COUNT(CASE WHEN current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND (is_archived IS DISTINCT FROM TRUE) THEN 1 END) as active,
           COUNT(CASE WHEN funding_date IS NOT NULL THEN 1 END) as closed,
           COUNT(CASE WHEN lock_date IS NOT NULL THEN 1 END) as locked,
-          SUM(CASE WHEN current_loan_status = 'Active Loan' THEN loan_amount ELSE 0 END) as active_volume,
+          SUM(CASE WHEN current_loan_status = 'Active Loan' AND (is_archived IS DISTINCT FROM TRUE) THEN loan_amount ELSE 0 END) as active_volume,
           SUM(CASE WHEN funding_date IS NOT NULL THEN loan_amount ELSE 0 END) as closed_volume,
           AVG(CASE WHEN funding_date IS NOT NULL AND application_date IS NOT NULL 
             THEN DATE(funding_date::date) - DATE(application_date) ELSE NULL END) as avg_cycle_time,
@@ -2483,8 +2652,8 @@ export async function getDashboardOverview(
         SELECT 
           COUNT(CASE WHEN application_date IS NOT NULL THEN 1 END) as loans_started,
           SUM(CASE WHEN application_date IS NOT NULL THEN loan_amount ELSE 0 END) as loans_started_volume,
-          COUNT(CASE WHEN current_loan_status = 'Active Loan' THEN 1 END) as still_active,
-          SUM(CASE WHEN current_loan_status = 'Active Loan' THEN loan_amount ELSE 0 END) as still_active_volume,
+          COUNT(CASE WHEN current_loan_status = 'Active Loan' AND (is_archived IS DISTINCT FROM TRUE) THEN 1 END) as still_active,
+          SUM(CASE WHEN current_loan_status = 'Active Loan' AND (is_archived IS DISTINCT FROM TRUE) THEN loan_amount ELSE 0 END) as still_active_volume,
           COUNT(CASE WHEN (current_loan_status ILIKE '%Originated%' OR current_loan_status ILIKE '%purchased%') THEN 1 END) as originated,
           SUM(CASE WHEN (current_loan_status ILIKE '%Originated%' OR current_loan_status ILIKE '%purchased%') THEN loan_amount ELSE 0 END) as originated_volume,
           COUNT(CASE WHEN current_loan_status IN ('withdrawn', 'cancelled') THEN 1 END) as fallout_withdrawn,
@@ -2526,6 +2695,7 @@ export async function getDashboardOverview(
         FROM public.loans
         WHERE current_loan_status = 'Active Loan'
           AND application_date IS NOT NULL
+          AND (is_archived IS DISTINCT FROM TRUE)
           ${startDate ? "AND application_date >= $1" : ""}
         ORDER BY risk_score DESC, loan_amount DESC
         LIMIT 50
@@ -2542,6 +2712,7 @@ export async function getDashboardOverview(
           COUNT(CASE WHEN current_loan_status IN ('denied', 'declined') THEN 1 END) as likely_decline
         FROM public.loans
         WHERE current_loan_status = 'Active Loan'
+          AND (is_archived IS DISTINCT FROM TRUE)
           ${startDate ? "AND application_date >= $1" : ""}
       `,
             startDate ? [startDate] : []

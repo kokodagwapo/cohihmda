@@ -62,8 +62,13 @@ router.post(
     const connectionId = req.params.connectionId as string;
     const { tenantPool, tenantId } = getTenantContext(req);
 
+    const strategyParam = (req.query.strategy as string) || "hybrid";
     const strategy: SamplingStrategy =
-      (req.query.strategy as string) === "fullLoan" ? "fullLoan" : "pipeline";
+      strategyParam === "fullLoan"
+        ? "fullLoan"
+        : strategyParam === "pipeline"
+          ? "pipeline"
+          : "hybrid";
 
     setupSSE(res);
 

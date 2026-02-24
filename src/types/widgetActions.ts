@@ -51,8 +51,12 @@ export interface ModifyWidgetAction {
   type: 'modify_widget';
   /** Instance ID on the canvas to modify */
   instanceId: string;
-  /** Partial changes to apply */
+  /** Partial changes to apply to the visualization config */
   changes: Partial<VisualizationConfig>;
+  /** New SQL query to replace the existing one (for cohi_widget items) */
+  sql?: string;
+  /** New widget title */
+  title?: string;
   /** LLM-generated explanation */
   explanation: string;
 }
@@ -160,6 +164,12 @@ export interface CanvasStateSnapshot {
     id: string;
     type: string;
     title?: string;
+    /** For cohi_widget items: where the widget originated */
+    sourceType?: 'research' | 'chat';
+    /** For research-sourced widgets: the research session that produced them */
+    sourceSessionId?: string;
+    /** For cohi_widget items: the SQL backing the widget */
+    sql?: string;
   }[];
   /** Total item count */
   totalItems: number;

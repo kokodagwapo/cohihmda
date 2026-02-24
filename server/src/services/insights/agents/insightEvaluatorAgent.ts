@@ -25,6 +25,7 @@ export interface EvaluatedInsight {
   priority: "RED" | "YELLOW" | "BLUE" | "GRAY";
   insight_type: "critical" | "warning" | "success" | "info";
   severity_score: number;
+  value_score?: number;
   source: string;
   impact: {
     type: string;
@@ -80,17 +81,20 @@ Output JSON:
 }
 
 RULES:
-- TARGET 10-16 insights across all buckets. A well-rounded dashboard MUST have coverage across all four levels. Minimum 2 per bucket.
+- TARGET 12-18 insights across all buckets. A comprehensive dashboard should have broad coverage. Aim for at least 1 insight per bucket when findings support it, but do NOT force low-quality findings into a bucket just to fill a quota.
 - KEEP MORE THAN YOU DROP. When in doubt, KEEP the finding — put it in "context" (Informational) if it doesn't fit a higher bucket. Only drop findings that are truly redundant (near-duplicate of another finding) or completely uninformative (no specific numbers, zero confidence).
-- EVERY bucket must have at least 2 insights. If you have none in a bucket, you are being too aggressive with filtering — go back and re-assign borderline findings to fill the gap.
 - Positive findings (improving metrics, strong performance, good trends) go in "working" (Strategic Review). Do NOT drop positive findings just because they aren't problems.
+- AVOID NEGATIVE-FINDING INSIGHTS: If an investigator found that a problem does NOT exist (e.g., "no stale loans", "no lock expirations", "0 loans with missing milestones"), do NOT surface this as a standalone insight. An absence of a problem is not newsworthy by default. However, if the finding contains other substantive data alongside the absence (e.g., "no stale loans AND pipeline is 154 active loans worth $61M"), keep the substantive part and reframe the headline around the real finding.
+- PRIORITIZE DOLLAR IMPACT: Insights with quantified dollar impact (revenue at risk, lost opportunity volume, exposure) should rank higher than insights that are purely observational. When assigning severity_score, weight financial impact heavily.
+- MARKET RATE INSIGHTS: If any findings reference market rate trends, rate changes, lock-vs-market analysis, or borrower rate sensitivity, these are HIGH VALUE — keep them and bucket appropriately. Market-aware insights connecting rate movements to pipeline behavior are particularly valuable.
 - Headlines must be concrete and specific: "Pull-through drops 12% vs Q4" not "Performance metrics show changes"
 - Understory must include specific numbers from the finding's keyMetrics.
 - Map bucket -> priority: critical=RED, attention=YELLOW, working=BLUE, context=GRAY
 - Map bucket -> insight_type: critical=critical, attention=warning, working=success, context=info
 - Preserve the findingIndex so we can link back to evidence.
 - De-duplicate only when two findings are nearly identical. Similar topics from different angles should BOTH be kept.
-- HEADLINE ACCURACY: Before writing the headline, read the finding's summary carefully. If the investigator's title contradicts the actual findings (e.g. title says "missing milestones" but summary says "0 loans have blank milestones"), you MUST rewrite the headline to reflect the TRUE finding. Never propagate a disproven hypothesis into the headline.`;
+- HEADLINE ACCURACY: Before writing the headline, read the finding's summary carefully. If the investigator's title contradicts the actual findings (e.g. title says "missing milestones" but summary says "0 loans have blank milestones"), you MUST rewrite the headline to reflect the TRUE finding. Never propagate a disproven hypothesis into the headline.
+- CONFIDENCE GROUNDING: When setting confidence, consider the evidence depth. "high" confidence requires 2+ SQL queries returning meaningful data. "medium" requires at least 1 query with clear results. "low" means speculative or based on thin data — these should generally not be in "critical" bucket.`;
 
 // ============================================================================
 // Agent Entry Point

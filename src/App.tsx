@@ -14,7 +14,6 @@ import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { ScrollToTop } from "@/components/ScrollToTop";
 import { useUserTimezone } from "@/hooks/useUserTimezone";
 import Index from "./pages/Index";
-import ShareLink from "./pages/ShareLink";
 import Dashboard from "./pages/Dashboard";
 import DashboardLegacy from "./pages/DashboardLegacy";
 import Admin from "./pages/Admin";
@@ -38,16 +37,24 @@ import FinancialModelingSandbox from "./pages/FinancialModelingSandbox";
 import SalesScorecard from "./pages/SalesScorecard";
 import SalesTrends from "./pages/SalesTrends";
 import CompanyScorecard from "./pages/CompanyScorecard";
+import HighPerformers from "./pages/HighPerformers";
 import CreditRiskManagement from "./pages/CreditRiskManagement";
+import LoanDetail from "./pages/LoanDetail";
+import WorkflowConversion from "./pages/WorkflowConversion";
 import { KnowledgeBaseEditor } from "./components/admin/KnowledgeBaseEditor";
 import { GlobalCohiChat } from "./components/cohi/GlobalCohiChat";
 import { CohiDemoExperience } from "./components/demo/CohiDemoExperience";
+import { TutorialProvider } from "@/contexts/TutorialContext";
+import { WelcomeTourTrigger } from "@/components/tutorial/WelcomeTourTrigger";
+import { ActiveTourRunner } from "@/components/tutorial/ActiveTourRunner";
 // Workbench pages
 import SharedWithMe from "./pages/workbench/SharedWithMe";
 import TeamFolders from "./pages/workbench/TeamFolders";
 import Favorites from "./pages/workbench/Favorites";
 // Research Lab
 import ResearchAnalyst from "./pages/ResearchAnalyst";
+// Help Center
+import HelpCenter from "./pages/HelpCenter";
 
 const queryClient = new QueryClient();
 
@@ -95,6 +102,7 @@ const App = () => (
         <DebugModeProvider>
         <DebugModeIndicator />
         <UserSettingsProvider>
+        <TutorialProvider>
         <EditProvider>
           <TooltipProvider>
             <TimezoneInitializer />
@@ -111,8 +119,7 @@ const App = () => (
               <Route path="/forgot-password" element={<ForgotPassword />} />
               <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/auth/sso/callback" element={<SSOCallback />} />
-              <Route path="/share/:token" element={<ShareLink />} />
-              
+
               {/* Protected routes - require authentication */}
               <Route path="/settings" element={
                 <ProtectedRoute>
@@ -175,14 +182,29 @@ const App = () => (
                   <LoanFunnel />
                 </ProtectedRoute>
               } />
+              <Route path="/workflow-conversion" element={
+                <ProtectedRoute>
+                  <WorkflowConversion />
+                </ProtectedRoute>
+              } />
+              <Route path="/loan-detail" element={
+                <ProtectedRoute>
+                  <LoanDetail />
+                </ProtectedRoute>
+              } />
               <Route path="/credit-risk-management" element={
                 <ProtectedRoute>
                   <CreditRiskManagement />
                 </ProtectedRoute>
               } />
-              <Route path="/company-scorecard" element={
+                <Route path="/company-scorecard" element={
                 <ProtectedRoute>
                   <CompanyScorecard />
+                </ProtectedRoute>
+              } />
+              <Route path="/high-performers" element={
+                <ProtectedRoute>
+                  <HighPerformers />
                 </ProtectedRoute>
               } />
               <Route path="/performance/toptiering-comparison" element={
@@ -240,14 +262,24 @@ const App = () => (
                 </ProtectedRoute>
               } />
               
+              {/* Help Center */}
+              <Route path="/help/*" element={
+                <ProtectedRoute>
+                  <HelpCenter />
+                </ProtectedRoute>
+              } />
+              
               {/* Catch-all route */}
               <Route path="*" element={<NotFound />} />
             </Routes>
               <GlobalCohiChat />
               <CohiDemoExperience />
+              <WelcomeTourTrigger />
+              <ActiveTourRunner />
           </Router>
         </TooltipProvider>
       </EditProvider>
+    </TutorialProvider>
     </UserSettingsProvider>
     </DebugModeProvider>
     </AuthProvider>

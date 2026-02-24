@@ -6,7 +6,7 @@
  * Users can add an entire section or individual widgets to the canvas.
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -19,12 +19,12 @@ import {
   Filter,
   TrendingUp,
   LayoutDashboard,
-} from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
-import { getWidgetsByGroup } from '@/components/widgets/registry';
-import type { WidgetCategory } from '@/components/widgets/registry';
-import { DASHBOARD_SECTION_GROUPS } from './workbenchSections';
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { getWidgetsByGroup } from "@/components/widgets/registry";
+import type { WidgetCategory } from "@/components/widgets/registry";
+import { DASHBOARD_SECTION_GROUPS } from "./workbenchSections";
 
 // ---------------------------------------------------------------------------
 // Icons per category
@@ -41,16 +41,18 @@ const categoryIcons: Record<WidgetCategory, React.ReactNode> = {
 
 // Map section item IDs → registry group names for expandable widget lists.
 const sectionIdToRegistryGroup: Record<string, string> = {
-  companyScorecard: 'Company Scorecard',
-  salesScorecard: 'Sales Scorecard',
-  operationsScorecard: 'Operations Scorecard',
-  operationsTrends: 'Operations Trends',
-  salesTrends: 'Sales Trends',
-  creditRiskManagement: 'Credit Risk',
-  loanFunnel: 'Loan Funnel',
-  topTieringComparison: 'TopTiering Comparison',
-  leaderboard: 'Leaderboard',
-  executiveDashboard: 'Executive Dashboard',
+  companyScorecard: "Company Scorecard",
+  salesScorecard: "Sales Scorecard",
+  operationsScorecard: "Operations Scorecard",
+  operationsTrends: "Operations Trends",
+  salesTrends: "Sales Trends",
+  creditRiskManagement: "Credit Risk",
+  /*   loanFunnel: 'Loan Funnel', */
+  workflowConversion: "Workflow Conversion",
+  topTieringComparison: "TopTiering Comparison",
+  leaderboard: "Leaderboard",
+  executiveDashboard: "Executive Dashboard",
+  highPerformers: "High Performers",
 };
 
 // ---------------------------------------------------------------------------
@@ -92,12 +94,20 @@ export function DashboardBrowser({
           <div className="space-y-1">
             {group.items.map((item) => {
               const registryGroup = sectionIdToRegistryGroup[item.id];
-              const widgets = registryGroup ? getWidgetsByGroup(registryGroup) : [];
+              const widgets = registryGroup
+                ? getWidgetsByGroup(registryGroup)
+                : [];
               const isExpanded = expandedGroup === item.id;
               const Icon = item.icon;
-              const kpiCount = widgets.filter((w) => w.category === 'kpi').length;
-              const chartCount = widgets.filter((w) => w.category === 'chart').length;
-              const tableCount = widgets.filter((w) => w.category === 'table' || w.category === 'distribution').length;
+              const kpiCount = widgets.filter(
+                (w) => w.category === "kpi",
+              ).length;
+              const chartCount = widgets.filter(
+                (w) => w.category === "chart",
+              ).length;
+              const tableCount = widgets.filter(
+                (w) => w.category === "table" || w.category === "distribution",
+              ).length;
 
               return (
                 <div
@@ -114,7 +124,7 @@ export function DashboardBrowser({
                     ) : (
                       <ChevronRight className="h-3 w-3 text-slate-400 shrink-0" />
                     )}
-                    <Icon className={cn('h-4 w-4 shrink-0', item.iconClass)} />
+                    <Icon className={cn("h-4 w-4 shrink-0", item.iconClass)} />
                     <span className="text-xs font-medium text-slate-700 dark:text-slate-300 flex-1 text-left">
                       {item.title}
                     </span>
@@ -151,7 +161,9 @@ export function DashboardBrowser({
                               key={widget.id}
                               className="flex items-center gap-1.5 px-2 py-1.5 rounded hover:bg-white dark:hover:bg-slate-800 group transition-colors"
                             >
-                              {categoryIcons[widget.category] || <Hash className="h-3 w-3 text-slate-400" />}
+                              {categoryIcons[widget.category] || (
+                                <Hash className="h-3 w-3 text-slate-400" />
+                              )}
                               <span className="text-[11px] text-slate-600 dark:text-slate-400 flex-1 truncate">
                                 {widget.name}
                               </span>
@@ -165,7 +177,9 @@ export function DashboardBrowser({
                                 </button>
                                 <button
                                   onClick={() =>
-                                    onAskCohi(`Explain how the "${widget.name}" widget works and what data it uses`)
+                                    onAskCohi(
+                                      `Explain how the "${widget.name}" widget works and what data it uses`,
+                                    )
                                   }
                                   className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700"
                                   title="Ask Cohi about this"

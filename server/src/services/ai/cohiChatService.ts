@@ -624,7 +624,7 @@ async function executeQuery(
   const sanitizedSql = sanitizeGeneratedSQL(sql);
   const normalizedSql = sanitizedSql.trim().toUpperCase();
 
-  if (!normalizedSql.startsWith("SELECT")) {
+  if (!normalizedSql.startsWith("SELECT") && !normalizedSql.startsWith("WITH")) {
     throw new Error("Only SELECT queries are allowed");
   }
 
@@ -948,8 +948,8 @@ async function gatherInsightMetrics(
     "activeLoans",
     `
     SELECT 
-      COUNT(CASE WHEN l.current_loan_status = 'Active Loan' AND l.application_date IS NOT NULL THEN 1 END) as active_count,
-      COALESCE(SUM(CASE WHEN l.current_loan_status = 'Active Loan' AND l.application_date IS NOT NULL THEN l.loan_amount ELSE 0 END), 0) as active_volume
+      COUNT(CASE WHEN l.current_loan_status = 'Active Loan' AND l.application_date IS NOT NULL AND (l.is_archived IS DISTINCT FROM TRUE) THEN 1 END) as active_count,
+      COALESCE(SUM(CASE WHEN l.current_loan_status = 'Active Loan' AND l.application_date IS NOT NULL AND (l.is_archived IS DISTINCT FROM TRUE) THEN l.loan_amount ELSE 0 END), 0) as active_volume
     FROM public.loans l
   `
   );
@@ -1435,23 +1435,14 @@ function formatDateValue(value: string | Date): string {
     const date = value instanceof Date ? value : new Date(value);
     if (isNaN(date.getTime())) return String(value);
 
-    const day = date.getDate();
-    const month = date.toLocaleDateString("en-US", { month: "short" });
-    const year = date.getFullYear();
+    const day = date.getUTCDate();
+    const month = date.toLocaleDateString("en-US", {
+      month: "short",
+      timeZone: "UTC",
+    });
+    const year = date.getUTCFullYear();
 
-    const dayOfWeek = date.getDay();
-    const isLikelyWeekStart =
-      (dayOfWeek === 0 || dayOfWeek === 1) &&
-      [1, 2, 7, 8, 14, 15, 21, 22, 28, 29].includes(day);
-    const isFirstOfMonth = day === 1;
-
-    if (isFirstOfMonth) {
-      return `${month} ${year}`;
-    } else if (isLikelyWeekStart) {
-      return `Week of ${month} ${day}`;
-    } else {
-      return `${month} ${day}`;
-    }
+    return `${month} ${day}, ${year}`;
   } catch {
     return String(value);
   }
@@ -1466,6 +1457,8 @@ function formatDataRows(rows: any[]): any[] {
     for (const [key, value] of Object.entries(row)) {
       if (value === null || value === undefined) {
         formatted[key] = null;
+      } else if (typeof value === "object" && !(value instanceof Date)) {
+        formatted[key] = JSON.stringify(value);
       } else if (isISODateString(value)) {
         formatted[key] = formatDateValue(value as string);
       } else if (isNumericString(value)) {

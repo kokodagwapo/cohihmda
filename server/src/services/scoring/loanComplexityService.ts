@@ -1,20 +1,18 @@
 /**
  * Loan Complexity Service
- * Calculates loan complexity scores based on configurable components
- * 
- * Based on Qlik logic from legacy Coheus:
- * - Loan Purpose: C-to-P (+30%), Purchase (+10%), Refi CO (+10%), Refi No CO (0%)
- * - Loan Type: FHA (+10%), VA (+5%), Conventional (0%)
- * - Loan Amount: Jumbo ≥$1M (+10%)
- * - Occupancy: Second Home (+10%), Investor (+10%), Primary (0%)
- * - FICO: >760 (-10%), 681-760 (0%), 620-681 (+5%), ≤620 (+15%)
- * - LTV: ≥95% (+5%)
- * - DTI: ≥43% (+5%)
- * - Employment: Self-employed (+20%)
+ * Calculates loan complexity scores using canonical calcLoanComplexity from scorecard-utils.
+ * Supports V2 config with dynamic ranges (FICO, DTI, LTV, Loan Amount) and categorical rules.
  */
 
 import pg from 'pg';
 import { logInfo, logError, logDebug } from '../logger.js';
+import {
+  calcLoanComplexity,
+  calcLoanComplexityWithBreakdown,
+  parseComplexityConfigV2,
+  type LoanComplexityData,
+  type ComplexityConfigV2,
+} from '../../utils/scorecard-utils.js';
 
 export interface LoanData {
   loan_purpose?: string;
@@ -26,6 +24,7 @@ export interface LoanData {
   be_dti_ratio?: number;
   borr_self_employed?: boolean;
   co_borr_self_employed?: boolean;
+  non_qm?: boolean | string;
 }
 
 export interface ComplexityScore {
@@ -41,260 +40,90 @@ export interface ComplexityComponent {
   applied: boolean;
 }
 
-// Default complexity weights (can be overridden by tenant configuration)
-const DEFAULT_COMPLEXITY_WEIGHTS: Record<string, Record<string, number>> = {
-  loan_purpose: {
-    'C to P': 0.30,
-    'Construction-to-Permanent': 0.30,
-    'Purchase': 0.10,
-    'Refi CO': 0.10,
-    'Cash-Out Refinance': 0.10,
-    'Refi No CO': 0.00,
-    'NoCash-Out Refinance': 0.00,
-    'Rate/Term Refinance': 0.00,
-  },
-  loan_type: {
-    'FHA': 0.10,
-    'VA': 0.05,
-    'Conventional': 0.00,
-    'USDA': 0.05,
-    'Jumbo': 0.15,
-  },
-  occupancy: {
-    'SecondHome': 0.10,
-    'Second Home': 0.10,
-    'Investor': 0.10,
-    'Investment': 0.10,
-    'Primary': 0.00,
-    'PrimaryResidence': 0.00,
-    'Owner Occupied': 0.00,
-  },
-};
+/** Map LoanData to LoanComplexityData for canonical calculator. */
+function toLoanComplexityData(loan: LoanData): LoanComplexityData {
+  return {
+    loan_type: loan.loan_type,
+    loan_purpose: loan.loan_purpose,
+    loan_amount: loan.loan_amount,
+    fico_score: loan.fico_score,
+    ltv_ratio: loan.ltv_ratio,
+    be_dti_ratio: loan.be_dti_ratio,
+    occupancy_type: loan.occupancy_type,
+    borr_self_employed: loan.borr_self_employed,
+    non_qm: loan.non_qm,
+  };
+}
 
-// FICO score ranges and their weights
-const FICO_WEIGHTS = [
-  { condition: 'excellent', minScore: 760, maxScore: 850, weight: -0.10 },
-  { condition: 'good', minScore: 681, maxScore: 759, weight: 0.00 },
-  { condition: 'fair', minScore: 620, maxScore: 680, weight: 0.05 },
-  { condition: 'poor', minScore: 300, maxScore: 619, weight: 0.15 },
-];
+/** Interpretation from totalScore (100 = baseline). */
+function interpretationFromScore(totalScore: number): 'low' | 'medium' | 'high' {
+  if (totalScore < 105) return 'low';
+  if (totalScore <= 120) return 'medium';
+  return 'high';
+}
 
 export class LoanComplexityService {
   private pool: pg.Pool;
-  private customWeights: Record<string, Record<string, number>> | null = null;
+  private configV2: ComplexityConfigV2 | null = null;
 
   constructor(pool: pg.Pool) {
     this.pool = pool;
   }
 
   /**
-   * Load custom complexity weights from the database
+   * Load complexity config from the database (with range_min/range_max for V2).
    */
   async loadCustomWeights(): Promise<void> {
     try {
       const result = await this.pool.query(`
-        SELECT component_name, condition_value, weight
+        SELECT component_name, condition_value, weight, range_min, range_max
         FROM public.complexity_components
         WHERE is_active = TRUE
+        ORDER BY component_name, COALESCE(range_min, 0), condition_value
       `);
 
-      this.customWeights = {};
-      for (const row of result.rows) {
-        if (!this.customWeights[row.component_name]) {
-          this.customWeights[row.component_name] = {};
-        }
-        this.customWeights[row.component_name][row.condition_value] = parseFloat(row.weight);
+      if (result.rows.length === 0) {
+        this.configV2 = null;
+        logDebug('No complexity components in DB, using legacy defaults');
+        return;
       }
 
-      logDebug('Loaded custom complexity weights', { count: result.rows.length });
+      this.configV2 = parseComplexityConfigV2(result.rows);
+      logDebug('Loaded complexity config V2', { count: result.rows.length });
     } catch (error: any) {
-      logError('Error loading custom complexity weights', error);
-      this.customWeights = null;
+      logError('Error loading complexity config', error);
+      this.configV2 = null;
     }
   }
 
   /**
-   * Get weight for a specific component and condition
-   */
-  private getWeight(component: string, condition: string): number {
-    // First check custom weights
-    if (this.customWeights?.[component]?.[condition] !== undefined) {
-      return this.customWeights[component][condition];
-    }
-    // Fall back to defaults
-    return DEFAULT_COMPLEXITY_WEIGHTS[component]?.[condition] ?? 0;
-  }
-
-  /**
-   * Calculate complexity score for a loan
+   * Calculate complexity score for a loan using canonical logic (V2 config or legacy).
    */
   calculateComplexity(loan: LoanData): ComplexityScore {
-    const components: ComplexityComponent[] = [];
-    let totalScore = 0;
+    const loanData = toLoanComplexityData(loan);
 
-    // 1. Loan Purpose
-    if (loan.loan_purpose) {
-      const purpose = loan.loan_purpose;
-      const purposeWeight = this.getWeight('loan_purpose', purpose);
-      components.push({
-        name: 'Loan Purpose',
-        condition: purpose,
-        weight: purposeWeight,
-        applied: true,
-      });
-      totalScore += purposeWeight;
+    if (this.configV2 && Object.keys(this.configV2).length > 0) {
+      const { totalScore, components } = calcLoanComplexityWithBreakdown(
+        loanData,
+        this.configV2,
+      );
+      return {
+        totalScore,
+        components: components.map((c) => ({
+          name: c.name,
+          condition: c.condition,
+          weight: c.weight / 100,
+          applied: c.applied,
+        })),
+        interpretation: interpretationFromScore(totalScore),
+      };
     }
 
-    // 2. Loan Type
-    if (loan.loan_type) {
-      const loanType = loan.loan_type;
-      const typeWeight = this.getWeight('loan_type', loanType);
-      components.push({
-        name: 'Loan Type',
-        condition: loanType,
-        weight: typeWeight,
-        applied: true,
-      });
-      totalScore += typeWeight;
-    }
-
-    // 3. Loan Amount (Jumbo check)
-    if (loan.loan_amount) {
-      const amount = loan.loan_amount;
-      if (amount >= 1000000) {
-        const jumboWeight = this.customWeights?.['loan_amount']?.['jumbo'] ?? 0.10;
-        components.push({
-          name: 'Loan Amount',
-          condition: 'jumbo',
-          weight: jumboWeight,
-          applied: true,
-        });
-        totalScore += jumboWeight;
-      } else {
-        components.push({
-          name: 'Loan Amount',
-          condition: 'conforming',
-          weight: 0,
-          applied: false,
-        });
-      }
-    }
-
-    // 4. Occupancy Type
-    if (loan.occupancy_type) {
-      const occupancy = loan.occupancy_type;
-      const occupancyWeight = this.getWeight('occupancy', occupancy);
-      components.push({
-        name: 'Occupancy',
-        condition: occupancy,
-        weight: occupancyWeight,
-        applied: occupancyWeight !== 0,
-      });
-      totalScore += occupancyWeight;
-    }
-
-    // 5. FICO Score
-    if (loan.fico_score) {
-      const fico = loan.fico_score;
-      let ficoWeight = 0;
-      let ficoCondition = 'unknown';
-
-      for (const range of FICO_WEIGHTS) {
-        if (fico >= range.minScore && fico <= range.maxScore) {
-          // Check for custom override
-          ficoWeight = this.customWeights?.['fico']?.[range.condition] ?? range.weight;
-          ficoCondition = range.condition;
-          break;
-        }
-      }
-
-      components.push({
-        name: 'FICO Score',
-        condition: `${ficoCondition} (${fico})`,
-        weight: ficoWeight,
-        applied: true,
-      });
-      totalScore += ficoWeight;
-    }
-
-    // 6. LTV Ratio
-    if (loan.ltv_ratio) {
-      const ltv = loan.ltv_ratio;
-      if (ltv >= 95) {
-        const ltvWeight = this.customWeights?.['ltv']?.['high'] ?? 0.05;
-        components.push({
-          name: 'LTV',
-          condition: `high (${ltv.toFixed(1)}%)`,
-          weight: ltvWeight,
-          applied: true,
-        });
-        totalScore += ltvWeight;
-      } else {
-        components.push({
-          name: 'LTV',
-          condition: `${ltv.toFixed(1)}%`,
-          weight: 0,
-          applied: false,
-        });
-      }
-    }
-
-    // 7. DTI Ratio
-    if (loan.be_dti_ratio) {
-      const dti = loan.be_dti_ratio;
-      if (dti >= 43) {
-        const dtiWeight = this.customWeights?.['dti']?.['high'] ?? 0.05;
-        components.push({
-          name: 'DTI',
-          condition: `high (${dti.toFixed(1)}%)`,
-          weight: dtiWeight,
-          applied: true,
-        });
-        totalScore += dtiWeight;
-      } else {
-        components.push({
-          name: 'DTI',
-          condition: `${dti.toFixed(1)}%`,
-          weight: 0,
-          applied: false,
-        });
-      }
-    }
-
-    // 8. Self-Employment
-    const isSelfEmployed = loan.borr_self_employed || loan.co_borr_self_employed;
-    if (isSelfEmployed) {
-      const selfEmpWeight = this.customWeights?.['employment']?.['self_employed'] ?? 0.20;
-      components.push({
-        name: 'Employment',
-        condition: 'self_employed',
-        weight: selfEmpWeight,
-        applied: true,
-      });
-      totalScore += selfEmpWeight;
-    } else {
-      components.push({
-        name: 'Employment',
-        condition: 'w2_employee',
-        weight: 0,
-        applied: false,
-      });
-    }
-
-    // Determine interpretation
-    let interpretation: 'low' | 'medium' | 'high';
-    if (totalScore < 0.5) {
-      interpretation = 'low';
-    } else if (totalScore <= 1.0) {
-      interpretation = 'medium';
-    } else {
-      interpretation = 'high';
-    }
-
+    const totalScore = calcLoanComplexity(loanData);
     return {
-      totalScore: Math.round(totalScore * 100) / 100, // Round to 2 decimal places
-      components,
-      interpretation,
+      totalScore,
+      components: [],
+      interpretation: interpretationFromScore(totalScore),
     };
   }
 
@@ -310,6 +139,8 @@ export class LoanComplexityService {
    */
   async calculateByLoanId(loanId: string): Promise<ComplexityScore | null> {
     try {
+      await this.loadCustomWeights();
+
       const result = await this.pool.query(`
         SELECT 
           loan_purpose, loan_type, loan_amount, occupancy_type,

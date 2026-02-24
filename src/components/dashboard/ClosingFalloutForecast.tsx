@@ -7,6 +7,7 @@ import {
   memo,
   useDeferredValue,
 } from "react";
+import { useJobStatus } from "@/hooks/useJobStatus";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   BarChart3,
@@ -64,7 +65,7 @@ import {
   transformLoanToCard,
   aggregateLoanOfficers,
 } from "@/utils/loanDataTransform";
-import { ExportShareMenu } from "@/components/common/ExportShareMenu";
+import { ExportMenu } from "@/components/common/ExportMenu";
 import type { ExportData } from "@/utils/exportUtils";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -937,6 +938,7 @@ export const ClosingFalloutForecast = ({
   const { user } = useAuth();
   const isPlatformAdmin = user?.role === "super_admin" || user?.role === "platform_admin";
   const forecastRef = useRef<HTMLDivElement>(null);
+  const criticalLoansSectionRef = useRef<HTMLElement>(null);
   // ============================================================================
   // TESTING FLAG: Signal Strength Buckets Table
   // Set to true to display the loan signal strength buckets table
@@ -1030,6 +1032,8 @@ export const ClosingFalloutForecast = ({
     likelyCloseLateCount?: number;
   } | null>(null);
   const [predictionsLoading, setPredictionsLoading] = useState(false);
+  const [predictionJobId, setPredictionJobId] = useState<string | null>(null);
+  const predictionJob = useJobStatus(predictionJobId);
   const [bucketedLoans, setBucketedLoans] = useState<any[]>([]);
   // Store individual predictions to identify which loans are predicted to fallout
   const [loanPredictions, setLoanPredictions] = useState<
@@ -1888,31 +1892,38 @@ export const ClosingFalloutForecast = ({
     }
     setPredictionsLoading(true);
     try {
-      // Don't send loanIds - let the backend query the full database with proper filters
-      // The frontend's 5000-loan sample may not match the backend's "Active Loan" criteria
       const predictUrl = selectedTenantId
         ? `/api/predictions?tenant_id=${selectedTenantId}`
         : "/api/predictions";
-      const response = await api.request<{
-        predictions: Array<{ predictedOutcome: string; loanId: string }>;
-        bucketedLoans?: any[];
-        summary: {
-          predictedWithdraw: number;
-          predictedDeny: number;
-          predictedOriginate: number;
-          likelyCloseLateCount?: number;
-        };
-      }>(predictUrl, {
+      const resp = await api.request<{ jobId: string }>(predictUrl, {
         method: "POST",
         body: JSON.stringify({}),
       });
 
+      if (resp.jobId) {
+        setPredictionJobId(resp.jobId);
+      }
+    } catch (error) {
+      console.error("[Predict] Failed to start prediction:", error);
+      setPredictions(null);
+      setLoanPredictions({});
+      setBucketedLoans([]);
+      setPredictionsLoading(false);
+      predictionInFlightRef.current = false;
+      predictionInFlightGlobal = false;
+    }
+  }, [selectedTenantId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Handle prediction job completion
+  useEffect(() => {
+    if (predictionJob.status === "complete" && predictionJob.result) {
+      const response = predictionJob.result;
       setPredictions({
-        likelyWithdraw: response.summary.predictedWithdraw,
-        likelyDecline: response.summary.predictedDeny,
+        likelyWithdraw: response.summary?.predictedWithdraw ?? 0,
+        likelyDecline: response.summary?.predictedDeny ?? 0,
         predictedFalloutTotal:
-          response.summary.predictedWithdraw + response.summary.predictedDeny,
-        likelyCloseLateCount: response.summary.likelyCloseLateCount,
+          (response.summary?.predictedWithdraw ?? 0) + (response.summary?.predictedDeny ?? 0),
+        likelyCloseLateCount: response.summary?.likelyCloseLateCount,
       });
 
       if (response.predictions && Array.isArray(response.predictions)) {
@@ -1936,20 +1947,21 @@ export const ClosingFalloutForecast = ({
         setBucketedLoans([]);
       }
 
-      // Simplified: predictions are instant now (no background processing)
-      // No need to poll for status - just set loading to false
       setPredictionsLoading(false);
-    } catch (error) {
-      console.error("[Predict] Failed to run prediction:", error);
+      setPredictionJobId(null);
+      predictionInFlightRef.current = false;
+      predictionInFlightGlobal = false;
+    } else if (predictionJob.status === "failed") {
+      console.error("[Predict] Prediction job failed:", predictionJob.error);
       setPredictions(null);
       setLoanPredictions({});
       setBucketedLoans([]);
       setPredictionsLoading(false);
-    } finally {
+      setPredictionJobId(null);
       predictionInFlightRef.current = false;
       predictionInFlightGlobal = false;
     }
-  }, [selectedTenantId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [predictionJob.status, predictionJob.result, predictionJob.error]);
 
   // Fetch stored predictions from database when activeLoansPeriod or tenant changes
   // Race condition protection: cancel stale requests when period changes rapidly
@@ -2524,6 +2536,12 @@ export const ClosingFalloutForecast = ({
     if (criticalOutcomeFilter === "all") return criticalLoanCards;
     return criticalLoanCards.filter((loan) => {
       switch (criticalOutcomeFilter) {
+        case "high-risk": {
+          const score = loan.riskScore ?? 0;
+          if (score < 80) return false;
+          const outcome = loan.riskSummary?.predictedOutcome;
+          return outcome === "withdraw" || outcome === "deny";
+        }
         case "likely-withdraw":
           if (loan.riskSummary?.predictedOutcome === "withdraw") return true;
           return criticalPredictionMap.get(loan.id) === "withdraw";
@@ -2579,6 +2597,12 @@ export const ClosingFalloutForecast = ({
   const criticalTabCounts = useMemo(() => {
     return {
       all: criticalLoanCards.length,
+      "high-risk": criticalLoanCards.filter((l) => {
+        const score = l.riskScore ?? 0;
+        if (score < 80) return false;
+        const outcome = l.riskSummary?.predictedOutcome;
+        return outcome === "withdraw" || outcome === "deny";
+      }).length,
       "likely-withdraw": criticalLoanCards.filter((l) => {
         if (l.riskSummary?.predictedOutcome === "withdraw") return true;
         return criticalPredictionMap.get(l.id) === "withdraw";
@@ -3299,24 +3323,36 @@ export const ClosingFalloutForecast = ({
     return aggregateLoanOfficers(cards);
   }, [loansRaw, deferredPeriod]);
 
-  const handleMetricClick = async (label: string) => {
-    await ensureLoansLoaded(); // Load full set if needed before opening modal
+  const scrollToCriticalLoans = (tab: TabType) => {
+    setInsightsTab("critical");
+    setCriticalOutcomeFilter(tab);
+    requestAnimationFrame(() => {
+      criticalLoansSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
 
-    // Outcome list modals - show predicted loans
+  const handleMetricClick = async (label: string) => {
+    await ensureLoansLoaded();
+
     if (label === "Predicted Fallout") {
-      setOutcomeModalType("fallout");
+      scrollToCriticalLoans("all");
+      return;
+    }
+    if (label === "High Risk") {
+      scrollToCriticalLoans("high-risk");
       return;
     }
     if (label === "Likely Withdraw") {
-      setOutcomeModalType("withdraw");
+      scrollToCriticalLoans("likely-withdraw");
       return;
     }
     if (label === "Likely Decline") {
-      setOutcomeModalType("decline");
+      scrollToCriticalLoans("likely-decline");
       return;
     }
     if (label === "Likely Close Late") {
-      return; // No modal for Likely Close Late
+      scrollToCriticalLoans("likely-close-late");
+      return;
     }
 
     // Metric drilldown modal
@@ -3325,10 +3361,10 @@ export const ClosingFalloutForecast = ({
 
   return (
     <TooltipProvider>
-      <div className="mb-8 md:mb-12">
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-8 lg:gap-10 items-stretch">
+      <div className="mb-8 md:mb-12 min-w-0 max-w-full">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-8 lg:gap-10 items-stretch min-w-0">
           {/* Main Forecast Section */}
-          <div className="md:col-span-12 flex flex-col">
+          <div className="md:col-span-12 flex flex-col min-w-0">
             <div ref={forecastRef}>
               <DashboardCard className="relative flex-1 flex flex-col">
                 <div className="p-6 md:p-10 lg:p-12 flex-1 flex flex-col">
@@ -3350,15 +3386,10 @@ export const ClosingFalloutForecast = ({
                       </div>
                     </div>
                     <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0 flex-wrap">
-                      <ExportShareMenu
+                      <ExportMenu
                         title="Closing & Fallout Forecast"
                         targetRef={forecastRef}
                         getExportData={getExportData}
-                        shareTarget={{
-                          type: "closing-fallout-forecast",
-                          tenantId: selectedTenantId || undefined,
-                          label: "Closing & Fallout Forecast",
-                        }}
                       />
                       {/* Start Prediction - manual trigger; disabled until run completes */}
                       <Button
@@ -3395,7 +3426,10 @@ export const ClosingFalloutForecast = ({
                         <div className="text-center space-y-1 sm:space-y-2 md:space-y-3 lg:space-y-4 group/stat transition-all duration-300">
                           <div className="flex items-center gap-1.5 sm:gap-2 justify-center">
                             <p className="text-[9px] sm:text-[10px] md:text-[11px] lg:text-sm font-semibold uppercase tracking-widest leading-tight text-slate-500 dark:text-slate-400">
-                              Active Loans Today
+                              Active Loans{" "}
+                              <span className="normal-case font-medium text-slate-400 dark:text-slate-500">
+                                ({ACTIVE_LOANS_PERIOD_OPTIONS.find((o) => o.value === activeLoansPeriod)?.label ?? "All Time"})
+                              </span>
                             </p>
                             <span className="px-1 sm:px-1.5 py-0.5 rounded text-[6px] sm:text-[7px] font-bold uppercase tracking-wide bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400">
                               Live
@@ -4107,16 +4141,18 @@ export const ClosingFalloutForecast = ({
           </section>
         )}
 
-        {/* Critical Loans and Top Loan Officers Section */}
+        {/* Critical Loans and Top Loan Officers Section - width constrained so table tab cannot expand */}
         <section
-          className={`mt-6 md:mt-12 md:rounded-2xl md:border overflow-hidden lg:min-h-[480px] ${
+          ref={criticalLoansSectionRef}
+          className={`mt-6 md:mt-12 md:rounded-2xl md:border overflow-hidden lg:min-h-[480px] min-w-0 max-w-full w-full box-border ${
             isDarkMode
               ? "bg-transparent md:bg-slate-900/50 md:border-white/10"
               : "bg-transparent md:bg-white md:border-slate-200 md:shadow-sm"
           }`}
+          style={{ width: "100%", maxWidth: "100%", minWidth: 0 }}
         >
           <div
-            className={`flex border-b ${
+            className={`flex border-b min-w-0 ${
               isDarkMode ? "border-white/10" : "border-slate-100"
             }`}
           >
@@ -4168,9 +4204,9 @@ export const ClosingFalloutForecast = ({
             </button>
           </div>
 
-          <div className="py-2 md:p-3 lg:p-4">
+          <div className="py-2 md:p-3 lg:p-4 min-w-0 w-full overflow-hidden">
             {insightsTab === "critical" && (
-              <div>
+              <div className="min-w-0">
                 {loansError ? (
                   <div
                     className={`text-sm py-6 text-center ${
@@ -4202,7 +4238,7 @@ export const ClosingFalloutForecast = ({
             )}
 
             {insightsTab === "officers" && (
-              <div className="w-full">
+              <div className="w-full min-w-0 max-w-full overflow-hidden">
                 {loansLoading && !loansRaw ? (
                   <div
                     className={`text-sm py-6 text-center ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}
@@ -4210,7 +4246,7 @@ export const ClosingFalloutForecast = ({
                     Loading loans…
                   </div>
                 ) : (
-                  <div className="w-full space-y-3">
+                  <div className="w-full min-w-0 max-w-full overflow-hidden space-y-3">
                     {/* Critical outcome filter (shared with cards) - show when we have critical loans data */}
                     {criticalLoanCards.length > 0 && (() => {
                       const criticalTabs: {
@@ -4223,6 +4259,12 @@ export const ClosingFalloutForecast = ({
                           id: "all",
                           label: "All Loans",
                           shortLabel: "All",
+                          color: "darkred",
+                        },
+                        {
+                          id: "high-risk",
+                          label: "High Risk",
+                          shortLabel: "High Risk",
                           color: "darkred",
                         },
                         {
@@ -4305,7 +4347,7 @@ export const ClosingFalloutForecast = ({
                         },
                       };
                       return (
-                        <div className="flex gap-1 sm:gap-1.5 overflow-x-auto scrollbar-hide -mx-1 px-1">
+                        <div className="flex gap-1 sm:gap-1.5 overflow-x-auto scrollbar-hide -mx-1 px-1 min-w-0">
                           {criticalTabs.map((tab) => {
                             const isActive =
                               criticalOutcomeFilter === tab.id;
@@ -4348,7 +4390,7 @@ export const ClosingFalloutForecast = ({
                     })()}
                     {sortedCriticalLoans.length === 0 ? (
                       <div
-                        className={`text-center py-12 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}
+                        className={`text-center py-12 min-w-0 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}
                       >
                         <Table className="w-12 h-12 mx-auto mb-4 opacity-40" />
                         <p className="text-sm font-medium">
@@ -4364,10 +4406,19 @@ export const ClosingFalloutForecast = ({
                       </div>
                     ) : (
                     <div
-                      className={`overflow-x-auto overflow-y-auto border rounded-lg ${isDarkMode ? "border-white/10" : "border-slate-200"}`}
-                      style={{ maxHeight: "45rem" }}
+                      className={`border rounded-lg ${isDarkMode ? "border-white/10" : "border-slate-200"}`}
+                      style={{
+                        maxHeight: "45rem",
+                        width: "100%",
+                        minWidth: 0,
+                        maxWidth: "100%",
+                        overflowX: "auto",
+                        overflowY: "auto",
+                        boxSizing: "border-box",
+                      }}
                     >
-                      <table className="table-auto divide-y divide-slate-200 dark:divide-white/10">
+                      <div style={{ minWidth: "min(100%, max-content)", width: "max-content" }}>
+                      <table className="table-auto divide-y divide-slate-200 dark:divide-white/10" style={{ width: "max-content" }}>
                         <thead
                           className={`sticky top-0 z-10 ${isDarkMode ? "bg-slate-800/90" : "bg-slate-50"}`}
                         >
@@ -4613,11 +4664,12 @@ export const ClosingFalloutForecast = ({
                           })}
                         </tbody>
                       </table>
+                      </div>
                     </div>
                     )}
                     {sortedCriticalLoans.length > 0 && (
                       <div
-                        className={`mt-2 flex items-center justify-center gap-3 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}
+                        className={`mt-2 flex items-center justify-center gap-3 min-w-0 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}
                       >
                         <span className="text-xs">
                           Showing {sortedCriticalLoans.length} critical loan

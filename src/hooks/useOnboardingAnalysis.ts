@@ -42,11 +42,20 @@ export interface DataQualityFlag {
   recommendation: string;
 }
 
+export interface RdbMissingField {
+  fieldId: string;
+  coheusAlias?: string;
+  description: string;
+  fieldReaderPopulation?: number;
+  canonicalName?: string;
+}
+
 export interface OnboardingAnalysis {
   fieldSwapRecommendations: FieldSwapRecommendation[];
   revenueFieldCandidates: RevenueFieldCandidate[];
   suggestedAdditionalFields: SuggestedAdditionalField[];
   dataQualityFlags: DataQualityFlag[];
+  rdbMissingFields: RdbMissingField[];
   summary: string;
 }
 
@@ -168,7 +177,7 @@ export function useOnboardingAnalysis(connectionId: string | null, tenantId?: st
   const chatAbortRef = useRef<AbortController | null>(null);
 
   // ── Phase 1: Start Analysis ──
-  const startAnalysis = useCallback(async (strategy?: "pipeline" | "fullLoan") => {
+  const startAnalysis = useCallback(async (strategy?: "hybrid" | "pipeline" | "fullLoan") => {
     if (!connectionId) return;
 
     // Reset state

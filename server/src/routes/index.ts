@@ -1,6 +1,6 @@
 import { Express } from "express";
 import authRoutes from "./auth.js";
-import { cognitoAuth } from "./auth/index.js";
+import { cognitoAuth, mfaRoutes } from "./auth/index.js";
 import subscriptionsRoutes from "./subscriptions.js";
 import ragRoutes from "./rag.js";
 import metricsRoutes from "./metrics.js";
@@ -28,12 +28,13 @@ import platformSettingsRoutes from "./admin/platformSettings.js";
 import tenantConfigExportRoutes from "./admin/tenantConfigExport.js";
 import insightFeedbackRoutes from "./admin/insightFeedback.js";
 import knowledgeCenterRoutes from "./knowledgeCenter.js";
-import shareLinksRoutes from "./shareLinks.js";
 import workbenchRoutes from "./workbench.js";
 import reportRoutes from "./reports.js";
 import researchRoutes from "./research.js";
 import trackedInsightRoutes from "./trackedInsights.js";
 import onboardingRoutes from "./onboarding.js";
+import jobsRoutes from "./jobs.js";
+import helpContentRoutes from "./helpContent.js";
 import { pool, resetPool } from "../config/database.js";
 import { setupMockLosApi } from "../services/mockLosApi.js";
 import { getVersionInfo } from "../services/versionService.js";
@@ -58,6 +59,7 @@ export function setupRoutes(app: Express) {
 
   app.use("/api/auth", authRoutes);
   app.use("/api/auth/cognito", cognitoAuth);
+  app.use("/api/auth/mfa", mfaRoutes);
 
   // SaaS & Enterprise Features
   app.use("/api/subscriptions", subscriptionsRoutes);
@@ -87,12 +89,13 @@ export function setupRoutes(app: Express) {
   app.use("/api/admin/tenant-config-transfer", tenantConfigExportRoutes);
   app.use("/api/admin/insight-feedback", insightFeedbackRoutes);
   app.use("/api/knowledge-center", knowledgeCenterRoutes);
-  app.use("/api/share-links", shareLinksRoutes);
   app.use("/api/workbench/canvases", workbenchRoutes); // Workbench canvas CRUD (tenant DB)
   app.use("/api/workbench/reports", reportRoutes); // Report generation (PPTX/PDF)
   app.use("/api/research", researchRoutes); // Research Analyst agentic system
   app.use("/api/insights/tracked", trackedInsightRoutes); // Tracked insights watchlist
   app.use("/api/onboarding", onboardingRoutes); // Onboarding analysis agent
+  app.use("/api/jobs", jobsRoutes); // Async job status polling
+  app.use("/api/help", helpContentRoutes); // Help content RAG seeding
 
   // Health check handler (shared by both /health and /api/health)
   const healthCheckHandler = async (req: any, res: any) => {

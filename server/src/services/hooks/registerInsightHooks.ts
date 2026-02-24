@@ -18,6 +18,18 @@ export function registerInsightHooks(): void {
     "agent-insight-generation",
     async (ctx: PostSyncContext) => {
       try {
+        const connResult = await ctx.tenantPool.query(
+          "SELECT insights_auto_enabled FROM public.los_connections WHERE id = $1",
+          [ctx.connectionId],
+        );
+        const enabled = connResult.rows[0]?.insights_auto_enabled ?? true;
+        if (!enabled) {
+          logInfo(
+            `[PostSyncHook] Auto-insights disabled for connection ${ctx.connectionId} — skipping`,
+          );
+          return;
+        }
+
         const { runInsightGeneration } = await import(
           "../insights/agents/insightOrchestrator.js"
         );
@@ -39,6 +51,13 @@ export function registerInsightHooks(): void {
     "tracked-insight-evaluation",
     async (ctx: PostSyncContext) => {
       try {
+        const connResult = await ctx.tenantPool.query(
+          "SELECT insights_auto_enabled FROM public.los_connections WHERE id = $1",
+          [ctx.connectionId],
+        );
+        const enabled = connResult.rows[0]?.insights_auto_enabled ?? true;
+        if (!enabled) return;
+
         const { evaluateTrackedInsights } = await import(
           "../insights/trackedInsightEvaluator.js"
         );
@@ -53,6 +72,6 @@ export function registerInsightHooks(): void {
         logError(`[PostSyncHook] Tracked insight evaluation failed: ${err.message}`, err);
       }
     },
-    200 // runs after insight generation
+    200
   );
 }

@@ -48,7 +48,14 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { cn } from "@/lib/utils";
 import { InsightChat } from "@/components/dashboard/InsightChat";
+import { AutoChart, EvidencePreviewTable } from "@/components/research/FindingDrillDown";
 import type {
   ResearchReport as ResearchReportType,
   ResearchTheme,
@@ -455,6 +462,20 @@ function ThemeAccordion({
   );
 }
 
+function CollapsibleEvidence({ children }: { children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
+        <BarChart3 className="h-3.5 w-3.5" />
+        {open ? "Hide data" : "View data"}
+        <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
+      </CollapsibleTrigger>
+      <CollapsibleContent className="pt-2">{children}</CollapsibleContent>
+    </Collapsible>
+  );
+}
+
 function InsightCard({
   insight,
   findings,
@@ -661,6 +682,21 @@ function InsightCard({
               ))}
             </div>
           )}
+
+          {/* Inline evidence: table + chart from first finding */}
+          {(() => {
+            const firstWithEvidence = relatedFindings.find((f) => f.evidence?.length > 0);
+            const firstEvidence = firstWithEvidence?.evidence?.[0];
+            if (!firstEvidence?.rows?.length) return null;
+            return (
+              <CollapsibleEvidence>
+                <div className="space-y-3 pt-1">
+                  <EvidencePreviewTable evidence={firstEvidence} maxRows={10} />
+                  <AutoChart evidence={firstEvidence} />
+                </div>
+              </CollapsibleEvidence>
+            );
+          })()}
 
           {/* Ask about this button */}
           <button

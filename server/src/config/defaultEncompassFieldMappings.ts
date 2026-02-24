@@ -141,6 +141,7 @@ export const FIELD_CATEGORY_MAP: Record<string, FieldCategory> = {
   "Loan Source": "loan_info",
   GUID: "loan_info",
   "Loan Folder": "loan_info",
+  "Is Archived": "loan_info",
   "Last Modified Date": "loan_info",
   "Current Milestone": "loan_info",
 
@@ -436,6 +437,7 @@ export const DEFAULT_ENCOMPASS_FIELD_MAPPINGS: Record<string, string> = {
   "Loan Source": "Fields.2024",
   GUID: "Fields.GUID",
   "Loan Folder": "Loan.LoanFolder",
+  "Is Archived": "Fields.5016",
   "Last Modified Date": "Loan.LastModified",
   "Current Milestone": "Fields.Log.MS.CurrentMilestone",
 
