@@ -28,6 +28,7 @@ import {
   FlaskConical,
   FileText,
   HelpCircle,
+  DollarSign,
 } from "lucide-react";
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -98,6 +99,12 @@ const topTieringMenuGroups = {
         label: "Company Scorecard",
         icon: ClipboardList,
         iconColor: "indigo" as const,
+      },
+      {
+        id: "pricingDashboard",
+        label: "Pricing Dashboard",
+        icon: DollarSign,
+        iconColor: "emerald" as const,
       },
       {
         id: "workflowConversion",
@@ -219,6 +226,7 @@ const routeMap: Record<string, string> = {
   topTieringComparison: "/performance/toptiering-comparison",
   workflowConversion: "/workflow-conversion",
   loanDetail: "/loan-detail",
+  pricingDashboard: "/pricing-dashboard",
   highPerformers: "/high-performers",
   actors: "/actors",
   salesScorecard: "/sales-scorecard",

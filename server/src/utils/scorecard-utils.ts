@@ -217,11 +217,27 @@ export const buildChannelWhereClause = (
 ): string => {
   if (!channelGroup || channelGroup === "All") return "";
 
+  // Normalize to canonical form so "99-missing", "99-MISSING" etc. all work
+  const normalized =
+    typeof channelGroup === "string"
+      ? (channelGroup.trim().length === 0
+          ? undefined
+          : (() => {
+              const lower = channelGroup.trim().toLowerCase();
+              if (lower === "99-missing") return "99-Missing";
+              if (lower === "retail") return "Retail";
+              if (lower === "tpo") return "TPO";
+              if (lower === "other") return "Other";
+              return channelGroup.trim();
+            })())
+      : undefined;
+  if (!normalized) return "";
+
   const col = tableAlias ? `${tableAlias}.channel` : "channel";
   const aeCol = tableAlias ? `${tableAlias}.account_executive` : "account_executive";
   const tpoPat = tpoChannelPatternSql(col);
 
-  switch (channelGroup) {
+  switch (normalized) {
     case "Retail":
       // Retail = Direct origination OR brokered-retail (TPO channel pattern but no account_executive)
       return `AND ((${col} ILIKE '%retail%') OR (${tpoPat} AND (${aeCol} IS NULL OR TRIM(${aeCol}) = '')))`;
@@ -234,7 +250,7 @@ export const buildChannelWhereClause = (
       return `AND ${col} IS NOT NULL AND TRIM(${col}) != '' AND ${col} NOT ILIKE '%retail%' AND NOT ${tpoPat}`;
     default:
       // Individual channel value (exact match)
-      return `AND LOWER(TRIM(${col})) = LOWER('${channelGroup.replace(
+      return `AND LOWER(TRIM(${col})) = LOWER('${normalized.replace(
         /'/g,
         "''",
       )}')`;

@@ -15,6 +15,7 @@ import {
   BarChart3,
   Trophy,
   Users,
+  DollarSign,
 } from "lucide-react";
 import {
   Sheet,
@@ -76,6 +77,12 @@ const topTieringNavLinks = [
     label: "Operations Trends",
     icon: LineChart,
     variant: "fuchsia" as const,
+  },
+  {
+    path: "/pricing-dashboard",
+    label: "Pricing Dashboard",
+    icon: DollarSign,
+    variant: "mint" as const,
   },
   {
     path: "/workflow-conversion",
