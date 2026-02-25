@@ -95,6 +95,14 @@ export interface SectionFilters {
   pricingEntityValue?: string;
   /** Pricing Dashboard: actor value filter */
   pricingActorValue?: string;
+  /** Workflow Conversion: period selection (MTD, QTD, etc.) */
+  workflowPeriodSelection?: PeriodSelection;
+  /** Workflow Conversion: conversion % vs turn time */
+  workflowCalculationType?: 'conversion' | 'turn_time';
+  /** Workflow Conversion: workflow vs individual cards */
+  workflowGrouping?: 'workflow' | 'individual';
+  /** Workflow Conversion: segment cards (from → to milestone ids) */
+  workflowSegments?: { from: string; to: string }[];
   /** User-added dynamic filters (column = value conditions) */
   dynamicFilters?: DynamicFilterEntry[];
 }

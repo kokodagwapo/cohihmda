@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import {
   Card,
   CardContent,
@@ -69,23 +69,61 @@ export interface WorkflowConversionViewProps {
   selectedChannel?: string | null;
   /** When true, show +/- buttons to add/remove cards (workbench only). */
   embeddedInWorkbench?: boolean;
+  /** Initial state when embedded (e.g. from saved canvas). */
+  initialWorkflowState?: {
+    periodSelection?: PeriodSelection;
+    calculationType?: WorkflowConversionMetric;
+    grouping?: WorkflowGrouping;
+    segments?: { from: string; to: string }[];
+  };
+  /** Called when toolbar or segment state changes (for persisting to canvas). */
+  onWorkflowStateChange?: (state: {
+    periodSelection: PeriodSelection;
+    calculationType: WorkflowConversionMetric;
+    grouping: WorkflowGrouping;
+    segments: { from: string; to: string }[];
+  }) => void;
 }
 
 export function WorkflowConversionView({
   selectedTenantId,
   selectedChannel,
   embeddedInWorkbench = false,
+  initialWorkflowState,
+  onWorkflowStateChange,
 }: WorkflowConversionViewProps) {
   const [periodSelection, setPeriodSelection] = useState<PeriodSelection>(() => {
+    const initial = initialWorkflowState?.periodSelection;
+    if (initial?.dateRange) return initial;
     const range = getDefaultDateRange();
     return { type: "preset", preset: "mtd", dateRange: range };
   });
-  const [calculationType, setCalculationType] = useState<WorkflowConversionMetric>("conversion");
-  const [grouping, setGrouping] = useState<WorkflowGrouping>("workflow");
-  const [segments, setSegments] = useState<{ from: string; to: string }[]>(() => [
-    ...DEFAULT_WORKFLOW_SEGMENTS,
-  ]);
+  const [calculationType, setCalculationType] = useState<WorkflowConversionMetric>(
+    () => initialWorkflowState?.calculationType ?? "conversion",
+  );
+  const [grouping, setGrouping] = useState<WorkflowGrouping>(
+    () => initialWorkflowState?.grouping ?? "workflow",
+  );
+  const [segments, setSegments] = useState<{ from: string; to: string }[]>(() => {
+    const initial = initialWorkflowState?.segments;
+    if (initial && initial.length > 0) return initial;
+    return [...DEFAULT_WORKFLOW_SEGMENTS];
+  });
   const [fullscreenSegmentIndex, setFullscreenSegmentIndex] = useState<number | null>(null);
+
+  const onWorkflowStateChangeRef = useRef(onWorkflowStateChange);
+  onWorkflowStateChangeRef.current = onWorkflowStateChange;
+
+  useEffect(() => {
+    const cb = onWorkflowStateChangeRef.current;
+    if (!cb) return;
+    cb({
+      periodSelection,
+      calculationType,
+      grouping,
+      segments,
+    });
+  }, [periodSelection, calculationType, grouping, segments]);
 
   const dateRange = periodSelection.dateRange;
   const { data, loading, error } = useWorkflowConversionData({

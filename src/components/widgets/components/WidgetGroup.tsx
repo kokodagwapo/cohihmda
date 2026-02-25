@@ -843,6 +843,37 @@ function GridCellRegistryWidget({
       }
     : {};
 
+  const isWorkflowConversion = defId === 'workflow-conversion-embed';
+  const workflowConfig = isWorkflowConversion
+    ? {
+        workflowInitialState:
+          filters.workflowPeriodSelection != null ||
+          filters.workflowCalculationType != null ||
+          filters.workflowGrouping != null ||
+          (filters.workflowSegments != null && filters.workflowSegments.length > 0)
+            ? {
+                periodSelection: filters.workflowPeriodSelection,
+                calculationType: filters.workflowCalculationType,
+                grouping: filters.workflowGrouping,
+                segments: filters.workflowSegments,
+              }
+            : undefined,
+        onWorkflowStateChange: (state: {
+          periodSelection: import('@/components/ui/DatePeriodPicker').PeriodSelection;
+          calculationType: 'conversion' | 'turn_time';
+          grouping: 'workflow' | 'individual';
+          segments: { from: string; to: string }[];
+        }) => {
+          updateFilters(groupId, {
+            workflowPeriodSelection: state.periodSelection,
+            workflowCalculationType: state.calculationType,
+            workflowGrouping: state.grouping,
+            workflowSegments: state.segments,
+          });
+        },
+      }
+    : {};
+
   const config = {
     ...definition.config,
     ...(periodLabel != null && { periodLabel }),
@@ -850,6 +881,7 @@ function GridCellRegistryWidget({
     ...(customColumns != null && { customColumns }),
     ...highPerformersConfig,
     ...actorsConfig,
+    ...workflowConfig,
   };
 
   return (
@@ -1159,9 +1191,15 @@ export function WidgetGroup({
     if (filters.branch && filters.branch !== 'all') toSave.branch = filters.branch;
     if (filters.loanOfficer && filters.loanOfficer !== 'all') toSave.loanOfficer = filters.loanOfficer;
     if (filters.dynamicFilters && filters.dynamicFilters.length > 0) toSave.dynamicFilters = filters.dynamicFilters;
+    if (sectionType === 'workflow-conversion') {
+      if (filters.workflowPeriodSelection) toSave.workflowPeriodSelection = filters.workflowPeriodSelection;
+      if (filters.workflowCalculationType) toSave.workflowCalculationType = filters.workflowCalculationType;
+      if (filters.workflowGrouping) toSave.workflowGrouping = filters.workflowGrouping;
+      if (filters.workflowSegments && filters.workflowSegments.length > 0) toSave.workflowSegments = filters.workflowSegments;
+    }
     patchPayload({ savedFilters: Object.keys(toSave).length > 0 ? toSave : undefined });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.year, filters.dateRange, filters.periodSelection, filters.dateField, filters.applicationType, filters.actorType, filters.branch, filters.loanOfficer, filters.dynamicFilters]);
+  }, [sectionType, filters.year, filters.dateRange, filters.periodSelection, filters.dateField, filters.applicationType, filters.actorType, filters.branch, filters.loanOfficer, filters.dynamicFilters, filters.workflowPeriodSelection, filters.workflowCalculationType, filters.workflowGrouping, filters.workflowSegments]);
 
   // ─── Grid layout ───
   const contentWidth = Math.max(width - 24, MIN_GRID_WIDTH);

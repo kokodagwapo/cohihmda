@@ -1,7 +1,7 @@
 /**
  * WorkflowConversionEmbed – Single workbench widget that renders the full
  * Workflow Conversion view: period, calculation, grouping, reset, and 6-card grid.
- * All state and data fetching are self-contained (same as the standalone page).
+ * When embedded in workbench, state can be initialized from and persisted to the canvas via config.
  */
 
 import React from 'react';
@@ -9,10 +9,28 @@ import { WorkflowConversionView } from '@/components/views/WorkflowConversionVie
 import { useTenantStore } from '@/stores/tenantStore';
 import { useChannelStore } from '@/stores/channelStore';
 import type { WidgetRenderProps } from '../registry/types';
+import type { PeriodSelection } from '@/components/ui/DatePeriodPicker';
 
-function WorkflowConversionEmbedInner({ width, height }: WidgetRenderProps) {
+export interface WorkflowConversionState {
+  periodSelection?: PeriodSelection;
+  calculationType?: 'conversion' | 'turn_time';
+  grouping?: 'workflow' | 'individual';
+  segments?: { from: string; to: string }[];
+}
+
+function WorkflowConversionEmbedInner({ width, height, config }: WidgetRenderProps) {
   const { selectedTenantId } = useTenantStore();
   const { selectedChannel } = useChannelStore();
+
+  const workflowInitialState = config?.workflowInitialState as WorkflowConversionState | undefined;
+  const onWorkflowStateChange = config?.onWorkflowStateChange as
+    | ((state: {
+        periodSelection: PeriodSelection;
+        calculationType: 'conversion' | 'turn_time';
+        grouping: 'workflow' | 'individual';
+        segments: { from: string; to: string }[];
+      }) => void)
+    | undefined;
 
   return (
     <div
@@ -23,6 +41,8 @@ function WorkflowConversionEmbedInner({ width, height }: WidgetRenderProps) {
         selectedTenantId={selectedTenantId}
         selectedChannel={selectedChannel}
         embeddedInWorkbench
+        initialWorkflowState={workflowInitialState}
+        onWorkflowStateChange={onWorkflowStateChange}
       />
     </div>
   );
