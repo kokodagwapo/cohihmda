@@ -196,3 +196,100 @@ export function usePricingDashboardData(
     refetch: fetchAll,
   };
 }
+
+/** Combined result for workbench: KPIs + all 4 tables (Loan Officer Report/Detail, Entity Report/Detail). */
+export interface PricingDashboardWorkbenchData {
+  kpis: PricingKPIs | null;
+  loanOfficerReport: { rows: PricingReportRow[]; totals: Partial<PricingReportRow> };
+  entityReport: { rows: PricingReportRow[]; totals: Partial<PricingReportRow> };
+  loanOfficerDetail: { rows: PricingDetailRow[]; totals: Partial<PricingDetailRow> };
+  entityDetail: { rows: PricingDetailRow[]; totals: Partial<PricingDetailRow> };
+  loading: boolean;
+  error: string | null;
+}
+
+/** Fetches KPIs + all 4 pricing tables in one go for workbench (5 API calls). */
+export function usePricingDashboardWorkbenchData(
+  filters: PricingDashboardFilters,
+  options: { tenantId?: string | null; selectedChannel?: string | null }
+): PricingDashboardWorkbenchData {
+  const [state, setState] = useState<PricingDashboardWorkbenchData>({
+    kpis: null,
+    loanOfficerReport: { rows: [], totals: {} },
+    entityReport: { rows: [], totals: {} },
+    loanOfficerDetail: { rows: [], totals: {} },
+    entityDetail: { rows: [], totals: {} },
+    loading: true,
+    error: null,
+  });
+
+  const effectiveChannel =
+    options.selectedChannel != null && options.selectedChannel !== "All"
+      ? options.selectedChannel
+      : filters.channel ?? undefined;
+
+  const fetchAll = useCallback(async () => {
+    const tenantId = options.tenantId;
+    const filtersWithChannel: PricingDashboardFilters = {
+      ...filters,
+      channel: effectiveChannel,
+    };
+    const base = buildParams(filtersWithChannel, tenantId);
+    try {
+      setState((s) => ({ ...s, loading: true, error: null }));
+      const [kpisRes, reportLORes, reportEntityRes, detailLORes, detailEntityRes] = await Promise.all([
+        api.request<PricingKPIs>(`/api/pricing-dashboard/kpis?${base.toString()}`),
+        api.request<{ rows: PricingReportRow[]; totals: Partial<PricingReportRow> }>(
+          `/api/pricing-dashboard/report?${base.toString()}&report_type=loan_officer_report`
+        ),
+        api.request<{ rows: PricingReportRow[]; totals: Partial<PricingReportRow> }>(
+          `/api/pricing-dashboard/report?${base.toString()}&report_type=entity_report`
+        ),
+        api.request<{ rows: PricingDetailRow[]; totals: Partial<PricingDetailRow> }>(
+          `/api/pricing-dashboard/detail?${base.toString()}&report_type=loan_officer_detail`
+        ),
+        api.request<{ rows: PricingDetailRow[]; totals: Partial<PricingDetailRow> }>(
+          `/api/pricing-dashboard/detail?${base.toString()}&report_type=entity_detail`
+        ),
+      ]);
+      setState({
+        kpis: kpisRes as PricingKPIs,
+        loanOfficerReport: { rows: (reportLORes as any).rows ?? [], totals: (reportLORes as any).totals ?? {} },
+        entityReport: { rows: (reportEntityRes as any).rows ?? [], totals: (reportEntityRes as any).totals ?? {} },
+        loanOfficerDetail: { rows: (detailLORes as any).rows ?? [], totals: (detailLORes as any).totals ?? {} },
+        entityDetail: { rows: (detailEntityRes as any).rows ?? [], totals: (detailEntityRes as any).totals ?? {} },
+        loading: false,
+        error: null,
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Failed to load pricing dashboard data";
+      setState((s) => ({
+        ...s,
+        kpis: null,
+        loanOfficerReport: { rows: [], totals: {} },
+        entityReport: { rows: [], totals: {} },
+        loanOfficerDetail: { rows: [], totals: {} },
+        entityDetail: { rows: [], totals: {} },
+        loading: false,
+        error: msg,
+      }));
+    }
+  }, [
+    effectiveChannel,
+    filters.entityType,
+    filters.entityValue,
+    filters.actorType,
+    filters.actorValue,
+    filters.dateRange,
+    filters.loanFunding,
+    filters.loanStatus,
+    filters.lockStatus,
+    options.tenantId,
+  ]);
+
+  useEffect(() => {
+    fetchAll();
+  }, [fetchAll]);
+
+  return state;
+}

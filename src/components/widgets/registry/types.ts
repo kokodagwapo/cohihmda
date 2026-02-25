@@ -31,7 +31,8 @@ export type DataSourceId =
   | 'loan-detail'
   | 'workflow-conversion'
   | 'high-performers'
-  | 'actors';
+  | 'actors'
+  | 'pricing-dashboard';
 
 // ---------------------------------------------------------------------------
 // Widget categories – drives catalog grouping & icon selection

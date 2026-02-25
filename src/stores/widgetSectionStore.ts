@@ -24,7 +24,8 @@ export type SectionType =
   | 'loan-detail'
   | 'workflow-conversion'
   | 'high-performers'
-  | 'actors';
+  | 'actors'
+  | 'pricing-dashboard';
 
 /**
  * A dynamic (user-added) filter dimension.
@@ -78,6 +79,22 @@ export interface SectionFilters {
   actorsTableDimensions?: [string, string, string, string];
   /** Actors: ordered list of column ids to show in workbench actor tables (empty = all default) */
   actorsTableColumnIds?: string[];
+  /** Pricing Dashboard: entity type (branch, broker_lender_name, channel, investor) */
+  pricingEntityType?: string;
+  /** Pricing Dashboard: actor type (loan_officer, account_executive) */
+  pricingActorType?: string;
+  /** Pricing Dashboard: date range (all, mtd, lm, qtd, ytd, ly) */
+  pricingDateRange?: string;
+  /** Pricing Dashboard: loan funding (funded, closed) */
+  pricingLoanFunding?: string;
+  /** Pricing Dashboard: loan status (all, active, funded) */
+  pricingLoanStatus?: string;
+  /** Pricing Dashboard: lock status (locked, not_locked, total) */
+  pricingLockStatus?: string;
+  /** Pricing Dashboard: entity value filter */
+  pricingEntityValue?: string;
+  /** Pricing Dashboard: actor value filter */
+  pricingActorValue?: string;
   /** User-added dynamic filters (column = value conditions) */
   dynamicFilters?: DynamicFilterEntry[];
 }
@@ -190,6 +207,18 @@ export const useWidgetSectionStore = create<WidgetSectionState>((set, get) => ({
           actorsSelectedStatus: null,
           actorsTableDimensions: ['loan_officer', 'processor', 'underwriter', 'closer'],
           actorsTableColumnIds: [...ACTORS_TABLE_DEFAULT_COLUMN_IDS],
+        };
+      } else if (sectionType === 'pricing-dashboard') {
+        filters = {
+          ...base,
+          pricingEntityType: 'branch',
+          pricingActorType: 'loan_officer',
+          pricingDateRange: 'mtd',
+          pricingLoanFunding: 'funded',
+          pricingLoanStatus: 'active',
+          pricingLockStatus: 'total',
+          pricingEntityValue: '',
+          pricingActorValue: '',
         };
       }
       return {

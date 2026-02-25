@@ -35,6 +35,8 @@ import {
 } from '@/hooks/useHighPerformersData';
 import { useActorsData } from '@/hooks/useActorsData';
 import type { ActorDimension } from '@/hooks/useActorsData';
+import { usePricingDashboardWorkbenchData } from '@/hooks/usePricingDashboardData';
+import type { PricingDashboardFilters as PricingFilters } from '@/hooks/usePricingDashboardData';
 import type { DataSourceId } from '../registry/types';
 
 /** Build dimension filter array from section dynamicFilters (for APIs that accept them). */
@@ -207,6 +209,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
   const ldFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'loan-detail'), [sections, scopedFilters]);
   const hpFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'high-performers'), [sections, scopedFilters]);
   const actorsFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'actors'), [sections, scopedFilters]);
+  const pdFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'pricing-dashboard'), [sections, scopedFilters]);
 
   // ---- Hook calls with dynamic filter values ----
 
@@ -380,9 +383,26 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     measure: (actorsFilters?.actorsMeasure as 'units' | 'volume') ?? 'units',
     selectedTenantId,
     channelGroup: selectedChannel,
-    selectedActor: actorsFilters?.actorsSelectedActor ?? null,
+    selectedActor: (actorsFilters?.actorsSelectedActor ?? null) as { type: ActorDimension; name: string } | null,
     selectedStatus: actorsFilters?.actorsSelectedStatus ?? null,
     tableDimensions: actorsTableDims,
+  });
+
+  // Pricing Dashboard: build filters from section and fetch all 4 tables + KPIs
+  const pricingFilters = useMemo((): PricingFilters => ({
+    channel: selectedChannel ?? undefined,
+    entityType: (pdFilters?.pricingEntityType ?? 'branch') as PricingFilters['entityType'],
+    entityValue: pdFilters?.pricingEntityValue ?? '',
+    actorType: (pdFilters?.pricingActorType ?? 'loan_officer') as PricingFilters['actorType'],
+    actorValue: pdFilters?.pricingActorValue ?? '',
+    dateRange: (pdFilters?.pricingDateRange ?? 'mtd') as PricingFilters['dateRange'],
+    loanFunding: (pdFilters?.pricingLoanFunding ?? 'funded') as PricingFilters['loanFunding'],
+    loanStatus: (pdFilters?.pricingLoanStatus ?? 'active') as PricingFilters['loanStatus'],
+    lockStatus: (pdFilters?.pricingLockStatus ?? 'total') as PricingFilters['lockStatus'],
+  }), [selectedChannel, pdFilters?.pricingEntityType, pdFilters?.pricingEntityValue, pdFilters?.pricingActorType, pdFilters?.pricingActorValue, pdFilters?.pricingDateRange, pdFilters?.pricingLoanFunding, pdFilters?.pricingLoanStatus, pdFilters?.pricingLockStatus]);
+  const pricingDashboard = usePricingDashboardWorkbenchData(pricingFilters, {
+    tenantId: selectedTenantId,
+    selectedChannel,
   });
 
   // Build lookup
@@ -479,6 +499,11 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
       loading: actorsLoading,
       error: actorsError,
     },
+    'pricing-dashboard': {
+      data: pricingDashboard,
+      loading: pricingDashboard.loading,
+      error: pricingDashboard.error,
+    },
   }), [
     companyScorecard.data, companyScorecard.loading, companyScorecard.error,
     creditRisk.data, creditRisk.loading, creditRisk.error,
@@ -492,6 +517,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     loanDetail.data, loanDetail.loading, loanDetail.error,
     highPerformersData, highPerformersLoading, highPerformersError,
     actorsData, actorsLoading, actorsError,
+    pricingDashboard,
   ]);
 
   const contextValue = useMemo<WidgetDataContextValue>(

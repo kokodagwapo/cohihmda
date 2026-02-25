@@ -672,6 +672,19 @@ const SECTION_TO_WIDGETS: Record<
       "actors-table-3",
     ],
   },
+  pricingDashboard: {
+    sectionType: "pricing-dashboard",
+    widgetIds: [
+      "pricing-dashboard-units",
+      "pricing-dashboard-volume",
+      "pricing-dashboard-margin",
+      "pricing-dashboard-pricing-dollars",
+      "pricing-dashboard-lo-report",
+      "pricing-dashboard-lo-detail",
+      "pricing-dashboard-entity-report",
+      "pricing-dashboard-entity-detail",
+    ],
+  },
 };
 
 /**

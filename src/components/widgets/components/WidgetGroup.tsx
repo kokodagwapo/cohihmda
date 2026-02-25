@@ -214,6 +214,7 @@ const SECTION_FILTER_CONFIG: Partial<Record<SectionType, SectionFilterField[]>> 
   ],
   'high-performers': [],
   'actors': [],
+  'pricing-dashboard': [],
 };
 
 const HIGH_PERFORMERS_DATE_TYPE_OPTIONS: { value: 'funding_date' | 'closing_date' | 'application_date'; label: string }[] = [
@@ -221,6 +222,73 @@ const HIGH_PERFORMERS_DATE_TYPE_OPTIONS: { value: 'funding_date' | 'closing_date
   { value: 'closing_date', label: 'Closed Loans' },
   { value: 'application_date', label: 'Applications Taken' },
 ];
+
+// Pricing Dashboard – same options as standalone page
+const PRICING_ENTITY_OPTIONS = [
+  { value: 'branch', label: 'Branch' },
+  { value: 'broker_lender_name', label: 'Broker Lender Name' },
+  { value: 'channel', label: 'Channel' },
+  { value: 'investor', label: 'Investor' },
+];
+const PRICING_ACTOR_OPTIONS = [
+  { value: 'loan_officer', label: 'Loan Officer' },
+  { value: 'account_executive', label: 'Account Executive' },
+];
+const PRICING_DATE_RANGE_OPTIONS = [
+  { value: 'all', label: 'All Time' },
+  { value: 'mtd', label: 'Month to Date' },
+  { value: 'lm', label: 'Last Month' },
+  { value: 'qtd', label: 'Quarter to Date' },
+  { value: 'ytd', label: 'Year to Date' },
+  { value: 'ly', label: 'Last Year' },
+];
+const PRICING_LOAN_FUNDING_OPTIONS = [
+  { value: 'funded', label: 'Funded Loans' },
+  { value: 'closed', label: 'Closed Loans' },
+];
+const PRICING_LOAN_STATUS_OPTIONS = [
+  { value: 'all', label: 'All Statuses' },
+  { value: 'active', label: 'Active' },
+  { value: 'funded', label: 'Funded' },
+];
+const PRICING_LOCK_STATUS_OPTIONS = [
+  { value: 'locked', label: 'Active Locked' },
+  { value: 'not_locked', label: 'Active Not Locked' },
+  { value: 'total', label: 'Active Total' },
+];
+
+/** Compact dropdown for pricing dashboard filters in WidgetGroup */
+function PricingFilterSelect({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider shrink-0">
+        {label}
+      </span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-7 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 pl-2 pr-6 text-xs font-medium text-slate-700 dark:text-slate-200 cursor-pointer hover:border-slate-300 dark:hover:border-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500/50 canvas-interactive min-w-0 max-w-[140px]"
+        title={label}
+      >
+        {options.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
 
 const ACTORS_DIMENSION_OPTIONS = ['channel', 'processor', 'closer', 'underwriter', 'loan_officer', 'branch', 'investor', 'warehouse_co_name'] as const;
 const ACTORS_DIMENSION_LABELS: Record<string, string> = {
@@ -271,6 +339,7 @@ const SECTION_COLORS: Record<SectionType, { border: string; bg: string; accent: 
   'workflow-conversion':  { border: 'border-teal-400/50',    bg: 'bg-teal-50/50 dark:bg-teal-950/20',    accent: 'text-teal-600 dark:text-teal-400',    dot: 'bg-teal-500' },
   'high-performers':      { border: 'border-amber-400/50',  bg: 'bg-amber-50/50 dark:bg-amber-950/20',   accent: 'text-amber-600 dark:text-amber-400',  dot: 'bg-amber-500' },
   'actors':              { border: 'border-cyan-400/50',   bg: 'bg-cyan-50/50 dark:bg-cyan-950/20',    accent: 'text-cyan-600 dark:text-cyan-400',   dot: 'bg-cyan-500' },
+  'pricing-dashboard':   { border: 'border-emerald-400/50', bg: 'bg-emerald-50/50 dark:bg-emerald-950/20', accent: 'text-emerald-600 dark:text-emerald-400', dot: 'bg-emerald-500' },
 };
 
 /**
@@ -306,7 +375,7 @@ function itemKey(item: GroupWidgetItem, idx: number): string {
 interface GridSize { w: number; h: number; minW: number; minH: number }
 
 const GRID_SIZES: Record<string, GridSize> = {
-  kpi:          { w: 5,  h: 4,  minW: 2,  minH: 2 },
+  kpi:          { w: 5,  h: 5,  minW: 2,  minH: 3 },
   chart:        { w: 18, h: 12, minW: 8,  minH: 6 },
   distribution: { w: 12, h: 10, minW: 6,  minH: 5 },
   table:        { w: 36, h: 16, minW: 18, minH: 8 },
@@ -1504,7 +1573,46 @@ export function WidgetGroup({
         {/* Expanded filter controls — compact row below header, only when sync ON and filters expanded */}
         {!collapsed && !SELF_MANAGED_SECTIONS.has(sectionType) && filterSync && !filtersCollapsed && (
           <div className="flex items-center gap-1.5 px-2.5 pb-1.5 flex-wrap">
-            {sectionType === 'actors' ? (
+            {sectionType === 'pricing-dashboard' ? (
+              <>
+                <PricingFilterSelect
+                  label="Entity"
+                  value={filters.pricingEntityType ?? 'branch'}
+                  options={PRICING_ENTITY_OPTIONS}
+                  onChange={(v) => updateFilters(groupId, { pricingEntityType: v })}
+                />
+                <PricingFilterSelect
+                  label="Actor"
+                  value={filters.pricingActorType ?? 'loan_officer'}
+                  options={PRICING_ACTOR_OPTIONS}
+                  onChange={(v) => updateFilters(groupId, { pricingActorType: v })}
+                />
+                <PricingFilterSelect
+                  label="Date range"
+                  value={filters.pricingDateRange ?? 'mtd'}
+                  options={PRICING_DATE_RANGE_OPTIONS}
+                  onChange={(v) => updateFilters(groupId, { pricingDateRange: v })}
+                />
+                <PricingFilterSelect
+                  label="Loan status"
+                  value={filters.pricingLoanStatus ?? 'active'}
+                  options={PRICING_LOAN_STATUS_OPTIONS}
+                  onChange={(v) => updateFilters(groupId, { pricingLoanStatus: v })}
+                />
+                <PricingFilterSelect
+                  label="Loan funding"
+                  value={filters.pricingLoanFunding ?? 'funded'}
+                  options={PRICING_LOAN_FUNDING_OPTIONS}
+                  onChange={(v) => updateFilters(groupId, { pricingLoanFunding: v })}
+                />
+                <PricingFilterSelect
+                  label="Lock status"
+                  value={filters.pricingLockStatus ?? 'total'}
+                  options={PRICING_LOCK_STATUS_OPTIONS}
+                  onChange={(v) => updateFilters(groupId, { pricingLockStatus: v })}
+                />
+              </>
+            ) : sectionType === 'actors' ? (
               <>
                 <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mr-0.5">Period</span>
                 <DatePeriodPicker
