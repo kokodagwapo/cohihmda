@@ -1,13 +1,7 @@
-import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Link2, Zap } from 'lucide-react';
 import { LOSSettingsSection } from './LOSSettingsSection';
-import { SynapseSection } from './SynapseSection';
 
 interface ConnectionsSectionProps {
-  // LOS props
   losConnections: any[];
   losTypes: any;
   losLoading: boolean;
@@ -21,21 +15,9 @@ interface ConnectionsSectionProps {
   onDeleteLos?: (connectionId: string, tenantId?: string) => Promise<any>;
   onLoadLosData?: (tenantId?: string) => Promise<any>;
   onLoadMetrics?: (tenantId: string) => Promise<void>;
-  
-  // Synapse props
-  vendorConnections: any[];
-  vendorCatalog: any;
-  synapseLoading: boolean;
-  onTestSynapse: (connectionId: string) => Promise<any>;
-  onCreateSynapse: (data: any) => Promise<any>;
-  onRefreshSynapse: () => Promise<any>;
-  
-  // Default tab
-  defaultTab?: 'los' | 'synapse';
 }
 
 export const ConnectionsSection = ({
-  // LOS props
   losConnections,
   losTypes,
   losLoading,
@@ -49,19 +31,7 @@ export const ConnectionsSection = ({
   onDeleteLos,
   onLoadLosData,
   onLoadMetrics,
-  
-  // Synapse props
-  vendorConnections,
-  vendorCatalog,
-  synapseLoading,
-  onTestSynapse,
-  onCreateSynapse,
-  onRefreshSynapse,
-  
-  defaultTab = 'los',
 }: ConnectionsSectionProps) => {
-  const [activeTab, setActiveTab] = useState<string>(defaultTab);
-
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -76,53 +46,26 @@ export const ConnectionsSection = ({
             Connections & Integrations
           </h2>
           <p className="text-base text-slate-600 dark:text-slate-400 font-extralight tracking-wide">
-            Manage LOS connections and vendor integrations
+            Manage LOS connections
           </p>
         </div>
       </div>
 
-      {/* Tabs for LOS and Synapse */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-2 mb-6">
-          <TabsTrigger value="los" className="flex items-center gap-2">
-            <Link2 className="h-4 w-4" />
-            LOS Connections
-          </TabsTrigger>
-          <TabsTrigger value="synapse" className="flex items-center gap-2">
-            <Zap className="h-4 w-4" />
-            Vendor Integrations
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="los" className="mt-0">
-          <LOSSettingsSection
-            losConnections={losConnections}
-            losTypes={losTypes}
-            loading={losLoading}
-            tenantMetrics={tenantMetrics}
-            loadingMetrics={loadingMetrics}
-            onTest={onTestLos}
-            onSync={onSyncLos}
-            onToggle={onToggleLos}
-            onCreate={onCreateLos}
-            onUpdate={onUpdateLos}
-            onDelete={onDeleteLos}
-            onLoadLosData={onLoadLosData}
-            onLoadMetrics={onLoadMetrics}
-          />
-        </TabsContent>
-
-        <TabsContent value="synapse" className="mt-0">
-          <SynapseSection
-            vendorConnections={vendorConnections}
-            vendorCatalog={vendorCatalog}
-            loading={synapseLoading}
-            onTest={onTestSynapse}
-            onCreate={onCreateSynapse}
-            onRefresh={onRefreshSynapse}
-          />
-        </TabsContent>
-      </Tabs>
+      <LOSSettingsSection
+        losConnections={losConnections}
+        losTypes={losTypes}
+        loading={losLoading}
+        tenantMetrics={tenantMetrics}
+        loadingMetrics={loadingMetrics}
+        onTest={onTestLos}
+        onSync={onSyncLos}
+        onToggle={onToggleLos}
+        onCreate={onCreateLos}
+        onUpdate={onUpdateLos}
+        onDelete={onDeleteLos}
+        onLoadLosData={onLoadLosData}
+        onLoadMetrics={onLoadMetrics}
+      />
     </motion.div>
   );
 };

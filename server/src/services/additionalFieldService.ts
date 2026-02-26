@@ -63,6 +63,12 @@ export interface AdditionalFieldAuditEntry {
   notes?: string;
 }
 
+export interface ReconcileColumnsReport {
+  created: string[];
+  failed: Array<{ columnName: string; error: string }>;
+  setColumnCreatedFalse: string[];
+}
+
 // ============================================================================
 // Data Type Mappings
 // ============================================================================
@@ -616,6 +622,90 @@ export class AdditionalFieldService {
     const result = await this.tenantPool.query(query, params);
 
     return parseInt(result.rows[0].count) > 0;
+  }
+
+  /**
+   * Reconcile column_created with actual schema: for each definition with
+   * column_created = TRUE, ensure the column exists on public.loans; if missing,
+   * add it with ADD COLUMN IF NOT EXISTS; if creation fails, set column_created = FALSE.
+   * Callable from admin tooling or after suspected schema drift.
+   */
+  async reconcileColumns(): Promise<ReconcileColumnsReport> {
+    const report: ReconcileColumnsReport = {
+      created: [],
+      failed: [],
+      setColumnCreatedFalse: [],
+    };
+    const allowedDbTypes = new Set([
+      'TEXT', 'DECIMAL(15,4)', 'DECIMAL(15,2)', 'DECIMAL(8,4)',
+      'DATE', 'BOOLEAN', 'timestamp with time zone', 'timestamp without time zone',
+    ]);
+    const dataTypeToDbType: Record<string, string> = {
+      string: 'TEXT',
+      number: 'DECIMAL(15,4)',
+      date: 'DATE',
+      boolean: 'BOOLEAN',
+      currency: 'DECIMAL(15,2)',
+      percentage: 'DECIMAL(8,4)',
+    };
+    const defsResult = await this.tenantPool.query(
+      `SELECT id, column_name, db_column_type, data_type FROM additional_field_definitions WHERE column_created = TRUE`
+    );
+    for (const row of defsResult.rows) {
+      const { id, column_name: columnName, data_type: dataType } = row;
+      let dbColumnType: string | null = row.db_column_type?.trim() || null;
+
+      // Fall back: derive from data_type if db_column_type is NULL/empty
+      if (!dbColumnType && dataType && dataTypeToDbType[dataType]) {
+        dbColumnType = dataTypeToDbType[dataType];
+        await this.tenantPool.query(
+          `UPDATE additional_field_definitions SET db_column_type = $1 WHERE id = $2`,
+          [dbColumnType, id]
+        );
+      }
+
+      if (!/^[a-z][a-z0-9_]*$/i.test(columnName) || !dbColumnType || !allowedDbTypes.has(dbColumnType)) {
+        await this.tenantPool.query(
+          `UPDATE additional_field_definitions SET column_created = FALSE WHERE id = $1`,
+          [id]
+        );
+        report.setColumnCreatedFalse.push(columnName);
+        continue;
+      }
+      const existsResult = await this.tenantPool.query(
+        `SELECT 1 FROM information_schema.columns
+         WHERE table_schema = 'public' AND table_name = 'loans' AND column_name = $1`,
+        [columnName]
+      );
+      if (existsResult.rows.length > 0) continue;
+      try {
+        await this.tenantPool.query(
+          `ALTER TABLE public.loans ADD COLUMN IF NOT EXISTS ${columnName} ${dbColumnType}`
+        );
+        const verifyResult = await this.tenantPool.query(
+          `SELECT 1 FROM information_schema.columns
+           WHERE table_schema = 'public' AND table_name = 'loans' AND column_name = $1`,
+          [columnName]
+        );
+        if (verifyResult.rows.length > 0) {
+          report.created.push(columnName);
+        } else {
+          await this.tenantPool.query(
+            `UPDATE additional_field_definitions SET column_created = FALSE WHERE id = $1`,
+            [id]
+          );
+          report.setColumnCreatedFalse.push(columnName);
+        }
+      } catch (err: any) {
+        await this.tenantPool.query(
+          `UPDATE additional_field_definitions SET column_created = FALSE WHERE id = $1`,
+          [id]
+        );
+        report.failed.push({ columnName, error: err.message || String(err) });
+        report.setColumnCreatedFalse.push(columnName);
+      }
+    }
+    return report;
   }
 
   // --------------------------------------------------------------------------

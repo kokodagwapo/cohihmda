@@ -350,3 +350,33 @@ SELECT version, name, applied_at, execution_time_ms
 FROM schema_migrations
 ORDER BY version;
 ```
+
+## Reconciling additional field columns
+
+If `additional_field_definitions` has rows with `column_created = TRUE` but the corresponding column is missing on `public.loans` (e.g. after a DB rebuild or a failed import), you can fix it in one of two ways. **You do not need to reload or re-import the loans table** — reconciliation only adds missing columns; existing data is unchanged.
+
+### Option 1: Run tenant migrations (recommended)
+
+Migration `065_reconcile_additional_field_columns.sql` adds any missing columns when it runs. Run tenant migrations for the affected tenant(s):
+
+```bash
+# From server directory
+# Single tenant (use tenant slug, e.g. from coheus_tenants.slug)
+npm run migrate:tenant -- <tenant-slug>
+
+# All tenants
+npm run migrate:tenant -- --all
+```
+
+Example: `npm run migrate:tenant -- acme-mortgage`. After this, the missing columns exist on `public.loans` and the workflow conversion dropdowns (and field population) will include them.
+
+### Option 2: Call the reconcile API (on-demand)
+
+An admin endpoint runs the same reconciliation logic without running the full migration CLI:
+
+```http
+POST /api/admin/tenants/:tenantId/reconcile-additional-field-columns
+Authorization: Bearer <token>
+```
+
+Requires `super_admin`, `platform_admin`, or `tenant_admin` (tenant admins can only run it for their own tenant). Replace `:tenantId` with the tenant UUID. Response includes a report: `created`, `failed`, `setColumnCreatedFalse`.

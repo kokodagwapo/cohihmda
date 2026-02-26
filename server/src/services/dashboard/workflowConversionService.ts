@@ -14,11 +14,74 @@
 import pg from "pg";
 import { buildChannelWhereClause } from "../../utils/scorecard-utils.js";
 
-// Ordered milestones: id -> DB date column (use COALESCE/expression where needed)
+// ---------------------------------------------------------------------------
+// Workflow conversion milestones (date columns) — dynamic from schema + cache
+// ---------------------------------------------------------------------------
+
+const MILESTONE_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+const milestonesCache = new WeakMap<pg.Pool, { list: WorkflowMilestoneOption[]; fetchedAt: number }>();
+
+const EXCLUDED_DATE_COLUMNS = new Set(["created_at", "updated_at", "last_modified_date"]);
+
+export interface WorkflowMilestoneOption {
+  id: string;
+  label: string;
+  column: string;
+}
+
+/** Convert snake_case column name to human-readable label (strip trailing _date for brevity). */
+function columnNameToLabel(columnName: string): string {
+  const base = columnName.replace(/_date$/, "").replace(/_/g, " ");
+  return base
+    .split(" ")
+    .map((w) => (w.length > 0 ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w))
+    .join(" ");
+}
+
+/**
+ * Fetch all date/timestamptz columns from the tenant's loans table for use as milestone options.
+ * Result is cached per pool with 1-hour TTL.
+ */
+export async function getWorkflowConversionMilestones(
+  tenantPool: pg.Pool
+): Promise<WorkflowMilestoneOption[]> {
+  const cached = milestonesCache.get(tenantPool);
+  if (cached && Date.now() - cached.fetchedAt < MILESTONE_CACHE_TTL_MS) {
+    return cached.list;
+  }
+
+  const result = await tenantPool.query(
+    `SELECT column_name
+     FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name = 'loans'
+       AND data_type IN ('date', 'timestamp with time zone', 'timestamp without time zone')
+       AND column_name != ALL($1::text[])`,
+    [Array.from(EXCLUDED_DATE_COLUMNS)]
+  );
+
+  const list: WorkflowMilestoneOption[] = (result.rows || [])
+    .map((r: { column_name: string }) => {
+      const column = r.column_name as string;
+      if (EXCLUDED_DATE_COLUMNS.has(column)) return null;
+      return {
+        id: column,
+        label: columnNameToLabel(column),
+        column,
+      };
+    })
+    .filter((m): m is WorkflowMilestoneOption => m != null)
+    .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
+
+  milestonesCache.set(tenantPool, { list, fetchedAt: Date.now() });
+  return list;
+}
+
+// Legacy id -> DB date column (for backward compatibility when frontend sends old milestone ids)
 const MILESTONE_DATE_COLUMNS: Record<string, string> = {
   started: "started_date",
   application: "application_date",
-  lock: "lock_date", // TIMESTAMPTZ -> use DATE(l.lock_date) in SQL
+  lock: "lock_date",
   processing: "processing_date",
   submittal: "submittal_date",
   submitted_to_underwriting: "submitted_to_underwriting_date",
@@ -31,12 +94,14 @@ const MILESTONE_DATE_COLUMNS: Record<string, string> = {
   shipped: "shipped_date",
 };
 
-function getDateExpression(milestoneId: string, alias: string): string {
-  const col = MILESTONE_DATE_COLUMNS[milestoneId];
-  if (!col) return "NULL";
-  if (col.startsWith("COALESCE")) return col.replace(/\bl\./g, `${alias}.`);
-  if (milestoneId === "lock") return `DATE(${alias}.lock_date)`;
-  return `${alias}.${col}`;
+/** Resolve milestone id (legacy or column name) to DB column name. */
+function resolveToColumnName(milestoneIdOrColumn: string): string {
+  return MILESTONE_DATE_COLUMNS[milestoneIdOrColumn] ?? milestoneIdOrColumn;
+}
+
+/** Build SQL expression for a validated date column (safe: only call with column names from schema whitelist). */
+function getDateExpression(columnName: string, alias: string): string {
+  return `DATE(${alias}.${columnName})`;
 }
 
 export interface WorkflowSegmentInput {
@@ -121,16 +186,24 @@ export async function getWorkflowConversionData(
     };
   }
 
+  // Whitelist: only use date columns that exist on the tenant's loans table (prevents SQL injection)
+  const allowedMilestones = await getWorkflowConversionMilestones(tenantPool);
+  const allowedColumnSet = new Set(allowedMilestones.map((m) => m.column));
+
   const results: SegmentResult[] = [];
   const isIndividual = grouping === "individual";
 
+  const fromCol = (s: WorkflowSegmentInput) => resolveToColumnName(s.from);
+  const toCol = (s: WorkflowSegmentInput) => resolveToColumnName(s.to);
+  const validExpr = (col: string) => (allowedColumnSet.has(col) ? getDateExpression(col, "l") : "NULL");
+
   // For workflow strict funnel: precompute "to" expressions for previous segments (used in cohort filter)
-  const segmentToExpressions: string[] = segments.map((s) => getDateExpression(s.to, "l"));
+  const segmentToExpressions: string[] = segments.map((s) => validExpr(toCol(s)));
 
   for (let segIndex = 0; segIndex < segments.length; segIndex++) {
     const seg = segments[segIndex];
-    const fromExpr = getDateExpression(seg.from, "l");
-    const toExpr = getDateExpression(seg.to, "l");
+    const fromExpr = validExpr(fromCol(seg));
+    const toExpr = validExpr(toCol(seg));
     const bucketSql = getBucketSql(byDay, isIndividual, fromExpr);
     // Graph only: always bucket by from-milestone date so x-axis is "when they hit from" (workflow cohort logic unchanged)
     const seriesBucketSql = getBucketSql(byDay, true, fromExpr);
@@ -308,16 +381,22 @@ export async function getWorkflowConversionSegmentLoans(
     return { loans: [] };
   }
 
+  const allowedMilestones = await getWorkflowConversionMilestones(tenantPool);
+  const allowedColumnSet = new Set(allowedMilestones.map((m) => m.column));
+  const toCol = (s: WorkflowSegmentInput) => resolveToColumnName(s.to);
+  const fromCol = (s: WorkflowSegmentInput) => resolveToColumnName(s.from);
+  const validExpr = (col: string) => (allowedColumnSet.has(col) ? getDateExpression(col, "l") : "NULL");
+
   const channelClause = buildChannelWhereClause(channelGroup, "l");
   const isIndividual = grouping === "individual";
-  const segmentToExpressions: string[] = segments.map((s) => getDateExpression(s.to, "l"));
+  const segmentToExpressions: string[] = segments.map((s) => validExpr(toCol(s)));
   const seg = segments[segmentIndex];
-  const fromExpr = getDateExpression(seg.from, "l");
-  const toExpr = getDateExpression(seg.to, "l");
+  const fromExpr = validExpr(fromCol(seg));
+  const toExpr = validExpr(toCol(seg));
 
   let cohortWhere: string;
   if (isIndividual) {
-    cohortWhere = `${fromExpr} IS NOT NULL AND DATE(${fromExpr}) >= $1::date AND DATE(${fromExpr}) <= $2::date`;
+    cohortWhere = `${fromExpr} IS NOT NULL AND ${fromExpr} >= $1::date AND ${fromExpr} <= $2::date`;
   } else {
     const base =
       "l.started_date IS NOT NULL AND DATE(l.started_date) >= $1::date AND DATE(l.started_date) <= $2::date";

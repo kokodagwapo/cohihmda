@@ -31,6 +31,7 @@ import {
   RefreshCw,
   Calculator,
   ArrowLeftRight,
+  Folder,
 } from "lucide-react";
 import type { AdminSection, AdminMode } from "@/hooks/admin/useAdminState";
 
@@ -276,6 +277,16 @@ const allAdminSections: AdminSectionDef[] = [
     label: "Connections & Integrations",
     icon: Link2,
     description: "LOS and vendor integrations",
+    color: "text-orange-300 dark:text-orange-400/70",
+    allowedRoles: ["super_admin", "platform_admin", "tenant_admin"],
+    category: "Data",
+    mode: "tenant",
+  },
+  {
+    id: "loan-folders" as AdminSection,
+    label: "Loan Folders",
+    icon: Folder,
+    description: "Manage which Encompass folders to sync from",
     color: "text-orange-300 dark:text-orange-400/70",
     allowedRoles: ["super_admin", "platform_admin", "tenant_admin"],
     category: "Data",
