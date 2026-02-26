@@ -411,14 +411,38 @@ export function analyzeImport(
     }
   }
 
-  // Remove duplicates from additionalFields (by alias, case-insensitive)
+  // Remove duplicates from additionalFields to match execution behavior:
+  // execution skips when los_field_id OR column_name already exists, so we deduplicate by all three.
   const uniqueAdditional = new Map<string, AdditionalFieldToImport>();
+  const seenFieldIds = new Set<string>();
+  const seenColumnNames = new Set<string>();
+
   for (const field of analysis.additionalFields) {
-    const key = field.alias.toLowerCase();
-    if (!uniqueAdditional.has(key)) {
-      uniqueAdditional.set(key, field);
+    const aliasKey = field.alias.toLowerCase();
+    const fieldIdKey = field.fieldId.toLowerCase();
+    const columnKey = field.columnName.toLowerCase();
+
+    if (uniqueAdditional.has(aliasKey)) {
+      continue; // duplicate alias
     }
+    if (seenFieldIds.has(fieldIdKey)) {
+      analysis.warnings.push(
+        `Skipping "${field.alias}": field ID "${field.fieldId}" already mapped by another alias`
+      );
+      continue;
+    }
+    if (seenColumnNames.has(columnKey)) {
+      analysis.warnings.push(
+        `Skipping "${field.alias}": column name "${field.columnName}" conflicts with another field`
+      );
+      continue;
+    }
+
+    uniqueAdditional.set(aliasKey, field);
+    seenFieldIds.add(fieldIdKey);
+    seenColumnNames.add(columnKey);
   }
+
   analysis.additionalFields = Array.from(uniqueAdditional.values());
 
   return analysis;
