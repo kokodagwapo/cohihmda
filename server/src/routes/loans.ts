@@ -772,7 +772,7 @@ router.get(
       const tenantPool = getTenantContext(req).tenantPool;
       const limit = Math.min(
         Math.max(parseInt((req.query.limit as string) || "100", 10) || 100, 1),
-        50000,
+        5000,
       );
       const offset = Math.max(parseInt((req.query.offset as string) || "0", 10) || 0);
 
@@ -1494,328 +1494,119 @@ router.get(
         channelFilter: { channel, channelGroup },
       });
 
-      // Get all loans from tenant-specific database (no tenant_id filter needed)
-      // Using only columns that exist in the tenant database schema
-      // IMPORTANT: started_date is the primary date for "Loans Started" (per Qlik logic)
-      //            application_date is used to determine RESPA App Status (has app vs no app)
-      // Note: Out of Range columns (fico_score, etc.) are only included if excludeOutOfRange is true
-      const baseColumns = `loan_id, loan_amount, loan_type, current_loan_status,
-          started_date, application_date, closing_date, lock_date, funding_date, branch`;
+      // Compute all funnel metrics in a single SQL aggregate query.
+      // Each metric is a COUNT/SUM with a FILTER clause matching the original JS logic.
+      // status_lower is used to avoid repeating LOWER(TRIM(COALESCE(...))) everywhere.
+      const has_app = `application_date IS NOT NULL AND TRIM(COALESCE(application_date::text, '')) <> ''`;
+      const no_app = `application_date IS NULL OR TRIM(COALESCE(application_date::text, '')) = ''`;
+      const is_originated = `(status_lower LIKE '%originated%' OR status_lower LIKE '%purchased%')`;
+      const is_withdrawn = `(status_lower LIKE '%withdraw%' OR status_lower LIKE '%not accepted%' OR status_lower LIKE '%incomp%')`;
+      const is_denied = `status_lower LIKE '%denied%'`;
 
-      // Only include Out of Range columns if we're filtering on them
-      const selectColumns = excludeOutOfRange
-        ? `${baseColumns}, fico_score, ltv_ratio, be_dti_ratio, interest_rate`
-        : baseColumns;
+      const aggregateQuery = `
+        SELECT
+          COUNT(*)                                                            AS started_units,
+          COALESCE(SUM(loan_amount::numeric), 0)                             AS started_volume,
 
-      const loansResult = await retryQuery(
-        () =>
-          tenantPool.query(
-            `SELECT ${selectColumns}
-         FROM public.loans 
-         ${whereClause}
-         ORDER BY COALESCE(started_date, created_at) DESC`,
-            params,
-          ),
-        2, // max retries
-        500, // delay between retries
+          COUNT(*)           FILTER (WHERE ${has_app})                        AS respa_app_units,
+          COALESCE(SUM(loan_amount::numeric) FILTER (WHERE ${has_app}), 0)   AS respa_app_volume,
+
+          COUNT(*)           FILTER (WHERE ${no_app})                         AS no_respa_app_units,
+          COALESCE(SUM(loan_amount::numeric) FILTER (WHERE ${no_app}), 0)    AS no_respa_app_volume,
+
+          COUNT(*)           FILTER (WHERE status_lower = 'active loan' AND ${has_app}) AS still_active_units,
+          COALESCE(SUM(loan_amount::numeric) FILTER (WHERE status_lower = 'active loan' AND ${has_app}), 0) AS still_active_volume,
+
+          COUNT(*)           FILTER (WHERE ${is_originated})                  AS originated_units,
+          COALESCE(SUM(loan_amount::numeric) FILTER (WHERE ${is_originated}), 0) AS originated_volume,
+
+          COUNT(*)           FILTER (WHERE ${is_withdrawn} AND NOT ${is_originated}) AS fallout_withdrawn_units,
+          COALESCE(SUM(loan_amount::numeric) FILTER (WHERE ${is_withdrawn} AND NOT ${is_originated}), 0) AS fallout_withdrawn_volume,
+
+          COUNT(*)           FILTER (WHERE ${is_denied} AND NOT ${is_originated}) AS fallout_denied_units,
+          COALESCE(SUM(loan_amount::numeric) FILTER (WHERE ${is_denied} AND NOT ${is_originated}), 0) AS fallout_denied_volume
+        FROM (
+          SELECT loan_amount, application_date, current_loan_status,
+                 LOWER(TRIM(COALESCE(current_loan_status, ''))) AS status_lower
+          FROM public.loans
+          ${whereClause}
+        ) sub
+      `;
+
+      const funnelResult = await retryQuery(
+        () => tenantPool.query(aggregateQuery, params),
+        2,
+        500,
       );
 
-      // Debug: Also get total count without date filter to understand the gap
-      const totalCountResult = await tenantPool.query(
-        `SELECT COUNT(*) as total FROM public.loans`,
-      );
-      const totalInDb = totalCountResult.rows[0]?.total || 0;
+      const r = funnelResult.rows[0];
+      const toNum = (v: any) => Number(v) || 0;
 
-      // Debug: Get count by year to see distribution
-      const yearCountResult = await tenantPool.query(`
-      SELECT EXTRACT(YEAR FROM COALESCE(started_date, created_at)) as year, COUNT(*) as count
-      FROM public.loans 
-      GROUP BY EXTRACT(YEAR FROM COALESCE(started_date, created_at))
-      ORDER BY year DESC
-      LIMIT 5
-    `);
+      const startedUnits = toNum(r.started_units);
+      const startedVolume = toNum(r.started_volume);
+      const respaAppUnits = toNum(r.respa_app_units);
+      const respaAppVolume = toNum(r.respa_app_volume);
+      const noRespaAppUnits = toNum(r.no_respa_app_units);
+      const noRespaAppVolume = toNum(r.no_respa_app_volume);
+      const stillActiveUnits = toNum(r.still_active_units);
+      const stillActiveVolume = toNum(r.still_active_volume);
+      const originatedUnits = toNum(r.originated_units);
+      const originatedVolume = toNum(r.originated_volume);
+      const falloutWithdrawnUnits = toNum(r.fallout_withdrawn_units);
+      const falloutWithdrawnVolume = toNum(r.fallout_withdrawn_volume);
+      const falloutDeniedUnits = toNum(r.fallout_denied_units);
+      const falloutDeniedVolume = toNum(r.fallout_denied_volume);
 
-      // Debug: Get distinct current_loan_status values with counts
-      const statusCountResult = await tenantPool.query(
-        `
-      SELECT current_loan_status, COUNT(*) as count
-      FROM public.loans 
-      ${whereClause.length > 0 ? whereClause : ""}
-      GROUP BY current_loan_status
-      ORDER BY count DESC
-    `,
-        params,
-      );
-
-      logInfo("[Funnel] Query returned", {
-        totalLoans: loansResult.rows.length,
-        totalInDb,
-        loansByYear: yearCountResult.rows,
-        statusCounts: statusCountResult.rows.slice(0, 10), // Top 10 statuses
-        tenantId,
-        dateFilter: { startDate, endDate, yearFilter },
-        sampleLoans: loansResult.rows.slice(0, 3).map((r) => ({
-          current_loan_status: r.current_loan_status,
-          started_date: r.started_date,
-          application_date: r.application_date,
-          funding_date: r.funding_date,
-        })),
-      });
-
-      // Use loan data directly from tenant database
-      const loans = loansResult.rows;
-
-      // Infer status based on current_loan_status field (tenant DB format) and dates
-      const getInferredStatus = (loan: any) => {
-        // First check dates for definitive status (most reliable)
-        if (loan.funding_date || loan.closing_date) return "Closed";
-        if (loan.lock_date) return "Locked";
-
-        // Use current_loan_status from tenant database
-        const currentStatus = (loan.current_loan_status || "")
-          .toString()
-          .toLowerCase()
-          .trim();
-
-        // Map known current_loan_status values (from tenant database)
-        // Based on observed values: 'Active Loan', 'Application approved but not accepted',
-        // 'Application denied', 'Application withdrawn', 'File Closed for incompleteness', 'Loan Originated'
-        if (currentStatus.includes("active loan")) return "Active";
-        if (currentStatus.includes("loan originated")) return "Closed";
-        if (
-          currentStatus.includes("application denied") ||
-          currentStatus.includes("denied")
-        )
-          return "Denied";
-        if (
-          currentStatus.includes("application withdrawn") ||
-          currentStatus.includes("withdrawn")
-        )
-          return "Withdrawn";
-        if (
-          currentStatus.includes("file closed") ||
-          currentStatus.includes("incompleteness")
-        )
-          return "Withdrawn";
-        if (currentStatus.includes("approved but not accepted"))
-          return "Active"; // Still in progress
-
-        // Handle other common status values
-        if (
-          [
-            "active",
-            "submitted",
-            "approved",
-            "ctc",
-            "started",
-            "inquiry",
-            "processing",
-            "underwriting",
-          ].includes(currentStatus)
-        ) {
-          return "Active";
-        }
-        if (currentStatus === "locked") return "Locked";
-        if (["withdrawn", "cancelled"].includes(currentStatus))
-          return "Withdrawn";
-        if (["denied", "declined"].includes(currentStatus)) return "Denied";
-        if (
-          ["funded", "closed", "originated", "complete", "completed"].includes(
-            currentStatus,
-          )
-        )
-          return "Closed";
-
-        // If no status or unrecognized, default to active
-        return "Active";
-      };
-
-      const loansWithInferredStatus = loans.map((loan) => ({
-        ...loan,
-        inferred_status: getInferredStatus(loan),
-      }));
-
-      // Calculate funnel stages
-      const loansStarted = loans.length;
-      const loansStartedVolume = loans.reduce(
-        (sum, l) => sum + parseFloat(l.loan_amount || 0),
-        0,
-      );
-
-      // RESPA App Status logic from Qlik: if(Len(Trim([Application Date]))>0,'Yes','No')
-      // Loans with RESPA Application = loans WHERE application_date IS NOT NULL
-      // Loans with No RESPA Application = loans WHERE application_date IS NULL
-      const loansWithRespaApp = loans.filter(
-        (l) =>
-          l.application_date !== null &&
-          l.application_date !== undefined &&
-          String(l.application_date).trim() !== "",
-      );
-      const loansWithRespaAppVolume = loansWithRespaApp.reduce(
-        (sum, l) => sum + parseFloat(l.loan_amount || 0),
-        0,
-      );
-
-      const loansNoRespaApp = loans.filter(
-        (l) =>
-          l.application_date === null ||
-          l.application_date === undefined ||
-          String(l.application_date).trim() === "",
-      );
-      const loansNoRespaAppVolume = loansNoRespaApp.reduce(
-        (sum, l) => sum + parseFloat(l.loan_amount || 0),
-        0,
-      );
-
-      // Active Loan Flag from Qlik: if("Current Loan Status" = 'Active Loan' AND Len([Application Date])>0, 'Yes', 'No')
-      // "Still Active" loans must have:
-      // 1. Current Loan Status = 'Active Loan' (not just any active status)
-      // 2. AND application_date exists (not null/empty)
-      const stillActive = loans.filter((l) => {
-        const currentStatus = (l.current_loan_status || "")
-          .toString()
-          .toLowerCase()
-          .trim();
-        const hasApplicationDate =
-          l.application_date !== null &&
-          l.application_date !== undefined &&
-          String(l.application_date).trim() !== "";
-        // Active Loan Flag = 'Yes' when status is 'Active Loan' AND has application date
-        return currentStatus === "active loan" && hasApplicationDate;
-      });
-      const stillActiveVolume = stillActive.reduce(
-        (sum, l) => sum + parseFloat(l.loan_amount || 0),
-        0,
-      );
-
-      // Originated loans - Pull Through Originated Flag from Qlik
-      // Qlik: If(WildMatch([Current Loan Status],'*Originated*','*purchased*')>0,'Yes','No') as [Pull Through Originated Flag]
-      // This checks ONLY the current_loan_status field, not dates
-      const originated = loans.filter((l) => {
-        const currentStatus = (l.current_loan_status || "")
-          .toString()
-          .toLowerCase();
-        return (
-          currentStatus.includes("originated") ||
-          currentStatus.includes("purchased")
-        );
-      });
-      const originatedVolume = originated.reduce(
-        (sum, l) => sum + parseFloat(l.loan_amount || 0),
-        0,
-      );
-
-      // Fallout - Withdrawn
-      // Qlik: If(WildMatch([Current Loan Status],'*withdraw*','*not accepted*','*incomp*')>0,1,0)
-      // AND [Pull Through Originated Flag]*={No} (not originated)
-      const falloutWithdrawn = loans.filter((l) => {
-        const currentStatus = (l.current_loan_status || "")
-          .toString()
-          .toLowerCase();
-        const isWithdrawn =
-          currentStatus.includes("withdraw") ||
-          currentStatus.includes("not accepted") ||
-          currentStatus.includes("incomp");
-        // Exclude if already originated
-        const isOriginated =
-          currentStatus.includes("originated") ||
-          currentStatus.includes("purchased");
-        return isWithdrawn && !isOriginated;
-      });
-      const falloutWithdrawnVolume = falloutWithdrawn.reduce(
-        (sum, l) => sum + parseFloat(l.loan_amount || 0),
-        0,
-      );
-
-      // Fallout - Denied
-      // Qlik: If(WildMatch([Current Loan Status],'*denied*')>0,1,0)
-      // AND [Pull Through Originated Flag]*={No} (not originated)
-      const falloutDenied = loans.filter((l) => {
-        const currentStatus = (l.current_loan_status || "")
-          .toString()
-          .toLowerCase();
-        const isDenied = currentStatus.includes("denied");
-        // Exclude if already originated
-        const isOriginated =
-          currentStatus.includes("originated") ||
-          currentStatus.includes("purchased");
-        return isDenied && !isOriginated;
-      });
-      const falloutDeniedVolume = falloutDenied.reduce(
-        (sum, l) => sum + parseFloat(l.loan_amount || 0),
-        0,
-      );
-
-      // Calculate revenue (simplified - 1% of loan amount)
       const revenueRate = 0.01;
 
-      // Verify: All funnel metrics should already be filtered by started_date (from the WHERE clause)
-      // The 'loans' array only contains loans where started_date matches the filter
-      logInfo("[Funnel] Calculated funnel breakdown", {
+      logInfo("[Funnel] Aggregate funnel breakdown", {
         dateFilter: { startDate, endDate, yearFilter },
-        loansStarted,
-        respaApp: loansWithRespaApp.length,
-        noRespaApp: loansNoRespaApp.length,
-        stillActive: stillActive.length,
-        originated: originated.length,
-        withdrawn: falloutWithdrawn.length,
-        denied: falloutDenied.length,
-        loansStartedVolume,
-        respaAppVolume: loansWithRespaAppVolume,
-        noRespaAppVolume: loansNoRespaAppVolume,
-        stillActiveVolume,
-        originatedVolume,
-        // Debug: verify the started_date range of loans in each category
-        sampleStartedDates: {
-          loansStarted: loans.slice(0, 3).map((l) => ({
-            started_date: l.started_date,
-            application_date: l.application_date,
-          })),
-          stillActive: stillActive.slice(0, 3).map((l) => ({
-            started_date: l.started_date,
-            status: l.current_loan_status,
-          })),
-        },
+        startedUnits,
+        respaAppUnits,
+        noRespaAppUnits,
+        stillActiveUnits,
+        originatedUnits,
+        falloutWithdrawnUnits,
+        falloutDeniedUnits,
+        startedVolume,
+        tenantId,
       });
 
       res.json({
         loansStarted: {
-          units: loansStarted,
-          volume: loansStartedVolume,
-          revenue: loansStartedVolume * revenueRate,
+          units: startedUnits,
+          volume: startedVolume,
+          revenue: startedVolume * revenueRate,
         },
         stillActive: {
-          units: stillActive.length,
+          units: stillActiveUnits,
           volume: stillActiveVolume,
           revenue: stillActiveVolume * revenueRate,
         },
         originated: {
-          units: originated.length,
+          units: originatedUnits,
           volume: originatedVolume,
           revenue: originatedVolume * revenueRate,
         },
         falloutWithdrawn: {
-          units: falloutWithdrawn.length,
+          units: falloutWithdrawnUnits,
           volume: falloutWithdrawnVolume,
           lostRevenue: falloutWithdrawnVolume * revenueRate,
         },
         falloutDenied: {
-          units: falloutDenied.length,
+          units: falloutDeniedUnits,
           volume: falloutDeniedVolume,
           lostRevenue: falloutDeniedVolume * revenueRate,
         },
-        // RESPA App Status from Qlik: if(Len(Trim([Application Date]))>0,'Yes','No')
-        // Loans WITH application_date = RESPA App Status 'Yes'
         respaApp: {
-          units: loansWithRespaApp.length,
-          volume: loansWithRespaAppVolume,
-          revenue: loansWithRespaAppVolume * revenueRate,
+          units: respaAppUnits,
+          volume: respaAppVolume,
+          revenue: respaAppVolume * revenueRate,
         },
-        // Loans WITHOUT application_date = RESPA App Status 'No'
         noRespaApp: {
-          units: loansNoRespaApp.length,
-          volume: loansNoRespaAppVolume,
-          lostRevenue: loansNoRespaAppVolume * revenueRate,
+          units: noRespaAppUnits,
+          volume: noRespaAppVolume,
+          lostRevenue: noRespaAppVolume * revenueRate,
         },
       });
     } catch (error: any) {
@@ -1875,177 +1666,117 @@ router.get(
       const startDateStr = formatDateForSQL(effectiveStartDate);
       const endDateStr = formatDateForSQL(effectiveEndDate);
 
-      const allLoansResult = await retryQuery(
-        () =>
-          tenantPool.query(
-            `SELECT 
-          loan_id, borrower_name, loan_amount, loan_type, status, channel,
-          application_date, closing_date, lock_date, funding_date, interest_rate
-         FROM loans 
-         WHERE ${whereClause}
-           AND (
-             application_date >= $1 OR 
-             funding_date >= $1 OR 
-             closing_date >= $1 OR
-             (funding_date IS NULL AND closing_date IS NULL)  -- Include active loans
-           )
-         ORDER BY application_date DESC`,
-            [startDateStr],
+      // Compute all company-overview metrics via SQL aggregates.
+      // A CTE pre-computes boolean flags so each row is only classified once.
+      const excludedStatuses = `('WITHDRAWN','CANCELLED','DENIED','DECLINED','REJECTED','ORIGINATED','FUNDED','CLOSED','COMPLETE','COMPLETED')`;
+
+      const overviewQuery = `
+        WITH base AS (
+          SELECT
+            loan_amount::numeric                        AS amount,
+            COALESCE(interest_rate::numeric, 0)         AS rate,
+            loan_type,
+            application_date,
+            funding_date,
+            -- Active = not closed by dates AND status not in excluded set
+            (closing_date IS NULL AND funding_date IS NULL
+             AND UPPER(TRIM(COALESCE(status, ''))) NOT IN ${excludedStatuses}
+            ) AS is_active,
+            CASE WHEN application_date IS NOT NULL
+              THEN (CURRENT_DATE - application_date::date) END AS age_days
+          FROM loans
+          WHERE ${whereClause}
+            AND (
+              application_date >= $1 OR funding_date >= $1 OR closing_date >= $1
+              OR (funding_date IS NULL AND closing_date IS NULL)
+            )
+        )
+        SELECT
+          -- Active (is_active AND app date in range or null)
+          COUNT(*)     FILTER (WHERE is_active AND (application_date IS NULL OR (application_date >= $1 AND application_date <= $2))) AS active_count,
+          COALESCE(SUM(amount) FILTER (WHERE is_active AND (application_date IS NULL OR (application_date >= $1 AND application_date <= $2))), 0) AS active_volume,
+          CASE WHEN COALESCE(SUM(amount) FILTER (WHERE is_active AND (application_date IS NULL OR (application_date >= $1 AND application_date <= $2))), 0) > 0
+            THEN SUM(amount * rate) FILTER (WHERE is_active AND (application_date IS NULL OR (application_date >= $1 AND application_date <= $2)))
+                 / SUM(amount)      FILTER (WHERE is_active AND (application_date IS NULL OR (application_date >= $1 AND application_date <= $2)))
+            ELSE 0 END AS active_wac,
+
+          -- Submitted MTD
+          COUNT(*)     FILTER (WHERE application_date >= $1 AND application_date <= $2) AS submitted_count,
+          COALESCE(SUM(amount) FILTER (WHERE application_date >= $1 AND application_date <= $2), 0) AS submitted_volume,
+          CASE WHEN COALESCE(SUM(amount) FILTER (WHERE application_date >= $1 AND application_date <= $2), 0) > 0
+            THEN SUM(amount * rate) FILTER (WHERE application_date >= $1 AND application_date <= $2)
+                 / SUM(amount)      FILTER (WHERE application_date >= $1 AND application_date <= $2)
+            ELSE 0 END AS submitted_wac,
+
+          -- Funded MTD
+          COUNT(*)     FILTER (WHERE funding_date >= $1 AND funding_date <= $2) AS funded_count,
+          COALESCE(SUM(amount) FILTER (WHERE funding_date >= $1 AND funding_date <= $2), 0) AS funded_volume,
+          CASE WHEN COALESCE(SUM(amount) FILTER (WHERE funding_date >= $1 AND funding_date <= $2), 0) > 0
+            THEN SUM(amount * rate) FILTER (WHERE funding_date >= $1 AND funding_date <= $2)
+                 / SUM(amount)      FILTER (WHERE funding_date >= $1 AND funding_date <= $2)
+            ELSE 0 END AS funded_wac,
+
+          -- Aging buckets (active loans with application_date)
+          COUNT(*) FILTER (WHERE is_active AND (application_date IS NULL OR (application_date >= $1 AND application_date <= $2)) AND age_days BETWEEN 0 AND 15)   AS aging_0_15,
+          COUNT(*) FILTER (WHERE is_active AND (application_date IS NULL OR (application_date >= $1 AND application_date <= $2)) AND age_days BETWEEN 16 AND 30)  AS aging_16_30,
+          COUNT(*) FILTER (WHERE is_active AND (application_date IS NULL OR (application_date >= $1 AND application_date <= $2)) AND age_days BETWEEN 31 AND 45)  AS aging_31_45,
+          COUNT(*) FILTER (WHERE is_active AND (application_date IS NULL OR (application_date >= $1 AND application_date <= $2)) AND age_days BETWEEN 46 AND 60)  AS aging_46_60,
+          COUNT(*) FILTER (WHERE is_active AND (application_date IS NULL OR (application_date >= $1 AND application_date <= $2)) AND age_days BETWEEN 61 AND 90)  AS aging_61_90,
+          COUNT(*) FILTER (WHERE is_active AND (application_date IS NULL OR (application_date >= $1 AND application_date <= $2)) AND age_days > 90)               AS aging_over_90
+        FROM base
+      `;
+
+      // By-type distributions (tiny result sets)
+      const byTypeQuery = (dateCol: string) => `
+        SELECT COALESCE(loan_type, 'Other') AS loan_type, COUNT(*) AS count
+        FROM loans
+        WHERE ${whereClause} AND ${dateCol} >= $1 AND ${dateCol} <= $2
+        GROUP BY COALESCE(loan_type, 'Other')
+      `;
+
+      const [overviewResult, submittedTypeResult, fundedTypeResult] =
+        await Promise.all([
+          retryQuery(
+            () => tenantPool.query(overviewQuery, [startDateStr, endDateStr]),
+            2,
+            500,
           ),
-        2,
-        500,
-      );
+          retryQuery(
+            () =>
+              tenantPool.query(byTypeQuery("application_date"), [
+                startDateStr,
+                endDateStr,
+              ]),
+            2,
+            500,
+          ),
+          retryQuery(
+            () =>
+              tenantPool.query(byTypeQuery("funding_date"), [
+                startDateStr,
+                endDateStr,
+              ]),
+            2,
+            500,
+          ),
+        ]);
 
-      const allLoans = allLoansResult.rows;
+      const m = overviewResult.rows[0];
+      const toNum = (v: any) => Number(v) || 0;
 
-      // Active Loans (excluding closed/denied/withdrawn) - smart detection
-      // Qlik: [Active Loan Flag] = 'Yes' means status is 'Active Loan' AND has application date
-      // Use inferred status based on dates and raw status
-      const getInferredStatus = (loan: any) => {
-        if (loan.closing_date || loan.funding_date) return "Closed";
-        if (loan.lock_date) return "Locked";
-        const rawStatus = (loan.status || "").toString().toUpperCase();
-        // Handle all possible status values from both LOS imports and sample data
-        if (
-          [
-            "ACTIVE",
-            "SUBMITTED",
-            "APPROVED",
-            "CTC",
-            "STARTED",
-            "INQUIRY",
-            "PROCESSING",
-            "UNDERWRITING",
-          ].includes(rawStatus)
-        )
-          return "Active";
-        if (["WITHDRAWN", "CANCELLED"].includes(rawStatus)) return "Withdrawn";
-        if (["DENIED", "DECLINED", "REJECTED"].includes(rawStatus))
-          return "Denied";
-        if (
-          ["ORIGINATED", "FUNDED", "CLOSED", "COMPLETE", "COMPLETED"].includes(
-            rawStatus,
-          )
-        )
-          return "Closed";
-        if (["LOCKED"].includes(rawStatus)) return "Locked";
-        // If status is a state code (2 letters), treat as active
-        if (/^[A-Z]{2}$/.test(rawStatus)) return "Active";
-        return "Active"; // Default
-      };
-
-      // Active Loans - filter by application date within date range
-      const activeLoans = allLoans.filter((l) => {
-        const inferredStatus = getInferredStatus(l);
-        if (
-          !["Active", "Locked", "Submitted", "Approved", "CTC"].includes(
-            inferredStatus,
-          )
-        )
-          return false;
-
-        // If date range is provided, filter active loans by application date
-        if (l.application_date) {
-          const appDate = new Date(l.application_date);
-          return appDate >= effectiveStartDate && appDate <= effectiveEndDate;
-        }
-        return true; // Include loans without application date
-      });
-
-      // Submitted Loans - loans with application_date in the date range
-      const submittedMTD = allLoans.filter((l) => {
-        if (!l.application_date) return false;
-        const appDate = new Date(l.application_date);
-        return appDate >= effectiveStartDate && appDate <= effectiveEndDate;
-      });
-
-      // Funded Loans - loans with funding_date in the date range (Qlik: Funded Flag = funding_date IS NOT NULL)
-      const fundedMTD = allLoans.filter((l) => {
-        if (!l.funding_date) return false;
-        const fundDate = new Date(l.funding_date);
-        return fundDate >= effectiveStartDate && fundDate <= effectiveEndDate;
-      });
-
-      // Aging of Active Loans (days since application)
-      const agingRanges = {
-        "0-15": 0,
-        "16-30": 0,
-        "31-45": 0,
-        "46-60": 0,
-        "61-90": 0,
-        ">90": 0,
-      };
-
-      activeLoans.forEach((loan) => {
-        if (!loan.application_date) return;
-        const days = daysBetween(loan.application_date, now);
-        if (days === null) return;
-        if (days <= 15) agingRanges["0-15"]++;
-        else if (days <= 30) agingRanges["16-30"]++;
-        else if (days <= 45) agingRanges["31-45"]++;
-        else if (days <= 60) agingRanges["46-60"]++;
-        else if (days <= 90) agingRanges["61-90"]++;
-        else agingRanges[">90"]++;
-      });
-
-      // Loan Type distribution for Submitted
       const submittedByType: Record<string, number> = {};
-      submittedMTD.forEach((loan) => {
-        const type = loan.loan_type || "Other";
-        submittedByType[type] = (submittedByType[type] || 0) + 1;
-      });
-
-      // Loan Type distribution for Funded
+      for (const row of submittedTypeResult.rows) {
+        submittedByType[row.loan_type] = Number(row.count);
+      }
       const fundedByType: Record<string, number> = {};
-      fundedMTD.forEach((loan) => {
-        const type = loan.loan_type || "Other";
-        fundedByType[type] = (fundedByType[type] || 0) + 1;
-      });
-
-      // Calculate averages with WAC formula: Sum(Loan Amount * Interest Rate) / Sum(Loan Amount)
-      const activeVolume = activeLoans.reduce(
-        (sum, l) => sum + parseFloat(l.loan_amount || 0),
-        0,
-      );
-      const activeWac =
-        activeVolume > 0
-          ? activeLoans.reduce((sum, l) => {
-              const amount = parseFloat(l.loan_amount || 0);
-              const rate = parseFloat(l.interest_rate || 0);
-              return sum + amount * rate;
-            }, 0) / activeVolume
-          : 0;
-
-      const submittedVolume = submittedMTD.reduce(
-        (sum, l) => sum + parseFloat(l.loan_amount || 0),
-        0,
-      );
-      const submittedWac =
-        submittedVolume > 0
-          ? submittedMTD.reduce((sum, l) => {
-              const amount = parseFloat(l.loan_amount || 0);
-              const rate = parseFloat(l.interest_rate || 0);
-              return sum + amount * rate;
-            }, 0) / submittedVolume
-          : 0;
-
-      const fundedVolume = fundedMTD.reduce(
-        (sum, l) => sum + parseFloat(l.loan_amount || 0),
-        0,
-      );
-      const fundedWac =
-        fundedVolume > 0
-          ? fundedMTD.reduce((sum, l) => {
-              const amount = parseFloat(l.loan_amount || 0);
-              const rate = parseFloat(l.interest_rate || 0);
-              return sum + amount * rate;
-            }, 0) / fundedVolume
-          : 0;
+      for (const row of fundedTypeResult.rows) {
+        fundedByType[row.loan_type] = Number(row.count);
+      }
 
       logInfo("[CompanyOverview] Results", {
-        activeCount: activeLoans.length,
-        submittedCount: submittedMTD.length,
-        fundedCount: fundedMTD.length,
+        activeCount: toNum(m.active_count),
+        submittedCount: toNum(m.submitted_count),
+        fundedCount: toNum(m.funded_count),
         dateRange: {
           start: effectiveStartDate.toISOString(),
           end: effectiveEndDate.toISOString(),
@@ -2054,21 +1785,28 @@ router.get(
 
       res.json({
         activeLoans: {
-          count: activeLoans.length,
-          volume: activeVolume,
-          avgInterestRate: activeWac,
+          count: toNum(m.active_count),
+          volume: toNum(m.active_volume),
+          avgInterestRate: toNum(m.active_wac),
         },
         submittedMTD: {
-          count: submittedMTD.length,
-          volume: submittedVolume,
-          avgInterestRate: submittedWac,
+          count: toNum(m.submitted_count),
+          volume: toNum(m.submitted_volume),
+          avgInterestRate: toNum(m.submitted_wac),
         },
         fundedMTD: {
-          count: fundedMTD.length,
-          volume: fundedVolume,
-          avgInterestRate: fundedWac,
+          count: toNum(m.funded_count),
+          volume: toNum(m.funded_volume),
+          avgInterestRate: toNum(m.funded_wac),
         },
-        aging: agingRanges,
+        aging: {
+          "0-15": toNum(m.aging_0_15),
+          "16-30": toNum(m.aging_16_30),
+          "31-45": toNum(m.aging_31_45),
+          "46-60": toNum(m.aging_46_60),
+          "61-90": toNum(m.aging_61_90),
+          ">90": toNum(m.aging_over_90),
+        },
         submittedByType,
         fundedByType,
       });

@@ -1,9 +1,10 @@
 /**
  * Fetches paginated loan detail list for the Loan Detail table.
- * No filtering - all loans (subject to user loan access).
+ * Loads data in pages of PAGE_SIZE, accumulating results incrementally.
+ * The first page is shown immediately; remaining pages load in the background.
  */
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { api } from "@/lib/api";
 
 export interface LoanDetailRow {
@@ -79,8 +80,7 @@ export interface LoanDetailListResponse {
   totalPages: number;
 }
 
-/** Request all loans in one call (no pagination). Backend max is 50000. */
-const ALL_LOANS_LIMIT = 50000;
+const PAGE_SIZE = 2000;
 
 export interface LoanDetailFilters {
   dateField?: string;
@@ -91,6 +91,39 @@ export interface LoanDetailFilters {
   dimensionFilters?: Array<{ column: string; value: string }>;
 }
 
+function buildParams(
+  tenantId: string | null | undefined,
+  filters: LoanDetailFilters | null | undefined,
+  limit: number,
+  offset: number,
+): URLSearchParams {
+  const params = new URLSearchParams();
+  params.set("limit", String(limit));
+  params.set("offset", String(offset));
+  if (tenantId) params.set("tenant_id", tenantId);
+  if (filters?.dateField) params.set("date_field", filters.dateField);
+  const hasDateRange =
+    filters?.dateRange &&
+    typeof filters.dateRange.start === "string" &&
+    filters.dateRange.start.length > 0 &&
+    typeof filters.dateRange.end === "string" &&
+    filters.dateRange.end.length > 0;
+  if (hasDateRange) {
+    params.set("date_from", filters!.dateRange!.start);
+    params.set("date_to", filters!.dateRange!.end);
+  }
+  if (filters?.branch && filters.branch !== "all")
+    params.set("branch", filters.branch);
+  if (filters?.loanOfficer && filters.loanOfficer !== "all")
+    params.set("loan_officer", filters.loanOfficer);
+  if (filters?.dimensionFilters?.length) {
+    for (const df of filters.dimensionFilters) {
+      if (df.column && df.value) params.set(df.column, df.value);
+    }
+  }
+  return params;
+}
+
 export function useLoanDetailData(
   tenantId?: string | null,
   filters?: LoanDetailFilters | null,
@@ -98,51 +131,74 @@ export function useLoanDetailData(
   const [data, setData] = useState<LoanDetailListResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const abortRef = useRef(0);
 
   const fetchAll = useCallback(async () => {
+    if (!tenantId) return null;
+
+    const fetchId = ++abortRef.current;
     setLoading(true);
     setError(null);
+    setData(null);
+
     try {
-      const params = new URLSearchParams();
-      params.set("limit", String(ALL_LOANS_LIMIT));
-      params.set("offset", "0");
-      if (tenantId) params.set("tenant_id", tenantId);
-      if (filters?.dateField) params.set("date_field", filters.dateField);
-      // Only send date range when explicitly set (avoid sending when "All" is selected)
-      const hasDateRange =
-        filters?.dateRange &&
-        typeof filters.dateRange.start === "string" &&
-        filters.dateRange.start.length > 0 &&
-        typeof filters.dateRange.end === "string" &&
-        filters.dateRange.end.length > 0;
-      if (hasDateRange) {
-        params.set("date_from", filters!.dateRange!.start);
-        params.set("date_to", filters!.dateRange!.end);
+      let allLoans: LoanDetailRow[] = [];
+      let total = 0;
+      let offset = 0;
+
+      // Fetch pages until all data is loaded or the fetch is superseded
+      while (true) {
+        if (abortRef.current !== fetchId) return null;
+
+        const params = buildParams(tenantId, filters, PAGE_SIZE, offset);
+        const url = `/api/loans/detail-list?${params.toString()}`;
+        const page = await api.request<LoanDetailListResponse>(url);
+
+        if (abortRef.current !== fetchId) return null;
+
+        allLoans = offset === 0 ? page.loans : [...allLoans, ...page.loans];
+        total = page.total;
+
+        const accumulated: LoanDetailListResponse = {
+          loans: allLoans,
+          total,
+          limit: total,
+          offset: 0,
+          page: 1,
+          totalPages: 1,
+        };
+        setData(accumulated);
+
+        // First page done: mark as no longer "loading" so UI is interactive
+        if (offset === 0) setLoading(false);
+
+        offset += PAGE_SIZE;
+        if (offset >= total) break;
       }
-      if (filters?.branch && filters.branch !== "all") params.set("branch", filters.branch);
-      if (filters?.loanOfficer && filters.loanOfficer !== "all") params.set("loan_officer", filters.loanOfficer);
-      if (filters?.dimensionFilters?.length) {
-        for (const df of filters.dimensionFilters) {
-          if (df.column && df.value) params.set(df.column, df.value);
-        }
-      }
-      const url = `/api/loans/detail-list?${params.toString()}`;
-      const res = await api.request<LoanDetailListResponse>(url);
-      setData(res);
-      return res;
+
+      const final: LoanDetailListResponse = {
+        loans: allLoans,
+        total,
+        limit: total,
+        offset: 0,
+        page: 1,
+        totalPages: 1,
+      };
+      setData(final);
+      return final;
     } catch (err: unknown) {
+      if (abortRef.current !== fetchId) return null;
       const message =
         err instanceof Error ? err.message : "Failed to fetch loan detail list";
       setError(message);
       setData(null);
       return null;
     } finally {
-      setLoading(false);
+      if (abortRef.current === fetchId) setLoading(false);
     }
   }, [tenantId, filters?.dateField, filters?.dateRange?.start, filters?.dateRange?.end, filters?.branch, filters?.loanOfficer, filters?.dimensionFilters]);
 
   useEffect(() => {
-    // Backend returns 400 when tenant_id is missing (e.g. super_admin with no tenant selected)
     if (!tenantId) {
       setLoading(false);
       setData(null);
