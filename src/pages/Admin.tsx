@@ -28,6 +28,7 @@ import { AIPromptManager } from "@/components/admin/AIPromptManager";
 import { InsightFeedbackSection } from "@/components/admin/InsightFeedbackSection";
 import { PlatformSettingsSection } from "@/components/admin/PlatformSettingsSection";
 import { SyncManagementSection } from "@/components/admin/SyncManagementSection";
+import { AnalyticsSection } from "@/components/admin/AnalyticsSection";
 import { AdminModeSelector } from "@/components/admin/AdminModeSelector";
 import { Button } from "@/components/ui/button";
 import { Menu, Settings } from "lucide-react";
@@ -268,6 +269,7 @@ export const Admin = () => {
       { id: "ai-prompts", label: "AI Prompts" },
       { id: "insight-feedback", label: "Insight Feedback" },
       { id: "platform-settings", label: "Platform Settings" },
+      { id: "analytics", label: "User Analytics" },
     ];
     return sections.find((s) => s.id === activeSection)?.label || "Overview";
   };
@@ -582,6 +584,17 @@ export const Admin = () => {
               {/* Sync Management Section (Platform Admin) */}
               {activeSection === "sync-management" && isPlatform && (
                 <SyncManagementSection />
+              )}
+
+              {/* User Analytics (tenant + platform in tenant mode) */}
+              {activeSection === "analytics" && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <AnalyticsSection />
+                </motion.div>
               )}
             </AdminLayoutWithContext>
             </div>

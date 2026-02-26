@@ -760,11 +760,13 @@ Resources:
               Value: !If [HasCognito, !Ref CognitoDomain, ""]
             - Name: COGNITO_PASSWORD_AUTH
               Value: !If [HasCognito, !Ref CognitoPasswordAuth, "false"]
-            # Email / SES
+            # Email / SES (use existing SES configuration set for reputation metrics; add SNS event destination for bounce/complaint handling if needed)
             - Name: AWS_SES_REGION
               Value: !Ref AWS::Region
             - Name: EMAIL_FROM_ADDRESS
               Value: !Ref EmailFromAddress
+            - Name: SES_CONFIGURATION_SET
+              Value: my-first-configuration-set
             # Platform SSO
             - Name: PLATFORM_SSO_IDP_NAME
               Value: !Ref PlatformSsoIdpName

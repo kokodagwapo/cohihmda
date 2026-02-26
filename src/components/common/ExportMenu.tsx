@@ -77,6 +77,7 @@ export function ExportMenu({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
+          data-track="export_menu_open"
           variant="outline"
           size="sm"
           className="gap-2"
@@ -88,23 +89,23 @@ export function ExportMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuItem onClick={() => handleExport("excel")}>
+        <DropdownMenuItem data-track="export_excel" onClick={() => handleExport("excel")}>
           <FileSpreadsheet className="w-4 h-4 mr-2" />
           Excel
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => handleExport("pdf")}>
+        <DropdownMenuItem data-track="export_pdf" onClick={() => handleExport("pdf")}>
           <FileText className="w-4 h-4 mr-2" />
           PDF
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => handleExport("ppt")}>
+        <DropdownMenuItem data-track="export_ppt" onClick={() => handleExport("ppt")}>
           <Presentation className="w-4 h-4 mr-2" />
           PowerPoint
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => handleExport("png")}>
+        <DropdownMenuItem data-track="export_png" onClick={() => handleExport("png")}>
           <FileImage className="w-4 h-4 mr-2" />
           PNG
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => handleExport("jpeg")}>
+        <DropdownMenuItem data-track="export_jpeg" onClick={() => handleExport("jpeg")}>
           <FileImage className="w-4 h-4 mr-2" />
           JPEG
         </DropdownMenuItem>

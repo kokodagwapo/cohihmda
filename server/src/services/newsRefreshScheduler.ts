@@ -3,6 +3,8 @@ import { sendDailyBriefNewsletterToSubscribers } from "./dailyBriefNewsletterSer
 
 let nextRunTimer: NodeJS.Timeout | null = null;
 const DAILY_REFRESH_HOURS = [5, 8, 10, 14, 16, 18];
+/** Only send the daily brief newsletter at this hour (once per day). */
+const NEWSLETTER_SEND_HOUR = 8;
 
 function getNextRefreshTime(now = new Date()): Date {
   const candidates = DAILY_REFRESH_HOURS.map((hour) => {
@@ -29,8 +31,11 @@ async function refreshNewsCache(reason: string) {
       `[NewsScheduler] Refresh complete. Sources: ${result.newsFeed.length}, updated: ${result.lastUpdated}`
     );
 
-    // Send newsletter only for scheduled refreshes (not startup prime).
-    if (reason.startsWith("scheduled-")) {
+    // Send newsletter only once per day at the designated morning hour (e.g. 8am).
+    const scheduledHour = reason.startsWith("scheduled-")
+      ? parseInt(reason.replace("scheduled-", "").replace(":00", ""), 10)
+      : null;
+    if (scheduledHour === NEWSLETTER_SEND_HOUR) {
       await sendDailyBriefNewsletterToSubscribers(reason, result);
     }
   } catch (error) {

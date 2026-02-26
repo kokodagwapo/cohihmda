@@ -31,6 +31,7 @@ import {
   RefreshCw,
   Calculator,
   ArrowLeftRight,
+  Activity,
 } from "lucide-react";
 import type { AdminSection, AdminMode } from "@/hooks/admin/useAdminState";
 
@@ -297,6 +298,16 @@ const allAdminSections: AdminSectionDef[] = [
     icon: BookOpen,
     description: "Browse and manage knowledge base",
     color: "text-indigo-300 dark:text-indigo-400/70",
+    allowedRoles: ["super_admin", "platform_admin", "tenant_admin"],
+    category: "AI & Knowledge",
+    mode: "tenant",
+  },
+  {
+    id: "analytics" as AdminSection,
+    label: "User Analytics",
+    icon: Activity,
+    description: "Page views, sessions, funnels, heatmaps, and replays",
+    color: "text-sky-300 dark:text-sky-400/70",
     allowedRoles: ["super_admin", "platform_admin", "tenant_admin"],
     category: "AI & Knowledge",
     mode: "tenant",

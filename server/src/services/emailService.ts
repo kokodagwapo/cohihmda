@@ -1,15 +1,47 @@
-// @ts-nocheck
 /**
  * Email Service
  * Handles sending emails for subscription and provisioning updates
  * Supports AWS SES, SendGrid, and Resend
  */
 
+import { logEmailSend } from "./emailAuditLogger.js";
+
+const SES_CONFIGURATION_SET = process.env.SES_CONFIGURATION_SET || "my-first-configuration-set";
+
+const EMAIL_MAX_RETRIES = 3;
+const EMAIL_RETRY_DELAY_MS = 1000;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withRetry<T>(fn: () => Promise<T>, maxAttempts = EMAIL_MAX_RETRIES): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      if (attempt < maxAttempts) {
+        const waitMs = EMAIL_RETRY_DELAY_MS * Math.pow(2, attempt - 1);
+        console.warn(`Email send attempt ${attempt}/${maxAttempts} failed, retrying in ${waitMs}ms:`, err);
+        await delay(waitMs);
+      }
+    }
+  }
+  throw lastError;
+}
+
 interface EmailOptions {
   to: string;
   subject: string;
   html: string;
   text?: string;
+  /** For audit log; when set, a row is written to email_send_log. */
+  emailType?: string;
+  containsPii?: boolean;
+  userId?: string | null;
+  tenantId?: string | null;
 }
 
 export interface DailyBriefEmailOptions {
@@ -17,57 +49,197 @@ export interface DailyBriefEmailOptions {
   subject: string;
   html: string;
   text?: string;
+  /** When set, email is sent with List-Unsubscribe / List-Unsubscribe-Post headers (CAN-SPAM). */
+  unsubscribeUrl?: string;
+  /** For audit log. */
+  emailType?: string;
+  containsPii?: boolean;
+  userId?: string | null;
+  tenantId?: string | null;
 }
 
 /**
- * Send email using configured provider
+ * Send email using configured provider.
+ * Returns SES MessageId when using SES (for delivery tracking in AWS console).
  */
-async function sendEmail(options: EmailOptions): Promise<void> {
+async function sendEmail(options: EmailOptions): Promise<string | undefined> {
   const emailProvider = process.env.EMAIL_PROVIDER || "ses"; // ses, sendgrid, resend
 
   try {
     switch (emailProvider) {
       case "ses":
-        await sendViaSES(options);
-        break;
+        return await withRetry(() => sendViaSES(options));
       case "sendgrid":
-        await sendViaSendGrid(options);
-        break;
+        await withRetry(() => sendViaSendGrid(options));
+        return undefined;
       case "resend":
-        await sendViaResend(options);
-        break;
+        await withRetry(() => sendViaResend(options));
+        return undefined;
       default:
         console.warn(
           `Unknown email provider: ${emailProvider}. Email not sent.`,
         );
         console.log("Email would be sent:", options);
+        return undefined;
     }
-  } catch (error: any) {
-    console.error("Error sending email:", error);
+  } catch (error: unknown) {
+    console.error("Error sending email after retries:", error);
     // Don't throw - email failures shouldn't break the flow
     // Log for manual retry
+    return undefined;
   }
 }
 
 export async function sendDailyBriefNewsletterEmail(
   options: DailyBriefEmailOptions,
+): Promise<string | undefined> {
+  const auditOpts = {
+    emailType: options.emailType ?? "daily_brief",
+    containsPii: options.containsPii ?? false,
+    userId: options.userId ?? null,
+    tenantId: options.tenantId ?? null,
+  };
+  if (options.unsubscribeUrl) {
+    await sendDailyBriefWithUnsubscribe(options);
+    await logEmailSend({
+      recipientEmail: options.to,
+      ...auditOpts,
+    });
+    return undefined;
+  }
+  return sendEmail({ ...options, ...auditOpts });
+}
+
+/**
+ * Send daily brief with List-Unsubscribe and List-Unsubscribe-Post headers (CAN-SPAM).
+ * Uses raw MIME for SES so we can set custom headers.
+ */
+async function sendDailyBriefWithUnsubscribe(options: DailyBriefEmailOptions): Promise<void> {
+  const emailProvider = process.env.EMAIL_PROVIDER || "ses";
+  const listUnsubscribe = `<${options.unsubscribeUrl}>`;
+  const listUnsubscribePost = "List-Unsubscribe=One-Click";
+
+  try {
+    if (emailProvider === "ses") {
+      await withRetry(() =>
+        sendDailyBriefWithUnsubscribeSES(options, listUnsubscribe, listUnsubscribePost),
+      );
+    } else if (emailProvider === "sendgrid") {
+      await withRetry(() =>
+        sendDailyBriefWithUnsubscribeSendGrid(options, listUnsubscribe, listUnsubscribePost),
+      );
+    } else if (emailProvider === "resend") {
+      await withRetry(() =>
+        sendDailyBriefWithUnsubscribeResend(options, listUnsubscribe, listUnsubscribePost),
+      );
+    } else {
+      await sendEmail(options);
+    }
+  } catch (error: unknown) {
+    console.error("Error sending daily brief with unsubscribe after retries:", error);
+  }
+}
+
+async function sendDailyBriefWithUnsubscribeSES(
+  options: DailyBriefEmailOptions,
+  listUnsubscribe: string,
+  listUnsubscribePost: string
 ): Promise<void> {
-  await sendEmail(options);
+  const { SESClient, SendRawEmailCommand } = await import("@aws-sdk/client-ses");
+  const sesClient = new SESClient({
+    region: process.env.AWS_SES_REGION || "us-east-1",
+  });
+  const from = process.env.EMAIL_FROM_ADDRESS || "noreply@coheus.com";
+  const boundary = "boundary_" + Math.random().toString(36).slice(2);
+  const subject = Buffer.from(options.subject, "utf-8").toString("base64");
+  const encodedSubject = "=?UTF-8?B?" + subject + "?=";
+
+  const rawMessage = [
+    `From: ${from}`,
+    `To: ${options.to}`,
+    `Subject: ${encodedSubject}`,
+    "List-Unsubscribe: " + listUnsubscribe,
+    "List-Unsubscribe-Post: " + listUnsubscribePost,
+    "MIME-Version: 1.0",
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    "",
+    `--${boundary}`,
+    "Content-Type: text/plain; charset=UTF-8",
+    "",
+    options.text || "",
+    "",
+    `--${boundary}`,
+    "Content-Type: text/html; charset=UTF-8",
+    "",
+    options.html,
+    "",
+    `--${boundary}--`,
+  ].join("\r\n");
+
+  const command = new SendRawEmailCommand({
+    RawMessage: { Data: Buffer.from(rawMessage, "utf-8") },
+    ConfigurationSetName: SES_CONFIGURATION_SET,
+  });
+  const result = await sesClient.send(command);
+  console.log(
+    `✅ Daily brief sent via SES to ${options.to} (with List-Unsubscribe) MessageId=${result.MessageId ?? "n/a"}`
+  );
+}
+
+async function sendDailyBriefWithUnsubscribeSendGrid(
+  options: DailyBriefEmailOptions,
+  listUnsubscribe: string,
+  listUnsubscribePost: string
+): Promise<void> {
+  const sgMail = (await import("@sendgrid/mail")) as { setApiKey: (k: string) => void; send: (o: unknown) => Promise<unknown> };
+  sgMail.setApiKey(process.env.SENDGRID_API_KEY || "");
+  await sgMail.send({
+    to: options.to,
+    from: process.env.EMAIL_FROM_ADDRESS || "noreply@coheus.com",
+    subject: options.subject,
+    html: options.html,
+    text: options.text,
+    headers: {
+      "List-Unsubscribe": listUnsubscribe,
+      "List-Unsubscribe-Post": listUnsubscribePost,
+    },
+  });
+  console.log(`✅ Daily brief sent via SendGrid to ${options.to} (with List-Unsubscribe)`);
+}
+
+async function sendDailyBriefWithUnsubscribeResend(
+  options: DailyBriefEmailOptions,
+  listUnsubscribe: string,
+  listUnsubscribePost: string
+): Promise<void> {
+  const resendModule = await import("resend");
+  const resend = new resendModule.Resend(process.env.RESEND_API_KEY || "");
+  await resend.emails.send({
+    from: process.env.EMAIL_FROM_ADDRESS || "noreply@coheus.com",
+    to: options.to,
+    subject: options.subject,
+    html: options.html,
+    text: options.text,
+    headers: {
+      "List-Unsubscribe": listUnsubscribe,
+      "List-Unsubscribe-Post": listUnsubscribePost,
+    },
+  });
+  console.log(`✅ Daily brief sent via Resend to ${options.to} (with List-Unsubscribe)`);
 }
 
 /**
  * Send email via AWS SES
  */
-async function sendViaSES(options: EmailOptions): Promise<void> {
+async function sendViaSES(options: EmailOptions): Promise<string | undefined> {
+  const region = process.env.AWS_SES_REGION || "us-east-1";
+  const from = process.env.EMAIL_FROM_ADDRESS || "noreply@coheus.com";
   try {
-    const sesModule = (await import("@aws-sdk/client-ses")) as any;
-    const { SESClient, SendEmailCommand } = sesModule;
-    const sesClient = new SESClient({
-      region: process.env.AWS_SES_REGION || "us-east-1",
-    });
+    const { SESClient, SendEmailCommand } = await import("@aws-sdk/client-ses");
+    const sesClient = new SESClient({ region });
 
     const command = new SendEmailCommand({
-      Source: process.env.EMAIL_FROM_ADDRESS || "noreply@coheus.com",
+      Source: from,
       Destination: {
         ToAddresses: [options.to],
       },
@@ -89,12 +261,15 @@ async function sendViaSES(options: EmailOptions): Promise<void> {
             : undefined,
         },
       },
+      ConfigurationSetName: SES_CONFIGURATION_SET,
     });
 
-    await sesClient.send(command);
-    console.log(`✅ Email sent via SES to ${options.to}`);
-  } catch (error: any) {
-    console.error("SES email error:", error);
+    const result = await sesClient.send(command);
+    const messageId = result.MessageId;
+    console.log(`✅ Email sent via SES to ${options.to} | MessageId=${messageId ?? "n/a"} | From=${from} | Region=${region} | ConfigSet=${SES_CONFIGURATION_SET}`);
+    return messageId ?? undefined;
+  } catch (error: unknown) {
+    console.error(`❌ SES email error (To=${options.to} From=${from} Region=${region} ConfigSet=${SES_CONFIGURATION_SET}):`, error);
     throw error;
   }
 }
@@ -105,7 +280,7 @@ async function sendViaSES(options: EmailOptions): Promise<void> {
 async function sendViaSendGrid(options: EmailOptions): Promise<void> {
   try {
     // Dynamic import to avoid requiring SendGrid if not used
-    const sgMail = (await import("@sendgrid/mail")) as any;
+    const sgMail = (await import("@sendgrid/mail")) as { setApiKey: (k: string) => void; send: (o: Record<string, unknown>) => Promise<unknown> };
     sgMail.setApiKey(process.env.SENDGRID_API_KEY || "");
 
     await sgMail.send({
@@ -141,7 +316,7 @@ async function sendViaResend(options: EmailOptions): Promise<void> {
     });
 
     console.log(`✅ Email sent via Resend to ${options.to}`);
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Resend email error:", error);
     throw error;
   }
@@ -262,6 +437,8 @@ If you have any questions, please contact our support team.
     subject: `Welcome to Coheus${isPerLender ? " - Infrastructure Provisioning Started" : ""}`,
     html,
     text,
+    emailType: "provisioning_started",
+    containsPii: false,
   });
 }
 
@@ -393,6 +570,8 @@ This email contains sensitive credentials. Please keep it secure.
     subject: "Your Coheus Admin Credentials - Infrastructure Ready",
     html,
     text,
+    emailType: "admin_credentials",
+    containsPii: true,
   });
 }
 
@@ -478,6 +657,8 @@ If you didn't request this password reset, you can safely ignore this email.
     subject: "Reset Your Cohi Password",
     html,
     text,
+    emailType: "password_reset",
+    containsPii: false,
   });
 }
 
@@ -549,6 +730,8 @@ This invitation expires in 7 days.
     subject: `You're invited to join ${tenantName} on Cohi`,
     html,
     text,
+    emailType: "user_invitation",
+    containsPii: false,
   });
 }
 
@@ -636,6 +819,8 @@ If you have any questions or concerns, please contact our support team.
     subject: "Coheus Infrastructure Provisioning - Action Required",
     html,
     text,
+    emailType: "provisioning_error",
+    containsPii: false,
   });
 }
 
@@ -693,8 +878,15 @@ export async function sendLoanCardEmail(
         break;
       default:
         console.warn(`Unknown email provider: ${emailProvider}. Loan card email not sent.`);
+        return;
     }
-  } catch (error: any) {
+    await logEmailSend({
+      recipientEmail: to,
+      emailType: "loan_card",
+      containsPii: true,
+      metadata: { loanId },
+    });
+  } catch (error: unknown) {
     console.error("Loan card email error:", error);
     throw error;
   }
@@ -707,8 +899,7 @@ async function sendLoanCardViaSES(
   text: string,
   imageBase64: string,
 ): Promise<void> {
-  const sesModule = (await import("@aws-sdk/client-ses")) as any;
-  const { SESClient, SendRawEmailCommand } = sesModule;
+  const { SESClient, SendRawEmailCommand } = await import("@aws-sdk/client-ses");
   const sesClient = new SESClient({
     region: process.env.AWS_SES_REGION || "us-east-1",
   });
@@ -766,7 +957,7 @@ async function sendLoanCardViaSendGrid(
   text: string,
   imageBase64: string,
 ): Promise<void> {
-  const sgMail = (await import("@sendgrid/mail")) as any;
+  const sgMail = (await import("@sendgrid/mail")) as { setApiKey: (k: string) => void; send: (o: Record<string, unknown>) => Promise<unknown> };
   sgMail.setApiKey(process.env.SENDGRID_API_KEY || "");
 
   await sgMail.send({
@@ -796,7 +987,7 @@ async function sendLoanCardViaResend(
   text: string,
   imageBase64: string,
 ): Promise<void> {
-  const resendModule = (await import("resend")) as any;
+  const resendModule = await import("resend");
   const { Resend } = resendModule;
   const resend = new Resend(process.env.RESEND_API_KEY || "");
 
