@@ -42,7 +42,7 @@ $ECR_IMAGE = "$AWS_ACCOUNT_ID.dkr.ecr.$env:AWS_REGION.amazonaws.com/${ECR_REPO}:
 $DB_INSTANCE_CLASS = "db.t3.small"
 
 # ECS Configuration
-$CONTAINER_CPU = 512
+$CONTAINER_CPU = 2048
 $CONTAINER_MEMORY = 4096
 $DESIRED_COUNT = 2
 
