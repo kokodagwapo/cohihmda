@@ -537,6 +537,12 @@ export const learningPaths: LearningPath[] = [
             link: "/help/admin/connections",
           },
           {
+            id: "adm-w2-2b",
+            title: "Read: Loan Folders",
+            type: "article",
+            link: "/help/admin/loan-folders",
+          },
+          {
             id: "adm-w2-3",
             title: "Read: Data Quality",
             type: "article",

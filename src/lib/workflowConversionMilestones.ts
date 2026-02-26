@@ -1,6 +1,8 @@
 /**
- * Workflow conversion milestones in display order.
- * Used for dropdowns and validation (earlier milestone on left, later on right).
+ * Workflow conversion milestones.
+ * WORKFLOW_MILESTONES_ORDER is the legacy fixed list (for backward compat).
+ * Dynamic milestone lists come from the API (all date columns in the tenant's loans table).
+ * Use isOrderValidWithMilestones(from, to, milestones) when using a dynamic list.
  */
 
 export interface WorkflowMilestone {
@@ -8,6 +10,7 @@ export interface WorkflowMilestone {
   label: string;
 }
 
+/** Legacy ordered list (kept for backward compatibility). */
 export const WORKFLOW_MILESTONES_ORDER: WorkflowMilestone[] = [
   { id: "started", label: "Started" },
   { id: "application", label: "Application" },
@@ -26,35 +29,53 @@ export const WORKFLOW_MILESTONES_ORDER: WorkflowMilestone[] = [
 
 const ORDER_INDEX = new Map(WORKFLOW_MILESTONES_ORDER.map((m, i) => [m.id, i]));
 
-export function getMilestoneIndex(id: string): number {
+export function getMilestoneIndex(id: string, milestones?: WorkflowMilestone[]): number {
+  if (milestones) {
+    const i = milestones.findIndex((m) => m.id === id);
+    return i ?? -1;
+  }
   const i = ORDER_INDEX.get(id);
   return i ?? -1;
 }
 
-export function isOrderValid(fromId: string, toId: string): boolean {
-  const fromIdx = getMilestoneIndex(fromId);
-  const toIdx = getMilestoneIndex(toId);
+export function isOrderValid(fromId: string, toId: string, milestones?: WorkflowMilestone[]): boolean {
+  const list = milestones ?? WORKFLOW_MILESTONES_ORDER;
+  const fromIdx = getMilestoneIndex(fromId, list);
+  const toIdx = getMilestoneIndex(toId, list);
   return fromIdx >= 0 && toIdx >= 0 && fromIdx < toIdx;
 }
 
-export function getMilestonesAfter(id: string): WorkflowMilestone[] {
-  const idx = getMilestoneIndex(id);
+/** When using dynamic milestones (no fixed order), valid = from !== to and both ids in the list. */
+export function isOrderValidWithMilestones(
+  fromId: string,
+  toId: string,
+  milestones: { id: string }[]
+): boolean {
+  if (fromId === toId) return false;
+  const idSet = new Set(milestones.map((m) => m.id));
+  return idSet.has(fromId) && idSet.has(toId);
+}
+
+export function getMilestonesAfter(id: string, milestones?: WorkflowMilestone[]): WorkflowMilestone[] {
+  const list = milestones ?? WORKFLOW_MILESTONES_ORDER;
+  const idx = getMilestoneIndex(id, list);
   if (idx < 0) return [];
-  return WORKFLOW_MILESTONES_ORDER.slice(idx + 1);
+  return list.slice(idx + 1);
 }
 
-export function getMilestonesBefore(id: string): WorkflowMilestone[] {
-  const idx = getMilestoneIndex(id);
+export function getMilestonesBefore(id: string, milestones?: WorkflowMilestone[]): WorkflowMilestone[] {
+  const list = milestones ?? WORKFLOW_MILESTONES_ORDER;
+  const idx = getMilestoneIndex(id, list);
   if (idx <= 0) return [];
-  return WORKFLOW_MILESTONES_ORDER.slice(0, idx);
+  return list.slice(0, idx);
 }
 
-/** Pre-populated 6 segments: Started→Application, Application→Processing, ... */
+/** Pre-populated 6 segments using column names (compatible with dynamic milestone dropdowns). */
 export const DEFAULT_WORKFLOW_SEGMENTS: { from: string; to: string }[] = [
-  { from: "started", to: "application" },
-  { from: "application", to: "processing" },
-  { from: "processing", to: "submitted_to_underwriting" },
-  { from: "submitted_to_underwriting", to: "uw_final_approval" },
-  { from: "uw_final_approval", to: "ctc" },
-  { from: "ctc", to: "funding" },
+  { from: "started_date", to: "application_date" },
+  { from: "application_date", to: "processing_date" },
+  { from: "processing_date", to: "submitted_to_underwriting_date" },
+  { from: "submitted_to_underwriting_date", to: "uw_final_approval_date" },
+  { from: "uw_final_approval_date", to: "ctc_date" },
+  { from: "ctc_date", to: "funding_date" },
 ];

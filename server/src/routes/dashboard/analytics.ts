@@ -19,6 +19,7 @@ import {
 import {
   getWorkflowConversionData,
   getWorkflowConversionSegmentLoans,
+  getWorkflowConversionMilestones,
   type WorkflowSegmentInput,
 } from "../../services/dashboard/workflowConversionService.js";
 import { getStaffingUnitTargets } from "../../utils/staffingUnitTargets.js";
@@ -931,11 +932,36 @@ router.get(
   }
 );
 
+const workflowSegmentSchema = z.object({ from: z.string(), to: z.string() });
+
+/**
+ * GET /api/dashboard/workflow-conversion/milestones
+ * Returns all date/timestamptz columns from the tenant's loans table for use as milestone dropdown options.
+ */
+router.get(
+  "/workflow-conversion/milestones",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantContext = getTenantContext(req);
+      const milestones = await getWorkflowConversionMilestones(tenantContext.tenantPool);
+      res.json({ milestones });
+    } catch (error: any) {
+      console.error("Error fetching workflow conversion milestones:", error);
+      if (handleDatabaseError(error, res, "Failed to fetch workflow conversion milestones")) return;
+      res.status(500).json({
+        error: "Failed to fetch workflow conversion milestones",
+        details: process.env.NODE_ENV === "development" ? error.message : undefined,
+      });
+    }
+  }
+);
+
 /**
  * GET /api/dashboard/workflow-conversion/loans
  * Loans for a segment filtered by initial | fallout | pull-through.
  */
-const workflowSegmentSchema = z.object({ from: z.string(), to: z.string() });
 router.get(
   "/workflow-conversion/loans",
   authenticateToken,

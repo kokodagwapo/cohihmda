@@ -518,20 +518,19 @@ export async function executeImport(
         : analysis.additionalFields;
 
     for (const field of fieldsToImport) {
+      const client = await tenantPool.connect();
       try {
         // Check if field already exists
-        const existing = await tenantPool.query(
+        const existing = await client.query(
           `SELECT id FROM additional_field_definitions 
            WHERE los_connection_id = $1 AND (los_field_id = $2 OR column_name = $3)`,
           [losConnectionId, field.fieldId, field.columnName]
         );
 
         if (existing.rows.length > 0) {
-          // Already exists - skip
           continue;
         }
 
-        // Determine DB column type
         const dbColumnType =
           {
             string: "TEXT",
@@ -541,28 +540,30 @@ export async function executeImport(
             currency: "DECIMAL(15,2)",
           }[field.dataType] || "TEXT";
 
-        // Create the column if it doesn't exist
-        const columnExists = await tenantPool.query(
+        await client.query("BEGIN");
+
+        // Validate column name (SQL identifier safety)
+        if (!/^[a-z][a-z0-9_]*$/i.test(field.columnName)) {
+          await client.query("ROLLBACK");
+          result.errors.push(`Additional field "${field.alias}": invalid column name`);
+          continue;
+        }
+        await client.query(
+          `ALTER TABLE public.loans ADD COLUMN IF NOT EXISTS ${field.columnName} ${dbColumnType}`
+        );
+
+        const columnExists = await client.query(
           `SELECT column_name FROM information_schema.columns 
            WHERE table_schema = 'public' AND table_name = 'loans' AND column_name = $1`,
           [field.columnName]
         );
-
         if (columnExists.rows.length === 0) {
-          console.log(
-            `[LegacyImport] Creating column: ${field.columnName} ${dbColumnType}`
-          );
-          await tenantPool.query(
-            `ALTER TABLE public.loans ADD COLUMN ${field.columnName} ${dbColumnType}`
-          );
-        } else {
-          console.log(
-            `[LegacyImport] Column already exists: ${field.columnName}`
-          );
+          await client.query("ROLLBACK");
+          result.errors.push(`Additional field "${field.alias}": column could not be created`);
+          continue;
         }
 
-        // Insert field definition (created_by is optional, don't include if it might fail)
-        await tenantPool.query(
+        await client.query(
           `INSERT INTO additional_field_definitions 
            (los_connection_id, los_field_id, column_name, display_name, 
             data_type, db_column_type, category, include_in_rag, column_created)
@@ -578,11 +579,17 @@ export async function executeImport(
           ]
         );
 
+        await client.query("COMMIT");
         console.log(
           `[LegacyImport] Created additional field: ${field.alias} (${field.columnName})`
         );
         result.additionalFieldsCreated++;
       } catch (error: any) {
+        try {
+          await client.query("ROLLBACK");
+        } catch (_) {
+          /* no-op */
+        }
         console.error(
           `[LegacyImport] Additional field error for "${field.alias}" (${field.columnName}):`,
           error.message
@@ -590,6 +597,8 @@ export async function executeImport(
         result.errors.push(
           `Additional field "${field.alias}": ${error.message}`
         );
+      } finally {
+        client.release();
       }
     }
   }

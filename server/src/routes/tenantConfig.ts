@@ -930,16 +930,6 @@ router.post(
             continue;
           }
 
-          // Check if column already exists in loans table
-          const columnExistsCheck = await tenantPool.query(
-            `SELECT column_name FROM information_schema.columns 
-             WHERE table_schema = 'public' AND table_name = 'loans' AND column_name = $1`,
-            [fieldInput.columnName]
-          );
-
-          const columnAlreadyExists = columnExistsCheck.rows.length > 0;
-
-          // Map data type to DB column type
           const dbTypeMap: Record<string, string> = {
             string: "TEXT",
             number: "DECIMAL(15,4)",
@@ -949,36 +939,62 @@ router.post(
             percentage: "DECIMAL(8,4)",
           };
           const dbColumnType = dbTypeMap[fieldInput.dataType];
-
-          // Create the column if it doesn't exist
-          if (!columnAlreadyExists) {
-            await tenantPool.query(
-              `ALTER TABLE public.loans ADD COLUMN ${fieldInput.columnName} ${dbColumnType}`
-            );
+          if (!/^[a-z][a-z0-9_]*$/i.test(fieldInput.columnName)) {
+            results.push({
+              field: fieldInput.columnName,
+              success: false,
+              error: "Invalid column name",
+            });
+            continue;
           }
 
-          // Insert the field definition
-          await tenantPool.query(
-            `INSERT INTO additional_field_definitions (
-              los_connection_id, los_field_id, column_name, display_name,
-              data_type, db_column_type, category, description,
-              include_in_rag, column_created, created_by
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, TRUE, $10)`,
-            [
-              data.losConnectionId,
-              fieldInput.losFieldId,
-              fieldInput.columnName,
-              fieldInput.displayName,
-              fieldInput.dataType,
-              dbColumnType,
-              "revenue", // Category for revenue formula fields
-              `Revenue formula field: ${fieldInput.displayName}`,
-              true, // Include in RAG
-              req.userId,
-            ]
-          );
-
-          results.push({ field: fieldInput.columnName, success: true });
+          const client = await tenantPool.connect();
+          try {
+            await client.query("BEGIN");
+            await client.query(
+              `ALTER TABLE public.loans ADD COLUMN IF NOT EXISTS ${fieldInput.columnName} ${dbColumnType}`
+            );
+            const columnExistsCheck = await client.query(
+              `SELECT column_name FROM information_schema.columns 
+               WHERE table_schema = 'public' AND table_name = 'loans' AND column_name = $1`,
+              [fieldInput.columnName]
+            );
+            if (columnExistsCheck.rows.length === 0) {
+              await client.query("ROLLBACK");
+              results.push({
+                field: fieldInput.columnName,
+                success: false,
+                error: "Column could not be created",
+              });
+              continue;
+            }
+            await client.query(
+              `INSERT INTO additional_field_definitions (
+                los_connection_id, los_field_id, column_name, display_name,
+                data_type, db_column_type, category, description,
+                include_in_rag, column_created, created_by
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, TRUE, $10)`,
+              [
+                data.losConnectionId,
+                fieldInput.losFieldId,
+                fieldInput.columnName,
+                fieldInput.displayName,
+                fieldInput.dataType,
+                dbColumnType,
+                "revenue",
+                `Revenue formula field: ${fieldInput.displayName}`,
+                true,
+                req.userId,
+              ]
+            );
+            await client.query("COMMIT");
+            results.push({ field: fieldInput.columnName, success: true });
+          } catch (txError: any) {
+            await client.query("ROLLBACK").catch(() => {});
+            throw txError;
+          } finally {
+            client.release();
+          }
         } catch (fieldError: any) {
           logError("Error creating additional field", fieldError, {
             userId: req.userId,
@@ -1129,49 +1145,71 @@ router.post(
             continue;
           }
 
-          // Check if column already exists in loans table
-          const columnExistsCheck = await tenantPool.query(
-            `SELECT column_name FROM information_schema.columns 
-             WHERE table_schema = 'public' AND table_name = 'loans' AND column_name = $1`,
-            [columnName]
-          );
-
-          const columnAlreadyExists = columnExistsCheck.rows.length > 0;
-
-          // Create the column if it doesn't exist (default to DECIMAL for revenue fields)
-          if (!columnAlreadyExists) {
-            await tenantPool.query(
-              `ALTER TABLE public.loans ADD COLUMN ${columnName} DECIMAL(15,2)`
-            );
+          if (!/^[a-z][a-z0-9_]*$/i.test(columnName)) {
+            results.push({
+              losFieldId: fieldInput.losFieldId,
+              columnName: "",
+              displayName,
+              success: false,
+              error: "Invalid column name",
+            });
+            continue;
           }
 
-          // Insert the field definition
-          await tenantPool.query(
-            `INSERT INTO additional_field_definitions (
-              los_connection_id, los_field_id, column_name, display_name,
-              data_type, db_column_type, category, description,
-              include_in_rag, column_created, created_by
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, TRUE, $10)`,
-            [
-              data.losConnectionId,
-              fieldInput.losFieldId,
+          const client = await tenantPool.connect();
+          try {
+            await client.query("BEGIN");
+            await client.query(
+              `ALTER TABLE public.loans ADD COLUMN IF NOT EXISTS ${columnName} DECIMAL(15,2)`
+            );
+            const columnExistsCheck = await client.query(
+              `SELECT column_name FROM information_schema.columns 
+               WHERE table_schema = 'public' AND table_name = 'loans' AND column_name = $1`,
+              [columnName]
+            );
+            if (columnExistsCheck.rows.length === 0) {
+              await client.query("ROLLBACK");
+              results.push({
+                losFieldId: fieldInput.losFieldId,
+                columnName: "",
+                displayName,
+                success: false,
+                error: "Column could not be created",
+              });
+              continue;
+            }
+            await client.query(
+              `INSERT INTO additional_field_definitions (
+                los_connection_id, los_field_id, column_name, display_name,
+                data_type, db_column_type, category, description,
+                include_in_rag, column_created, created_by
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, TRUE, $10)`,
+              [
+                data.losConnectionId,
+                fieldInput.losFieldId,
+                columnName,
+                displayName,
+                "currency",
+                "DECIMAL(15,2)",
+                "revenue",
+                `Revenue formula field from Encompass: ${displayName}`,
+                true,
+                req.userId,
+              ]
+            );
+            await client.query("COMMIT");
+            results.push({
+              losFieldId: fieldInput.losFieldId,
               columnName,
               displayName,
-              "currency",
-              "DECIMAL(15,2)",
-              "revenue",
-              `Revenue formula field from Encompass: ${displayName}`,
-              true,
-              req.userId,
-            ]
-          );
-
-          results.push({
-            losFieldId: fieldInput.losFieldId,
-            columnName,
-            displayName,
-            success: true,
-          });
+              success: true,
+            });
+          } catch (txError: any) {
+            await client.query("ROLLBACK").catch(() => {});
+            throw txError;
+          } finally {
+            client.release();
+          }
 
           logInfo("Created additional field from Encompass", {
             losFieldId: fieldInput.losFieldId,

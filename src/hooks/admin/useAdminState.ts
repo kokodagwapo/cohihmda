@@ -16,6 +16,7 @@ export type AdminSection =
   | "infrastructure" // Renamed from 'system' for clarity
   | "security-compliance" // Combined security and SOC 2
   | "connections" // Combined LOS + Synapse integrations
+  | "loan-folders" // Encompass folder selection per connection
   | "dev-tools" // Developer tools including demo data
   | "stripe"
   | "rag-voice"
