@@ -60,7 +60,7 @@ export async function getWorkflowConversionMilestones(
     [Array.from(EXCLUDED_DATE_COLUMNS)]
   );
 
-  const list: WorkflowMilestoneOption[] = (result.rows || [])
+  const rawList: WorkflowMilestoneOption[] = (result.rows || [])
     .map((r: { column_name: string }) => {
       const column = r.column_name as string;
       if (EXCLUDED_DATE_COLUMNS.has(column)) return null;
@@ -70,8 +70,19 @@ export async function getWorkflowConversionMilestones(
         column,
       };
     })
-    .filter((m): m is WorkflowMilestoneOption => m != null)
-    .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
+    .filter((m): m is WorkflowMilestoneOption => m != null);
+
+  // Deduplicate by label: prefer _date-suffixed (built-in) columns when same label exists twice
+  const seen = new Map<string, WorkflowMilestoneOption>();
+  for (const m of rawList) {
+    const existing = seen.get(m.label);
+    if (!existing || m.column.endsWith("_date")) {
+      seen.set(m.label, m);
+    }
+  }
+  const list = Array.from(seen.values()).sort((a, b) =>
+    a.label.localeCompare(b.label, undefined, { sensitivity: "base" })
+  );
 
   milestonesCache.set(tenantPool, { list, fetchedAt: Date.now() });
   return list;
