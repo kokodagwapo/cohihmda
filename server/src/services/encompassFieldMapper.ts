@@ -46,13 +46,18 @@ const COLUMN_NAME_ALIASES: Record<string, string> = {
   'started': 'started_date',
   'approval': 'approval_date',
   'cond_approval': 'conditional_approval_date',
+  'disclosure_prep': 'disclosure_prep_date',
   'docs_out': 'docs_out_date',
   'docs_signing': 'docs_signing_date',
   'funding': 'funding_date',
   'processing': 'processing_date',
   'resubmittal': 'resubmittal_date',
+  'scrubbed': 'scrubbed_date',
+  'signed': 'signed_date',
   'submittal': 'submittal_date',
   'shipping': 'shipped_date',
+  'pre_approval': 'pre_approval_date',
+  'closing': 'closing_date',
   
   // Special naming cases
   'dulp_case_id': 'du_lp_case_id',

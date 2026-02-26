@@ -531,6 +531,16 @@ export async function executeImport(
           continue;
         }
 
+        // Skip if a built-in column already exists (e.g. disclosure_prep_date when columnName is disclosure_prep)
+        const builtinCheck = await client.query(
+          `SELECT 1 FROM information_schema.columns
+           WHERE table_schema = 'public' AND table_name = 'loans' AND column_name = $1`,
+          [field.columnName + "_date"]
+        );
+        if (builtinCheck.rows.length > 0) {
+          continue;
+        }
+
         const dbColumnType =
           {
             string: "TEXT",

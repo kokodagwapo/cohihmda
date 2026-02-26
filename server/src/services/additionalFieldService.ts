@@ -151,7 +151,27 @@ export class AdditionalFieldService {
         AND column_name = $1
     `, [columnName]);
 
-    return parseInt(colResult.rows[0].count) === 0;
+    if (parseInt(colResult.rows[0].count) > 0) {
+      return false;
+    }
+
+    // Check for built-in column variants (with/without _date suffix) to avoid duplicates like disclosure_prep vs disclosure_prep_date
+    const variants: string[] = [columnName];
+    if (!columnName.endsWith("_date")) {
+      variants.push(columnName + "_date");
+    }
+    if (columnName.endsWith("_date")) {
+      variants.push(columnName.replace(/_date$/, ""));
+    }
+    const variantResult = await this.tenantPool.query(
+      `SELECT COUNT(*) FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name = 'loans'
+         AND column_name = ANY($1::text[])`,
+      [variants]
+    );
+
+    return parseInt(variantResult.rows[0].count) === 0;
   }
 
   /**
