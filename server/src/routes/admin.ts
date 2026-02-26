@@ -1022,7 +1022,7 @@ router.post(
     } catch (error: any) {
       logError("Error reconciling additional field columns", error, {
         userId: req.userId,
-        tenantId: req.params.tenantId,
+        tenantId: req.params.tenantId as string,
       });
       res
         .status(500)
