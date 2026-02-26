@@ -91,6 +91,12 @@ const topTieringNavLinks = [
     variant: "sky" as const,
   },
   {
+    path: "/pipeline-analysis",
+    label: "Pipeline Analysis",
+    icon: LineChart,
+    variant: "mint" as const,
+  },
+  {
     path: "/high-performers",
     label: "High Performers",
     icon: Trophy,

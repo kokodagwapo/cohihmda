@@ -42,6 +42,7 @@ import CreditRiskManagement from "./pages/CreditRiskManagement";
 import LoanDetail from "./pages/LoanDetail";
 import WorkflowConversion from "./pages/WorkflowConversion";
 import PricingDashboard from "./pages/PricingDashboard";
+import PipelineAnalysisDashboard from "./pages/PipelineAnalysisDashboard";
 import Actors from "./pages/Actors";
 import { KnowledgeBaseEditor } from "./components/admin/KnowledgeBaseEditor";
 import { GlobalCohiChat } from "./components/cohi/GlobalCohiChat";
@@ -197,6 +198,11 @@ const App = () => (
               <Route path="/pricing-dashboard" element={
                 <ProtectedRoute>
                   <PricingDashboard />
+                </ProtectedRoute>
+              } />
+              <Route path="/pipeline-analysis" element={
+                <ProtectedRoute>
+                  <PipelineAnalysisDashboard />
                 </ProtectedRoute>
               } />
               <Route path="/credit-risk-management" element={

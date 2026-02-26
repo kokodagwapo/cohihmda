@@ -113,6 +113,12 @@ const topTieringMenuGroups = {
         iconColor: "blue" as const,
       },
       {
+        id: "pipelineAnalysis",
+        label: "Pipeline Analysis",
+        icon: LineChart,
+        iconColor: "emerald" as const,
+      },
+      {
         id: "highPerformers",
         label: "High Performers",
         icon: Trophy,
@@ -225,6 +231,7 @@ const routeMap: Record<string, string> = {
   companyScorecard: "/company-scorecard",
   topTieringComparison: "/performance/toptiering-comparison",
   workflowConversion: "/workflow-conversion",
+  pipelineAnalysis: "/pipeline-analysis",
   loanDetail: "/loan-detail",
   pricingDashboard: "/pricing-dashboard",
   highPerformers: "/high-performers",
@@ -466,6 +473,7 @@ export function Navigation(
       "/company-scorecard",
       "/performance/toptiering-comparison",
       "/workflow-conversion",
+      "/pipeline-analysis",
       "/loan-detail",
       "/high-performers",
       "/sales-scorecard",

@@ -14,6 +14,7 @@ import toptieringRoutes from "./toptiering/index.js";
 import predictionsRoutes from "./predictions/index.js";
 import falloutRoutes from "./fallout/index.js";
 import pricingDashboardRoutes from "./pricingDashboard/index.js";
+import pipelineAnalysisRoutes from "./pipelineAnalysis/index.js";
 import userPreferencesRoutes from "./userPreferences.js";
 import encompassRoutes from "./encompass.js";
 import tenantRoutes from "./tenants.js";
@@ -75,6 +76,7 @@ export function setupRoutes(app: Express) {
   app.use("/api/scorecard", scorecardRoutes);
   app.use("/api/toptiering", toptieringRoutes);
   app.use("/api/pricing-dashboard", pricingDashboardRoutes);
+  app.use("/api/pipeline-analysis", pipelineAnalysisRoutes);
   app.use("/api/predictions", predictionsRoutes);
   app.use("/api/fallout", falloutRoutes);
   app.use("/api/user", userPreferencesRoutes);
