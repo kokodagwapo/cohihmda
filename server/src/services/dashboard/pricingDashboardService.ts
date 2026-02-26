@@ -20,8 +20,12 @@ export type PricingLockStatus = "locked" | "not_locked" | "total";
 export interface PricingDashboardFilters {
   channel?: string | null;
   entityType: PricingEntityType;
+  /** When set, entity filter is applied to this column instead of entityType (e.g. filter by Branch 1000 while grouping by Broker Lender Name) */
+  entityFilterType?: PricingEntityType;
   entityValue: string;
   actorType: PricingActorType;
+  /** When set, actor filter is applied to this column instead of actorType */
+  actorFilterType?: PricingActorType;
   actorValue: string;
   dateRange: PricingDateRange;
   loanFunding: PricingLoanFunding;
@@ -180,14 +184,14 @@ function buildBaseWhere(
     conditions.push(channelClause.replace(/^\s*AND\s+/i, ""));
   }
 
-  const entityCol = ENTITY_COLUMN[filters.entityType];
+  const entityCol = ENTITY_COLUMN[filters.entityFilterType ?? filters.entityType];
   if (filters.entityValue != null && String(filters.entityValue).trim() !== "") {
     conditions.push(`(${l}${entityCol} = $${idx} OR ($${idx}::text = '' AND (${l}${entityCol} IS NULL OR TRIM(COALESCE(${l}${entityCol}, '')) = '')))`);
     params.push(filters.entityValue);
     idx++;
   }
 
-  const actorCol = ACTOR_COLUMN[filters.actorType];
+  const actorCol = ACTOR_COLUMN[filters.actorFilterType ?? filters.actorType];
   if (filters.actorValue != null && String(filters.actorValue).trim() !== "") {
     conditions.push(`(${l}${actorCol} = $${idx} OR ($${idx}::text = '' AND (${l}${actorCol} IS NULL OR TRIM(COALESCE(${l}${actorCol}, '')) = '')))`);
     params.push(filters.actorValue);

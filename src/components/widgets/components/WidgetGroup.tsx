@@ -843,6 +843,37 @@ function GridCellRegistryWidget({
       }
     : {};
 
+  const isPricingTable =
+    definition.dataSource === 'pricing-dashboard' &&
+    (definition.id?.includes('-report') || definition.id?.includes('-detail'));
+  const pricingConfig = isPricingTable
+    ? {
+        onRowClick: (row: Record<string, unknown>, columnKey?: string) => {
+          if (columnKey === 'entityName') {
+            const entityName = row?.entityName != null ? String(row.entityName).trim() : '';
+            if (entityName && entityName !== 'Totals') {
+              updateFilters(groupId, {
+                pricingEntityValue: entityName,
+                pricingEntityFilterType: filters.pricingEntityType ?? 'branch',
+                pricingActorValue: '',
+                pricingActorFilterType: undefined,
+              });
+            }
+          } else if (columnKey === 'actorName') {
+            const actorName = row?.actorName != null ? String(row.actorName).trim() : '';
+            if (actorName) {
+              updateFilters(groupId, {
+                pricingEntityValue: '',
+                pricingEntityFilterType: undefined,
+                pricingActorValue: actorName,
+                pricingActorFilterType: filters.pricingActorType ?? 'loan_officer',
+              });
+            }
+          }
+        },
+      }
+    : {};
+
   const isWorkflowConversion = defId === 'workflow-conversion-embed';
   const workflowConfig = isWorkflowConversion
     ? {
@@ -881,6 +912,7 @@ function GridCellRegistryWidget({
     ...(customColumns != null && { customColumns }),
     ...highPerformersConfig,
     ...actorsConfig,
+    ...pricingConfig,
     ...workflowConfig,
   };
 
@@ -1649,6 +1681,21 @@ export function WidgetGroup({
                   options={PRICING_LOCK_STATUS_OPTIONS}
                   onChange={(v) => updateFilters(groupId, { pricingLockStatus: v })}
                 />
+                {((filters.pricingEntityValue ?? '').trim() !== '' || (filters.pricingActorValue ?? '').trim() !== '') && (
+                  <span className="inline-flex items-center gap-1 rounded-md bg-emerald-100 dark:bg-emerald-900/40 px-2 py-0.5 text-xs">
+                    {(filters.pricingEntityValue ?? '').trim() !== ''
+                      ? `${PRICING_ENTITY_OPTIONS.find((o) => o.value === (filters.pricingEntityFilterType ?? filters.pricingEntityType ?? 'branch'))?.label ?? 'Entity'}: ${filters.pricingEntityValue}`
+                      : `${PRICING_ACTOR_OPTIONS.find((o) => o.value === (filters.pricingActorFilterType ?? filters.pricingActorType ?? 'loan_officer'))?.label ?? 'Actor'}: ${filters.pricingActorValue}`}
+                    <button
+                      type="button"
+                      onClick={() => updateFilters(groupId, { pricingEntityValue: '', pricingEntityFilterType: undefined, pricingActorValue: '', pricingActorFilterType: undefined })}
+                      className="p-0.5 rounded hover:bg-emerald-200 dark:hover:bg-emerald-800"
+                      aria-label="Clear entity/actor filter"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                )}
               </>
             ) : sectionType === 'actors' ? (
               <>

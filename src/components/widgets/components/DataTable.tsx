@@ -34,7 +34,8 @@ export interface DataTableProps extends WidgetRenderProps<TableData> {
   showActions?: boolean;
   onRemove?: () => void;
   onDuplicate?: () => void;
-  onRowClick?: (row: Record<string, unknown>) => void;
+  /** If columnKey is passed (e.g. from cell click), callers can distinguish entity vs actor column for pricing tables */
+  onRowClick?: (row: Record<string, unknown>, columnKey?: string) => void;
 }
 
 export function DataTable({
@@ -44,8 +45,10 @@ export function DataTable({
   showActions,
   onRemove,
   onDuplicate,
-  onRowClick,
+  onRowClick: onRowClickProp,
+  config,
 }: DataTableProps) {
+  const onRowClick = onRowClickProp ?? (config?.onRowClick as ((row: Record<string, unknown>, columnKey?: string) => void) | undefined);
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>(null);
 
@@ -126,7 +129,6 @@ export function DataTable({
                   'hover:bg-slate-50 dark:hover:bg-slate-800/30',
                   onRowClick && 'cursor-pointer',
                 )}
-                onClick={() => onRowClick?.(row)}
               >
                 {columns.map((col, ci) => (
                   <td
@@ -139,6 +141,7 @@ export function DataTable({
                       ci === 0 && data?.stickyFirstColumn && 'sticky left-0 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-700',
                       col.highlight,
                     )}
+                    onClick={onRowClick ? () => onRowClick(row, col.key) : undefined}
                   >
                     {formatCell(row[col.key], col.format)}
                   </td>

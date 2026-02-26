@@ -93,8 +93,12 @@ export interface SectionFilters {
   pricingLockStatus?: string;
   /** Pricing Dashboard: entity value filter */
   pricingEntityValue?: string;
+  /** Pricing Dashboard: column to apply entity value filter (e.g. branch when grouping by broker_lender_name) */
+  pricingEntityFilterType?: string;
   /** Pricing Dashboard: actor value filter */
   pricingActorValue?: string;
+  /** Pricing Dashboard: column to apply actor value filter */
+  pricingActorFilterType?: string;
   /** Workflow Conversion: period selection (MTD, QTD, etc.) */
   workflowPeriodSelection?: PeriodSelection;
   /** Workflow Conversion: conversion % vs turn time */
@@ -226,7 +230,9 @@ export const useWidgetSectionStore = create<WidgetSectionState>((set, get) => ({
           pricingLoanStatus: 'active',
           pricingLockStatus: 'total',
           pricingEntityValue: '',
+          pricingEntityFilterType: undefined,
           pricingActorValue: '',
+          pricingActorFilterType: undefined,
         };
       }
       return {

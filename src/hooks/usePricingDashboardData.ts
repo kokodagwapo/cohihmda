@@ -16,8 +16,12 @@ export type PricingLockStatus = "locked" | "not_locked" | "total";
 export interface PricingDashboardFilters {
   channel?: string | null;
   entityType: PricingEntityType;
+  /** When set, entity filter is applied to this column (e.g. filter by Branch 1000 while grouping by Broker Lender Name) */
+  entityFilterType?: PricingEntityType;
   entityValue: string;
   actorType: PricingActorType;
+  /** When set, actor filter is applied to this column */
+  actorFilterType?: PricingActorType;
   actorValue: string;
   dateRange: PricingDateRange;
   loanFunding: PricingLoanFunding;
@@ -83,8 +87,10 @@ function buildParams(filters: PricingDashboardFilters, tenantId?: string | null)
   if (tenantId) p.set("tenant_id", tenantId);
   if (filters.channel) p.set("channel", filters.channel);
   p.set("entity_type", filters.entityType);
+  if (filters.entityFilterType) p.set("entity_filter_type", filters.entityFilterType);
   p.set("entity_value", filters.entityValue);
   p.set("actor_type", filters.actorType);
+  if (filters.actorFilterType) p.set("actor_filter_type", filters.actorFilterType);
   p.set("actor_value", filters.actorValue);
   p.set("date_range", filters.dateRange);
   p.set("loan_funding", filters.loanFunding);
@@ -169,8 +175,10 @@ export function usePricingDashboardData(
   }, [
     effectiveChannel,
     filters.entityType,
+    filters.entityFilterType,
     filters.entityValue,
     filters.actorType,
+    filters.actorFilterType,
     filters.actorValue,
     filters.dateRange,
     filters.loanFunding,
@@ -277,8 +285,10 @@ export function usePricingDashboardWorkbenchData(
   }, [
     effectiveChannel,
     filters.entityType,
+    filters.entityFilterType,
     filters.entityValue,
     filters.actorType,
+    filters.actorFilterType,
     filters.actorValue,
     filters.dateRange,
     filters.loanFunding,

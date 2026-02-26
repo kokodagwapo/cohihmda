@@ -37,11 +37,15 @@ function parseChannelParam(query: Record<string, unknown>): string | undefined {
 function parseFilters(query: Record<string, unknown>): PricingDashboardFilters {
   const entityType = (query.entity_type as string) || "branch";
   const actorType = (query.actor_type as string) || "loan_officer";
+  const entityFilterType = query.entity_filter_type as string | undefined;
+  const actorFilterType = query.actor_filter_type as string | undefined;
   return {
     channel: parseChannelParam(query),
     entityType: entityType as PricingEntityType,
+    entityFilterType: entityFilterType ? (entityFilterType as PricingEntityType) : undefined,
     entityValue: String(query.entity_value ?? ""),
     actorType: actorType as PricingActorType,
+    actorFilterType: actorFilterType ? (actorFilterType as PricingActorType) : undefined,
     actorValue: String(query.actor_value ?? ""),
     dateRange: (query.date_range as PricingDateRange) || "all",
     loanFunding: (query.loan_funding as PricingLoanFunding) || "funded",

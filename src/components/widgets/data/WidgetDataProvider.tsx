@@ -392,14 +392,16 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
   const pricingFilters = useMemo((): PricingFilters => ({
     channel: selectedChannel ?? undefined,
     entityType: (pdFilters?.pricingEntityType ?? 'branch') as PricingFilters['entityType'],
+    entityFilterType: pdFilters?.pricingEntityFilterType as PricingFilters['entityFilterType'] | undefined,
     entityValue: pdFilters?.pricingEntityValue ?? '',
     actorType: (pdFilters?.pricingActorType ?? 'loan_officer') as PricingFilters['actorType'],
+    actorFilterType: pdFilters?.pricingActorFilterType as PricingFilters['actorFilterType'] | undefined,
     actorValue: pdFilters?.pricingActorValue ?? '',
     dateRange: (pdFilters?.pricingDateRange ?? 'mtd') as PricingFilters['dateRange'],
     loanFunding: (pdFilters?.pricingLoanFunding ?? 'funded') as PricingFilters['loanFunding'],
     loanStatus: (pdFilters?.pricingLoanStatus ?? 'active') as PricingFilters['loanStatus'],
     lockStatus: (pdFilters?.pricingLockStatus ?? 'total') as PricingFilters['lockStatus'],
-  }), [selectedChannel, pdFilters?.pricingEntityType, pdFilters?.pricingEntityValue, pdFilters?.pricingActorType, pdFilters?.pricingActorValue, pdFilters?.pricingDateRange, pdFilters?.pricingLoanFunding, pdFilters?.pricingLoanStatus, pdFilters?.pricingLockStatus]);
+  }), [selectedChannel, pdFilters?.pricingEntityType, pdFilters?.pricingEntityFilterType, pdFilters?.pricingEntityValue, pdFilters?.pricingActorType, pdFilters?.pricingActorFilterType, pdFilters?.pricingActorValue, pdFilters?.pricingDateRange, pdFilters?.pricingLoanFunding, pdFilters?.pricingLoanStatus, pdFilters?.pricingLockStatus]);
   const pricingDashboard = usePricingDashboardWorkbenchData(pricingFilters, {
     tenantId: selectedTenantId,
     selectedChannel,

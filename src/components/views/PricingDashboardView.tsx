@@ -31,8 +31,9 @@ import type {
   PricingReportRow,
   PricingDetailRow,
 } from "@/hooks/usePricingDashboardData";
-import { Loader2, ArrowUp, ArrowDown } from "lucide-react";
+import { Loader2, ArrowUp, ArrowDown, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 
 const ENTITY_TYPE_OPTIONS: { value: PricingEntityType; label: string }[] = [
   { value: "branch", label: "Branch" },
@@ -182,14 +183,21 @@ export function PricingDashboardView({
   const [reportSortDir, setReportSortDir] = useState<"asc" | "desc">("asc");
   const [detailSortKey, setDetailSortKey] = useState<string>("entityName");
   const [detailSortDir, setDetailSortDir] = useState<"asc" | "desc">("asc");
+  const [selectedEntityOrActor, setSelectedEntityOrActor] = useState<
+    | { kind: "entity"; entityType: PricingEntityType; value: string; label: string }
+    | { kind: "actor"; actorType: PricingActorType; value: string; label: string }
+    | null
+  >(null);
 
   const filters: PricingDashboardFilters = useMemo(
     () => ({
       channel: selectedChannel ?? undefined,
       entityType,
-      entityValue: "",
+      entityFilterType: selectedEntityOrActor?.kind === "entity" ? selectedEntityOrActor.entityType : undefined,
+      entityValue: selectedEntityOrActor?.kind === "entity" ? selectedEntityOrActor.value : "",
       actorType,
-      actorValue: "",
+      actorFilterType: selectedEntityOrActor?.kind === "actor" ? selectedEntityOrActor.actorType : undefined,
+      actorValue: selectedEntityOrActor?.kind === "actor" ? selectedEntityOrActor.value : "",
       dateRange,
       loanFunding,
       loanStatus,
@@ -203,8 +211,11 @@ export function PricingDashboardView({
       loanFunding,
       loanStatus,
       lockStatus,
+      selectedEntityOrActor,
     ]
   );
+
+  const clearEntityOrActorFilter = useCallback(() => setSelectedEntityOrActor(null), []);
 
   const reportType = activeTab === "entity_report" ? "entity_report" : "loan_officer_report";
   const detailType = activeTab === "entity_detail" ? "entity_detail" : "loan_officer_detail";
@@ -408,8 +419,29 @@ export function PricingDashboardView({
                   const val = row[c.key as keyof PricingReportRow];
                   const isNumber = typeof val === "number";
                   const isRightAlign = isNumber || c.key === "units";
+                  const isEntityOrActor = c.key === "entityName" || c.key === "actorName";
+                  const canSelect = isEntityOrActor && val != null && String(val).trim() !== "";
                   return (
-                    <td key={c.key} className={cn("py-3 px-4", textTd, isRightAlign ? "text-right" : "")}>
+                    <td
+                      key={c.key}
+                      className={cn(
+                        "py-3 px-4",
+                        textTd,
+                        isRightAlign ? "text-right" : "",
+                        canSelect && "cursor-pointer hover:underline hover:opacity-90"
+                      )}
+                      role={canSelect ? "button" : undefined}
+                      onClick={
+                        canSelect
+                          ? () =>
+                              setSelectedEntityOrActor(
+                                c.key === "entityName"
+                                  ? { kind: "entity", entityType, value: String(val), label: String(val) }
+                                  : { kind: "actor", actorType, value: String(val), label: String(val) }
+                              )
+                          : undefined
+                      }
+                    >
                       {typeof val === "number"
                         ? c.key === "units" || c.key === "pricingMargin"
                           ? formatNum(val)
@@ -489,6 +521,8 @@ export function PricingDashboardView({
                   const isNum = typeof val === "number";
                   const isRight = isNum || ["loanNumber", "applicationDate", "lockExpirationDate"].includes(c.key);
                   const isDateCol = ["applicationDate", "lockExpirationDate", "fundingDate", "closingDate"].includes(c.key);
+                  const isEntityOrActor = c.key === "entityName" || c.key === "actorName";
+                  const canSelect = isEntityOrActor && val != null && String(val).trim() !== "";
                   const displayVal =
                     val == null
                       ? ""
@@ -500,7 +534,26 @@ export function PricingDashboardView({
                           ? formatDateOnly(val as string)
                           : String(val);
                   return (
-                    <td key={c.key} className={cn("py-3 px-4", textTd, isRight ? "text-right" : "")}>
+                    <td
+                      key={c.key}
+                      className={cn(
+                        "py-3 px-4",
+                        textTd,
+                        isRight ? "text-right" : "",
+                        canSelect && "cursor-pointer hover:underline hover:opacity-90"
+                      )}
+                      role={canSelect ? "button" : undefined}
+                      onClick={
+                        canSelect
+                          ? () =>
+                              setSelectedEntityOrActor(
+                                c.key === "entityName"
+                                  ? { kind: "entity", entityType, value: String(val), label: String(val) }
+                                  : { kind: "actor", actorType, value: String(val), label: String(val) }
+                              )
+                          : undefined
+                      }
+                    >
                       {displayVal}
                     </td>
                   );
@@ -601,6 +654,29 @@ export function PricingDashboardView({
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+          )}
+          {selectedEntityOrActor && (
+            <div className="flex items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/50 px-3 py-2 col-span-full sm:col-span-1">
+              <div className="flex flex-col min-w-0">
+                <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  {selectedEntityOrActor.kind === "entity"
+                    ? getEntityLabel(selectedEntityOrActor.entityType)
+                    : getActorLabel(selectedEntityOrActor.actorType)}
+                </span>
+                <span className="text-sm text-slate-600 dark:text-slate-400 truncate" title={selectedEntityOrActor.label}>
+                  {selectedEntityOrActor.label}
+                </span>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 shrink-0 rounded-full text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                onClick={clearEntityOrActorFilter}
+                aria-label="Clear filter"
+              >
+                <X className="h-4 w-4" />
+              </Button>
             </div>
           )}
         </CardContent>
