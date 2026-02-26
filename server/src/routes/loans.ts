@@ -1400,6 +1400,9 @@ router.get(
         }
       }
 
+      // Exclude archived loans (matches Qlik Active Loan Flag definition)
+      conditions.push("(is_archived IS DISTINCT FROM TRUE)");
+
       // Handle date filtering - MUST use started_date (not application_date)
       // Qlik Logic: Loans Started is filtered by [Started Year], then RESPA App Status is calculated
       // from those started loans based on whether application_date exists
@@ -1652,7 +1655,7 @@ router.get(
 
       // Use shared utility for channel filtering
       const channelClause = buildChannelWhereClause(channelGroup);
-      const whereClause = `1=1 ${channelClause}`;
+      const whereClause = `1=1 ${channelClause} AND (is_archived IS DISTINCT FROM TRUE)`;
 
       logInfo("[CompanyOverview] Query params", {
         tenantId,
