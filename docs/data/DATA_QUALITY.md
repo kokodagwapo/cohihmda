@@ -375,3 +375,4 @@ Admins can export affected loans for bulk correction in the LOS:
 - [Universal Connector](./UNIVERSAL_CONNECTOR.md)
 - [Client Admin Requirements](../architecture/CLIENT_ADMIN_REQUIREMENTS.md)
 - [AI Insights Architecture](../ALETHEIA_INSIGHTS_ARCHITECTURE_REVIEW.md)
+- [Status Date Fallback](../STATUS_DATE_FALLBACK.md) — for Denied/Withdrawn loans, when status-specific date is null, reporting uses `current_status_date`
