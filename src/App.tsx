@@ -7,6 +7,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavig
 import { useEffect } from "react";
 import { EditProvider } from "@/contexts/EditContext";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { AnalyticsWrapper, AnalyticsPageViewTracker } from "@/contexts/AnalyticsContext";
 import { DebugModeProvider } from "@/contexts/DebugModeContext";
 import { DebugModeIndicator } from "@/components/layout/DebugModeIndicator";
 import { UserSettingsProvider } from "@/hooks/useUserSettings";
@@ -22,6 +23,7 @@ import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import SSOCallback from "./pages/SSOCallback";
 import UserSettings from "./pages/UserSettings";
+import Unsubscribe from "./pages/Unsubscribe";
 import Loans from "./pages/Loans";
 import MyDashboard from "./pages/MyDashboard";
 import MyDashboardLegacy from "./pages/MyDashboardLegacy";
@@ -99,6 +101,7 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme">
       <AuthProvider>
+        <AnalyticsWrapper>
         <DebugModeProvider>
         <DebugModeIndicator />
         <UserSettingsProvider>
@@ -109,6 +112,7 @@ const App = () => (
             <Toaster />
             <Sonner />
             <Router basename={import.meta.env.BASE_URL}>
+              <AnalyticsPageViewTracker />
               <Handle404Redirect />
               <ScrollToTop />
               <Routes>
@@ -119,6 +123,7 @@ const App = () => (
               <Route path="/forgot-password" element={<ForgotPassword />} />
               <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/auth/sso/callback" element={<SSOCallback />} />
+              <Route path="/unsubscribe/:token" element={<Unsubscribe />} />
 
               {/* Protected routes - require authentication */}
               <Route path="/settings" element={
@@ -278,11 +283,12 @@ const App = () => (
               <ActiveTourRunner />
           </Router>
         </TooltipProvider>
-      </EditProvider>
-    </TutorialProvider>
-    </UserSettingsProvider>
-    </DebugModeProvider>
-    </AuthProvider>
+        </EditProvider>
+        </TutorialProvider>
+        </UserSettingsProvider>
+        </DebugModeProvider>
+        </AnalyticsWrapper>
+      </AuthProvider>
   </ThemeProvider>
 </QueryClientProvider>
 );

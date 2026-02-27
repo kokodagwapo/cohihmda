@@ -54,6 +54,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import { renderMarkdownText } from "@/utils/renderMarkdown";
 import { InsightChat } from "@/components/dashboard/InsightChat";
 import { AutoChart, EvidencePreviewTable } from "@/components/research/FindingDrillDown";
 import type {
@@ -81,6 +82,8 @@ interface ResearchReportProps {
   ) => void;
   onDrillDown?: (finding: Finding) => void;
   onTrackInsight?: (headline: string, detail: string) => void;
+  /** When user clicks "Run this investigation" on a further-investigation suggestion. */
+  onRunFurtherInvestigation?: (question: string) => void;
 }
 
 type ViewMode = "brief" | "full";
@@ -127,6 +130,101 @@ const CONFIDENCE_TOOLTIPS: Record<string, string> = {
   medium: "Based on moderate evidence — directionally reliable",
   low: "Limited evidence — treat as a hypothesis worth investigating",
 };
+
+// ============================================================================
+// Quick Answer View (single finding, no synthesis)
+// ============================================================================
+
+function humanizeKeyQuick(key: string): string {
+  return key
+    .replace(/_/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .trim();
+}
+
+export function QuickAnswerView({
+  finding,
+  onDrillDown,
+}: {
+  finding: Finding;
+  onDrillDown?: (finding: Finding) => void;
+}) {
+  return (
+    <div className="space-y-4 py-2">
+      <Card className="rounded-lg border bg-card overflow-hidden">
+        <CardHeader className="pb-2">
+          <div className="flex items-start justify-between gap-2">
+            <CardTitle className="text-lg">{finding.title}</CardTitle>
+            <Badge
+              variant={
+                finding.confidence === "high"
+                  ? "default"
+                  : finding.confidence === "medium"
+                    ? "secondary"
+                    : "outline"
+              }
+              className="text-xs"
+            >
+              {finding.confidence}
+            </Badge>
+          </div>
+          <div className="text-sm text-muted-foreground leading-relaxed mt-1 prose prose-sm dark:prose-invert max-w-none">
+            {renderMarkdownText(finding.summary)}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {Object.keys(finding.keyMetrics).length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(finding.keyMetrics).map(([k, v]) => (
+                <div
+                  key={k}
+                  className="flex items-center gap-1.5 text-sm bg-muted/50 rounded-md px-3 py-2"
+                >
+                  <span className="text-muted-foreground font-medium">
+                    {humanizeKeyQuick(k)}:
+                  </span>
+                  <span className="font-semibold tabular-nums">{String(v)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {finding.evidence?.length > 0 && (
+            <div className="space-y-4">
+              <h4 className="text-sm font-semibold flex items-center gap-2">
+                <BarChart3 className="h-4 w-4" />
+                Data
+              </h4>
+              <div className="space-y-4 overflow-x-auto min-w-0">
+                {finding.evidence.map((ev, idx) => (
+                  <div key={idx} className="space-y-1">
+                    {ev.explanation && (
+                      <p className="text-xs text-muted-foreground mb-1">
+                        {ev.explanation}
+                      </p>
+                    )}
+                    <EvidencePreviewTable evidence={ev} maxRows={20} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {onDrillDown && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-2"
+              onClick={() => onDrillDown(finding)}
+            >
+              <ChevronRight className="h-3.5 w-3.5 mr-1.5" />
+              View full evidence & charts
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
 
 // ============================================================================
 // Finding Feedback
@@ -307,16 +405,16 @@ function KpiSummaryStrip({ findings }: { findings: Finding[] }) {
       .replace(/\b\w/g, (c) => c.toUpperCase());
 
   return (
-    <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+    <div className="flex gap-3 overflow-x-auto pb-1 -mx-1 px-1">
       {aggregatedMetrics.map(([key, value]) => (
         <div
           key={key}
-          className="flex-shrink-0 rounded-lg border bg-card px-3 py-2 min-w-[120px]"
+          className="flex-shrink-0 rounded-lg border bg-card px-4 py-3 min-w-[140px] shadow-sm"
         >
-          <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide block truncate">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide block truncate">
             {humanizeKey(key)}
           </span>
-          <span className="text-sm font-semibold mt-0.5 block">
+          <span className="text-base font-bold mt-1 block tabular-nums">
             {formatKpiValue(value)}
           </span>
         </div>
@@ -375,6 +473,16 @@ function SectionNav({
 // Sub-components
 // ============================================================================
 
+function DirectAnswerSection({ directAnswer }: { directAnswer: string }) {
+  return (
+    <div className="rounded-lg border border-primary/20 bg-primary/5 p-4">
+      <div className="text-sm font-medium text-foreground leading-snug prose prose-sm dark:prose-invert max-w-none">
+        {renderMarkdownText(directAnswer)}
+      </div>
+    </div>
+  );
+}
+
 function ExecutiveSummary({ summary }: { summary: string }) {
   return (
     <Card>
@@ -386,7 +494,9 @@ function ExecutiveSummary({ summary }: { summary: string }) {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <p className="text-sm leading-relaxed">{summary}</p>
+        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
+          {renderMarkdownText(summary)}
+        </div>
       </CardContent>
     </Card>
   );
@@ -431,9 +541,9 @@ function ThemeAccordion({
             </div>
           </AccordionTrigger>
           <AccordionContent className="px-3 pb-3">
-            <p className="text-xs text-muted-foreground leading-relaxed mb-2">
-              {theme.description}
-            </p>
+            <div className="text-xs text-muted-foreground leading-relaxed mb-2 prose prose-sm dark:prose-invert max-w-none">
+              {renderMarkdownText(theme.description)}
+            </div>
             {theme.findingIds.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
                 {theme.findingIds.map((id) => {
@@ -462,8 +572,14 @@ function ThemeAccordion({
   );
 }
 
-function CollapsibleEvidence({ children }: { children: React.ReactNode }) {
-  const [open, setOpen] = useState(false);
+function CollapsibleEvidence({
+  children,
+  defaultOpen = false,
+}: {
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
@@ -471,7 +587,7 @@ function CollapsibleEvidence({ children }: { children: React.ReactNode }) {
         {open ? "Hide data" : "View data"}
         <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
       </CollapsibleTrigger>
-      <CollapsibleContent className="pt-2">{children}</CollapsibleContent>
+      <CollapsibleContent className="pt-2 overflow-x-auto min-w-0">{children}</CollapsibleContent>
     </Collapsible>
   );
 }
@@ -483,6 +599,7 @@ function InsightCard({
   onDrillDown,
   onTrackInsight,
   selectedTenantId,
+  defaultEvidenceOpen = false,
 }: {
   insight: RankedInsight;
   findings: Finding[];
@@ -490,6 +607,8 @@ function InsightCard({
   onDrillDown?: (finding: Finding) => void;
   onTrackInsight?: (headline: string, detail: string) => void;
   selectedTenantId?: string | null;
+  /** Open the evidence (table/chart) by default for top insights. */
+  defaultEvidenceOpen?: boolean;
 }) {
   const [chatOpen, setChatOpen] = useState(false);
   const relatedFindings = findings.filter((f) =>
@@ -536,9 +655,16 @@ function InsightCard({
     [insight, relatedFindings]
   );
 
+  const impactBorderClass =
+    insight.impact === "high"
+      ? "border-l-4 border-l-red-500 shadow-sm"
+      : insight.impact === "medium"
+        ? "border-l-4 border-l-amber-500 shadow-sm"
+        : "border-l-4 border-l-border";
+
   return (
-    <div className="rounded-lg border bg-card overflow-hidden">
-      <div className="flex gap-3 p-3 hover:bg-accent/5 transition-colors">
+    <div className={cn("rounded-lg border bg-card overflow-hidden", impactBorderClass)}>
+      <div className="flex gap-3 p-4 hover:bg-accent/5 transition-colors">
         <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary text-sm font-bold">
           {insight.rank}
         </div>
@@ -607,10 +733,16 @@ function InsightCard({
             </div>
           </div>
 
+          {/* Key takeaway (one-liner) */}
+          {insight.keyTakeaway && (
+            <p className="text-xs font-medium text-foreground border-l-2 border-primary/50 pl-2 py-0.5">
+              {insight.keyTakeaway}
+            </p>
+          )}
           {/* Detail text */}
-          <p className="text-xs text-muted-foreground leading-relaxed">
-            {insight.detail}
-          </p>
+          <div className="text-xs text-muted-foreground leading-relaxed prose prose-sm dark:prose-invert max-w-none">
+            {renderMarkdownText(insight.detail)}
+          </div>
 
           {/* Inline KPI row */}
           {inlineMetrics.length > 0 && (
@@ -689,9 +821,9 @@ function InsightCard({
             const firstEvidence = firstWithEvidence?.evidence?.[0];
             if (!firstEvidence?.rows?.length) return null;
             return (
-              <CollapsibleEvidence>
-                <div className="space-y-3 pt-1">
-                  <EvidencePreviewTable evidence={firstEvidence} maxRows={10} />
+              <CollapsibleEvidence defaultOpen={defaultEvidenceOpen}>
+                <div className="space-y-3 pt-1 min-w-0">
+                  <EvidencePreviewTable evidence={firstEvidence} maxRows={defaultEvidenceOpen ? 20 : 12} />
                   <AutoChart evidence={firstEvidence} />
                 </div>
               </CollapsibleEvidence>
@@ -732,17 +864,29 @@ function InsightCard({
 
 function FurtherInvestigationCard({
   item,
+  onRun,
 }: {
   item: { question: string; rationale: string };
+  onRun?: (question: string) => void;
 }) {
   return (
     <div className="flex gap-2 p-2.5 rounded-md border border-dashed bg-muted/30">
       <Search className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" />
-      <div>
+      <div className="min-w-0 flex-1">
         <p className="text-sm font-medium">{item.question}</p>
         <p className="text-xs text-muted-foreground mt-0.5">
           {item.rationale}
         </p>
+        {onRun && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-2"
+            onClick={() => onRun(item.question)}
+          >
+            Run this investigation
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -760,6 +904,7 @@ export function ResearchReport({
   onSubmitFeedback,
   onDrillDown,
   onTrackInsight,
+  onRunFurtherInvestigation,
 }: ResearchReportProps) {
   const [viewMode, setViewMode] = useState<ViewMode>("brief");
   const [activeSection, setActiveSection] = useState("summary");
@@ -861,10 +1006,71 @@ export function ResearchReport({
         </div>
       </div>
 
+      {/* ========== Direct Answer (when user asked a specific question) ========== */}
+      {report.directAnswer && (
+        <div className="space-y-1">
+          <h3 className="text-sm font-semibold flex items-center gap-2">
+            Answer
+            <InfoTip text="Direct response to your question based on the data" />
+          </h3>
+          <DirectAnswerSection directAnswer={report.directAnswer} />
+        </div>
+      )}
+
       {/* ========== Executive Summary ========== */}
       <div ref={summaryRef}>
         <ExecutiveSummary summary={report.executiveSummary} />
       </div>
+
+      {/* ========== Action priority summary (deep report only) ========== */}
+      {!isBrief && report.rankedInsights?.length > 0 && (
+        <Card className="rounded-lg border bg-muted/30">
+          <CardContent className="pt-4 pb-3 px-4">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
+              At a glance
+            </h4>
+            <div className="flex flex-wrap gap-4">
+              {(["high", "medium", "low"] as const).map((impact) => {
+                const items = report.rankedInsights!.filter((i) => i.impact === impact);
+                if (items.length === 0) return null;
+                const label =
+                  impact === "high"
+                    ? "Act"
+                    : impact === "medium"
+                      ? "Monitor"
+                      : "Review when able";
+                const borderClass =
+                  impact === "high"
+                    ? "border-l-red-500"
+                    : impact === "medium"
+                      ? "border-l-amber-500"
+                      : "border-l-muted-foreground/50";
+                return (
+                  <div key={impact} className={cn("pl-3 border-l-2 min-w-[140px]", borderClass)}>
+                    <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                      {label}
+                    </p>
+                    <p className="text-sm font-semibold mt-0.5">{items.length} insight{items.length !== 1 ? "s" : ""}</p>
+                    <ul className="mt-1 space-y-0.5">
+                      {items.slice(0, 3).map((i) => (
+                        <li key={i.rank} className="text-xs text-muted-foreground truncate max-w-[200px]">
+                          {i.headline}
+                        </li>
+                      ))}
+                      {items.length > 3 && (
+                        <li className="text-xs text-muted-foreground">+{items.length - 3} more</li>
+                      )}
+                    </ul>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-3 pt-2 border-t border-border/50">
+              Metrics below may be YTD, T12m, or rolling window — see each insight for period.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* ========== KPI Summary Strip ========== */}
       {findings.length > 0 && <KpiSummaryStrip findings={findings} />}
@@ -904,7 +1110,7 @@ export function ResearchReport({
               </button>
             )}
           </h3>
-          <div className="space-y-2">
+          <div className="space-y-4">
             {displayInsights.map((insight) => (
               <InsightCard
                 key={insight.rank}
@@ -916,6 +1122,7 @@ export function ResearchReport({
                 onDrillDown={onDrillDown}
                 onTrackInsight={onTrackInsight}
                 selectedTenantId={selectedTenantId}
+                defaultEvidenceOpen={insight.rank <= 2}
               />
             ))}
           </div>
@@ -936,7 +1143,11 @@ export function ResearchReport({
               </h3>
               <div className="space-y-2">
                 {report.furtherInvestigation.map((item, i) => (
-                  <FurtherInvestigationCard key={i} item={item} />
+                  <FurtherInvestigationCard
+                    key={i}
+                    item={item}
+                    onRun={onRunFurtherInvestigation}
+                  />
                 ))}
               </div>
             </div>

@@ -86,20 +86,45 @@ interface SortState {
 // Humanization + formatting utilities
 // ============================================================================
 
+/** Common mortgage/LO abbreviations to preserve when humanizing column names */
+const LABEL_ABBREVIATIONS: Record<string, string> = {
+  lo: "LO",
+  los: "LOS",
+  t12m: "T12m",
+  t6m: "T6m",
+  ytd: "YTD",
+  pt: "PT",
+  fico: "FICO",
+  ltv: "LTV",
+  dti: "DTI",
+  cltv: "CLTV",
+  hcltv: "HCLTV",
+  bps: "bps",
+  pni: "P&I",
+  ami: "AMI",
+};
+
 /**
  * Converts snake_case or camelCase keys into readable labels.
  * Looks up FIELD_REGISTRY and SUMMARY_REGISTRY first, falls back to
- * splitting on _ and camelCase boundaries.
+ * splitting on _ and camelCase boundaries. Preserves common mortgage abbreviations (LO, T12m, etc.).
  */
 function humanizeKey(key: string): string {
   if (FIELD_REGISTRY[key]?.label) return FIELD_REGISTRY[key].label;
   if (SUMMARY_REGISTRY[key]?.label) return SUMMARY_REGISTRY[key].label;
 
-  return key
+  const withSpaces = key
     .replace(/_/g, " ")
-    .replace(/([a-z])([A-Z])/g, "$1 $2")
-    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .replace(/([a-z])([A-Z])/g, "$1 $2");
+  const words = withSpaces.split(/\s+/);
+  const result = words
+    .map((w) => {
+      const lower = w.toLowerCase();
+      return LABEL_ABBREVIATIONS[lower] ?? w.replace(/\b\w/g, (c) => c.toUpperCase());
+    })
+    .join(" ")
     .trim();
+  return result || key;
 }
 
 /**
@@ -620,14 +645,50 @@ function EvidenceTable({ evidence, index, findingTitle, sessionId, onSaveToWorkb
 // Evidence Preview Table (lightweight, for inline use in Report)
 // ============================================================================
 
-const EVIDENCE_PREVIEW_MAX_ROWS = 10;
+const EVIDENCE_PREVIEW_DEFAULT_ROWS = 8;
+const EVIDENCE_PREVIEW_MAX_ROWS = 20;
 
 export interface EvidencePreviewTableProps {
   evidence: EvidenceItem;
   maxRows?: number;
 }
 
+function EvidenceCell({
+  value,
+  format,
+  maxWidth = 160,
+}: {
+  value: unknown;
+  format: FieldFormat;
+  maxWidth?: number;
+}) {
+  const str = value == null ? "" : typeof value === "string" ? value : String(value);
+  const isTruncated = str.length > 28;
+  const content = value == null ? (
+    <span className="text-muted-foreground italic">-</span>
+  ) : (
+    formatValue(value, format)
+  );
+  return (
+    <td
+      className={cn(
+        "px-2 py-1 text-xs border-b border-border last:border-b-0 tabular-nums",
+        ["currency", "number", "percent", "rate", "days", "bps"].includes(format)
+          ? "text-right"
+          : "text-left",
+      )}
+      style={{ maxWidth }}
+      title={isTruncated ? str : undefined}
+    >
+      <span className={cn("block", isTruncated && "max-w-[160px] truncate")}>
+        {content}
+      </span>
+    </td>
+  );
+}
+
 export function EvidencePreviewTable({ evidence, maxRows = EVIDENCE_PREVIEW_MAX_ROWS }: EvidencePreviewTableProps) {
+  const [expanded, setExpanded] = useState(false);
   const columnFormats = useMemo(() => {
     const formats: Record<string, FieldFormat> = {};
     const agentFmts = evidence.columnFormats || {};
@@ -663,69 +724,68 @@ export function EvidencePreviewTable({ evidence, maxRows = EVIDENCE_PREVIEW_MAX_
   const isNumericFormat = (fmt: FieldFormat) =>
     ["currency", "number", "percent", "rate", "days", "bps"].includes(fmt);
 
-  const displayRows = evidence.rows.slice(0, maxRows);
+  const visibleRowCount = expanded ? Math.min(evidence.rows.length, maxRows) : EVIDENCE_PREVIEW_DEFAULT_ROWS;
+  const displayRows = evidence.rows.slice(0, visibleRowCount);
   const totalRows = evidence.rows.length;
-  const gridCols = { display: "grid" as const, gridTemplateColumns: `repeat(${evidence.fields.length}, minmax(70px, 1fr))` };
+  const hasMore = totalRows > visibleRowCount;
 
   if (totalRows === 0) return null;
 
   return (
-    <div className="rounded-md border overflow-hidden" role="grid" aria-label="Evidence preview table">
-      <div className="overflow-x-auto max-h-48 overflow-y-auto">
-        <div style={{ minWidth: "max-content" }}>
-          <div
-            className="sticky top-0 z-10 border-b bg-muted/80 text-xs"
-            style={gridCols}
-            role="row"
-          >
-            {evidence.fields.map((f) => {
-              const fmt = columnFormats[f] || "text";
-              return (
-                <div
-                  key={f}
-                  role="columnheader"
-                  className={cn(
-                    "px-2 py-1.5 font-medium whitespace-nowrap",
-                    isNumericFormat(fmt) ? "text-right" : "text-left",
-                  )}
-                >
-                  {humanizeKey(f)}
-                </div>
-              );
-            })}
-          </div>
-          {displayRows.map((row, i) => (
-            <div
-              key={i}
-              className={cn("border-b last:border-b-0 text-xs hover:bg-muted/30", gridCols)}
-              role="row"
-            >
+    <div className="rounded-md border overflow-hidden" role="region" aria-label="Evidence preview table">
+      <div className="overflow-x-auto overflow-y-visible">
+        <table className="w-full border-collapse text-xs" style={{ minWidth: `${evidence.fields.length * 90}px` }}>
+          <thead>
+            <tr className="sticky top-0 z-10 border-b bg-muted/80">
               {evidence.fields.map((f) => {
                 const fmt = columnFormats[f] || "text";
                 return (
-                  <div
+                  <th
                     key={f}
-                    role="gridcell"
                     className={cn(
-                      "px-2 py-1 whitespace-nowrap max-w-[160px] truncate",
-                      isNumericFormat(fmt) ? "text-right tabular-nums" : "text-left",
+                      "px-2 py-1.5 font-medium whitespace-nowrap text-left",
+                      isNumericFormat(fmt) && "text-right",
                     )}
                   >
-                    {row[f] == null ? (
-                      <span className="text-muted-foreground italic">-</span>
-                    ) : (
-                      formatValue(row[f], fmt)
-                    )}
-                  </div>
+                    {humanizeKey(f)}
+                  </th>
                 );
               })}
-            </div>
-          ))}
-        </div>
+            </tr>
+          </thead>
+          <tbody>
+            {displayRows.map((row, i) => (
+              <tr key={i} className="hover:bg-muted/30">
+                {evidence.fields.map((f) => {
+                  const fmt = columnFormats[f] || "text";
+                  return (
+                    <EvidenceCell
+                      key={f}
+                      value={row[f]}
+                      format={fmt}
+                    />
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
-      {totalRows > maxRows && (
-        <div className="px-2 py-1 text-[10px] text-muted-foreground bg-muted/30 border-t">
-          Showing {maxRows} of {totalRows} rows
+      {(hasMore || (expanded && totalRows > EVIDENCE_PREVIEW_DEFAULT_ROWS)) && (
+        <div className="flex items-center justify-between px-2 py-1.5 text-[10px] text-muted-foreground bg-muted/30 border-t">
+          <span>
+            Showing {displayRows.length} of {totalRows} rows
+          </span>
+          {!expanded && totalRows > EVIDENCE_PREVIEW_DEFAULT_ROWS && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 text-xs"
+              onClick={() => setExpanded(true)}
+            >
+              Show more
+            </Button>
+          )}
         </div>
       )}
     </div>

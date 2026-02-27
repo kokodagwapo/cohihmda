@@ -1201,7 +1201,7 @@ export function CohiWidgetRenderer({
   const effectiveDateFilter = isResearch ? null : (filterSyncEnabled ? (groupDateFilter ?? null) : localDateFilter);
   const effectiveDimFilters = isResearch ? null : (filterSyncEnabled ? (groupDimensionFilters ?? null) : null);
 
-  const { data, loading, error, refetch } = useCohiWidgetData(sql, tenantId, effectiveDateFilter, effectiveDimFilters);
+  const { data, loading, error, refetch } = useCohiWidgetData(sql, tenantId, effectiveDateFilter, effectiveDimFilters, isResearch);
   const effectiveConfig = { ...vizConfig, type: chartType };
 
   // Compute compatible viz types based on actual data shape

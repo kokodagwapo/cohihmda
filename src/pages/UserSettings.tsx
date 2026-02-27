@@ -1,22 +1,34 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { Navigation } from '@/components/layout/Navigation';
 import { AccountSection } from '@/components/settings/AccountSection';
 import { AppearanceSection } from '@/components/settings/AppearanceSection';
-import { User, Palette, ArrowLeft } from 'lucide-react';
+import { NotificationPreferencesSection } from '@/components/settings/NotificationPreferencesSection';
+import { User, Palette, Bell, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-type SettingsSection = 'account' | 'appearance';
+type SettingsSection = 'account' | 'appearance' | 'notifications';
 
 const sections: { id: SettingsSection; label: string; icon: typeof User; description: string }[] = [
   { id: 'account', label: 'Account', icon: User, description: 'Your account info and password' },
   { id: 'appearance', label: 'Appearance', icon: Palette, description: 'Theme and display preferences' },
+  { id: 'notifications', label: 'Notifications', icon: Bell, description: 'Email briefs and alerts' },
 ];
 
 export default function UserSettings() {
-  const [activeSection, setActiveSection] = useState<SettingsSection>('account');
+  const [searchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const [activeSection, setActiveSection] = useState<SettingsSection>(
+    tabParam === 'notifications' ? 'notifications' : tabParam === 'appearance' ? 'appearance' : 'account'
+  );
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (tabParam === 'notifications') setActiveSection('notifications');
+    else if (tabParam === 'appearance') setActiveSection('appearance');
+    else if (tabParam === 'account') setActiveSection('account');
+  }, [tabParam]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -78,6 +90,7 @@ export default function UserSettings() {
           <div className="flex-1 min-w-0">
             {activeSection === 'account' && <AccountSection />}
             {activeSection === 'appearance' && <AppearanceSection />}
+            {activeSection === 'notifications' && <NotificationPreferencesSection />}
           </div>
         </div>
       </div>

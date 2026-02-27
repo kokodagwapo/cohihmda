@@ -35,6 +35,7 @@ import {
   canAccessSession,
   type SSEEvent,
 } from "../services/research/orchestrator.js";
+import { startSSEHeartbeat } from "../utils/sseUtils.js";
 
 const router = Router();
 
@@ -48,23 +49,6 @@ function setupSSE(res: Response): void {
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
-}
-
-/**
- * Start a periodic SSE keepalive that sends a comment every 30s.
- * Prevents CloudFront / ALB from killing the connection during
- * long-running LLM calls where no data events are emitted.
- * Returns a cleanup function to stop the heartbeat.
- */
-function startSSEHeartbeat(res: Response): () => void {
-  const interval = setInterval(() => {
-    try {
-      res.write(":heartbeat\n\n");
-    } catch {
-      clearInterval(interval);
-    }
-  }, 30_000);
-  return () => clearInterval(interval);
 }
 
 function sseEmitter(res: Response, session: { events: SSEEvent[] }) {
@@ -110,11 +94,12 @@ router.post(
   async (req: AuthRequest, res: Response) => {
     try {
       const { tenantPool, tenantId } = getTenantContext(req);
-      const { topic, initialContext } = req.body || {};
+      const { topic, initialContext, mode } = req.body || {};
       const userId = req.userId || "";
       const userEmail = req.userEmail || "";
+      const researchMode = mode === "quick" ? "quick" : "deep";
 
-      const session = await createSession(tenantId, userId, userEmail, tenantPool, topic || undefined, initialContext || undefined);
+      const session = await createSession(tenantId, userId, userEmail, tenantPool, topic || undefined, initialContext || undefined, researchMode);
 
       console.log(`[Research] Created session ${session.id} for tenant ${tenantId}${topic ? `, topic: "${topic}"` : ""}${initialContext ? " (from insight)" : ""}`);
 
@@ -290,10 +275,14 @@ router.post(
     }
 
     setupSSE(res);
+    const stopHeartbeat = startSSEHeartbeat(res);
     const emit = sseEmitter(res, session);
 
     let clientDisconnected = false;
-    req.on("close", () => { clientDisconnected = true; });
+    req.on("close", () => {
+      clientDisconnected = true;
+      stopHeartbeat();
+    });
 
     try {
       await runFollowUp(id, question, tenantPool, emit);
@@ -303,6 +292,7 @@ router.post(
       }
     }
 
+    stopHeartbeat();
     if (!clientDisconnected) res.end();
   }
 );

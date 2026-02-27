@@ -152,7 +152,7 @@ export const ChannelSelector = ({
           }}
           disabled={loading}
         >
-          <SelectTrigger className="w-[160px] h-8 rounded-lg border-slate-200/80 dark:border-slate-600/80 bg-white/80 dark:bg-slate-800/80 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors duration-200 focus:ring-2 focus:ring-slate-400/20">
+          <SelectTrigger data-track="filter_channel" className="w-[160px] h-8 rounded-lg border-slate-200/80 dark:border-slate-600/80 bg-white/80 dark:bg-slate-800/80 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors duration-200 focus:ring-2 focus:ring-slate-400/20">
             {loading ? (
               <div className="flex items-center gap-2">
                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -202,6 +202,7 @@ export const ChannelSelector = ({
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
+                    data-track="filter_channel_view_toggle"
                     variant="ghost"
                     size="sm"
                     onClick={handleViewToggle}

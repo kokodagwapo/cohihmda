@@ -21,6 +21,7 @@ import {
   runOnboardingChat,
   type ChatEvent,
 } from "../services/onboarding/onboardingChatAgent.js";
+import { startSSEHeartbeat } from "../utils/sseUtils.js";
 
 const router = Router();
 
@@ -71,17 +72,19 @@ router.post(
           : "hybrid";
 
     setupSSE(res);
+    const stopHeartbeat = startSSEHeartbeat(res);
 
     let clientDisconnected = false;
     req.on("close", () => {
       clientDisconnected = true;
+      stopHeartbeat();
     });
 
     const emit = (event: AnalysisEvent) => {
       if (!clientDisconnected) sseWrite(res, event);
     };
 
-    // Heartbeat
+    // Initial heartbeat
     sseWrite(res, {
       type: "heartbeat",
       data: { connectionId, strategy },
@@ -109,6 +112,7 @@ router.post(
       }
     }
 
+    stopHeartbeat();
     if (!clientDisconnected) res.end();
   },
 );
@@ -171,6 +175,7 @@ router.post(
       }
     }
 
+    stopHeartbeat();
     if (!clientDisconnected) res.end();
   },
 );

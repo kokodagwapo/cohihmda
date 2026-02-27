@@ -59,6 +59,8 @@ interface CanvasWidgetCardProps {
   onEditWithCohi?: () => void;
   /** Called when the user wants to export this widget's data to Excel */
   onExportExcel?: () => void;
+  /** When true, show editing ring and badge (widget is being edited via Cohi) */
+  editing?: boolean;
 }
 
 export function CanvasWidgetCard({
@@ -81,6 +83,7 @@ export function CanvasWidgetCard({
   onWrapInGroup,
   onEditWithCohi,
   onExportExcel,
+  editing = false,
 }: CanvasWidgetCardProps) {
   const hasHideableSections = hideableSections.length > 0 && typeof onToggleSection === 'function';
   const hasLayerActions = typeof onBringToFront === 'function' || typeof onSendToBack === 'function';
@@ -100,9 +103,15 @@ export function CanvasWidgetCard({
       className={cn(
         'group relative h-full w-full rounded-2xl transition-all flex flex-col bg-white/95 dark:bg-slate-900/70 shadow-slate-200/60 dark:shadow-black/30',
         selected ? 'shadow-xl' : 'shadow-lg',
+        editing && 'ring-2 ring-indigo-500',
         className
       )}
     >
+      {editing && (
+        <div className="absolute top-2 left-2 z-10 px-1.5 py-0.5 rounded-md bg-indigo-500 text-white text-[10px] font-medium shadow-sm">
+          Editing
+        </div>
+      )}
       <div className="absolute top-9 right-1 z-10 opacity-0 group-hover:opacity-100 focus-within:opacity-100 hover:opacity-100 transition-opacity">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
