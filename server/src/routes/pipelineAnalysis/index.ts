@@ -2,7 +2,7 @@
  * Pipeline Analysis API Routes
  * GET /api/pipeline-analysis/snapshots?from=YYYY-MM-DD&to=YYYY-MM-DD
  * GET /api/pipeline-analysis/config - current snapshot day (1=Mon .. 5=Fri)
- * POST /api/pipeline-analysis/backfill - optional body { day_of_week: 1-5 } to set day, wipe, and recalc
+ * POST /api/pipeline-analysis/backfill - optional body { day_of_week: 1-5 } to set snapshot day only (no table)
  */
 
 import { Router } from "express";
@@ -14,8 +14,18 @@ import {
   recalculatePipelineSnapshots,
   getPipelineYearRange,
   getPipelineSnapshotDay,
+  getPipelineFilterOptions,
   type SnapshotDayOfWeek,
+  type StartDateField,
+  type PipelineSnapshotFilters,
 } from "../../services/dashboard/pipelineAnalysisService.js";
+
+function parseStringArray(q: unknown): string[] | undefined {
+  if (q == null) return undefined;
+  if (Array.isArray(q)) return q.filter((x) => typeof x === "string" && x.trim() !== "").map((x) => String(x).trim());
+  if (typeof q === "string" && q.trim() !== "") return [q.trim()];
+  return undefined;
+}
 
 const router = Router();
 
@@ -44,7 +54,7 @@ router.get(
 
 /**
  * GET /api/pipeline-analysis/range
- * Returns { minYear, maxYear } from pipeline_analysis_snapshots for building year-range dropdown.
+ * Returns { minYear, maxYear } from loans (application_date) for building year-range dropdown.
  */
 router.get(
   "/range",
@@ -65,6 +75,29 @@ router.get(
   }
 );
 
+/**
+ * GET /api/pipeline-analysis/filter-options
+ * Returns { loanTypes, loanPurposes, branches } for multi-select filter dropdowns.
+ */
+router.get(
+  "/filter-options",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const ctx = getTenantContext(req);
+      if (!ctx?.tenantPool) {
+        return res.status(400).json({ error: "Tenant context required" });
+      }
+      const options = await getPipelineFilterOptions(ctx.tenantPool);
+      return res.json(options);
+    } catch (error) {
+      if (handleDatabaseError(error, res, "Pipeline analysis filter options")) return;
+      return res.status(500).json({ error: "Failed to get filter options" });
+    }
+  }
+);
+
 router.get(
   "/snapshots",
   authenticateToken,
@@ -72,13 +105,24 @@ router.get(
   async (req: AuthRequest, res) => {
     const from = req.query.from as string | undefined;
     const to = req.query.to as string | undefined;
-    console.log("[Pipeline Analysis] GET /snapshots", { from, to });
+    const startDateFieldRaw = req.query.start_date_field as string | undefined;
+    const startDateField: StartDateField =
+      startDateFieldRaw === "lock_date" ? "lock_date"
+      : startDateFieldRaw === "processing_date" ? "processing_date"
+      : "application_date";
+    const loanTypes = parseStringArray(req.query.loan_type);
+    const loanPurposes = parseStringArray(req.query.loan_purpose);
+    const branches = parseStringArray(req.query.branch);
+    const filters: PipelineSnapshotFilters | undefined =
+      (loanTypes?.length ?? 0) > 0 || (loanPurposes?.length ?? 0) > 0 || (branches?.length ?? 0) > 0
+        ? { loanTypes, loanPurposes, branches }
+        : undefined;
     try {
       const ctx = getTenantContext(req);
       if (!ctx?.tenantPool) {
         return res.status(400).json({ error: "Tenant context required" });
       }
-      const rows = await getPipelineSnapshots(ctx.tenantPool, from, to);
+      const rows = await getPipelineSnapshots(ctx.tenantPool, from, to, startDateField, filters);
       const snapshots = rows.map((r) => ({
         date: typeof r.date === "string" ? r.date : r.date?.toISOString?.()?.slice(0, 10) ?? String(r.date),
         index: Number(r.index),
@@ -106,9 +150,8 @@ router.get(
 );
 
 /**
- * POST /api/pipeline-analysis/backfill
- * Populate pipeline_analysis_snapshots. If body.day_of_week (1-5) is provided, set config to that day,
- * truncate the snapshot table, and recalculate all snapshots for that weekday. Otherwise recalc using current config.
+ * If body.day_of_week (1-5) is provided, set config to that day only.
+ * Snapshots are always computed live from loans; no table is written.
  * Requires tenant context.
  */
 router.post(

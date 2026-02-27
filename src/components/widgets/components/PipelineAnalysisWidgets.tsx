@@ -1,0 +1,715 @@
+/**
+ * Pipeline Analysis workbench widgets (Table, Volume/Units Chart, LO Count Chart).
+ * Same data and layout as Pipeline Analysis page; uses default filters (application_date, no filters).
+ */
+
+import React, { useMemo } from 'react';
+import { format, parseISO } from 'date-fns';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  ComposedChart,
+  Bar,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  Legend,
+} from 'recharts';
+import { Loader2 } from 'lucide-react';
+import type { WidgetRenderProps } from '../registry/types';
+import type { PipelineSnapshotRow } from '@/hooks/usePipelineAnalysisData';
+import { WidgetShell } from './WidgetShell';
+
+// ---------------------------------------------------------------------------
+// Helpers (match PipelineAnalysisView)
+// ---------------------------------------------------------------------------
+
+function formatVolume(n: number): string {
+  return n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
+
+function formatPct(value: number | null): string {
+  if (value === null || value === undefined) return '—';
+  const sign = value >= 0 ? '+' : '';
+  return `${sign}${value.toFixed(2)}%`;
+}
+
+function ordinal(n: number): string {
+  const s = n % 10;
+  const t = n % 100;
+  if (s === 1 && t !== 11) return `${n}st`;
+  if (s === 2 && t !== 12) return `${n}nd`;
+  if (s === 3 && t !== 13) return `${n}rd`;
+  return `${n}th`;
+}
+
+const SNAPSHOT_DAY_LABELS: Record<number, string> = {
+  1: 'Monday',
+  2: 'Tuesday',
+  3: 'Wednesday',
+  4: 'Thursday',
+  5: 'Friday',
+};
+
+const ALL_WEEK_VALUES = Array.from({ length: 53 }, (_, i) => i + 1);
+const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+export interface PipelineAnalysisSource {
+  snapshots: PipelineSnapshotRow[];
+  range: { minYear: number | null; maxYear: number | null } | null;
+  config: { snapshot_day_of_week: number } | null;
+  /** Selected year range "YYYY-YYYY" (e.g. "2024-2025"). When set, table/chart years use this instead of range. */
+  yearRange?: string | null;
+  viewMode?: 'week' | 'month';
+  pctMetric?: 'volume' | 'units';
+}
+
+function snapshotsToByYearMonth(snapshots: PipelineSnapshotRow[]): Map<string, PipelineSnapshotRow> {
+  const byYearMonth = new Map<string, PipelineSnapshotRow>();
+  for (const row of snapshots) {
+    const d = typeof row.date === 'string' ? parseISO(row.date) : new Date(row.date);
+    const y = d.getFullYear();
+    const m = d.getMonth() + 1;
+    const key = `${y}-${m}`;
+    const existing = byYearMonth.get(key);
+    const rowStr = typeof row.date === 'string' ? row.date.slice(0, 10) : format(new Date(row.date), 'yyyy-MM-dd');
+    if (!existing || rowStr < (typeof existing.date === 'string' ? existing.date.slice(0, 10) : format(new Date(existing.date), 'yyyy-MM-dd'))) {
+      byYearMonth.set(key, row);
+    }
+  }
+  return byYearMonth;
+}
+
+function buildDerived(source: PipelineAnalysisSource | null) {
+  if (!source?.snapshots?.length) return null;
+  const snapshots = source.snapshots;
+  // Use selected year range when present; otherwise fall back to range (min/max from data) so labels match filter
+  let startYear: number;
+  let endYear: number;
+  if (source.yearRange) {
+    const parts = source.yearRange.split('-').map(Number);
+    if (parts.length >= 2 && !Number.isNaN(parts[0]) && !Number.isNaN(parts[1])) {
+      startYear = parts[0];
+      endYear = parts[1];
+    } else {
+      const minYear = source.range?.minYear ?? new Date().getFullYear() - 2;
+      const maxYear = source.range?.maxYear ?? new Date().getFullYear();
+      startYear = Math.max(minYear, maxYear - 1);
+      endYear = maxYear;
+    }
+  } else {
+    const minYear = source.range?.minYear ?? new Date().getFullYear() - 2;
+    const maxYear = source.range?.maxYear ?? new Date().getFullYear();
+    startYear = Math.max(minYear, maxYear - 1);
+    endYear = maxYear;
+  }
+  const years = [startYear, endYear];
+
+  const byYearWeekMap = new Map<string, PipelineSnapshotRow>();
+  for (const row of snapshots) byYearWeekMap.set(`${row.year}-${row.week_value}`, row);
+
+  const weekValues = ALL_WEEK_VALUES;
+
+  const byWeekPct = new Map<
+    number,
+    {
+      weeklyVolume: number | null;
+      monthlyVolume: number | null;
+      annualVolume: number | null;
+      weeklyUnits: number | null;
+      monthlyUnits: number | null;
+      annualUnits: number | null;
+    }
+  >();
+  for (const w of weekValues) {
+    let best: PipelineSnapshotRow | null = null;
+    for (const row of snapshots) {
+      if (row.week_value !== w) continue;
+      if (!best || row.year > best.year) best = row;
+    }
+    if (best && best.year === endYear)
+      byWeekPct.set(w, {
+        weeklyVolume: best.weekly_pct_change_volume,
+        monthlyVolume: best.monthly_pct_change_volume,
+        annualVolume: best.annual_pct_change_volume,
+        weeklyUnits: best.weekly_pct_change_units,
+        monthlyUnits: best.monthly_pct_change_units,
+        annualUnits: best.annual_pct_change_units,
+      });
+  }
+
+  const snapshotDayLabel =
+    snapshots[0]?.snapshot_weekday ?? SNAPSHOT_DAY_LABELS[source.config?.snapshot_day_of_week ?? 1] ?? 'Monday';
+
+  const viewMode = source.viewMode ?? 'week';
+  const byYearMonth = snapshotsToByYearMonth(snapshots);
+
+  const pipelineChartDataWeek = weekValues.map((w) => {
+    const point: Record<string, number | string | null> = { week: w, weekLabel: ordinal(w) };
+    years.forEach((y) => {
+      const row = byYearWeekMap.get(`${y}-${w}`);
+      point[`${y} Volume`] = row?.active_volume ?? null;
+      point[`${y} Units`] = row?.active_units ?? null;
+    });
+    return point;
+  });
+
+  const pipelineChartDataMonth = MONTH_LABELS.map((label, i) => {
+    const month = i + 1;
+    const point: Record<string, number | string | null> = { periodLabel: label, month };
+    years.forEach((y) => {
+      const row = byYearMonth.get(`${y}-${month}`);
+      point[`${y} Volume`] = row?.active_volume ?? null;
+      point[`${y} Units`] = row?.active_units ?? null;
+    });
+    return point;
+  });
+
+  const pipelineLoCountChartDataWeek = weekValues.map((w) => {
+    const point: Record<string, number | string | null> = { week: w, weekLabel: ordinal(w) };
+    years.forEach((y) => {
+      const row = byYearWeekMap.get(`${y}-${w}`);
+      point[`${y} LO Count`] = row?.active_lo_count ?? null;
+    });
+    return point;
+  });
+
+  const pipelineLoCountChartDataMonth = MONTH_LABELS.map((label, i) => {
+    const month = i + 1;
+    const point: Record<string, number | string | null> = { periodLabel: label, month };
+    years.forEach((y) => {
+      const row = byYearMonth.get(`${y}-${month}`);
+      point[`${y} LO Count`] = row?.active_lo_count ?? null;
+    });
+    return point;
+  });
+
+  const byMonthPct = new Map<
+    number,
+    { weeklyVolume: number | null; monthlyVolume: number | null; annualVolume: number | null; weeklyUnits: number | null; monthlyUnits: number | null; annualUnits: number | null }
+  >();
+  const mostRecentYear = endYear;
+  if (mostRecentYear != null) {
+    for (let month = 1; month <= 12; month++) {
+      const row = byYearMonth.get(`${mostRecentYear}-${month}`);
+      if (row) {
+        byMonthPct.set(month, {
+          weeklyVolume: row.weekly_pct_change_volume,
+          monthlyVolume: row.monthly_pct_change_volume,
+          annualVolume: row.annual_pct_change_volume,
+          weeklyUnits: row.weekly_pct_change_units,
+          monthlyUnits: row.monthly_pct_change_units,
+          annualUnits: row.annual_pct_change_units,
+        });
+      }
+    }
+  }
+
+  const pipelineChartData = viewMode === 'month' ? pipelineChartDataMonth : pipelineChartDataWeek;
+  const pipelineLoCountChartData = viewMode === 'month' ? pipelineLoCountChartDataMonth : pipelineLoCountChartDataWeek;
+  const chartXKey = viewMode === 'month' ? 'periodLabel' : 'weekLabel';
+
+  return {
+    years,
+    weekValues,
+    byYearWeek: byYearWeekMap,
+    byWeekPct,
+    byYearMonth,
+    byMonthPct,
+    snapshotDayLabel,
+    pipelineChartData,
+    pipelineLoCountChartData,
+    chartXKey,
+    viewMode,
+    pctMetric: source.pctMetric ?? 'volume',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Table Widget
+// ---------------------------------------------------------------------------
+
+export function PipelineAnalysisTableWidget({
+  data,
+  loading,
+  error,
+  width,
+  height,
+}: WidgetRenderProps<PipelineAnalysisSource>) {
+  const derived = useMemo(() => buildDerived(data), [data]);
+
+  if (loading) {
+    return (
+      <WidgetShell loading>
+        <div className="flex items-center justify-center gap-2 text-slate-500 h-full">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          <span className="text-sm">Loading…</span>
+        </div>
+      </WidgetShell>
+    );
+  }
+  if (error) {
+    return (
+      <WidgetShell error={error}>
+        <p className="text-sm text-destructive">{error}</p>
+      </WidgetShell>
+    );
+  }
+  if (!derived || derived.years.length === 0 || (derived.viewMode === 'week' ? derived.weekValues.length === 0 : false)) {
+    return (
+      <WidgetShell title="Pipeline Analysis Table">
+        <div className="text-muted-foreground text-sm py-8 text-center">No data to display.</div>
+      </WidgetShell>
+    );
+  }
+
+  const { years, byYearWeek, byWeekPct, snapshotDayLabel, viewMode, pctMetric } = derived;
+  const pctMetricLabel = pctMetric === 'volume' ? 'Volume' : 'Units';
+
+  if (viewMode === 'month') {
+    const { byYearMonth, byMonthPct } = derived;
+    return (
+      <WidgetShell title="Active Pipeline Analysis – Table">
+        <div className="h-full min-h-0 overflow-auto border rounded-md text-xs">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="min-w-[100px] sticky left-0 bg-background z-10 font-semibold" />
+                {MONTH_LABELS.map((label) => (
+                  <TableHead key={label} className="text-right whitespace-nowrap">
+                    {label}
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {years.map((year) => (
+                <TableRow key={`vol-${year}`}>
+                  <TableCell className="font-medium sticky left-0 bg-background z-10">{year} Volume</TableCell>
+                  {MONTH_LABELS.map((_, i) => {
+                    const month = i + 1;
+                    const row = byYearMonth.get(`${year}-${month}`);
+                    return (
+                      <TableCell key={`${year}-${month}`} className="text-right">
+                        {row != null ? formatVolume(row.active_volume) : '—'}
+                      </TableCell>
+                    );
+                  })}
+                </TableRow>
+              ))}
+              {years.map((year) => (
+                <TableRow key={`units-${year}`}>
+                  <TableCell className="font-medium sticky left-0 bg-background z-10">{year} Units</TableCell>
+                  {MONTH_LABELS.map((_, i) => {
+                    const month = i + 1;
+                    const row = byYearMonth.get(`${year}-${month}`);
+                    return (
+                      <TableCell key={`${year}-${month}`} className="text-right">
+                        {row != null ? row.active_units : '—'}
+                      </TableCell>
+                    );
+                  })}
+                </TableRow>
+              ))}
+              {years.map((year) => (
+                <TableRow key={`lo-${year}`}>
+                  <TableCell className="font-medium sticky left-0 bg-background z-10">{year} LO Count</TableCell>
+                  {MONTH_LABELS.map((_, i) => {
+                    const month = i + 1;
+                    const row = byYearMonth.get(`${year}-${month}`);
+                    return (
+                      <TableCell key={`${year}-${month}`} className="text-right">
+                        {row != null ? row.active_lo_count : '—'}
+                      </TableCell>
+                    );
+                  })}
+                </TableRow>
+              ))}
+              <TableRow>
+                <TableCell className="font-medium sticky left-0 bg-background z-10 text-muted-foreground">
+                  Weekly % ({pctMetricLabel})
+                </TableCell>
+                {MONTH_LABELS.map((_, i) => {
+                  const month = i + 1;
+                  const p = byMonthPct.get(month);
+                  const val = pctMetric === 'volume' ? p?.weeklyVolume : p?.weeklyUnits;
+                  return (
+                    <TableCell key={`w-${month}`} className="text-right">
+                      {val != null ? formatPct(val) : '—'}
+                    </TableCell>
+                  );
+                })}
+              </TableRow>
+              <TableRow>
+                <TableCell className="font-medium sticky left-0 bg-background z-10 text-muted-foreground">
+                  Monthly % ({pctMetricLabel})
+                </TableCell>
+                {MONTH_LABELS.map((_, i) => {
+                  const month = i + 1;
+                  const p = byMonthPct.get(month);
+                  const val = pctMetric === 'volume' ? p?.monthlyVolume : p?.monthlyUnits;
+                  return (
+                    <TableCell key={`m-${month}`} className="text-right">
+                      {val != null ? formatPct(val) : '—'}
+                    </TableCell>
+                  );
+                })}
+              </TableRow>
+              <TableRow>
+                <TableCell className="font-medium sticky left-0 bg-background z-10 text-muted-foreground">
+                  Annual % ({pctMetricLabel})
+                </TableCell>
+                {MONTH_LABELS.map((_, i) => {
+                  const month = i + 1;
+                  const p = byMonthPct.get(month);
+                  const val = pctMetric === 'volume' ? p?.annualVolume : p?.annualUnits;
+                  return (
+                    <TableCell key={`a-${month}`} className="text-right">
+                      {val != null ? formatPct(val) : '—'}
+                    </TableCell>
+                  );
+                })}
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
+      </WidgetShell>
+    );
+  }
+
+  const { weekValues } = derived;
+
+  return (
+    <WidgetShell title="Active Pipeline Analysis – Table">
+      <div className="h-full min-h-0 overflow-auto border rounded-md text-xs">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="min-w-[100px] sticky left-0 bg-background z-10 font-semibold" />
+              {weekValues.slice(0, 26).map((w) => (
+                <TableHead key={w} className="text-right whitespace-nowrap">
+                  {ordinal(w)} {snapshotDayLabel}
+                </TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {years.map((year) => (
+              <TableRow key={`vol-${year}`}>
+                <TableCell className="font-medium sticky left-0 bg-background z-10">{year} Volume</TableCell>
+                {weekValues.slice(0, 26).map((w) => {
+                  const row = byYearWeek.get(`${year}-${w}`);
+                  return (
+                    <TableCell key={`${year}-${w}`} className="text-right">
+                      {row != null ? formatVolume(row.active_volume) : '—'}
+                    </TableCell>
+                  );
+                })}
+              </TableRow>
+            ))}
+            {years.map((year) => (
+              <TableRow key={`units-${year}`}>
+                <TableCell className="font-medium sticky left-0 bg-background z-10">{year} Units</TableCell>
+                {weekValues.slice(0, 26).map((w) => {
+                  const row = byYearWeek.get(`${year}-${w}`);
+                  return (
+                    <TableCell key={`${year}-${w}`} className="text-right">
+                      {row != null ? row.active_units : '—'}
+                    </TableCell>
+                  );
+                })}
+              </TableRow>
+            ))}
+            {years.map((year) => (
+              <TableRow key={`lo-${year}`}>
+                <TableCell className="font-medium sticky left-0 bg-background z-10">{year} LO Count</TableCell>
+                {weekValues.slice(0, 26).map((w) => {
+                  const row = byYearWeek.get(`${year}-${w}`);
+                  return (
+                    <TableCell key={`${year}-${w}`} className="text-right">
+                      {row != null ? row.active_lo_count : '—'}
+                    </TableCell>
+                  );
+                })}
+              </TableRow>
+            ))}
+            <TableRow>
+              <TableCell className="font-medium sticky left-0 bg-background z-10 text-muted-foreground">
+                Weekly % ({pctMetricLabel})
+              </TableCell>
+              {weekValues.slice(0, 26).map((w) => {
+                const p = byWeekPct.get(w);
+                const val = pctMetric === 'volume' ? p?.weeklyVolume : p?.weeklyUnits;
+                return (
+                  <TableCell key={`w-${w}`} className="text-right">
+                    {val != null ? formatPct(val) : '—'}
+                  </TableCell>
+                );
+              })}
+            </TableRow>
+            <TableRow>
+              <TableCell className="font-medium sticky left-0 bg-background z-10 text-muted-foreground">
+                Monthly % ({pctMetricLabel})
+              </TableCell>
+              {weekValues.slice(0, 26).map((w) => {
+                const p = byWeekPct.get(w);
+                const val = pctMetric === 'volume' ? p?.monthlyVolume : p?.monthlyUnits;
+                return (
+                  <TableCell key={`m-${w}`} className="text-right">
+                    {val != null ? formatPct(val) : '—'}
+                  </TableCell>
+                );
+              })}
+            </TableRow>
+            <TableRow>
+              <TableCell className="font-medium sticky left-0 bg-background z-10 text-muted-foreground">
+                Annual % ({pctMetricLabel})
+              </TableCell>
+              {weekValues.slice(0, 26).map((w) => {
+                const p = byWeekPct.get(w);
+                const val = pctMetric === 'volume' ? p?.annualVolume : p?.annualUnits;
+                return (
+                  <TableCell key={`a-${w}`} className="text-right">
+                    {val != null ? formatPct(val) : '—'}
+                  </TableCell>
+                );
+              })}
+            </TableRow>
+          </TableBody>
+        </Table>
+      </div>
+    </WidgetShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Volume & Units Chart Widget
+// ---------------------------------------------------------------------------
+
+export function PipelineAnalysisChartWidget({
+  data,
+  loading,
+  error,
+  width,
+  height,
+}: WidgetRenderProps<PipelineAnalysisSource>) {
+  const derived = useMemo(() => buildDerived(data), [data]);
+
+  if (loading) {
+    return (
+      <WidgetShell loading>
+        <div className="flex items-center justify-center gap-2 text-slate-500 h-full">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          <span className="text-sm">Loading…</span>
+        </div>
+      </WidgetShell>
+    );
+  }
+  if (error) {
+    return (
+      <WidgetShell error={error}>
+        <p className="text-sm text-destructive">{error}</p>
+      </WidgetShell>
+    );
+  }
+  if (!derived || derived.pipelineChartData.length === 0 || derived.years.length < 1) {
+    return (
+      <WidgetShell title="Pipeline Volume & Units">
+        <div className="text-muted-foreground text-sm py-8 text-center">No data to display.</div>
+      </WidgetShell>
+    );
+  }
+
+  const { years, pipelineChartData, snapshotDayLabel, chartXKey } = derived;
+  const chartHeight = Math.max(280, (height ?? 300) - 48);
+
+  return (
+    <WidgetShell title="Total Pipeline Volume & Units">
+      <div className="p-2 flex-1 min-h-0">
+        <ResponsiveContainer width="100%" height={chartHeight}>
+          <ComposedChart
+            data={pipelineChartData}
+            margin={{ top: 8, right: 8, left: 8, bottom: 8 }}
+            barCategoryGap="20%"
+            barGap={2}
+          >
+            <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
+            <XAxis
+              dataKey={chartXKey}
+              tick={{ fontSize: 10 }}
+              label={{ value: chartXKey === 'periodLabel' ? 'Month' : 'Week', position: 'insideBottom', offset: -6, fontSize: 11 }}
+            />
+            <YAxis
+              yAxisId="volume"
+              orientation="left"
+              width={44}
+              tick={{ fontSize: 9 }}
+              tickFormatter={(v) =>
+                v >= 1e6 ? `${(v / 1e6).toFixed(0)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(0)}K` : String(v)
+              }
+              label={{ value: 'Volume', angle: -90, position: 'insideLeft', fontSize: 10 }}
+            />
+            <YAxis yAxisId="units" orientation="right" width={36} tick={{ fontSize: 9 }} />
+            <Tooltip
+              content={({ active, payload }) => {
+                if (!active || !payload?.length) return null;
+                const p = payload[0]?.payload;
+                if (!p) return null;
+                const title = chartXKey === 'periodLabel' ? (p.periodLabel as string) : `${p.weekLabel} ${snapshotDayLabel}`;
+                return (
+                  <div className="rounded-lg border border-border bg-background px-2 py-1.5 shadow-md text-xs">
+                    <p className="font-medium mb-1">{title}</p>
+                    {years.map((y) => (
+                      <div key={y} className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+                        <span className="text-muted-foreground">{y} Volume</span>
+                        <span className="tabular-nums">
+                          {p[`${y} Volume`] != null ? formatVolume(p[`${y} Volume`] as number) : '—'}
+                        </span>
+                        <span className="text-muted-foreground">{y} Units</span>
+                        <span className="tabular-nums">{p[`${y} Units`] != null ? String(p[`${y} Units`]) : '—'}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              }}
+            />
+            <Legend wrapperStyle={{ paddingTop: 4 }} formatter={(v) => v} iconType="rect" iconSize={8} />
+            {years.map((y, i) => (
+              <Bar
+                key={`${y}-volume`}
+                yAxisId="volume"
+                dataKey={`${y} Volume`}
+                name={`${y} Volume`}
+                fill={i === 0 ? '#00008f' : '#52b852'}
+                radius={[2, 2, 0, 0]}
+              />
+            ))}
+            {years.map((y, i) => (
+              <Line
+                key={`${y}-units`}
+                yAxisId="units"
+                type="monotone"
+                dataKey={`${y} Units`}
+                name={`${y} Units`}
+                stroke={i === 0 ? '#8080c7' : '#a9dca9'}
+                strokeWidth={1.5}
+                dot={{ r: 2 }}
+                connectNulls
+              />
+            ))}
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+    </WidgetShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// LO Count Chart Widget
+// ---------------------------------------------------------------------------
+
+export function PipelineAnalysisLOCountWidget({
+  data,
+  loading,
+  error,
+  width,
+  height,
+}: WidgetRenderProps<PipelineAnalysisSource>) {
+  const derived = useMemo(() => buildDerived(data), [data]);
+
+  if (loading) {
+    return (
+      <WidgetShell loading>
+        <div className="flex items-center justify-center gap-2 text-slate-500 h-full">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          <span className="text-sm">Loading…</span>
+        </div>
+      </WidgetShell>
+    );
+  }
+  if (error) {
+    return (
+      <WidgetShell error={error}>
+        <p className="text-sm text-destructive">{error}</p>
+      </WidgetShell>
+    );
+  }
+  if (!derived || derived.pipelineLoCountChartData.length === 0 || derived.years.length < 1) {
+    return (
+      <WidgetShell title="LO Count">
+        <div className="text-muted-foreground text-sm py-8 text-center">No data to display.</div>
+      </WidgetShell>
+    );
+  }
+
+  const { years, pipelineLoCountChartData, snapshotDayLabel, chartXKey } = derived;
+  const chartHeight = Math.max(280, (height ?? 300) - 48);
+
+  return (
+    <WidgetShell title="LO Count by Week">
+      <div className="p-2 flex-1 min-h-0">
+        <ResponsiveContainer width="100%" height={chartHeight}>
+          <ComposedChart
+            data={pipelineLoCountChartData}
+            margin={{ top: 8, right: 8, left: 8, bottom: 8 }}
+            barCategoryGap="20%"
+            barGap={2}
+          >
+            <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
+            <XAxis
+              dataKey={chartXKey}
+              tick={{ fontSize: 10 }}
+              label={{ value: chartXKey === 'periodLabel' ? 'Month' : 'Week', position: 'insideBottom', offset: -6, fontSize: 11 }}
+            />
+            <YAxis
+              width={36}
+              allowDecimals={false}
+              tick={{ fontSize: 9 }}
+              label={{ value: 'LO Count', angle: -90, position: 'insideLeft', fontSize: 10 }}
+            />
+            <Tooltip
+              content={({ active, payload }) => {
+                if (!active || !payload?.length) return null;
+                const p = payload[0]?.payload;
+                if (!p) return null;
+                const title = chartXKey === 'periodLabel' ? (p.periodLabel as string) : `${p.weekLabel} ${snapshotDayLabel}`;
+                return (
+                  <div className="rounded-lg border border-border bg-background px-2 py-1.5 shadow-md text-xs">
+                    <p className="font-medium mb-1">{title}</p>
+                    {years.map((y) => (
+                      <div key={y} className="flex justify-between gap-3">
+                        <span className="text-muted-foreground">{y} LO Count</span>
+                        <span className="font-medium tabular-nums">
+                          {p[`${y} LO Count`] != null ? String(p[`${y} LO Count`]) : '—'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              }}
+            />
+            <Legend wrapperStyle={{ paddingTop: 4 }} formatter={(v) => v} iconType="rect" iconSize={8} />
+            {years.map((y, i) => (
+              <Bar
+                key={`${y}-lo`}
+                dataKey={`${y} LO Count`}
+                name={`${y} LO Count`}
+                fill={i === 0 ? '#00008f' : '#52b852'}
+                radius={[2, 2, 0, 0]}
+              />
+            ))}
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+    </WidgetShell>
+  );
+}

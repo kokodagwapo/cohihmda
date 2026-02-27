@@ -25,6 +25,7 @@ import { workflowConversionWidgets } from './workflowConversionWidgets';
 import { highPerformersWidgets } from './highPerformersWidgets';
 import { actorsWidgets } from './actorsWidgets';
 import { pricingDashboardWidgets } from './pricingDashboardWidgets';
+import { pipelineAnalysisWidgets } from './pipelineAnalysisWidgets';
 
 // ---------------------------------------------------------------------------
 // Aggregate all widgets
@@ -50,6 +51,7 @@ const allWidgets: WidgetDefinition[] = [
   ...highPerformersWidgets,
   ...actorsWidgets,
   ...pricingDashboardWidgets,
+  ...pipelineAnalysisWidgets,
 ];
 
 // ---------------------------------------------------------------------------

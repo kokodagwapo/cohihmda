@@ -685,6 +685,14 @@ const SECTION_TO_WIDGETS: Record<
       "pricing-dashboard-entity-detail",
     ],
   },
+  pipelineAnalysis: {
+    sectionType: "pipeline-analysis",
+    widgetIds: [
+      "pipeline-analysis-table",
+      "pipeline-analysis-chart",
+      "pipeline-analysis-lo-count",
+    ],
+  },
 };
 
 /**

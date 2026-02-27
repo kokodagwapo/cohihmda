@@ -3,15 +3,37 @@
  * Weekly snapshots on a configurable weekday (Mon–Fri): active units/volume/LO count and percent change.
  *
  * A loan is counted as "active" on snapshot date D as follows:
- * - Active loans (current_loan_status = 'Active Loan'): application_date < D (snapshot date is after application).
- * - Non-active loans (any other current_loan_status): application_date <= D and we use only current_status_date
+ * - Active loans (current_loan_status = 'Active Loan'): start_date < D (snapshot date is after start).
+ * - Non-active loans (any other current_loan_status): start_date <= D and we use only current_status_date
  *   for the end date — loan is active on D if current_status_date IS NULL OR current_status_date > D.
+ *
+ * Start date is either application_date, lock_date, or processing_date (configurable via start_date_field;
+ * lock_date / processing_date only count loans that have that date set).
  */
 
 import pg from "pg";
 
 /** Snapshot day of week: 1 = Monday, 2 = Tuesday, ... 5 = Friday. */
 export type SnapshotDayOfWeek = 1 | 2 | 3 | 4 | 5;
+
+/** Which date field to use as the "start" date for counting a loan in a snapshot. */
+export type StartDateField = "application_date" | "lock_date" | "processing_date";
+
+/** Optional filters applied before counting (all selected = no filter). When any is present, snapshots are computed on the fly. */
+export interface PipelineSnapshotFilters {
+  loanTypes?: string[];
+  loanPurposes?: string[];
+  branches?: string[];
+}
+
+export function hasPipelineFilters(f: PipelineSnapshotFilters | null | undefined): boolean {
+  if (!f) return false;
+  return (
+    (f.loanTypes != null && f.loanTypes.length > 0) ||
+    (f.loanPurposes != null && f.loanPurposes.length > 0) ||
+    (f.branches != null && f.branches.length > 0)
+  );
+}
 
 const SNAPSHOT_DAY_NAMES: Record<SnapshotDayOfWeek, string> = {
   1: "Monday",
@@ -125,27 +147,83 @@ function getMondayOnOrBefore(d: Date): Date {
   return getSnapshotDateOnOrBefore(d, 1);
 }
 
+/** Get distinct loan_type, loan_purpose, branch from loans (for filter dropdowns). Excludes archived. */
+export async function getPipelineFilterOptions(
+  pool: pg.Pool
+): Promise<{ loanTypes: string[]; loanPurposes: string[]; branches: string[] }> {
+  const [typesRes, purposesRes, branchesRes] = await Promise.all([
+    pool.query<{ loan_type: string }>(
+      `SELECT DISTINCT loan_type FROM public.loans WHERE (is_archived IS NULL OR is_archived IS NOT TRUE) AND loan_type IS NOT NULL AND TRIM(loan_type) <> '' ORDER BY loan_type`
+    ),
+    pool.query<{ loan_purpose: string }>(
+      `SELECT DISTINCT loan_purpose FROM public.loans WHERE (is_archived IS NULL OR is_archived IS NOT TRUE) AND loan_purpose IS NOT NULL AND TRIM(loan_purpose) <> '' ORDER BY loan_purpose`
+    ),
+    pool.query<{ branch: string }>(
+      `SELECT DISTINCT branch FROM public.loans WHERE (is_archived IS NULL OR is_archived IS NOT TRUE) AND branch IS NOT NULL AND TRIM(branch) <> '' ORDER BY branch`
+    ),
+  ]);
+  return {
+    loanTypes: typesRes.rows.map((r) => String(r.loan_type).trim()),
+    loanPurposes: purposesRes.rows.map((r) => String(r.loan_purpose).trim()),
+    branches: branchesRes.rows.map((r) => String(r.branch).trim()),
+  };
+}
+
 /** Compute active units, volume, and distinct LO count for a single snapshot date. */
 export async function computeSnapshotForDate(
   pool: pg.Pool,
-  snapshotDate: Date
+  snapshotDate: Date,
+  startDateField: StartDateField = "application_date",
+  filters?: PipelineSnapshotFilters | null
 ): Promise<{ activeUnits: number; activeVolume: number; activeLoCount: number }> {
   const dateStr = formatDateForSql(snapshotDate);
+  const useLockDate = startDateField === "lock_date";
+  const useProcessingDate = startDateField === "processing_date";
+  const startCol =
+    useLockDate ? "l.lock_date"
+    : useProcessingDate ? "l.processing_date"
+    : "l.application_date";
+  const startNotNull =
+    useLockDate ? "l.lock_date IS NOT NULL"
+    : useProcessingDate ? "l.processing_date IS NOT NULL"
+    : "l.application_date IS NOT NULL";
+
+  const conditions: string[] = [
+    startNotNull,
+    "(l.is_archived IS NULL OR l.is_archived IS NOT TRUE)",
+    `(
+      (TRIM(COALESCE(l.current_loan_status, '')) = 'Active Loan'
+       AND ((${startCol})::date < $1::date))
+      OR
+      (TRIM(COALESCE(l.current_loan_status, '')) != 'Active Loan'
+       AND ((${startCol})::date <= $1::date)
+       AND (l.current_status_date IS NULL OR (l.current_status_date::date > $1::date)))
+    )`,
+  ];
+  const params: unknown[] = [dateStr];
+  let nextParam = 2;
+  if (filters?.loanTypes != null && filters.loanTypes.length > 0) {
+    conditions.push(`l.loan_type = ANY($${nextParam}::text[])`);
+    params.push(filters.loanTypes);
+    nextParam++;
+  }
+  if (filters?.loanPurposes != null && filters.loanPurposes.length > 0) {
+    conditions.push(`l.loan_purpose = ANY($${nextParam}::text[])`);
+    params.push(filters.loanPurposes);
+    nextParam++;
+  }
+  if (filters?.branches != null && filters.branches.length > 0) {
+    conditions.push(`l.branch = ANY($${nextParam}::text[])`);
+    params.push(filters.branches);
+  }
+
+  const whereClause = conditions.join(" AND ");
   const sql = `
     WITH active_loans AS (
       SELECT l.loan_amount,
              COALESCE(l.loan_officer_id::text, NULLIF(TRIM(l.loan_officer), '')) AS lo_key
       FROM public.loans l
-      WHERE l.application_date IS NOT NULL
-        AND (l.is_archived IS NULL OR l.is_archived IS NOT TRUE)
-        AND (
-          (TRIM(COALESCE(l.current_loan_status, '')) = 'Active Loan'
-           AND (l.application_date::date < $1::date))
-          OR
-          (TRIM(COALESCE(l.current_loan_status, '')) != 'Active Loan'
-           AND (l.application_date::date <= $1::date)
-           AND (l.current_status_date IS NULL OR (l.current_status_date::date > $1::date)))
-        )
+      WHERE ${whereClause}
     )
     SELECT
       COUNT(*)::int AS active_units,
@@ -153,7 +231,7 @@ export async function computeSnapshotForDate(
       COUNT(DISTINCT CASE WHEN lo_key IS NOT NULL AND lo_key <> '' THEN lo_key END)::int AS active_lo_count
     FROM active_loans
   `;
-  const result = await pool.query(sql, [dateStr]);
+  const result = await pool.query(sql, params);
   const row = result.rows[0];
   return {
     activeUnits: row ? parseInt(row.active_units, 10) || 0 : 0,
@@ -208,41 +286,81 @@ function getWeekValue(d: Date): number {
   return getWeekValueForDay(d, 1);
 }
 
-/** Backfill: optionally set snapshot day, wipe table, then compute and insert all snapshots for the configured weekday. */
+/** Backfill: when day_of_week is provided, only update snapshot day config (no table). All snapshot data is computed live. */
 export async function recalculatePipelineSnapshots(
   pool: pg.Pool,
   dayOfWeek?: SnapshotDayOfWeek
 ): Promise<void> {
   if (dayOfWeek != null) {
     await setPipelineSnapshotDay(pool, dayOfWeek);
-    await pool.query(`TRUNCATE TABLE public.pipeline_analysis_snapshots`);
   }
+}
 
+/**
+ * No-op: pipeline snapshots are 100% live from loans. Kept for API compatibility (e.g. losSyncScheduler).
+ */
+export async function insertPipelineSnapshotForLatestMondayIfMissing(pool: pg.Pool): Promise<void> {
+  void pool;
+}
+
+/** Get snapshots in range for API. from/to are optional ISO date strings. All snapshots are computed live from loans (no table). */
+export async function getPipelineSnapshots(
+  pool: pg.Pool,
+  from?: string,
+  to?: string,
+  startDateField: StartDateField = "application_date",
+  filters?: PipelineSnapshotFilters | null
+): Promise<PipelineSnapshotRow[]> {
+  return getPipelineSnapshotsComputed(pool, from, to, startDateField, filters ?? undefined);
+}
+
+/** Compute snapshots on the fly from loans. Used for all snapshot requests (100% live, no table). */
+async function getPipelineSnapshotsComputed(
+  pool: pg.Pool,
+  from?: string,
+  to?: string,
+  startDateField: StartDateField = "lock_date",
+  filters?: PipelineSnapshotFilters
+): Promise<PipelineSnapshotRow[]> {
   const snapshotDay = await getPipelineSnapshotDay(pool);
+  const dayName = SNAPSHOT_DAY_NAMES[snapshotDay];
 
-  const rangeResult = await pool.query(
-    `SELECT MIN(application_date) AS min_app FROM public.loans WHERE application_date IS NOT NULL`
-  );
-  const minApp = rangeResult.rows[0]?.min_app;
-  if (!minApp) {
-    return;
+  let startDate: Date;
+  let endDate: Date;
+  if (from && to) {
+    startDate = new Date(from);
+    endDate = new Date(to);
+  } else {
+    const startCol =
+      startDateField === "lock_date"
+        ? "lock_date"
+        : startDateField === "processing_date"
+          ? "processing_date"
+          : "application_date";
+    const rangeResult = await pool.query(
+      `SELECT MIN(${startCol}) AS min_d FROM public.loans WHERE ${startCol} IS NOT NULL`
+    );
+    const minD = rangeResult.rows[0]?.min_d;
+    if (!minD) return [];
+    startDate = getSnapshotDateOnOrBefore(new Date(minD), snapshotDay);
+    endDate = getLatestSnapshotDateBeforeToday(snapshotDay);
+    if (startDate > endDate) return [];
   }
-
-  const startSnapshot = getSnapshotDateOnOrBefore(new Date(minApp), snapshotDay);
+  startDate.setHours(0, 0, 0, 0);
+  endDate.setHours(0, 0, 0, 0);
   const endSnapshot = getLatestSnapshotDateBeforeToday(snapshotDay);
-  if (startSnapshot > endSnapshot) {
-    return;
-  }
+  if (endDate > endSnapshot) endDate = new Date(endSnapshot);
 
-  const dates = getSnapshotDatesInRange(startSnapshot, endSnapshot, snapshotDay);
-  if (dates.length === 0) return;
+  const dates = getSnapshotDatesInRange(startDate, endDate, snapshotDay);
+  if (dates.length === 0) return [];
 
   const snapshots: Array<{ snapshotDate: Date; activeUnits: number; activeVolume: number; activeLoCount: number }> = [];
   for (const d of dates) {
-    const { activeUnits, activeVolume, activeLoCount } = await computeSnapshotForDate(pool, d);
+    const { activeUnits, activeVolume, activeLoCount } = await computeSnapshotForDate(pool, d, startDateField, filters);
     snapshots.push({ snapshotDate: d, activeUnits, activeVolume, activeLoCount });
   }
 
+  const rows: PipelineSnapshotRow[] = [];
   for (let i = 0; i < snapshots.length; i++) {
     const s = snapshots[i];
     const prevWeekVolume = i >= 1 ? snapshots[i - 1].activeVolume : null;
@@ -278,204 +396,37 @@ export async function recalculatePipelineSnapshots(
         : null;
 
     const dateStr = formatDateForSql(s.snapshotDate);
-    const year = getYear(s.snapshotDate);
-    const weekValue = getWeekValueForDay(s.snapshotDate, snapshotDay);
-    const snapshotIndex = i + 1;
-    const dayName = SNAPSHOT_DAY_NAMES[snapshotDay];
-
-    await pool.query(
-      `INSERT INTO public.pipeline_analysis_snapshots (
-        "date", index, snapshot_weekday, year, week_value, active_units, active_volume, active_lo_count,
-        weekly_pct_change_volume, monthly_pct_change_volume, annual_pct_change_volume,
-        weekly_pct_change_units, monthly_pct_change_units, annual_pct_change_units,
-        calculated_at
-      ) VALUES ($1::date, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
-      ON CONFLICT ("date") DO UPDATE SET
-        index = EXCLUDED.index,
-        snapshot_weekday = EXCLUDED.snapshot_weekday,
-        year = EXCLUDED.year,
-        week_value = EXCLUDED.week_value,
-        active_units = EXCLUDED.active_units,
-        active_volume = EXCLUDED.active_volume,
-        active_lo_count = EXCLUDED.active_lo_count,
-        weekly_pct_change_volume = EXCLUDED.weekly_pct_change_volume,
-        monthly_pct_change_volume = EXCLUDED.monthly_pct_change_volume,
-        annual_pct_change_volume = EXCLUDED.annual_pct_change_volume,
-        weekly_pct_change_units = EXCLUDED.weekly_pct_change_units,
-        monthly_pct_change_units = EXCLUDED.monthly_pct_change_units,
-        annual_pct_change_units = EXCLUDED.annual_pct_change_units,
-        calculated_at = NOW()`,
-      [
-        dateStr,
-        snapshotIndex,
-        dayName,
-        year,
-        weekValue,
-        s.activeUnits,
-        s.activeVolume,
-        s.activeLoCount,
-        weeklyPctVolume,
-        monthlyPctVolume,
-        annualPctVolume,
-        weeklyPctUnits,
-        monthlyPctUnits,
-        annualPctUnits,
-      ]
-    );
+    rows.push({
+      date: dateStr,
+      index: i + 1,
+      snapshot_weekday: dayName,
+      year: getYear(s.snapshotDate),
+      week_value: getWeekValueForDay(s.snapshotDate, snapshotDay),
+      active_units: s.activeUnits,
+      active_volume: s.activeVolume,
+      active_lo_count: s.activeLoCount,
+      weekly_pct_change_volume: weeklyPctVolume,
+      monthly_pct_change_volume: monthlyPctVolume,
+      annual_pct_change_volume: annualPctVolume,
+      weekly_pct_change_units: weeklyPctUnits,
+      monthly_pct_change_units: monthlyPctUnits,
+      annual_pct_change_units: annualPctUnits,
+      calculated_at: null,
+    });
   }
+  return rows;
 }
 
-/**
- * Incremental: if the row for the most recently completed snapshot date (for configured day) does NOT exist, compute and insert it.
- */
-export async function insertPipelineSnapshotForLatestMondayIfMissing(pool: pg.Pool): Promise<void> {
-  const snapshotDay = await getPipelineSnapshotDay(pool);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  if (today.getDay() === snapshotDay) {
-    return;
-  }
-
-  const latestSnapshot = getLatestSnapshotDateBeforeToday(snapshotDay);
-  const dateStr = formatDateForSql(latestSnapshot);
-
-  const existsResult = await pool.query(
-    `SELECT 1 FROM public.pipeline_analysis_snapshots WHERE "date" = $1::date`,
-    [dateStr]
-  );
-  if (existsResult.rowCount && existsResult.rowCount > 0) {
-    return;
-  }
-
-  const { activeUnits, activeVolume, activeLoCount } = await computeSnapshotForDate(pool, latestSnapshot);
-
-  const prevWeekResult = await pool.query(
-    `SELECT active_volume, active_units FROM public.pipeline_analysis_snapshots
-     WHERE "date" = $1::date - INTERVAL '7 days'`,
-    [dateStr]
-  );
-  const prevMonthResult = await pool.query(
-    `SELECT active_volume, active_units FROM public.pipeline_analysis_snapshots
-     WHERE "date" = $1::date - INTERVAL '28 days'`,
-    [dateStr]
-  );
-  const prevYearResult = await pool.query(
-    `SELECT active_volume, active_units FROM public.pipeline_analysis_snapshots
-     WHERE "date" = $1::date - INTERVAL '364 days'`,
-    [dateStr]
-  );
-
-  const prevWeekVolume = prevWeekResult.rows[0]?.active_volume != null ? Number(prevWeekResult.rows[0].active_volume) : null;
-  const prevMonthVolume = prevMonthResult.rows[0]?.active_volume != null ? Number(prevMonthResult.rows[0].active_volume) : null;
-  const prevYearVolume = prevYearResult.rows[0]?.active_volume != null ? Number(prevYearResult.rows[0].active_volume) : null;
-  const prevWeekUnits = prevWeekResult.rows[0]?.active_units != null ? Number(prevWeekResult.rows[0].active_units) : null;
-  const prevMonthUnits = prevMonthResult.rows[0]?.active_units != null ? Number(prevMonthResult.rows[0].active_units) : null;
-  const prevYearUnits = prevYearResult.rows[0]?.active_units != null ? Number(prevYearResult.rows[0].active_units) : null;
-
-  const weeklyPctVolume =
-    prevWeekVolume != null && prevWeekVolume !== 0 ? ((activeVolume - prevWeekVolume) / prevWeekVolume) * 100 : null;
-  const monthlyPctVolume =
-    prevMonthVolume != null && prevMonthVolume !== 0 ? ((activeVolume - prevMonthVolume) / prevMonthVolume) * 100 : null;
-  const annualPctVolume =
-    prevYearVolume != null && prevYearVolume !== 0 ? ((activeVolume - prevYearVolume) / prevYearVolume) * 100 : null;
-  const weeklyPctUnits =
-    prevWeekUnits != null && prevWeekUnits !== 0 ? ((activeUnits - prevWeekUnits) / prevWeekUnits) * 100 : null;
-  const monthlyPctUnits =
-    prevMonthUnits != null && prevMonthUnits !== 0 ? ((activeUnits - prevMonthUnits) / prevMonthUnits) * 100 : null;
-  const annualPctUnits =
-    prevYearUnits != null && prevYearUnits !== 0 ? ((activeUnits - prevYearUnits) / prevYearUnits) * 100 : null;
-
-  const year = getYear(latestSnapshot);
-  const weekValue = getWeekValueForDay(latestSnapshot, snapshotDay);
-  const dayName = SNAPSHOT_DAY_NAMES[snapshotDay];
-
-  const maxIndexResult = await pool.query(
-    `SELECT COALESCE(MAX(index), 0) AS mx FROM public.pipeline_analysis_snapshots`
-  );
-  const snapshotIndex = (maxIndexResult.rows[0]?.mx ?? 0) + 1;
-
-  await pool.query(
-    `INSERT INTO public.pipeline_analysis_snapshots (
-      "date", index, snapshot_weekday, year, week_value, active_units, active_volume, active_lo_count,
-      weekly_pct_change_volume, monthly_pct_change_volume, annual_pct_change_volume,
-      weekly_pct_change_units, monthly_pct_change_units, annual_pct_change_units,
-      calculated_at
-    ) VALUES ($1::date, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
-    ON CONFLICT ("date") DO NOTHING`,
-    [dateStr, snapshotIndex, dayName, year, weekValue, activeUnits, activeVolume, activeLoCount, weeklyPctVolume, monthlyPctVolume, annualPctVolume, weeklyPctUnits, monthlyPctUnits, annualPctUnits]
-  );
-}
-
-/** Get snapshots in range for API. from/to are optional ISO date strings. */
-export async function getPipelineSnapshots(
-  pool: pg.Pool,
-  from?: string,
-  to?: string
-): Promise<PipelineSnapshotRow[]> {
-  const conditions: string[] = [];
-  const params: unknown[] = [];
-  if (from) {
-    params.push(from);
-    conditions.push(`"date" >= $${params.length}::date`);
-  }
-  if (to) {
-    params.push(to);
-    conditions.push(`"date" <= $${params.length}::date`);
-  }
-  const whereClause = conditions.length > 0 ? ` WHERE ${conditions.join(" AND ")}` : "";
-  const orderClause = ` ORDER BY "date" ASC`;
-
-  const sqlWithWeekday = `SELECT "date", index, snapshot_weekday, year, week_value, active_units, active_volume, active_lo_count,
-    weekly_pct_change_volume, monthly_pct_change_volume, annual_pct_change_volume,
-    weekly_pct_change_units, monthly_pct_change_units, annual_pct_change_units,
-    calculated_at
-    FROM public.pipeline_analysis_snapshots${whereClause}${orderClause}`;
-
-  const sqlWithoutWeekday = `SELECT "date", index, year, week_value, active_units, active_volume, active_lo_count,
-    weekly_pct_change_volume, monthly_pct_change_volume, annual_pct_change_volume,
-    weekly_pct_change_units, monthly_pct_change_units, annual_pct_change_units,
-    calculated_at
-    FROM public.pipeline_analysis_snapshots${whereClause}${orderClause}`;
-
-  let result: pg.QueryResult;
-  try {
-    result = await pool.query(sqlWithWeekday, params);
-  } catch (err: unknown) {
-    const code = (err as { code?: string })?.code;
-    if (code === "42703") {
-      result = await pool.query(sqlWithoutWeekday, params);
-    } else {
-      throw err;
-    }
-  }
-
-  return result.rows.map((r) => ({
-    date: r.date,
-    index: r.index,
-    snapshot_weekday: r.snapshot_weekday ?? "Monday",
-    year: r.year,
-    week_value: r.week_value,
-    active_units: r.active_units,
-    active_volume: Number(r.active_volume),
-    active_lo_count: r.active_lo_count != null ? parseInt(r.active_lo_count, 10) || 0 : 0,
-    weekly_pct_change_volume: r.weekly_pct_change_volume != null ? Number(r.weekly_pct_change_volume) : null,
-    monthly_pct_change_volume: r.monthly_pct_change_volume != null ? Number(r.monthly_pct_change_volume) : null,
-    annual_pct_change_volume: r.annual_pct_change_volume != null ? Number(r.annual_pct_change_volume) : null,
-    weekly_pct_change_units: r.weekly_pct_change_units != null ? Number(r.weekly_pct_change_units) : null,
-    monthly_pct_change_units: r.monthly_pct_change_units != null ? Number(r.monthly_pct_change_units) : null,
-    annual_pct_change_units: r.annual_pct_change_units != null ? Number(r.annual_pct_change_units) : null,
-    calculated_at: r.calculated_at,
-  }));
-}
-
-/** Get min/max year from pipeline_analysis_snapshots for building year-range options. */
+/** Get min/max year from loans (application_date) for building year-range options. No table. */
 export async function getPipelineYearRange(
   pool: pg.Pool
 ): Promise<{ minYear: number; maxYear: number } | null> {
   const result = await pool.query(
-    `SELECT MIN(year) AS min_year, MAX(year) AS max_year FROM public.pipeline_analysis_snapshots`
+    `SELECT MIN(application_date) AS min_d, MAX(application_date) AS max_d FROM public.loans WHERE application_date IS NOT NULL`
   );
   const row = result.rows[0];
-  if (!row || row.min_year == null || row.max_year == null) return null;
-  return { minYear: Number(row.min_year), maxYear: Number(row.max_year) };
+  if (!row || row.min_d == null || row.max_d == null) return null;
+  const minYear = new Date(row.min_d).getFullYear();
+  const maxYear = new Date(row.max_d).getFullYear();
+  return { minYear, maxYear };
 }

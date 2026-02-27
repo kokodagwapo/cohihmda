@@ -25,7 +25,8 @@ export type SectionType =
   | 'workflow-conversion'
   | 'high-performers'
   | 'actors'
-  | 'pricing-dashboard';
+  | 'pricing-dashboard'
+  | 'pipeline-analysis';
 
 /**
  * A dynamic (user-added) filter dimension.
@@ -107,6 +108,22 @@ export interface SectionFilters {
   workflowGrouping?: 'workflow' | 'individual';
   /** Workflow Conversion: segment cards (from → to milestone ids) */
   workflowSegments?: { from: string; to: string }[];
+  /** Pipeline Analysis: year range "YYYY-YYYY" (e.g. "2024-2025") */
+  pipelineAnalysisYearRange?: string;
+  /** Pipeline Analysis: start date field for pipeline */
+  pipelineAnalysisStartDateField?: 'application_date' | 'lock_date' | 'processing_date';
+  /** Pipeline Analysis: selected loan types (empty = all) */
+  pipelineAnalysisLoanTypes?: string[];
+  /** Pipeline Analysis: selected loan purposes (empty = all) */
+  pipelineAnalysisLoanPurposes?: string[];
+  /** Pipeline Analysis: selected branches (empty = all) */
+  pipelineAnalysisBranches?: string[];
+  /** Pipeline Analysis: snapshot day of week (1=Mon .. 5=Fri); changing triggers backfill */
+  pipelineAnalysisSnapshotDay?: number;
+  /** Pipeline Analysis: view mode week vs month */
+  pipelineAnalysisViewMode?: 'week' | 'month';
+  /** Pipeline Analysis: percent change rows by volume or units */
+  pipelineAnalysisPctMetric?: 'volume' | 'units';
   /** User-added dynamic filters (column = value conditions) */
   dynamicFilters?: DynamicFilterEntry[];
 }
@@ -233,6 +250,17 @@ export const useWidgetSectionStore = create<WidgetSectionState>((set, get) => ({
           pricingEntityFilterType: undefined,
           pricingActorValue: '',
           pricingActorFilterType: undefined,
+        };
+      } else if (sectionType === 'pipeline-analysis') {
+        filters = {
+          ...base,
+          pipelineAnalysisStartDateField: 'application_date',
+          pipelineAnalysisYearRange: undefined,
+          pipelineAnalysisLoanTypes: [],
+          pipelineAnalysisLoanPurposes: [],
+          pipelineAnalysisBranches: [],
+          pipelineAnalysisViewMode: 'week',
+          pipelineAnalysisPctMetric: 'volume',
         };
       }
       return {

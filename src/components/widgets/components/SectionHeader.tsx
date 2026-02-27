@@ -102,6 +102,7 @@ export function SectionHeader({ sectionId, title, sectionType }: SectionHeaderPr
     'operations-trends': 'from-orange-500 to-amber-500',
     'sales-trends': 'from-emerald-500 to-teal-500',
     'pricing-dashboard': 'from-emerald-500 to-green-600',
+    'pipeline-analysis': 'from-sky-500 to-cyan-600',
   };
   const accentGradient = SECTION_COLORS[sectionType] ?? 'from-slate-500 to-slate-600';
 

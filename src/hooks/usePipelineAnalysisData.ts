@@ -29,6 +29,14 @@ export interface UsePipelineAnalysisDataOptions {
   to?: string | null;
   /** Tenant ID for API (required for platform staff; use selectedTenantId ?? user?.tenant_id) */
   tenantId?: string | null;
+  /** Which date to use as the pipeline start: application_date (default), lock_date, or processing_date. Changing triggers refetch. */
+  startDateField?: "application_date" | "lock_date" | "processing_date";
+  /** Filters applied before counting. Empty/undefined = no filter (all). When any array has items, only those are included. */
+  filters?: {
+    loanTypes?: string[];
+    loanPurposes?: string[];
+    branches?: string[];
+  } | null;
 }
 
 export interface UsePipelineAnalysisDataResult {
@@ -50,6 +58,12 @@ export function usePipelineAnalysisData(
     if (options.tenantId) params.set("tenant_id", options.tenantId);
     if (options.from) params.set("from", options.from);
     if (options.to) params.set("to", options.to);
+    if (options.startDateField === "lock_date") params.set("start_date_field", "lock_date");
+    if (options.startDateField === "processing_date") params.set("start_date_field", "processing_date");
+    const f = options.filters;
+    if (f?.loanTypes?.length) f.loanTypes.forEach((v) => params.append("loan_type", v));
+    if (f?.loanPurposes?.length) f.loanPurposes.forEach((v) => params.append("loan_purpose", v));
+    if (f?.branches?.length) f.branches.forEach((v) => params.append("branch", v));
     const qs = params.toString();
     try {
       setLoading(true);
@@ -66,7 +80,7 @@ export function usePipelineAnalysisData(
     } finally {
       setLoading(false);
     }
-  }, [options.tenantId, options.from, options.to]);
+  }, [options.tenantId, options.from, options.to, options.startDateField, options.filters]);
 
   useEffect(() => {
     fetchSnapshots();
@@ -159,4 +173,53 @@ export function usePipelineAnalysisRange(tenantId: string | null): {
   }, [fetchRange]);
 
   return { range, loading, error, refetch: fetchRange };
+}
+
+export interface PipelineFilterOptions {
+  loanTypes: string[];
+  loanPurposes: string[];
+  branches: string[];
+}
+
+export function usePipelineAnalysisFilterOptions(tenantId: string | null): {
+  options: PipelineFilterOptions | null;
+  loading: boolean;
+  error: string | null;
+  refetch: () => void;
+} {
+  const [options, setOptions] = useState<PipelineFilterOptions | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchOptions = useCallback(async () => {
+    if (!tenantId) {
+      setOptions(null);
+      setLoading(false);
+      return;
+    }
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await api.request<PipelineFilterOptions>(
+        `/api/pipeline-analysis/filter-options?tenant_id=${encodeURIComponent(tenantId)}`,
+        { headers: { "Cache-Control": "no-cache" } }
+      );
+      setOptions({
+        loanTypes: data.loanTypes ?? [],
+        loanPurposes: data.loanPurposes ?? [],
+        branches: data.branches ?? [],
+      });
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load filter options");
+      setOptions({ loanTypes: [], loanPurposes: [], branches: [] });
+    } finally {
+      setLoading(false);
+    }
+  }, [tenantId]);
+
+  useEffect(() => {
+    fetchOptions();
+  }, [fetchOptions]);
+
+  return { options, loading, error, refetch: fetchOptions };
 }

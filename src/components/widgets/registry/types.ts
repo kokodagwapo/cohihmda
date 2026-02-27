@@ -32,7 +32,8 @@ export type DataSourceId =
   | 'workflow-conversion'
   | 'high-performers'
   | 'actors'
-  | 'pricing-dashboard';
+  | 'pricing-dashboard'
+  | 'pipeline-analysis';
 
 // ---------------------------------------------------------------------------
 // Widget categories – drives catalog grouping & icon selection

@@ -8,7 +8,7 @@
  * corresponding section (or defaults if no section is registered).
  */
 
-import React, { createContext, useContext, useMemo } from 'react';
+import React, { createContext, useContext, useEffect, useMemo } from 'react';
 import { useTenantStore } from '@/stores/tenantStore';
 import { useChannelStore } from '@/stores/channelStore';
 import {
@@ -37,6 +37,11 @@ import { useActorsData } from '@/hooks/useActorsData';
 import type { ActorDimension } from '@/hooks/useActorsData';
 import { usePricingDashboardWorkbenchData } from '@/hooks/usePricingDashboardData';
 import type { PricingDashboardFilters as PricingFilters } from '@/hooks/usePricingDashboardData';
+import {
+  usePipelineAnalysisData,
+  usePipelineAnalysisRange,
+  usePipelineAnalysisConfig,
+} from '@/hooks/usePipelineAnalysisData';
 import type { DataSourceId } from '../registry/types';
 
 /** Build dimension filter array from section dynamicFilters (for APIs that accept them). */
@@ -210,6 +215,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
   const hpFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'high-performers'), [sections, scopedFilters]);
   const actorsFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'actors'), [sections, scopedFilters]);
   const pdFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'pricing-dashboard'), [sections, scopedFilters]);
+  const paFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'pipeline-analysis'), [sections, scopedFilters]);
 
   // ---- Hook calls with dynamic filter values ----
 
@@ -407,6 +413,68 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     selectedChannel,
   });
 
+  // Pipeline Analysis (workbench: use section filters when present)
+  const pipelineRange = usePipelineAnalysisRange(selectedTenantId ?? null);
+  const pipelineConfig = usePipelineAnalysisConfig(selectedTenantId ?? null);
+  const pipelineFromTo = useMemo(() => {
+    if (paFilters?.pipelineAnalysisYearRange) {
+      const [start, end] = paFilters.pipelineAnalysisYearRange.split('-').map(Number);
+      if (!Number.isNaN(start) && !Number.isNaN(end))
+        return { from: `${start}-01-01`, to: `${end}-12-31` };
+    }
+    const r = pipelineRange.range;
+    const max = r?.maxYear ?? new Date().getFullYear();
+    const startYear = Math.max((r?.minYear ?? max - 2), max - 1);
+    const endYear = max;
+    return { from: `${startYear}-01-01`, to: `${endYear}-12-31` };
+  }, [paFilters?.pipelineAnalysisYearRange, pipelineRange.range]);
+  const pipelineFiltersForApi = useMemo(() => {
+    const types = paFilters?.pipelineAnalysisLoanTypes ?? [];
+    const purposes = paFilters?.pipelineAnalysisLoanPurposes ?? [];
+    const branches = paFilters?.pipelineAnalysisBranches ?? [];
+    if (types.length > 0 || purposes.length > 0 || branches.length > 0)
+      return { loanTypes: types.length ? types : undefined, loanPurposes: purposes.length ? purposes : undefined, branches: branches.length ? branches : undefined };
+    return undefined;
+  }, [paFilters?.pipelineAnalysisLoanTypes, paFilters?.pipelineAnalysisLoanPurposes, paFilters?.pipelineAnalysisBranches]);
+  const pipelineSnapshots = usePipelineAnalysisData({
+    from: pipelineFromTo.from,
+    to: pipelineFromTo.to,
+    tenantId: selectedTenantId ?? null,
+    startDateField: (paFilters?.pipelineAnalysisStartDateField ?? 'application_date') as 'application_date' | 'lock_date' | 'processing_date',
+    filters: pipelineFiltersForApi,
+  });
+
+  // Refetch pipeline snapshots after user changes snapshot day (and triggers backfill)
+  useEffect(() => {
+    if (paFilters?.pipelineAnalysisSnapshotDay != null) {
+      pipelineSnapshots.refetch();
+    }
+  }, [paFilters?.pipelineAnalysisSnapshotDay]);
+
+  const pipelineAnalysisSource = useMemo(() => ({
+    snapshots: pipelineSnapshots.snapshots,
+    range: pipelineRange.range,
+    config: pipelineConfig.config,
+    yearRange: paFilters?.pipelineAnalysisYearRange ?? null,
+    viewMode: (paFilters?.pipelineAnalysisViewMode ?? 'week') as 'week' | 'month',
+    pctMetric: (paFilters?.pipelineAnalysisPctMetric ?? 'volume') as 'volume' | 'units',
+    loading: pipelineRange.loading || pipelineConfig.loading || pipelineSnapshots.loading,
+    error: pipelineRange.error || pipelineConfig.error || pipelineSnapshots.error,
+  }), [
+    pipelineSnapshots.snapshots,
+    pipelineRange.range,
+    pipelineRange.loading,
+    pipelineRange.error,
+    pipelineConfig.config,
+    pipelineConfig.loading,
+    pipelineConfig.error,
+    pipelineSnapshots.loading,
+    pipelineSnapshots.error,
+    paFilters?.pipelineAnalysisYearRange,
+    paFilters?.pipelineAnalysisViewMode,
+    paFilters?.pipelineAnalysisPctMetric,
+  ]);
+
   // Build lookup
   const sourceMap = useMemo<Record<string, SourceResult>>(() => ({
     'company-scorecard': {
@@ -506,6 +574,18 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
       loading: pricingDashboard.loading,
       error: pricingDashboard.error,
     },
+    'pipeline-analysis': {
+      data: {
+        snapshots: pipelineSnapshots.snapshots,
+        range: pipelineRange.range,
+        config: pipelineConfig.config,
+        yearRange: paFilters?.pipelineAnalysisYearRange ?? null,
+        viewMode: (paFilters?.pipelineAnalysisViewMode ?? 'week') as 'week' | 'month',
+        pctMetric: (paFilters?.pipelineAnalysisPctMetric ?? 'volume') as 'volume' | 'units',
+      },
+      loading: pipelineAnalysisSource.loading,
+      error: pipelineAnalysisSource.error,
+    },
   }), [
     companyScorecard.data, companyScorecard.loading, companyScorecard.error,
     creditRisk.data, creditRisk.loading, creditRisk.error,
@@ -520,6 +600,10 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     highPerformersData, highPerformersLoading, highPerformersError,
     actorsData, actorsLoading, actorsError,
     pricingDashboard,
+    pipelineAnalysisSource,
+    paFilters?.pipelineAnalysisYearRange,
+    paFilters?.pipelineAnalysisViewMode,
+    paFilters?.pipelineAnalysisPctMetric,
   ]);
 
   const contextValue = useMemo<WidgetDataContextValue>(

@@ -1,10 +1,10 @@
 /**
  * Pipeline Analysis View
  * Table: columns = Monday 1st, 2nd, …; rows = year (volume), year (units), Weekly/Monthly/Annual Percent Change.
- * Auto-runs backfill once when table is empty and tenant is selected.
+ * All data is computed live from loans; changing filters or dropdowns triggers a fresh calculation.
  */
 
-import React, { useMemo, useState, useCallback, useEffect, useRef } from "react";
+import React, { useMemo, useState, useCallback, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
@@ -22,8 +22,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { usePipelineAnalysisData, usePipelineAnalysisRange, usePipelineAnalysisConfig, type PipelineSnapshotRow } from "@/hooks/usePipelineAnalysisData";
-import { Loader2, Table2, BarChart3 } from "lucide-react";
+import { usePipelineAnalysisData, usePipelineAnalysisRange, usePipelineAnalysisConfig, usePipelineAnalysisFilterOptions, type PipelineSnapshotRow } from "@/hooks/usePipelineAnalysisData";
+import { Loader2, Table2, BarChart3, ChevronDown } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { api } from "@/lib/api";
 import {
@@ -38,6 +38,9 @@ import {
   Legend,
 } from "recharts";
 import { cn } from "@/lib/utils";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
 
 export type PipelineViewMode = "week" | "month";
 
@@ -122,9 +125,16 @@ export function PipelineAnalysisView({
   const [viewMode, setViewMode] = useState<PipelineViewMode>("week");
   const [pctMetric, setPctMetric] = useState<PipelinePctMetric>("volume");
   const [dataViewTab, setDataViewTab] = useState<"table" | "chart" | "loCountChart">("table");
+  const [startDateField, setStartDateField] = useState<"application_date" | "lock_date" | "processing_date">("application_date");
+
+  type FilterState = { loanTypes: string[]; loanPurposes: string[]; branches: string[] };
+  const emptyFilters: FilterState = { loanTypes: [], loanPurposes: [], branches: [] };
+  const [appliedFilters, setAppliedFilters] = useState<FilterState>(emptyFilters);
+  const [draftFilters, setDraftFilters] = useState<FilterState>(emptyFilters);
 
   const { range, loading: rangeLoading, refetch: refetchRange } = usePipelineAnalysisRange(tenantId ?? null);
   const { config, loading: configLoading, refetch: refetchConfig } = usePipelineAnalysisConfig(tenantId ?? null);
+  const { options: filterOptions, loading: filterOptionsLoading } = usePipelineAnalysisFilterOptions(tenantId ?? null);
 
   const yearRangeOptions = useMemo(() => {
     const min = range?.minYear ?? new Date().getFullYear() - 2;
@@ -152,11 +162,44 @@ export function PipelineAnalysisView({
     };
   }, [effectiveYearRange]);
 
+  const filtersForApi = useMemo(() => {
+    const a = appliedFilters;
+    const types = a.loanTypes ?? [];
+    const purposes = a.loanPurposes ?? [];
+    const branches = a.branches ?? [];
+    const typeOpts = filterOptions?.loanTypes ?? [];
+    const purposeOpts = filterOptions?.loanPurposes ?? [];
+    const branchOpts = filterOptions?.branches ?? [];
+    const hasTypeFilter = types.length > 0 && types.length !== typeOpts.length;
+    const hasPurposeFilter = purposes.length > 0 && purposes.length !== purposeOpts.length;
+    const hasBranchFilter = branches.length > 0 && branches.length !== branchOpts.length;
+    if (hasTypeFilter || hasPurposeFilter || hasBranchFilter) {
+      return {
+        loanTypes: hasTypeFilter ? types : undefined,
+        loanPurposes: hasPurposeFilter ? purposes : undefined,
+        branches: hasBranchFilter ? branches : undefined,
+      };
+    }
+    return undefined;
+  }, [appliedFilters, filterOptions]);
+
   const { snapshots, loading, error, refetch } = usePipelineAnalysisData({
     from: from || null,
     to: to || null,
     tenantId: tenantId ?? null,
+    startDateField,
+    filters: filtersForApi,
   });
+
+  const handleApplyFilters = useCallback(() => {
+    setAppliedFilters({ ...draftFilters });
+    // Don't call refetch() here: it would use stale options (previous filters). The hook's
+    // useEffect will run when filtersForApi changes and fetch with the new filters.
+  }, [draftFilters]);
+
+  const handleCancelFilters = useCallback(() => {
+    setDraftFilters({ ...appliedFilters });
+  }, [appliedFilters]);
 
   const [backfillLoading, setBackfillLoading] = useState(false);
   const [backfillMessage, setBackfillMessage] = useState<string | null>(null);
@@ -184,26 +227,6 @@ export function PipelineAnalysisView({
       setBackfillLoading(false);
     }
   }, [tenantId, refetch, refetchRange, refetchConfig]);
-
-  // Auto-run backfill once when table is empty and tenant is selected
-  const hasTriedAutoBackfill = useRef(false);
-  useEffect(() => {
-    if (
-      !loading &&
-      !error &&
-      snapshots.length === 0 &&
-      tenantId &&
-      !backfillLoading &&
-      !hasTriedAutoBackfill.current
-    ) {
-      hasTriedAutoBackfill.current = true;
-      runBackfill();
-    }
-  }, [loading, error, snapshots.length, tenantId, backfillLoading, runBackfill]);
-  // Reset ref when we get data so a later empty range can trigger backfill again if desired
-  useEffect(() => {
-    if (snapshots.length > 0) hasTriedAutoBackfill.current = false;
-  }, [snapshots.length]);
 
   // When range loads, set selected year range to latest if not yet set
   useEffect(() => {
@@ -380,7 +403,13 @@ export function PipelineAnalysisView({
     <div className="space-y-4">
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-lg">Pipeline Analysis</CardTitle>
+          <CardTitle className="text-lg">
+            {startDateField === "lock_date"
+              ? "Locked Pipeline Analysis"
+              : startDateField === "processing_date"
+                ? "Processing Pipeline Analysis"
+                : "Active Pipeline Analysis"}
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap items-center gap-4">
@@ -430,6 +459,25 @@ export function PipelineAnalysisView({
               </Select>
             </div>
             <div className="flex items-center gap-2">
+              <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">
+                Start date
+              </label>
+              <Select
+                value={startDateField}
+                onValueChange={(v) => setStartDateField(v as "application_date" | "lock_date" | "processing_date")}
+                disabled={loading || backfillLoading}
+              >
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="application_date">Application date</SelectItem>
+                  <SelectItem value="lock_date">Lock date</SelectItem>
+                  <SelectItem value="processing_date">Processing date</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-2">
               <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">View</label>
               <Select value={viewMode} onValueChange={(v) => setViewMode(v as PipelineViewMode)}>
                 <SelectTrigger className="w-[180px]">
@@ -454,6 +502,169 @@ export function PipelineAnalysisView({
                   <SelectItem value="units">Units</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+          </div>
+
+          {/* Filter row: loan type, loan purpose, branch (multi-select with Apply/Cancel) */}
+          <div className="flex flex-wrap items-center gap-3 pt-1 border-t border-border/60">
+            <span className="text-sm font-medium text-muted-foreground">Filters:</span>
+            {loading && (
+              <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Applying…
+              </span>
+            )}
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="min-w-[160px] justify-between"
+                  disabled={filterOptionsLoading || !tenantId || loading}
+                >
+                  <span className="truncate">
+                    Loan type{(draftFilters.loanTypes.length === 0 || draftFilters.loanTypes.length === (filterOptions?.loanTypes?.length ?? 0)) ? " (All)" : ` (${draftFilters.loanTypes.length} selected)`}
+                  </span>
+                  <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-64 p-2" align="start">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setDraftFilters((d) => ({ ...d, loanTypes: [] }))}>
+                    Select all
+                  </Button>
+                  <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setDraftFilters((d) => ({ ...d, loanTypes: filterOptions?.loanTypes ?? [] }))}>
+                    Deselect all
+                  </Button>
+                </div>
+                <div className="max-h-48 overflow-y-auto space-y-1.5">
+                  {(filterOptions?.loanTypes ?? []).map((opt) => {
+                    const allOptions = filterOptions?.loanTypes ?? [];
+                    const noneSelected = allOptions.length > 0 && draftFilters.loanTypes.length === allOptions.length;
+                    const checked = draftFilters.loanTypes.length === 0 ? true : (noneSelected ? false : draftFilters.loanTypes.includes(opt));
+                    return (
+                      <label key={opt} className="flex items-center gap-2 cursor-pointer rounded px-1.5 py-1 hover:bg-muted/60 text-sm">
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={() => {
+                            setDraftFilters((d) => {
+                              if (d.loanTypes.length === 0) return { ...d, loanTypes: (filterOptions?.loanTypes ?? []).filter((x) => x !== opt) };
+                              if (d.loanTypes.length === allOptions.length) return { ...d, loanTypes: [opt] };
+                              if (d.loanTypes.includes(opt)) return { ...d, loanTypes: d.loanTypes.filter((x) => x !== opt) };
+                              return { ...d, loanTypes: [...d.loanTypes, opt] };
+                            });
+                          }}
+                        />
+                        <span className="truncate">{opt}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </PopoverContent>
+            </Popover>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="min-w-[160px] justify-between"
+                  disabled={filterOptionsLoading || !tenantId || loading}
+                >
+                  <span className="truncate">
+                    Loan purpose{(draftFilters.loanPurposes.length === 0 || draftFilters.loanPurposes.length === (filterOptions?.loanPurposes?.length ?? 0)) ? " (All)" : ` (${draftFilters.loanPurposes.length} selected)`}
+                  </span>
+                  <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-64 p-2" align="start">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setDraftFilters((d) => ({ ...d, loanPurposes: [] }))}>
+                    Select all
+                  </Button>
+                  <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setDraftFilters((d) => ({ ...d, loanPurposes: filterOptions?.loanPurposes ?? [] }))}>
+                    Deselect all
+                  </Button>
+                </div>
+                <div className="max-h-48 overflow-y-auto space-y-1.5">
+                  {(filterOptions?.loanPurposes ?? []).map((opt) => {
+                    const allOptions = filterOptions?.loanPurposes ?? [];
+                    const noneSelected = allOptions.length > 0 && draftFilters.loanPurposes.length === allOptions.length;
+                    const checked = draftFilters.loanPurposes.length === 0 ? true : (noneSelected ? false : draftFilters.loanPurposes.includes(opt));
+                    return (
+                      <label key={opt} className="flex items-center gap-2 cursor-pointer rounded px-1.5 py-1 hover:bg-muted/60 text-sm">
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={() => {
+                            setDraftFilters((d) => {
+                              if (d.loanPurposes.length === 0) return { ...d, loanPurposes: (filterOptions?.loanPurposes ?? []).filter((x) => x !== opt) };
+                              if (d.loanPurposes.length === allOptions.length) return { ...d, loanPurposes: [opt] };
+                              if (d.loanPurposes.includes(opt)) return { ...d, loanPurposes: d.loanPurposes.filter((x) => x !== opt) };
+                              return { ...d, loanPurposes: [...d.loanPurposes, opt] };
+                            });
+                          }}
+                        />
+                        <span className="truncate">{opt}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </PopoverContent>
+            </Popover>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="min-w-[160px] justify-between"
+                  disabled={filterOptionsLoading || !tenantId || loading}
+                >
+                  <span className="truncate">
+                    Branch{(draftFilters.branches.length === 0 || draftFilters.branches.length === (filterOptions?.branches?.length ?? 0)) ? " (All)" : ` (${draftFilters.branches.length} selected)`}
+                  </span>
+                  <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-64 p-2" align="start">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setDraftFilters((d) => ({ ...d, branches: [] }))}>
+                    Select all
+                  </Button>
+                  <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setDraftFilters((d) => ({ ...d, branches: filterOptions?.branches ?? [] }))}>
+                    Deselect all
+                  </Button>
+                </div>
+                <div className="max-h-48 overflow-y-auto space-y-1.5">
+                  {(filterOptions?.branches ?? []).map((opt) => {
+                    const allOptions = filterOptions?.branches ?? [];
+                    const noneSelected = allOptions.length > 0 && draftFilters.branches.length === allOptions.length;
+                    const checked = draftFilters.branches.length === 0 ? true : (noneSelected ? false : draftFilters.branches.includes(opt));
+                    return (
+                      <label key={opt} className="flex items-center gap-2 cursor-pointer rounded px-1.5 py-1 hover:bg-muted/60 text-sm">
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={() => {
+                            setDraftFilters((d) => {
+                              if (d.branches.length === 0) return { ...d, branches: (filterOptions?.branches ?? []).filter((x) => x !== opt) };
+                              if (d.branches.length === allOptions.length) return { ...d, branches: [opt] };
+                              if (d.branches.includes(opt)) return { ...d, branches: d.branches.filter((x) => x !== opt) };
+                              return { ...d, branches: [...d.branches, opt] };
+                            });
+                          }}
+                        />
+                        <span className="truncate">{opt}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </PopoverContent>
+            </Popover>
+            <div className="flex items-center gap-2 ml-2">
+              <Button variant="outline" size="sm" onClick={handleCancelFilters} disabled={loading}>
+                Cancel
+              </Button>
+              <Button size="sm" onClick={handleApplyFilters} disabled={loading}>
+                Apply
+              </Button>
             </div>
           </div>
 
@@ -820,6 +1031,7 @@ export function PipelineAnalysisView({
                       />
                       <YAxis
                         width={40}
+                        allowDecimals={false}
                         tick={{ fontSize: 10 }}
                         label={{ value: "LO Count", angle: -90, position: "insideLeft", fontSize: 11 }}
                       />

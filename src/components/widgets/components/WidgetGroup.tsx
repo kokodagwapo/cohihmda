@@ -51,6 +51,15 @@ import { cn } from '@/lib/utils';
 import { DatePeriodPicker, type DateRange, type PeriodSelection, type PeriodPreset, computePresetDateRange } from '@/components/ui/DatePeriodPicker';
 import { Button } from '@/components/ui/button';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -79,6 +88,8 @@ import { useTenantStore } from '@/stores/tenantStore';
 import { useFilterOptions } from '@/hooks/useFilterOptions';
 import { useCanvasDataStore } from '@/stores/canvasDataStore';
 import { useFilterPresetStore, type FilterPreset } from '@/stores/filterPresetStore';
+import { usePipelineAnalysisRange, usePipelineAnalysisFilterOptions, usePipelineAnalysisConfig } from '@/hooks/usePipelineAnalysisData';
+import { api } from '@/lib/api';
 import type { GroupWidgetItem, WidgetFilterState } from '@/components/workbench/canvas/types';
 import type { DateFilter, DimensionFilter } from '@/hooks/useCohiWidgetData';
 import type { VisualizationConfig } from '@/hooks/useCohiChat';
@@ -215,6 +226,7 @@ const SECTION_FILTER_CONFIG: Partial<Record<SectionType, SectionFilterField[]>> 
   'high-performers': [],
   'actors': [],
   'pricing-dashboard': [],
+  'pipeline-analysis': [],
 };
 
 const HIGH_PERFORMERS_DATE_TYPE_OPTIONS: { value: 'funding_date' | 'closing_date' | 'application_date'; label: string }[] = [
@@ -290,6 +302,262 @@ function PricingFilterSelect({
   );
 }
 
+/** Pipeline Analysis filter row: snapshot day, year range, start date, view, pct metric, loan type / purpose / branch */
+const SNAPSHOT_DAY_LABELS: Record<number, string> = {
+  1: 'Monday',
+  2: 'Tuesday',
+  3: 'Wednesday',
+  4: 'Thursday',
+  5: 'Friday',
+};
+
+function PipelineAnalysisFilterRow({
+  groupId,
+  filters,
+  updateFilters,
+  pipelineRange,
+  pipelineConfig,
+  pipelineFilterOptions,
+  loading,
+  tenantId,
+}: {
+  groupId: string;
+  filters: SectionFilters;
+  updateFilters: (sectionId: string, partial: Partial<SectionFilters>) => void;
+  pipelineRange: { minYear: number | null; maxYear: number | null } | null;
+  pipelineConfig: { snapshot_day_of_week: number } | null;
+  pipelineFilterOptions: { loanTypes: string[]; loanPurposes: string[]; branches: string[] } | null;
+  loading: boolean;
+  tenantId: string | null;
+}) {
+  const [backfillLoading, setBackfillLoading] = useState(false);
+
+  const handleSnapshotDayChange = useCallback(
+    async (dayStr: string) => {
+      const d = parseInt(dayStr, 10);
+      if (!tenantId || d < 1 || d > 5) return;
+      setBackfillLoading(true);
+      try {
+        const url = `/api/pipeline-analysis/backfill?tenant_id=${encodeURIComponent(tenantId)}`;
+        await api.request<{ success: boolean; message: string }>(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ day_of_week: d }),
+        });
+        updateFilters(groupId, { pipelineAnalysisSnapshotDay: d });
+      } catch {
+        // Error could be shown via toast if desired
+      } finally {
+        setBackfillLoading(false);
+      }
+    },
+    [tenantId, groupId, updateFilters],
+  );
+  const minYear = pipelineRange?.minYear ?? new Date().getFullYear() - 2;
+  const maxYear = pipelineRange?.maxYear ?? new Date().getFullYear();
+  const yearRangeOptions = useMemo(() => {
+    const opts: string[] = [];
+    for (let y = minYear; y < maxYear; y++) opts.push(`${y}-${y + 1}`);
+    if (opts.length === 0) opts.push(`${maxYear - 1}-${maxYear}`);
+    return opts;
+  }, [minYear, maxYear]);
+
+  const loanTypes = filters.pipelineAnalysisLoanTypes ?? [];
+  const loanPurposes = filters.pipelineAnalysisLoanPurposes ?? [];
+  const branches = filters.pipelineAnalysisBranches ?? [];
+  const typeOpts = pipelineFilterOptions?.loanTypes ?? [];
+  const purposeOpts = pipelineFilterOptions?.loanPurposes ?? [];
+  const branchOpts = pipelineFilterOptions?.branches ?? [];
+
+  const toggleMulti = (
+    key: 'pipelineAnalysisLoanTypes' | 'pipelineAnalysisLoanPurposes' | 'pipelineAnalysisBranches',
+    current: string[],
+    allOptions: string[],
+    value: string,
+  ) => {
+    if (current.length === 0) {
+      updateFilters(groupId, { [key]: allOptions.filter((x) => x !== value) });
+      return;
+    }
+    if (current.length === allOptions.length) {
+      updateFilters(groupId, { [key]: [value] });
+      return;
+    }
+    if (current.includes(value)) {
+      updateFilters(groupId, { [key]: current.filter((x) => x !== value) });
+    } else {
+      updateFilters(groupId, { [key]: [...current, value] });
+    }
+  };
+
+  const isChecked = (
+    current: string[],
+    allOptions: string[],
+    value: string,
+  ) => {
+    if (current.length === 0) return true;
+    if (current.length === allOptions.length) return true;
+    return current.includes(value);
+  };
+
+  return (
+    <>
+      <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mr-0.5">Snapshot day</span>
+      <Select
+        value={String(filters.pipelineAnalysisSnapshotDay ?? pipelineConfig?.snapshot_day_of_week ?? 1)}
+        onValueChange={handleSnapshotDayChange}
+        disabled={loading || backfillLoading || !tenantId}
+      >
+        <SelectTrigger className="h-7 w-[110px] text-xs">
+          <SelectValue placeholder="Day" />
+        </SelectTrigger>
+        <SelectContent>
+          {[1, 2, 3, 4, 5].map((d) => (
+            <SelectItem key={d} value={String(d)}>
+              {SNAPSHOT_DAY_LABELS[d]}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mr-0.5">Year range</span>
+      <Select
+        value={filters.pipelineAnalysisYearRange ?? (yearRangeOptions.length > 0 ? yearRangeOptions[yearRangeOptions.length - 1] : '')}
+        onValueChange={(v) => updateFilters(groupId, { pipelineAnalysisYearRange: v || undefined })}
+        disabled={loading || yearRangeOptions.length === 0}
+      >
+        <SelectTrigger className="h-7 w-[120px] text-xs">
+          <SelectValue placeholder="Range" />
+        </SelectTrigger>
+        <SelectContent>
+          {yearRangeOptions.map((opt) => (
+            <SelectItem key={opt} value={opt}>
+              {opt}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mr-0.5">Start date</span>
+      <Select
+        value={filters.pipelineAnalysisStartDateField ?? 'application_date'}
+        onValueChange={(v) => updateFilters(groupId, { pipelineAnalysisStartDateField: v as 'application_date' | 'lock_date' | 'processing_date' })}
+        disabled={loading}
+      >
+        <SelectTrigger className="h-7 w-[140px] text-xs">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="application_date">Application date</SelectItem>
+          <SelectItem value="lock_date">Lock date</SelectItem>
+          <SelectItem value="processing_date">Processing date</SelectItem>
+        </SelectContent>
+      </Select>
+      <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mr-0.5">View</span>
+      <Select
+        value={filters.pipelineAnalysisViewMode ?? 'week'}
+        onValueChange={(v) => updateFilters(groupId, { pipelineAnalysisViewMode: v as 'week' | 'month' })}
+        disabled={loading}
+      >
+        <SelectTrigger className="h-7 w-[130px] text-xs">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="week">Week by week</SelectItem>
+          <SelectItem value="month">Month by month</SelectItem>
+        </SelectContent>
+      </Select>
+      <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mr-0.5">Percent changes by</span>
+      <Select
+        value={filters.pipelineAnalysisPctMetric ?? 'volume'}
+        onValueChange={(v) => updateFilters(groupId, { pipelineAnalysisPctMetric: v as 'volume' | 'units' })}
+        disabled={loading}
+      >
+        <SelectTrigger className="h-7 w-[100px] text-xs">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="volume">Volume</SelectItem>
+          <SelectItem value="units">Units</SelectItem>
+        </SelectContent>
+      </Select>
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button variant="outline" size="sm" className="h-7 min-w-[120px] justify-between text-xs" disabled={loading}>
+            Loan type{(loanTypes.length === 0 || loanTypes.length === typeOpts.length) ? ' (All)' : ` (${loanTypes.length})`}
+            <ChevronDown className="h-3 w-3 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-56 p-2" align="start">
+          <div className="flex justify-between gap-2 mb-1.5">
+            <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => updateFilters(groupId, { pipelineAnalysisLoanTypes: [] })}>All</Button>
+            <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => updateFilters(groupId, { pipelineAnalysisLoanTypes: typeOpts })}>None</Button>
+          </div>
+          <div className="max-h-40 overflow-y-auto space-y-1">
+            {typeOpts.map((opt) => (
+              <label key={opt} className="flex items-center gap-2 cursor-pointer rounded px-1.5 py-0.5 hover:bg-muted/60 text-xs">
+                <Checkbox
+                  checked={isChecked(loanTypes, typeOpts, opt)}
+                  onCheckedChange={() => toggleMulti('pipelineAnalysisLoanTypes', loanTypes, typeOpts, opt)}
+                />
+                <span className="truncate">{opt}</span>
+              </label>
+            ))}
+          </div>
+        </PopoverContent>
+      </Popover>
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button variant="outline" size="sm" className="h-7 min-w-[120px] justify-between text-xs" disabled={loading}>
+            Loan purpose{(loanPurposes.length === 0 || loanPurposes.length === purposeOpts.length) ? ' (All)' : ` (${loanPurposes.length})`}
+            <ChevronDown className="h-3 w-3 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-56 p-2" align="start">
+          <div className="flex justify-between gap-2 mb-1.5">
+            <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => updateFilters(groupId, { pipelineAnalysisLoanPurposes: [] })}>All</Button>
+            <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => updateFilters(groupId, { pipelineAnalysisLoanPurposes: purposeOpts })}>None</Button>
+          </div>
+          <div className="max-h-40 overflow-y-auto space-y-1">
+            {purposeOpts.map((opt) => (
+              <label key={opt} className="flex items-center gap-2 cursor-pointer rounded px-1.5 py-0.5 hover:bg-muted/60 text-xs">
+                <Checkbox
+                  checked={isChecked(loanPurposes, purposeOpts, opt)}
+                  onCheckedChange={() => toggleMulti('pipelineAnalysisLoanPurposes', loanPurposes, purposeOpts, opt)}
+                />
+                <span className="truncate">{opt}</span>
+              </label>
+            ))}
+          </div>
+        </PopoverContent>
+      </Popover>
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button variant="outline" size="sm" className="h-7 min-w-[120px] justify-between text-xs" disabled={loading}>
+            Branch{(branches.length === 0 || branches.length === branchOpts.length) ? ' (All)' : ` (${branches.length})`}
+            <ChevronDown className="h-3 w-3 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-56 p-2" align="start">
+          <div className="flex justify-between gap-2 mb-1.5">
+            <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => updateFilters(groupId, { pipelineAnalysisBranches: [] })}>All</Button>
+            <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => updateFilters(groupId, { pipelineAnalysisBranches: branchOpts })}>None</Button>
+          </div>
+          <div className="max-h-40 overflow-y-auto space-y-1">
+            {branchOpts.map((opt) => (
+              <label key={opt} className="flex items-center gap-2 cursor-pointer rounded px-1.5 py-0.5 hover:bg-muted/60 text-xs">
+                <Checkbox
+                  checked={isChecked(branches, branchOpts, opt)}
+                  onCheckedChange={() => toggleMulti('pipelineAnalysisBranches', branches, branchOpts, opt)}
+                />
+                <span className="truncate">{opt}</span>
+              </label>
+            ))}
+          </div>
+        </PopoverContent>
+      </Popover>
+    </>
+  );
+}
+
 const ACTORS_DIMENSION_OPTIONS = ['channel', 'processor', 'closer', 'underwriter', 'loan_officer', 'branch', 'investor', 'warehouse_co_name'] as const;
 const ACTORS_DIMENSION_LABELS: Record<string, string> = {
   channel: 'Channel',
@@ -340,6 +608,7 @@ const SECTION_COLORS: Record<SectionType, { border: string; bg: string; accent: 
   'high-performers':      { border: 'border-amber-400/50',  bg: 'bg-amber-50/50 dark:bg-amber-950/20',   accent: 'text-amber-600 dark:text-amber-400',  dot: 'bg-amber-500' },
   'actors':              { border: 'border-cyan-400/50',   bg: 'bg-cyan-50/50 dark:bg-cyan-950/20',    accent: 'text-cyan-600 dark:text-cyan-400',   dot: 'bg-cyan-500' },
   'pricing-dashboard':   { border: 'border-emerald-400/50', bg: 'bg-emerald-50/50 dark:bg-emerald-950/20', accent: 'text-emerald-600 dark:text-emerald-400', dot: 'bg-emerald-500' },
+  'pipeline-analysis':   { border: 'border-sky-400/50', bg: 'bg-sky-50/50 dark:bg-sky-950/20', accent: 'text-sky-600 dark:text-sky-400', dot: 'bg-sky-500' },
 };
 
 /**
@@ -405,6 +674,12 @@ function getGridSizeForItem(item: GroupWidgetItem): GridSize {
     }
     const def = getWidgetDefinition(item.defId);
     return (def && GRID_SIZES[def.category]) || DEFAULT_GRID;
+  }
+  // Pipeline Analysis: chart widgets default ~630×368px; table uses standard table size
+  if (item.kind === 'registry' && item.defId.startsWith('pipeline-analysis-')) {
+    if (item.defId === 'pipeline-analysis-chart' || item.defId === 'pipeline-analysis-lo-count')
+      return { w: 18, h: 20, minW: 12, minH: 14 };
+    // table: use standard table grid size
   }
   const def = getWidgetDefinition(item.defId);
   return (def && GRID_SIZES[def.category]) || DEFAULT_GRID;
@@ -1107,6 +1382,12 @@ export function WidgetGroup({
   const updateDynamicFilter = useWidgetSectionStore((s) => s.updateDynamicFilter);
   const filters = useWidgetSectionStore((s) => s.getFilters(groupId));
 
+  // Pipeline Analysis filter options (used when sectionType === 'pipeline-analysis')
+  const { selectedTenantId } = useTenantStore();
+  const pipelineRange = usePipelineAnalysisRange(selectedTenantId ?? null);
+  const { options: pipelineFilterOptions } = usePipelineAnalysisFilterOptions(selectedTenantId ?? null);
+  const pipelineConfig = usePipelineAnalysisConfig(selectedTenantId ?? null);
+
   // Normalize legacy widgetIds to items
   const items = useMemo(() => normalizeItems(widgetIds, itemsProp), [widgetIds, itemsProp]);
 
@@ -1144,6 +1425,26 @@ export function WidgetGroup({
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupId, sectionType, registerSection]);
+
+  // Pipeline Analysis: set default year range when options have loaded and none is set (so table/charts show correct years from first paint)
+  const yearRangeOptions = useMemo(() => {
+    if (sectionType !== 'pipeline-analysis') return [];
+    const min = pipelineRange?.minYear ?? new Date().getFullYear() - 2;
+    const max = pipelineRange?.maxYear ?? new Date().getFullYear();
+    const opts: string[] = [];
+    for (let y = min; y < max; y++) opts.push(`${y}-${y + 1}`);
+    if (opts.length === 0) opts.push(`${max - 1}-${max}`);
+    return opts;
+  }, [sectionType, pipelineRange?.minYear, pipelineRange?.maxYear]);
+  useEffect(() => {
+    if (sectionType !== 'pipeline-analysis') return;
+    if (yearRangeOptions.length === 0) return;
+    const current = filters.pipelineAnalysisYearRange;
+    if (current != null && current !== '') return;
+    if (savedFiltersProp?.pipelineAnalysisYearRange) return;
+    const defaultRange = yearRangeOptions[yearRangeOptions.length - 1];
+    updateFilters(groupId, { pipelineAnalysisYearRange: defaultRange });
+  }, [sectionType, groupId, yearRangeOptions, filters.pipelineAnalysisYearRange, savedFiltersProp?.pipelineAnalysisYearRange, updateFilters]);
 
   // Auto-focus title input when renaming
   useEffect(() => {
@@ -1229,9 +1530,19 @@ export function WidgetGroup({
       if (filters.workflowGrouping) toSave.workflowGrouping = filters.workflowGrouping;
       if (filters.workflowSegments && filters.workflowSegments.length > 0) toSave.workflowSegments = filters.workflowSegments;
     }
+    if (sectionType === 'pipeline-analysis') {
+      if (filters.pipelineAnalysisYearRange) toSave.pipelineAnalysisYearRange = filters.pipelineAnalysisYearRange;
+      if (filters.pipelineAnalysisStartDateField && filters.pipelineAnalysisStartDateField !== 'application_date') toSave.pipelineAnalysisStartDateField = filters.pipelineAnalysisStartDateField;
+      if (filters.pipelineAnalysisViewMode && filters.pipelineAnalysisViewMode !== 'week') toSave.pipelineAnalysisViewMode = filters.pipelineAnalysisViewMode;
+      if (filters.pipelineAnalysisPctMetric && filters.pipelineAnalysisPctMetric !== 'volume') toSave.pipelineAnalysisPctMetric = filters.pipelineAnalysisPctMetric;
+      if (filters.pipelineAnalysisSnapshotDay != null) toSave.pipelineAnalysisSnapshotDay = filters.pipelineAnalysisSnapshotDay;
+      if (filters.pipelineAnalysisLoanTypes && filters.pipelineAnalysisLoanTypes.length > 0) toSave.pipelineAnalysisLoanTypes = filters.pipelineAnalysisLoanTypes;
+      if (filters.pipelineAnalysisLoanPurposes && filters.pipelineAnalysisLoanPurposes.length > 0) toSave.pipelineAnalysisLoanPurposes = filters.pipelineAnalysisLoanPurposes;
+      if (filters.pipelineAnalysisBranches && filters.pipelineAnalysisBranches.length > 0) toSave.pipelineAnalysisBranches = filters.pipelineAnalysisBranches;
+    }
     patchPayload({ savedFilters: Object.keys(toSave).length > 0 ? toSave : undefined });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sectionType, filters.year, filters.dateRange, filters.periodSelection, filters.dateField, filters.applicationType, filters.actorType, filters.branch, filters.loanOfficer, filters.dynamicFilters, filters.workflowPeriodSelection, filters.workflowCalculationType, filters.workflowGrouping, filters.workflowSegments]);
+  }, [sectionType, filters.year, filters.dateRange, filters.periodSelection, filters.dateField, filters.applicationType, filters.actorType, filters.branch, filters.loanOfficer, filters.dynamicFilters, filters.workflowPeriodSelection, filters.workflowCalculationType, filters.workflowGrouping, filters.workflowSegments, filters.pipelineAnalysisYearRange, filters.pipelineAnalysisStartDateField, filters.pipelineAnalysisViewMode, filters.pipelineAnalysisPctMetric, filters.pipelineAnalysisSnapshotDay, filters.pipelineAnalysisLoanTypes, filters.pipelineAnalysisLoanPurposes, filters.pipelineAnalysisBranches]);
 
   // ─── Grid layout ───
   const contentWidth = Math.max(width - 24, MIN_GRID_WIDTH);
@@ -1696,6 +2007,19 @@ export function WidgetGroup({
                     </button>
                   </span>
                 )}
+              </>
+            ) : sectionType === 'pipeline-analysis' ? (
+              <>
+                <PipelineAnalysisFilterRow
+                  groupId={groupId}
+                  filters={filters}
+                  updateFilters={updateFilters}
+                  pipelineRange={pipelineRange.range}
+                  pipelineConfig={pipelineConfig.config}
+                  pipelineFilterOptions={pipelineFilterOptions}
+                  loading={pipelineRange.loading}
+                  tenantId={selectedTenantId ?? null}
+                />
               </>
             ) : sectionType === 'actors' ? (
               <>
