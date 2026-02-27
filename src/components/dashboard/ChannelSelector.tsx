@@ -74,10 +74,10 @@ export const ChannelSelector = ({
 
         // Filter out any channels/groups with empty string values (breaks Radix Select)
         const validChannels = (data.channels || []).filter(
-          (c) => c.channel && c.channel.trim() !== ""
+          (c) => c.channel && c.channel.trim() !== "",
         );
         const validChannelGroups = (data.channelGroups || []).filter(
-          (g) => g.group && g.group.trim() !== ""
+          (g) => g.group && g.group.trim() !== "",
         );
 
         setChannels(validChannels);
@@ -114,14 +114,14 @@ export const ChannelSelector = ({
       const group = channelGroups.find((g) => g.group === selectedChannel);
       if (group) {
         return `${formatChannelName(
-          group.group
+          group.group,
         )} (${group.loanCount.toLocaleString()})`;
       }
     } else {
       const channel = channels.find((c) => c.channel === selectedChannel);
       if (channel) {
         return `${formatChannelName(
-          channel.channel
+          channel.channel,
         )} (${channel.loanCount.toLocaleString()})`;
       }
     }

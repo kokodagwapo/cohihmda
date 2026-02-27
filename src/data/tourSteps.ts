@@ -230,9 +230,16 @@ export const adminTourSteps: Step[] = [
   {
     target: '[data-tour="admin-connections"]',
     content:
-      "Set up and manage your LOS connection (e.g. Encompass), sync schedules, and vendor integrations.",
+      "Set up and manage your LOS connection (e.g. Encompass) and sync schedules.",
     placement: "right",
     title: "Connections & Integrations",
+  },
+  {
+    target: '[data-tour="admin-loan-folders"]',
+    content:
+      "Choose which Encompass loan folders Cohi syncs data from. Only loans in selected folders appear in dashboards and reports.",
+    placement: "right",
+    title: "Loan Folders",
   },
   {
     target: '[data-tour="admin-data-config"]',

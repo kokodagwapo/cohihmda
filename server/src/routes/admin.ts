@@ -16,6 +16,7 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { tenantDbManager } from "../config/tenantDatabaseManager.js";
 import { listTenants } from "../services/tenantProvisioningService.js";
+import { AdditionalFieldService } from "../services/additionalFieldService.js";
 import { createEncompassUserSyncService } from "../services/encompassUserSyncService.js";
 import ssoConfigRoutes from "./admin/ssoConfig.js";
 import * as cognitoAuth from "../services/cognito/cognitoAuthService.js";
@@ -978,6 +979,51 @@ router.get(
         .status(500)
         .json({
           error: "Failed to fetch tenant users",
+          details: error.message,
+        });
+    }
+  },
+);
+
+/**
+ * POST /api/admin/tenants/:tenantId/reconcile-additional-field-columns
+ * Reconcile additional_field_definitions with actual loans table columns:
+ * for each definition with column_created=TRUE, add missing column on loans if needed.
+ * No need to reload or re-import loans data.
+ */
+router.post(
+  "/tenants/:tenantId/reconcile-additional-field-columns",
+  authenticateToken,
+  requireRole("super_admin", "platform_admin", "tenant_admin"),
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.params.tenantId as string;
+      if (req.userRole === "tenant_admin" && req.tenantId !== tenantId) {
+        return res.status(403).json({
+          error: "Forbidden",
+          message: "You can only run this for your own organization",
+        });
+      }
+      const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+      const service = new AdditionalFieldService(tenantPool);
+      const report = await service.reconcileColumns();
+      res.json({
+        success: true,
+        message:
+          report.created.length > 0 || report.setColumnCreatedFalse.length > 0 || report.failed.length > 0
+            ? "Reconciliation completed. See report."
+            : "No mismatches found.",
+        report,
+      });
+    } catch (error: any) {
+      logError("Error reconciling additional field columns", error, {
+        userId: req.userId,
+        tenantId: req.params.tenantId as string,
+      });
+      res
+        .status(500)
+        .json({
+          error: "Failed to reconcile additional field columns",
           details: error.message,
         });
     }

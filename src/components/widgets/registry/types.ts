@@ -61,6 +61,8 @@ export interface WidgetRenderProps<TData = unknown> {
   height: number;
   /** User-overridable settings (colors, number format, etc.) */
   config?: Record<string, unknown>;
+  /** Called when the widget wants to persist config changes (e.g. workflow dropdown state). */
+  onConfigChange?: (config: Record<string, unknown>) => void;
 }
 
 // ---------------------------------------------------------------------------

@@ -7,7 +7,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { api } from '@/lib/api';
-import { Loader2, Link2, RefreshCw, Play, Plus, Pause, Edit, CheckCircle2, XCircle, Clock, Network, BarChart3, Folder, Trash2, AlertTriangle, StopCircle, Save } from 'lucide-react';
+import { Loader2, Link2, RefreshCw, Play, Plus, Pause, Edit, CheckCircle2, XCircle, Clock, Network, BarChart3, Trash2, AlertTriangle, StopCircle, Save } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
@@ -81,7 +81,6 @@ export const LOSSettingsSection = ({
   const [searchParams, setSearchParams] = useSearchParams();
   const [newConnectionOpen, setNewConnectionOpen] = useState(false);
   const [fieldMappingConnectionId, setFieldMappingConnectionId] = useState<string | null>(null);
-  const [folderSelectionConnectionId, setFolderSelectionConnectionId] = useState<string | null>(null);
   const [clearingDatabase, setClearingDatabase] = useState(false);
   
   // Edit dialog state
@@ -798,26 +797,15 @@ export const LOSSettingsSection = ({
                             </>
                           )}
                           {connection.los_type === 'encompass' && (
-                            <>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 w-8 p-0"
-                                onClick={() => setFolderSelectionConnectionId(connection.id)}
-                                title="Manage Folders"
-                              >
-                                <Folder className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 w-8 p-0"
-                                onClick={() => handleFieldMappingClick(connection.id)}
-                                title="Configure Field Mapping"
-                              >
-                                <Link2 className="h-4 w-4" />
-                              </Button>
-                            </>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0"
+                              onClick={() => handleFieldMappingClick(connection.id)}
+                              title="Configure Field Mapping"
+                            >
+                              <Link2 className="h-4 w-4" />
+                            </Button>
                           )}
                           {onUpdate && !isTenantAdmin && (
                             <Button
@@ -933,36 +921,6 @@ export const LOSSettingsSection = ({
         </DialogContent>
       </Dialog>
 
-      {/* Folder Selection Dialog */}
-      {folderSelectionConnectionId && selectedTenantId && (
-        <Card className="border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 shadow-[0_1px_3px_rgba(0,0,0,0.04)] mt-6">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-lg font-thin text-slate-900 dark:text-white tracking-tight">
-                Manage Loan Folders
-              </CardTitle>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setFolderSelectionConnectionId(null)}
-              >
-                <XCircle className="h-4 w-4" />
-              </Button>
-            </div>
-            <CardDescription className="text-sm text-slate-600 dark:text-slate-400 font-light">
-              Select which Encompass folders to sync loans from
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <FolderSelectionDialog
-              connectionId={folderSelectionConnectionId}
-              tenantId={selectedTenantId}
-              onClose={() => setFolderSelectionConnectionId(null)}
-            />
-          </CardContent>
-        </Card>
-      )}
-
       {/* Field Mapping Dialog/Modal */}
       {fieldMappingConnectionId && selectedTenantId && (
         <Card className="border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 shadow-[0_1px_3px_rgba(0,0,0,0.04)] mt-6">
@@ -1001,188 +959,3 @@ export const LOSSettingsSection = ({
     </motion.div>
   );
 };
-
-// Folder Selection Component
-function FolderSelectionDialog({ 
-  connectionId, 
-  tenantId, 
-  onClose 
-}: { 
-  connectionId: string; 
-  tenantId: string; 
-  onClose: () => void;
-}) {
-  const { toast } = useToast();
-  const [availableFolders, setAvailableFolders] = useState<Array<{ folderName: string }>>([]);
-  const [selectedFolders, setSelectedFolders] = useState<string[]>([]);
-  const [loadingFolders, setLoadingFolders] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [loadingConnection, setLoadingConnection] = useState(true);
-
-  // Load connection data and folders
-  useEffect(() => {
-    const loadData = async () => {
-      setLoadingConnection(true);
-      try {
-        // Load connection to get current selected folders
-        const connectionResponse = await api.request<{ connections: any[] }>(
-          `/api/los/connections?tenant_id=${tenantId}`
-        );
-        const connection = connectionResponse.connections?.find((c: any) => c.id === connectionId);
-        if (connection?.encompass_selected_folders) {
-          const folders = Array.isArray(connection.encompass_selected_folders) 
-            ? connection.encompass_selected_folders 
-            : (typeof connection.encompass_selected_folders === 'string' 
-                ? JSON.parse(connection.encompass_selected_folders || '[]')
-                : []);
-          setSelectedFolders(folders);
-        }
-        
-        // Load available folders
-        await loadFolders();
-      } catch (error: any) {
-        console.error('Error loading connection data:', error);
-        toast({
-          title: 'Error',
-          description: 'Failed to load connection data',
-          variant: 'destructive',
-        });
-      } finally {
-        setLoadingConnection(false);
-      }
-    };
-    
-    loadData();
-  }, [connectionId, tenantId, toast]);
-
-  const loadFolders = async () => {
-    setLoadingFolders(true);
-    try {
-      const response = await api.request<{ folders: Array<{ folderName: string }> }>(
-        `/api/encompass/folders/${connectionId}?tenant_id=${tenantId}`
-      );
-      setAvailableFolders(response.folders || []);
-    } catch (error: any) {
-      console.error('Error loading folders:', error);
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to load folders',
-        variant: 'destructive',
-      });
-    } finally {
-      setLoadingFolders(false);
-    }
-  };
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      await api.request(`/api/los/connections/${connectionId}?tenant_id=${tenantId}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          encompass_selected_folders: selectedFolders,
-        }),
-      });
-      toast({
-        title: 'Success',
-        description: 'Folders saved successfully',
-      });
-      onClose();
-    } catch (error: any) {
-      console.error('Error saving folders:', error);
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to save folders',
-        variant: 'destructive',
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (loadingConnection) {
-    return (
-      <div className="flex items-center justify-center py-8">
-        <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300">Loan Folders</h4>
-          <p className="text-xs text-slate-500 mt-1">
-            Select which Encompass folders to sync loans from
-          </p>
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={loadFolders}
-          disabled={loadingFolders}
-        >
-          {loadingFolders ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Loading...
-            </>
-          ) : (
-            <>
-              <RefreshCw className="mr-2 h-4 w-4" />
-              Refresh Folders
-            </>
-          )}
-        </Button>
-      </div>
-
-      {availableFolders.length > 0 ? (
-        <div className="space-y-2 max-h-[300px] overflow-y-auto border rounded-md p-3">
-          {availableFolders.map((folder) => (
-            <div key={folder.folderName} className="flex items-center space-x-2">
-              <Checkbox
-                id={`folder-${folder.folderName}`}
-                checked={selectedFolders.includes(folder.folderName)}
-                onCheckedChange={(checked) => {
-                  if (checked) {
-                    setSelectedFolders([...selectedFolders, folder.folderName]);
-                  } else {
-                    setSelectedFolders(selectedFolders.filter((f) => f !== folder.folderName));
-                  }
-                }}
-              />
-              <Label
-                htmlFor={`folder-${folder.folderName}`}
-                className="text-sm font-normal cursor-pointer flex-1"
-              >
-                {folder.folderName}
-              </Label>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="text-sm text-slate-500 text-center py-4 border rounded-md">
-          {loadingFolders ? 'Loading folders...' : 'No folders available. Click "Refresh Folders" to load.'}
-        </div>
-      )}
-
-      {selectedFolders.length > 0 && (
-        <div className="text-xs text-slate-600 dark:text-slate-400 p-2 bg-slate-50 dark:bg-slate-800 rounded">
-          <strong>Selected ({selectedFolders.length}):</strong> {selectedFolders.join(', ')}
-        </div>
-      )}
-
-      <div className="flex justify-end gap-2 pt-2 border-t">
-        <Button variant="outline" onClick={onClose} disabled={saving}>
-          Cancel
-        </Button>
-        <Button onClick={handleSave} disabled={saving}>
-          {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          Save Folders
-        </Button>
-      </div>
-    </div>
-  );
-}

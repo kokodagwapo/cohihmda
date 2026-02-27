@@ -59,6 +59,7 @@ $params = @(
     "ParameterKey=ContainerImageTag,ParameterValue=$ImageTag"
     "ParameterKey=ContainerCpu,ParameterValue=$CONTAINER_CPU"
     "ParameterKey=ContainerMemory,ParameterValue=$CONTAINER_MEMORY"
+    "ParameterKey=WorkerDesiredCount,ParameterValue=$WORKER_DESIRED_COUNT"
     "ParameterKey=AuroraEndpoint,ParameterValue=$AURORA_ENDPOINT"
     "ParameterKey=AuroraSecretArn,ParameterValue=$AURORA_SECRET_ARN"
     "ParameterKey=AuroraKmsKeyArn,ParameterValue=$AURORA_KMS_KEY_ARN"

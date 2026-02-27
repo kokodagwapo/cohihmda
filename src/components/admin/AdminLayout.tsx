@@ -31,7 +31,7 @@ import {
   RefreshCw,
   Calculator,
   ArrowLeftRight,
-  Activity,
+  Folder,
 } from "lucide-react";
 import type { AdminSection, AdminMode } from "@/hooks/admin/useAdminState";
 
@@ -283,6 +283,16 @@ const allAdminSections: AdminSectionDef[] = [
     mode: "tenant",
   },
   {
+    id: "loan-folders" as AdminSection,
+    label: "Loan Folders",
+    icon: Folder,
+    description: "Manage which Encompass folders to sync from",
+    color: "text-orange-300 dark:text-orange-400/70",
+    allowedRoles: ["super_admin", "platform_admin", "tenant_admin"],
+    category: "Data",
+    mode: "tenant",
+  },
+  {
     id: "rag-voice" as AdminSection,
     label: "AI Assistant",
     icon: Brain,
@@ -298,16 +308,6 @@ const allAdminSections: AdminSectionDef[] = [
     icon: BookOpen,
     description: "Browse and manage knowledge base",
     color: "text-indigo-300 dark:text-indigo-400/70",
-    allowedRoles: ["super_admin", "platform_admin", "tenant_admin"],
-    category: "AI & Knowledge",
-    mode: "tenant",
-  },
-  {
-    id: "analytics" as AdminSection,
-    label: "User Analytics",
-    icon: Activity,
-    description: "Page views, sessions, funnels, heatmaps, and replays",
-    color: "text-sky-300 dark:text-sky-400/70",
     allowedRoles: ["super_admin", "platform_admin", "tenant_admin"],
     category: "AI & Knowledge",
     mode: "tenant",

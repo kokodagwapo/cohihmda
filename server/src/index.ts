@@ -53,6 +53,8 @@ const wss = new WebSocketServer({ server });
 const PORT = process.env.PORT || 3001;
 const SKIP_DB = process.env.SKIP_DB === "true";
 const NODE_ENV = process.env.NODE_ENV || "development";
+// PROCESS_MODE: 'api' = HTTP server only; 'worker' = schedulers + sync job poller only; unset = both (local dev)
+const PROCESS_MODE = process.env.PROCESS_MODE;
 
 // Initialize Sentry (must be first)
 initSentry();
@@ -316,15 +318,75 @@ const startServer = () => {
   });
 };
 
+/**
+ * Start worker process: schedulers + sync job poller. No HTTP server.
+ * Used when PROCESS_MODE=worker (dedicated ECS worker container).
+ */
+async function startWorker() {
+  console.log("🔧 Starting worker (schedulers + sync job poller)...");
+  if (NODE_ENV === "test") return;
+
+  try {
+    const { startSyncScheduler } =
+      await import("./services/losSyncScheduler.js");
+    startSyncScheduler();
+  } catch (error) {
+    console.warn("⚠️ Failed to start LOS sync scheduler:", error);
+  }
+
+  if (process.env.ENCOMPASS_WEBHOOK_SCHEDULER_ENABLED !== "false") {
+    try {
+      const { startEncompassWebhookScheduler } = await import(
+        "./services/encompassWebhookScheduler.js"
+      );
+      startEncompassWebhookScheduler();
+    } catch (error) {
+      console.warn("⚠️ Failed to start Encompass webhook scheduler:", error);
+    }
+  }
+
+  try {
+    const { registerInsightHooks } =
+      await import("./services/hooks/registerInsightHooks.js");
+    registerInsightHooks();
+  } catch (error) {
+    console.warn("⚠️ Failed to register insight hooks:", error);
+  }
+
+  try {
+    const { startNewsRefreshScheduler } = await import(
+      "./services/newsRefreshScheduler.js"
+    );
+    startNewsRefreshScheduler();
+  } catch (error) {
+    console.warn("⚠️ Failed to start news refresh scheduler:", error);
+  }
+
+  try {
+    const { startSyncJobPoller } = await import(
+      "./services/syncJobPoller.js"
+    );
+    startSyncJobPoller();
+    console.log("✅ Sync job poller started");
+  } catch (error) {
+    console.warn("⚠️ Failed to start sync job poller:", error);
+  }
+}
+
 if (SKIP_DB) {
   startServer();
 } else {
   initDatabase()
     .then(async () => {
+      if (PROCESS_MODE === "worker") {
+        await startWorker();
+        return;
+      }
+
       startServer();
 
-      // Start LOS sync scheduler if not in test mode
-      if (NODE_ENV !== "test") {
+      // Start schedulers only when not in api-only mode (unset = legacy: API + schedulers in one process)
+      if (NODE_ENV !== "test" && PROCESS_MODE !== "api") {
         try {
           const { startSyncScheduler } =
             await import("./services/losSyncScheduler.js");
@@ -344,7 +406,6 @@ if (SKIP_DB) {
           }
         }
 
-        // Register post-sync hooks (insight generation + tracked insight evaluation)
         try {
           const { registerInsightHooks } =
             await import("./services/hooks/registerInsightHooks.js");
@@ -353,12 +414,6 @@ if (SKIP_DB) {
           console.warn("⚠️ Failed to register insight hooks:", error);
         }
 
-        // Vendor sync scheduler disabled - not yet ready for production use
-        // When vendor outbound integrations (accounting, capital markets, servicing) are needed,
-        // re-enable and fix to use tenant-specific database pools instead of management pool.
-        // See: server/src/services/vendorSyncScheduler.ts
-
-        // Refresh industry news cache daily at 5:00 AM
         try {
           const { startNewsRefreshScheduler } = await import(
             "./services/newsRefreshScheduler.js"
@@ -366,6 +421,15 @@ if (SKIP_DB) {
           startNewsRefreshScheduler();
         } catch (error) {
           console.warn("⚠️ Failed to start news refresh scheduler:", error);
+        }
+
+        try {
+          const { startSyncJobPoller } = await import(
+            "./services/syncJobPoller.js"
+          );
+          startSyncJobPoller();
+        } catch (error) {
+          console.warn("⚠️ Failed to start sync job poller:", error);
         }
       }
     })

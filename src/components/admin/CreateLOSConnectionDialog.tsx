@@ -107,6 +107,7 @@ export function CreateLOSConnectionDialog({
         
         if (isPartnerFlow) {
           connectionData.api_client_secret = formData.api_client_secret;
+          connectionData.encompass_sa_username = formData.encompass_sa_username;
         } else if (isRopcFlow) {
           connectionData.api_client_secret = formData.api_client_secret;
           connectionData.encompass_sa_username = formData.encompass_sa_username;
@@ -342,6 +343,22 @@ export function CreateLOSConnectionDialog({
                     />
                   </div>
                 </div>
+
+                {isPartnerFlow && (
+                  <div className="space-y-2">
+                    <Label htmlFor="encompass_sa_username_partner">API Username</Label>
+                    <Input
+                      id="encompass_sa_username_partner"
+                      type="text"
+                      value={formData.encompass_sa_username}
+                      onChange={(e) => setFormData({ ...formData, encompass_sa_username: e.target.value })}
+                      placeholder="Encompass API user login (e.g., apiuser)"
+                    />
+                    <p className="text-xs text-slate-500">
+                      The Encompass user account associated with this partner integration. Used for user impersonation when accessing loan data.
+                    </p>
+                  </div>
+                )}
 
                 {/* ROPC/API Flow Fields */}
                 {isRopcFlow && (

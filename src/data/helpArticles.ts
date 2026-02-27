@@ -1130,6 +1130,7 @@ The Admin panel is where you manage your organization's users, data connections,
 - **Access & Permissions** — Custom roles, section access, field and row-level restrictions
 - **SSO Configuration** — Single Sign-On with your IdP
 - **Connections & Integrations** — LOS (e.g. Encompass) connection and sync
+- **Loan Folders** — Choose which Encompass loan folders to sync
 - **Field Mapping** — Map LOS fields to Cohi (default + additional fields)
 - **Revenue** — Revenue and margin formulas for scorecards
 - **Scoring & Weights** — Sales/Operations weights, loan complexity, unit targets
@@ -1200,11 +1201,15 @@ Cohi integrates with:
 1. Go to **Admin > Connections & Integrations**
 2. Click **Add Connection** (or Add Encompass Connection)
 3. Enter your Encompass credentials (Client ID, Client Secret, Instance ID)
-4. Configure sync frequency (e.g. every 15 minutes) and which loan folders to sync
+4. Configure sync frequency (e.g. every 15 minutes)
 5. Save and run an initial sync
+6. Go to **Admin > Loan Folders** to select which Encompass folders to sync
 
 ## Field Mapping
 After the connection is created, configure which Encompass fields map to Cohi in **Admin > Field Mapping**. Cohi maps most standard fields automatically; use Field Discovery there for custom fields.
+
+## Loan Folders
+Folder selection has moved to a dedicated section. Go to **Admin > Loan Folders** to choose which Encompass loan folders Cohi pulls data from.
 
 ## Monitoring Sync
 In **Connections & Integrations**, view last sync timestamp, loan counts, and any errors. Fix sync or mapping issues there or in **Data Quality**.`,
@@ -1357,16 +1362,52 @@ The **Connections & Integrations** section is where you add and manage your Loan
 2. Click **Add Connection** (or **Add Encompass Connection**)
 3. Enter your Encompass API credentials (Client ID, Client Secret, Instance ID)
 4. Configure sync frequency (e.g. every 15 minutes)
-5. Choose which loan folders to sync
-6. Save and run an initial sync
+5. Save and run an initial sync
+6. After connecting, go to **Admin > Loan Folders** to choose which folders to sync
 
 ## After Connection
+- **Loan Folders** — Select which Encompass loan folders to sync (see **Admin > Loan Folders**)
 - **Field Mapping** — Configure which Encompass fields map to Cohi (see Field Mapping section)
 - **Sync status** — View last sync time, loan counts, and any errors
 - **Multiple connections** — Some tenants use more than one Encompass instance; you can add multiple connections
 
 ## Monitoring
 Check sync status and history regularly. Failed syncs or rate limits will appear in the connection details.`,
+  },
+  {
+    id: "adm-loan-folders",
+    slug: "loan-folders",
+    title: "Loan Folders",
+    category: "Admin",
+    categorySlug: "admin",
+    summary:
+      "Select which Encompass loan folders to sync into Cohi.",
+    adminOnly: true,
+    content: `# Loan Folders
+
+## Overview
+The **Loan Folders** section lets you choose which Encompass loan folders Cohi syncs data from. Only loans in selected folders will appear in your dashboards, scorecards, and reports.
+
+## Prerequisites
+You must have at least one Encompass connection configured in **Admin > Connections & Integrations** before you can manage folders.
+
+## Selecting Folders
+1. Go to **Admin > Loan Folders**
+2. Each Encompass connection is shown as a card with its name, instance ID, and status
+3. Available folders are fetched directly from your Encompass instance
+4. Check the boxes next to the folders you want to sync
+5. Click **Save Folders** to apply your selection
+
+## Refreshing the Folder List
+If new folders have been created in Encompass, click **Refresh Folders** on the relevant connection card. This re-fetches the full folder list from Encompass in real time.
+
+## Common Issues
+- **"No folders available"** — The Encompass API credentials may have expired or the connection may be offline. Check the warning or error message displayed on the card and verify the connection in **Connections & Integrations**.
+- **Authentication errors (401)** — The API user's credentials need to be refreshed or the user may not have permission to list folders in Encompass.
+- **Folders appear empty after saving** — After changing folder selections, a sync must run before new loans appear. Syncs run on the configured schedule (typically every 15 minutes) or can be triggered manually.
+
+## Who Can Use It
+Loan Folders management is available to **tenant admins**, **platform admins**, and **super admins**.`,
   },
   {
     id: "adm-revenue",
