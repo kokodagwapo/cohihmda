@@ -144,6 +144,7 @@ RULES:
   - Withdrawn: current_loan_status ILIKE '%Withdrawn%'
   - Denied: current_loan_status ILIKE '%Denied%'
   - Completed (non-active): current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
+  - When reporting or filtering by outcome date for Denied loans, use current_status_date when uw_denied_date/denial_date is null (platform fallback). Do not report "no denied date populated" as an issue.
   - Pull-through: funded / completed * 100 (use application_date cohort)
   - Revenue: loan_amount * (rate_lock_buy_side_base_price_rate - 100) / 100 (when rate > 100, else use 25bps default)
 - Result set size: you may return up to 1000 rows. The UI uses lazy loading and virtualization, so large result sets are fine. For pipelines or cohorts larger than 1000, aggregate in your query (e.g. by status, by personnel, by month) rather than returning raw rows.
