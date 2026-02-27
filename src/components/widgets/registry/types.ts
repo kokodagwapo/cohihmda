@@ -66,6 +66,18 @@ export interface WidgetRenderProps<TData = unknown> {
 }
 
 // ---------------------------------------------------------------------------
+// Configurable properties – agent/UI can override these per instance
+// ---------------------------------------------------------------------------
+
+export interface ConfigurableProperty {
+  key: string;
+  label: string;
+  type: 'select' | 'boolean' | 'number';
+  options?: { value: string; label: string }[];
+  default?: unknown;
+}
+
+// ---------------------------------------------------------------------------
 // Widget Definition – the static "blueprint" for a widget type
 // ---------------------------------------------------------------------------
 
@@ -92,6 +104,8 @@ export interface WidgetDefinition<TData = unknown> {
   component: ComponentType<WidgetRenderProps<TData>>;
   /** Default config (colors, formatting, etc.) passed to the component */
   config?: Record<string, unknown>;
+  /** Properties the agent or UI can override (for modify_registry_widget) */
+  configurableProperties?: ConfigurableProperty[];
 }
 
 // ---------------------------------------------------------------------------

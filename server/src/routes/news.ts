@@ -216,12 +216,14 @@ router.post(
         return res.status(400).json({ error: "A valid recipient email is required" });
       }
 
-      await sendDailyBriefNewsletterPreview(recipient);
+      const messageId = await sendDailyBriefNewsletterPreview(recipient);
 
       res.json({
         success: true,
-        message: "Preview email queued",
+        message: "Preview email sent. If you don't see it, check your spam folder.",
         recipient,
+        messageId: messageId ?? undefined,
+        tip: "Delivery status can be checked in AWS SES console (Sending → Email sending activity) using the messageId.",
       });
     } catch (error: any) {
       console.error("[News Route] Error sending newsletter preview:", error);

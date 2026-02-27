@@ -701,6 +701,7 @@ export function Navigation(
                 ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
                 : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800",
             )}
+            data-track="nav_workbench"
           >
             <LayoutPanelLeft className="w-4 h-4 flex-shrink-0" />
             <span>My Workbench</span>
@@ -710,6 +711,7 @@ export function Navigation(
         {/* Research Lab */}
         <div>
           <button
+            data-track="nav_research"
             onClick={() => {
               navigate("/research");
               setMobileMenuOpen(false);
@@ -741,6 +743,7 @@ export function Navigation(
           <div className="flex items-center min-w-0">
             <Link
               to="/"
+              data-track="nav_home"
               className="flex items-center gap-2 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background hover:opacity-90 transition-opacity"
               aria-label="Go to home page"
             >
@@ -768,6 +771,7 @@ export function Navigation(
                 }}
               >
                 <button
+                  data-track="nav_insights"
                   onClick={() => {
                     if (!isInsightsPage) {
                       navigate("/insights");
@@ -838,6 +842,7 @@ export function Navigation(
                             return (
                               <button
                                 key={section.id}
+                                data-track={`nav_section_${section.id}`}
                                 onClick={() => scrollToSection(section.id)}
                                 onFocus={() => setFocusedIndex(index)}
                                 className={cn(

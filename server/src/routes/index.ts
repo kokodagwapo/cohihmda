@@ -22,6 +22,7 @@ import cohiWorkbenchRoutes from "./cohiWorkbench.js";
 import ragKnowledgeBaseRouter from "./ragKnowledgeBase.js";
 import dataQualityRoutes from "./dataQuality.js";
 import newsRoutes from "./news.js";
+import emailRoutes from "./email.js";
 import globalKnowledgeRoutes from "./admin/globalKnowledge.js";
 import aiPromptsRoutes from "./admin/aiPrompts.js";
 import platformSettingsRoutes from "./admin/platformSettings.js";
@@ -35,6 +36,7 @@ import trackedInsightRoutes from "./trackedInsights.js";
 import onboardingRoutes from "./onboarding.js";
 import jobsRoutes from "./jobs.js";
 import helpContentRoutes from "./helpContent.js";
+import analyticsRoutes from "./analytics.js";
 import { pool, resetPool } from "../config/database.js";
 import { setupMockLosApi } from "../services/mockLosApi.js";
 import { getVersionInfo } from "../services/versionService.js";
@@ -83,6 +85,7 @@ export function setupRoutes(app: Express) {
   app.use("/api/cohi-chat/workbench", cohiWorkbenchRoutes); // Workbench AI assistant
   app.use("/api/data-quality", dataQualityRoutes);
   app.use("/api/news", newsRoutes);
+  app.use("/api/email", emailRoutes);
   app.use("/api/admin/global-knowledge", globalKnowledgeRoutes);
   app.use("/api/admin/ai-prompts", aiPromptsRoutes);
   app.use("/api/admin/platform-settings", platformSettingsRoutes);
@@ -96,6 +99,7 @@ export function setupRoutes(app: Express) {
   app.use("/api/onboarding", onboardingRoutes); // Onboarding analysis agent
   app.use("/api/jobs", jobsRoutes); // Async job status polling
   app.use("/api/help", helpContentRoutes); // Help content RAG seeding
+  app.use("/api/analytics", analyticsRoutes); // User behavior analytics (ingestion + reporting)
 
   // Health check handler (shared by both /health and /api/health)
   const healthCheckHandler = async (req: any, res: any) => {

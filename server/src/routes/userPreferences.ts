@@ -5,6 +5,7 @@
 
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import { z } from 'zod';
 import { retryQuery, isDatabaseConnectionError, handleDatabaseError } from '../config/database.js';
 import { pool as managementPool } from '../config/managementDatabase.js';
@@ -174,6 +175,177 @@ router.put('/preferences/:key', authenticateToken, async (req: AuthRequest, res)
       error: 'Failed to update user preference',
       message: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// Unified Email Preferences (Notification Hub)
+// Schema: emailPreferences = { dailyBrief: { enabled, frequency, deliveryHour, email, sections, newsSourceFilter }, alerts: {...}, unsubscribeToken }
+// -----------------------------------------------------------------------------
+
+const DEFAULT_DAILY_BRIEF_SECTIONS = {
+  marketSnapshot: true,
+  industryNews: true,
+  pipelineDigest: false,
+  researchUpdates: false,
+  trackedMetrics: false,
+};
+
+const DEFAULT_EMAIL_PREFERENCES = {
+  dailyBrief: {
+    enabled: false,
+    frequency: 'weekdays',
+    deliveryHour: 8,
+    email: '',
+    sections: DEFAULT_DAILY_BRIEF_SECTIONS,
+    newsSourceFilter: [] as string[],
+  },
+  alerts: {
+    criticalInsights: false,
+    researchComplete: false,
+    trackedMetricBreach: false,
+  },
+  unsubscribeToken: null as string | null,
+};
+
+/**
+ * GET /api/user/email-preferences
+ * Returns unified email preferences, merging from legacy dailyBriefEmailSubscription if needed.
+ */
+router.get('/email-preferences', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.userId;
+    const userEmail = req.userEmail || '';
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const prefResult = await retryQuery(
+      () => managementPool.query(
+        `SELECT preference_value FROM user_preferences WHERE user_id = $1 AND preference_key = 'emailPreferences' LIMIT 1`,
+        [userId]
+      ),
+      3,
+      1000
+    );
+    const emailPrefs = prefResult.rows[0]?.preference_value as Record<string, unknown> | undefined;
+
+    if (emailPrefs && typeof emailPrefs === 'object') {
+      const merged = {
+        ...DEFAULT_EMAIL_PREFERENCES,
+        ...emailPrefs,
+        dailyBrief: {
+          ...DEFAULT_EMAIL_PREFERENCES.dailyBrief,
+          ...(typeof (emailPrefs as any).dailyBrief === 'object' ? (emailPrefs as any).dailyBrief : {}),
+          sections: {
+            ...DEFAULT_DAILY_BRIEF_SECTIONS,
+            ...(typeof (emailPrefs as any).dailyBrief?.sections === 'object' ? (emailPrefs as any).dailyBrief.sections : {}),
+          },
+        },
+        alerts: {
+          ...DEFAULT_EMAIL_PREFERENCES.alerts,
+          ...(typeof (emailPrefs as any).alerts === 'object' ? (emailPrefs as any).alerts : {}),
+        },
+      };
+      if (!merged.dailyBrief.email && userEmail) merged.dailyBrief.email = userEmail;
+      return res.json(merged);
+    }
+
+    const legacyResult = await retryQuery(
+      () => managementPool.query(
+        `SELECT preference_value FROM user_preferences WHERE user_id = $1 AND preference_key = 'dailyBriefEmailSubscription' LIMIT 1`,
+        [userId]
+      ),
+      3,
+      1000
+    );
+    const legacy = legacyResult.rows[0]?.preference_value as { enabled?: boolean; email?: string } | undefined;
+    const migrated = {
+      ...DEFAULT_EMAIL_PREFERENCES,
+      dailyBrief: {
+        ...DEFAULT_EMAIL_PREFERENCES.dailyBrief,
+        enabled: Boolean(legacy?.enabled),
+        email: (legacy?.email || userEmail || '').trim(),
+      },
+    };
+    return res.json(migrated);
+  } catch (error: any) {
+    console.error('Error fetching email preferences:', error);
+    if (handleDatabaseError(error, res, 'Failed to fetch email preferences')) return;
+    res.status(500).json({ error: 'Failed to fetch email preferences' });
+  }
+});
+
+/**
+ * PUT /api/user/email-preferences
+ * Save unified email preferences. Generates unsubscribeToken when daily brief is first enabled.
+ */
+router.put('/email-preferences', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.userId;
+    const userEmail = req.userEmail || '';
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const body = req.body as Record<string, unknown>;
+    const dailyBrief = body?.dailyBrief as Record<string, unknown> | undefined;
+    const email = String((dailyBrief?.email ?? userEmail) || '').trim();
+    if (!email || !email.includes('@')) {
+      return res.status(400).json({ error: 'A valid email is required for the daily brief' });
+    }
+
+    const existing = await retryQuery(
+      () => managementPool.query(
+        `SELECT preference_value FROM user_preferences WHERE user_id = $1 AND preference_key = 'emailPreferences' LIMIT 1`,
+        [userId]
+      ),
+      3,
+      1000
+    );
+    const current = (existing.rows[0]?.preference_value as Record<string, unknown>) || {};
+    let unsubscribeToken = (current as any).unsubscribeToken as string | null;
+    const enabling = Boolean(dailyBrief?.enabled) && !(current as any).dailyBrief?.enabled;
+    if (enabling && !unsubscribeToken) {
+      unsubscribeToken = crypto.randomUUID();
+    }
+
+    const value = {
+      ...DEFAULT_EMAIL_PREFERENCES,
+      ...body,
+      dailyBrief: {
+        ...DEFAULT_EMAIL_PREFERENCES.dailyBrief,
+        ...(typeof dailyBrief === 'object' ? dailyBrief : {}),
+        email,
+        sections: {
+          ...DEFAULT_DAILY_BRIEF_SECTIONS,
+          ...(typeof (dailyBrief as any)?.sections === 'object' ? (dailyBrief as any).sections : {}),
+        },
+      },
+      alerts: {
+        ...DEFAULT_EMAIL_PREFERENCES.alerts,
+        ...(typeof body?.alerts === 'object' ? body.alerts : {}),
+      },
+      unsubscribeToken: unsubscribeToken ?? (current as any).unsubscribeToken ?? null,
+    };
+
+    await retryQuery(
+      () => managementPool.query(
+        `INSERT INTO user_preferences (user_id, preference_key, preference_value)
+         VALUES ($1, 'emailPreferences', $2::jsonb)
+         ON CONFLICT (user_id, preference_key)
+         DO UPDATE SET preference_value = $2::jsonb, updated_at = NOW()`,
+        [userId, JSON.stringify(value)]
+      ),
+      3,
+      1000
+    );
+
+    res.json({ success: true, preference_value: value });
+  } catch (error: any) {
+    console.error('Error saving email preferences:', error);
+    if (handleDatabaseError(error, res, 'Failed to save email preferences')) return;
+    res.status(500).json({ error: 'Failed to save email preferences' });
   }
 });
 
