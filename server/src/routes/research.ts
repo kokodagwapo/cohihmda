@@ -110,11 +110,12 @@ router.post(
   async (req: AuthRequest, res: Response) => {
     try {
       const { tenantPool, tenantId } = getTenantContext(req);
-      const { topic, initialContext } = req.body || {};
+      const { topic, initialContext, mode } = req.body || {};
       const userId = req.userId || "";
       const userEmail = req.userEmail || "";
+      const researchMode = mode === "quick" ? "quick" : "deep";
 
-      const session = await createSession(tenantId, userId, userEmail, tenantPool, topic || undefined, initialContext || undefined);
+      const session = await createSession(tenantId, userId, userEmail, tenantPool, topic || undefined, initialContext || undefined, researchMode);
 
       console.log(`[Research] Created session ${session.id} for tenant ${tenantId}${topic ? `, topic: "${topic}"` : ""}${initialContext ? " (from insight)" : ""}`);
 

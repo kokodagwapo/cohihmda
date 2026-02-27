@@ -66,6 +66,8 @@ export interface ResearchTheme {
 export interface RankedInsight {
   rank: number;
   headline: string;
+  /** One-line actionable takeaway. */
+  keyTakeaway?: string;
   detail: string;
   impact: "high" | "medium" | "low";
   supportingFindingIds: number[];
@@ -96,6 +98,8 @@ export type SessionPhase =
   | "complete"
   | "followup"
   | "error";
+
+export type ResearchMode = "quick" | "deep";
 
 export interface AgentEvent {
   type: string;
@@ -227,6 +231,9 @@ export function useResearchSession(tenantId?: string | null) {
         }
         break;
       }
+      case "quick_result":
+        setFindings([event.data as Finding]);
+        break;
       case "synthesis":
         setReport(event.data as ResearchReport);
         break;
@@ -252,7 +259,7 @@ export function useResearchSession(tenantId?: string | null) {
 
   // ── Start a new research session ──
   const startSession = useCallback(
-    async (topic?: string, initialContext?: InsightContext) => {
+    async (topic?: string, initialContext?: InsightContext, mode: ResearchMode = "quick") => {
       setPhase("creating");
       setError(null);
       setPlan(null);
@@ -268,9 +275,10 @@ export function useResearchSession(tenantId?: string | null) {
       }
 
       try {
-        const body: any = {};
+        const body: Record<string, unknown> = {};
         if (topic) body.topic = topic;
         if (initialContext) body.initialContext = initialContext;
+        body.mode = mode;
 
         const result = await api.request<{ sessionId: string }>(
           `/api/research/sessions${tenantParam}`,

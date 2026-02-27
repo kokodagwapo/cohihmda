@@ -24,9 +24,13 @@ export interface ResearchTheme {
 export interface RankedInsight {
   rank: number;
   headline: string;
+  /** One-line actionable takeaway (e.g. "Review LO tier mix to improve pull-through."). */
+  keyTakeaway?: string;
   detail: string;
   impact: "high" | "medium" | "low";
   supportingFindingIds: number[];
+  /** Recommended next step; required for high/medium impact. */
+  recommendedAction?: string;
 }
 
 export interface FurtherInvestigation {
@@ -56,8 +60,8 @@ You will receive:
 
 Your output is a JSON object:
 {
-  "directAnswer": "Optional: if the user asked a specific question, give a 1-2 sentence direct answer to that question with the key result (e.g. the main number or table takeaway). Omit or null if the request was broad / exploratory.",
-  "executiveSummary": "2-3 sentence high-level summary of the most important findings",
+  "directAnswer": "Optional: if the user asked a specific question, give a 1-2 sentence direct answer with the key result. Use **bold** for key numbers. Omit or null if the request was broad / exploratory.",
+  "executiveSummary": "2-3 sentence high-level summary of the most important findings. Use **bold** for key metrics and bullet lists where helpful.",
   "themes": [
     {
       "name": "Theme name",
@@ -70,9 +74,11 @@ Your output is a JSON object:
     {
       "rank": 1,
       "headline": "Most impactful insight headline",
-      "detail": "2-3 sentences explaining the insight with specific numbers",
+      "keyTakeaway": "One-line actionable sentence (e.g. 'Review LO tier mix to improve pull-through.')",
+      "detail": "2-3 sentences with **bold** for key numbers; use bullet lists for multiple sub-points.",
       "impact": "high" | "medium" | "low",
-      "supportingFindingIds": [1]
+      "supportingFindingIds": [1],
+      "recommendedAction": "Concrete next step (required for high/medium impact; e.g. 'Segment by channel and rerun conversion metrics.')"
     }
   ],
   "furtherInvestigation": [
@@ -84,15 +90,15 @@ Your output is a JSON object:
 }
 
 RULES:
-- DATA BUILD requests: When the user asked for a specific output (a table, a breakdown, "show me X"), set directAnswer to a 1-2 sentence response telling them what was produced (e.g. "The table below shows hours per personnel across all loans."). The finding that contains the user's requested table MUST be the basis for the rank-1 insight so its evidence data is displayed first and prominently.
-- INVESTIGATION requests: When the request was broad/exploratory, omit directAnswer or set to null, and rank insights by business impact.
-- Themes should group related findings and identify cross-cutting patterns
-- Ranked insights: For data-build requests, the finding that directly answers the user's question is ALWAYS rank 1. For investigations, rank by business impact.
-- Use specific numbers from the findings — do not generalize or invent data
-- Severity levels: "critical" = requires immediate attention, "warning" = concerning trend, "info" = noteworthy, "positive" = good performance
-- Only suggest further investigation for genuinely unresolved questions
-- Be concise but precise — this is for executives who need actionable intelligence
-- If findings conflict, note the discrepancy and explain possible reasons`;
+- DATA BUILD requests: When the user asked for a specific output (a table, a breakdown, "show me X"), set directAnswer to a 1-2 sentence response. The finding that contains the user's requested table MUST be the basis for the rank-1 insight.
+- INVESTIGATION requests: Omit directAnswer or set to null; rank insights by business impact.
+- FORMATTING: Use Markdown in directAnswer, executiveSummary, theme descriptions, and insight detail: **bold** for key numbers and metrics, bullet lists (- item) for multiple points. This improves scanability.
+- MORTGAGE FRAMING: Always frame insights in terms of business impact: revenue, pipeline volume, risk exposure, cycle time, conversion (pull-through/fallout/denial), and compliance. Avoid generic language; tie each insight to a concrete operational or financial effect.
+- keyTakeaway: Every ranked insight MUST have a keyTakeaway — one short, actionable sentence.
+- recommendedAction: Every high- or medium-impact insight MUST have a recommendedAction. Low-impact can omit or keep brief.
+- Themes: Group related findings; use severity consistently (critical / warning / info / positive).
+- Use specific numbers from the findings — do not generalize or invent data.
+- If findings conflict, note the discrepancy and explain possible reasons.`;
 
 // ============================================================================
 // Agent Entry Point

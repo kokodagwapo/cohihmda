@@ -17,7 +17,7 @@
 import pg from "pg";
 import crypto from "crypto";
 import { getOpenAIKey, getSchemaContext, getMetricDefinitions, getKnowledgeContext } from "./tools.js";
-import { runPlannerAgent, type ResearchPlan } from "./agents/plannerAgent.js";
+import { runPlannerAgent, type ResearchPlan, type InvestigationQuestion } from "./agents/plannerAgent.js";
 import {
   runDataAnalystAgent,
   type Finding,
@@ -64,6 +64,8 @@ export interface InsightContext {
   chatHistory?: Array<{ role: string; content: string }>;
 }
 
+export type ResearchMode = "quick" | "deep";
+
 export interface ResearchSession {
   id: string;
   tenantId: string;
@@ -80,6 +82,8 @@ export interface ResearchSession {
   createdAt: number;
   error?: string;
   initialContext?: InsightContext;
+  /** "quick" = single agent, no plan/synthesis; "deep" = full pipeline. Default "deep". */
+  mode?: ResearchMode;
   // Pause mechanism
   pauseRequested: boolean;
   paused: boolean;
@@ -444,7 +448,8 @@ export async function createSession(
   userEmail: string,
   tenantPool: pg.Pool,
   topic?: string,
-  initialContext?: InsightContext
+  initialContext?: InsightContext,
+  mode: ResearchMode = "deep"
 ): Promise<ResearchSession> {
   pruneExpiredSessions();
 
@@ -453,9 +458,9 @@ export async function createSession(
     ? `Deep dive: ${initialContext.headline}`
     : undefined);
 
-  // Pre-populate steering directive from insight context so the planner has prior knowledge
+  // Pre-populate steering directive from insight context so the planner has prior knowledge (deep mode only)
   const steeringDirectives: string[] = [];
-  if (initialContext) {
+  if (mode === "deep" && initialContext) {
     let directive = `PRIOR INVESTIGATION CONTEXT — The user is escalating from a dashboard insight:\n`;
     directive += `Headline: ${initialContext.headline}\n`;
     directive += `Summary: ${initialContext.understory}\n`;
@@ -488,6 +493,7 @@ export async function createSession(
     steeringDirectives,
     createdAt: Date.now(),
     initialContext,
+    mode,
     pauseRequested: false,
     paused: false,
   };
@@ -526,15 +532,94 @@ export async function runResearchPipeline(
 
   session._activeEmitter = emit;
 
+  const isQuickMode = session.mode === "quick";
+
   try {
     const apiKey = await getOpenAIKey(session.tenantId);
     const [schemaContext, metricDefs, knowledgeContext, priorSessionSummaries] = await Promise.all([
       getSchemaContext(session.tenantId),
       Promise.resolve(getMetricDefinitions()),
       getKnowledgeContext(tenantPool, session.tenantId, session.topic),
-      getPriorSessionSummaries(tenantPool, session.tenantId, session.id),
+      isQuickMode ? Promise.resolve("") : getPriorSessionSummaries(tenantPool, session.tenantId, session.id),
     ]);
 
+    const enrichedKnowledgeContext = [knowledgeContext, priorSessionSummaries]
+      .filter(Boolean)
+      .join("\n\n") || undefined;
+
+    if (isQuickMode) {
+      // ── Quick Answer: single data analyst, no plan, no synthesis ──
+      const quickQuestion: InvestigationQuestion = {
+        id: 1,
+        topic: session.topic || "Quick analysis",
+        hypothesis: session.topic || "Answer the user's question directly.",
+        approach: "Answer the user's question directly with one or more SQL queries. Produce a single finding with a clear title, summary, key metrics, and evidence tables. Be concise.",
+        priority: "high",
+        category: "performance",
+      };
+
+      session.phase = "investigating";
+      emit({
+        type: "phase",
+        data: { phase: "investigating", message: "Getting your answer..." },
+        timestamp: Date.now(),
+      });
+
+      emit({
+        type: "agent_start",
+        data: { questionId: 1, topic: quickQuestion.topic, category: quickQuestion.category },
+        timestamp: Date.now(),
+      });
+
+      const onStep = (step: AgentStep) => {
+        emit({
+          type: `agent_${step.type}`,
+          data: { questionId: 1, ...step },
+          timestamp: step.timestamp,
+        });
+      };
+
+      const getSteeringDirective = (): string | null => {
+        if (session.steeringDirectives.length > 0) return session.steeringDirectives.shift()!;
+        return null;
+      };
+
+      const checkPause = () => waitIfPaused(session, emit);
+
+      const finding = await runDataAnalystAgent(
+        quickQuestion,
+        schemaContext,
+        metricDefs,
+        tenantPool,
+        apiKey,
+        onStep,
+        getSteeringDirective,
+        checkPause,
+        enrichedKnowledgeContext
+      );
+
+      session.plan = { summary: "Quick answer", questions: [quickQuestion] };
+      session.findings = [finding];
+      emit({ type: "quick_result", data: finding, timestamp: Date.now() });
+      emit({
+        type: "agent_complete",
+        data: { questionId: finding.questionId, title: finding.title, confidence: finding.confidence },
+        timestamp: Date.now(),
+      });
+
+      session.phase = "complete";
+      emit({
+        type: "complete",
+        data: { message: "Quick answer ready.", findingCount: 1, quickMode: true },
+        timestamp: Date.now(),
+      });
+
+      await saveSession(session, tenantPool);
+      console.log(`[Research] Session ${sessionId}: Quick answer complete`);
+      return;
+    }
+
+    // ── Deep mode: full pipeline ──
     if (knowledgeContext) {
       console.log(`[Research] Session ${sessionId}: Knowledge base context loaded (${knowledgeContext.length} chars)`);
     }
@@ -572,7 +657,7 @@ export async function runResearchPipeline(
       topic: session.topic,
       knowledgeContext,
       priorInvestigationContext,
-      priorSessionSummaries,
+      priorSessionSummaries: priorSessionSummaries || undefined,
     });
 
     session.plan = plan;
@@ -588,10 +673,6 @@ export async function runResearchPipeline(
       data: { phase: "investigating", message: `Launching ${plan.questions.length} data analyst agents...` },
       timestamp: Date.now(),
     });
-
-    const enrichedKnowledgeContext = [knowledgeContext, priorSessionSummaries]
-      .filter(Boolean)
-      .join("\n\n") || undefined;
 
     const MAX_CONCURRENT = 3;
     const questions = plan.questions;
