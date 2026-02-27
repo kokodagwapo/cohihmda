@@ -15,7 +15,8 @@ const router = Router();
  */
 router.get("/unsubscribe/:token", async (req: Request, res: Response) => {
   try {
-    const token = req.params.token?.trim();
+    const raw = req.params.token;
+    const token = (typeof raw === "string" ? raw : Array.isArray(raw) ? raw[0] ?? "" : "").trim();
     if (!token) {
       return res.status(400).json({ success: false, error: "Missing unsubscribe token" });
     }

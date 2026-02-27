@@ -135,16 +135,19 @@ router.post(
     }
 
     setupSSE(res);
+    const stopHeartbeat = startSSEHeartbeat(res);
 
     let clientDisconnected = false;
     req.on("close", () => {
       clientDisconnected = true;
+      stopHeartbeat();
     });
 
     const emit = (event: ChatEvent) => {
       if (!clientDisconnected) sseWrite(res, event);
     };
 
+    // Initial heartbeat
     sseWrite(res, {
       type: "heartbeat",
       data: { connectionId },

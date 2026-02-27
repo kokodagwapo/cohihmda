@@ -126,7 +126,7 @@ router.post("/session", authenticateToken, async (req: AuthRequest, res) => {
       ...parse.data,
       userId,
       tenantId,
-    };
+    } as AnalyticsSessionPayload;
     await upsertSession(session);
     res.status(204).end();
   } catch (err) {
@@ -220,7 +220,8 @@ router.get("/sessions/:id", authenticateToken, requireAnalyticsAdmin, async (req
   try {
     const tenantId = await resolveAnalyticsTenantId(req);
     if (!tenantId) return res.status(400).json({ error: "Tenant context required" });
-    const sessionId = req.params.id;
+    const sessionId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!sessionId) return res.status(400).json({ error: "Session ID required" });
     const { session, replayChunkIndices } = await getSessionDetail(tenantId, sessionId);
     if (!session) return res.status(404).json({ error: "Session not found" });
     res.json({ session, replayChunkIndices });
@@ -237,8 +238,9 @@ router.get(
     try {
       const tenantId = await resolveAnalyticsTenantId(req);
       if (!tenantId) return res.status(400).json({ error: "Tenant context required" });
-      const sessionId = req.params.id;
-      const chunkIndex = parseInt(req.params.chunkIndex, 10);
+      const sessionId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      if (!sessionId) return res.status(400).json({ error: "Session ID required" });
+      const chunkIndex = parseInt(Array.isArray(req.params.chunkIndex) ? req.params.chunkIndex[0] : req.params.chunkIndex, 10);
       if (Number.isNaN(chunkIndex)) return res.status(400).json({ error: "Invalid chunk index" });
       const events = await getReplayChunk(tenantId, sessionId, chunkIndex);
       if (events === null) return res.status(404).json({ error: "Chunk not found" });
@@ -257,7 +259,8 @@ router.get(
     try {
       const tenantId = await resolveAnalyticsTenantId(req);
       if (!tenantId) return res.status(400).json({ error: "Tenant context required" });
-      const userId = req.params.userId;
+      const userId = Array.isArray(req.params.userId) ? req.params.userId[0] : req.params.userId;
+      if (!userId) return res.status(400).json({ error: "User ID required" });
       const sessionId = typeof req.query.sessionId === "string" ? req.query.sessionId : null;
       const data = await getUserJourney(tenantId, userId, sessionId);
       res.json({ data });
