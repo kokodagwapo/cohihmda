@@ -983,6 +983,24 @@ Resources:
         ScaleInCooldown: 300
         ScaleOutCooldown: 60
 
+  # Scale on request count per target (helps when LLM/AI endpoints are I/O-bound and CPU stays low)
+  ECSRequestCountScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub "${ProjectName}-${Environment}-request-count-scaling"
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ECSAutoScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ALBRequestCountPerTarget
+          ResourceLabel: !Sub
+            - "${ALBFullName}/${TGFullName}"
+            - ALBFullName: !GetAtt ApplicationLoadBalancer.LoadBalancerFullName
+              TGFullName: !GetAtt ALBTargetGroup.TargetGroupFullName
+        TargetValue: 500.0
+        ScaleInCooldown: 300
+        ScaleOutCooldown: 60
+
   # ============================================================================
   # CloudWatch Alarms
   # ============================================================================
