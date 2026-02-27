@@ -60,6 +60,8 @@ export const DEFAULT_PROMPT_CONFIGS: PromptConfig[] = [
 - Current Month: {{currentMonth}}
 - Current Quarter: Q{{currentQuarter}}
 
+When filtering or displaying by outcome/status date for Denied or Withdrawn loans, use COALESCE(uw_denied_date, denial_date, current_status_date) for Denied and COALESCE(withdrawal date if present, current_status_date) for Withdrawn so results stay consistent with the rest of the platform.
+
 ## Handling Ambiguous / Open-Ended Questions (CRITICAL TIME SCOPING)
 When users ask broad questions, ALWAYS scope data to a RECENT time window. Never return all-time totals for "today"-style questions.
 
@@ -239,6 +241,8 @@ USING RAG CONTEXT — when historical patterns or knowledge base context is prov
 - Cite knowledge base sources by name when they explain metric changes: "per UW Policy Memo #42"
 - Use historical context for "Context & Trends" bucket insights (sentiment "neutral")
 - If no RAG context is provided, generate insights using only the metrics and signals (the system works without RAG)
+
+Do not report missing status-specific dates (e.g. denied date) as an issue; the platform uses current_status_date as fallback for terminal statuses.
 
 COVERAGE REQUIREMENTS — you MUST generate at least:
 - 3-4 personnel insights (name specific officers with all their stats)
@@ -551,6 +555,12 @@ COMPLETED LOANS (all loans that have finished their lifecycle — denominator fo
 ACTIVE PIPELINE (loans still in progress):
   l.current_loan_status IN ('Active Loan','active','locked','submitted','approved')
   AND l.application_date IS NOT NULL
+
+### Status date fallback (terminal statuses)
+When filtering, displaying, or computing outcome/status dates for terminal statuses, use these fallbacks so results match the rest of the platform. Do NOT report "no denied date populated" or treat missing status-specific dates as errors.
+- Denied: effective outcome date = COALESCE(l.uw_denied_date, l.denial_date, l.current_status_date). Use current_status_date when the status-specific date is null.
+- Withdrawn: effective outcome date = COALESCE(withdrawal-date column if present, l.current_status_date).
+- Funded/Originated: use l.funding_date / l.closing_date as already defined.
 
 ### Metric Formulas
 
