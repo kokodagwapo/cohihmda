@@ -500,6 +500,9 @@ router.get(
         }
       }
 
+      // Exclude archived loans by default
+      conditions.push("(is_archived IS DISTINCT FROM TRUE)");
+
       // Handle search across multiple fields
       if (search && typeof search === "string" && search.trim()) {
         const searchTerm = `%${search.trim().toLowerCase()}%`;
@@ -802,6 +805,9 @@ router.get(
           paramIndex += accessFilter.paramOffset;
         }
       }
+
+      // Exclude archived loans
+      conditions.push("(is_archived IS DISTINCT FROM TRUE)");
 
       const dateField = (req.query.date_field as string) || "application_date";
       const dateFrom = req.query.date_from as string | undefined;

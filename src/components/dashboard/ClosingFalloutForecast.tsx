@@ -184,10 +184,10 @@ const mapForecastStatus = (loan: any): Exclude<ForecastStatus, "Locked"> => {
 
 // Helper to check if loan has "Active Loan" status (for Active Loans Today metric)
 // IMPORTANT: This MUST match the server-side METRICS_CATALOG.active_loans definition exactly:
-//   current_loan_status = 'Active Loan' AND application_date IS NOT NULL
+//   current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND (is_archived IS DISTINCT FROM TRUE)
 // Do NOT use getLoanStatus() here because it has fallbacks that inflate the count
 const isActiveLoan = (loan: any): boolean => {
-  // Only check current_loan_status - this is the EXACT field the server checks
+  if (loan?.is_archived === true) return false;
   const status = loan?.current_loan_status;
   if (!status) return false;
   const normalized = normalizeRawStatus(status);
@@ -994,7 +994,7 @@ export const ClosingFalloutForecast = ({
     count: number;
     volume: number;
     loading: boolean;
-  }>({ count: 0, volume: 0, loading: false });
+  }>({ count: 0, volume: 0, loading: true });
 
   // Session-scoped metrics cache: keyed by period, invalidated when loans, predictions, stats, pull-through rate, or active loans period change
   const metricsCacheRef = useRef<{
