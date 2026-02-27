@@ -37,6 +37,8 @@ export interface SyncOptions {
   useChunkedProcessing?: boolean; // Enable chunked processing (default: true for datasets > 10000 loans)
 }
 
+const LOAD_BATCH_SIZE = 500;
+
 export class EncompassEtlService {
   private extractor: EncompassLoanExtractor;
   private tenantPool?: pg.Pool;
@@ -44,6 +46,65 @@ export class EncompassEtlService {
   constructor(tenantPool?: pg.Pool) {
     this.tenantPool = tenantPool;
     this.extractor = new EncompassLoanExtractor(tenantPool);
+  }
+
+  /**
+   * Convert a single value for a database column (type coercion for INSERT).
+   * Used for both batch and single-row load paths.
+   */
+  private convertValueForColumn(
+    value: any,
+    col: { name: string; data_type: string; numeric_precision?: number; numeric_scale?: number },
+    _columnTypeMap: Map<string, { data_type: string; numeric_precision?: number; numeric_scale?: number }>
+  ): any {
+    if (value === null || value === undefined) return null;
+    if (value === "") return null;
+    const colType = col.data_type;
+
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed === "") return null;
+      const numValue = parseFloat(trimmed);
+      const isNumericString = !isNaN(numValue) && isFinite(numValue);
+      if (isNumericString) {
+        if (colType === "integer" || colType === "bigint" || colType === "smallint") return Math.round(numValue);
+        if (colType === "numeric" || colType === "decimal" || colType === "double precision" || colType === "real") return numValue;
+      }
+      if (colType === "boolean") {
+        const lower = trimmed.toLowerCase();
+        return lower === "true" || lower === "yes" || lower === "y" || lower === "1" || lower === "x";
+      }
+      if (colType === "date" || colType === "timestamp" || colType === "timestamp with time zone") {
+        let date = new Date(trimmed);
+        if (isNaN(date.getTime())) {
+          const match = trimmed.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+          if (match) {
+            const [, month, day, year] = match;
+            date = new Date(`${year}-${(month as string).padStart(2, "0")}-${(day as string).padStart(2, "0")}`);
+          }
+        }
+        if (!isNaN(date.getTime())) return colType === "date" ? date.toISOString().split("T")[0] : date;
+        return null;
+      }
+      return value;
+    }
+
+    if (typeof value === "number") {
+      if (colType === "date" || colType === "timestamp" || colType === "timestamp with time zone") {
+        if (Math.abs(value) < 100000) return null;
+        try {
+          const date = value > 10000000000 ? new Date(value) : new Date(value * 1000);
+          if (!isNaN(date.getTime()) && date.getFullYear() >= 1970 && date.getFullYear() <= 2100) {
+            return colType === "date" ? date.toISOString().split("T")[0] : date;
+          }
+        } catch {
+          return null;
+        }
+        return null;
+      }
+      if (colType === "boolean") return value !== 0;
+    }
+    return value;
   }
 
   /**
@@ -614,7 +675,85 @@ export class EncompassEtlService {
 
     let processedCount = 0;
     const totalLoans = loans.length;
+    const columnNames = availableColumns.map((c) => c.name);
+    const updateClauses = columnNames
+      .filter((n) => n !== "guid" && n !== "id")
+      .map((n) => `${n} = EXCLUDED.${n}`)
+      .concat(["updated_at = NOW()"]);
 
+    const runOneRow = async (loan: Record<string, any>) => {
+      const values = availableColumns.map((col) =>
+        this.convertValueForColumn(loan[col.name], col, columnTypeMap)
+      );
+      const placeholders = columnNames.map((_, i) => `$${i + 1}`).join(", ");
+      const query = `
+          INSERT INTO public.loans (${columnNames.join(", ")})
+          VALUES (${placeholders})
+          ON CONFLICT (guid)
+          DO UPDATE SET ${updateClauses.join(", ")}
+          RETURNING (xmax = 0) AS is_insert
+        `;
+      const result = await this.tenantPool!.query(query, values);
+      return result.rows[0]?.is_insert === true ? "insert" : "update";
+    };
+
+    const useBulkLoad = true;
+    if (useBulkLoad) {
+      for (let start = 0; start < loans.length; start += LOAD_BATCH_SIZE) {
+        const batch = loans.slice(start, start + LOAD_BATCH_SIZE);
+        try {
+          const flatValues: any[] = [];
+          for (const loan of batch) {
+            const row = availableColumns.map((col) =>
+              this.convertValueForColumn(loan[col.name], col, columnTypeMap)
+            );
+            flatValues.push(...row);
+          }
+          const numCols = columnNames.length;
+          const placeholders = batch
+            .map((_, i) =>
+              "(" +
+              Array.from({ length: numCols }, (_, j) => `$${i * numCols + j + 1}`).join(",") +
+              ")"
+            )
+            .join(", ");
+          const query = `
+          INSERT INTO public.loans (${columnNames.join(", ")})
+          VALUES ${placeholders}
+          ON CONFLICT (guid)
+          DO UPDATE SET ${updateClauses.join(", ")}
+          RETURNING (xmax = 0) AS is_insert
+        `;
+          const result = await this.tenantPool!.query(query, flatValues);
+          const rows = result.rows as { is_insert: boolean }[];
+          successCount += rows.length;
+          insertCount += rows.filter((r) => r.is_insert).length;
+          updateCount += rows.filter((r) => !r.is_insert).length;
+          processedCount += batch.length;
+        } catch (batchError: any) {
+          for (const loan of batch) {
+            try {
+              const outcome = await runOneRow(loan);
+              successCount++;
+              if (outcome === "insert") insertCount++;
+              else updateCount++;
+            } catch (err: any) {
+              failureCount++;
+              errors.push(
+                `Loan ${loan.guid || loan.loan_number || "unknown"}: ${err?.message || err}`
+              );
+              if (errors.length <= 10) console.error("[EncompassEtlService] Load error:", err?.message);
+            }
+            processedCount++;
+          }
+        }
+        if (processedCount % 1000 === 0 && processedCount > 0) {
+          console.log(
+            `[EncompassEtlService] Load progress: ${processedCount}/${totalLoans} (${successCount} succeeded, ${failureCount} failed)`
+          );
+        }
+      }
+    } else {
     for (const loan of loans) {
       // Build column list and values
       // Note: Tenant databases don't have tenant_id column
@@ -1039,6 +1178,7 @@ export class EncompassEtlService {
           );
         }
       }
+    }
     }
 
     console.log(

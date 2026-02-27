@@ -46,6 +46,9 @@ $CONTAINER_CPU = 2048
 $CONTAINER_MEMORY = 4096
 $DESIRED_COUNT = 2
 
+# Sync worker (dedicated container for Encompass ETL; 0 to disable)
+$WORKER_DESIRED_COUNT = 1
+
 # Domain Configuration (coheus1.com subdomains)
 # Dev:  cohi-dev.coheus1.com (frontend), cohi-dev-api.coheus1.com (API/ALB)
 # Prod: cohi.coheus1.com (frontend), cohi-api.coheus1.com (API/ALB)
