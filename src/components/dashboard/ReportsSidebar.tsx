@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, Zap, BarChart3, Target, Check, Home, Trophy, X, Sun, FileText, LayoutGrid, TrendingUp, LayoutDashboard, Filter, ArrowLeftRight, Shield, ClipboardList, Calculator, LineChart } from 'lucide-react';
@@ -22,6 +22,10 @@ import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
+import {
+  SidebarRouteSearch,
+  type SidebarRouteSearchTarget,
+} from '@/components/dashboard/SidebarRouteSearch';
 
 export interface DashboardVisibility {
   executiveDashboard: boolean;
@@ -338,6 +342,52 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
   const [operationsSubExpanded, setOperationsSubExpanded] = useState(true);
   const [financialModelingSubExpanded, setFinancialModelingSubExpanded] = useState(true);
   const realtimeStats = useRealtimeStats();
+
+  const searchTargets: SidebarRouteSearchTarget[] = useMemo(() => {
+    const sectionTargets: SidebarRouteSearchTarget[] = [
+      ...INSIGHTS_CHILDREN.filter((it): it is typeof INSIGHTS_CHILDREN[number] & { type: 'section' } => it.type === "section").map((it) => ({
+        id: `section:${it.id}`,
+        label: it.label,
+        group: "Insights",
+        kind: "section" as const,
+        sectionId: it.id,
+        keywords: ["insights", "dashboard"],
+      })),
+      ...DASHBOARD_CHILDREN.filter((it): it is Extract<typeof DASHBOARD_CHILDREN[number], { type: "section" }> => it.type === "section").map((it) => ({
+        id: `section:${it.id}`,
+        label: it.label,
+        group: "Dashboards",
+        kind: "section" as const,
+        sectionId: it.id,
+        keywords: ["dashboards", "insights"],
+      })),
+    ];
+
+    const toptieringTargets: SidebarRouteSearchTarget[] = TOPTIERING_CHILDREN.filter(
+      (it): it is Extract<typeof TOPTIERING_CHILDREN[number], { type: "route" }> => it.type === "route",
+    ).map((it) => ({
+      id: `route:${it.id}`,
+      label: it.label,
+      group: "TopTiering",
+      kind: "route" as const,
+      path: it.path,
+      keywords: ["toptiering", "top tiering", "performance"],
+    }));
+
+    const pageTargets: SidebarRouteSearchTarget[] = [
+      { id: "route:insights", label: "Insights", group: "Pages", kind: "route", path: "/insights", keywords: ["home", "dashboard"] },
+      { id: "route:my-workbench", label: "My Workbench", group: "Pages", kind: "route", path: "/my-dashboard", keywords: ["workbench", "canvas"] },
+      { id: "route:research", label: "Research Lab", group: "Pages", kind: "route", path: "/research", keywords: ["research"] },
+      { id: "route:loans", label: "Loans", group: "Pages", kind: "route", path: "/loans", keywords: ["pipeline"] },
+      { id: "route:settings", label: "Settings", group: "Pages", kind: "route", path: "/settings", keywords: ["profile", "preferences"] },
+      { id: "route:help", label: "Help Center", group: "Pages", kind: "route", path: "/help", keywords: ["support", "docs"] },
+      { id: "route:workbench-shared", label: "Workbench: Shared With Me", group: "Pages", kind: "route", path: "/workbench/shared", keywords: ["workbench", "shared"] },
+      { id: "route:workbench-team", label: "Workbench: Team Folders", group: "Pages", kind: "route", path: "/workbench/team-folders", keywords: ["workbench", "team"] },
+      { id: "route:workbench-favorites", label: "Workbench: Favorites", group: "Pages", kind: "route", path: "/workbench/favorites", keywords: ["workbench", "favorites"] },
+    ];
+
+    return [...sectionTargets, ...toptieringTargets, ...pageTargets];
+  }, []);
 
   const subExpanded: Record<SubsectionKey, boolean> = {
     dashboard: true,
@@ -819,6 +869,9 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
 
         <SidebarContent className={cn("pb-3 overflow-y-auto flex-1 min-h-0")}>
         <div className={cn("py-2", isExpanded ? "pl-1 pr-2" : "px-1")}>
+          <div className={cn("mb-2", isExpanded ? "px-1" : "px-0")}>
+            <SidebarRouteSearch targets={searchTargets} collapsed={!isExpanded} />
+          </div>
           {/* Insights */}
           <div>
             {isExpanded ? (
