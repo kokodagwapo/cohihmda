@@ -574,8 +574,8 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(
       <div
         className={`md:rounded-2xl md:border ${
           isDarkMode
-            ? "bg-transparent md:bg-slate-900/50 md:border-white/10"
-            : "bg-transparent md:bg-white md:border-slate-200 md:shadow-sm"
+            ? "bg-transparent md:bg-slate-900/50 md:border-white/10 md:shadow-[0_8px_32px_rgba(0,0,0,0.24)]"
+            : "bg-transparent md:bg-white md:border-slate-200 md:shadow-[0_8px_32px_rgba(15,23,42,0.08)]"
         } overflow-hidden`}
       >
         <div
