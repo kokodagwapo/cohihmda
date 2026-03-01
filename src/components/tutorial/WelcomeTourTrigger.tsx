@@ -14,6 +14,30 @@ import {
 import { Button } from '@/components/ui/button';
 import { Sparkles, SkipForward } from 'lucide-react';
 
+const WELCOME_TOUR_STORAGE_KEY = 'cohi-welcome-tour-last-shown';
+const COOLDOWN_MS = 48 * 60 * 60 * 1000; // 48 hours
+
+function shouldShowWelcomeTour(): boolean {
+  try {
+    const raw = localStorage.getItem(WELCOME_TOUR_STORAGE_KEY);
+    if (!raw) return true;
+    const lastShown = new Date(raw).getTime();
+    const now = Date.now();
+    if (now - lastShown < COOLDOWN_MS) return false;
+    const lastDate = new Date(lastShown).toDateString();
+    const today = new Date(now).toDateString();
+    return lastDate !== today; // only on first login of the day
+  } catch {
+    return true;
+  }
+}
+
+function recordWelcomeTourShown(): void {
+  try {
+    localStorage.setItem(WELCOME_TOUR_STORAGE_KEY, new Date().toISOString());
+  } catch { /* quota */ }
+}
+
 export function WelcomeTourTrigger() {
   const { isAuthenticated, user } = useAuth();
   const { isTourCompleted, startTour, isLoading, prefs } = useTutorial();
@@ -27,7 +51,8 @@ export function WelcomeTourTrigger() {
       !isLoading &&
       !prefs.onboarding_complete &&
       !isTourCompleted('welcome') &&
-      location.pathname === '/insights'
+      location.pathname === '/insights' &&
+      shouldShowWelcomeTour()
     ) {
       const timer = setTimeout(() => setShowWelcomeDialog(true), 1000);
       return () => clearTimeout(timer);
@@ -36,19 +61,26 @@ export function WelcomeTourTrigger() {
 
   const handleStartTour = () => {
     setShowWelcomeDialog(false);
+    recordWelcomeTourShown();
     setTourStarted(true);
     startTour('welcome');
   };
 
   const handleSkip = () => {
     setShowWelcomeDialog(false);
+    recordWelcomeTourShown();
+  };
+
+  const handleOpenChange = (open: boolean) => {
+    if (!open) recordWelcomeTourShown();
+    setShowWelcomeDialog(open);
   };
 
   const firstName = user?.full_name?.split(' ')[0] || 'there';
 
   return (
     <>
-      <Dialog open={showWelcomeDialog} onOpenChange={setShowWelcomeDialog}>
+      <Dialog open={showWelcomeDialog} onOpenChange={handleOpenChange}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <div className="flex items-center justify-center mb-4">
