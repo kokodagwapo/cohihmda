@@ -1,3 +1,5 @@
+// Pricing dashboard page
+
 import { PricingDashboardView } from "@/components/views/PricingDashboardView";
 import { TopTieringLayout } from "@/components/layout/TopTieringLayout";
 import { TopTieringTopBar } from "@/components/layout/TopTieringTopBar";
