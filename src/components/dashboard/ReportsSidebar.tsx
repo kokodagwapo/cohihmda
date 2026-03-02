@@ -227,7 +227,8 @@ const DASHBOARD_CHILDREN = [
 // Submenus under Toptiering main menu (Core Analytics, Sales, Operations, Financial Modeling)
 const TOPTIERING_CHILDREN = [
   { type: 'subheader' as const, label: 'Core Analytics', subsectionKey: 'topTiering' as SubsectionKey },
-  { type: 'route' as const, id: 'loanFunnel', label: 'Loan Funnel', icon: Filter, path: '/loan-funnel', subsectionKey: 'topTiering' as SubsectionKey },
+  // Loan Funnel page hidden – references removed
+  // { type: 'route' as const, id: 'loanFunnel', label: 'Loan Funnel', icon: Filter, path: '/loan-funnel', subsectionKey: 'topTiering' as SubsectionKey },
   { type: 'route' as const, id: 'topTieringComparison', label: 'TopTiering Comparison', icon: ArrowLeftRight, path: '/performance/toptiering-comparison', subsectionKey: 'topTiering' as SubsectionKey },
   { type: 'route' as const, id: 'creditRiskManagement', label: 'Credit Risk Management', icon: Shield, path: '/credit-risk-management', subsectionKey: 'topTiering' as SubsectionKey },
   { type: 'route' as const, id: 'companyScorecard', label: 'Company Scorecard', icon: ClipboardList, path: '/company-scorecard', subsectionKey: 'topTiering' as SubsectionKey },

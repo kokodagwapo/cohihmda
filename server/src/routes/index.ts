@@ -33,6 +33,7 @@ import insightFeedbackRoutes from "./admin/insightFeedback.js";
 import knowledgeCenterRoutes from "./knowledgeCenter.js";
 import workbenchRoutes from "./workbench.js";
 import reportRoutes from "./reports.js";
+import distributionsRoutes from "./distributions.js";
 import researchRoutes from "./research.js";
 import trackedInsightRoutes from "./trackedInsights.js";
 import onboardingRoutes from "./onboarding.js";
@@ -98,6 +99,7 @@ export function setupRoutes(app: Express) {
   app.use("/api/knowledge-center", knowledgeCenterRoutes);
   app.use("/api/workbench/canvases", workbenchRoutes); // Workbench canvas CRUD (tenant DB)
   app.use("/api/workbench/reports", reportRoutes); // Report generation (PPTX/PDF)
+  app.use("/api/distributions", distributionsRoutes); // Report distribution schedules (tenant DB)
   app.use("/api/research", researchRoutes); // Research Analyst agentic system
   app.use("/api/insights/tracked", trackedInsightRoutes); // Tracked insights watchlist
   app.use("/api/onboarding", onboardingRoutes); // Onboarding analysis agent

@@ -10,6 +10,7 @@ import React, {
   useEffect,
   useMemo,
 } from "react";
+import { useNavigate } from "react-router-dom";
 import type { SectionType } from "@/stores/widgetSectionStore";
 import { Rnd } from "react-rnd";
 import { api } from "@/lib/api";
@@ -19,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import {
   Save,
   Share2,
+  Mail,
   Image,
   Upload,
   Palette,
@@ -34,7 +36,6 @@ import {
   Sparkles,
   Download,
   Presentation,
-  Mail,
   Link as LinkIcon,
   Code,
   Undo2,
@@ -120,6 +121,9 @@ import type {
 import type { GroupWidgetItem } from "@/components/workbench/canvas/types";
 import { ImageToDashboardDialog } from "@/components/workbench/ImageToDashboardDialog";
 import { Camera } from "lucide-react";
+
+/** Set to true to hide Cohi chat/panel in workbench (panel + toggle + empty-state entry points). */
+const WORKBENCH_COHI_HIDDEN = true;
 
 /**
  * Helper: make an authenticated POST that returns a Blob (for PPTX/PDF downloads).
@@ -853,6 +857,7 @@ export function WorkbenchCanvas({
   const [tenantUsersLoaded, setTenantUsersLoaded] = useState(false);
   const [visibilitySaving, setVisibilitySaving] = useState(false);
   const { user } = useAuth();
+  const navigate = useNavigate();
   const isOwner = isOwnerProp ?? true; // Default to true for new/own canvases
   const {
     handleExportPng,
@@ -3646,6 +3651,30 @@ Structure it as a narrative-first executive briefing:
                       <TooltipContent side="bottom">Share</TooltipContent>
                     </Tooltip>
                   )}
+                  {/* Distributions page hidden for now – entire Schedule distribution button removed */}
+                  {false && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400"
+                          onClick={() =>
+                            navigate(
+                              canvasId
+                                ? `/workbench/distributions?canvas=${canvasId}`
+                                : "/workbench/distributions",
+                            )
+                          }
+                        >
+                          <Mail className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">
+                        Schedule distribution
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
                   <input
                     ref={backgroundImageInputRef}
                     type="file"
@@ -4016,27 +4045,29 @@ Structure it as a narrative-first executive briefing:
               )}
               {/* --- End canvas-only tools --- */}
 
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className={cn(
-                      "h-8 gap-1.5 text-xs px-2.5 font-medium shrink-0",
-                      showCohiPanel
-                        ? "bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-700"
-                        : "",
-                    )}
-                    onClick={() => setShowCohiPanel(!showCohiPanel)}
-                  >
-                    <Sparkles className="h-3.5 w-3.5" />
-                    Cohi
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  Toggle Cohi Assistant
-                </TooltipContent>
-              </Tooltip>
+              {!WORKBENCH_COHI_HIDDEN && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className={cn(
+                        "h-8 gap-1.5 text-xs px-2.5 font-medium shrink-0",
+                        showCohiPanel
+                          ? "bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-700"
+                          : "",
+                      )}
+                      onClick={() => setShowCohiPanel(!showCohiPanel)}
+                    >
+                      <Sparkles className="h-3.5 w-3.5" />
+                      Cohi
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    Toggle Cohi Assistant
+                  </TooltipContent>
+                </Tooltip>
+              )}
 
               {/* Primary: Generate Report — one-click, AI-powered */}
               <Tooltip>
@@ -4425,18 +4456,22 @@ Structure it as a narrative-first executive briefing:
                         onMoveToGroup={handleMoveToGroup}
                         onWrapInGroup={handleWrapInGroup}
                         onExportExcel={() => handleExportWidgetExcel(item.i)}
-                        onEditWithCohi={() => {
-                          setEditingWidgetId(item.i);
-                          setSelectedWidgetId(item.i);
-                          setShowCohiPanel(true);
-                          const widgetTitle =
-                            (payload as any).title ||
-                            (payload as any).sectionId ||
-                            item.type;
-                          const widgetType = item.type;
-                          const contextMsg = `Help me edit the "${widgetTitle}" widget (type: ${widgetType}, ID: ${item.i}). What changes can I make?`;
-                          cohiSendMessage(contextMsg);
-                        }}
+                        onEditWithCohi={
+                          WORKBENCH_COHI_HIDDEN
+                            ? undefined
+                            : () => {
+                                setEditingWidgetId(item.i);
+                                setSelectedWidgetId(item.i);
+                                setShowCohiPanel(true);
+                                const widgetTitle =
+                                  (payload as any).title ||
+                                  (payload as any).sectionId ||
+                                  item.type;
+                                const widgetType = item.type;
+                                const contextMsg = `Help me edit the "${widgetTitle}" widget (type: ${widgetType}, ID: ${item.i}). What changes can I make?`;
+                                cohiSendMessage(contextMsg);
+                              }
+                        }
                       >
                         <WidgetRenderer
                           item={displayItem}
@@ -4530,73 +4565,88 @@ Structure it as a narrative-first executive briefing:
               ) : (
                 <div className="flex items-center justify-center p-8 min-h-[400px]">
                   <div className="text-center max-w-2xl w-full">
-                    <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-200/60 dark:shadow-violet-900/40">
-                      <Sparkles className="w-7 h-7 text-white" />
-                    </div>
-                    <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-1">
-                      What would you like to review?
-                    </h3>
-                    <p className="text-sm text-slate-400 dark:text-slate-500 mb-6">
-                      Ask Cohi to prepare dashboards, analyze performance, or
-                      build executive presentations.
-                    </p>
-
-                    {/* Primary: Natural language input */}
-                    <div className="max-w-lg mx-auto mb-6">
-                      <button
-                        type="button"
-                        onClick={() => setShowCohiPanel(true)}
-                        className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-md hover:border-violet-300 dark:hover:border-violet-600 hover:shadow-lg transition-all group text-left"
-                      >
-                        <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shrink-0">
-                          <Sparkles className="h-4 w-4 text-white" />
+                    {!WORKBENCH_COHI_HIDDEN ? (
+                      <>
+                        <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-200/60 dark:shadow-violet-900/40">
+                          <Sparkles className="w-7 h-7 text-white" />
                         </div>
-                        <span className="flex-1 text-sm text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300 transition-colors">
-                          &ldquo;Prepare a board-ready overview of monthly
-                          performance&rdquo;
-                        </span>
-                        <MessageSquare className="h-4 w-4 text-slate-300 dark:text-slate-600 shrink-0 group-hover:text-violet-500 transition-colors" />
-                      </button>
-                    </div>
+                        <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-1">
+                          What would you like to review?
+                        </h3>
+                        <p className="text-sm text-slate-400 dark:text-slate-500 mb-6">
+                          Ask Cohi to prepare dashboards, analyze performance, or
+                          build executive presentations.
+                        </p>
 
-                    {/* Quick executive prompts */}
-                    <div className="flex flex-wrap gap-2 justify-center mb-6">
-                      {[
-                        {
-                          label: "Executive Dashboard",
-                          prompt:
-                            "Build me a comprehensive executive dashboard with key KPIs, production trends, and pull-through analysis",
-                        },
-                        {
-                          label: "Monthly Performance",
-                          prompt:
-                            "Prepare a monthly performance overview with funded volume, pull-through, turn times, and highlights",
-                        },
-                        {
-                          label: "Pipeline Review",
-                          prompt:
-                            "Show me a pipeline review dashboard with active loans by stage, aging analysis, and fallout risk",
-                        },
-                        {
-                          label: "Board Presentation",
-                          prompt:
-                            "Create a board-ready presentation with executive summary, key metrics, trends, and recommendations",
-                        },
-                      ].map((q) => (
-                        <button
-                          key={q.label}
-                          type="button"
-                          onClick={() => {
-                            setShowCohiPanel(true);
-                            // Small delay to let the panel open before sending the message
-                            setTimeout(() => cohiSendMessage(q.prompt), 300);
-                          }}
-                          className="px-3 py-1.5 text-xs font-medium rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:border-violet-300 dark:hover:border-violet-600 hover:text-violet-700 dark:hover:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-all"
-                        >
-                          {q.label}
-                        </button>
-                      ))}
-                    </div>
+                        {/* Primary: Natural language input */}
+                        <div className="max-w-lg mx-auto mb-6">
+                          <button
+                            type="button"
+                            onClick={() => setShowCohiPanel(true)}
+                            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-md hover:border-violet-300 dark:hover:border-violet-600 hover:shadow-lg transition-all group text-left"
+                          >
+                            <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shrink-0">
+                              <Sparkles className="h-4 w-4 text-white" />
+                            </div>
+                            <span className="flex-1 text-sm text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300 transition-colors">
+                              &ldquo;Prepare a board-ready overview of monthly
+                              performance&rdquo;
+                            </span>
+                            <MessageSquare className="h-4 w-4 text-slate-300 dark:text-slate-600 shrink-0 group-hover:text-violet-500 transition-colors" />
+                          </button>
+                        </div>
+
+                        {/* Quick executive prompts */}
+                        <div className="flex flex-wrap gap-2 justify-center mb-6">
+                          {[
+                            {
+                              label: "Executive Dashboard",
+                              prompt:
+                                "Build me a comprehensive executive dashboard with key KPIs, production trends, and pull-through analysis",
+                            },
+                            {
+                              label: "Monthly Performance",
+                              prompt:
+                                "Prepare a monthly performance overview with funded volume, pull-through, turn times, and highlights",
+                            },
+                            {
+                              label: "Pipeline Review",
+                              prompt:
+                                "Show me a pipeline review dashboard with active loans by stage, aging analysis, and fallout risk",
+                            },
+                            {
+                              label: "Board Presentation",
+                              prompt:
+                                "Create a board-ready presentation with executive summary, key metrics, trends, and recommendations",
+                            },
+                          ].map((q) => (
+                            <button
+                              key={q.label}
+                              type="button"
+                              onClick={() => {
+                                setShowCohiPanel(true);
+                                setTimeout(() => cohiSendMessage(q.prompt), 300);
+                              }}
+                              className="px-3 py-1.5 text-xs font-medium rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:border-violet-300 dark:hover:border-violet-600 hover:text-violet-700 dark:hover:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-all"
+                            >
+                              {q.label}
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+                          <LayoutDashboard className="w-7 h-7 text-slate-500 dark:text-slate-400" />
+                        </div>
+                        <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-1">
+                          Your canvas is empty
+                        </h3>
+                        <p className="text-sm text-slate-400 dark:text-slate-500 mb-6">
+                          Add widgets from the library or browse templates below.
+                        </p>
+                      </>
+                    )}
 
                     {/* Secondary: Browse library */}
                     <div className="flex items-center justify-center gap-4">
@@ -4774,20 +4824,22 @@ Structure it as a narrative-first executive briefing:
           </div>
         </div>
 
-        {/* Cohi Assistant Panel (docks right) */}
-        <WorkbenchCohiPanel
-          open={showCohiPanel}
-          onClose={() => {
-            setShowCohiPanel(false);
-            setEditingWidgetId(null);
-          }}
-          messages={cohiMessages}
-          isLoading={cohiLoading}
-          suggestedQuestions={cohiSuggestions}
-          onSendMessage={cohiSendMessage}
-          onClearMessages={cohiClearMessages}
-          onExecuteAction={handleCohiAction}
-        />
+        {/* Cohi Assistant Panel (docks right) – hidden when WORKBENCH_COHI_HIDDEN */}
+        {!WORKBENCH_COHI_HIDDEN && (
+          <WorkbenchCohiPanel
+            open={showCohiPanel}
+            onClose={() => {
+              setShowCohiPanel(false);
+              setEditingWidgetId(null);
+            }}
+            messages={cohiMessages}
+            isLoading={cohiLoading}
+            suggestedQuestions={cohiSuggestions}
+            onSendMessage={cohiSendMessage}
+            onClearMessages={cohiClearMessages}
+            onExecuteAction={handleCohiAction}
+          />
+        )}
 
         <AlertDialog open={clearConfirmOpen} onOpenChange={setClearConfirmOpen}>
           <AlertDialogContent>
