@@ -885,6 +885,121 @@ export function FinancialModelingSandboxView({ selectedTenantId }: FinancialMode
 
         {/* Right Panel - Tables */}
         <div className="col-span-12 lg:col-span-9 space-y-3 sm:space-y-3 overflow-y-auto">
+          {/* Additional Profit Improvements Table */}
+          <Card
+            className={`rounded-xl backdrop-blur-sm ${
+              isDarkMode
+                ? "border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]"
+                : "border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]"
+            }`}
+          >
+            <CardHeader
+              className={`border-b pb-2 ${
+                isDarkMode
+                  ? "border-slate-700/50 bg-gradient-to-r from-slate-800/50 to-slate-700/30"
+                  : "border-blue-100/50 bg-gradient-to-r from-blue-50/30 to-purple-50/30"
+              }`}
+            >
+              <CardTitle className="text-base font-bold">
+                Additional Profit Improvements
+              </CardTitle>
+              <p className={`text-[10px] sm:text-xs mt-0.5 font-normal ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                Revenue impact from adjusting margin, pull-through, and MLO productivity targets
+              </p>
+            </CardHeader>
+            <CardContent className="pt-2">
+              <div className="overflow-x-auto -mx-2 sm:mx-0">
+                <div className="min-w-[500px] sm:min-w-0">
+                  <table className="w-full border-collapse text-xs sm:text-sm">
+                    <thead>
+                      <tr
+                        className={`border-b-2 ${
+                          isDarkMode ? "border-slate-700" : "border-slate-300"
+                        }`}
+                      >
+                        <th
+                          className={`text-left py-1.5 sm:py-2 px-2 sm:px-3 text-[10px] sm:text-xs font-semibold ${
+                            isDarkMode ? "text-slate-400" : "text-slate-600"
+                          }`}
+                        >
+                          Metric
+                        </th>
+                        <th
+                          className={`text-center py-1.5 sm:py-2 px-2 sm:px-3 text-[10px] sm:text-xs font-semibold ${
+                            isDarkMode ? "text-slate-400" : "text-slate-600"
+                          }`}
+                        >
+                          Actual
+                        </th>
+                        <th
+                          className={`text-center py-1.5 sm:py-2 px-2 sm:px-3 text-[10px] sm:text-xs font-semibold ${
+                            isDarkMode ? "text-slate-400" : "text-slate-600"
+                          }`}
+                        >
+                          Target (Selected)
+                        </th>
+                        <th
+                          className={`text-center py-1.5 sm:py-2 px-2 sm:px-3 text-[10px] sm:text-xs font-semibold ${
+                            isDarkMode ? "text-slate-400" : "text-slate-600"
+                          }`}
+                        >
+                          Est. Profit Improvement
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {profitImprovementData.map((row, idx) => (
+                        <tr
+                          key={idx}
+                          className={`border-b transition-colors ${
+                            isDarkMode
+                              ? "border-slate-800/50 hover:bg-slate-700/30"
+                              : "border-slate-200 hover:bg-slate-50"
+                          }`}
+                        >
+                          <td
+                            className={`py-1.5 sm:py-2 px-2 sm:px-3 text-xs sm:text-sm font-medium ${
+                              isDarkMode ? "text-slate-200" : "text-slate-900"
+                            }`}
+                          >
+                            {row.metric}
+                          </td>
+                          <td
+                            className={`py-1.5 sm:py-2 px-2 sm:px-3 text-xs sm:text-sm text-center ${
+                              isDarkMode ? "text-slate-300" : "text-slate-700"
+                            }`}
+                          >
+                            {row.actual}
+                          </td>
+                          <td
+                            className={`py-1.5 sm:py-2 px-2 sm:px-3 text-xs sm:text-sm text-center font-semibold ${
+                              isDarkMode ? "text-slate-200" : "text-slate-900"
+                            }`}
+                          >
+                            {row.valueSelected}
+                          </td>
+                          <td
+                            className={`py-1.5 sm:py-2 px-2 sm:px-3 text-xs sm:text-sm text-center font-semibold ${
+                              row.profitImprovement > 0
+                                ? "text-emerald-600 dark:text-emerald-400"
+                                : isDarkMode
+                                ? "text-slate-400"
+                                : "text-slate-500"
+                            }`}
+                          >
+                            {row.profitImprovement > 0
+                              ? formatCurrency(row.profitImprovement)
+                              : "$0"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
           {/* Tables Section */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-3">
             {/* Productivity Improvement Table */}
@@ -1143,121 +1258,6 @@ export function FinancialModelingSandboxView({ selectedTenantId }: FinancialMode
               </Card>
             </div>
           </div>
-
-          {/* Additional Profit Improvements Table */}
-          <Card
-            className={`rounded-xl backdrop-blur-sm ${
-              isDarkMode
-                ? "border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]"
-                : "border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]"
-            }`}
-          >
-            <CardHeader
-              className={`border-b pb-2 ${
-                isDarkMode
-                  ? "border-slate-700/50 bg-gradient-to-r from-slate-800/50 to-slate-700/30"
-                  : "border-blue-100/50 bg-gradient-to-r from-blue-50/30 to-purple-50/30"
-              }`}
-            >
-              <CardTitle className="text-base font-bold">
-                Additional Profit Improvements
-              </CardTitle>
-              <p className={`text-[10px] sm:text-xs mt-0.5 font-normal ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                Revenue impact from adjusting margin, pull-through, and MLO productivity targets
-              </p>
-            </CardHeader>
-            <CardContent className="pt-2">
-              <div className="overflow-x-auto -mx-2 sm:mx-0">
-                <div className="min-w-[500px] sm:min-w-0">
-                  <table className="w-full border-collapse text-xs sm:text-sm">
-                    <thead>
-                      <tr
-                        className={`border-b-2 ${
-                          isDarkMode ? "border-slate-700" : "border-slate-300"
-                        }`}
-                      >
-                        <th
-                          className={`text-left py-1.5 sm:py-2 px-2 sm:px-3 text-[10px] sm:text-xs font-semibold ${
-                            isDarkMode ? "text-slate-400" : "text-slate-600"
-                          }`}
-                        >
-                          Metric
-                        </th>
-                        <th
-                          className={`text-center py-1.5 sm:py-2 px-2 sm:px-3 text-[10px] sm:text-xs font-semibold ${
-                            isDarkMode ? "text-slate-400" : "text-slate-600"
-                          }`}
-                        >
-                          Actual
-                        </th>
-                        <th
-                          className={`text-center py-1.5 sm:py-2 px-2 sm:px-3 text-[10px] sm:text-xs font-semibold ${
-                            isDarkMode ? "text-slate-400" : "text-slate-600"
-                          }`}
-                        >
-                          Target (Selected)
-                        </th>
-                        <th
-                          className={`text-center py-1.5 sm:py-2 px-2 sm:px-3 text-[10px] sm:text-xs font-semibold ${
-                            isDarkMode ? "text-slate-400" : "text-slate-600"
-                          }`}
-                        >
-                          Est. Profit Improvement
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {profitImprovementData.map((row, idx) => (
-                        <tr
-                          key={idx}
-                          className={`border-b transition-colors ${
-                            isDarkMode
-                              ? "border-slate-800/50 hover:bg-slate-700/30"
-                              : "border-slate-200 hover:bg-slate-50"
-                          }`}
-                        >
-                          <td
-                            className={`py-1.5 sm:py-2 px-2 sm:px-3 text-xs sm:text-sm font-medium ${
-                              isDarkMode ? "text-slate-200" : "text-slate-900"
-                            }`}
-                          >
-                            {row.metric}
-                          </td>
-                          <td
-                            className={`py-1.5 sm:py-2 px-2 sm:px-3 text-xs sm:text-sm text-center ${
-                              isDarkMode ? "text-slate-300" : "text-slate-700"
-                            }`}
-                          >
-                            {row.actual}
-                          </td>
-                          <td
-                            className={`py-1.5 sm:py-2 px-2 sm:px-3 text-xs sm:text-sm text-center font-semibold ${
-                              isDarkMode ? "text-slate-200" : "text-slate-900"
-                            }`}
-                          >
-                            {row.valueSelected}
-                          </td>
-                          <td
-                            className={`py-1.5 sm:py-2 px-2 sm:px-3 text-xs sm:text-sm text-center font-semibold ${
-                              row.profitImprovement > 0
-                                ? "text-emerald-600 dark:text-emerald-400"
-                                : isDarkMode
-                                ? "text-slate-400"
-                                : "text-slate-500"
-                            }`}
-                          >
-                            {row.profitImprovement > 0
-                              ? formatCurrency(row.profitImprovement)
-                              : "$0"}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
         </div>
       </div>
     </div>

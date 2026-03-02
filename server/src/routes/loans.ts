@@ -61,6 +61,7 @@ import {
   OPERATIONS_ACTOR_CONFIGS,
   SALES_ACTOR_CONFIGS,
   REVENUE_SQL_EXPRESSION,
+  buildDimensionFilterWhereClause,
   type ActorConfig,
   type ActorMissingMode,
 } from "../utils/scorecard-utils.js";
@@ -753,7 +754,7 @@ const DETAIL_LIST_DATE_COLUMNS: Record<string, string> = {
   investor_purchase_date: "investor_purchase_date",
 };
 
-/** Whitelist of columns allowed as dimension filters (ADD FILTER DIMENSION). Must exist on public.loans. */
+/** Whitelist of columns allowed as dimension filters (ADD FILTER DIMENSION). Must exist on public.loans. branch/loan_officer applied above. */
 const DETAIL_LIST_DIMENSION_FILTER_COLUMNS: Record<string, string> = {
   channel: "channel",
   loan_type: "loan_type",
@@ -764,6 +765,7 @@ const DETAIL_LIST_DIMENSION_FILTER_COLUMNS: Record<string, string> = {
   property_type: "property_type",
   current_loan_status: "current_loan_status",
   investor: "investor",
+  investor_name: "investor", // frontend sends investor_name, map to DB column investor
 };
 router.get(
   "/detail-list",
@@ -1490,8 +1492,19 @@ router.get(
         );
       }
 
-      const whereClause =
+      const dimensionFilterClause = buildDimensionFilterWhereClause(
+        req.query as Record<string, any>,
+        '',
+        new Set(['channel_group', 'tenant_id', 'branch', 'loan_officer_id', 'loan_type', 'channel', 'year', 'startDate', 'endDate']),
+      );
+
+      let whereClause =
         conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+      if (dimensionFilterClause) {
+        whereClause = whereClause
+          ? `${whereClause} ${dimensionFilterClause}`
+          : `WHERE 1=1 ${dimensionFilterClause}`;
+      }
 
       logInfo("[Funnel] Querying tenant database", {
         whereClause,

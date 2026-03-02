@@ -21,7 +21,8 @@ export interface FunnelDateFilter {
 export const useFunnelData = (
   dateFilter: FunnelDateFilter,
   selectedTenantId?: string | null,
-  additionalFilters?: FunnelDataFilters
+  additionalFilters?: FunnelDataFilters,
+  dimensionFilters?: Array<{ column: string; value: string }>,
 ) => {
   const [funnelData, setFunnelData] = useState<LOSFunnelData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -58,6 +59,11 @@ export const useFunnelData = (
         if (additionalFilters?.loan_type) params.append('loan_type', additionalFilters.loan_type);
         if (additionalFilters?.channel) params.append('channel', additionalFilters.channel);
         if (additionalFilters?.channelGroup) params.append('channel_group', additionalFilters.channelGroup);
+        if (dimensionFilters) {
+          for (const df of dimensionFilters) {
+            if (df.value && df.value !== 'all') params.append(df.column, df.value);
+          }
+        }
         
         console.log('[useFunnelData] Fetching funnel data:', { dateFilter, selectedTenantId, channelGroup: additionalFilters?.channelGroup, params: params.toString() });
         const data = await api.request<LOSFunnelData>(`/api/loans/funnel?${params.toString()}`);
@@ -85,7 +91,8 @@ export const useFunnelData = (
       }
     };
     fetchFunnelData();
-  }, [dateFilter.type, dateFilter.year, dateFilter.startDate, dateFilter.endDate, selectedTenantId, additionalFilters?.loan_officer_id, additionalFilters?.branch, additionalFilters?.loan_type, additionalFilters?.channel, additionalFilters?.channelGroup]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateFilter.type, dateFilter.year, dateFilter.startDate, dateFilter.endDate, selectedTenantId, additionalFilters?.loan_officer_id, additionalFilters?.branch, additionalFilters?.loan_type, additionalFilters?.channel, additionalFilters?.channelGroup, JSON.stringify(dimensionFilters)]);
 
   return { funnelData, loading };
 };

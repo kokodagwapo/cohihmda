@@ -108,7 +108,8 @@ export const useTopTieringComparisonData = (
   timeFilter: TimeFilterType = "last-year",
   selectedTenantId?: string | null,
   selectedChannel?: string | null,
-  customDateRange?: CustomDateRange
+  customDateRange?: CustomDateRange,
+  dimensionFilters?: Array<{ column: string; value: string }>,
 ) => {
   const [data, setData] = useState<TopTieringComparisonData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -141,6 +142,11 @@ export const useTopTieringComparisonData = (
         if (selectedTenantId) params.append("tenant_id", selectedTenantId);
         if (selectedChannel && selectedChannel !== "All")
           params.append("channel_group", selectedChannel);
+        if (dimensionFilters) {
+          for (const df of dimensionFilters) {
+            if (df.value && df.value !== 'all') params.append(df.column, df.value);
+          }
+        }
 
         const queryString = params.toString();
         // Using new consolidated endpoint with channel-aware actor support
@@ -203,6 +209,8 @@ export const useTopTieringComparisonData = (
     selectedChannel,
     customDateRange?.start,
     customDateRange?.end,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    JSON.stringify(dimensionFilters),
   ]);
 
   return { data, loading, error };

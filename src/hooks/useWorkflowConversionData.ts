@@ -34,6 +34,8 @@ export interface UseWorkflowConversionDataParams {
   grouping?: WorkflowGrouping;
   selectedTenantId?: string | null;
   channelGroup?: string | null;
+  /** Optional dimension filters (e.g. branch, loan_officer) from workbench group filters. */
+  dimensionFilters?: Array<{ column: string; value: string }>;
 }
 
 export function useWorkflowConversionData({
@@ -44,6 +46,7 @@ export function useWorkflowConversionData({
   grouping = "workflow",
   selectedTenantId,
   channelGroup,
+  dimensionFilters,
 }: UseWorkflowConversionDataParams): {
   data: WorkflowConversionData | null;
   loading: boolean;
@@ -71,6 +74,11 @@ export function useWorkflowConversionData({
       params.set("grouping", grouping);
       if (selectedTenantId) params.set("tenant_id", selectedTenantId);
       if (channelGroup && channelGroup !== "All") params.set("channel_group", channelGroup);
+      if (dimensionFilters) {
+        for (const df of dimensionFilters) {
+          if (df.value && df.value !== "all") params.set(df.column, df.value);
+        }
+      }
       const res = await api.request<WorkflowConversionData>(
         `/api/dashboard/workflow-conversion?${params.toString()}`
       );
@@ -82,7 +90,7 @@ export function useWorkflowConversionData({
     } finally {
       setLoading(false);
     }
-  }, [startDate, endDate, segments, metric, grouping, selectedTenantId, channelGroup]);
+  }, [startDate, endDate, segments, metric, grouping, selectedTenantId, channelGroup, dimensionFilters]);
 
   useEffect(() => {
     fetchData();

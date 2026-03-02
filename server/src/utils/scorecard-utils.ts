@@ -217,11 +217,27 @@ export const buildChannelWhereClause = (
 ): string => {
   if (!channelGroup || channelGroup === "All") return "";
 
+  // Normalize to canonical form so "99-missing", "99-MISSING" etc. all work
+  const normalized =
+    typeof channelGroup === "string"
+      ? (channelGroup.trim().length === 0
+          ? undefined
+          : (() => {
+              const lower = channelGroup.trim().toLowerCase();
+              if (lower === "99-missing") return "99-Missing";
+              if (lower === "retail") return "Retail";
+              if (lower === "tpo") return "TPO";
+              if (lower === "other") return "Other";
+              return channelGroup.trim();
+            })())
+      : undefined;
+  if (!normalized) return "";
+
   const col = tableAlias ? `${tableAlias}.channel` : "channel";
   const aeCol = tableAlias ? `${tableAlias}.account_executive` : "account_executive";
   const tpoPat = tpoChannelPatternSql(col);
 
-  switch (channelGroup) {
+  switch (normalized) {
     case "Retail":
       // Retail = Direct origination OR brokered-retail (TPO channel pattern but no account_executive)
       return `AND ((${col} ILIKE '%retail%') OR (${tpoPat} AND (${aeCol} IS NULL OR TRIM(${aeCol}) = '')))`;
@@ -234,11 +250,57 @@ export const buildChannelWhereClause = (
       return `AND ${col} IS NOT NULL AND TRIM(${col}) != '' AND ${col} NOT ILIKE '%retail%' AND NOT ${tpoPat}`;
     default:
       // Individual channel value (exact match)
-      return `AND LOWER(TRIM(${col})) = LOWER('${channelGroup.replace(
+      return `AND LOWER(TRIM(${col})) = LOWER('${normalized.replace(
         /'/g,
         "''",
       )}')`;
   }
+};
+
+/**
+ * Map of frontend dimension filter param names to actual DB column names on the loans table.
+ * Used by buildDimensionFilterWhereClause to translate query params into SQL filters.
+ */
+const DIMENSION_FILTER_COLUMNS: Record<string, string> = {
+  branch: 'branch',
+  loan_officer: 'loan_officer',
+  loan_type: 'loan_type',
+  loan_purpose: 'loan_purpose',
+  property_state: 'property_state',
+  property_county: 'property_county',
+  property_type: 'property_type',
+  current_loan_status: 'current_loan_status',
+  investor_name: 'investor',
+};
+
+/**
+ * Build a SQL WHERE clause fragment from workbench dimension filter query params.
+ * Inspects `query` for known dimension filter keys and produces AND clauses.
+ * Uses ILIKE for case-insensitive matching.
+ *
+ * @param query - Express req.query (or plain object with string values)
+ * @param tableAlias - Table alias used in the query (e.g. "l"). Empty string for no alias.
+ * @param skip - Optional set of param keys to skip (when the route already handles them).
+ * @returns SQL fragment to append to WHERE clause (includes leading AND per condition, or empty string).
+ */
+export const buildDimensionFilterWhereClause = (
+  query: Record<string, any>,
+  tableAlias: string = 'l',
+  skip?: Set<string>,
+): string => {
+  const parts: string[] = [];
+  const prefix = tableAlias ? `${tableAlias}.` : '';
+
+  for (const [param, dbCol] of Object.entries(DIMENSION_FILTER_COLUMNS)) {
+    if (skip?.has(param)) continue;
+    const v = query[param];
+    if (v && typeof v === 'string' && v.toLowerCase() !== 'all' && v.trim() !== '') {
+      const escaped = v.replace(/'/g, "''");
+      parts.push(`AND ${prefix}${dbCol} ILIKE '${escaped}'`);
+    }
+  }
+
+  return parts.join(' ');
 };
 
 /**

@@ -171,7 +171,8 @@ export const useSalesScorecardData = (
   actorType: ActorType = "loan_officer",
   dateRange?: DateRange,
   selectedTenantId?: string | null,
-  selectedChannel?: string | null
+  selectedChannel?: string | null,
+  dimensionFilters?: Array<{ column: string; value: string }>,
 ) => {
   const [data, setData] = useState<SalesScorecardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -199,6 +200,11 @@ export const useSalesScorecardData = (
         if (selectedTenantId) params.append("tenant_id", selectedTenantId);
         if (selectedChannel && selectedChannel !== "All")
           params.append("channel_group", selectedChannel);
+        if (dimensionFilters) {
+          for (const df of dimensionFilters) {
+            if (df.value && df.value !== 'all') params.append(df.column, df.value);
+          }
+        }
 
         const queryString = params.toString();
         // NOTE: Using original endpoint until /api/scorecard/sales is fully tested
@@ -253,12 +259,14 @@ export const useSalesScorecardData = (
     };
 
     fetchSalesScorecardData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     actorType,
     dateRange?.start,
     dateRange?.end,
     selectedTenantId,
     selectedChannel,
+    JSON.stringify(dimensionFilters),
   ]);
 
   return { data, loading, error };

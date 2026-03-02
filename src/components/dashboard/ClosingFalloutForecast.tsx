@@ -3755,8 +3755,8 @@ export const ClosingFalloutForecast = ({
           <section
             className={`mt-6 md:mt-12 md:rounded-2xl md:border overflow-hidden ${
               isDarkMode
-                ? "bg-transparent md:bg-slate-900/50 md:border-white/10"
-                : "bg-transparent md:bg-white md:border-slate-200 md:shadow-sm"
+                ? "bg-transparent md:bg-slate-900/50 md:border-white/10 md:shadow-[0_8px_32px_rgba(0,0,0,0.24)]"
+                : "bg-transparent md:bg-white md:border-slate-200 md:shadow-[0_8px_32px_rgba(15,23,42,0.08)]"
             }`}
             data-testid="signal-buckets-table"
           >
@@ -4144,11 +4144,7 @@ export const ClosingFalloutForecast = ({
         {/* Critical Loans and Top Loan Officers Section - width constrained so table tab cannot expand */}
         <section
           ref={criticalLoansSectionRef}
-          className={`mt-6 md:mt-12 md:rounded-2xl md:border overflow-hidden lg:min-h-[480px] min-w-0 max-w-full w-full box-border ${
-            isDarkMode
-              ? "bg-transparent md:bg-slate-900/50 md:border-white/10"
-              : "bg-transparent md:bg-white md:border-slate-200 md:shadow-sm"
-          }`}
+          className="mt-6 md:mt-12 md:rounded-2xl md:border overflow-hidden lg:min-h-[480px] min-w-0 max-w-full w-full box-border bg-transparent md:bg-white dark:md:bg-slate-900/70 md:border-slate-100 dark:md:border-slate-800 md:shadow-[0_8px_32px_rgba(15,23,42,0.08)] dark:md:shadow-[0_8px_32px_rgba(0,0,0,0.24)]"
           style={{ width: "100%", maxWidth: "100%", minWidth: 0 }}
         >
           <div

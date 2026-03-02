@@ -60,6 +60,9 @@ const SECTION_TO_SOURCE: Record<SectionType, string> = {
   'loan-detail': 'loan-detail',
   'workflow-conversion': 'workflow-conversion',
   'high-performers': 'high-performers',
+  'actors': 'actors',
+  'pricing-dashboard': 'pricing-dashboard',
+  'pipeline-analysis': 'pipeline-analysis',
 };
 
 // Contextual suggested prompts per section type

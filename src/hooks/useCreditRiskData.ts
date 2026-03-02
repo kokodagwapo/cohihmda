@@ -15,6 +15,8 @@ export interface CreditRiskFilters {
   year: number;
   dateRange?: { start: string; end: string }; // Optional: explicit date range
   tenantId?: string | null; // Tenant ID for multi-tenant support (admins viewing other tenants)
+  /** Additional dimension filters from workbench "Add Filter" */
+  dimensionFilters?: Array<{ column: string; value: string }>;
 }
 
 // Distribution bucket interface - matches backend DistributionBucket
@@ -151,6 +153,9 @@ export function useCreditRiskData(filters: CreditRiskFilters) {
       if (filters.channel && filters.channel !== 'All') {
         additionalFilters.consolidated_channel = filters.channel;
       }
+      (filters.dimensionFilters || []).forEach((df) => {
+        if (df.value && df.value !== 'all') additionalFilters[df.column] = df.value;
+      });
 
       // Build request body
       const requestBody = {
@@ -193,13 +198,16 @@ export function useCreditRiskData(filters: CreditRiskFilters) {
     } finally {
       setLoading(false);
     }
+  // Serialize dimensionFilters to a stable string so a new array ref doesn't cause a fetch loop
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     filters.applicationType, 
     filters.channel, 
     filters.year, 
     filters.dateRange?.start, 
     filters.dateRange?.end,
-    filters.tenantId
+    filters.tenantId,
+    JSON.stringify(filters.dimensionFilters),
   ]);
 
   useEffect(() => {

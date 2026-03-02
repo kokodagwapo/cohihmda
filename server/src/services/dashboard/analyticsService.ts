@@ -463,6 +463,7 @@ export async function getLeaderboardData(
     startDate?: string; // For custom date range
     endDate?: string; // For custom date range
     channelGroup?: string; // Channel filter (Retail, TPO, or specific channel)
+    dimensionFilterClause?: string; // Additional SQL WHERE fragment from dimension filters
   }
 ): Promise<{ leaderboard: LeaderboardEntry[]; timeframe: string }> {
   try {
@@ -508,6 +509,7 @@ export async function getLeaderboardData(
 
     const branchFilter =
       conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
+    const dimensionFilter = filters?.dimensionFilterClause || "";
 
     // Channel-aware funded filter: Retail uses rate_lock > 0, TPO/All do not.
     const fundedFilter = buildFundedFilter(filters?.channelGroup, "l");
@@ -568,6 +570,7 @@ export async function getLeaderboardData(
        FROM public.loans l
        WHERE 1=1
          ${branchFilter}
+         ${dimensionFilter}
        GROUP BY ${actorExpression}, l.branch
        HAVING COUNT(*) FILTER (
          WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
@@ -616,6 +619,7 @@ export async function getLeaderboardData(
        WHERE 1=1
          ${prevBranchFilter}
          ${prevChannelClause}
+         ${dimensionFilter}
        GROUP BY ${actorExpression}`,
       prevParams
     );
@@ -695,6 +699,7 @@ export async function getHighPerformersRankings(
     timePeriod: HighPerformersTimePeriod;
     userAccessFilter?: LoanAccessFilter;
     channelGroup?: string;
+    dimensionFilterClause?: string;
   }
 ): Promise<{ branchRankings: HighPerformerRow[]; loanOfficerRankings: HighPerformerRow[] }> {
   try {
@@ -724,6 +729,7 @@ export async function getHighPerformersRankings(
       conditions.push(channelClause.replace(/^AND\s+/i, ""));
     }
     const extraWhere = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
+    const hpDimensionFilter = options.dimensionFilterClause || "";
 
     const actorExpression = getActorSqlExpression(options.channelGroup, "l");
 
@@ -746,7 +752,7 @@ export async function getHighPerformersRankings(
         COUNT(*) FILTER (WHERE ${dateFilter} AND ${loanPurposeRefi}) as refi_count,
         COUNT(*) FILTER (WHERE ${dateFilter} AND ${loanPurposePurch}) as purch_count
       FROM public.loans l
-      WHERE ${dateCol} IS NOT NULL ${extraWhere}
+      WHERE ${dateCol} IS NOT NULL ${extraWhere} ${hpDimensionFilter}
       GROUP BY l.branch
       HAVING COUNT(*) FILTER (WHERE ${dateFilter}) > 0
       ORDER BY volume DESC, units DESC
@@ -783,7 +789,7 @@ export async function getHighPerformersRankings(
         COUNT(*) FILTER (WHERE ${dateFilter} AND ${loanPurposeRefi}) as refi_count,
         COUNT(*) FILTER (WHERE ${dateFilter} AND ${loanPurposePurch}) as purch_count
       FROM public.loans l
-      WHERE ${dateCol} IS NOT NULL ${extraWhere}
+      WHERE ${dateCol} IS NOT NULL ${extraWhere} ${hpDimensionFilter}
       GROUP BY ${actorExpression}
       HAVING COUNT(*) FILTER (WHERE ${dateFilter}) > 0
       ORDER BY volume DESC, units DESC
