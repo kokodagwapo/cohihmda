@@ -1,3 +1,4 @@
+// Dashboard main insights page
 import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
@@ -232,7 +233,7 @@ const Dashboard = () => {
   // Track user ID to detect user changes and reset state
   // Initialize with current user ID to avoid resetting on first mount
   const [prevUserId, setPrevUserId] = useState<string | null>(
-    () => user?.id || null
+    () => user?.id || null,
   );
 
   // Reset tenant selection only when user actually changes (login/logout/switch)
@@ -445,7 +446,7 @@ const Dashboard = () => {
             ? `&channel_group=${encodeURIComponent(selectedChannel)}`
             : "";
         const insightsData = await api.request<any>(
-          `/api/dashboard/insights?dateFilter=${dateFilter}${tenantParam}${channelParam}`
+          `/api/dashboard/insights?dateFilter=${dateFilter}${tenantParam}${channelParam}`,
         );
         const dialogues =
           insightsData?.insights?.map((insight: any) => ({
@@ -458,7 +459,7 @@ const Dashboard = () => {
         let funnelStory = null;
         try {
           const funnelData = await api.request<any>(
-            `/api/loans/funnel?dateFilter=${dateFilter}${tenantParam}`
+            `/api/loans/funnel?dateFilter=${dateFilter}${tenantParam}`,
           );
           if (funnelData) {
             funnelStory = {
@@ -516,7 +517,7 @@ const Dashboard = () => {
           // For timeout errors, log as warning since briefing has empty context fallback
           console.warn(
             "Briefing context request timed out, using empty context fallback:",
-            error.message
+            error.message,
           );
           setBriefingContext({
             dialogues: [],
@@ -636,12 +637,12 @@ const Dashboard = () => {
         category === "Withdrawals"
           ? "Customer withdrew application"
           : category === "Declinations"
-          ? "Did not meet underwriting criteria"
-          : category === "Rate-Driven"
-          ? "Found better rate elsewhere"
-          : category === "Ops-Driven"
-          ? "Processing delays caused withdrawal"
-          : "Changed financing plans",
+            ? "Did not meet underwriting criteria"
+            : category === "Rate-Driven"
+              ? "Found better rate elsewhere"
+              : category === "Ops-Driven"
+                ? "Processing delays caused withdrawal"
+                : "Changed financing plans",
       daysInPipeline: Math.floor(Math.random() * 30) + 10,
       lastContact: `${Math.floor(Math.random() * 7) + 1} days ago`,
     }));
@@ -661,23 +662,23 @@ const Dashboard = () => {
         stage === "Application"
           ? "New Application"
           : stage === "Processing"
-          ? "Documents Under Review"
-          : stage === "Underwriting"
-          ? "Credit Analysis"
-          : stage === "Closing"
-          ? "Final Review"
-          : "Funded",
+            ? "Documents Under Review"
+            : stage === "Underwriting"
+              ? "Credit Analysis"
+              : stage === "Closing"
+                ? "Final Review"
+                : "Funded",
       daysInStage: Math.floor(Math.random() * 14) + 1,
       nextAction:
         stage === "Application"
           ? "Await documentation"
           : stage === "Processing"
-          ? "Complete verification"
-          : stage === "Underwriting"
-          ? "Final approval"
-          : stage === "Closing"
-          ? "Schedule signing"
-          : "Disbursement",
+            ? "Complete verification"
+            : stage === "Underwriting"
+              ? "Final approval"
+              : stage === "Closing"
+                ? "Schedule signing"
+                : "Disbursement",
     }));
   };
 
@@ -693,8 +694,8 @@ const Dashboard = () => {
             70,
             Math.min(
               100,
-              Math.floor(p.score * (0.75 + baseProgress * 0.25 + variation))
-            )
+              Math.floor(p.score * (0.75 + baseProgress * 0.25 + variation)),
+            ),
           )
         : p.score,
       loans: getAnimatedValue(p.loans, animationCycle, isAnimating, 0.2),
@@ -704,7 +705,7 @@ const Dashboard = () => {
           : parseFloat(p.revenue.replace(/[$K,]/g, "")) * 1000,
         animationCycle,
         isAnimating,
-        0.15
+        0.15,
       ),
       trend: isAnimating
         ? Math.random() > 0.5
@@ -721,13 +722,13 @@ const Dashboard = () => {
       predicted: isAnimating
         ? Math.max(
             0,
-            Math.floor(d.predicted * (0.6 + baseProgress * 0.4 + variation))
+            Math.floor(d.predicted * (0.6 + baseProgress * 0.4 + variation)),
           )
         : d.predicted,
       actual: isAnimating
         ? Math.max(
             0,
-            Math.floor(d.actual * (0.6 + baseProgress * 0.4 + variation * 0.8))
+            Math.floor(d.actual * (0.6 + baseProgress * 0.4 + variation * 0.8)),
           )
         : d.actual,
     };
@@ -760,13 +761,16 @@ const Dashboard = () => {
       targetDays: isAnimating
         ? Math.max(
             0,
-            d.targetDays * (0.8 + baseProgress * 0.2 + variation * 0.7)
+            d.targetDays * (0.8 + baseProgress * 0.2 + variation * 0.7),
           )
         : d.targetDays,
       efficiency: isAnimating
         ? Math.max(
             0,
-            Math.min(100, d.efficiency * (0.7 + baseProgress * 0.3 + variation))
+            Math.min(
+              100,
+              d.efficiency * (0.7 + baseProgress * 0.3 + variation),
+            ),
           )
         : d.efficiency,
     };
@@ -779,7 +783,7 @@ const Dashboard = () => {
       count: isAnimating
         ? Math.max(
             0,
-            Math.floor(d.count * (0.6 + baseProgress * 0.4 + variation))
+            Math.floor(d.count * (0.6 + baseProgress * 0.4 + variation)),
           )
         : d.count,
       percentage: isAnimating
@@ -787,8 +791,8 @@ const Dashboard = () => {
             0,
             Math.min(
               100,
-              Math.floor(d.percentage * (0.6 + baseProgress * 0.4 + variation))
-            )
+              Math.floor(d.percentage * (0.6 + baseProgress * 0.4 + variation)),
+            ),
           )
         : d.percentage,
     };
@@ -1003,13 +1007,13 @@ const Dashboard = () => {
 
     // Cycle time warnings
     const highCycleTime = realCycleTimeData.find(
-      (d) => d.avgDays > d.targetDays * 1.3
+      (d) => d.avgDays > d.targetDays * 1.3,
     );
     if (highCycleTime) {
       warnings.push({
         id: "cycle-time",
         message: `${highCycleTime.role} exceeding target by ${Math.round(
-          (highCycleTime.avgDays / highCycleTime.targetDays - 1) * 100
+          (highCycleTime.avgDays / highCycleTime.targetDays - 1) * 100,
         )}%`,
         urgency: "high",
         code: "TIME-001",
@@ -1115,7 +1119,7 @@ const Dashboard = () => {
           id: `risk-${rc.id}`,
           title: `${rc.borrower} - ${rc.reason}`,
           description: `$${(rc.loanAmount / 1000).toFixed(
-            0
+            0,
           )}K loan needs attention`,
           action: "Review case",
           urgency: "medium",
@@ -1462,7 +1466,6 @@ const Dashboard = () => {
         profitabilityData: profitabilityData[profitabilityData.length - 1] // Latest month
        }} />
        */}
-
       </DashboardLayout>
     </DashboardContainer>
   );
