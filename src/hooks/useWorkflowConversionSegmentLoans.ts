@@ -30,6 +30,8 @@ export interface UseWorkflowConversionSegmentLoansParams {
   filter: WorkflowSegmentLoanFilter | null;
   selectedTenantId?: string | null;
   channelGroup?: string | null;
+  /** Optional dimension filters (e.g. branch, loan_officer) from workbench group filters. */
+  dimensionFilters?: Array<{ column: string; value: string }>;
 }
 
 export function useWorkflowConversionSegmentLoans({
@@ -41,6 +43,7 @@ export function useWorkflowConversionSegmentLoans({
   filter,
   selectedTenantId,
   channelGroup,
+  dimensionFilters,
 }: UseWorkflowConversionSegmentLoansParams): {
   loans: WorkflowSegmentLoanRow[];
   loading: boolean;
@@ -76,6 +79,11 @@ export function useWorkflowConversionSegmentLoans({
       params.set("filter", filter);
       if (selectedTenantId) params.set("tenant_id", selectedTenantId);
       if (channelGroup && channelGroup !== "All") params.set("channel_group", channelGroup);
+      if (dimensionFilters) {
+        for (const df of dimensionFilters) {
+          if (df.value && df.value !== "all") params.set(df.column, df.value);
+        }
+      }
       const res = await api.request<{ loans: WorkflowSegmentLoanRow[] }>(
         `/api/dashboard/workflow-conversion/loans?${params.toString()}`
       );
@@ -97,6 +105,7 @@ export function useWorkflowConversionSegmentLoans({
     filter,
     selectedTenantId,
     channelGroup,
+    dimensionFilters,
   ]);
 
   useEffect(() => {

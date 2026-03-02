@@ -53,15 +53,6 @@ import {
   DialogContent,
 } from "@/components/ui/dialog";
 import { useWidgetSectionStore } from "@/stores/widgetSectionStore";
-import type { SectionFilters } from "@/stores/widgetSectionStore";
-import { useTenantStore } from "@/stores/tenantStore";
-import { useFilterPresetStore, type FilterPreset } from "@/stores/filterPresetStore";
-import { computePresetDateRange } from "@/components/ui/DatePeriodPicker";
-import {
-  AddFilterPicker,
-  GroupFilterBookmarkButton,
-  DynamicDimensionFilter,
-} from "@/components/widgets/components/WidgetGroup";
 
 const PERIOD_PRESETS: PeriodPreset[] = [
   "mtd",
@@ -101,6 +92,8 @@ export interface WorkflowConversionViewProps {
   initialState?: WorkflowConversionSavedState;
   /** Called when state changes (debounced) so the parent can persist it. */
   onStateChange?: (state: WorkflowConversionSavedState) => void;
+  /** When set (workbench group), group filters (branch, loan officer, dynamic filters) are applied to data. */
+  groupId?: string | null;
 }
 
 const DEBOUNCE_MS = 300;
@@ -111,6 +104,7 @@ export function WorkflowConversionView({
   embeddedInWorkbench = false,
   initialState,
   onStateChange,
+  groupId,
 }: WorkflowConversionViewProps) {
   const defaultPeriod: PeriodSelection = useMemo(() => {
     const range = getDefaultDateRange();
@@ -154,6 +148,22 @@ export function WorkflowConversionView({
     };
   }, [segments, calculationType, grouping, periodSelection, onStateChange]);
 
+  const groupFilters = useWidgetSectionStore((s) => (groupId ? s.getFilters(groupId) : null));
+  const dimensionFilters = useMemo((): Array<{ column: string; value: string }> | undefined => {
+    if (!groupFilters) return undefined;
+    const dims: Array<{ column: string; value: string }> = [];
+    if (groupFilters.branch && groupFilters.branch !== "all") {
+      dims.push({ column: "branch", value: groupFilters.branch });
+    }
+    if (groupFilters.loanOfficer && groupFilters.loanOfficer !== "all") {
+      dims.push({ column: "loan_officer", value: groupFilters.loanOfficer });
+    }
+    (groupFilters.dynamicFilters || []).forEach((df) => {
+      if (df.value && df.value !== "all") dims.push({ column: df.column, value: df.value });
+    });
+    return dims.length > 0 ? dims : undefined;
+  }, [groupFilters?.branch, groupFilters?.loanOfficer, groupFilters?.dynamicFilters]);
+
   const dateRange = periodSelection.dateRange;
   const { milestones, loading: milestonesLoading, error: milestonesError } = useWorkflowMilestones(selectedTenantId);
   const { data, loading, error } = useWorkflowConversionData({
@@ -164,6 +174,7 @@ export function WorkflowConversionView({
     grouping,
     selectedTenantId,
     channelGroup: selectedChannel,
+    dimensionFilters,
   });
 
   const updateSegment = useCallback((index: number, field: "from" | "to", value: string) => {
@@ -328,31 +339,6 @@ export function WorkflowConversionView({
             </Button>
           </div>
         )}
-        {groupId && filters && (
-          <>
-            <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-0.5" />
-            {(filters.dynamicFilters || []).map((df) => (
-              <DynamicDimensionFilter
-                key={df.column}
-                entry={df}
-                tenantId={tenantIdForEdit}
-                onChange={(value) => updateDynamicFilter(groupId, df.column, value)}
-                onRemove={() => removeDynamicFilter(groupId, df.column)}
-              />
-            ))}
-            <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-0.5" />
-            <AddFilterPicker
-              groupId={groupId}
-              existingColumns={(filters.dynamicFilters || []).map((f) => f.column)}
-              onAdd={(col, label) => addDynamicFilter(groupId, { column: col, label, value: "all" })}
-            />
-            <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-0.5" />
-            <GroupFilterBookmarkButton
-              filters={filters}
-              onApplyPreset={handleApplyGroupPreset}
-            />
-          </>
-        )}
         <Button
           type="button"
           variant="outline"
@@ -399,6 +385,7 @@ export function WorkflowConversionView({
               selectedChannel={selectedChannel}
               segments={segments}
               grouping={grouping}
+              dimensionFilters={dimensionFilters}
             />
           ))}
         </div>
@@ -427,6 +414,7 @@ interface WorkflowSegmentCardProps {
   showFullscreenButton?: boolean;
   onFullscreenClick?: () => void;
   onCloseFullscreen?: () => void;
+  dimensionFilters?: Array<{ column: string; value: string }>;
 }
 
 /** True when range is ≤31 days (backend uses day bucket); else months. */
@@ -457,6 +445,7 @@ function WorkflowSegmentCard({
   showFullscreenButton = false,
   onFullscreenClick,
   onCloseFullscreen,
+  dimensionFilters,
 }: WorkflowSegmentCardProps) {
   const [loansModalOpen, setLoansModalOpen] = React.useState(false);
   const [loansModalFilter, setLoansModalFilter] = React.useState<WorkflowSegmentLoanFilter | null>(null);
@@ -757,6 +746,7 @@ function WorkflowSegmentCard({
         segmentIndex={index}
         selectedTenantId={selectedTenantId}
         channelGroup={selectedChannel}
+        dimensionFilters={dimensionFilters}
       />
     </Card>
   );

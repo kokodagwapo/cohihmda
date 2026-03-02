@@ -629,7 +629,6 @@ const SECTION_COLORS: Record<SectionType, { border: string; bg: string; accent: 
 const SELF_MANAGED_SECTIONS: Set<SectionType> = new Set([
   'executive-dashboard',
   'leaderboard',
-  'workflow-conversion',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -1994,7 +1993,31 @@ export function WidgetGroup({
         {/* Expanded filter controls — compact row below header, only when sync ON and filters expanded */}
         {!collapsed && !SELF_MANAGED_SECTIONS.has(sectionType) && filterSync && !filtersCollapsed && (
           <div className="flex items-center gap-1.5 px-2.5 pb-1.5 flex-wrap">
-            {sectionType === 'pricing-dashboard' ? (
+            {sectionType === 'workflow-conversion' ? (
+              <>
+                {/* Dynamic (user-added) filters */}
+                {(filters.dynamicFilters || []).map((df) => (
+                  <DynamicDimensionFilter
+                    key={df.column}
+                    entry={df}
+                    tenantId={tenantIdForEdit}
+                    onChange={(value) => updateDynamicFilter(groupId, df.column, value)}
+                    onRemove={() => removeDynamicFilter(groupId, df.column)}
+                  />
+                ))}
+                <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+                <AddFilterPicker
+                  groupId={groupId}
+                  existingColumns={(filters.dynamicFilters || []).map((f) => f.column)}
+                  onAdd={(col, label) => addDynamicFilter(groupId, { column: col, label, value: 'all' })}
+                />
+                <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+                <GroupFilterBookmarkButton
+                  filters={filters}
+                  onApplyPreset={handleApplyGroupPreset}
+                />
+              </>
+            ) : sectionType === 'pricing-dashboard' ? (
               <>
                 <PricingFilterSelect
                   label="Entity"

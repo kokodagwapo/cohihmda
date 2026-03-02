@@ -42,6 +42,7 @@ function WorkflowConversionEmbedInner({ width, height, config, onConfigChange }:
         embeddedInWorkbench
         initialState={initialState}
         onStateChange={onConfigChange ? handleStateChange : undefined}
+        groupId={config?.groupId}
       />
     </div>
   );

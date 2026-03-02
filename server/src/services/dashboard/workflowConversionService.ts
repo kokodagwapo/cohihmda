@@ -133,6 +133,8 @@ export interface WorkflowConversionOptions {
   /** Pre-built clause with $3, $4... and corresponding params to append after $1,$2 (startDate, endDate) */
   accessClause?: string;
   accessParams?: unknown[];
+  /** Optional SQL fragment for dimension filters (e.g. AND l.loan_officer ILIKE '...'). */
+  dimensionFilterClause?: string;
 }
 
 export interface SeriesPoint {
@@ -168,7 +170,7 @@ export async function getWorkflowConversionData(
   tenantPool: pg.Pool,
   options: WorkflowConversionOptions
 ): Promise<WorkflowConversionResult> {
-  const { startDate, endDate, segments, metric, grouping = "workflow", channelGroup, accessClause: accessClauseOpt, accessParams: accessParamsOpt } = options;
+  const { startDate, endDate, segments, metric, grouping = "workflow", channelGroup, accessClause: accessClauseOpt, accessParams: accessParamsOpt, dimensionFilterClause: dimensionFilterClauseOpt } = options;
   const byDay =
     (() => {
       const start = new Date(startDate);
@@ -178,6 +180,7 @@ export async function getWorkflowConversionData(
     })();
 
   const channelClause = buildChannelWhereClause(channelGroup, "l");
+  const dimensionFilterClause = dimensionFilterClauseOpt?.trim() ? " " + dimensionFilterClauseOpt.trim() : "";
   const params: unknown[] = [startDate, endDate];
   const accessClause = accessClauseOpt ? " " + accessClauseOpt.trim() : "";
   if (accessParamsOpt && accessParamsOpt.length > 0) {
@@ -246,6 +249,7 @@ export async function getWorkflowConversionData(
         WHERE ${cohortWhere}
           ${channelClause}
           ${accessClause}
+          ${dimensionFilterClause}
       )
       SELECT
         COUNT(*) FILTER (WHERE from_d IS NOT NULL) AS left_count,
@@ -280,6 +284,7 @@ export async function getWorkflowConversionData(
         WHERE ${cohortWhere}
           ${channelClause}
           ${accessClause}
+          ${dimensionFilterClause}
       )
       SELECT
         bucket AS period,
@@ -341,6 +346,7 @@ export interface WorkflowConversionSegmentLoansOptions {
   channelGroup?: string;
   accessClause?: string;
   accessParams?: unknown[];
+  dimensionFilterClause?: string;
   segmentIndex: number;
   filter: WorkflowSegmentLoanFilter;
 }
@@ -375,6 +381,7 @@ export async function getWorkflowConversionSegmentLoans(
     channelGroup,
     accessClause: accessClauseOpt,
     accessParams: accessParamsOpt,
+    dimensionFilterClause: dimensionFilterClauseOpt,
     segmentIndex,
     filter,
   } = options;
@@ -385,6 +392,7 @@ export async function getWorkflowConversionSegmentLoans(
 
   const params: unknown[] = [startDate, endDate];
   const accessClause = accessClauseOpt ? " " + accessClauseOpt.trim() : "";
+  const dimensionFilterClause = dimensionFilterClauseOpt?.trim() ? " " + dimensionFilterClauseOpt.trim() : "";
   if (accessParamsOpt && accessParamsOpt.length > 0) {
     params.push(...accessParamsOpt);
   }
@@ -458,6 +466,7 @@ export async function getWorkflowConversionSegmentLoans(
       AND ${filterWhere}
       ${channelClause}
       ${accessClause}
+      ${dimensionFilterClause}
     ORDER BY l.loan_id
   `;
 

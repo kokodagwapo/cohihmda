@@ -997,6 +997,11 @@ router.get(
         return res.json({ loans: [] });
       }
       const { accessClause, accessParams } = accessCtx.buildWhereClause("l", 3);
+      const dimensionFilterClause = buildDimensionFilterWhereClause(
+        req.query as Record<string, unknown>,
+        "l",
+        new Set(["startDate", "endDate", "segments", "grouping", "segmentIndex", "filter", "channel_group", "tenant_id"]),
+      );
       const result = await getWorkflowConversionSegmentLoans(tenantContext.tenantPool, {
         startDate,
         endDate,
@@ -1005,6 +1010,7 @@ router.get(
         channelGroup: channel_group || undefined,
         accessClause: accessClause ? " " + accessClause.trim() : undefined,
         accessParams: accessParams.length > 0 ? accessParams : undefined,
+        dimensionFilterClause: dimensionFilterClause || undefined,
         segmentIndex,
         filter,
       });
@@ -1062,6 +1068,11 @@ router.get(
         });
       }
       const { accessClause, accessParams } = accessCtx.buildWhereClause("l", 3);
+      const dimensionFilterClause = buildDimensionFilterWhereClause(
+        req.query as Record<string, unknown>,
+        "l",
+        new Set(["startDate", "endDate", "segments", "metric", "grouping", "channel_group", "tenant_id"]),
+      );
       const result = await getWorkflowConversionData(tenantContext.tenantPool, {
         startDate,
         endDate,
@@ -1071,6 +1082,7 @@ router.get(
         channelGroup: channel_group || undefined,
         accessClause: accessClause ? " " + accessClause.trim() : undefined,
         accessParams: accessParams.length > 0 ? accessParams : undefined,
+        dimensionFilterClause: dimensionFilterClause || undefined,
       });
       res.json(result);
     } catch (error: any) {
