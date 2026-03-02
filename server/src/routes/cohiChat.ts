@@ -33,6 +33,7 @@ import {
   columnToLabel,
 } from '../services/ai/schemaContextService.js';
 import { apiLimiter } from '../middleware/rateLimiter.js';
+import { safeExecuteSQL } from '../services/research/tools.js';
 
 const router = Router();
 
@@ -536,10 +537,34 @@ function injectConditionIntoBody(body: string, condition: string): string {
  */
 router.post('/execute-sql', authenticateToken, attachTenantContext, async (req: AuthRequest, res) => {
   try {
-    const { sql, dateFilter, dimensionFilters } = req.body;
+    const { sql, dateFilter, dimensionFilters, runAsIs } = req.body;
 
     if (!sql || typeof sql !== 'string') {
       return res.status(400).json({ error: 'sql is required' });
+    }
+
+    // Research-lab widgets: run SQL exactly as stored (no sanitization, no filter injection).
+    // Uses the same execution path as the research lab so CTEs with E'\n', etc. work.
+    if (runAsIs) {
+      const tenantContext = getTenantContext(req);
+      if (!tenantContext.tenantId || !tenantContext.tenantPool) {
+        return res.status(400).json({ error: 'Tenant context required for runAsIs' });
+      }
+      try {
+        const result = await safeExecuteSQL(sql, tenantContext.tenantPool);
+        const formattedRows = formatDataRows(result.rows);
+        return res.json({
+          data: formattedRows,
+          rowCount: result.rowCount,
+          fields: result.fields,
+        });
+      } catch (err: any) {
+        console.error('[CohiChat] runAsIs SQL error:', err.message);
+        return res.status(500).json({
+          error: 'Failed to execute query',
+          message: err.message,
+        });
+      }
     }
 
     let effectiveSql = sql;

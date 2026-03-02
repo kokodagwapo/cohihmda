@@ -144,6 +144,7 @@ RULES:
   - Withdrawn: current_loan_status ILIKE '%Withdrawn%'
   - Denied: current_loan_status ILIKE '%Denied%'
   - Completed (non-active): current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
+  - When reporting or filtering by outcome date for Denied loans, use current_status_date when uw_denied_date/denial_date is null (platform fallback). Do not report "no denied date populated" as an issue.
   - Pull-through: funded / completed * 100 (use application_date cohort)
   - Revenue: loan_amount * (rate_lock_buy_side_base_price_rate - 100) / 100 (when rate > 100, else use 25bps default)
 - Result set size: you may return up to 1000 rows. The UI uses lazy loading and virtualization, so large result sets are fine. For pipelines or cohorts larger than 1000, aggregate in your query (e.g. by status, by personnel, by month) rather than returning raw rows.
@@ -183,9 +184,27 @@ POSTGRESQL DATE ARITHMETIC (CRITICAL):
 - Date comparisons: l.application_date >= CURRENT_DATE - INTERVAL '90 days' is fine (the interval is subtracted from the date)
 
 STRING PARSING (for multi-value fields):
-- Some fields store multiple values in a single text column (space-delimited pairs, pipe-separated lists, etc.)
-- To parse space-delimited key-value pairs like "user1 0.5 user2 1.2" (alternating name then number):
-  Use a CTE with regexp_split_to_table and WITH ORDINALITY to split tokens, then pair odd positions (keys) with even positions (values):
+- Some fields store multiple values in a single text column. BEFORE writing SQL, first run a small query (LIMIT 5) to inspect the actual format of the field. Different fields use different delimiters.
+- Common formats and how to parse each:
+
+  Format A — newline-delimited lines with tab-separated key\tvalue (e.g. "j_budde\t0.077\nr.childress\t3.483"):
+  WITH lines AS (
+    SELECT l.loan_number, NULLIF(BTRIM(line), '') AS line
+    FROM public.loans l
+    CROSS JOIN LATERAL regexp_split_to_table(COALESCE(l.some_field, ''), E'\\n') AS line
+    WHERE l.some_field IS NOT NULL AND BTRIM(l.some_field) != ''
+  ),
+  parsed AS (
+    SELECT loan_number,
+      NULLIF(split_part(line, E'\\t', 1), '') AS person_name,
+      NULLIF(split_part(line, E'\\t', 2), '')::numeric AS hours
+    FROM lines WHERE line IS NOT NULL AND line LIKE '%' || E'\\t' || '%'
+  )
+  SELECT person_name, COUNT(DISTINCT loan_number) AS loans, SUM(hours) AS total_hours,
+    ROUND(AVG(hours), 3) AS avg_hours_per_loan
+  FROM parsed GROUP BY person_name ORDER BY total_hours DESC
+
+  Format B — space-delimited alternating key-value pairs (e.g. "user1 0.5 user2 1.2"):
   WITH tokens AS (
     SELECT l.loan_number, t.token, t.ordinality
     FROM public.loans l,
@@ -194,21 +213,31 @@ STRING PARSING (for multi-value fields):
   ),
   paired AS (
     SELECT loan_number,
-      MAX(CASE WHEN ordinality % 2 = 1 THEN token END) AS username,
+      MAX(CASE WHEN ordinality % 2 = 1 THEN token END) AS person_name,
       MAX(CASE WHEN ordinality % 2 = 0 THEN token END)::numeric AS hours
     FROM tokens
     GROUP BY loan_number, CEIL(ordinality::numeric / 2)
   )
-  SELECT username, COUNT(*) AS loans, SUM(hours) AS total_hours, AVG(hours) AS avg_hours_per_loan
-  FROM paired GROUP BY username ORDER BY total_hours DESC
+  SELECT person_name, COUNT(DISTINCT loan_number) AS loans, SUM(hours) AS total_hours
+  FROM paired GROUP BY person_name ORDER BY total_hours DESC
+
 - For pipe-separated lists: unnest(string_to_array(field, '|'))
 - For comma-separated lists: unnest(string_to_array(field, ','))
+- IMPORTANT: Always inspect the field with a small sample query FIRST before choosing a parsing strategy. Do not assume the format.
 - Always handle NULLs and empty strings (TRIM, COALESCE) before parsing
 - After parsing, aggregate as the investigation requires (SUM, AVG, COUNT per parsed entity)
 - Column names may use dots (e.g. cx_touches_all_userhours); reference them with double quotes if needed: l."CX.TOUCHES.ALL.USERHOURS"
 
 - When you have enough evidence (usually 2-3 queries), produce your finding
-- If a desired output format (outputHint) is provided in the question, ensure your final query produces exactly that structure (e.g. a table with personnel name and hours per loan). The user expects this specific output.
+
+OUTPUT FORMAT (when outputHint is provided):
+- The outputHint describes the table or visualization the user wants. Your goal is to produce it as closely as possible.
+- ALWAYS produce a finding with data, even if parsing is imperfect. A partial result is far better than giving up. NEVER refuse to produce output — the user already knows the data is parseable.
+- Include as many of the requested columns as you can. If the schema doesn't have a column the user mentioned, skip it and note it in your finding summary — don't let one missing column stop you from producing the rest.
+- For pivot-style requests ("a column for each person with their hours"): produce a normalized table with one row per loan-person combination (loan_number, person_name, hours, plus the other requested columns). The UI can display this effectively. Don't try to build dynamic column names — just normalize.
+- Your final query before the finding should be the one that produces the user's requested table. Earlier queries can explore the data structure.
+- If a query fails or returns unexpected results, try a different parsing approach. You have up to 5 iterations — use them to iterate on the SQL until it works.
+
 - CRITICAL: Your finding title MUST reflect what the data actually shows, NOT the original hypothesis. If your investigation disproved the hypothesis, the title must reflect the real finding.
 - Every key in keyMetrics MUST have a corresponding entry in keyMetricDescriptions AND keyMetricFormats.
 - keyMetricDescriptions: 1 sentence explaining what the metric measures in plain business language.
@@ -235,7 +264,7 @@ Respond in JSON format:
 // Agent Loop
 // ============================================================================
 
-const MAX_ITERATIONS = 5;
+const MAX_ITERATIONS = 8;
 
 export async function runDataAnalystAgent(
   question: InvestigationQuestion,
@@ -270,9 +299,17 @@ export async function runDataAnalystAgent(
     `Topic: ${question.topic}`,
     `Hypothesis: ${question.hypothesis}`,
     `Suggested Approach: ${question.approach}`,
-    ...(question.outputHint
-      ? [`Desired output format: ${question.outputHint} — ensure your final query produces data in this structure.`]
-      : []),
+  );
+
+  if (question.outputHint) {
+    userContentParts.push(
+      `\n## Desired Output Format (from the user's request)`,
+      `${question.outputHint}`,
+      `Your final query should produce a table as close to this format as possible. Include as many of the requested columns as the schema supports. Always produce data — a partial table is much better than no table.`
+    );
+  }
+
+  userContentParts.push(
     `\nBegin your investigation. Think about what data you need first.`
   );
 
@@ -404,11 +441,17 @@ export async function runDataAnalystAgent(
       });
 
       const formattedResults = formatResultsForLLM(queryResult);
+      const iterationsRemaining = MAX_ITERATIONS - iteration;
+      const urgency = iterationsRemaining <= 2
+        ? `\n\n⚠️ You have ${iterationsRemaining} iteration(s) remaining. You MUST produce your finding on the next iteration. Use the best evidence you have — do NOT run another query unless absolutely necessary. Produce action "finding" now with whatever data you've collected.`
+        : iterationsRemaining <= 3
+        ? `\n\nNote: ${iterationsRemaining} iterations remaining. Start wrapping up — produce your finding soon.`
+        : "";
       conversationHistory.push(
         { role: "assistant", content: raw },
         {
           role: "user",
-          content: `Query results (${queryResult.rowCount} rows, ${queryResult.executionTimeMs}ms):\n\n${formattedResults}\n\nAnalyze these results. Either run another query for more data, or produce your final finding if you have enough evidence.`,
+          content: `Query results (${queryResult.rowCount} rows, ${queryResult.executionTimeMs}ms):\n\n${formattedResults}\n\nAnalyze these results. Either run another query for more data, or produce your final finding if you have enough evidence.${urgency}`,
         }
       );
     } else {
@@ -422,11 +465,52 @@ export async function runDataAnalystAgent(
     }
   }
 
+  // Ran out of iterations — force the LLM to produce a finding from what it has
+  if (evidence.length > 0) {
+    try {
+      conversationHistory.push({
+        role: "user",
+        content: `You have reached the iteration limit. You MUST produce your finding NOW using action "finding". Summarize what you found from the ${evidence.length} queries you ran. The last query's results are your primary evidence table. Do not run any more queries.`,
+      });
+
+      const finalRaw = await callLLM(conversationHistory, apiKey, {
+        temperature: 0.2,
+        maxTokens: 2000,
+        jsonMode: true,
+      });
+
+      const finalParsed = JSON.parse(finalRaw);
+      if (finalParsed.action === "finding" && finalParsed.finding) {
+        const finding: Finding = {
+          questionId: question.id,
+          title: finalParsed.finding.title || question.topic,
+          summary: finalParsed.finding.summary || "Investigation reached iteration limit.",
+          confidence: finalParsed.finding.confidence || "medium",
+          evidence,
+          keyMetrics: finalParsed.finding.keyMetrics || {},
+          keyMetricDescriptions: finalParsed.finding.keyMetricDescriptions || {},
+          keyMetricFormats: finalParsed.finding.keyMetricFormats || {},
+        };
+
+        onStep({
+          iteration: MAX_ITERATIONS + 1,
+          type: "finding",
+          content: JSON.stringify(finding, null, 2),
+          timestamp: Date.now(),
+        });
+
+        return finding;
+      }
+    } catch {
+      // Fall through to static fallback
+    }
+  }
+
   return buildFallbackFinding(question, evidence);
 }
 
 // ============================================================================
-// Fallback finding when agent runs out of iterations or fails
+// Fallback finding when agent produces no evidence at all
 // ============================================================================
 
 function buildFallbackFinding(
@@ -437,7 +521,7 @@ function buildFallbackFinding(
     questionId: question.id,
     title: question.topic,
     summary: evidence.length > 0
-      ? `Investigation gathered ${evidence.length} data point(s) but could not reach a definitive conclusion within the iteration limit.`
+      ? `Investigation gathered ${evidence.length} data point(s). Review the evidence tables below for the raw results.`
       : `Investigation could not gather sufficient data to answer this question.`,
     confidence: "low",
     evidence,

@@ -3,7 +3,7 @@
  *
  * Receives the tenant's database schema, canonical metric definitions,
  * and optional user-specified topic. Produces a structured research plan
- * with 3-7 investigation questions, each with a hypothesis and approach.
+ * with 1-7 investigation questions (1-3 for specific requests, 3-7 for broad), each with a hypothesis and approach.
  */
 
 import { callLLM, type LLMMessage } from "../tools.js";
@@ -57,10 +57,13 @@ Your output is a JSON object with:
 }
 
 RULES:
-- Generate 3-7 questions, prioritized by likely business impact
+- DATA BUILD vs INVESTIGATION: Distinguish between two types of requests:
+  1. DATA BUILD — the user describes a specific output they want ("I want a table with columns A, B, C", "show me a breakdown of X by Y", "parse field F and create a table showing..."). For data-build requests, generate EXACTLY 1 question whose sole purpose is producing that exact table/output. The outputHint MUST contain the complete column specification. Do NOT add extra questions about data quality, validation, or distribution — the user wants the table, not an investigation about the table. Set priority to "high".
+  2. INVESTIGATION — the user asks a question or wants analysis ("Why is pull-through dropping?", "overall pipeline health", "investigate processing delays"). For investigations, follow the question count rules below.
+- Question count for INVESTIGATIONS: If the user's request is highly specific (a single metric, a single question), generate only 1-3 focused questions. If broad ("overall pipeline health", "comprehensive analysis"), generate 3-7 covering multiple areas. Do not pad with unrelated questions.
 - Each question should be independently investigable with SQL queries against the loans table
 - Approaches should be specific: mention column names, date ranges (use CURRENT_DATE-based expressions), aggregation strategies
-- If a user topic is provided, at least 2-3 questions should focus on that topic; the rest can be broader
+- If a user topic is provided and this is an investigation, at least 2-3 questions should focus on that topic; the rest can be broader
 - If no topic is provided, cover a mix of: pipeline health, conversion rates, personnel performance, risk patterns, and time trends
 - Consider multiple time windows: YTD, rolling 90D, rolling 30D, trailing 12M
 - For conversion metrics (pull-through, fallout, funded rate): be aware that mortgage cycle times often exceed 30 days. A 30D application cohort will contain many loans still in-process, making conversion rates unreliable. Prefer 90D or YTD windows for these metrics unless the investigation specifically needs short-window sensitivity. When planning 30D conversion analysis, include a cycle-time check so the analyst can contextualize the results.
@@ -68,7 +71,8 @@ RULES:
 - NEVER suggest queries that modify data
 - Today's date context will be provided separately
 - DATA QUALITY: "Active Loan" status often includes stale records not properly closed out in the LOS. When planning pipeline-related questions, instruct the analyst to check for and segment stale active loans (application_date > 6 months old). Data quality issues (missing fields, stale statuses, impossible dates) are high-value findings — include them when relevant.
-- If the user's request implies a specific output format (e.g. "create a table showing...", "break down X by Y", "show me hours per loan per user"), include an outputHint on the relevant question describing that format. The data analyst will use it to shape the final query so the user gets the exact table or visualization they asked for.`;
+- If the user's request implies a specific output format (e.g. "create a table showing...", "break down X by Y", "show me hours per loan per user"), include an outputHint on the relevant question describing that format. Be VERY specific in the outputHint — list every column the user mentioned. The data analyst will use it to shape the final query so the user gets the exact table or visualization they asked for.
+- When the user lists specific columns they want (e.g. "loan number, loan officer, state, FICO..."), copy that FULL column list verbatim into the outputHint. Do not summarize or abbreviate it.`;
 
 // ============================================================================
 // Training Examples

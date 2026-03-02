@@ -1,11 +1,12 @@
 /**
  * WorkflowConversionEmbed – Single workbench widget that renders the full
  * Workflow Conversion view: period, calculation, grouping, reset, and 6-card grid.
- * When embedded in workbench, state can be initialized from and persisted to the canvas via config.
+ * State is persisted via config.workflowState and onConfigChange so it survives canvas save/reload.
  */
 
-import React from 'react';
+import React, { useCallback } from 'react';
 import { WorkflowConversionView } from '@/components/views/WorkflowConversionView';
+import type { WorkflowConversionSavedState } from '@/components/views/WorkflowConversionView';
 import { useTenantStore } from '@/stores/tenantStore';
 import { useChannelStore } from '@/stores/channelStore';
 import type { WidgetRenderProps } from '../registry/types';
@@ -18,20 +19,17 @@ export interface WorkflowConversionState {
   segments?: { from: string; to: string }[];
 }
 
-function WorkflowConversionEmbedInner({ width, height, config }: WidgetRenderProps) {
+function WorkflowConversionEmbedInner({ width, height, config, onConfigChange }: WidgetRenderProps) {
   const { selectedTenantId } = useTenantStore();
   const { selectedChannel } = useChannelStore();
 
-  const workflowInitialState = config?.workflowInitialState as WorkflowConversionState | undefined;
-  const onWorkflowStateChange = config?.onWorkflowStateChange as
-    | ((state: {
-        periodSelection: PeriodSelection;
-        calculationType: 'conversion' | 'turn_time';
-        grouping: 'workflow' | 'individual';
-        segments: { from: string; to: string }[];
-      }) => void)
-    | undefined;
-  const groupId = config?.groupId as string | undefined;
+  const initialState = config?.workflowState as WorkflowConversionSavedState | undefined;
+  const handleStateChange = useCallback(
+    (state: WorkflowConversionSavedState) => {
+      onConfigChange?.({ workflowState: state });
+    },
+    [onConfigChange],
+  );
 
   return (
     <div
@@ -42,9 +40,8 @@ function WorkflowConversionEmbedInner({ width, height, config }: WidgetRenderPro
         selectedTenantId={selectedTenantId}
         selectedChannel={selectedChannel}
         embeddedInWorkbench
-        groupId={groupId}
-        initialWorkflowState={workflowInitialState}
-        onWorkflowStateChange={onWorkflowStateChange}
+        initialState={initialState}
+        onStateChange={onConfigChange ? handleStateChange : undefined}
       />
     </div>
   );

@@ -16,6 +16,7 @@ export type AdminSection =
   | "infrastructure" // Renamed from 'system' for clarity
   | "security-compliance" // Combined security and SOC 2
   | "connections" // Combined LOS + Synapse integrations
+  | "loan-folders" // Encompass folder selection per connection
   | "dev-tools" // Developer tools including demo data
   | "stripe"
   | "rag-voice"
@@ -25,7 +26,8 @@ export type AdminSection =
   | "ai-prompts" // AI prompt configuration (platform admin)
   | "insight-feedback" // Insight feedback review & training (platform admin)
   | "sync-management" // Cross-tenant sync schedule management (platform admin)
-  | "platform-settings"; // Platform API keys and settings (platform admin)
+  | "platform-settings" // Platform API keys and settings (platform admin)
+  | "analytics"; // User behavior analytics (page views, sessions, funnels, replays)
 
 // Admin mode: platform (Cohi internal management) vs tenant (tenant context/impersonation)
 export type AdminMode = "platform" | "tenant";

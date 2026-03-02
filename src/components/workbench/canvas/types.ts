@@ -95,7 +95,7 @@ export interface WidgetFilterState {
 
 /** An item inside a WidgetGroup – either a registry widget or a SQL-backed Cohi widget */
 export type GroupWidgetItem =
-  | { kind: 'registry'; defId: string }
+  | { kind: 'registry'; defId: string; config?: Record<string, unknown> }
   | {
       kind: 'cohi';
       /** Stable id for this item within the group */

@@ -40,6 +40,7 @@ import { getPromptConfig, buildPrompt } from "../services/promptConfigService.js
 import { decryptAPIKeys } from "../services/encryption.js";
 import { tenantDbManager } from "../config/tenantDatabaseManager.js";
 import { loadSession as loadResearchSession } from "../services/research/orchestrator.js";
+import { callLLM, type LLMMessage } from "../services/research/tools.js";
 
 const router = Router();
 
@@ -53,6 +54,10 @@ interface CanvasStateSnapshot {
     title: string;
     sectionType: string;
     widgetIds: string[];
+    /** Widgets in this group with stable ids (for modify_group operations) */
+    widgets?: { id: string; kind: "registry" | "cohi"; defId?: string; title?: string; name?: string }[];
+    /** Grid layout per widget (key = widgets[].id); 36 cols, 16px rows */
+    widgetLayouts?: Record<string, { x: number; y: number; w: number; h: number }>;
     filters?: {
       dateRange?: string;
       dateField?: string;
@@ -67,6 +72,7 @@ interface CanvasStateSnapshot {
     sourceType?: 'research' | 'chat';
     sourceSessionId?: string;
     sql?: string;
+    selected?: boolean;
   }[];
   totalItems: number;
   /** Actual data from rendered widgets */
@@ -78,14 +84,28 @@ interface CanvasStateSnapshot {
   }[];
 }
 
-interface OpenAIChatMessage {
-  role: "system" | "user" | "assistant";
-  content: string;
-}
-
 // ============================================================================
 // Helpers
 // ============================================================================
+
+/** Pre-validates SQL for create_widget/modify_widget: must be SELECT/WITH and not obviously hallucinated. */
+function isValidWidgetSql(sql: string): boolean {
+  const trimmed = sql.trim();
+  if (!trimmed) return false;
+  const upper = trimmed.toUpperCase();
+  if (!upper.startsWith("SELECT") && !upper.startsWith("WITH")) return false;
+  const hallucinated = [
+    "some_other_table",
+    "example_table",
+    "your_table",
+    "table_name",
+  ];
+  const lower = trimmed.toLowerCase();
+  for (const phrase of hallucinated) {
+    if (lower.includes(phrase)) return false;
+  }
+  return true;
+}
 
 async function getOpenAIKey(tenantId?: string): Promise<string> {
   if (tenantId) {
@@ -120,48 +140,20 @@ async function getOpenAIKey(tenantId?: string): Promise<string> {
   throw new Error("OpenAI API key not configured.");
 }
 
-async function callOpenAI(
-  messages: OpenAIChatMessage[],
-  apiKey: string,
-  options: {
-    temperature?: number;
-    maxTokens?: number;
-    jsonMode?: boolean;
-  } = {}
-): Promise<string> {
-  const body: any = {
-    model: "gpt-4o",
-    messages,
-    temperature: options.temperature ?? 0.3,
-    max_tokens: options.maxTokens ?? 3000,
-  };
-  if (options.jsonMode) {
-    body.response_format = { type: "json_object" };
-  }
-
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const error = (await response.json()) as {
-      error?: { message?: string };
-    };
-    throw new Error(
-      `OpenAI API error: ${error.error?.message || "Unknown error"}`
-    );
-  }
-
-  const data = (await response.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-  return data.choices?.[0]?.message?.content || "";
-}
+/**
+ * Data source to base SQL hint (for convert_to_sql_widget).
+ * Registry widgets are backed by data hooks; when converting to SQL the LLM
+ * should use the tenant schema. These hints document typical tables/columns
+ * per source for prompt context. Expand as needed.
+ */
+const DATA_SOURCE_SQL_HINTS: Partial<Record<string, string>> = {
+  "company-scorecard":
+    "Typical tables: public.loans, public.loan_officers, public.branches. Common columns: application_date, funding_date, loan_amount, status, branch_id, loan_officer_id.",
+  "sales-scorecard":
+    "Similar to company-scorecard; often filtered by sales channel or product.",
+  "operations-scorecard":
+    "Loans and operational metrics; cycle time, fallout, pipeline stages.",
+};
 
 // ============================================================================
 // Build workbench system prompt
@@ -245,7 +237,7 @@ function buildCanvasContext(state: CanvasStateSnapshot): string {
 
   const lines: string[] = ["## CURRENT CANVAS STATE\n"];
 
-  // ---- Structural info with filter context ----
+  // ---- Structural info with filter context and group widget/layout detail ----
   if (state.groups.length > 0) {
     lines.push(`### Dashboard Groups on Canvas (${state.groups.length})`);
     for (const g of state.groups) {
@@ -258,9 +250,18 @@ function buildCanvasContext(state: CanvasStateSnapshot): string {
         if (g.filters.loanOfficer) parts.push(`LO: ${g.filters.loanOfficer}`);
         if (parts.length > 0) filterStr = ` [Filters: ${parts.join(", ")}]`;
       }
+      const widgetCount = g.widgets?.length ?? g.widgetIds.length;
       lines.push(
-        `- **${g.title}** (${g.sectionType}, ${g.widgetIds.length} widgets)${filterStr}`
+        `- **${g.title}** groupId=\`${g.groupId}\` (${g.sectionType}, ${widgetCount} widgets)${filterStr}`
       );
+      if (g.widgets && g.widgets.length > 0) {
+        for (const w of g.widgets) {
+          const label = w.kind === "registry" ? (w.name || w.defId) : w.title;
+          const layout = g.widgetLayouts?.[w.id];
+          const layoutStr = layout ? ` @ grid(${layout.x},${layout.y}) size ${layout.w}x${layout.h}` : "";
+          lines.push(`  - \`${w.id}\` (${w.kind}) ${label ?? ""}${layoutStr}`);
+        }
+      }
     }
     lines.push("");
   }
@@ -269,9 +270,12 @@ function buildCanvasContext(state: CanvasStateSnapshot): string {
     lines.push(`### Standalone Items (${state.standaloneWidgets.length})`);
     for (const w of state.standaloneWidgets) {
       const source = w.sourceType === 'research' ? ' [research-lab widget]' : '';
-      lines.push(`- ${w.id} (${w.type})${w.title ? ": " + w.title : ""}${source}`);
+      const selectedLabel = w.selected ? ' [SELECTED]' : '';
+      lines.push(`- ${w.id} (${w.type})${w.title ? ": " + w.title : ""}${source}${selectedLabel}`);
       if (w.sql) {
-        lines.push(`  SQL: \`${w.sql.substring(0, 300)}${w.sql.length > 300 ? '...' : ''}\``);
+        const sqlLimit = w.selected ? w.sql.length : 1000;
+        const sqlSnippet = w.sql.length <= sqlLimit ? w.sql : w.sql.substring(0, sqlLimit) + '...';
+        lines.push(`  SQL: \`${sqlSnippet}\``);
       }
     }
     lines.push("");
@@ -388,6 +392,21 @@ You help users build, modify, and understand data visualizations on their canvas
 9. **See actual data** on the canvas (KPI values, chart data, table rows) — use this to give data-driven answers
 10. **Generate reports** — create full multi-slide PowerPoint/PDF presentations using the "generate_report" action
 
+## Clarification Before Action
+When the user's request is ambiguous or underspecified, ASK a clarifying question
+instead of guessing. Return an empty "actions" array and put your question in "message".
+
+Ask when:
+- The user says "make a chart" but doesn't specify what data, metrics, or grouping
+- The user says "modify the widget" but there is no [SELECTED] widget, or the change is unclear
+- The user asks for analysis but multiple interpretations exist (e.g. "show me performance" -- by LO? by branch? by month?)
+- The user references a field or concept you can't map to the schema
+
+Do NOT ask when:
+- The request is clear and specific (e.g. "create a bar chart of funded volume by month")
+- The user is clearly referring to the [SELECTED] widget and the change is unambiguous
+- You can confidently infer intent from context (canvas state, conversation history)
+
 ## Response Format
 You MUST respond with valid JSON in this exact format:
 {
@@ -414,24 +433,56 @@ Each action in the "actions" array must be one of:
 
 4. **modify_widget**: Change an existing canvas widget
    {"type": "modify_widget", "instanceId": "<canvas item id>", "changes": {...}, "sql": "SELECT ...", "title": "New Title", "explanation": "What changed"}
-   - "changes" accepts partial VisualizationConfig overrides (type, xKey, yKey, etc.)
-   - "sql" (optional) replaces the widget's SQL query — use this for cohi_widget items when the user wants different data, date ranges, groupings, or columns
-   - "title" (optional) updates the widget title
+   - The instanceId MUST be the id of the widget marked [SELECTED] in the Standalone Items list. Only that widget can be modified; if you use a different id the change will be rejected. The full SQL for the [SELECTED] widget is provided so you can edit it.
+   - When removing a column from a table you may use EITHER: (1) Provide a new "sql" with that column omitted from the SELECT list (copy the exact SQL above and remove only that column from the SELECT clause). (2) Provide "changes" with tableConfig.columns set to an array of {key: "<column_key>", label: "<display label>"} for every column that should REMAIN — omit the column to remove. Use the exact keys from the LIVE DATA VALUES table for that widget. Option (1) is required for research-lab widgets with complex SQL; option (2) works for any table and is simpler.
+   - Do not SELECT NULL AS column_name or invent table/CTE names. Base all SQL on the EXACT SQL shown for that widget.
+   - "changes" also accepts other VisualizationConfig overrides (type, xKey, yKey, etc.) for visual-only changes when data is unchanged.
+   - "title" (optional) updates the widget title.
    - For research-lab widgets: these use complex CTEs and derived columns. When modifying them, always provide a complete new SQL query. Reference the RESEARCH LAB CONTEXT section below to understand the analytical intent behind the original query.
+   - When modifying a widget's SQL, you MUST base your new query on the EXACT SQL shown for that widget in the canvas state. Do NOT invent table names, CTEs, or columns that don't appear in the original SQL. Copy the original SQL and make only the specific change the user requested.
+   - Return EXACTLY ONE modify_widget action per user request. Do NOT return multiple modify_widget actions for the same widget.
 
 5. **delete_widget**: Remove a widget from canvas
    {"type": "delete_widget", "instanceId": "<canvas item id>", "explanation": "Why removing"}
 
-6. **explain_widget**: Teach about a widget
+6. **modify_group**: Rearrange, add, remove, or resize widgets within a dashboard group
+   {"type": "modify_group", "groupId": "<groupId from canvas>", "operations": [...], "explanation": "What changed"}
+   The canvas state lists each group with groupId= and its widgets with stable ids (e.g. company-scorecard-units__0, cohi__abc123__1). Use these exact ids in operations.
+   Operations (array, applied in order):
+   - {"op": "add_registry", "defId": "<widget id from catalog>", "gridPosition": {"x": 0, "y": 10, "w": 5, "h": 4}} — add a pre-built widget (grid: 36 cols, 16px rows)
+   - {"op": "add_cohi", "sql": "SELECT ...", "title": "...", "vizConfig": {...}, "gridPosition": {...}} — add a SQL-backed widget
+   - {"op": "remove", "widgetId": "<id from group widget list>"} — remove that widget
+   - {"op": "resize", "widgetId": "<id>", "w": 12, "h": 8} — change grid size
+   - {"op": "reorder", "widgetIds": ["<id1>", "<id2>", ...]} — new order (all current ids in desired order)
+   - {"op": "set_title", "title": "New Section Title"}
+   - {"op": "set_filters", "filters": {"year": 2025, ...}}
+   Use modify_group when the user asks to add/remove widgets in a dashboard section, reorder them, resize, or change the section title.
+
+6a. **modify_registry_widget**: Change config on a pre-built catalog widget inside a group
+   {"type": "modify_registry_widget", "groupId": "<groupId>", "widgetId": "<widget id from group list, e.g. company-scorecard-units__0>", "configOverrides": {"format": "currency", "chartType": "line"}, "explanation": "What changed"}
+   Use when the user wants to change how a catalog widget displays (e.g. number format, chart type) without converting it to SQL. The widgetId is the stable id shown in the canvas state for that widget (e.g. company-scorecard-units__0 or cohi__abc__1). Only keys that the widget supports (e.g. format, chartType) will take effect.
+
+6b. **create_dashboard**: Build an entirely new dashboard from scratch (mix of catalog widgets and SQL widgets)
+   {"type": "create_dashboard", "title": "My Dashboard", "groups": [{"title": "Section Title", "sectionType": "company-scorecard", "widgets": [{"kind": "registry", "defId": "company-scorecard-units"}, {"kind": "cohi", "sql": "SELECT ...", "title": "Custom Chart", "vizConfig": {...}}], "canvasPosition": {"x": 20, "y": 20, "w": 1000, "h": 800}}], "standaloneWidgets": [{"kind": "cohi", "sql": "SELECT ...", "title": "Standalone", "vizConfig": {...}}], "explanation": "What this dashboard shows"}
+   - groups: array of sections; each has title, optional sectionType (company-scorecard, sales-scorecard, etc.), widgets (registry defIds or cohi sql+title+vizConfig), optional canvasPosition (pixel x, y, w, h).
+   - standaloneWidgets: optional array of cohi widgets to place on the canvas outside any group.
+   - Layout: use canvasPosition to place groups; if omitted, groups are stacked vertically. Grid inside groups: 36 columns, 16px row height.
+   - Use create_dashboard when the user asks for a "new dashboard", "custom dashboard", or to "build a dashboard from scratch" with a specific mix of widgets.
+
+6c. **convert_to_sql_widget**: Replace a catalog widget inside a group with a SQL-backed widget (for deep customization)
+   {"type": "convert_to_sql_widget", "groupId": "<groupId>", "widgetId": "<widget id from group list>", "sql": "SELECT ...", "title": "...", "vizConfig": {...}, "explanation": "Why converted"}
+   Use when the user needs changes that go beyond config overrides (e.g. filter by a specific branch, add a custom WHERE clause, change the underlying query). The registry widget is replaced by a cohi_widget that runs your SQL. Base your SQL on the tenant schema and the widget's data source (see DATA SOURCE HINTS below). The widgetId is the same stable id as in modify_registry_widget (e.g. company-scorecard-units__0).
+
+7. **explain_widget**: Teach about a widget
    {"type": "explain_widget", "widgetId": "<id>", "explanation": "Detailed explanation"}
 
-7. **explain_schema**: Teach about data fields
+8. **explain_schema**: Teach about data fields
    {"type": "explain_schema", "fields": ["field1", "field2"], "explanation": "What these fields mean"}
 
-8. **create_canvas**: Build a full multi-section dashboard canvas at once
+9. **create_canvas**: Build a full multi-section dashboard canvas at once
    {"type": "create_canvas", "title": "Monthly Executive Review", "sectionKeys": ["executiveDashboard", "companyScorecard", "salesScorecard"], "explanation": "Why this combination"}
 
-9. **query_data**: Run a SQL query to answer a data question (results are returned to you automatically)
+10. **query_data**: Run a SQL query to answer a data question (results are returned to you automatically)
    {"type": "query_data", "sql": "SELECT ...", "explanation": "What this query checks"}
    Use query_data when:
    - The user asks a question that requires data NOT visible on the canvas
@@ -440,7 +491,7 @@ Each action in the "actions" array must be one of:
    PREFER answering from canvas data when possible (faster, no extra query needed).
    The query results will be automatically provided back to you so you can formulate a data-driven answer.
 
-10. **generate_report**: Generate a full multi-slide PowerPoint/PDF report
+11. **generate_report**: Generate a full multi-slide PowerPoint/PDF report
     {"type": "generate_report", "reportDefinition": {
       "title": "Report Title",
       "subtitle": "Optional subtitle",
@@ -701,6 +752,10 @@ Current date: {{currentDate}}
 
 {{WIDGET_CATALOG}}
 
+## Data source hints (for convert_to_sql_widget)
+When replacing a catalog widget with a SQL-backed widget, use the tenant schema and these hints for the widget's data source:
+{{DATA_SOURCE_HINTS}}
+
 {{CANVAS_STATE}}
 `;
 
@@ -776,17 +831,23 @@ router.post(
       )
         .replace("{{SCHEMA_CONTEXT}}", schemaContext + verifiedMetricsBlock)
         .replace("{{WIDGET_CATALOG}}", widgetCatalog || "No widget catalog provided.")
+        .replace(
+          "{{DATA_SOURCE_HINTS}}",
+          Object.entries(DATA_SOURCE_SQL_HINTS)
+            .map(([src, hint]) => `- ${src}: ${hint}`)
+            .join("\n") || "Use the schema context above and the widget's data source (e.g. company-scorecard, sales-scorecard) to write equivalent SQL."
+        )
         .replace("{{CANVAS_STATE}}", canvasContext + researchContext);
 
       // Build message history
-      const history: OpenAIChatMessage[] = (conversationHistory || [])
+      const history: LLMMessage[] = (conversationHistory || [])
         .slice(-6)
         .map((m) => ({
           role: m.role as "user" | "assistant",
           content: m.content,
         }));
 
-      const messages: OpenAIChatMessage[] = [
+      const messages: LLMMessage[] = [
         { role: "system", content: systemPrompt },
         ...history,
         { role: "user", content: question },
@@ -798,9 +859,9 @@ router.post(
 
       // Use higher token limit when user appears to be requesting a report
       const isReportRequest = /\b(report|presentation|powerpoint|pptx|pdf|slide|deck)\b/i.test(question);
-      const rawResponse = await callOpenAI(messages, apiKey, {
+      const rawResponse = await callLLM(messages, apiKey, {
         temperature: 0.3,
-        maxTokens: isReportRequest ? 8000 : 3000,
+        maxTokens: isReportRequest ? 8000 : 4096,
         jsonMode: true,
       });
 
@@ -824,6 +885,10 @@ router.post(
         "modify_widget",
         "delete_widget",
         "suggest_dashboard",
+        "modify_group",
+        "modify_registry_widget",
+        "create_dashboard",
+        "convert_to_sql_widget",
         "explain_widget",
         "explain_schema",
         "query_data",
@@ -854,6 +919,19 @@ router.post(
         }
       }
 
+      // Log modify_widget actions for debugging (instanceId, sql provided?, changes keys)
+      for (const action of validActions) {
+        if (action.type === "modify_widget") {
+          const hasSql = !!(action.sql && String(action.sql).trim());
+          const changesKeys = action.changes && typeof action.changes === "object"
+            ? Object.keys(action.changes)
+            : [];
+          console.log(
+            `[CohiWorkbench] modify_widget: instanceId=${action.instanceId} hasSql=${hasSql} changesKeys=[${changesKeys.join(", ")}] title=${action.title ? "set" : "unset"}`
+          );
+        }
+      }
+
       // ------------------------------------------------------------------
       // Two-pass flow: if the LLM emitted query_data actions, execute
       // the SQL and make a second LLM call with the results.
@@ -862,6 +940,22 @@ router.post(
       let finalMessage = parsed.message || "I processed your request.";
       let finalTeachingNotes = parsed.teachingNotes || undefined;
       let finalSuggestions = parsed.suggestedQuestions || [];
+
+      // SQL pre-validation: drop create_widget/modify_widget actions with invalid SQL
+      const invalidSqlActions: string[] = [];
+      validActions = validActions.filter((a: any) => {
+        if ((a.type !== "create_widget" && a.type !== "modify_widget") || !a.sql) return true;
+        const sql = String(a.sql).trim();
+        if (isValidWidgetSql(sql)) return true;
+        invalidSqlActions.push(a.type);
+        return false;
+      });
+      if (invalidSqlActions.length > 0) {
+        finalMessage += "\n\nOne or more widget SQL statements were rejected (invalid or placeholder SQL). Please try a more specific request.";
+        console.log(
+          `[CohiWorkbench] SQL pre-validation stripped ${invalidSqlActions.length} action(s): ${invalidSqlActions.join(", ")}`
+        );
+      }
 
       if (queryActions.length > 0 && tenantId) {
         console.log(
@@ -934,7 +1028,7 @@ router.post(
         }).join("\n\n");
 
         // Second LLM call with query results
-        const followUpMessages: OpenAIChatMessage[] = [
+        const followUpMessages: LLMMessage[] = [
           ...messages,
           { role: "assistant", content: rawResponse },
           {
@@ -944,7 +1038,7 @@ router.post(
         ];
 
         try {
-          const secondResponse = await callOpenAI(followUpMessages, apiKey, {
+          const secondResponse = await callLLM(followUpMessages, apiKey, {
             temperature: 0.3,
             maxTokens: 3000,
             jsonMode: true,

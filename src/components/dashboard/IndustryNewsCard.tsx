@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { format } from "date-fns";
 import {
@@ -484,13 +485,7 @@ export const IndustryNewsCard = () => {
   const [headlinesPaused, setHeadlinesPaused] = useState(false);
   const [pinnedHeadlineId, setPinnedHeadlineId] = useState<string | null>(null);
   const [copiedHeadlineId, setCopiedHeadlineId] = useState<string | null>(null);
-  const [showNewsletterModal, setShowNewsletterModal] = useState(false);
-  const [newsletterEnabled, setNewsletterEnabled] = useState(false);
-  const [newsletterEmail, setNewsletterEmail] = useState("");
-  const [newsletterLoading, setNewsletterLoading] = useState(false);
-  const [newsletterSaving, setNewsletterSaving] = useState(false);
-  const [newsletterSending, setNewsletterSending] = useState(false);
-  const [newsletterMessage, setNewsletterMessage] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   // Load user preferences from database
   const loadUserPreferences = async () => {
@@ -942,57 +937,6 @@ export const IndustryNewsCard = () => {
     });
   };
 
-  const loadNewsletterSubscription = useCallback(async () => {
-    setNewsletterLoading(true);
-    setNewsletterMessage(null);
-    try {
-      const pref = await api.getDailyBriefNewsletterSubscription();
-      setNewsletterEnabled(Boolean(pref.enabled));
-      setNewsletterEmail(pref.email || "");
-    } catch (error: any) {
-      setNewsletterMessage(error?.message || "Could not load newsletter settings.");
-    } finally {
-      setNewsletterLoading(false);
-    }
-  }, []);
-
-  const handleSaveNewsletterSubscription = useCallback(async () => {
-    setNewsletterSaving(true);
-    setNewsletterMessage(null);
-    try {
-      const email = newsletterEmail.trim();
-      const result = await api.updateDailyBriefNewsletterSubscription({
-        enabled: newsletterEnabled,
-        email,
-      });
-      setNewsletterEnabled(result.enabled);
-      setNewsletterEmail(result.email);
-      setNewsletterMessage(
-        result.enabled
-          ? "Subscribed. You will receive automated Daily Brief emails."
-          : "Newsletter subscription disabled."
-      );
-    } catch (error: any) {
-      setNewsletterMessage(error?.message || "Could not save newsletter settings.");
-    } finally {
-      setNewsletterSaving(false);
-    }
-  }, [newsletterEnabled, newsletterEmail]);
-
-  const handleSendNewsletterPreview = useCallback(async () => {
-    setNewsletterSending(true);
-    setNewsletterMessage(null);
-    try {
-      const email = newsletterEmail.trim();
-      const result = await api.sendDailyBriefPreviewEmail({ email });
-      setNewsletterMessage(`Preview sent to ${result.recipient}.`);
-    } catch (error: any) {
-      setNewsletterMessage(error?.message || "Could not send preview email.");
-    } finally {
-      setNewsletterSending(false);
-    }
-  }, [newsletterEmail]);
-
   // Re-fetch news when selected sources change (to ensure we have latest data)
   // The filtering is handled by filteredNewsFeed useMemo
   useEffect(() => {
@@ -1383,15 +1327,12 @@ export const IndustryNewsCard = () => {
               targetRef={cardRef}
             />
             <button
-              onClick={() => {
-                setShowNewsletterModal(true);
-                void loadNewsletterSubscription();
-              }}
+              onClick={() => navigate("/settings?tab=notifications")}
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all border border-slate-200 dark:border-slate-700 text-xs sm:text-sm text-slate-700 dark:text-slate-200"
-              aria-label="Subscribe to daily brief newsletter"
+              aria-label="Manage email notifications and daily brief"
             >
               <Mail className="w-4 h-4" strokeWidth={1.8} />
-              Newsletter
+              Notifications
             </button>
             <button
               onClick={() => setShowSourceSelector(true)}
@@ -1780,84 +1721,6 @@ export const IndustryNewsCard = () => {
               <div className="h-full min-h-[420px] rounded-xl border border-slate-200/60 dark:border-slate-700/50 bg-slate-50/40 dark:bg-slate-800/30 p-3 sm:p-4">
                 {renderDrilldownChart()}
               </div>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={showNewsletterModal}
-        onOpenChange={(open) => {
-          setShowNewsletterModal(open);
-          if (!open) {
-            setNewsletterMessage(null);
-          }
-        }}
-      >
-        <DialogContent className="max-w-xl w-[95vw] rounded-2xl border border-slate-200/60 dark:border-slate-700/50 bg-white dark:bg-slate-900">
-          <DialogTitle className="text-lg font-medium text-slate-900 dark:text-slate-100">
-            Subscribe to Cohi Daily Brief
-          </DialogTitle>
-          <DialogDescription className="text-sm text-slate-500 dark:text-slate-400">
-            Receive automated email snapshots with charts and top headlines only (no sensitive data).
-          </DialogDescription>
-
-          <div className="mt-3 space-y-4">
-            <label className="flex items-center justify-between rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2.5">
-              <span className="text-sm text-slate-700 dark:text-slate-300">Enable newsletter delivery</span>
-              <input
-                type="checkbox"
-                checked={newsletterEnabled}
-                onChange={(event) => setNewsletterEnabled(event.target.checked)}
-                className="h-4 w-4 accent-blue-600"
-              />
-            </label>
-
-            <div>
-              <label className="block text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5">
-                Recipient email
-              </label>
-              <input
-                type="email"
-                value={newsletterEmail}
-                onChange={(event) => setNewsletterEmail(event.target.value)}
-                placeholder="you@company.com"
-                className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5 text-sm text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-blue-500/40"
-              />
-            </div>
-
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Automated sends run on the Daily Brief schedule (5AM, 8AM, 10AM, 2PM, 4PM, 6PM).
-            </p>
-
-            {newsletterMessage ? (
-              <p className="text-xs text-blue-600 dark:text-blue-400">{newsletterMessage}</p>
-            ) : null}
-
-            <div className="flex items-center justify-end gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => setShowNewsletterModal(false)}
-                className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
-              >
-                Close
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleSendNewsletterPreview()}
-                disabled={newsletterLoading || newsletterSending || !newsletterEmail.trim()}
-                className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-60"
-              >
-                {newsletterSending ? "Sending..." : "Send Preview"}
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleSaveNewsletterSubscription()}
-                disabled={newsletterLoading || newsletterSaving || !newsletterEmail.trim()}
-                className="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700 disabled:opacity-60"
-              >
-                {newsletterSaving ? "Saving..." : "Save Subscription"}
-              </button>
             </div>
           </div>
         </DialogContent>

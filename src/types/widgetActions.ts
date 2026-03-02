@@ -8,6 +8,7 @@
 
 import type { VisualizationConfig } from '@/hooks/useCohiChat';
 import type { ReportDefinition } from '@/types/reportTypes';
+import type { SectionFilters, SectionType } from '@/stores/widgetSectionStore';
 
 // ---------------------------------------------------------------------------
 // Action union
@@ -20,6 +21,10 @@ export type WidgetAction =
   | ModifyWidgetAction
   | DeleteWidgetAction
   | SuggestDashboardAction
+  | ModifyGroupAction
+  | ModifyRegistryWidgetAction
+  | CreateDashboardAction
+  | ConvertToSqlWidgetAction
   | ExplainWidgetAction
   | ExplainSchemaAction
   | QueryDataAction
@@ -87,6 +92,98 @@ export interface SuggestDashboardAction {
   explanation: string;
 }
 
+// ---------------------------------------------------------------------------
+// Phase 1: Group layout manipulation
+// ---------------------------------------------------------------------------
+
+export type GroupOperation =
+  | {
+      op: 'add_registry';
+      defId: string;
+      gridPosition?: { x: number; y: number; w: number; h: number };
+    }
+  | {
+      op: 'add_cohi';
+      sql: string;
+      title: string;
+      vizConfig: VisualizationConfig;
+      gridPosition?: { x: number; y: number; w: number; h: number };
+    }
+  | { op: 'remove'; widgetId: string }
+  | { op: 'resize'; widgetId: string; w: number; h: number }
+  | { op: 'reorder'; widgetIds: string[] }
+  | { op: 'set_title'; title: string }
+  | { op: 'set_filters'; filters: Partial<SectionFilters> };
+
+export interface ModifyGroupAction {
+  type: 'modify_group';
+  groupId: string;
+  operations: GroupOperation[];
+  explanation: string;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2: Registry widget config overrides
+// ---------------------------------------------------------------------------
+
+export interface ModifyRegistryWidgetAction {
+  type: 'modify_registry_widget';
+  groupId: string;
+  /** Registry defId or stable item id within the group */
+  widgetId: string;
+  configOverrides: Record<string, unknown>;
+  explanation: string;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3: Full template creation
+// ---------------------------------------------------------------------------
+
+export interface DashboardGroupSpec {
+  title: string;
+  sectionType?: SectionType;
+  widgets: (
+    | { kind: 'registry'; defId: string }
+    | { kind: 'cohi'; sql: string; title: string; vizConfig: VisualizationConfig }
+  )[];
+  canvasPosition?: { x: number; y: number; w: number; h: number };
+}
+
+export interface StandaloneWidgetSpec {
+  kind: 'cohi';
+  sql: string;
+  title: string;
+  vizConfig: VisualizationConfig;
+  canvasPosition?: { x: number; y: number; w: number; h: number };
+}
+
+export interface CreateDashboardAction {
+  type: 'create_dashboard';
+  title: string;
+  groups: DashboardGroupSpec[];
+  standaloneWidgets?: StandaloneWidgetSpec[];
+  explanation: string;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4: Registry-to-SQL conversion
+// ---------------------------------------------------------------------------
+
+export interface ConvertToSqlWidgetAction {
+  type: 'convert_to_sql_widget';
+  groupId: string;
+  /** Registry widget defId within the group to replace */
+  widgetId: string;
+  sql: string;
+  title: string;
+  vizConfig: VisualizationConfig;
+  explanation: string;
+}
+
+// ---------------------------------------------------------------------------
+// Explain / Query / Report
+// ---------------------------------------------------------------------------
+
 export interface ExplainWidgetAction {
   type: 'explain_widget';
   /** Widget ID to explain */
@@ -144,6 +241,17 @@ export interface WorkbenchChatMessage {
 // Canvas state snapshot (sent to server as context)
 // ---------------------------------------------------------------------------
 
+/** Widget list item within a group (for LLM context) */
+export interface CanvasStateSnapshotGroupWidget {
+  /** Stable id used in widgetLayouts and modify_group operations (defId__idx or cohi__id__idx) */
+  id: string;
+  kind: 'registry' | 'cohi';
+  defId?: string;
+  title?: string;
+  /** Display name for registry widgets */
+  name?: string;
+}
+
 export interface CanvasStateSnapshot {
   /** All widget groups currently on the canvas */
   groups: {
@@ -151,6 +259,10 @@ export interface CanvasStateSnapshot {
     title: string;
     sectionType: string;
     widgetIds: string[];
+    /** Widgets in this group with stable ids and layout keys */
+    widgets?: CanvasStateSnapshotGroupWidget[];
+    /** Grid layout per widget (key = widget id from widgets[].id) */
+    widgetLayouts?: Record<string, { x: number; y: number; w: number; h: number }>;
     /** Active filter state for the group (date range, branch, etc.) */
     filters?: {
       dateRange?: string;
@@ -170,6 +282,8 @@ export interface CanvasStateSnapshot {
     sourceSessionId?: string;
     /** For cohi_widget items: the SQL backing the widget */
     sql?: string;
+    /** True when this widget is the one the user is editing via Cohi */
+    selected?: boolean;
   }[];
   /** Total item count */
   totalItems: number;

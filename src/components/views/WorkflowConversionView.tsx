@@ -11,16 +11,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { DatePeriodPicker } from "@/components/ui/DatePeriodPicker";
 import type { PeriodSelection, PeriodPreset } from "@/components/ui/DatePeriodPicker";
 import {
-  WORKFLOW_MILESTONES_ORDER,
   DEFAULT_WORKFLOW_SEGMENTS,
-  isOrderValid,
-  getMilestonesAfter,
-  getMilestoneIndex,
-  type WorkflowMilestone,
+  isOrderValidWithMilestones,
 } from "@/lib/workflowConversionMilestones";
+import { useWorkflowMilestones } from "@/hooks/useWorkflowMilestones";
 import { useWorkflowConversionData, type WorkflowConversionMetric, type WorkflowGrouping, type SegmentResult } from "@/hooks/useWorkflowConversionData";
 import {
   Bar,
@@ -34,7 +44,7 @@ import {
 } from "recharts";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
-import { AlertCircle, Loader2, Maximize2, Minus, Plus, RotateCcw, X } from "lucide-react";
+import { AlertCircle, Check, ChevronsUpDown, Loader2, Maximize2, Minus, Plus, RotateCcw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { WorkflowSegmentLoansModal } from "@/components/views/WorkflowSegmentLoansModal";
 import type { WorkflowSegmentLoanFilter } from "@/hooks/useWorkflowConversionSegmentLoans";
@@ -63,7 +73,7 @@ const PERIOD_PRESETS: PeriodPreset[] = [
 ];
 
 const INVALID_MESSAGE =
-  "Please select milestones so the earlier stage is on the left and the later stage on the right.";
+  "Please select two different date stages (From and To must differ).";
 
 function getDefaultDateRange(): { start: string; end: string } {
   const now = new Date();
@@ -74,101 +84,78 @@ function getDefaultDateRange(): { start: string; end: string } {
   };
 }
 
+/** Persisted state for the workflow conversion widget (survives canvas save/reload). */
+export interface WorkflowConversionSavedState {
+  segments?: { from: string; to: string }[];
+  calculationType?: WorkflowConversionMetric;
+  grouping?: WorkflowGrouping;
+  periodSelection?: PeriodSelection;
+}
+
 export interface WorkflowConversionViewProps {
   selectedTenantId?: string | null;
   selectedChannel?: string | null;
   /** When true, show +/- buttons to add/remove cards (workbench only). */
   embeddedInWorkbench?: boolean;
-  /** Section/group id when embedded in workbench – enables Filter + Presets bar. */
-  groupId?: string;
-  /** Initial state when embedded (e.g. from saved canvas). */
-  initialWorkflowState?: {
-    periodSelection?: PeriodSelection;
-    calculationType?: WorkflowConversionMetric;
-    grouping?: WorkflowGrouping;
-    segments?: { from: string; to: string }[];
-  };
-  /** Called when toolbar or segment state changes (for persisting to canvas). */
-  onWorkflowStateChange?: (state: {
-    periodSelection: PeriodSelection;
-    calculationType: WorkflowConversionMetric;
-    grouping: WorkflowGrouping;
-    segments: { from: string; to: string }[];
-  }) => void;
+  /** Restored state from saved canvas (period, segments, calculation type, grouping). */
+  initialState?: WorkflowConversionSavedState;
+  /** Called when state changes (debounced) so the parent can persist it. */
+  onStateChange?: (state: WorkflowConversionSavedState) => void;
 }
+
+const DEBOUNCE_MS = 300;
 
 export function WorkflowConversionView({
   selectedTenantId,
   selectedChannel,
   embeddedInWorkbench = false,
-  groupId,
-  initialWorkflowState,
-  onWorkflowStateChange,
+  initialState,
+  onStateChange,
 }: WorkflowConversionViewProps) {
-  const filters = useWidgetSectionStore((s) =>
-    groupId ? s.getFilters(groupId) : null
-  ) as SectionFilters | null;
-  const updateFilters = useWidgetSectionStore((s) => s.updateFilters);
-  const addDynamicFilter = useWidgetSectionStore((s) => s.addDynamicFilter);
-  const removeDynamicFilter = useWidgetSectionStore((s) => s.removeDynamicFilter);
-  const updateDynamicFilter = useWidgetSectionStore((s) => s.updateDynamicFilter);
-  const { selectedTenantId: tenantIdFromStore } = useTenantStore();
-  const tenantIdForEdit = tenantIdFromStore ?? selectedTenantId ?? null;
-
-  const handleApplyGroupPreset = useCallback(
-    (preset: FilterPreset) => {
-      if (!groupId) return;
-      const f = preset.filters;
-      const patch: Partial<SectionFilters> = {};
-      if (f.dateField) patch.dateField = f.dateField;
-      if (f.preset) {
-        const range = computePresetDateRange(f.preset as PeriodPreset);
-        patch.periodSelection = { type: "preset", preset: f.preset as PeriodPreset, dateRange: range };
-        patch.dateRange = range;
-      } else if (f.year) {
-        patch.year = f.year;
-        patch.dateRange = { start: `${f.year}-01-01`, end: `${f.year}-12-31` };
-      } else if (f.dateRange) {
-        patch.dateRange = f.dateRange;
-      }
-      updateFilters(groupId, patch);
-    },
-    [groupId, updateFilters]
-  );
-  const [periodSelection, setPeriodSelection] = useState<PeriodSelection>(() => {
-    const initial = initialWorkflowState?.periodSelection;
-    if (initial?.dateRange) return initial;
+  const defaultPeriod: PeriodSelection = useMemo(() => {
     const range = getDefaultDateRange();
     return { type: "preset", preset: "mtd", dateRange: range };
-  });
+  }, []);
+  const [periodSelection, setPeriodSelection] = useState<PeriodSelection>(
+    () => initialState?.periodSelection ?? defaultPeriod
+  );
   const [calculationType, setCalculationType] = useState<WorkflowConversionMetric>(
-    () => initialWorkflowState?.calculationType ?? "conversion",
+    () => initialState?.calculationType ?? "conversion"
   );
   const [grouping, setGrouping] = useState<WorkflowGrouping>(
-    () => initialWorkflowState?.grouping ?? "workflow",
+    () => initialState?.grouping ?? "workflow"
   );
-  const [segments, setSegments] = useState<{ from: string; to: string }[]>(() => {
-    const initial = initialWorkflowState?.segments;
-    if (initial && initial.length > 0) return initial;
-    return [...DEFAULT_WORKFLOW_SEGMENTS];
-  });
-  const [fullscreenSegmentIndex, setFullscreenSegmentIndex] = useState<number | null>(null);
+  const [segments, setSegments] = useState<{ from: string; to: string }[]>(() =>
+    initialState?.segments && initialState.segments.length > 0
+      ? [...initialState.segments]
+      : [...DEFAULT_WORKFLOW_SEGMENTS]
+  );
 
-  const onWorkflowStateChangeRef = useRef(onWorkflowStateChange);
-  onWorkflowStateChangeRef.current = onWorkflowStateChange;
-
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isFirstMountRef = useRef(true);
   useEffect(() => {
-    const cb = onWorkflowStateChangeRef.current;
-    if (!cb) return;
-    cb({
-      periodSelection,
-      calculationType,
-      grouping,
-      segments,
-    });
-  }, [periodSelection, calculationType, grouping, segments]);
+    if (!onStateChange) return;
+    if (isFirstMountRef.current) {
+      isFirstMountRef.current = false;
+      return;
+    }
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      debounceRef.current = null;
+      onStateChange({
+        segments: segments.length > 0 ? segments : undefined,
+        calculationType,
+        grouping,
+        periodSelection,
+      });
+    }, DEBOUNCE_MS);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [segments, calculationType, grouping, periodSelection, onStateChange]);
 
   const dateRange = periodSelection.dateRange;
+  const { milestones, loading: milestonesLoading, error: milestonesError } = useWorkflowMilestones(selectedTenantId);
   const { data, loading, error } = useWorkflowConversionData({
     startDate: dateRange.start,
     endDate: dateRange.end,
@@ -180,82 +167,33 @@ export function WorkflowConversionView({
   });
 
   const updateSegment = useCallback((index: number, field: "from" | "to", value: string) => {
-    setSegments((prev) => {
-      const next = prev.map((s, i) => (i === index ? { ...s, [field]: value } : s));
-      if (grouping !== "workflow") return next;
-      if (field === "to") {
-        // Cascade forward: each following card's "from" = previous card's "to", "to" = valid option
-        for (let j = index + 1; j < next.length; j++) {
-          const prevTo = next[j - 1].to;
-          const optionsAfter = getMilestonesAfter(prevTo);
-          const currentTo = next[j].to;
-          const toIsValid = optionsAfter.some((m) => m.id === currentTo);
-          next[j] = {
-            from: prevTo,
-            to: toIsValid ? currentTo : optionsAfter[0]?.id ?? prevTo,
-          };
-        }
-      }
-      if (field === "from" && index > 0) {
-        next[index - 1] = { ...next[index - 1], to: value };
-        const optionsAfter = getMilestonesAfter(value);
-        const currentTo = next[index].to;
-        const toIsValid = optionsAfter.some((m) => m.id === currentTo);
-        if (!toIsValid && optionsAfter.length > 0) {
-          next[index] = { ...next[index], to: optionsAfter[0].id };
-        }
-        // Cascade forward from this card so the rest of the chain stays linked
-        for (let j = index + 1; j < next.length; j++) {
-          const prevTo = next[j - 1].to;
-          const optionsAfter = getMilestonesAfter(prevTo);
-          const currentTo = next[j].to;
-          const toIsValid = optionsAfter.some((m) => m.id === currentTo);
-          next[j] = {
-            from: prevTo,
-            to: toIsValid ? currentTo : optionsAfter[0]?.id ?? prevTo,
-          };
-        }
-      }
-      return next;
-    });
-  }, [grouping]);
+    setSegments((prev) =>
+      prev.map((s, i) => (i === index ? { ...s, [field]: value } : s))
+    );
+  }, []);
 
   const resetToDefault = useCallback(() => {
     setSegments([...DEFAULT_WORKFLOW_SEGMENTS]);
   }, []);
 
-  const maxCardsWorkflow = Math.max(1, WORKFLOW_MILESTONES_ORDER.length - 1);
+  const maxCardsCap = Math.max(1, (milestones?.length ?? 20) - 1);
 
   const addCard = useCallback(() => {
     setSegments((prev) => {
+      if (prev.length === 0 && milestones.length >= 2) {
+        return [{ from: milestones[0].id, to: milestones[1].id }];
+      }
       if (prev.length === 0) return [DEFAULT_WORKFLOW_SEGMENTS[0]];
-      if (grouping === "workflow" && prev.length >= maxCardsWorkflow) return prev;
+      if (grouping === "workflow" && prev.length >= maxCardsCap) return prev;
       const last = prev[prev.length - 1];
-      const nextMilestones = getMilestonesAfter(last.to);
-      const nextId = nextMilestones[0]?.id;
-      if (nextId) return [...prev, { from: last.to, to: nextId }];
-      // Individual: add a default segment.
-      if (grouping === "individual") {
-        const first = DEFAULT_WORKFLOW_SEGMENTS[0];
-        return [...prev, { from: first.from, to: first.to }];
+      if (grouping === "individual" || milestones.length < 2) {
+        return [...prev, { ...DEFAULT_WORKFLOW_SEGMENTS[0] }];
       }
-      // Workflow at end of funnel: work backwards and split the rightmost segment that has a gap.
-      const lastMilestoneId = WORKFLOW_MILESTONES_ORDER[WORKFLOW_MILESTONES_ORDER.length - 1]?.id;
-      if (!lastMilestoneId || last.to !== lastMilestoneId) return prev;
-      for (let j = prev.length - 1; j >= 0; j--) {
-        const seg = prev[j];
-        const fromIdx = getMilestoneIndex(seg.from);
-        const toIdx = getMilestoneIndex(seg.to);
-        if (fromIdx < 0 || toIdx < 0 || toIdx - fromIdx < 2) continue;
-        const midId = WORKFLOW_MILESTONES_ORDER[toIdx - 1]?.id;
-        if (!midId) continue;
-        const next = prev.map((s, i) => (i === j ? { ...s, to: midId } : { ...s }));
-        next.splice(j + 1, 0, { from: midId, to: seg.to });
-        return next;
-      }
-      return prev;
+      const fromIdx = milestones.findIndex((m) => m.id === last.to);
+      const nextId = fromIdx >= 0 && fromIdx < milestones.length - 1 ? milestones[fromIdx + 1].id : milestones[1]?.id;
+      return [...prev, { from: last.to, to: nextId ?? last.to }];
     });
-  }, [grouping, maxCardsWorkflow]);
+  }, [grouping, milestones, maxCardsCap]);
 
   const removeCard = useCallback(() => {
     setSegments((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
@@ -263,24 +201,22 @@ export function WorkflowConversionView({
 
   const canAddCard =
     segments.length > 0 &&
-    (grouping === "individual" || segments.length < maxCardsWorkflow);
+    (grouping === "individual" || segments.length < maxCardsCap);
   const canRemoveCard = segments.length > 1;
 
-  // In workflow mode, card i (i > 0) can only "from" = previous card's "to" or a later milestone (keeps chain in order)
   const getFromOptions = useCallback(
     (index: number) => {
-      if (grouping !== "workflow" || index === 0) {
-        return WORKFLOW_MILESTONES_ORDER.slice(0, -1);
-      }
-      const prevTo = segments[index - 1]?.to;
-      if (!prevTo) return WORKFLOW_MILESTONES_ORDER.slice(0, -1);
-      const idx = getMilestoneIndex(prevTo);
-      if (idx < 0) return WORKFLOW_MILESTONES_ORDER.slice(0, -1);
-      return WORKFLOW_MILESTONES_ORDER.slice(idx, -1);
+      const currentTo = segments[index]?.to;
+      return currentTo
+        ? milestones.filter((m) => m.id !== currentTo)
+        : milestones;
     },
-    [grouping, segments],
+    [milestones, segments],
   );
-  const getToOptions = useCallback((fromId: string) => getMilestonesAfter(fromId), []);
+  const getToOptions = useCallback(
+    (fromId: string) => milestones.filter((m) => m.id !== fromId),
+    [milestones],
+  );
 
   const segmentResults = data?.segments ?? [];
 
@@ -432,61 +368,40 @@ export function WorkflowConversionView({
         </Button>
       </div>
 
-      {error && (
+      {(error || milestonesError) && (
         <div className="rounded-lg border border-amber-200 bg-amber-50/80 px-4 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
-          {error}
+          {milestonesError ?? error}
         </div>
       )}
 
-      {/* 2x3 Grid */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {segments.map((seg, index) => (
-          <WorkflowSegmentCard
-            key={index}
-            index={index}
-            segment={seg}
-            result={segmentResults[index]}
-            dateRange={dateRange}
-            calculationType={calculationType}
-            loading={loading}
-            fromOptions={getFromOptions(index)}
-            getToOptions={getToOptions}
-            onFromChange={(value) => updateSegment(index, "from", value)}
-            onToChange={(value) => updateSegment(index, "to", value)}
-            selectedTenantId={selectedTenantId}
-            selectedChannel={selectedChannel}
-            segments={segments}
-            grouping={grouping}
-            chartHeight={280}
-            showFullscreenButton
-            onFullscreenClick={() => setFullscreenSegmentIndex(index)}
-          />
-        ))}
-      </div>
-      {fullscreenSegmentIndex !== null && (
-        <Dialog open onOpenChange={(open) => !open && setFullscreenSegmentIndex(null)}>
-          <DialogContent className="max-w-[95vw] w-full max-h-[90vh] flex flex-col p-2 sm:p-4" hideCloseButton>
+      {milestonesLoading && milestones.length === 0 ? (
+        <div className="flex items-center justify-center gap-2 py-8 text-sm text-slate-500 dark:text-slate-400">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          Loading date options…
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {segments.map((seg, index) => (
             <WorkflowSegmentCard
-              index={fullscreenSegmentIndex}
-              segment={segments[fullscreenSegmentIndex]}
-              result={segmentResults[fullscreenSegmentIndex]}
+              key={index}
+              index={index}
+              segment={seg}
+              result={segmentResults[index]}
               dateRange={dateRange}
               calculationType={calculationType}
               loading={loading}
-              fromOptions={getFromOptions(fullscreenSegmentIndex)}
+              milestones={milestones}
+              fromOptions={getFromOptions(index)}
               getToOptions={getToOptions}
-              onFromChange={(value) => updateSegment(fullscreenSegmentIndex, "from", value)}
-              onToChange={(value) => updateSegment(fullscreenSegmentIndex, "to", value)}
+              onFromChange={(value) => updateSegment(index, "from", value)}
+              onToChange={(value) => updateSegment(index, "to", value)}
               selectedTenantId={selectedTenantId}
               selectedChannel={selectedChannel}
               segments={segments}
               grouping={grouping}
-              chartHeight={420}
-              showFullscreenButton={false}
-              onCloseFullscreen={() => setFullscreenSegmentIndex(null)}
             />
-          </DialogContent>
-        </Dialog>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -499,8 +414,9 @@ interface WorkflowSegmentCardProps {
   dateRange: { start: string; end: string };
   calculationType: WorkflowConversionMetric;
   loading: boolean;
-  fromOptions: WorkflowMilestone[];
-  getToOptions: (fromId: string) => WorkflowMilestone[];
+  milestones: { id: string; label: string }[];
+  fromOptions: { id: string; label: string }[];
+  getToOptions: (fromId: string) => { id: string; label: string }[];
   onFromChange: (value: string) => void;
   onToChange: (value: string) => void;
   selectedTenantId?: string | null;
@@ -528,6 +444,7 @@ function WorkflowSegmentCard({
   dateRange,
   calculationType,
   loading,
+  milestones,
   fromOptions,
   getToOptions,
   onFromChange,
@@ -543,8 +460,10 @@ function WorkflowSegmentCard({
 }: WorkflowSegmentCardProps) {
   const [loansModalOpen, setLoansModalOpen] = React.useState(false);
   const [loansModalFilter, setLoansModalFilter] = React.useState<WorkflowSegmentLoanFilter | null>(null);
+  const [fromOpen, setFromOpen] = React.useState(false);
+  const [toOpen, setToOpen] = React.useState(false);
 
-  const valid = isOrderValid(segment.from, segment.to);
+  const valid = isOrderValidWithMilestones(segment.from, segment.to, milestones);
   const fromLabel = fromOptions.find((m) => m.id === segment.from)?.label ?? segment.from;
   const toOptions = getToOptions(segment.from);
   const toLabel = toOptions.find((m) => m.id === segment.to)?.label ?? segment.to;
@@ -564,63 +483,83 @@ function WorkflowSegmentCard({
 
   return (
     <Card className="flex min-h-[460px] flex-col overflow-hidden border-slate-200/80 bg-white shadow-sm dark:border-slate-700/50 dark:bg-slate-900/50">
-      <CardHeader className="h-[48px] shrink-0 px-3 py-2">
-        <div className="flex h-[36px] items-center gap-2 w-full">
-          <div className="flex flex-1 items-center justify-center gap-2 min-w-0">
-            <Select value={segment.from} onValueChange={onFromChange}>
-              <SelectTrigger className="h-9 w-[140px] text-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {fromOptions.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <span className="text-slate-500 dark:text-slate-400">→</span>
-            <Select
-              value={segment.to}
-              onValueChange={onToChange}
-              disabled={toOptions.length === 0}
-            >
-              <SelectTrigger className="h-9 w-[140px] text-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {toOptions.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {showFullscreenButton && onFullscreenClick && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 shrink-0 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-              onClick={onFullscreenClick}
-              aria-label="View fullscreen"
-            >
-              <Maximize2 className="h-4 w-4" />
-            </Button>
-          )}
-          {onCloseFullscreen && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 shrink-0 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-              onClick={onCloseFullscreen}
-              aria-label="Close fullscreen"
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          )}
+      <CardHeader className="h-[48px] shrink-0 px-4 py-2">
+        <div className="flex h-[36px] items-center justify-center gap-2">
+          <Popover open={fromOpen} onOpenChange={setFromOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                role="combobox"
+                aria-expanded={fromOpen}
+                className="h-9 w-[140px] justify-between text-sm font-normal"
+              >
+                <span className="truncate">{fromLabel}</span>
+                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[240px] p-0" align="center">
+              <Command>
+                <CommandInput placeholder="Search stage..." />
+                <CommandList>
+                  <CommandEmpty>No stage found.</CommandEmpty>
+                  <CommandGroup>
+                    {fromOptions.map((m) => (
+                      <CommandItem
+                        key={m.id}
+                        value={m.label}
+                        onSelect={() => {
+                          onFromChange(m.id);
+                          setFromOpen(false);
+                        }}
+                      >
+                        <Check className={cn("mr-2 h-4 w-4", segment.from === m.id ? "opacity-100" : "opacity-0")} />
+                        {m.label}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+          <span className="text-slate-500 dark:text-slate-400">→</span>
+          <Popover open={toOpen} onOpenChange={setToOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                role="combobox"
+                aria-expanded={toOpen}
+                disabled={toOptions.length === 0}
+                className="h-9 w-[140px] justify-between text-sm font-normal"
+              >
+                <span className="truncate">{toLabel}</span>
+                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[240px] p-0" align="center">
+              <Command>
+                <CommandInput placeholder="Search stage..." />
+                <CommandList>
+                  <CommandEmpty>No stage found.</CommandEmpty>
+                  <CommandGroup>
+                    {toOptions.map((m) => (
+                      <CommandItem
+                        key={m.id}
+                        value={m.label}
+                        onSelect={() => {
+                          onToChange(m.id);
+                          setToOpen(false);
+                        }}
+                      >
+                        <Check className={cn("mr-2 h-4 w-4", segment.to === m.id ? "opacity-100" : "opacity-0")} />
+                        {m.label}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+        
         </div>
       </CardHeader>
       <CardContent className="flex flex-1 flex-col gap-2 px-2 pb-3 pt-0">

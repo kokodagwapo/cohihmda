@@ -48,6 +48,10 @@ export interface WorkbenchCohiPanelProps {
   onSendMessage: (content: string) => void;
   onClearMessages: () => void;
   onExecuteAction: (action: WidgetAction) => void;
+  /** Widget currently being edited via Cohi; shows dismissible banner with "Stop editing" */
+  editingWidget?: { id: string; title: string } | null;
+  /** Called when user clicks X on the editing banner to stop editing */
+  onStopEditing?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -290,6 +294,8 @@ export function WorkbenchCohiPanel({
   onSendMessage,
   onClearMessages,
   onExecuteAction,
+  editingWidget = null,
+  onStopEditing,
 }: WorkbenchCohiPanelProps) {
   const [input, setInput] = useState('');
   const [activeTab, setActiveTab] = useState<CohiPanelTab>('chat');
@@ -394,6 +400,24 @@ export function WorkbenchCohiPanel({
             </Button>
           </div>
         </div>
+
+        {/* Editing widget banner */}
+        {editingWidget && onStopEditing && (
+          <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/40 border-b border-indigo-100 dark:border-indigo-900/50">
+            <span className="text-xs font-medium text-indigo-800 dark:text-indigo-200 truncate">
+              Editing: {editingWidget.title}
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 p-0 shrink-0 text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-200"
+              onClick={onStopEditing}
+              title="Stop editing"
+            >
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="flex px-2 gap-1 bg-slate-50/50 dark:bg-slate-800/30">

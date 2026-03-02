@@ -106,7 +106,17 @@ import {
 import { useCanvasDataStore } from "@/stores/canvasDataStore";
 import { ReportBuilder } from "@/components/workbench/report/ReportBuilder";
 import { serializeWidgetCatalog } from "@/utils/widgetCatalogSerializer";
-import type { WidgetAction } from "@/types/widgetActions";
+import type {
+  WidgetAction,
+  ModifyGroupAction,
+  GroupOperation,
+  ModifyRegistryWidgetAction,
+  CreateDashboardAction,
+  DashboardGroupSpec,
+  StandaloneWidgetSpec,
+  ConvertToSqlWidgetAction,
+} from "@/types/widgetActions";
+import type { GroupWidgetItem } from "@/components/workbench/canvas/types";
 import { ImageToDashboardDialog } from "@/components/workbench/ImageToDashboardDialog";
 import { Camera } from "lucide-react";
 
@@ -814,6 +824,8 @@ export function WorkbenchCanvas({
   const [width, setWidth] = useState(1200);
   const [isUploading, setIsUploading] = useState(false);
   const [selectedWidgetId, setSelectedWidgetId] = useState<string | null>(null);
+  /** Widget being edited via Cohi panel; set only by "Edit with Cohi", cleared when panel closes */
+  const [editingWidgetId, setEditingWidgetId] = useState<string | null>(null);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<
     string | null
   >(null);
@@ -961,6 +973,14 @@ export function WorkbenchCanvas({
 
   // --- Cohi Workbench Intelligence ---
   const widgetCatalog = React.useMemo(() => serializeWidgetCatalog(), []);
+  const editingWidget = useMemo(() => {
+    if (!editingWidgetId) return null;
+    const item = items.find((it) => it.i === editingWidgetId);
+    if (!item) return { id: editingWidgetId, title: editingWidgetId };
+    const p = item.payload as { title?: string; sectionId?: string };
+    const title = p?.title ?? p?.sectionId ?? item.type ?? editingWidgetId;
+    return { id: editingWidgetId, title: String(title) };
+  }, [editingWidgetId, items]);
 
   // Ref to hold the latest handleCohiAction for auto-execution (avoids circular dep with hook)
   const cohiActionRef = useRef<(action: WidgetAction) => void>(() => {});
@@ -977,6 +997,7 @@ export function WorkbenchCanvas({
     widgetCatalog,
     canvasId,
     sourceInsight,
+    selectedWidgetId: editingWidgetId,
     onAutoExecuteActions: useCallback(
       (actions: WidgetAction[]) => {
         // Batch-execute all canvas actions to avoid stale-state issues
@@ -984,7 +1005,26 @@ export function WorkbenchCanvas({
         const createWidgetActions = actions.filter(
           (a) => a.type === "create_widget",
         );
-        const otherActions = actions.filter((a) => a.type !== "create_widget");
+        let otherActions: WidgetAction[] = actions.filter(
+          (a) => a.type !== "create_widget",
+        );
+        // Deduplicate modify_widget by instanceId — keep only the last one per widget
+        const modifyActions = otherActions.filter(
+          (a): a is WidgetAction & { type: "modify_widget"; instanceId: string } =>
+            a.type === "modify_widget" && "instanceId" in a,
+        );
+        if (modifyActions.length > 0) {
+          const lastByInstanceId = new Map<
+            string,
+            WidgetAction & { type: "modify_widget"; instanceId: string }
+          >();
+          for (const a of modifyActions) lastByInstanceId.set(a.instanceId, a);
+          const dedupedModify = [...lastByInstanceId.values()];
+          otherActions = [
+            ...otherActions.filter((a) => a.type !== "modify_widget"),
+            ...dedupedModify,
+          ];
+        }
 
         // Execute non-create_widget actions normally (one at a time)
         for (const action of otherActions) {
@@ -1178,6 +1218,330 @@ export function WorkbenchCanvas({
           toast({
             title: "Dashboard added",
             description: `Added ${section.widgetIds.length} widgets to canvas`,
+          });
+          break;
+        }
+        case "modify_group": {
+          const groupAction = action as ModifyGroupAction;
+          const groupIdx = items.findIndex(
+            (it) =>
+              it.payload.type === "widget_group" &&
+              (it.payload as { groupId: string }).groupId === groupAction.groupId
+          );
+          if (groupIdx < 0) {
+            toast({
+              title: "Group not found",
+              description: `No dashboard group with id ${groupAction.groupId}`,
+              variant: "destructive",
+            });
+            break;
+          }
+          const layoutItem = items[groupIdx];
+          const payload = layoutItem.payload as {
+            type: "widget_group";
+            groupId: string;
+            title: string;
+            sectionType: SectionType;
+            widgetIds: string[];
+            items?: GroupWidgetItem[];
+            widgetLayouts?: Record<string, { x: number; y: number; w: number; h: number }>;
+            layoutVersion?: number;
+            savedFilters?: Record<string, unknown>;
+          };
+          const LAYOUT_VERSION = 8;
+          function itemKey(groupItem: GroupWidgetItem, idx: number): string {
+            if (groupItem.kind === "registry") return `${groupItem.defId}__${idx}`;
+            return `cohi__${groupItem.id}__${idx}`;
+          }
+          let itemsList: GroupWidgetItem[] = Array.isArray(payload.items)
+            ? [...payload.items]
+            : (payload.widgetIds ?? []).map((defId: string) => ({ kind: "registry" as const, defId }));
+          let layouts: Record<string, { x: number; y: number; w: number; h: number }> = { ...(payload.widgetLayouts ?? {}) };
+          let groupTitle = payload.title;
+          let savedFilters = payload.savedFilters ? { ...payload.savedFilters } : undefined;
+
+          for (const op of groupAction.operations) {
+            if (op.op === "add_registry") {
+              const newItem: GroupWidgetItem = { kind: "registry", defId: op.defId };
+              const idx = itemsList.length;
+              itemsList.push(newItem);
+              if (op.gridPosition) layouts[itemKey(newItem, idx)] = op.gridPosition;
+            } else if (op.op === "add_cohi") {
+              const id = `cohi-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+              const newItem: GroupWidgetItem = {
+                kind: "cohi",
+                id,
+                sql: op.sql,
+                title: op.title,
+                vizConfig: op.vizConfig,
+              };
+              const idx = itemsList.length;
+              itemsList.push(newItem);
+              if (op.gridPosition) layouts[itemKey(newItem, idx)] = op.gridPosition;
+            } else if (op.op === "remove") {
+              const idx = itemsList.findIndex((it, i) => itemKey(it, i) === op.widgetId);
+              if (idx >= 0) {
+                const oldKeys = itemsList.map((it, i) => itemKey(it, i));
+                itemsList = itemsList.filter((_, i) => i !== idx);
+                const nextLayouts: Record<string, { x: number; y: number; w: number; h: number }> = {};
+                itemsList.forEach((it, i) => {
+                  const newKey = itemKey(it, i);
+                  const oldKey = i < idx ? oldKeys[i] : oldKeys[i + 1];
+                  if (layouts[oldKey]) nextLayouts[newKey] = layouts[oldKey];
+                });
+                layouts = nextLayouts;
+              }
+            } else if (op.op === "resize") {
+              if (layouts[op.widgetId]) {
+                layouts = { ...layouts, [op.widgetId]: { ...layouts[op.widgetId], w: op.w, h: op.h } };
+              }
+            } else if (op.op === "reorder") {
+              const keyToItem = new Map<string | undefined, GroupWidgetItem>();
+              itemsList.forEach((it, i) => keyToItem.set(itemKey(it, i), it));
+              const reordered = op.widgetIds.map((k) => keyToItem.get(k)).filter(Boolean) as GroupWidgetItem[];
+              if (reordered.length === itemsList.length) {
+                itemsList = reordered;
+                const nextLayouts: Record<string, { x: number; y: number; w: number; h: number }> = {};
+                itemsList.forEach((it, i) => {
+                  const newKey = itemKey(it, i);
+                  const oldKey = op.widgetIds[i];
+                  if (layouts[oldKey]) nextLayouts[newKey] = layouts[oldKey];
+                });
+                layouts = nextLayouts;
+              }
+            } else if (op.op === "set_title") {
+              groupTitle = op.title;
+            } else if (op.op === "set_filters") {
+              savedFilters = { ...(savedFilters ?? {}), ...(op.filters ?? {}) };
+            }
+          }
+
+          const nextPayload = {
+            ...payload,
+            title: groupTitle,
+            savedFilters,
+            items: itemsList,
+            widgetLayouts: Object.keys(layouts).length > 0 ? layouts : undefined,
+            layoutVersion: LAYOUT_VERSION,
+          } as typeof layoutItem.payload;
+          setItemsWithHistory((prev) =>
+            prev.map((it, i) =>
+              i === groupIdx ? { ...layoutItem, payload: nextPayload } : it
+            )
+          );
+          toast({
+            title: "Group updated",
+            description: groupAction.explanation?.substring(0, 80) || "Changes applied",
+          });
+          break;
+        }
+        case "modify_registry_widget": {
+          const regAction = action as ModifyRegistryWidgetAction;
+          const groupIdx = items.findIndex(
+            (it) =>
+              it.payload.type === "widget_group" &&
+              (it.payload as { groupId: string }).groupId === regAction.groupId
+          );
+          if (groupIdx < 0) {
+            toast({
+              title: "Group not found",
+              description: `No dashboard group with id ${regAction.groupId}`,
+              variant: "destructive",
+            });
+            break;
+          }
+          const layoutItem = items[groupIdx];
+          const payload = layoutItem.payload as {
+            type: "widget_group";
+            groupId: string;
+            title: string;
+            sectionType: SectionType;
+            widgetIds: string[];
+            items?: GroupWidgetItem[];
+            widgetLayouts?: Record<string, { x: number; y: number; w: number; h: number }>;
+          };
+          function itemKey(groupItem: GroupWidgetItem, idx: number): string {
+            if (groupItem.kind === "registry") return `${groupItem.defId}__${idx}`;
+            return `cohi__${groupItem.id}__${idx}`;
+          }
+          const itemsList = Array.isArray(payload.items)
+            ? [...payload.items]
+            : (payload.widgetIds ?? []).map((defId: string) => ({ kind: "registry" as const, defId }));
+          const targetIdx = itemsList.findIndex(
+            (it, i) => it.kind === "registry" && (itemKey(it, i) === regAction.widgetId || it.defId === regAction.widgetId)
+          );
+          if (targetIdx < 0) {
+            toast({
+              title: "Widget not found",
+              description: `No registry widget "${regAction.widgetId}" in that group`,
+              variant: "destructive",
+            });
+            break;
+          }
+          const target = itemsList[targetIdx];
+          if (target.kind !== "registry") {
+            toast({
+              title: "Not a registry widget",
+              description: "modify_registry_widget only applies to pre-built catalog widgets",
+              variant: "destructive",
+            });
+            break;
+          }
+          const updatedItems = itemsList.map((it, i) =>
+            i === targetIdx && it.kind === "registry"
+              ? { ...it, configOverrides: { ...(it.configOverrides ?? {}), ...regAction.configOverrides } }
+              : it
+          );
+          const nextPayload = {
+            ...payload,
+            items: updatedItems,
+          } as typeof layoutItem.payload;
+          setItemsWithHistory((prev) =>
+            prev.map((it, i) =>
+              i === groupIdx ? { ...layoutItem, payload: nextPayload } : it
+            )
+          );
+          toast({
+            title: "Widget config updated",
+            description: regAction.explanation?.substring(0, 80) || "Config overrides applied",
+          });
+          break;
+        }
+        case "convert_to_sql_widget": {
+          const convAction = action as ConvertToSqlWidgetAction;
+          const groupIdx = items.findIndex(
+            (it) =>
+              it.payload.type === "widget_group" &&
+              (it.payload as { groupId: string }).groupId === convAction.groupId
+          );
+          if (groupIdx < 0) {
+            toast({
+              title: "Group not found",
+              description: `No dashboard group with id ${convAction.groupId}`,
+              variant: "destructive",
+            });
+            break;
+          }
+          const layoutItem = items[groupIdx];
+          const payload = layoutItem.payload as {
+            type: "widget_group";
+            groupId: string;
+            title: string;
+            sectionType: SectionType;
+            widgetIds: string[];
+            items?: GroupWidgetItem[];
+            widgetLayouts?: Record<string, { x: number; y: number; w: number; h: number }>;
+            layoutVersion?: number;
+          };
+          const LAYOUT_VER = 8;
+          function itemKey(groupItem: GroupWidgetItem, idx: number): string {
+            if (groupItem.kind === "registry") return `${groupItem.defId}__${idx}`;
+            return `cohi__${groupItem.id}__${idx}`;
+          }
+          const itemsList = Array.isArray(payload.items)
+            ? [...payload.items]
+            : (payload.widgetIds ?? []).map((defId: string) => ({ kind: "registry" as const, defId }));
+          const targetIdx = itemsList.findIndex(
+            (it, i) => it.kind === "registry" && (itemKey(it, i) === convAction.widgetId || it.defId === convAction.widgetId)
+          );
+          if (targetIdx < 0) {
+            toast({
+              title: "Widget not found",
+              description: `No registry widget "${convAction.widgetId}" in that group`,
+              variant: "destructive",
+            });
+            break;
+          }
+          const oldKey = itemKey(itemsList[targetIdx], targetIdx);
+          const newCohi: GroupWidgetItem = {
+            kind: "cohi",
+            id: `cohi-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            sql: convAction.sql,
+            title: convAction.title,
+            vizConfig: convAction.vizConfig,
+          };
+          const updatedItems = itemsList.map((it, i) => (i === targetIdx ? newCohi : it));
+          const newKey = itemKey(newCohi, targetIdx);
+          const layouts = { ...(payload.widgetLayouts ?? {}) };
+          if (layouts[oldKey]) {
+            layouts[newKey] = layouts[oldKey];
+            delete layouts[oldKey];
+          }
+          const nextPayload = {
+            ...payload,
+            items: updatedItems,
+            widgetLayouts: Object.keys(layouts).length > 0 ? layouts : undefined,
+            layoutVersion: LAYOUT_VER,
+          } as typeof layoutItem.payload;
+          setItemsWithHistory((prev) =>
+            prev.map((it, i) =>
+              i === groupIdx ? { ...layoutItem, payload: nextPayload } : it
+            )
+          );
+          toast({
+            title: "Widget converted",
+            description: convAction.explanation?.substring(0, 80) || "Replaced with SQL-backed widget",
+          });
+          break;
+        }
+        case "create_dashboard": {
+          const dashAction = action as CreateDashboardAction;
+          const newItems: CanvasLayoutItem[] = [];
+          let yOffset = 20;
+          const groupGap = 20;
+          const defaultGroupSize = { w: 1000, h: 800 };
+
+          for (const group of dashAction.groups) {
+            const groupId = `cohi-dash-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+            const groupItems: GroupWidgetItem[] = group.widgets.map((w) => {
+              if (w.kind === "registry") {
+                return { kind: "registry" as const, defId: w.defId };
+              }
+              const id = `cohi-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+              return {
+                kind: "cohi" as const,
+                id,
+                sql: w.sql,
+                title: w.title,
+                vizConfig: w.vizConfig,
+              };
+            });
+            const pos = group.canvasPosition ?? { x: 20, y: yOffset, w: defaultGroupSize.w, h: defaultGroupSize.h };
+            const sectionType = (group.sectionType ?? "company-scorecard") as SectionType;
+            const groupPayload = {
+              type: "widget_group" as const,
+              groupId,
+              title: group.title,
+              sectionType,
+              widgetIds: groupItems.filter((i): i is Extract<GroupWidgetItem, { kind: "registry" }> => i.kind === "registry").map((i) => i.defId),
+              items: groupItems,
+            };
+            newItems.push(createLayoutItem(`canvas-${groupId}`, "widget_group", groupPayload, pos));
+            yOffset = pos.y + pos.h + groupGap;
+          }
+
+          for (const spec of dashAction.standaloneWidgets ?? []) {
+            if (spec.kind !== "cohi") continue;
+            const pos = spec.canvasPosition ?? { x: 20, y: yOffset, w: 360, h: 240 };
+            const cohiItem = createLayoutItem(
+              `cohi-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              "cohi_widget",
+              {
+                type: "cohi_widget",
+                sql: spec.sql,
+                title: spec.title,
+                vizConfig: spec.vizConfig,
+              },
+              pos
+            );
+            newItems.push(cohiItem);
+            yOffset = pos.y + pos.h + groupGap;
+          }
+
+          setItemsWithHistory((prev) => [...prev, ...newItems]);
+          toast({
+            title: "Dashboard created",
+            description: dashAction.explanation?.substring(0, 80) || `Added ${dashAction.groups.length} group(s)`,
           });
           break;
         }
@@ -1376,6 +1740,15 @@ export function WorkbenchCanvas({
           break;
         }
         case "modify_widget": {
+          if (editingWidgetId && action.instanceId !== editingWidgetId) {
+            toast({
+              title: "Wrong widget",
+              description:
+                "Cohi tried to modify a different widget. Only the widget you're editing (with the ring) can be modified. Click 'Stop editing' or select the correct widget and use Edit with Cohi.",
+              variant: "destructive",
+            });
+            break;
+          }
           const targetIdx = items.findIndex((it) => it.i === action.instanceId);
           if (targetIdx < 0) {
             toast({
@@ -1387,7 +1760,49 @@ export function WorkbenchCanvas({
           }
           const target = items[targetIdx];
           if (target.payload.type === "cohi_widget") {
+            const hasSql = !!(action.sql && String(action.sql).trim());
+            const hasChanges = action.changes && Object.keys(action.changes).length > 0;
+            const hasTitle = !!(action.title && String(action.title).trim());
+            if (!hasSql && !hasChanges && !hasTitle) {
+              toast({
+                title: "No changes applied",
+                description:
+                  "Cohi didn't provide SQL or config changes. Try asking to remove a column or change the query explicitly.",
+                variant: "destructive",
+              });
+              break;
+            }
+            if (hasSql) {
+              const trimmed = String(action.sql).trim();
+              const upper = trimmed.toUpperCase();
+              if (!upper.startsWith("SELECT") && !upper.startsWith("WITH")) {
+                toast({
+                  title: "Invalid SQL",
+                  description:
+                    "Widget SQL must start with SELECT or WITH. The change was not applied.",
+                  variant: "destructive",
+                });
+                break;
+              }
+            }
             const updated = [...items];
+            const existingViz = target.payload.vizConfig || {};
+            const changes = action.changes as Partial<typeof existingViz> & { tableConfig?: Record<string, unknown> };
+            const mergedViz =
+              action.changes && Object.keys(action.changes).length > 0
+                ? {
+                    ...existingViz,
+                    ...action.changes,
+                    ...(changes.tableConfig
+                      ? {
+                          tableConfig: {
+                            ...((existingViz as { tableConfig?: Record<string, unknown> }).tableConfig || {}),
+                            ...changes.tableConfig,
+                          },
+                        }
+                      : {}),
+                  }
+                : existingViz;
             updated[targetIdx] = {
               ...target,
               payload: {
@@ -1395,12 +1810,7 @@ export function WorkbenchCanvas({
                 ...(action.sql ? { sql: action.sql } : {}),
                 ...(action.title ? { title: action.title } : {}),
                 ...(action.changes && Object.keys(action.changes).length > 0
-                  ? {
-                      vizConfig: {
-                        ...target.payload.vizConfig,
-                        ...action.changes,
-                      },
-                    }
+                  ? { vizConfig: mergedViz as typeof target.payload.vizConfig }
                   : {}),
               },
             };
@@ -1424,7 +1834,7 @@ export function WorkbenchCanvas({
           break;
       }
     },
-    [items, setItemsWithHistory, toast, width, tenantId],
+    [items, setItemsWithHistory, toast, width, tenantId, editingWidgetId],
   );
 
   // Keep the ref in sync so auto-execute callback always uses latest handler
@@ -4310,6 +4720,7 @@ Structure it as a narrative-first executive briefing:
                       <CanvasWidgetCard
                         widgetId={item.i}
                         selected={selectedWidgetId === item.i}
+                        editing={editingWidgetId === item.i}
                         onSelect={() => setSelectedWidgetId(item.i)}
                         onDuplicate={() => duplicateWidget(item.i)}
                         onDelete={() => removeWidget(item.i)}
@@ -4334,6 +4745,8 @@ Structure it as a narrative-first executive briefing:
                         onWrapInGroup={handleWrapInGroup}
                         onExportExcel={() => handleExportWidgetExcel(item.i)}
                         onEditWithCohi={() => {
+                          setEditingWidgetId(item.i);
+                          setSelectedWidgetId(item.i);
                           setShowCohiPanel(true);
                           const widgetTitle =
                             (payload as any).title ||
@@ -4683,7 +5096,10 @@ Structure it as a narrative-first executive briefing:
         {/* Cohi Assistant Panel (docks right) */}
         <WorkbenchCohiPanel
           open={showCohiPanel}
-          onClose={() => setShowCohiPanel(false)}
+          onClose={() => {
+            setShowCohiPanel(false);
+            setEditingWidgetId(null);
+          }}
           messages={cohiMessages}
           isLoading={cohiLoading}
           suggestedQuestions={cohiSuggestions}

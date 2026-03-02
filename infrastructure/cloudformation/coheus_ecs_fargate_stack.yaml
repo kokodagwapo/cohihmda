@@ -111,6 +111,14 @@ Parameters:
     MinValue: 1
     Description: Maximum tasks for auto-scaling
 
+  # Sync worker (dedicated container for Encompass ETL)
+  WorkerDesiredCount:
+    Type: Number
+    Default: 1
+    MinValue: 0
+    MaxValue: 4
+    Description: Desired number of worker tasks (0 to disable dedicated worker)
+
   # Aurora Database Configuration (required)
   AuroraEndpoint:
     Type: String
@@ -176,6 +184,23 @@ Parameters:
     AllowedValues: ["true", "false"]
     Description: Enable Cognito for email/password auth (requires ALLOW_ADMIN_USER_PASSWORD_AUTH on app client)
 
+  # Email / SES Configuration
+  EmailFromAddress:
+    Type: String
+    Default: "noreply@coheus1.com"
+    Description: From address for outbound emails (must be a verified SES identity)
+
+  # Platform SSO
+  PlatformSsoIdpName:
+    Type: String
+    Default: ""
+    Description: Cognito IdP name for platform staff SSO (e.g., TestAccCognito)
+
+  PlatformJitDomains:
+    Type: String
+    Default: "teraverde.com"
+    Description: Comma-separated email domains allowed for platform JIT provisioning
+
   # FRED API (market rates)
   FredApiKey:
     Type: String
@@ -189,6 +214,7 @@ Conditions:
   HasCertificate: !Not [!Equals [!Ref CertificateArn, ""]]
   HasAlertEmail: !Not [!Equals [!Ref AlertEmail, ""]]
   HasCognito: !Not [!Equals [!Ref CognitoUserPoolId, ""]]
+  WorkerDesiredCountNonZero: !Not [!Equals [!Ref WorkerDesiredCount, 0]]
 
 Rules:
   ExistingVPCRequiresSubnets:
@@ -708,6 +734,8 @@ Resources:
               Value: "--max-old-space-size=3584"
             - Name: NODE_ENV
               Value: production
+            - Name: PROCESS_MODE
+              Value: api
             - Name: PORT
               Value: !Ref ContainerPort
             - Name: DEPLOYMENT_MODE
@@ -743,6 +771,18 @@ Resources:
               Value: !If [HasCognito, !Ref CognitoDomain, ""]
             - Name: COGNITO_PASSWORD_AUTH
               Value: !If [HasCognito, !Ref CognitoPasswordAuth, "false"]
+            # Email / SES (use existing SES configuration set for reputation metrics; add SNS event destination for bounce/complaint handling if needed)
+            - Name: AWS_SES_REGION
+              Value: !Ref AWS::Region
+            - Name: EMAIL_FROM_ADDRESS
+              Value: !Ref EmailFromAddress
+            - Name: SES_CONFIGURATION_SET
+              Value: my-first-configuration-set
+            # Platform SSO
+            - Name: PLATFORM_SSO_IDP_NAME
+              Value: !Ref PlatformSsoIdpName
+            - Name: PLATFORM_JIT_DOMAINS
+              Value: !Ref PlatformJitDomains
             # FRED API for market rate data
             - Name: FRED_API_KEY
               Value: !Ref FredApiKey
@@ -768,6 +808,100 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-${Environment}-task"
+
+  # ============================================================================
+  # Sync worker task (same image, PROCESS_MODE=worker; runs schedulers + sync job poller)
+  # ============================================================================
+  ECSTaskDefinitionWorker:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "${ProjectName}-${Environment}-worker"
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: !Ref ContainerCpu
+      Memory: !Ref ContainerMemory
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+      ContainerDefinitions:
+        - Name: !Sub "${ProjectName}-worker"
+          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECRRepository}:${ContainerImageTag}"
+          Essential: true
+          Command:
+            - "node"
+            - "--max-old-space-size=3584"
+            - "dist/index.js"
+          Environment:
+            - Name: NODE_ENV
+              Value: production
+            - Name: PROCESS_MODE
+              Value: worker
+            - Name: DEPLOYMENT_MODE
+              Value: saas
+            - Name: MULTI_TENANT_ENABLED
+              Value: "true"
+            - Name: DB_HOST
+              Value: !Ref AuroraEndpoint
+            - Name: DB_PORT
+              Value: "5432"
+            - Name: DB_NAME
+              Value: coheus_management
+            - Name: DB_SSL
+              Value: "true"
+            - Name: KMS_KEY_ID
+              Value: !Ref EncryptionKey
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+            - Name: JWT_SECRET
+              Value: !Ref JwtSecret
+            - Name: COGNITO_USER_POOL_ID
+              Value: !If [HasCognito, !Ref CognitoUserPoolId, ""]
+            - Name: COGNITO_CLIENT_ID
+              Value: !If [HasCognito, !Ref CognitoClientId, ""]
+            - Name: COGNITO_CLIENT_SECRET
+              Value: !If [HasCognito, !Ref CognitoClientSecret, ""]
+            - Name: COGNITO_REGION
+              Value: !If [HasCognito, !Ref AWS::Region, ""]
+            - Name: COGNITO_DOMAIN
+              Value: !If [HasCognito, !Ref CognitoDomain, ""]
+            - Name: FRED_API_KEY
+              Value: !Ref FredApiKey
+          Secrets:
+            - Name: DB_USER
+              ValueFrom: !Sub "${AuroraSecretArn}:username::"
+            - Name: DB_PASSWORD
+              ValueFrom: !Sub "${AuroraSecretArn}:password::"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ECSLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: !Sub "${ProjectName}-worker"
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-${Environment}-worker-task"
+
+  ECSServiceWorker:
+    Type: AWS::ECS::Service
+    Condition: WorkerDesiredCountNonZero
+    Properties:
+      ServiceName: !Sub "${ProjectName}-${Environment}-worker-service"
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref ECSTaskDefinitionWorker
+      DesiredCount: !Ref WorkerDesiredCount
+      LaunchType: FARGATE
+      EnableExecuteCommand: true
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets:
+            - !If [CreateNewVPC, !Ref PrivateSubnet1, !Ref ExistingPrivateSubnet1]
+            - !If [CreateNewVPC, !Ref PrivateSubnet2, !Ref ExistingPrivateSubnet2]
+          SecurityGroups:
+            - !Ref ECSSecurityGroup
+          AssignPublicIp: DISABLED
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-${Environment}-worker-service"
 
   ECSService:
     Type: AWS::ECS::Service
@@ -846,6 +980,24 @@ Resources:
         PredefinedMetricSpecification:
           PredefinedMetricType: ECSServiceAverageMemoryUtilization
         TargetValue: 80
+        ScaleInCooldown: 300
+        ScaleOutCooldown: 60
+
+  # Scale on request count per target (helps when LLM/AI endpoints are I/O-bound and CPU stays low)
+  ECSRequestCountScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub "${ProjectName}-${Environment}-request-count-scaling"
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ECSAutoScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ALBRequestCountPerTarget
+          ResourceLabel: !Sub
+            - "${ALBFullName}/${TGFullName}"
+            - ALBFullName: !GetAtt ApplicationLoadBalancer.LoadBalancerFullName
+              TGFullName: !GetAtt ALBTargetGroup.TargetGroupFullName
+        TargetValue: 500.0
         ScaleInCooldown: 300
         ScaleOutCooldown: 60
 

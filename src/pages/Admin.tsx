@@ -9,6 +9,7 @@ import { TenantsSection } from "@/components/admin/TenantsSection";
 import { SystemSection } from "@/components/admin/SystemSection";
 import { SecuritySection } from "@/components/admin/SecuritySection";
 import { ConnectionsSection } from "@/components/admin/ConnectionsSection";
+import { LoanFoldersSection } from "@/components/admin/LoanFoldersSection";
 import { RAGVoiceSection } from "@/components/admin/RAGVoiceSection";
 import { UserManagementSection } from "@/components/admin/UserManagementSection";
 import { PlatformTeamSection } from "@/components/admin/PlatformTeamSection";
@@ -28,6 +29,7 @@ import { AIPromptManager } from "@/components/admin/AIPromptManager";
 import { InsightFeedbackSection } from "@/components/admin/InsightFeedbackSection";
 import { PlatformSettingsSection } from "@/components/admin/PlatformSettingsSection";
 import { SyncManagementSection } from "@/components/admin/SyncManagementSection";
+import { AnalyticsSection } from "@/components/admin/AnalyticsSection";
 import { AdminModeSelector } from "@/components/admin/AdminModeSelector";
 import { Button } from "@/components/ui/button";
 import { Menu, Settings } from "lucide-react";
@@ -41,7 +43,6 @@ import { useSystemInfo } from "@/hooks/admin/useSystemInfo";
 import { useTenants } from "@/hooks/admin/useTenants";
 import { useSecurityInfo } from "@/hooks/admin/useSecurityInfo";
 import { useLOSConnections } from "@/hooks/admin/useLOSConnections";
-import { useSynapseConnections } from "@/hooks/admin/useSynapseConnections";
 import { useRAGSettings } from "@/hooks/admin/useRAGSettings";
 import { useStripeData } from "@/hooks/admin/useStripeData";
 import { useState } from "react";
@@ -123,14 +124,6 @@ export const Admin = () => {
   const [tenantMetrics, setTenantMetrics] = useState<any>(null);
   const [loadingMetrics, setLoadingMetrics] = useState(false);
   const {
-    vendorConnections,
-    vendorCatalog,
-    loading: synapseLoading,
-    loadSynapseData,
-    testConnection: testSynapseConnection,
-    createConnection: createSynapseConnection,
-  } = useSynapseConnections();
-  const {
     ragVoiceSettings,
     ragVoiceCosts,
     loading: ragVoiceLoading,
@@ -204,13 +197,11 @@ export const Admin = () => {
             await loadSecurityInfo();
             break;
           case "connections":
-            // Load both LOS and Synapse data for combined section
             if (!isPlatform && user?.tenant_id) {
               await loadLosData(user.tenant_id);
             } else {
               await loadLosData();
             }
-            await loadSynapseData();
             break;
           case "rag-voice":
             await loadRagVoiceData(false);
@@ -237,7 +228,6 @@ export const Admin = () => {
     loadSystemInfo,
     loadSecurityInfo,
     loadLosData,
-    loadSynapseData,
     loadRagVoiceData,
     isPlatform,
     user?.tenant_id,
@@ -268,6 +258,7 @@ export const Admin = () => {
       { id: "ai-prompts", label: "AI Prompts" },
       { id: "insight-feedback", label: "Insight Feedback" },
       { id: "platform-settings", label: "Platform Settings" },
+      { id: "analytics", label: "User Analytics" },
     ];
     return sections.find((s) => s.id === activeSection)?.label || "Overview";
   };
@@ -433,7 +424,10 @@ export const Admin = () => {
                 </motion.div>
               )}
 
-              {/* Connections & Integrations Section (combined LOS + Synapse) */}
+              {/* Loan Folders Section */}
+              {activeSection === "loan-folders" && <LoanFoldersSection />}
+
+              {/* Connections & Integrations Section */}
               {activeSection === "connections" && (
                 <ConnectionsSection
                   // LOS props
@@ -467,13 +461,6 @@ export const Admin = () => {
                       setLoadingMetrics(false);
                     }
                   }}
-                  // Synapse props
-                  vendorConnections={vendorConnections}
-                  vendorCatalog={vendorCatalog}
-                  synapseLoading={synapseLoading}
-                  onTestSynapse={testSynapseConnection}
-                  onCreateSynapse={createSynapseConnection}
-                  onRefreshSynapse={loadSynapseData}
                 />
               )}
 
@@ -582,6 +569,17 @@ export const Admin = () => {
               {/* Sync Management Section (Platform Admin) */}
               {activeSection === "sync-management" && isPlatform && (
                 <SyncManagementSection />
+              )}
+
+              {/* User Analytics (tenant + platform in tenant mode) */}
+              {activeSection === "analytics" && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <AnalyticsSection />
+                </motion.div>
               )}
             </AdminLayoutWithContext>
             </div>

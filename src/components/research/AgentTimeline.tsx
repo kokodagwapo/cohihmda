@@ -44,11 +44,15 @@ import type { AgentEvent } from "@/hooks/useResearchSession";
 // Types
 // ============================================================================
 
+const KEY_EVENT_TYPES = ["plan", "agent_finding", "agent_complete", "synthesis", "complete", "error", "agent_error"];
+
 interface AgentTimelineProps {
   events: AgentEvent[];
   isRunning: boolean;
   isPaused?: boolean;
   sessionId?: string | null;
+  /** Total investigation questions (from plan). Used for progress bar in compact mode. */
+  totalQuestions?: number;
   onSelectEvent?: (event: AgentEvent) => void;
   onSubmitFeedback?: (targetType: "step" | "finding" | "session", targetId: string | null, rating: -1 | 1 | null, comment: string | null, context?: any) => void;
 }
@@ -519,10 +523,12 @@ export function AgentTimeline({
   isRunning,
   isPaused,
   sessionId,
+  totalQuestions: totalQuestionsProp,
   onSelectEvent,
   onSubmitFeedback,
 }: AgentTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [showFullLog, setShowFullLog] = useState(false);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -546,6 +552,14 @@ export function AgentTimeline({
   );
 
   const visibleEvents = events.filter((e) => e.type !== "heartbeat");
+  const totalQuestions =
+    totalQuestionsProp ??
+    (() => {
+      const planEvent = events.find((e) => e.type === "plan");
+      return planEvent?.data?.questions?.length ?? 0;
+    })();
+  const completedCount = events.filter((e) => e.type === "agent_complete").length;
+  const keyEvents = visibleEvents.filter((e) => KEY_EVENT_TYPES.includes(e.type));
 
   if (visibleEvents.length === 0 && !isRunning) {
     return (
@@ -556,18 +570,68 @@ export function AgentTimeline({
     );
   }
 
+  const renderEventList = (list: AgentEvent[], isLastPredicate: (i: number) => boolean) =>
+    list.map((event, i) => (
+      <TimelineEvent
+        key={`${event.timestamp}-${i}`}
+        event={event}
+        eventIndex={events.indexOf(event)}
+        isLast={isLastPredicate(i) && !isRunning}
+        onSelect={() => onSelectEvent?.(event)}
+        onStepFeedback={onSubmitFeedback ? handleStepFeedback : undefined}
+      />
+    ));
+
   return (
-    <div ref={scrollRef} className="overflow-y-auto h-full px-4 py-3">
-      {visibleEvents.map((event, i) => (
-        <TimelineEvent
-          key={`${event.timestamp}-${i}`}
-          event={event}
-          eventIndex={events.indexOf(event)}
-          isLast={i === visibleEvents.length - 1 && !isRunning}
-          onSelect={() => onSelectEvent?.(event)}
-          onStepFeedback={onSubmitFeedback ? handleStepFeedback : undefined}
-        />
-      ))}
+    <div ref={scrollRef} className="overflow-y-auto h-full px-4 py-3 flex flex-col gap-3">
+      {/* Compact: progress bar when we have a plan */}
+      {totalQuestions > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span>
+              {isRunning
+                ? `Investigating... ${completedCount} of ${totalQuestions} questions complete`
+                : `${completedCount} of ${totalQuestions} questions complete`}
+            </span>
+          </div>
+          <div className="h-2 rounded-full bg-muted overflow-hidden">
+            <div
+              className="h-full bg-primary transition-all duration-300"
+              style={{ width: `${Math.min(100, (completedCount / totalQuestions) * 100)}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Key events (compact) or full list when "Show full process log" is toggled */}
+      {!showFullLog ? (
+        <div className="space-y-0">
+          {renderEventList(keyEvents, (i) => i === keyEvents.length - 1)}
+        </div>
+      ) : (
+        <div className="space-y-0">
+          {renderEventList(visibleEvents, (i) => i === visibleEvents.length - 1)}
+        </div>
+      )}
+
+      <Button
+        variant="ghost"
+        size="sm"
+        className="text-muted-foreground hover:text-foreground -ml-2 self-start"
+        onClick={() => setShowFullLog((v) => !v)}
+      >
+        {showFullLog ? (
+          <>
+            <ChevronDown className="h-3.5 w-3.5 mr-1" />
+            Hide full process log
+          </>
+        ) : (
+          <>
+            <ChevronRight className="h-3.5 w-3.5 mr-1" />
+            Show full process log
+          </>
+        )}
+      </Button>
 
       {isRunning && (
         <div className="flex items-center gap-2 pl-[15px] text-sm text-muted-foreground">

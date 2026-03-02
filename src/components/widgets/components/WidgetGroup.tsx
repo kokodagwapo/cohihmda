@@ -781,6 +781,7 @@ function GridCellWidget({
   onMoveToGroup,
   onVizTypeChange,
   onOpenEditDialog,
+  onRegistryConfigChange,
 }: {
   item: GroupWidgetItem;
   /** Stable unique ID used for canvasDataStore reporting */
@@ -800,6 +801,8 @@ function GridCellWidget({
   onMoveToGroup?: (targetGroupId: string) => void;
   onVizTypeChange?: (type: string) => void;
   onOpenEditDialog?: () => void;
+  /** For registry widgets: persist config changes (e.g. workflow dropdown state). */
+  onRegistryConfigChange?: (config: Record<string, unknown>) => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const [moveMenuOpen, setMoveMenuOpen] = useState(false);
@@ -958,7 +961,14 @@ function GridCellWidget({
       {/* Widget content */}
       <div className="flex-1 min-h-0 overflow-hidden">
         {item.kind === 'registry' ? (
-          <GridCellRegistryWidget defId={item.defId} canvasItemId={itemId} width={width} height={height - 20} />
+          <GridCellRegistryWidget
+            defId={item.defId}
+            config={item.config}
+            onConfigChange={onRegistryConfigChange}
+            canvasItemId={itemId}
+            width={width}
+            height={height - 20}
+          />
         ) : (
           <GridCellCohiWidget item={item} canvasItemId={itemId} width={width} height={height - 20} dateFilter={dateFilter} dimensionFilters={dimensionFilters} filterSyncEnabled={filterSyncEnabled} onFilterChange={onFilterChange} onVizTypeChange={onVizTypeChange} />
         )}
@@ -1018,11 +1028,15 @@ function getLoanDetailFilterSummary(filters: SectionFilters): string | undefined
 
 function GridCellRegistryWidget({
   defId,
+  config: configProp,
+  onConfigChange,
   canvasItemId,
   width,
   height,
 }: {
   defId: string;
+  config?: Record<string, unknown>;
+  onConfigChange?: (config: Record<string, unknown>) => void;
   canvasItemId: string;
   width: number;
   height: number;
@@ -1196,6 +1210,7 @@ function GridCellRegistryWidget({
 
   const config = {
     ...definition.config,
+    ...configProp,
     ...(periodLabel != null && { periodLabel }),
     ...(filterSummary != null && { filterSummary }),
     ...(customColumns != null && { customColumns }),
@@ -1215,6 +1230,7 @@ function GridCellRegistryWidget({
           width={width}
           height={height}
           config={config}
+          onConfigChange={onConfigChange}
         />
       </div>
     </div>
@@ -1610,6 +1626,16 @@ export function WidgetGroup({
       }
       const next = [...items];
       next.splice(index + 1, 0, dup);
+      persistItems(next);
+    },
+    [items, persistItems],
+  );
+
+  const handleRegistryConfigChange = useCallback(
+    (index: number, config: Record<string, unknown>) => {
+      const next = items.map((it, i) =>
+        i === index && it.kind === 'registry' ? { ...it, config } : it
+      );
       persistItems(next);
     },
     [items, persistItems],
@@ -2453,6 +2479,7 @@ export function WidgetGroup({
                     onMoveToGroup={(targetId) => handleMoveItemToGroup(idx, targetId)}
                     onVizTypeChange={item.kind === 'cohi' ? (type) => handleVizTypeChange(idx, type) : undefined}
                     onOpenEditDialog={item.kind === 'cohi' ? () => { setEditingItemIdx(idx); setEditDialogOpen(true); } : undefined}
+                    onRegistryConfigChange={item.kind === 'registry' ? (config) => handleRegistryConfigChange(idx, config) : undefined}
                   />
                 </div>
               );

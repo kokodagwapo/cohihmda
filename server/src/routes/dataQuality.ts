@@ -255,6 +255,18 @@ const DATA_QUALITY_TESTS: DataQualityTest[] = [
                    AND application_date < CURRENT_DATE - INTERVAL '365 days'`,
     requiredColumns: ["current_loan_status", "application_date"],
   },
+  {
+    id: "denied_no_uw_denied_date",
+    name: "Denied Loans with No UW Denied Date",
+    description:
+      "UW Denied Date is not populated; reporting and analytics use Current Status Date as fallback where applicable.",
+    severity: "info",
+    group: "Status Tests",
+    field: "uw_denied_date",
+    sqlCondition: `(current_loan_status ILIKE '%denied%' OR current_loan_status ILIKE '%declined%')
+                   AND uw_denied_date IS NULL`,
+    requiredColumns: ["current_loan_status", "uw_denied_date"],
+  },
 
   // ============ DATE TESTS ============
   // These detect illogical date sequences

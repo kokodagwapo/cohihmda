@@ -16,9 +16,9 @@ import { useTenantStore } from "@/stores/tenantStore";
 import { useResearchSession } from "@/hooks/useResearchSession";
 import { api } from "@/lib/api";
 import { AgentTimeline } from "@/components/research/AgentTimeline";
-import { ResearchReport } from "@/components/research/ResearchReport";
+import { ResearchReport, QuickAnswerView } from "@/components/research/ResearchReport";
 import { FindingDrillDown } from "@/components/research/FindingDrillDown";
-import type { Finding } from "@/hooks/useResearchSession";
+import type { Finding, ResearchMode } from "@/hooks/useResearchSession";
 import {
   Play,
   SendHorizontal,
@@ -102,7 +102,7 @@ function SessionSidebar({
   collapsed,
   onToggle,
 }: {
-  sessions: Array<{ id: string; topic: string | null; phase: string; createdAt: string; updatedAt: string; isOwner?: boolean }>;
+  sessions: Array<{ id: string; topic: string | null; phase: string; primaryCategory?: string | null; createdAt: string; updatedAt: string; isOwner?: boolean }>;
   currentSessionId: string | null;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
@@ -110,8 +110,12 @@ function SessionSidebar({
   collapsed: boolean;
   onToggle: () => void;
 }) {
-  const mySessions = sessions.filter((s) => s.isOwner !== false);
-  const sharedWithMe = sessions.filter((s) => s.isOwner === false);
+  const [search, setSearch] = useState("");
+  const searchLower = search.trim().toLowerCase();
+  const matchesSearch = (s: { topic: string | null }) =>
+    !searchLower || (s.topic?.toLowerCase().includes(searchLower) ?? false);
+  const mySessions = sessions.filter((s) => s.isOwner !== false).filter(matchesSearch);
+  const sharedWithMe = sessions.filter((s) => s.isOwner === false).filter(matchesSearch);
 
   if (collapsed) {
     return (
@@ -139,9 +143,20 @@ function SessionSidebar({
           </Button>
         </div>
       </div>
+      <div className="px-2 py-1.5 border-b">
+        <Input
+          type="search"
+          placeholder="Search sessions..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="h-8 text-xs"
+        />
+      </div>
       <div className="flex-1 overflow-y-auto">
         {sessions.length === 0 ? (
           <p className="text-xs text-muted-foreground text-center py-6">No sessions yet</p>
+        ) : mySessions.length === 0 && sharedWithMe.length === 0 ? (
+          <p className="text-xs text-muted-foreground text-center py-6">No sessions match your search</p>
         ) : (
           <>
             {mySessions.length > 0 && (
@@ -159,8 +174,13 @@ function SessionSidebar({
                 onClick={() => onSelect(s.id)}
               >
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium truncate">{s.topic || "Open Analysis"}</p>
-                  <div className="flex items-center gap-1.5 mt-0.5">
+                  <p className="text-sm font-medium line-clamp-2">{s.topic || "Open Analysis"}</p>
+                  <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                    {s.primaryCategory && (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 capitalize">
+                        {s.primaryCategory}
+                      </Badge>
+                    )}
                     <PhaseBadge phase={s.phase} />
                     <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
                       <Clock className="h-2.5 w-2.5" />
@@ -196,8 +216,13 @@ function SessionSidebar({
                 onClick={() => onSelect(s.id)}
               >
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium truncate">{s.topic || "Open Analysis"}</p>
-                  <div className="flex items-center gap-1.5 mt-0.5">
+                  <p className="text-sm font-medium line-clamp-2">{s.topic || "Open Analysis"}</p>
+                  <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                    {s.primaryCategory && (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 capitalize">
+                        {s.primaryCategory}
+                      </Badge>
+                    )}
                     <PhaseBadge phase={s.phase} />
                     <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
                       <Clock className="h-2.5 w-2.5" />
@@ -222,21 +247,42 @@ function SessionFeedback({ onSubmit }: { onSubmit: (rating: -1 | 1, comment: str
   const [rating, setRating] = useState<-1 | 1 | null>(null);
   const [comment, setComment] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   if (submitted) {
     return (
-      <Card>
-        <CardContent className="pt-4 pb-3">
-          <p className="text-sm text-muted-foreground text-center">Thanks for your feedback!</p>
-        </CardContent>
-      </Card>
+      <p className="text-xs text-muted-foreground">Thanks for your feedback!</p>
+    );
+  }
+
+  if (!expanded) {
+    return (
+      <Button
+        variant="ghost"
+        size="sm"
+        className="text-muted-foreground hover:text-foreground -ml-2"
+        onClick={() => setExpanded(true)}
+      >
+        <MessageSquarePlus className="h-3.5 w-3.5 mr-1.5" />
+        Give feedback on this report
+      </Button>
     );
   }
 
   return (
     <Card>
       <CardContent className="pt-4 pb-3 space-y-3">
-        <p className="text-sm font-medium">How was this investigation?</p>
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-medium">How was this investigation?</p>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs text-muted-foreground"
+            onClick={() => setExpanded(false)}
+          >
+            Collapse
+          </Button>
+        </div>
         <div className="flex items-center gap-2">
           <Button
             variant={rating === 1 ? "default" : "outline"}
@@ -315,6 +361,7 @@ export default function ResearchAnalyst() {
 
   const [topicInput, setTopicInput] = useState("");
   const [steerInput, setSteerInput] = useState("");
+  const [researchMode, setResearchMode] = useState<ResearchMode>("quick");
   const [activeTab, setActiveTab] = useState<string>("timeline");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [drillDownFinding, setDrillDownFinding] = useState<Finding | null>(null);
@@ -345,7 +392,7 @@ export default function ResearchAnalyst() {
       sessionParamHandled.current = true;
       setSearchParams({}, { replace: true });
       runSession(sessionParam);
-      setActiveTab("timeline");
+      // Tab will switch to report/findings when session data is available
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
@@ -358,13 +405,27 @@ export default function ResearchAnalyst() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
 
-  // Switch to report tab when synthesis arrives (once)
+  // Switch to report tab when synthesis arrives (once) or quick answer (single finding, no report)
   useEffect(() => {
     if (report && !lastReportRef.current) {
       lastReportRef.current = true;
       setActiveTab("report");
+    } else if (!report && findings.length === 1 && phase === "complete" && !lastReportRef.current) {
+      lastReportRef.current = true;
+      setActiveTab("report");
     }
-  }, [report]);
+  }, [report, findings.length, phase]);
+
+  // Switch to findings tab when first finding arrives (so results are primary view during investigation)
+  useEffect(() => {
+    if (
+      findings.length > 0 &&
+      !report &&
+      (phase === "investigating" || phase === "synthesizing")
+    ) {
+      setActiveTab("findings");
+    }
+  }, [findings.length, report, phase]);
 
   // Reset report tracking and drill-down when session changes
   useEffect(() => {
@@ -375,10 +436,10 @@ export default function ResearchAnalyst() {
   // Start investigation
   const handleStart = useCallback(() => {
     const topic = topicInput.trim() || undefined;
-    startSession(topic);
+    startSession(topic, undefined, researchMode);
     setActiveTab("timeline");
     lastReportRef.current = false;
-  }, [topicInput, startSession]);
+  }, [topicInput, researchMode, startSession]);
 
   // Send steering or follow-up
   const handleSend = useCallback(() => {
@@ -501,37 +562,57 @@ export default function ResearchAnalyst() {
         {/* Main Content */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {phase === "idle" ? (
-            /* ── Idle: Topic Input ── */
+            /* ── Idle: Topic Input + Mode ── */
             <div className="flex-1 flex items-center justify-center p-8">
               <div className="max-w-xl w-full space-y-6">
                 <div className="text-center space-y-2">
                   <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 mb-2">
                     <Sparkles className="h-8 w-8 text-primary" />
                   </div>
-                  <h2 className="text-2xl font-semibold">Start a Research Investigation</h2>
+                  <h2 className="text-2xl font-semibold">Research Lab</h2>
                   <p className="text-muted-foreground">
-                    The research analyst will autonomously plan, investigate, and synthesize
-                    insights from your loan data using multiple AI agents.
+                    Get a quick answer or run a full multi-agent investigation on your loan data.
                   </p>
                 </div>
 
                 <Card>
                   <CardContent className="pt-6 space-y-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex-1" />
+                      <Button
+                        type="button"
+                        variant={researchMode === "deep" ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => setResearchMode(researchMode === "deep" ? "quick" : "deep")}
+                      >
+                        {researchMode === "deep" ? "Deep Analysis ✓" : "Deep Analysis"}
+                      </Button>
+                    </div>
+                    {researchMode === "deep" && (
+                      <p className="text-xs text-muted-foreground">
+                        Full plan + multiple agents + synthesis. Best for: exploratory questions and comprehensive reports.
+                      </p>
+                    )}
+
                     <div data-tour="research-input">
                       <label className="text-sm font-medium mb-1.5 block">
-                        Investigation Topic (optional)
+                        {researchMode === "quick" ? "Your question" : "Investigation topic (optional)"}
                       </label>
                       <div className="flex gap-2">
                         <Input
                           value={topicInput}
                           onChange={(e) => setTopicInput(e.target.value)}
-                          placeholder="e.g., 'Why is pull-through declining?' or leave blank for comprehensive analysis"
+                          placeholder={
+                            researchMode === "quick"
+                              ? "e.g., What's our YTD pull-through? or Show top 10 LOs by volume"
+                              : "e.g., Why is pull-through declining? or leave blank for comprehensive analysis"
+                          }
                           onKeyDown={handleKeyDown}
                           className="flex-1"
                         />
                         <Button onClick={handleStart} disabled={isRunning}>
                           <Play className="h-4 w-4 mr-1.5" />
-                          Investigate
+                          {researchMode === "quick" ? "Get answer" : "Investigate"}
                         </Button>
                       </div>
                     </div>
@@ -556,7 +637,9 @@ export default function ResearchAnalyst() {
                 </Card>
 
                 <p className="text-xs text-muted-foreground text-center">
-                  Investigations typically take 30-90 seconds. You can pause, steer, and ask follow-ups.
+                  {researchMode === "deep"
+                    ? "You can pause, steer, and ask follow-ups during the investigation."
+                    : "Click Deep Analysis for a full multi-agent investigation."}
                 </p>
               </div>
             </div>
@@ -578,7 +661,10 @@ export default function ResearchAnalyst() {
                       <TabsTrigger value="findings" disabled={findings.length === 0}>
                         Findings ({findings.length})
                       </TabsTrigger>
-                      <TabsTrigger value="report" disabled={!report}>
+                      <TabsTrigger
+                        value="report"
+                        disabled={!report && !(findings.length === 1 && phase === "complete")}
+                      >
                         Report
                       </TabsTrigger>
                     </TabsList>
@@ -652,6 +738,7 @@ export default function ResearchAnalyst() {
                     isRunning={isRunning}
                     isPaused={isPaused}
                     sessionId={sessionId}
+                    totalQuestions={plan?.questions?.length}
                     onSubmitFeedback={submitFeedback}
                   />
                 </TabsContent>
@@ -739,6 +826,26 @@ export default function ResearchAnalyst() {
                             console.error("Error tracking insight:", err);
                           }
                         }}
+                        onRunFurtherInvestigation={(question) => {
+                          reset();
+                          setTopicInput(question);
+                          lastReportRef.current = false;
+                          startSession(question, undefined, "deep");
+                          setActiveTab("timeline");
+                        }}
+                      />
+                    </div>
+                  ) : findings.length === 1 && phase === "complete" ? (
+                    <div className="space-y-4 py-2">
+                      {phase === "complete" && (
+                        <SessionFeedback onSubmit={handleSessionFeedback} />
+                      )}
+                      <QuickAnswerView
+                        finding={findings[0]}
+                        onDrillDown={(f) => {
+                          setDrillDownFinding(f);
+                          setActiveTab("findings");
+                        }}
                       />
                     </div>
                   ) : (
@@ -760,7 +867,18 @@ export default function ResearchAnalyst() {
 
               {/* Bottom Input Bar: Steering (running) or Follow-up (complete) */}
               {showBottomInput && (
-                <div className="border-t px-6 py-3" data-tour="research-followup">
+                <div
+                  className={cn(
+                    "border-t px-6 py-3",
+                    phase === "complete" && "bg-muted/40"
+                  )}
+                  data-tour="research-followup"
+                >
+                  {phase === "complete" && (
+                    <p className="text-sm font-medium text-foreground mb-2">
+                      Continue the conversation
+                    </p>
+                  )}
                   <div className="flex gap-2 max-w-2xl">
                     {isRunning && (
                       isPaused ? (
@@ -793,6 +911,27 @@ export default function ResearchAnalyst() {
                       <SendHorizontal className="h-4 w-4" />
                     </Button>
                   </div>
+                  {phase === "complete" && report?.furtherInvestigation && report.furtherInvestigation.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      <span className="text-xs text-muted-foreground self-center mr-1">Suggested:</span>
+                      {report.furtherInvestigation.map((item, i) => (
+                        <Badge
+                          key={i}
+                          variant="secondary"
+                          className="cursor-pointer hover:bg-primary/20 hover:text-primary transition-colors py-1 px-2 text-xs font-normal"
+                          onClick={() => {
+                            reset();
+                            setTopicInput(item.question);
+                            lastReportRef.current = false;
+                            startSession(item.question);
+                            setActiveTab("timeline");
+                          }}
+                        >
+                          {item.question}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
                   <p className="text-xs text-muted-foreground mt-1">
                     {phase === "complete"
                       ? "Ask a follow-up and the agent will investigate using the existing context."

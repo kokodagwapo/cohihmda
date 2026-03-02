@@ -64,6 +64,20 @@ export interface WidgetRenderProps<TData = unknown> {
   height: number;
   /** User-overridable settings (colors, number format, etc.) */
   config?: Record<string, unknown>;
+  /** Called when the widget wants to persist config changes (e.g. workflow dropdown state). */
+  onConfigChange?: (config: Record<string, unknown>) => void;
+}
+
+// ---------------------------------------------------------------------------
+// Configurable properties – agent/UI can override these per instance
+// ---------------------------------------------------------------------------
+
+export interface ConfigurableProperty {
+  key: string;
+  label: string;
+  type: 'select' | 'boolean' | 'number';
+  options?: { value: string; label: string }[];
+  default?: unknown;
 }
 
 // ---------------------------------------------------------------------------
@@ -93,6 +107,8 @@ export interface WidgetDefinition<TData = unknown> {
   component: ComponentType<WidgetRenderProps<TData>>;
   /** Default config (colors, formatting, etc.) passed to the component */
   config?: Record<string, unknown>;
+  /** Properties the agent or UI can override (for modify_registry_widget) */
+  configurableProperties?: ConfigurableProperty[];
 }
 
 // ---------------------------------------------------------------------------

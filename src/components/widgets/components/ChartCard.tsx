@@ -42,6 +42,7 @@ export function ChartCard({
   error,
   width,
   height,
+  config,
   showActions,
   onRemove,
   onDuplicate,
@@ -50,7 +51,8 @@ export function ChartCard({
 
   const renderChart = useMemo(() => {
     if (!data) return null;
-    const { chartType, data: chartData, series, xAxisKey, stacked, colorAccessor, cumulativeKey } = data;
+    const { data: chartData, series, xAxisKey, stacked, colorAccessor, cumulativeKey } = data;
+    const chartType = (config?.chartType as ChartData['chartType']) ?? data.chartType;
 
     const commonAxisProps = {
       tick: { fontSize: 11, fill: 'currentColor' },

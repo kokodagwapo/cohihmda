@@ -59,6 +59,7 @@ $params = @(
     "ParameterKey=ContainerImageTag,ParameterValue=$ImageTag"
     "ParameterKey=ContainerCpu,ParameterValue=$CONTAINER_CPU"
     "ParameterKey=ContainerMemory,ParameterValue=$CONTAINER_MEMORY"
+    "ParameterKey=WorkerDesiredCount,ParameterValue=$WORKER_DESIRED_COUNT"
     "ParameterKey=AuroraEndpoint,ParameterValue=$AURORA_ENDPOINT"
     "ParameterKey=AuroraSecretArn,ParameterValue=$AURORA_SECRET_ARN"
     "ParameterKey=AuroraKmsKeyArn,ParameterValue=$AURORA_KMS_KEY_ARN"
@@ -92,6 +93,18 @@ if ($COGNITO_USER_POOL_ID) {
     $params += "ParameterKey=CognitoPasswordAuth,ParameterValue=$COGNITO_PASSWORD_AUTH"
 } else {
     Write-Status "Cognito SSO not configured for $ENVIRONMENT - skipping" "Yellow"
+}
+
+# Email / SES configuration
+$params += "ParameterKey=EmailFromAddress,ParameterValue=noreply@coheus1.com"
+
+# Platform SSO configuration
+if ($COGNITO_USER_POOL_ID) {
+    $platformIdpName = if ($ENVIRONMENT -eq "prod") { "" } else { "TestAccCognito" }
+    if ($platformIdpName) {
+        $params += "ParameterKey=PlatformSsoIdpName,ParameterValue=$platformIdpName"
+    }
+    $params += "ParameterKey=PlatformJitDomains,ParameterValue=teraverde.com"
 }
 
 # FRED API key (optional - market rate sync disabled if not provided)
