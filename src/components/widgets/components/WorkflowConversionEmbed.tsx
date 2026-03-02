@@ -10,6 +10,14 @@ import type { WorkflowConversionSavedState } from '@/components/views/WorkflowCo
 import { useTenantStore } from '@/stores/tenantStore';
 import { useChannelStore } from '@/stores/channelStore';
 import type { WidgetRenderProps } from '../registry/types';
+import type { PeriodSelection } from '@/components/ui/DatePeriodPicker';
+
+export interface WorkflowConversionState {
+  periodSelection?: PeriodSelection;
+  calculationType?: 'conversion' | 'turn_time';
+  grouping?: 'workflow' | 'individual';
+  segments?: { from: string; to: string }[];
+}
 
 function WorkflowConversionEmbedInner({ width, height, config, onConfigChange }: WidgetRenderProps) {
   const { selectedTenantId } = useTenantStore();
@@ -34,6 +42,7 @@ function WorkflowConversionEmbedInner({ width, height, config, onConfigChange }:
         embeddedInWorkbench
         initialState={initialState}
         onStateChange={onConfigChange ? handleStateChange : undefined}
+        groupId={config?.groupId}
       />
     </div>
   );

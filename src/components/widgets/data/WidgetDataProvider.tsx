@@ -8,7 +8,7 @@
  * corresponding section (or defaults if no section is registered).
  */
 
-import React, { createContext, useContext, useMemo } from 'react';
+import React, { createContext, useContext, useEffect, useMemo } from 'react';
 import { useTenantStore } from '@/stores/tenantStore';
 import { useChannelStore } from '@/stores/channelStore';
 import {
@@ -33,13 +33,32 @@ import {
   type HighPerformersDateType,
   type HighPerformersTimePeriod,
 } from '@/hooks/useHighPerformersData';
+import { useActorsData } from '@/hooks/useActorsData';
+import type { ActorDimension } from '@/hooks/useActorsData';
+import { usePricingDashboardWorkbenchData } from '@/hooks/usePricingDashboardData';
+import type { PricingDashboardFilters as PricingFilters } from '@/hooks/usePricingDashboardData';
+import {
+  usePipelineAnalysisData,
+  usePipelineAnalysisRange,
+  usePipelineAnalysisConfig,
+} from '@/hooks/usePipelineAnalysisData';
 import type { DataSourceId } from '../registry/types';
 
-/** Build dimension filter array from section dynamicFilters (for APIs that accept them). */
-function toDimensionFilters(filters: SectionFilters | null): Array<{ column: string; value: string }> | undefined {
-  const list = filters?.dynamicFilters?.filter((df) => df.value && df.value !== 'all').map((df) => ({ column: df.column, value: df.value }));
+/** Build dimension filter array from section dynamicFilters (for APIs that accept them).
+ *  @param exclude – column names already handled natively by the hook (e.g. branch, loan_officer). */
+function toDimensionFilters(
+  filters: SectionFilters | null,
+  exclude?: string[],
+): Array<{ column: string; value: string }> | undefined {
+  const ex = exclude ? new Set(exclude) : undefined;
+  const list = filters?.dynamicFilters
+    ?.filter((df) => df.value && df.value !== 'all' && (!ex || !ex.has(df.column)))
+    .map((df) => ({ column: df.column, value: df.value }));
   return list && list.length > 0 ? list : undefined;
 }
+
+// Columns already handled natively by individual hooks (branch/loan_officer passed as dedicated params)
+const NATIVE_BRANCH_LO = ['branch', 'loan_officer'];
 
 // ---------------------------------------------------------------------------
 // Types
@@ -204,18 +223,54 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
   const lbFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'leaderboard'), [sections, scopedFilters]);
   const ldFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'loan-detail'), [sections, scopedFilters]);
   const hpFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'high-performers'), [sections, scopedFilters]);
+  const actorsFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'actors'), [sections, scopedFilters]);
+  const pdFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'pricing-dashboard'), [sections, scopedFilters]);
+  const paFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'pipeline-analysis'), [sections, scopedFilters]);
 
   // ---- Hook calls with dynamic filter values ----
 
+  // Effective branch/loanOfficer: prefer dynamic filter value when present (so "Add Filter" Branch works)
+  const csEffectiveBranch = useMemo(() => {
+    const fromDynamic = csFilters?.dynamicFilters?.find((df) => df.column === 'branch')?.value;
+    return fromDynamic && fromDynamic !== 'all' ? fromDynamic : (csFilters?.branch ?? 'all');
+  }, [csFilters?.branch, csFilters?.dynamicFilters]);
+  const csEffectiveLoanOfficer = useMemo(() => {
+    const fromDynamic = csFilters?.dynamicFilters?.find((df) => df.column === 'loan_officer')?.value;
+    return fromDynamic && fromDynamic !== 'all' ? fromDynamic : (csFilters?.loanOfficer ?? 'all');
+  }, [csFilters?.loanOfficer, csFilters?.dynamicFilters]);
+
+  // Memoize dimension filters to avoid new array references each render (prevents fetch loops)
+  const csDimensionFilters = useMemo(
+    () => toDimensionFilters(csFilters, NATIVE_BRANCH_LO),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [csFilters?.dynamicFilters],
+  );
+  const crDimensionFilters = useMemo(
+    () => toDimensionFilters(crFilters),
+    [crFilters?.dynamicFilters],
+  );
+  const ssDimensionFilters = useMemo(() => toDimensionFilters(ssFilters), [ssFilters?.dynamicFilters]);
+  const osDimensionFilters = useMemo(() => toDimensionFilters(osFilters), [osFilters?.dynamicFilters]);
+  const otDimensionFilters = useMemo(() => toDimensionFilters(otFilters), [otFilters?.dynamicFilters]);
+  const stDimensionFilters = useMemo(() => toDimensionFilters(stFilters), [stFilters?.dynamicFilters]);
+  const fnDimensionFilters = useMemo(() => toDimensionFilters(fnFilters), [fnFilters?.dynamicFilters]);
+  const ttcDimensionFilters = useMemo(() => toDimensionFilters(ttcFilters), [ttcFilters?.dynamicFilters]);
+  const lbDimensionFilters = useMemo(() => toDimensionFilters(lbFilters), [lbFilters?.dynamicFilters]);
+  const hpDimensionFilters = useMemo(() => toDimensionFilters(hpFilters), [hpFilters?.dynamicFilters]);
+  const actorsDimensionFilters = useMemo(() => toDimensionFilters(actorsFilters), [actorsFilters?.dynamicFilters]);
+  const pdDimensionFilters = useMemo(() => toDimensionFilters(pdFilters), [pdFilters?.dynamicFilters]);
+  const paDimensionFilters = useMemo(() => toDimensionFilters(paFilters), [paFilters?.dynamicFilters]);
+
   const companyScorecard = useCompanyScorecardData({
     year: csFilters.year,
-    branch: csFilters.branch,
-    loanOfficer: csFilters.loanOfficer,
+    branch: csEffectiveBranch,
+    loanOfficer: csEffectiveLoanOfficer,
     application: csFilters.application,
     channel: selectedChannel,
     dateField: csFilters.dateField,
     dateRange: csFilters.periodSelection?.dateRange ?? csFilters.dateRange,
     tenantId: selectedTenantId,
+    dimensionFilters: csDimensionFilters,
   });
 
   const creditRisk = useCreditRiskData({
@@ -224,6 +279,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     year: crFilters.year,
     dateRange: crFilters.periodSelection?.dateRange ?? crFilters.dateRange,
     tenantId: selectedTenantId,
+    dimensionFilters: crDimensionFilters,
   });
 
   const ssDateRange = ssFilters.periodSelection?.dateRange ?? ssFilters.dateRange;
@@ -233,6 +289,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     ssDateRange,
     selectedTenantId,
     selectedChannel,
+    ssDimensionFilters,
   );
 
   // Operations Scorecard: map preset → DateRangeType, forward custom range if set
@@ -250,6 +307,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     selectedTenantId,
     selectedChannel,
     osCustomDR,
+    osDimensionFilters,
   );
 
   // Operations Trends: actor type from filters, fixed 13-month window
@@ -258,6 +316,8 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     'vs-target',
     selectedTenantId,
     selectedChannel,
+    13,
+    otDimensionFilters,
   );
 
   // Sales Trends: map preset → DateRangeOption, forward custom range if set
@@ -274,6 +334,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     selectedChannel ?? 'Retail',
     selectedTenantId,
     stCustomDR,
+    stDimensionFilters,
   );
 
   // Funnel: uses year-based or custom date filter
@@ -290,6 +351,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     funnelDateFilter,
     selectedTenantId,
     { channelGroup: selectedChannel },
+    fnDimensionFilters,
   );
 
   // Top Tiering: map preset → TimeFilterType + optional customDateRange
@@ -300,6 +362,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     selectedTenantId,
     selectedChannel,
     ttcMapping.customDateRange,
+    ttcDimensionFilters,
   );
 
   // Leaderboard: map preset → LeaderboardTimeframe
@@ -311,26 +374,47 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
       channelGroup: selectedChannel,
       ...(lbMapping.startDate ? { startDate: lbMapping.startDate, endDate: lbMapping.endDate } : {}),
     },
+    lbDimensionFilters,
+  );
+
+  // Loan detail: effective branch/loanOfficer from built-in or dynamic (so "Add Filter" Branch/LO work)
+  const ldEffectiveBranch = useMemo(() => {
+    const fromDynamic = ldFilters?.dynamicFilters?.find((df) => df.column === 'branch')?.value;
+    return fromDynamic && fromDynamic !== 'all' ? fromDynamic : (ldFilters?.branch ?? 'all');
+  }, [ldFilters?.branch, ldFilters?.dynamicFilters]);
+  const ldEffectiveLoanOfficer = useMemo(() => {
+    const fromDynamic = ldFilters?.dynamicFilters?.find((df) => df.column === 'loan_officer')?.value;
+    return fromDynamic && fromDynamic !== 'all' ? fromDynamic : (ldFilters?.loanOfficer ?? 'all');
+  }, [ldFilters?.loanOfficer, ldFilters?.dynamicFilters]);
+
+  const ldDimensionFilters = useMemo(
+    () => toDimensionFilters(ldFilters, NATIVE_BRANCH_LO),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ldFilters?.dynamicFilters],
   );
 
   // Loan detail: only apply date filter when user has explicitly selected a period (preset/year/custom).
   // When periodSelection is missing, show all loans so the table isn't empty by default.
   // Include dynamic filters (loan purpose, channel, etc.) so ADD FILTER DIMENSION filters are applied.
+  const ldDateRange = useMemo(() => {
+    if (!ldFilters) return undefined;
+    return ldFilters.sectionType === 'loan-detail'
+      ? (ldFilters.periodSelection?.dateRange ?? undefined)
+      : (ldFilters.periodSelection?.dateRange ?? ldFilters.dateRange);
+  }, [ldFilters?.sectionType, ldFilters?.periodSelection?.dateRange, ldFilters?.dateRange]);
+
   const loanDetailFilters = useMemo(
     () =>
       ldFilters
         ? {
             dateField: ldFilters.dateField,
-            dateRange:
-              ldFilters.sectionType === 'loan-detail'
-                ? (ldFilters.periodSelection?.dateRange ?? undefined)
-                : (ldFilters.periodSelection?.dateRange ?? ldFilters.dateRange),
-            branch: ldFilters.branch,
-            loanOfficer: ldFilters.loanOfficer,
-            dimensionFilters: toDimensionFilters(ldFilters),
+            dateRange: ldDateRange,
+            branch: ldEffectiveBranch,
+            loanOfficer: ldEffectiveLoanOfficer,
+            dimensionFilters: ldDimensionFilters,
           }
         : undefined,
-    [ldFilters],
+    [ldFilters?.dateField, ldDateRange, ldEffectiveBranch, ldEffectiveLoanOfficer, ldDimensionFilters],
   );
   const loanDetail = useLoanDetailData(selectedTenantId, loanDetailFilters ?? undefined);
 
@@ -341,12 +425,12 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
   const { data: hpLeftData, loading: hpLeftLoading, error: hpLeftError } = useHighPerformersData(
     hpDateType,
     hpLeftPeriod,
-    { channelGroup: selectedChannel, tenantId: selectedTenantId },
+    { channelGroup: selectedChannel, tenantId: selectedTenantId, dimensionFilters: hpDimensionFilters },
   );
   const { data: hpRightData, loading: hpRightLoading, error: hpRightError } = useHighPerformersData(
     hpDateType,
     hpRightPeriod,
-    { channelGroup: selectedChannel, tenantId: selectedTenantId },
+    { channelGroup: selectedChannel, tenantId: selectedTenantId, dimensionFilters: hpDimensionFilters },
   );
   const highPerformersData = useMemo(
     () => ({ left: hpLeftData, right: hpRightData }),
@@ -354,6 +438,117 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
   );
   const highPerformersLoading = hpLeftLoading || hpRightLoading;
   const highPerformersError = hpLeftError || hpRightError;
+
+  // Actors: period + calculation/turn/measure/actor/status from section filters
+  const actorsDateRange = useMemo(() => {
+    const range = actorsFilters?.periodSelection?.dateRange ?? actorsFilters?.dateRange;
+    if (range?.start && range?.end) return { start: range.start, end: range.end };
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    return { start: start.toISOString().slice(0, 10), end: now.toISOString().slice(0, 10) };
+  }, [actorsFilters?.periodSelection?.dateRange, actorsFilters?.dateRange]);
+  const actorsTableDims = useMemo((): [ActorDimension, ActorDimension, ActorDimension, ActorDimension] => {
+    const d = actorsFilters?.actorsTableDimensions;
+    if (Array.isArray(d) && d.length === 4) return d as [ActorDimension, ActorDimension, ActorDimension, ActorDimension];
+    return ['loan_officer', 'processor', 'underwriter', 'closer'];
+  }, [actorsFilters?.actorsTableDimensions]);
+  const { data: actorsData, loading: actorsLoading, error: actorsError } = useActorsData({
+    startDate: actorsDateRange.start,
+    endDate: actorsDateRange.end,
+    calculation: (actorsFilters?.actorsCalculation as 'average' | 'median') ?? 'average',
+    turnTimeType: (actorsFilters?.actorsTurnTimeType as 'app_to_fund_days' | 'app_to_closing_days') ?? 'app_to_fund_days',
+    dateRangeType: (actorsFilters?.actorsDateRangeType as 'calendar_days' | 'business_days') ?? 'calendar_days',
+    measure: (actorsFilters?.actorsMeasure as 'units' | 'volume') ?? 'units',
+    selectedTenantId,
+    channelGroup: selectedChannel,
+    selectedActor: (actorsFilters?.actorsSelectedActor ?? null) as { type: ActorDimension; name: string } | null,
+    selectedStatus: actorsFilters?.actorsSelectedStatus ?? null,
+    tableDimensions: actorsTableDims,
+    dimensionFilters: actorsDimensionFilters,
+  });
+
+  // Pricing Dashboard: build filters from section and fetch all 4 tables + KPIs
+  const pricingFilters = useMemo((): PricingFilters => ({
+    channel: selectedChannel ?? undefined,
+    entityType: (pdFilters?.pricingEntityType ?? 'branch') as PricingFilters['entityType'],
+    entityFilterType: pdFilters?.pricingEntityFilterType as PricingFilters['entityFilterType'] | undefined,
+    entityValue: pdFilters?.pricingEntityValue ?? '',
+    actorType: (pdFilters?.pricingActorType ?? 'loan_officer') as PricingFilters['actorType'],
+    actorFilterType: pdFilters?.pricingActorFilterType as PricingFilters['actorFilterType'] | undefined,
+    actorValue: pdFilters?.pricingActorValue ?? '',
+    dateRange: (pdFilters?.pricingDateRange ?? 'mtd') as PricingFilters['dateRange'],
+    loanFunding: (pdFilters?.pricingLoanFunding ?? 'funded') as PricingFilters['loanFunding'],
+    loanStatus: (pdFilters?.pricingLoanStatus ?? 'active') as PricingFilters['loanStatus'],
+    lockStatus: (pdFilters?.pricingLockStatus ?? 'total') as PricingFilters['lockStatus'],
+  }), [selectedChannel, pdFilters?.pricingEntityType, pdFilters?.pricingEntityFilterType, pdFilters?.pricingEntityValue, pdFilters?.pricingActorType, pdFilters?.pricingActorFilterType, pdFilters?.pricingActorValue, pdFilters?.pricingDateRange, pdFilters?.pricingLoanFunding, pdFilters?.pricingLoanStatus, pdFilters?.pricingLockStatus]);
+  const pricingDashboard = usePricingDashboardWorkbenchData(pricingFilters, {
+    tenantId: selectedTenantId,
+    selectedChannel,
+    dimensionFilters: pdDimensionFilters,
+  });
+
+  // Pipeline Analysis (workbench: use section filters when present)
+  const pipelineRange = usePipelineAnalysisRange(selectedTenantId ?? null);
+  const pipelineConfig = usePipelineAnalysisConfig(selectedTenantId ?? null);
+  const pipelineFromTo = useMemo(() => {
+    if (paFilters?.pipelineAnalysisYearRange) {
+      const [start, end] = paFilters.pipelineAnalysisYearRange.split('-').map(Number);
+      if (!Number.isNaN(start) && !Number.isNaN(end))
+        return { from: `${start}-01-01`, to: `${end}-12-31` };
+    }
+    const r = pipelineRange.range;
+    const max = r?.maxYear ?? new Date().getFullYear();
+    const startYear = Math.max((r?.minYear ?? max - 2), max - 1);
+    const endYear = max;
+    return { from: `${startYear}-01-01`, to: `${endYear}-12-31` };
+  }, [paFilters?.pipelineAnalysisYearRange, pipelineRange.range]);
+  const pipelineFiltersForApi = useMemo(() => {
+    const types = paFilters?.pipelineAnalysisLoanTypes ?? [];
+    const purposes = paFilters?.pipelineAnalysisLoanPurposes ?? [];
+    const branches = paFilters?.pipelineAnalysisBranches ?? [];
+    if (types.length > 0 || purposes.length > 0 || branches.length > 0)
+      return { loanTypes: types.length ? types : undefined, loanPurposes: purposes.length ? purposes : undefined, branches: branches.length ? branches : undefined };
+    return undefined;
+  }, [paFilters?.pipelineAnalysisLoanTypes, paFilters?.pipelineAnalysisLoanPurposes, paFilters?.pipelineAnalysisBranches]);
+  const pipelineSnapshots = usePipelineAnalysisData({
+    from: pipelineFromTo.from,
+    to: pipelineFromTo.to,
+    tenantId: selectedTenantId ?? null,
+    startDateField: (paFilters?.pipelineAnalysisStartDateField ?? 'application_date') as 'application_date' | 'lock_date' | 'processing_date' | 'credit_pull_date' | 'submitted_to_underwriting_date',
+    filters: pipelineFiltersForApi,
+    dimensionFilters: paDimensionFilters,
+  });
+
+  // Refetch pipeline snapshots after user changes snapshot day (and triggers backfill)
+  useEffect(() => {
+    if (paFilters?.pipelineAnalysisSnapshotDay != null) {
+      pipelineSnapshots.refetch();
+    }
+  }, [paFilters?.pipelineAnalysisSnapshotDay]);
+
+  const pipelineAnalysisSource = useMemo(() => ({
+    snapshots: pipelineSnapshots.snapshots,
+    range: pipelineRange.range,
+    config: pipelineConfig.config,
+    yearRange: paFilters?.pipelineAnalysisYearRange ?? null,
+    viewMode: (paFilters?.pipelineAnalysisViewMode ?? 'week') as 'week' | 'month',
+    pctMetric: (paFilters?.pipelineAnalysisPctMetric ?? 'volume') as 'volume' | 'units',
+    loading: pipelineRange.loading || pipelineConfig.loading || pipelineSnapshots.loading,
+    error: pipelineRange.error || pipelineConfig.error || pipelineSnapshots.error,
+  }), [
+    pipelineSnapshots.snapshots,
+    pipelineRange.range,
+    pipelineRange.loading,
+    pipelineRange.error,
+    pipelineConfig.config,
+    pipelineConfig.loading,
+    pipelineConfig.error,
+    pipelineSnapshots.loading,
+    pipelineSnapshots.error,
+    paFilters?.pipelineAnalysisYearRange,
+    paFilters?.pipelineAnalysisViewMode,
+    paFilters?.pipelineAnalysisPctMetric,
+  ]);
 
   // Build lookup
   const sourceMap = useMemo<Record<string, SourceResult>>(() => ({
@@ -444,6 +639,28 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
       loading: highPerformersLoading,
       error: highPerformersError,
     },
+    'actors': {
+      data: actorsData,
+      loading: actorsLoading,
+      error: actorsError,
+    },
+    'pricing-dashboard': {
+      data: pricingDashboard,
+      loading: pricingDashboard.loading,
+      error: pricingDashboard.error,
+    },
+    'pipeline-analysis': {
+      data: {
+        snapshots: pipelineSnapshots.snapshots,
+        range: pipelineRange.range,
+        config: pipelineConfig.config,
+        yearRange: paFilters?.pipelineAnalysisYearRange ?? null,
+        viewMode: (paFilters?.pipelineAnalysisViewMode ?? 'week') as 'week' | 'month',
+        pctMetric: (paFilters?.pipelineAnalysisPctMetric ?? 'volume') as 'volume' | 'units',
+      },
+      loading: pipelineAnalysisSource.loading,
+      error: pipelineAnalysisSource.error,
+    },
   }), [
     companyScorecard.data, companyScorecard.loading, companyScorecard.error,
     creditRisk.data, creditRisk.loading, creditRisk.error,
@@ -456,6 +673,12 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     leaderboardData, leaderboardLoading,
     loanDetail.data, loanDetail.loading, loanDetail.error,
     highPerformersData, highPerformersLoading, highPerformersError,
+    actorsData, actorsLoading, actorsError,
+    pricingDashboard,
+    pipelineAnalysisSource,
+    paFilters?.pipelineAnalysisYearRange,
+    paFilters?.pipelineAnalysisViewMode,
+    paFilters?.pipelineAnalysisPctMetric,
   ]);
 
   const contextValue = useMemo<WidgetDataContextValue>(

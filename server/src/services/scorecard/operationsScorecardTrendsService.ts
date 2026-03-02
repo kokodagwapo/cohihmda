@@ -37,6 +37,7 @@ export interface OperationsTrendsOptions {
   actorType: string;
   monthsCount: number;
   channelGroup?: string;
+  dimensionFilterClause?: string;
 }
 
 export interface OperationsTrendsResult {
@@ -91,7 +92,7 @@ export async function getOperationsScorecardTrends(
   tenantPool: Pool,
   options: OperationsTrendsOptions
 ): Promise<OperationsTrendsResult> {
-  const { actorType, monthsCount, channelGroup } = options;
+  const { actorType, monthsCount, channelGroup, dimensionFilterClause = '' } = options;
   const targets = await getStaffingUnitTargets(tenantPool);
   const targetUnits =
     actorType === "processor"
@@ -140,6 +141,7 @@ export async function getOperationsScorecardTrends(
       AND TRIM(${config.actorColumn}) != ''
       AND UPPER(TRIM(${config.actorColumn})) != '99-MISSING'
       ${channelClause}
+      ${dimensionFilterClause}
     `,
     [startDateStr, endDateStr]
   );

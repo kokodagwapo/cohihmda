@@ -185,6 +185,27 @@ export const DatePeriodPicker = ({
     }
   }, [showAllOption, periodSelectionFromStore]);
 
+  // Sync active selection from store when periodSelectionFromStore is provided (e.g. workbench actors)
+  useEffect(() => {
+    if (periodSelectionFromStore == null) return;
+    if (periodSelectionFromStore.type === 'preset' && periodSelectionFromStore.preset) {
+      setActiveType('preset');
+      setActivePreset(periodSelectionFromStore.preset);
+    } else if (periodSelectionFromStore.type === 'year' && periodSelectionFromStore.year != null) {
+      setActiveType('year');
+      setActivePreset(null);
+    } else if (periodSelectionFromStore.type === 'custom') {
+      setActiveType('custom');
+      setActivePreset(null);
+      if (periodSelectionFromStore.dateRange?.start && periodSelectionFromStore.dateRange?.end) {
+        setCustomDateRange({
+          start: new Date(periodSelectionFromStore.dateRange.start),
+          end: new Date(periodSelectionFromStore.dateRange.end),
+        });
+      }
+    }
+  }, [periodSelectionFromStore?.type, periodSelectionFromStore?.preset, periodSelectionFromStore?.year, periodSelectionFromStore?.dateRange?.start, periodSelectionFromStore?.dateRange?.end]);
+
   // ---- Notification helpers ------------------------------------------------
 
   const notify = useCallback(

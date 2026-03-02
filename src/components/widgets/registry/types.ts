@@ -30,7 +30,10 @@ export type DataSourceId =
   | 'industry-news'
   | 'loan-detail'
   | 'workflow-conversion'
-  | 'high-performers';
+  | 'high-performers'
+  | 'actors'
+  | 'pricing-dashboard'
+  | 'pipeline-analysis';
 
 // ---------------------------------------------------------------------------
 // Widget categories – drives catalog grouping & icon selection

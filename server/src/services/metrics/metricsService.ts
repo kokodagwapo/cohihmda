@@ -1488,11 +1488,6 @@ function buildWhereClause(
     // 'all' or '*' means no filter
   }
 
-  if (filters.investor) {
-    clauses.push(`l.investor = $${paramOffset + params.length + 1}`);
-    params.push(filters.investor);
-  }
-
   if (filters.status) {
     if (Array.isArray(filters.status)) {
       clauses.push(
@@ -1550,6 +1545,30 @@ function buildWhereClause(
   if (filters.loan_purpose) {
     clauses.push(`l.loan_purpose = $${paramOffset + params.length + 1}`);
     params.push(filters.loan_purpose);
+  }
+
+  // Additional dimension columns (workbench "Add Filter" - match loans table)
+  if (filters.property_state) {
+    clauses.push(`l.property_state = $${paramOffset + params.length + 1}`);
+    params.push(filters.property_state);
+  }
+  if (filters.property_county) {
+    clauses.push(`l.property_county = $${paramOffset + params.length + 1}`);
+    params.push(filters.property_county);
+  }
+  if (filters.property_type) {
+    clauses.push(`l.property_type = $${paramOffset + params.length + 1}`);
+    params.push(filters.property_type);
+  }
+  if (filters.current_loan_status) {
+    clauses.push(`l.current_loan_status = $${paramOffset + params.length + 1}`);
+    params.push(filters.current_loan_status);
+  }
+  // Frontend may send investor_name; map to loans.investor if needed
+  const investorValue = filters.investor ?? filters.investor_name;
+  if (investorValue) {
+    clauses.push(`l.investor = $${paramOffset + params.length + 1}`);
+    params.push(investorValue);
   }
 
   // Occupancy type filter

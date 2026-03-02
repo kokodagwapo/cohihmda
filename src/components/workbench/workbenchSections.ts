@@ -18,6 +18,8 @@ import {
   LineChart,
   FileText,
   GitBranch,
+  Users,
+  DollarSign,
 } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
@@ -69,6 +71,7 @@ export const DASHBOARD_SECTION_GROUPS: { label: string; items: DashboardSectionI
       { id: 'creditRiskManagement', title: 'Credit Risk Management', icon: Shield, iconClass: 'text-emerald-500' },
       { id: 'loanDetail', title: 'Loan Detail', icon: FileText, iconClass: 'text-sky-500' },
       { id: 'highPerformers', title: 'High Performers', icon: Trophy, iconClass: 'text-amber-500' },
+      { id: 'actors', title: 'Actors', icon: Users, iconClass: 'text-cyan-500' },
     ],
   },
   {
@@ -79,6 +82,8 @@ export const DASHBOARD_SECTION_GROUPS: { label: string; items: DashboardSectionI
       { id: 'topTieringComparison', title: 'TopTiering Comparison', icon: ArrowLeftRight, iconClass: 'text-sky-500' },
       { id: 'salesTrends', title: 'Sales Trends', icon: TrendingUp, iconClass: 'text-emerald-500' },
       { id: 'operationsTrends', title: 'Operations Trends', icon: LineChart, iconClass: 'text-blue-500' },
+      { id: 'pricingDashboard', title: 'Pricing Dashboard', icon: DollarSign, iconClass: 'text-emerald-500' },
+      { id: 'pipelineAnalysis', title: 'Pipeline Analysis', icon: LineChart, iconClass: 'text-sky-500' },
     ],
   },
 ];

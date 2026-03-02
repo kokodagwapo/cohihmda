@@ -116,7 +116,8 @@ export const useOperationsScorecardData = (
   dateRange: DateRangeType = "3-months",
   selectedTenantId?: string | null,
   selectedChannel?: string | null,
-  customDateRange?: OpsCustomDateRange
+  customDateRange?: OpsCustomDateRange,
+  dimensionFilters?: Array<{ column: string; value: string }>,
 ) => {
   const [data, setData] = useState<OperationsScorecardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -149,6 +150,11 @@ export const useOperationsScorecardData = (
         if (selectedTenantId) params.append("tenant_id", selectedTenantId);
         if (selectedChannel && selectedChannel !== "All")
           params.append("channel_group", selectedChannel);
+        if (dimensionFilters) {
+          for (const df of dimensionFilters) {
+            if (df.value && df.value !== 'all') params.append(df.column, df.value);
+          }
+        }
 
         const queryString = params.toString();
         // NOTE: Using original endpoint until /api/scorecard/operations is fully tested
@@ -203,7 +209,8 @@ export const useOperationsScorecardData = (
     };
 
     fetchOperationsScorecardData();
-  }, [actorType, dateRange, selectedTenantId, selectedChannel, customDateRange?.start, customDateRange?.end]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [actorType, dateRange, selectedTenantId, selectedChannel, customDateRange?.start, customDateRange?.end, JSON.stringify(dimensionFilters)]);
 
   return { data, loading, error };
 };

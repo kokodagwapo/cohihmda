@@ -640,11 +640,13 @@ router.post('/execute-sql', authenticateToken, attachTenantContext, async (req: 
     // ---------------------------------------------------------------------------
     // Dimension filters: inject equality conditions (branch, loan_officer, etc.)
     // ---------------------------------------------------------------------------
+    const DIMENSION_COLUMN_MAP: Record<string, string> = { investor_name: 'investor' }; // frontend column -> DB column
     if (Array.isArray(dimensionFilters) && dimensionFilters.length > 0) {
       for (const df of dimensionFilters) {
         if (!df.column || !df.value || typeof df.column !== 'string' || typeof df.value !== 'string') continue;
-        const dimCol = df.column.replace(/[^a-zA-Z0-9_.]/g, '');
-        if (!/^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(dimCol)) continue;
+        const rawCol = df.column.replace(/[^a-zA-Z0-9_.]/g, '');
+        if (!/^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(rawCol)) continue;
+        const dimCol = DIMENSION_COLUMN_MAP[rawCol] ?? rawCol;
 
         // Only inject if the column is accessible in the final SELECT body
         const dimOffset = findFinalSelectOffset(effectiveSql);

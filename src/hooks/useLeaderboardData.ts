@@ -43,7 +43,8 @@ export type LeaderboardTimeframe =
 export const useLeaderboardData = (
   timeframe: LeaderboardTimeframe,
   selectedTenantId?: string | null,
-  additionalFilters?: LeaderboardFilters
+  additionalFilters?: LeaderboardFilters,
+  dimensionFilters?: Array<{ column: string; value: string }>,
 ) => {
   const [leaderboardData, setLeaderboardData] = useState<LeaderboardLeader[]>(
     []
@@ -96,6 +97,12 @@ export const useLeaderboardData = (
         ) {
           params.append("startDate", additionalFilters.startDate);
           params.append("endDate", additionalFilters.endDate);
+        }
+
+        if (dimensionFilters) {
+          for (const df of dimensionFilters) {
+            if (df.value && df.value !== 'all') params.append(df.column, df.value);
+          }
         }
 
         console.log("[useLeaderboardData] Fetching leaderboard:", {
@@ -180,6 +187,8 @@ export const useLeaderboardData = (
     additionalFilters?.startDate,
     additionalFilters?.endDate,
     additionalFilters?.channelGroup,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    JSON.stringify(dimensionFilters),
   ]);
 
   return { leaderboardData, loading };

@@ -31,9 +31,9 @@ export interface HighPerformersData {
 export function useHighPerformersData(
   dateType: HighPerformersDateType,
   timePeriod: HighPerformersTimePeriod,
-  options?: { channelGroup?: string | null; tenantId?: string | null }
+  options?: { channelGroup?: string | null; tenantId?: string | null; dimensionFilters?: Array<{ column: string; value: string }> }
 ) {
-  const { channelGroup, tenantId } = options ?? {};
+  const { channelGroup, tenantId, dimensionFilters } = options ?? {};
   const [data, setData] = useState<HighPerformersData>({
     branchRankings: [],
     loanOfficerRankings: [],
@@ -48,6 +48,11 @@ export function useHighPerformersData(
     if (tenantId) params.set("tenant_id", tenantId);
     if (channelGroup && channelGroup !== "All")
       params.set("channel_group", channelGroup);
+    if (dimensionFilters) {
+      for (const df of dimensionFilters) {
+        if (df.value && df.value !== 'all') params.set(df.column, df.value);
+      }
+    }
 
     let cancelled = false;
     setLoading(true);
@@ -77,7 +82,8 @@ export function useHighPerformersData(
     return () => {
       cancelled = true;
     };
-  }, [dateType, timePeriod, channelGroup, tenantId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateType, timePeriod, channelGroup, tenantId, JSON.stringify(dimensionFilters)]);
 
   return { data, loading, error };
 }
