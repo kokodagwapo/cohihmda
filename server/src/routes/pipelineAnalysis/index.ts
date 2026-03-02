@@ -134,7 +134,7 @@ router.get(
       }
       const rows = await getPipelineSnapshots(ctx.tenantPool, from, to, startDateField, filters, dimensionFilterClause);
       const snapshots = rows.map((r) => ({
-        date: typeof r.date === "string" ? r.date : r.date?.toISOString?.()?.slice(0, 10) ?? String(r.date),
+        date: typeof r.date === "string" ? r.date : (r.date as Date | undefined)?.toISOString?.()?.slice(0, 10) ?? String(r.date),
         index: Number(r.index),
         snapshot_weekday: String(r.snapshot_weekday ?? "Monday"),
         year: Number(r.year),
