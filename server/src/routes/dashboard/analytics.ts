@@ -22,7 +22,12 @@ import {
   getWorkflowConversionMilestones,
   type WorkflowSegmentInput,
 } from "../../services/dashboard/workflowConversionService.js";
+import {
+  getActorsDashboardData,
+  type ActorDimension,
+} from "../../services/dashboard/actorsService.js";
 import { getStaffingUnitTargets } from "../../utils/staffingUnitTargets.js";
+import { buildDimensionFilterWhereClause } from "../../utils/scorecard-utils.js";
 import { deleteInsightById } from "../../services/insights/llmInsightGenerator.js";
 import {
   runInsightGeneration,
@@ -103,6 +108,7 @@ router.get(
       }
 
       // Build filters object with access filter
+      const dimensionFilterClause = buildDimensionFilterWhereClause(req.query as Record<string, any>, 'l', new Set(['channel_group', 'tenant_id']));
       const filters = {
         branch: branch || undefined,
         scope: (scope as "all" | "branch" | "team") || "all",
@@ -110,6 +116,7 @@ router.get(
         endDate: endDate || undefined,
         channelGroup: channel_group || undefined,
         userAccessFilter: accessCtx.getFilter("l"),
+        dimensionFilterClause: dimensionFilterClause || undefined,
       };
 
       const result = await getLeaderboardData(
@@ -180,11 +187,13 @@ router.get(
         });
       }
       const filter = accessCtx.getFilter("l", 3);
+      const hpDimensionFilterClause = buildDimensionFilterWhereClause(req.query as Record<string, any>, 'l', new Set(['channel_group', 'tenant_id']));
       const result = await getHighPerformersRankings(tenantContext.tenantPool, {
         dateType: dateType as "funding_date" | "closing_date" | "application_date",
         timePeriod: timePeriod as "mtd" | "lm" | "ytd" | "ly" | "rolling_13",
         userAccessFilter: filter ?? undefined,
         channelGroup: channel_group,
+        dimensionFilterClause: hpDimensionFilterClause || undefined,
       });
       res.json(result);
     } catch (error: any) {
@@ -988,6 +997,11 @@ router.get(
         return res.json({ loans: [] });
       }
       const { accessClause, accessParams } = accessCtx.buildWhereClause("l", 3);
+      const dimensionFilterClause = buildDimensionFilterWhereClause(
+        req.query as Record<string, unknown>,
+        "l",
+        new Set(["startDate", "endDate", "segments", "grouping", "segmentIndex", "filter", "channel_group", "tenant_id"]),
+      );
       const result = await getWorkflowConversionSegmentLoans(tenantContext.tenantPool, {
         startDate,
         endDate,
@@ -996,6 +1010,7 @@ router.get(
         channelGroup: channel_group || undefined,
         accessClause: accessClause ? " " + accessClause.trim() : undefined,
         accessParams: accessParams.length > 0 ? accessParams : undefined,
+        dimensionFilterClause: dimensionFilterClause || undefined,
         segmentIndex,
         filter,
       });
@@ -1053,6 +1068,11 @@ router.get(
         });
       }
       const { accessClause, accessParams } = accessCtx.buildWhereClause("l", 3);
+      const dimensionFilterClause = buildDimensionFilterWhereClause(
+        req.query as Record<string, unknown>,
+        "l",
+        new Set(["startDate", "endDate", "segments", "metric", "grouping", "channel_group", "tenant_id"]),
+      );
       const result = await getWorkflowConversionData(tenantContext.tenantPool, {
         startDate,
         endDate,
@@ -1062,6 +1082,7 @@ router.get(
         channelGroup: channel_group || undefined,
         accessClause: accessClause ? " " + accessClause.trim() : undefined,
         accessParams: accessParams.length > 0 ? accessParams : undefined,
+        dimensionFilterClause: dimensionFilterClause || undefined,
       });
       res.json(result);
     } catch (error: any) {
@@ -1072,6 +1093,93 @@ router.get(
       if (handleDatabaseError(error, res, "Failed to fetch workflow conversion")) return;
       res.status(500).json({
         error: "Failed to fetch workflow conversion",
+        details: process.env.NODE_ENV === "development" ? error.message : undefined,
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/dashboard/actors
+ * Actors dashboard: status counts, KPIs, and four actor tables.
+ * Base loan set: application_date in [startDate, endDate], channel/tenant/access.
+ * Optional: actor_type + actor_name to filter to that actor's loans.
+ */
+const actorDimensionSchema = z.enum([
+  "channel", "processor", "closer", "underwriter", "loan_officer", "branch", "investor", "warehouse_co_name",
+]);
+router.get(
+  "/actors",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const querySchema = z.object({
+        startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        calculation: z.enum(["average", "median"]).default("average"),
+        turnTimeType: z.enum(["app_to_fund_days", "app_to_closing_days"]).default("app_to_fund_days"),
+        dateRangeType: z.enum(["calendar_days", "business_days"]).default("calendar_days"),
+        measure: z.enum(["volume", "units"]).default("units"),
+        channel_group: z.string().optional(),
+        tenant_id: z.string().uuid().optional(),
+        actor_type: z.string().optional(),
+        actor_name: z.string().optional(),
+        status_filter: z.string().optional(),
+        tableDimensions: z
+          .string()
+          .optional()
+          .transform((s) => {
+            if (!s) return undefined;
+            const arr = JSON.parse(s) as unknown;
+            return z.tuple([actorDimensionSchema, actorDimensionSchema, actorDimensionSchema, actorDimensionSchema]).parse(arr) as [ActorDimension, ActorDimension, ActorDimension, ActorDimension];
+          }),
+      });
+      const parsed = querySchema.parse(req.query);
+      const tenantContext = getTenantContext(req);
+      const accessCtx = await getLoanAccessContext(req, tenantContext.tenantPool);
+      if (accessCtx.hasNoAccess) {
+        return res.json({
+          statusCounts: [],
+          kpis: { units: 0, volume: 0, averageBalance: 0, wac: null, wam: null, waFico: null, waLtv: null, waDti: null },
+          tables: [
+            { rows: [], totals: { name: "Totals", units: 0, volume: 0, avgAppToFund: null, approvalPct: 0, deniedPct: 0, withdrawnPct: 0, loanComplexity: null } },
+            { rows: [], totals: { name: "Totals", units: 0, volume: 0, avgAppToFund: null, approvalPct: 0, deniedPct: 0, withdrawnPct: 0, loanComplexity: null } },
+            { rows: [], totals: { name: "Totals", units: 0, volume: 0, avgAppToFund: null, approvalPct: 0, deniedPct: 0, withdrawnPct: 0, loanComplexity: null } },
+            { rows: [], totals: { name: "Totals", units: 0, volume: 0, avgAppToFund: null, approvalPct: 0, deniedPct: 0, withdrawnPct: 0, loanComplexity: null } },
+          ],
+        });
+      }
+      const { accessClause, accessParams } = accessCtx.buildWhereClause("l", 3);
+      const actorsDimensionFilterClause = buildDimensionFilterWhereClause(req.query as Record<string, any>, 'l', new Set(['channel_group', 'tenant_id']));
+      const selectedActor =
+        parsed.actor_type && parsed.actor_name != null && parsed.actor_name !== ""
+          ? { type: parsed.actor_type as ActorDimension, name: parsed.actor_name }
+          : undefined;
+      const result = await getActorsDashboardData(tenantContext.tenantPool, {
+        startDate: parsed.startDate,
+        endDate: parsed.endDate,
+        calculation: parsed.calculation as "average" | "median",
+        turnTimeType: parsed.turnTimeType as "app_to_fund_days" | "app_to_closing_days",
+        dateRangeType: parsed.dateRangeType as "calendar_days" | "business_days",
+        measure: parsed.measure as "volume" | "units",
+        channelGroup: parsed.channel_group || undefined,
+        accessClause: accessClause ? " " + accessClause.trim() : undefined,
+        accessParams: accessParams.length > 0 ? accessParams : undefined,
+        selectedActor,
+        statusFilter: parsed.status_filter || undefined,
+        tableDimensions: parsed.tableDimensions,
+        dimensionFilterClause: actorsDimensionFilterClause || undefined,
+      });
+      res.json(result);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid request", details: error.errors });
+      }
+      console.error("Error fetching actors dashboard:", error);
+      if (handleDatabaseError(error, res, "Failed to fetch actors dashboard")) return;
+      res.status(500).json({
+        error: "Failed to fetch actors dashboard",
         details: process.env.NODE_ENV === "development" ? error.message : undefined,
       });
     }

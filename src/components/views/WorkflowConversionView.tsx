@@ -44,10 +44,15 @@ import {
 } from "recharts";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
-import { AlertCircle, Check, ChevronsUpDown, Loader2, Minus, Plus, RotateCcw } from "lucide-react";
+import { AlertCircle, Check, ChevronsUpDown, Loader2, Maximize2, Minus, Plus, RotateCcw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { WorkflowSegmentLoansModal } from "@/components/views/WorkflowSegmentLoansModal";
 import type { WorkflowSegmentLoanFilter } from "@/hooks/useWorkflowConversionSegmentLoans";
+import {
+  Dialog,
+  DialogContent,
+} from "@/components/ui/dialog";
+import { useWidgetSectionStore } from "@/stores/widgetSectionStore";
 
 const PERIOD_PRESETS: PeriodPreset[] = [
   "mtd",
@@ -87,6 +92,8 @@ export interface WorkflowConversionViewProps {
   initialState?: WorkflowConversionSavedState;
   /** Called when state changes (debounced) so the parent can persist it. */
   onStateChange?: (state: WorkflowConversionSavedState) => void;
+  /** When set (workbench group), group filters (branch, loan officer, dynamic filters) are applied to data. */
+  groupId?: string | null;
 }
 
 const DEBOUNCE_MS = 300;
@@ -97,6 +104,7 @@ export function WorkflowConversionView({
   embeddedInWorkbench = false,
   initialState,
   onStateChange,
+  groupId,
 }: WorkflowConversionViewProps) {
   const defaultPeriod: PeriodSelection = useMemo(() => {
     const range = getDefaultDateRange();
@@ -140,6 +148,22 @@ export function WorkflowConversionView({
     };
   }, [segments, calculationType, grouping, periodSelection, onStateChange]);
 
+  const groupFilters = useWidgetSectionStore((s) => (groupId ? s.getFilters(groupId) : null));
+  const dimensionFilters = useMemo((): Array<{ column: string; value: string }> | undefined => {
+    if (!groupFilters) return undefined;
+    const dims: Array<{ column: string; value: string }> = [];
+    if (groupFilters.branch && groupFilters.branch !== "all") {
+      dims.push({ column: "branch", value: groupFilters.branch });
+    }
+    if (groupFilters.loanOfficer && groupFilters.loanOfficer !== "all") {
+      dims.push({ column: "loan_officer", value: groupFilters.loanOfficer });
+    }
+    (groupFilters.dynamicFilters || []).forEach((df) => {
+      if (df.value && df.value !== "all") dims.push({ column: df.column, value: df.value });
+    });
+    return dims.length > 0 ? dims : undefined;
+  }, [groupFilters?.branch, groupFilters?.loanOfficer, groupFilters?.dynamicFilters]);
+
   const dateRange = periodSelection.dateRange;
   const { milestones, loading: milestonesLoading, error: milestonesError } = useWorkflowMilestones(selectedTenantId);
   const { data, loading, error } = useWorkflowConversionData({
@@ -150,6 +174,7 @@ export function WorkflowConversionView({
     grouping,
     selectedTenantId,
     channelGroup: selectedChannel,
+    dimensionFilters,
   });
 
   const updateSegment = useCallback((index: number, field: "from" | "to", value: string) => {
@@ -208,10 +233,24 @@ export function WorkflowConversionView({
 
   return (
     <div className="space-y-4">
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-4">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Period</span>
+      {/* Toolbar – compact style when embedded in workbench to match other widget filter bars */}
+      <div
+        className={
+          embeddedInWorkbench
+            ? "flex flex-wrap items-center gap-1.5 px-2.5 pb-1.5"
+            : "flex flex-wrap items-center gap-4"
+        }
+      >
+        <div className="flex items-center gap-1.5">
+          <span
+            className={
+              embeddedInWorkbench
+                ? "text-[10px] font-medium text-slate-500 dark:text-slate-400 mr-0.5"
+                : "text-sm font-medium text-slate-600 dark:text-slate-400"
+            }
+          >
+            Period
+          </span>
           <DatePeriodPicker
             year={new Date().getFullYear()}
             onYearChange={() => {}}
@@ -223,13 +262,23 @@ export function WorkflowConversionView({
             size="sm"
           />
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Calculation</span>
+        <div className="flex items-center gap-1.5">
+          <span
+            className={
+              embeddedInWorkbench
+                ? "text-[10px] font-medium text-slate-500 dark:text-slate-400 mr-0.5"
+                : "text-sm font-medium text-slate-600 dark:text-slate-400"
+            }
+          >
+            Calculation
+          </span>
           <Select
             value={calculationType}
             onValueChange={(v) => setCalculationType(v as WorkflowConversionMetric)}
           >
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger
+              className={embeddedInWorkbench ? "h-7 w-[120px] text-xs" : "w-[180px]"}
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -238,13 +287,23 @@ export function WorkflowConversionView({
             </SelectContent>
           </Select>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Grouping</span>
+        <div className="flex items-center gap-1.5">
+          <span
+            className={
+              embeddedInWorkbench
+                ? "text-[10px] font-medium text-slate-500 dark:text-slate-400 mr-0.5"
+                : "text-sm font-medium text-slate-600 dark:text-slate-400"
+            }
+          >
+            Grouping
+          </span>
           <Select
             value={grouping}
             onValueChange={(v) => setGrouping(v as WorkflowGrouping)}
           >
-            <SelectTrigger className="w-[140px]">
+            <SelectTrigger
+              className={embeddedInWorkbench ? "h-7 w-[100px] text-xs" : "w-[140px]"}
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -255,28 +314,28 @@ export function WorkflowConversionView({
         </div>
         {embeddedInWorkbench && (
           <div className="flex items-center gap-1">
-            <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Cards</span>
+            <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mr-0.5">Cards</span>
             <Button
               type="button"
               variant="outline"
               size="icon"
-              className="h-8 w-8"
+              className="h-7 w-7"
               onClick={removeCard}
               disabled={!canRemoveCard}
               aria-label="Remove last card"
             >
-              <Minus className="h-3.5 w-3.5" />
+              <Minus className="h-3 w-3" />
             </Button>
             <Button
               type="button"
               variant="outline"
               size="icon"
-              className="h-8 w-8"
+              className="h-7 w-7"
               onClick={addCard}
               disabled={!canAddCard}
               aria-label="Add card"
             >
-              <Plus className="h-3.5 w-3.5" />
+              <Plus className="h-3 w-3" />
             </Button>
           </div>
         )}
@@ -285,9 +344,12 @@ export function WorkflowConversionView({
           variant="outline"
           size="sm"
           onClick={resetToDefault}
-          className="gap-1.5 ml-auto"
+          className={cn(
+            "gap-1.5",
+            embeddedInWorkbench && "!h-7 !py-0 !min-h-0 px-2.5 text-xs",
+          )}
         >
-          <RotateCcw className="h-3.5 w-3.5" />
+          <RotateCcw className={embeddedInWorkbench ? "h-2.5 w-2.5" : "h-3.5 w-3.5"} />
           Reset to Default
         </Button>
       </div>
@@ -323,6 +385,7 @@ export function WorkflowConversionView({
               selectedChannel={selectedChannel}
               segments={segments}
               grouping={grouping}
+              dimensionFilters={dimensionFilters}
             />
           ))}
         </div>
@@ -347,6 +410,11 @@ interface WorkflowSegmentCardProps {
   selectedChannel?: string | null;
   segments: { from: string; to: string }[];
   grouping: WorkflowGrouping;
+  chartHeight?: number;
+  showFullscreenButton?: boolean;
+  onFullscreenClick?: () => void;
+  onCloseFullscreen?: () => void;
+  dimensionFilters?: Array<{ column: string; value: string }>;
 }
 
 /** True when range is ≤31 days (backend uses day bucket); else months. */
@@ -373,6 +441,11 @@ function WorkflowSegmentCard({
   selectedChannel,
   segments,
   grouping,
+  chartHeight = 280,
+  showFullscreenButton = false,
+  onFullscreenClick,
+  onCloseFullscreen,
+  dimensionFilters,
 }: WorkflowSegmentCardProps) {
   const [loansModalOpen, setLoansModalOpen] = React.useState(false);
   const [loansModalFilter, setLoansModalFilter] = React.useState<WorkflowSegmentLoanFilter | null>(null);
@@ -475,9 +548,10 @@ function WorkflowSegmentCard({
               </Command>
             </PopoverContent>
           </Popover>
+        
         </div>
       </CardHeader>
-      <CardContent className="flex flex-1 flex-col gap-2 px-4 pb-3 pt-0">
+      <CardContent className="flex flex-1 flex-col gap-2 px-2 pb-3 pt-0">
         {/* KPIs - fixed height so chart starts at same position in every card */}
         <div className="grid h-[64px] shrink-0 grid-cols-3 items-center gap-2 text-center">
           <div>
@@ -540,7 +614,12 @@ function WorkflowSegmentCard({
         )}
 
         {/* Chart or message - fixed height so same in every card, bottom-aligned */}
-        <div className="mt-auto h-[280px] min-h-[280px] max-h-[280px] w-full shrink-0 rounded-lg border border-slate-100 bg-slate-50/50 dark:border-slate-800 dark:bg-slate-900/30">
+        <div
+          className={cn(
+            "mt-auto w-full shrink-0 rounded-lg border border-slate-100 bg-slate-50/50 dark:border-slate-800 dark:bg-slate-900/30",
+          )}
+          style={{ minHeight: chartHeight, maxHeight: chartHeight, height: chartHeight }}
+        >
           {!valid ? (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm text-slate-500 dark:text-slate-400">
               <AlertCircle className="h-8 w-8 shrink-0" />
@@ -558,7 +637,7 @@ function WorkflowSegmentCard({
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart
                 data={series}
-                margin={{ top: 10, right: 46, left: 46, bottom: 28 }}
+                margin={{ top: 24, right: 18, left: 18, bottom: 24 }}
                 barCategoryGap="12%"
                 barGap={2}
               >
@@ -580,14 +659,14 @@ function WorkflowSegmentCard({
                 />
                 <YAxis
                   yAxisId="left"
-                  width={42}
+                  width={28}
                   tick={{ fontSize: 10 }}
                   label={{ value: "Units", angle: -90, position: "insideLeft", fontSize: 11 }}
                 />
                 <YAxis
                   yAxisId="right"
                   orientation="right"
-                  width={42}
+                  width={28}
                   tick={{ fontSize: 10 }}
                   domain={calculationType === "conversion" ? [0, 100] : undefined}
                   label={{
@@ -667,6 +746,7 @@ function WorkflowSegmentCard({
         segmentIndex={index}
         selectedTenantId={selectedTenantId}
         channelGroup={selectedChannel}
+        dimensionFilters={dimensionFilters}
       />
     </Card>
   );

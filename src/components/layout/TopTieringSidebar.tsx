@@ -14,6 +14,8 @@ import {
   FileText,
   BarChart3,
   Trophy,
+  Users,
+  DollarSign,
 } from "lucide-react";
 import {
   Sheet,
@@ -65,7 +67,12 @@ const topTieringNavLinks = [
     variant: "mint" as const,
   },
   {
-    path: "/performance/operation-scorecard",
+    path: "/sales-scorecard-overview",
+    label: "Sales Scorecard Overview",
+    icon: BarChart3,
+    variant: "sky" as const,
+  },
+  {
     label: "Operations Scorecard",
     icon: Target,
     variant: "sky" as const,
@@ -77,16 +84,34 @@ const topTieringNavLinks = [
     variant: "fuchsia" as const,
   },
   {
+    path: "/pricing-dashboard",
+    label: "Pricing Dashboard",
+    icon: DollarSign,
+    variant: "mint" as const,
+  },
+  {
     path: "/workflow-conversion",
     label: "Workflow Conversion",
     icon: BarChart3,
     variant: "sky" as const,
   },
   {
+    path: "/pipeline-analysis",
+    label: "Pipeline Analysis",
+    icon: LineChart,
+    variant: "mint" as const,
+  },
+  {
     path: "/high-performers",
     label: "High Performers",
     icon: Trophy,
     variant: "amber" as const,
+  },
+  {
+    path: "/actors",
+    label: "Actors",
+    icon: Users,
+    variant: "sky" as const,
   },
   {
     path: "/loan-detail",

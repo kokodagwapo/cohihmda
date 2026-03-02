@@ -1313,7 +1313,7 @@ export const IndustryNewsCard = () => {
               <Newspaper className="w-5 h-5 sm:w-6 sm:h-6 text-white" strokeWidth={1.5} />
             </div>
             <div>
-              <h3 className="text-xl sm:text-2xl md:text-3xl font-extralight text-slate-900 dark:text-white tracking-tight">
+              <h3 className="text-xl sm:text-2xl md:text-3xl font-semibold text-slate-900 dark:text-white mb-0.5 tracking-tight leading-tight">
                 Cohi Daily Morning Brief
               </h3>
               <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-light mt-0.5">

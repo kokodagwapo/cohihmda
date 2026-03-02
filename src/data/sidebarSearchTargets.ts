@@ -1,0 +1,44 @@
+/**
+ * Shared search targets for dashboard/page search.
+ * Used by SidebarRouteSearch in both Navigation (top nav) and ReportsSidebar.
+ */
+
+import type { SidebarRouteSearchTarget } from '@/components/dashboard/SidebarRouteSearch';
+
+export function getSidebarSearchTargets(): SidebarRouteSearchTarget[] {
+  const sectionTargets: SidebarRouteSearchTarget[] = [
+    { id: 'section:aletheiaInsights', label: 'Cohi Daily Briefings', group: 'Insights', kind: 'section', sectionId: 'aletheiaInsights', keywords: ['insights', 'dashboard'] },
+    { id: 'section:industryNews', label: 'Mortgage News', group: 'Insights', kind: 'section', sectionId: 'industryNews', keywords: ['insights', 'dashboard'] },
+    { id: 'section:leaderboard', label: 'Leaderboard', group: 'Dashboards', kind: 'section', sectionId: 'leaderboard', keywords: ['dashboards', 'insights'] },
+    { id: 'section:executiveDashboard', label: 'Business Overview', group: 'Dashboards', kind: 'section', sectionId: 'executiveDashboard', keywords: ['dashboards', 'insights'] },
+    { id: 'section:closingFalloutForecast', label: 'Closing & Fallout Forecast', group: 'Dashboards', kind: 'section', sectionId: 'closingFalloutForecast', keywords: ['dashboards', 'insights'] },
+  ];
+
+  const toptieringTargets: SidebarRouteSearchTarget[] = [
+    { id: 'route:topTieringComparison', label: 'TopTiering Comparison', group: 'TopTiering', kind: 'route', path: '/performance/toptiering-comparison', keywords: ['toptiering', 'top tiering', 'performance'] },
+    { id: 'route:creditRiskManagement', label: 'Credit Risk Management', group: 'TopTiering', kind: 'route', path: '/credit-risk-management', keywords: ['toptiering', 'top tiering', 'performance'] },
+    { id: 'route:companyScorecard', label: 'Company Scorecard', group: 'TopTiering', kind: 'route', path: '/company-scorecard', keywords: ['toptiering', 'top tiering', 'performance'] },
+    { id: 'route:workflowConversion', label: 'Workflow Conversion', group: 'TopTiering', kind: 'route', path: '/workflow-conversion', keywords: ['toptiering', 'top tiering', 'performance'] },
+    { id: 'route:highPerformers', label: 'High Performers', group: 'TopTiering', kind: 'route', path: '/high-performers', keywords: ['toptiering', 'top tiering', 'performance'] },
+    { id: 'route:loanDetail', label: 'Loan Detail', group: 'TopTiering', kind: 'route', path: '/loan-detail', keywords: ['toptiering', 'top tiering', 'performance'] },
+    { id: 'route:salesScorecard', label: 'Scorecard', group: 'TopTiering', kind: 'route', path: '/sales-scorecard', keywords: ['toptiering', 'top tiering', 'performance'] },
+    { id: 'route:salesTrends', label: 'Trends', group: 'TopTiering', kind: 'route', path: '/sales-trends', keywords: ['toptiering', 'top tiering', 'performance'] },
+    { id: 'route:operationsScorecard', label: 'Scorecard', group: 'TopTiering', kind: 'route', path: '/performance/operation-scorecard', keywords: ['toptiering', 'top tiering', 'performance'] },
+    { id: 'route:operationsTrends', label: 'Trends', group: 'TopTiering', kind: 'route', path: '/performance/operation-scorecard-trends', keywords: ['toptiering', 'top tiering', 'performance'] },
+    { id: 'route:financialModeling', label: 'Financial Modeling Sandbox', group: 'TopTiering', kind: 'route', path: '/performance/financial-modeling-sandbox', keywords: ['toptiering', 'top tiering', 'performance'] },
+  ];
+
+  const pageTargets: SidebarRouteSearchTarget[] = [
+    { id: 'route:insights', label: 'Insights', group: 'Pages', kind: 'route', path: '/insights', keywords: ['home', 'dashboard'] },
+    { id: 'route:my-workbench', label: 'My Workbench', group: 'Pages', kind: 'route', path: '/my-dashboard', keywords: ['workbench', 'canvas'] },
+    { id: 'route:research', label: 'Research Lab', group: 'Pages', kind: 'route', path: '/research', keywords: ['research'] },
+    { id: 'route:loans', label: 'Loans', group: 'Pages', kind: 'route', path: '/loans', keywords: ['pipeline'] },
+    { id: 'route:settings', label: 'Settings', group: 'Pages', kind: 'route', path: '/settings', keywords: ['profile', 'preferences'] },
+    { id: 'route:help', label: 'Help Center', group: 'Pages', kind: 'route', path: '/help', keywords: ['support', 'docs'] },
+    { id: 'route:workbench-shared', label: 'Workbench: Shared With Me', group: 'Pages', kind: 'route', path: '/workbench/shared', keywords: ['workbench', 'shared'] },
+    { id: 'route:workbench-team', label: 'Workbench: Team Folders', group: 'Pages', kind: 'route', path: '/workbench/team-folders', keywords: ['workbench', 'team'] },
+    { id: 'route:workbench-favorites', label: 'Workbench: Favorites', group: 'Pages', kind: 'route', path: '/workbench/favorites', keywords: ['workbench', 'favorites'] },
+  ];
+
+  return [...sectionTargets, ...toptieringTargets, ...pageTargets];
+}

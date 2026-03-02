@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useEffect } from "react";
 import { EditProvider } from "@/contexts/EditContext";
-import { AuthProvider } from "@/contexts/AuthContext";
+import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { AnalyticsWrapper, AnalyticsPageViewTracker } from "@/contexts/AnalyticsContext";
 import { DebugModeProvider } from "@/contexts/DebugModeContext";
 import { DebugModeIndicator } from "@/components/layout/DebugModeIndicator";
@@ -38,11 +38,15 @@ import OperationScorecardTrends from "./pages/OperationScorecardTrends";
 import FinancialModelingSandbox from "./pages/FinancialModelingSandbox";
 import SalesScorecard from "./pages/SalesScorecard";
 import SalesTrends from "./pages/SalesTrends";
+import SalesScorecardOverview from "./pages/SalesScorecardOverview";
 import CompanyScorecard from "./pages/CompanyScorecard";
 import HighPerformers from "./pages/HighPerformers";
 import CreditRiskManagement from "./pages/CreditRiskManagement";
 import LoanDetail from "./pages/LoanDetail";
 import WorkflowConversion from "./pages/WorkflowConversion";
+import PricingDashboard from "./pages/PricingDashboard";
+import PipelineAnalysisDashboard from "./pages/PipelineAnalysisDashboard";
+import Actors from "./pages/Actors";
 import { KnowledgeBaseEditor } from "./components/admin/KnowledgeBaseEditor";
 import { GlobalCohiChat } from "./components/cohi/GlobalCohiChat";
 import { CohiDemoExperience } from "./components/demo/CohiDemoExperience";
@@ -97,6 +101,12 @@ function WorkbenchRedirect() {
   return <Navigate to="/my-dashboard" replace />;
 }
 
+function RootRoute() {
+  const { isAuthenticated } = useAuth();
+  if (isAuthenticated) return <Navigate to="/insights" replace />;
+  return <Index />;
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme">
@@ -117,7 +127,7 @@ const App = () => (
               <ScrollToTop />
               <Routes>
               {/* Public routes */}
-              <Route path="/" element={<Navigate to="/insights" replace />} />
+              <Route path="/" element={<RootRoute />} />
               <Route path="/landing" element={<Index />} />
               <Route path="/login" element={<Login />} />
               <Route path="/forgot-password" element={<ForgotPassword />} />
@@ -197,6 +207,16 @@ const App = () => (
                   <LoanDetail />
                 </ProtectedRoute>
               } />
+              <Route path="/pricing-dashboard" element={
+                <ProtectedRoute>
+                  <PricingDashboard />
+                </ProtectedRoute>
+              } />
+              <Route path="/pipeline-analysis" element={
+                <ProtectedRoute>
+                  <PipelineAnalysisDashboard />
+                </ProtectedRoute>
+              } />
               <Route path="/credit-risk-management" element={
                 <ProtectedRoute>
                   <CreditRiskManagement />
@@ -210,6 +230,11 @@ const App = () => (
               <Route path="/high-performers" element={
                 <ProtectedRoute>
                   <HighPerformers />
+                </ProtectedRoute>
+              } />
+              <Route path="/actors" element={
+                <ProtectedRoute>
+                  <Actors />
                 </ProtectedRoute>
               } />
               <Route path="/performance/toptiering-comparison" element={
@@ -230,6 +255,11 @@ const App = () => (
               <Route path="/sales-trends" element={
                 <ProtectedRoute>
                   <SalesTrends />
+                </ProtectedRoute>
+              } />
+              <Route path="/sales-scorecard-overview" element={
+                <ProtectedRoute>
+                  <SalesScorecardOverview />
                 </ProtectedRoute>
               } />
               <Route path="/performance/operation-scorecard" element={

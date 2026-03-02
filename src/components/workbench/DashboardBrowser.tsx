@@ -53,6 +53,9 @@ const sectionIdToRegistryGroup: Record<string, string> = {
   leaderboard: "Leaderboard",
   executiveDashboard: "Executive Dashboard",
   highPerformers: "High Performers",
+  actors: "Actors",
+  pricingDashboard: "Pricing Dashboard",
+  pipelineAnalysis: "Pipeline Analysis",
 };
 
 // ---------------------------------------------------------------------------

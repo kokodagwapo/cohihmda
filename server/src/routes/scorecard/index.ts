@@ -47,12 +47,20 @@ import {
   OPS_TTS_WEIGHTS,
   SALES_TTS_WEIGHTS,
   type ActorConfig,
+  buildDimensionFilterWhereClause,
   type ActorMissingMode,
   type TTSTier,
   type ComplexityConfig,
   type ComplexityConfigV2,
 } from "../../utils/scorecard-utils.js";
 import { getOperationsScorecardTrends } from "../../services/scorecard/operationsScorecardTrendsService.js";
+import {
+  getSalesScorecardOverview,
+  getSalesScorecardOverviewBranches,
+  getSalesScorecardOverviewLoanOfficers,
+  type SalesScorecardOverviewMeasure,
+  type SalesScorecardOverviewTimePeriod,
+} from "../../services/dashboard/salesScorecardOverviewService.js";
 
 const router = Router();
 
@@ -313,6 +321,7 @@ router.get(
 
       // SQL filtering setup
       const channelClause = buildChannelWhereClause(channelGroup);
+      const dimensionFilterClause = buildDimensionFilterWhereClause(req.query as Record<string, any>, '', new Set(['channel_group', 'tenant_id']));
       const startDateStr = formatDateForSQL(effectiveStartDate);
       const endDateStr = formatDateForSQL(effectiveEndDate);
 
@@ -353,7 +362,8 @@ router.get(
            AND UPPER(TRIM(${actorColumn})) NOT IN ('99-MISSING', 'MISSING', 'NO LO FOUND', 'NO LOAN OFFICER', 'NO BRANCH FOUND', 'UNKNOWN')
            AND UPPER(TRIM(${actorColumn})) NOT LIKE '99-%'
            ${accessWhereClause}
-           ${channelClause}`,
+           ${channelClause}
+           ${dimensionFilterClause}`,
             fundedQueryParams
           ),
         2,
@@ -376,7 +386,8 @@ router.get(
          WHERE COALESCE(started_date, application_date) >= $1
            AND COALESCE(started_date, application_date) <= $2
            ${accessWhereClause}
-           ${channelClause}`,
+           ${channelClause}
+           ${dimensionFilterClause}`,
             fundedQueryParams
           ),
         2,
@@ -1165,6 +1176,7 @@ router.get(
 
       // SQL filtering
       const channelClause = buildChannelWhereClause(channelGroup);
+      const dimensionFilterClause = buildDimensionFilterWhereClause(req.query as Record<string, any>, '', new Set(['channel_group', 'tenant_id']));
       const startDateStr = formatDateForSQL(effectiveStartDate);
       const endDateStr = formatDateForSQL(effectiveEndDate);
 
@@ -1188,6 +1200,7 @@ router.get(
         AND TRIM(${config.actorColumn}) != ''
         AND UPPER(TRIM(${config.actorColumn})) != '99-MISSING'
         ${channelClause}
+        ${dimensionFilterClause}
     `,
         [startDateStr, endDateStr]
       );
@@ -1651,10 +1664,13 @@ router.get(
         months: monthsCount,
       });
 
+      const dimensionFilterClause = buildDimensionFilterWhereClause(req.query as Record<string, any>, '', new Set(['channel_group', 'tenant_id']));
+
       const result = await getOperationsScorecardTrends(tenantPool, {
         actorType,
         monthsCount,
         channelGroup,
+        dimensionFilterClause,
       });
 
       logInfo("[Scorecard/Operations-Trends] Complete", {
@@ -1719,6 +1735,12 @@ router.get(
       previousStartDate.setMonth(previousStartDate.getMonth() - monthsBack + 1);
       previousStartDate.setDate(1);
 
+      const dimensionFilterClause = buildDimensionFilterWhereClause(
+        req.query as Record<string, any>,
+        '',
+        new Set(['channel_group', 'tenant_id', 'date_range'])
+      );
+
       logInfo("[Scorecard/Sales-Trends] Start", {
         dateRange,
         channel: channelGroup,
@@ -1738,6 +1760,7 @@ router.get(
       WHERE funding_date IS NOT NULL
         AND funding_date >= $1
         AND funding_date <= $2
+        ${dimensionFilterClause}
     `,
         [previousStartDate.toISOString(), currentEndDate.toISOString()]
       );
@@ -2022,6 +2045,12 @@ router.get(
       startDate.setMonth(startDate.getMonth() - monthsBack);
       startDate.setDate(1);
 
+      const dimensionFilterClause = buildDimensionFilterWhereClause(
+        req.query as Record<string, any>,
+        '',
+        new Set(['channel_group', 'tenant_id', 'date_range', 'loan_officer'])
+      );
+
       // Fetch LO's loans with tenant-specific revenue calculation
       const loansResult = await tenantPool.query(
         `
@@ -2037,6 +2066,7 @@ router.get(
         AND funding_date IS NOT NULL
         AND funding_date >= $2
         AND funding_date <= $3
+        ${dimensionFilterClause}
     `,
         [decodedLoName, startDate.toISOString(), endDate.toISOString()]
       );
@@ -2185,6 +2215,89 @@ router.get(
       });
       res.status(500).json({
         error: error.message || "Failed to fetch sales trends drilldown",
+      });
+    }
+  }
+);
+
+// =============================================================================
+// SALES SCORECARD OVERVIEW - GET /api/scorecard/sales-scorecard-overview
+// =============================================================================
+
+/**
+ * GET /api/scorecard/sales-scorecard-overview
+ * Volume or units by pipeline stage (started, application, locked, closed, funded) per time period.
+ *
+ * Query: measure=volume|units, time_period=monthly-ytd|quarterly-ytd|weekly-mtd|weekly-last-3|daily-mtd|daily-last-month,
+ *        branch?, loan_officer?
+ */
+router.get(
+  "/sales-scorecard-overview",
+  authenticateToken,
+  attachTenantContext,
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantPool = getTenantContext(req).tenantPool;
+      if (!tenantPool) {
+        return res.status(400).json({ error: "Tenant context required" });
+      }
+      const measure = (req.query.measure as SalesScorecardOverviewMeasure) || "volume";
+      const timePeriod =
+        (req.query.time_period as SalesScorecardOverviewTimePeriod) || "monthly-ytd";
+      const filters = {
+        branch: req.query.branch ? [].concat(req.query.branch as any).filter(Boolean) : undefined,
+        loan_officer: req.query.loan_officer
+          ? [].concat(req.query.loan_officer as any).filter(Boolean)
+          : undefined,
+      };
+      const queryParams = req.query as Record<string, unknown>;
+      const rows = await getSalesScorecardOverview(
+        tenantPool,
+        measure,
+        timePeriod,
+        filters,
+        queryParams
+      );
+      return res.json({ rows });
+    } catch (error: any) {
+      logError("Error fetching sales scorecard overview", error, {
+        userId: req.userId,
+      });
+      res.status(500).json({
+        error: error.message || "Failed to fetch sales scorecard overview",
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/scorecard/sales-scorecard-overview/filter-options
+ * Returns { branches, loanOfficers } for filter dropdowns.
+ */
+router.get(
+  "/sales-scorecard-overview/filter-options",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantPool = getTenantContext(req).tenantPool;
+      if (!tenantPool) {
+        return res.status(400).json({ error: "Tenant context required" });
+      }
+      const [branches, loanOfficers] = await Promise.all([
+        getSalesScorecardOverviewBranches(tenantPool),
+        getSalesScorecardOverviewLoanOfficers(tenantPool),
+      ]);
+      return res.json({ branches, loanOfficers });
+    } catch (error: any) {
+      logError("Error fetching sales scorecard overview filter options", error, {
+        userId: req.userId,
+      });
+      res.status(500).json({
+        error:
+          error.message ||
+          "Failed to fetch sales scorecard overview filter options",
       });
     }
   }

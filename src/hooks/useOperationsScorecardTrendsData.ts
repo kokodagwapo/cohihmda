@@ -114,7 +114,8 @@ export const useOperationsScorecardTrendsData = (
   comparisonView: ComparisonViewType = "vs-target",
   selectedTenantId?: string | null,
   selectedChannel?: string | null,
-  monthsToShow: number = 13
+  monthsToShow: number = 13,
+  dimensionFilters?: Array<{ column: string; value: string }>,
 ) => {
   const [data, setData] = useState<OperationsScorecardTrendsData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -143,6 +144,11 @@ export const useOperationsScorecardTrendsData = (
         if (selectedTenantId) params.append("tenant_id", selectedTenantId);
         if (selectedChannel && selectedChannel !== "All")
           params.append("channel_group", selectedChannel);
+        if (dimensionFilters) {
+          for (const df of dimensionFilters) {
+            if (df.value && df.value !== 'all') params.append(df.column, df.value);
+          }
+        }
 
         const queryString = params.toString();
         // Canonical endpoint: /api/scorecard/operations-trends (legacy /api/loans/operations-scorecard-trends is deprecated)
@@ -211,12 +217,14 @@ export const useOperationsScorecardTrendsData = (
     };
 
     fetchOperationsScorecardTrendsData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     actorType,
     comparisonView,
     selectedTenantId,
     selectedChannel,
     monthsToShow,
+    JSON.stringify(dimensionFilters),
   ]);
 
   return { data, loading, error };

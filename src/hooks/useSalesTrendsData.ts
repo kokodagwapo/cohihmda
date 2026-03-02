@@ -144,7 +144,8 @@ export function useSalesTrendsData(
   dateRange: DateRangeOption = '3-months',
   channelGroup: string = 'Retail',
   tenantId?: string | null,
-  customDateRange?: SalesTrendsCustomDateRange
+  customDateRange?: SalesTrendsCustomDateRange,
+  dimensionFilters?: Array<{ column: string; value: string }>,
 ): UseSalesTrendsDataReturn {
   const [data, setData] = useState<SalesTrendsData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -165,6 +166,11 @@ export function useSalesTrendsData(
       if (customDateRange) {
         url += `&start_date=${encodeURIComponent(customDateRange.start)}&end_date=${encodeURIComponent(customDateRange.end)}`;
       }
+      if (dimensionFilters) {
+        for (const df of dimensionFilters) {
+          if (df.value && df.value !== 'all') url += `&${encodeURIComponent(df.column)}=${encodeURIComponent(df.value)}`;
+        }
+      }
       console.log('[SalesTrends] Fetching data from', url);
       
       const responseData = await api.request<SalesTrendsData>(url);
@@ -181,7 +187,8 @@ export function useSalesTrendsData(
     } finally {
       setLoading(false);
     }
-  }, [dateRange, channelGroup, tenantId, customDateRange?.start, customDateRange?.end]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateRange, channelGroup, tenantId, customDateRange?.start, customDateRange?.end, JSON.stringify(dimensionFilters)]);
 
   useEffect(() => {
     fetchData();

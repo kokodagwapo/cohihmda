@@ -23,7 +23,10 @@ export type SectionType =
   | 'executive-dashboard'
   | 'loan-detail'
   | 'workflow-conversion'
-  | 'high-performers';
+  | 'high-performers'
+  | 'actors'
+  | 'pricing-dashboard'
+  | 'pipeline-analysis';
 
 /**
  * A dynamic (user-added) filter dimension.
@@ -61,9 +64,81 @@ export interface SectionFilters {
   highPerformersLeftPeriod?: string;
   /** High Performers: right column period */
   highPerformersRightPeriod?: string;
+  /** Actors: calculation (average | median) */
+  actorsCalculation?: 'average' | 'median';
+  /** Actors: turn time type (app_to_fund_days | app_to_closing_days) */
+  actorsTurnTimeType?: 'app_to_fund_days' | 'app_to_closing_days';
+  /** Actors: date range type (calendar_days | business_days) */
+  actorsDateRangeType?: 'calendar_days' | 'business_days';
+  /** Actors: measure (units | volume) */
+  actorsMeasure?: 'units' | 'volume';
+  /** Actors: selected actor filter */
+  actorsSelectedActor?: { type: string; name: string } | null;
+  /** Actors: selected status filter (from bar chart) */
+  actorsSelectedStatus?: string | null;
+  /** Actors: which dimension each of the 4 table slots shows */
+  actorsTableDimensions?: [string, string, string, string];
+  /** Actors: ordered list of column ids to show in workbench actor tables (empty = all default) */
+  actorsTableColumnIds?: string[];
+  /** Pricing Dashboard: entity type (branch, broker_lender_name, channel, investor) */
+  pricingEntityType?: string;
+  /** Pricing Dashboard: actor type (loan_officer, account_executive) */
+  pricingActorType?: string;
+  /** Pricing Dashboard: date range (all, mtd, lm, qtd, ytd, ly) */
+  pricingDateRange?: string;
+  /** Pricing Dashboard: loan funding (funded, closed) */
+  pricingLoanFunding?: string;
+  /** Pricing Dashboard: loan status (all, active, funded) */
+  pricingLoanStatus?: string;
+  /** Pricing Dashboard: lock status (locked, not_locked, total) */
+  pricingLockStatus?: string;
+  /** Pricing Dashboard: entity value filter */
+  pricingEntityValue?: string;
+  /** Pricing Dashboard: column to apply entity value filter (e.g. branch when grouping by broker_lender_name) */
+  pricingEntityFilterType?: string;
+  /** Pricing Dashboard: actor value filter */
+  pricingActorValue?: string;
+  /** Pricing Dashboard: column to apply actor value filter */
+  pricingActorFilterType?: string;
+  /** Workflow Conversion: period selection (MTD, QTD, etc.) */
+  workflowPeriodSelection?: PeriodSelection;
+  /** Workflow Conversion: conversion % vs turn time */
+  workflowCalculationType?: 'conversion' | 'turn_time';
+  /** Workflow Conversion: workflow vs individual cards */
+  workflowGrouping?: 'workflow' | 'individual';
+  /** Workflow Conversion: segment cards (from → to milestone ids) */
+  workflowSegments?: { from: string; to: string }[];
+  /** Pipeline Analysis: year range "YYYY-YYYY" (e.g. "2024-2025") */
+  pipelineAnalysisYearRange?: string;
+  /** Pipeline Analysis: start date field for pipeline */
+  pipelineAnalysisStartDateField?: 'application_date' | 'lock_date' | 'processing_date' | 'credit_pull_date' | 'submitted_to_underwriting_date';
+  /** Pipeline Analysis: selected loan types (empty = all) */
+  pipelineAnalysisLoanTypes?: string[];
+  /** Pipeline Analysis: selected loan purposes (empty = all) */
+  pipelineAnalysisLoanPurposes?: string[];
+  /** Pipeline Analysis: selected branches (empty = all) */
+  pipelineAnalysisBranches?: string[];
+  /** Pipeline Analysis: snapshot day of week (1=Mon .. 5=Fri); changing triggers backfill */
+  pipelineAnalysisSnapshotDay?: number;
+  /** Pipeline Analysis: view mode week vs month */
+  pipelineAnalysisViewMode?: 'week' | 'month';
+  /** Pipeline Analysis: percent change rows by volume or units */
+  pipelineAnalysisPctMetric?: 'volume' | 'units';
   /** User-added dynamic filters (column = value conditions) */
   dynamicFilters?: DynamicFilterEntry[];
 }
+
+/** Default column ids for actor tables (workbench). Order determines display order. */
+export const ACTORS_TABLE_DEFAULT_COLUMN_IDS = [
+  'name',
+  'units',
+  'volume',
+  'avgAppToFund',
+  'approvalPct',
+  'deniedPct',
+  'withdrawnPct',
+  'loanComplexity',
+] as const;
 
 const currentYear = new Date().getFullYear();
 
@@ -141,6 +216,51 @@ export const useWidgetSectionStore = create<WidgetSectionState>((set, get) => ({
           highPerformersDateType: 'funding_date',
           highPerformersLeftPeriod: 'mtd',
           highPerformersRightPeriod: 'ytd',
+        };
+      } else if (sectionType === 'actors') {
+        const now = new Date();
+        const start = new Date(now.getFullYear(), now.getMonth(), 1);
+        const range = {
+          start: start.toISOString().slice(0, 10),
+          end: now.toISOString().slice(0, 10),
+        };
+        filters = {
+          ...base,
+          periodSelection: { type: 'preset' as const, preset: 'mtd' as const, dateRange: range },
+          dateRange: range,
+          actorsCalculation: 'average',
+          actorsTurnTimeType: 'app_to_fund_days',
+          actorsDateRangeType: 'calendar_days',
+          actorsMeasure: 'units',
+          actorsSelectedActor: null,
+          actorsSelectedStatus: null,
+          actorsTableDimensions: ['loan_officer', 'processor', 'underwriter', 'closer'],
+          actorsTableColumnIds: [...ACTORS_TABLE_DEFAULT_COLUMN_IDS],
+        };
+      } else if (sectionType === 'pricing-dashboard') {
+        filters = {
+          ...base,
+          pricingEntityType: 'branch',
+          pricingActorType: 'loan_officer',
+          pricingDateRange: 'mtd',
+          pricingLoanFunding: 'funded',
+          pricingLoanStatus: 'active',
+          pricingLockStatus: 'total',
+          pricingEntityValue: '',
+          pricingEntityFilterType: undefined,
+          pricingActorValue: '',
+          pricingActorFilterType: undefined,
+        };
+      } else if (sectionType === 'pipeline-analysis') {
+        filters = {
+          ...base,
+          pipelineAnalysisStartDateField: 'application_date',
+          pipelineAnalysisYearRange: undefined,
+          pipelineAnalysisLoanTypes: [],
+          pipelineAnalysisLoanPurposes: [],
+          pipelineAnalysisBranches: [],
+          pipelineAnalysisViewMode: 'week',
+          pipelineAnalysisPctMetric: 'volume',
         };
       }
       return {

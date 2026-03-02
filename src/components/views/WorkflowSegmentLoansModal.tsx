@@ -98,6 +98,8 @@ export interface WorkflowSegmentLoansModalProps {
   segmentIndex: number;
   selectedTenantId?: string | null;
   channelGroup?: string | null;
+  /** Optional dimension filters from workbench group (branch, loan_officer, etc.). */
+  dimensionFilters?: Array<{ column: string; value: string }>;
 }
 
 export function WorkflowSegmentLoansModal({
@@ -113,6 +115,7 @@ export function WorkflowSegmentLoansModal({
   segmentIndex,
   selectedTenantId,
   channelGroup,
+  dimensionFilters,
 }: WorkflowSegmentLoansModalProps) {
   const { loans, loading, error } = useWorkflowConversionSegmentLoans({
     startDate,
@@ -123,6 +126,7 @@ export function WorkflowSegmentLoansModal({
     filter: open && filter ? filter : null,
     selectedTenantId,
     channelGroup,
+    dimensionFilters,
   });
 
   const title =

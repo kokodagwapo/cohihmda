@@ -254,6 +254,14 @@ export async function runScheduledSyncs(): Promise<void> {
             const batch = jobs.slice(i, i + batchSize);
             await Promise.allSettled(batch.map(job => runScheduledSync(job, tenantPool)));
           }
+
+          // After scheduled sync: if the latest Monday's row does not exist, compute and insert it (run only when today is not Monday)
+          try {
+            const { insertPipelineSnapshotForLatestMondayIfMissing } = await import('./dashboard/pipelineAnalysisService.js');
+            await insertPipelineSnapshotForLatestMondayIfMissing(tenantPool);
+          } catch (err: any) {
+            console.warn(`[SyncScheduler] Pipeline analysis snapshot update failed for tenant "${tenant.name}":`, err?.message ?? err);
+          }
         }
       } catch (error: any) {
         console.error(`[SyncScheduler] Error processing tenant "${tenant.name}" (${tenant.id}):`, error.message);
