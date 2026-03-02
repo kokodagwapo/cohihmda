@@ -487,7 +487,8 @@ router.post(
       const ctx = getTenantContext(req);
       const { tenantPool } = ctx;
       const tenantId = ctx.tenantId ?? '';
-      const { id } = req.params;
+      const rawId = req.params.id;
+      const id = typeof rawId === 'string' ? rawId : Array.isArray(rawId) ? rawId[0] ?? '' : '';
       const scheduleResult = await tenantPool.query(
         'SELECT id, name, description, content_type, content_id, content_config, recipient_list_id, recipient_emails FROM public.distribution_schedules WHERE id = $1 AND is_active = true',
         [id]
