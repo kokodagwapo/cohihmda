@@ -104,12 +104,13 @@ const topTieringMenuGroups = {
         icon: ClipboardList,
         iconColor: "indigo" as const,
       },
-      {
-        id: "pricingDashboard",
-        label: "Pricing Dashboard",
-        icon: DollarSign,
-        iconColor: "emerald" as const,
-      },
+      // Hidden for now – needs work
+      // {
+      //   id: "pricingDashboard",
+      //   label: "Pricing Dashboard",
+      //   icon: DollarSign,
+      //   iconColor: "emerald" as const,
+      // },
       {
         id: "workflowConversion",
         label: "Workflow Conversion",
@@ -248,14 +249,14 @@ const compactItemDefault =
 
 // Route mapping for navigation
 const routeMap: Record<string, string> = {
-  loanFunnel: "/loan-funnel",
+  // loanFunnel: "/loan-funnel", // hidden – page references removed
   creditRiskManagement: "/credit-risk-management",
   companyScorecard: "/company-scorecard",
   topTieringComparison: "/performance/toptiering-comparison",
   workflowConversion: "/workflow-conversion",
   pipelineAnalysis: "/pipeline-analysis",
   loanDetail: "/loan-detail",
-  pricingDashboard: "/pricing-dashboard",
+  // pricingDashboard: "/pricing-dashboard", // hidden for now
   highPerformers: "/high-performers",
   actors: "/actors",
   salesScorecard: "/sales-scorecard",
@@ -493,7 +494,7 @@ export function Navigation(
   // Check if current page is a TopTiering page
   const isTopTieringPage = useMemo(() => {
     const topTieringRoutes = [
-      "/loan-funnel",
+      // "/loan-funnel", // hidden – page removed
       "/credit-risk-management",
       "/company-scorecard",
       "/performance/toptiering-comparison",
@@ -953,7 +954,7 @@ export function Navigation(
                 <button
                   onClick={() => {
                     if (!isTopTieringPage) {
-                      navigate("/loan-funnel");
+                      navigate("/performance/toptiering-comparison");
                     } else {
                       setTopTieringSubOpen(true);
                       setTopTieringOpen(!topTieringOpen);
