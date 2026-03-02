@@ -16,6 +16,8 @@ import {
   getPipelineYearRange,
   getPipelineSnapshotDay,
   getPipelineFilterOptions,
+  getPipelineLoansInRange,
+  getPipelineLoansActiveInRange,
   type SnapshotDayOfWeek,
   type StartDateField,
   type PipelineSnapshotFilters,
@@ -110,6 +112,8 @@ router.get(
     const startDateField: StartDateField =
       startDateFieldRaw === "lock_date" ? "lock_date"
       : startDateFieldRaw === "processing_date" ? "processing_date"
+      : startDateFieldRaw === "credit_pull_date" ? "credit_pull_date"
+      : startDateFieldRaw === "submitted_to_underwriting_date" ? "submitted_to_underwriting_date"
       : "application_date";
     const loanTypes = parseStringArray(req.query.loan_type);
     const loanPurposes = parseStringArray(req.query.loan_purpose);
@@ -138,6 +142,7 @@ router.get(
         active_units: Number(r.active_units),
         active_volume: Number(r.active_volume),
         active_lo_count: Number(r.active_lo_count),
+        active_ops_count: Number(r.active_ops_count ?? 0),
         weekly_pct_change_volume: r.weekly_pct_change_volume != null ? Number(r.weekly_pct_change_volume) : null,
         monthly_pct_change_volume: r.monthly_pct_change_volume != null ? Number(r.monthly_pct_change_volume) : null,
         annual_pct_change_volume: r.annual_pct_change_volume != null ? Number(r.annual_pct_change_volume) : null,
@@ -184,6 +189,65 @@ router.post(
     } catch (error) {
       if (handleDatabaseError(error, res, "Pipeline analysis backfill")) return;
       return res.status(500).json({ error: "Pipeline analysis backfill failed" });
+    }
+  }
+);
+
+/**
+ * GET /api/pipeline-analysis/loans
+ * Returns loan detail rows for all loans that are active on at least one snapshot date in the range.
+ * Same "active on snapshot date" logic as pipeline snapshots, so the list matches the loans counted in units/volume.
+ * Query: from, to, start_date_field, loan_type[], loan_purpose[], branch[], tenant_id.
+ */
+router.get(
+  "/loans",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    const from = req.query.from as string | undefined;
+    const to = req.query.to as string | undefined;
+    if (!from || !to) {
+      return res.status(400).json({ error: "from and to date parameters are required (YYYY-MM-DD)." });
+    }
+    const startDateFieldRaw = req.query.start_date_field as string | undefined;
+    const startDateField: StartDateField =
+      startDateFieldRaw === "lock_date" ? "lock_date"
+      : startDateFieldRaw === "processing_date" ? "processing_date"
+      : startDateFieldRaw === "credit_pull_date" ? "credit_pull_date"
+      : startDateFieldRaw === "submitted_to_underwriting_date" ? "submitted_to_underwriting_date"
+      : "application_date";
+    const loanTypes = parseStringArray(req.query.loan_type);
+    const loanPurposes = parseStringArray(req.query.loan_purpose);
+    const branches = parseStringArray(req.query.branch);
+    const filters: PipelineSnapshotFilters | undefined =
+      (loanTypes?.length ?? 0) > 0 || (loanPurposes?.length ?? 0) > 0 || (branches?.length ?? 0) > 0
+        ? { loanTypes, loanPurposes, branches }
+        : undefined;
+    const dimensionFilterClause = buildDimensionFilterWhereClause(
+      req.query as Record<string, unknown>,
+      "l",
+      new Set(["tenant_id", "from", "to", "start_date_field", "loan_type", "loan_purpose", "branch", "snapshot_dates"]),
+    );
+    const snapshotDates = parseStringArray(req.query.snapshot_dates);
+    try {
+      const ctx = getTenantContext(req);
+      if (!ctx?.tenantPool) {
+        return res.status(400).json({ error: "Tenant context required" });
+      }
+      const loans = await getPipelineLoansActiveInRange(
+        ctx.tenantPool,
+        from,
+        to,
+        startDateField,
+        filters,
+        dimensionFilterClause,
+        snapshotDates && snapshotDates.length > 0 ? snapshotDates : undefined
+      );
+      return res.json({ loans });
+    } catch (error) {
+      console.error("[Pipeline Analysis] GET /loans error:", error);
+      if (handleDatabaseError(error, res, "Pipeline analysis loans")) return;
+      return res.status(500).json({ error: "Failed to load pipeline loans" });
     }
   }
 );

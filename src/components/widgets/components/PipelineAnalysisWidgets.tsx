@@ -43,6 +43,19 @@ function formatPct(value: number | null): string {
   return `${sign}${value.toFixed(2)}%`;
 }
 
+function formatUnitsPerActor(units: number, count: number): string {
+  if (count == null || count <= 0) return '—';
+  return (units / count).toFixed(1);
+}
+
+/** Returns Tailwind background class for heatmap: bottom 35% red, middle 30% yellow, top 35% green (by percentile). */
+function heatmapClass(value: number | null, p35: number, p65: number): string {
+  if (value == null || !Number.isFinite(p35) || !Number.isFinite(p65)) return '';
+  if (value <= p35) return 'bg-red-100 dark:bg-red-950/50';
+  if (value >= p65) return 'bg-emerald-100 dark:bg-emerald-950/50';
+  return 'bg-yellow-100 dark:bg-yellow-950/50';
+}
+
 function ordinal(n: number): string {
   const s = n % 10;
   const t = n % 100;
@@ -179,6 +192,7 @@ function buildDerived(source: PipelineAnalysisSource | null) {
     years.forEach((y) => {
       const row = byYearWeekMap.get(`${y}-${w}`);
       point[`${y} LO Count`] = row?.active_lo_count ?? null;
+      point[`${y} Units`] = row?.active_units ?? null;
     });
     return point;
   });
@@ -189,6 +203,7 @@ function buildDerived(source: PipelineAnalysisSource | null) {
     years.forEach((y) => {
       const row = byYearMonth.get(`${y}-${month}`);
       point[`${y} LO Count`] = row?.active_lo_count ?? null;
+      point[`${y} Units`] = row?.active_units ?? null;
     });
     return point;
   });
@@ -272,8 +287,53 @@ export function PipelineAnalysisTableWidget({
     );
   }
 
-  const { years, byYearWeek, byWeekPct, snapshotDayLabel, viewMode, pctMetric } = derived;
+  const { years, byYearWeek, byWeekPct, byYearMonth, snapshotDayLabel, viewMode, pctMetric } = derived;
   const pctMetricLabel = pctMetric === 'volume' ? 'Volume' : 'Units';
+
+  const monthHeatmapAvgs = useMemo(() => {
+    const lo: number[] = [];
+    const op: number[] = [];
+    years.forEach((y) => {
+      for (let m = 1; m <= 12; m++) {
+        const row = byYearMonth.get(`${y}-${m}`);
+        if (row && row.active_lo_count > 0) lo.push(row.active_units / row.active_lo_count);
+        if (row && row.active_ops_count > 0) op.push(row.active_units / row.active_ops_count);
+      }
+    });
+    const sortedLO = [...lo].sort((a, b) => a - b);
+    const sortedOP = [...op].sort((a, b) => a - b);
+    const nLO = sortedLO.length;
+    const nOP = sortedOP.length;
+    return {
+      p35LO: nLO > 0 ? sortedLO[Math.floor(0.35 * nLO)] : 0,
+      p65LO: nLO > 0 ? sortedLO[Math.floor(0.65 * nLO)] : 0,
+      p35OPs: nOP > 0 ? sortedOP[Math.floor(0.35 * nOP)] : 0,
+      p65OPs: nOP > 0 ? sortedOP[Math.floor(0.65 * nOP)] : 0,
+    };
+  }, [years, byYearMonth]);
+
+  const weekHeatmapAvgs = useMemo(() => {
+    const lo: number[] = [];
+    const op: number[] = [];
+    const weeks = derived.weekValues.slice(0, 26);
+    years.forEach((y) => {
+      weeks.forEach((w) => {
+        const row = byYearWeek.get(`${y}-${w}`);
+        if (row && row.active_lo_count > 0) lo.push(row.active_units / row.active_lo_count);
+        if (row && row.active_ops_count > 0) op.push(row.active_units / row.active_ops_count);
+      });
+    });
+    const sortedLO = [...lo].sort((a, b) => a - b);
+    const sortedOP = [...op].sort((a, b) => a - b);
+    const nLO = sortedLO.length;
+    const nOP = sortedOP.length;
+    return {
+      p35LO: nLO > 0 ? sortedLO[Math.floor(0.35 * nLO)] : 0,
+      p65LO: nLO > 0 ? sortedLO[Math.floor(0.65 * nLO)] : 0,
+      p35OPs: nOP > 0 ? sortedOP[Math.floor(0.35 * nOP)] : 0,
+      p65OPs: nOP > 0 ? sortedOP[Math.floor(0.65 * nOP)] : 0,
+    };
+  }, [years, byYearWeek, derived.weekValues]);
 
   if (viewMode === 'month') {
     const { byYearMonth, byMonthPct } = derived;
@@ -315,20 +375,6 @@ export function PipelineAnalysisTableWidget({
                     return (
                       <TableCell key={`${year}-${month}`} className="text-right">
                         {row != null ? row.active_units : '—'}
-                      </TableCell>
-                    );
-                  })}
-                </TableRow>
-              ))}
-              {years.map((year) => (
-                <TableRow key={`lo-${year}`}>
-                  <TableCell className="font-medium sticky left-0 bg-background z-10">{year} LO Count</TableCell>
-                  {MONTH_LABELS.map((_, i) => {
-                    const month = i + 1;
-                    const row = byYearMonth.get(`${year}-${month}`);
-                    return (
-                      <TableCell key={`${year}-${month}`} className="text-right">
-                        {row != null ? row.active_lo_count : '—'}
                       </TableCell>
                     );
                   })}
@@ -379,6 +425,64 @@ export function PipelineAnalysisTableWidget({
                   );
                 })}
               </TableRow>
+              {years.map((year) => (
+                <TableRow key={`lo-${year}`}>
+                  <TableCell className="font-medium sticky left-0 bg-background z-10">{year} LO Count</TableCell>
+                  {MONTH_LABELS.map((_, i) => {
+                    const month = i + 1;
+                    const row = byYearMonth.get(`${year}-${month}`);
+                    return (
+                      <TableCell key={`${year}-${month}`} className="text-right">
+                        {row != null ? row.active_lo_count : '—'}
+                      </TableCell>
+                    );
+                  })}
+                </TableRow>
+              ))}
+              {years.map((year) => (
+                <TableRow key={`ops-${year}`}>
+                  <TableCell className="font-medium sticky left-0 bg-background z-10">{year} OPs Count</TableCell>
+                  {MONTH_LABELS.map((_, i) => {
+                    const month = i + 1;
+                    const row = byYearMonth.get(`${year}-${month}`);
+                    return (
+                      <TableCell key={`${year}-${month}`} className="text-right">
+                        {row != null ? row.active_ops_count : '—'}
+                      </TableCell>
+                    );
+                  })}
+                </TableRow>
+              ))}
+              {years.map((year) => (
+                <TableRow key={`uplo-${year}`}>
+                  <TableCell className="font-medium sticky left-0 bg-background z-10 text-muted-foreground">{year} Units per LO</TableCell>
+                  {MONTH_LABELS.map((_, i) => {
+                    const month = i + 1;
+                    const row = byYearMonth.get(`${year}-${month}`);
+                    const val = row && row.active_lo_count > 0 ? row.active_units / row.active_lo_count : null;
+                    return (
+                      <TableCell key={`${year}-${month}`} className={`text-right ${heatmapClass(val, monthHeatmapAvgs.p35LO, monthHeatmapAvgs.p65LO)}`}>
+                        {row != null ? formatUnitsPerActor(row.active_units, row.active_lo_count) : '—'}
+                      </TableCell>
+                    );
+                  })}
+                </TableRow>
+              ))}
+              {years.map((year) => (
+                <TableRow key={`upops-${year}`}>
+                  <TableCell className="font-medium sticky left-0 bg-background z-10 text-muted-foreground">{year} Units per OPs</TableCell>
+                  {MONTH_LABELS.map((_, i) => {
+                    const month = i + 1;
+                    const row = byYearMonth.get(`${year}-${month}`);
+                    const val = row && row.active_ops_count > 0 ? row.active_units / row.active_ops_count : null;
+                    return (
+                      <TableCell key={`${year}-${month}`} className={`text-right ${heatmapClass(val, monthHeatmapAvgs.p35OPs, monthHeatmapAvgs.p65OPs)}`}>
+                        {row != null ? formatUnitsPerActor(row.active_units, row.active_ops_count) : '—'}
+                      </TableCell>
+                    );
+                  })}
+                </TableRow>
+              ))}
             </TableBody>
           </Table>
         </div>
@@ -429,19 +533,6 @@ export function PipelineAnalysisTableWidget({
                 })}
               </TableRow>
             ))}
-            {years.map((year) => (
-              <TableRow key={`lo-${year}`}>
-                <TableCell className="font-medium sticky left-0 bg-background z-10">{year} LO Count</TableCell>
-                {weekValues.slice(0, 26).map((w) => {
-                  const row = byYearWeek.get(`${year}-${w}`);
-                  return (
-                    <TableCell key={`${year}-${w}`} className="text-right">
-                      {row != null ? row.active_lo_count : '—'}
-                    </TableCell>
-                  );
-                })}
-              </TableRow>
-            ))}
             <TableRow>
               <TableCell className="font-medium sticky left-0 bg-background z-10 text-muted-foreground">
                 Weekly % ({pctMetricLabel})
@@ -484,6 +575,60 @@ export function PipelineAnalysisTableWidget({
                 );
               })}
             </TableRow>
+            {years.map((year) => (
+              <TableRow key={`lo-${year}`}>
+                <TableCell className="font-medium sticky left-0 bg-background z-10">{year} LO Count</TableCell>
+                {weekValues.slice(0, 26).map((w) => {
+                  const row = byYearWeek.get(`${year}-${w}`);
+                  return (
+                    <TableCell key={`${year}-${w}`} className="text-right">
+                      {row != null ? row.active_lo_count : '—'}
+                    </TableCell>
+                  );
+                })}
+              </TableRow>
+            ))}
+            {years.map((year) => (
+              <TableRow key={`ops-${year}`}>
+                <TableCell className="font-medium sticky left-0 bg-background z-10">{year} OPs Count</TableCell>
+                {weekValues.slice(0, 26).map((w) => {
+                  const row = byYearWeek.get(`${year}-${w}`);
+                  return (
+                    <TableCell key={`${year}-${w}`} className="text-right">
+                      {row != null ? row.active_ops_count : '—'}
+                    </TableCell>
+                  );
+                })}
+              </TableRow>
+            ))}
+            {years.map((year) => (
+              <TableRow key={`uplo-${year}`}>
+                <TableCell className="font-medium sticky left-0 bg-background z-10 text-muted-foreground">{year} Units per LO</TableCell>
+                {weekValues.slice(0, 26).map((w) => {
+                  const row = byYearWeek.get(`${year}-${w}`);
+                  const val = row && row.active_lo_count > 0 ? row.active_units / row.active_lo_count : null;
+                  return (
+                    <TableCell key={`${year}-${w}`} className={`text-right ${heatmapClass(val, weekHeatmapAvgs.p35LO, weekHeatmapAvgs.p65LO)}`}>
+                      {row != null ? formatUnitsPerActor(row.active_units, row.active_lo_count) : '—'}
+                    </TableCell>
+                  );
+                })}
+              </TableRow>
+            ))}
+            {years.map((year) => (
+              <TableRow key={`upops-${year}`}>
+                <TableCell className="font-medium sticky left-0 bg-background z-10 text-muted-foreground">{year} Units per OPs</TableCell>
+                {weekValues.slice(0, 26).map((w) => {
+                  const row = byYearWeek.get(`${year}-${w}`);
+                  const val = row && row.active_ops_count > 0 ? row.active_units / row.active_ops_count : null;
+                  return (
+                    <TableCell key={`${year}-${w}`} className={`text-right ${heatmapClass(val, weekHeatmapAvgs.p35OPs, weekHeatmapAvgs.p65OPs)}`}>
+                      {row != null ? formatUnitsPerActor(row.active_units, row.active_ops_count) : '—'}
+                    </TableCell>
+                  );
+                })}
+              </TableRow>
+            ))}
           </TableBody>
         </Table>
       </div>
@@ -549,16 +694,22 @@ export function PipelineAnalysisChartWidget({
               label={{ value: chartXKey === 'periodLabel' ? 'Month' : 'Week', position: 'insideBottom', offset: -6, fontSize: 11 }}
             />
             <YAxis
-              yAxisId="volume"
+              yAxisId="units"
               orientation="left"
+              width={44}
+              tick={{ fontSize: 9 }}
+              label={{ value: 'Units', angle: -90, position: 'insideLeft', fontSize: 10 }}
+            />
+            <YAxis
+              yAxisId="volume"
+              orientation="right"
               width={44}
               tick={{ fontSize: 9 }}
               tickFormatter={(v) =>
                 v >= 1e6 ? `${(v / 1e6).toFixed(0)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(0)}K` : String(v)
               }
-              label={{ value: 'Volume', angle: -90, position: 'insideLeft', fontSize: 10 }}
+              label={{ value: 'Volume', angle: 90, position: 'insideRight', fontSize: 10 }}
             />
-            <YAxis yAxisId="units" orientation="right" width={36} tick={{ fontSize: 9 }} />
             <Tooltip
               content={({ active, payload }) => {
                 if (!active || !payload?.length) return null;
@@ -585,21 +736,21 @@ export function PipelineAnalysisChartWidget({
             <Legend wrapperStyle={{ paddingTop: 4 }} formatter={(v) => v} iconType="rect" iconSize={8} />
             {years.map((y, i) => (
               <Bar
-                key={`${y}-volume`}
-                yAxisId="volume"
-                dataKey={`${y} Volume`}
-                name={`${y} Volume`}
+                key={`${y}-units`}
+                yAxisId="units"
+                dataKey={`${y} Units`}
+                name={`${y} Units`}
                 fill={i === 0 ? '#00008f' : '#52b852'}
                 radius={[2, 2, 0, 0]}
               />
             ))}
             {years.map((y, i) => (
               <Line
-                key={`${y}-units`}
-                yAxisId="units"
+                key={`${y}-volume`}
+                yAxisId="volume"
                 type="monotone"
-                dataKey={`${y} Units`}
-                name={`${y} Units`}
+                dataKey={`${y} Volume`}
+                name={`${y} Volume`}
                 stroke={i === 0 ? '#8080c7' : '#a9dca9'}
                 strokeWidth={1.5}
                 dot={{ r: 2 }}
@@ -671,10 +822,19 @@ export function PipelineAnalysisLOCountWidget({
               label={{ value: chartXKey === 'periodLabel' ? 'Month' : 'Week', position: 'insideBottom', offset: -6, fontSize: 11 }}
             />
             <YAxis
+              yAxisId="loCount"
               width={36}
               allowDecimals={false}
               tick={{ fontSize: 9 }}
               label={{ value: 'LO Count', angle: -90, position: 'insideLeft', fontSize: 10 }}
+            />
+            <YAxis
+              yAxisId="units"
+              orientation="right"
+              width={36}
+              allowDecimals={false}
+              tick={{ fontSize: 9 }}
+              label={{ value: 'Units', angle: 90, position: 'insideRight', fontSize: 10 }}
             />
             <Tooltip
               content={({ active, payload }) => {
@@ -686,11 +846,19 @@ export function PipelineAnalysisLOCountWidget({
                   <div className="rounded-lg border border-border bg-background px-2 py-1.5 shadow-md text-xs">
                     <p className="font-medium mb-1">{title}</p>
                     {years.map((y) => (
-                      <div key={y} className="flex justify-between gap-3">
-                        <span className="text-muted-foreground">{y} LO Count</span>
-                        <span className="font-medium tabular-nums">
-                          {p[`${y} LO Count`] != null ? String(p[`${y} LO Count`]) : '—'}
-                        </span>
+                      <div key={y} className="space-y-0.5">
+                        <div className="flex justify-between gap-3">
+                          <span className="text-muted-foreground">{y} LO Count</span>
+                          <span className="font-medium tabular-nums">
+                            {p[`${y} LO Count`] != null ? String(p[`${y} LO Count`]) : '—'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between gap-3">
+                          <span className="text-muted-foreground">{y} Units</span>
+                          <span className="font-medium tabular-nums">
+                            {p[`${y} Units`] != null ? String(p[`${y} Units`]) : '—'}
+                          </span>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -701,10 +869,24 @@ export function PipelineAnalysisLOCountWidget({
             {years.map((y, i) => (
               <Bar
                 key={`${y}-lo`}
+                yAxisId="loCount"
                 dataKey={`${y} LO Count`}
                 name={`${y} LO Count`}
                 fill={i === 0 ? '#00008f' : '#52b852'}
                 radius={[2, 2, 0, 0]}
+              />
+            ))}
+            {years.map((y, i) => (
+              <Line
+                key={`${y}-units`}
+                yAxisId="units"
+                type="monotone"
+                dataKey={`${y} Units`}
+                name={`${y} Units`}
+                stroke={i === 0 ? '#8080c7' : '#a9dca9'}
+                strokeWidth={1.5}
+                dot={{ r: 2 }}
+                connectNulls
               />
             ))}
           </ComposedChart>

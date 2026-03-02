@@ -67,7 +67,12 @@ const topTieringNavLinks = [
     variant: "mint" as const,
   },
   {
-    path: "/performance/operation-scorecard",
+    path: "/sales-scorecard-overview",
+    label: "Sales Scorecard Overview",
+    icon: BarChart3,
+    variant: "sky" as const,
+  },
+  {
     label: "Operations Scorecard",
     icon: Target,
     variant: "sky" as const,

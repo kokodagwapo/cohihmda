@@ -38,6 +38,7 @@ import OperationScorecardTrends from "./pages/OperationScorecardTrends";
 import FinancialModelingSandbox from "./pages/FinancialModelingSandbox";
 import SalesScorecard from "./pages/SalesScorecard";
 import SalesTrends from "./pages/SalesTrends";
+import SalesScorecardOverview from "./pages/SalesScorecardOverview";
 import CompanyScorecard from "./pages/CompanyScorecard";
 import HighPerformers from "./pages/HighPerformers";
 import CreditRiskManagement from "./pages/CreditRiskManagement";
@@ -248,6 +249,11 @@ const App = () => (
               <Route path="/sales-trends" element={
                 <ProtectedRoute>
                   <SalesTrends />
+                </ProtectedRoute>
+              } />
+              <Route path="/sales-scorecard-overview" element={
+                <ProtectedRoute>
+                  <SalesScorecardOverview />
                 </ProtectedRoute>
               } />
               <Route path="/performance/operation-scorecard" element={

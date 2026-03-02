@@ -22,8 +22,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { usePipelineAnalysisData, usePipelineAnalysisRange, usePipelineAnalysisConfig, usePipelineAnalysisFilterOptions, type PipelineSnapshotRow } from "@/hooks/usePipelineAnalysisData";
-import { Loader2, Table2, BarChart3, ChevronDown } from "lucide-react";
+import { usePipelineAnalysisData, usePipelineAnalysisRange, usePipelineAnalysisConfig, usePipelineAnalysisFilterOptions, usePipelineAnalysisLoans, type PipelineSnapshotRow, type PipelineLoanDetailRow } from "@/hooks/usePipelineAnalysisData";
+import { Loader2, Table2, BarChart3, ChevronDown, ArrowUp, ArrowDown, ChevronsUpDown, X } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { api } from "@/lib/api";
 import {
@@ -36,6 +36,7 @@ import {
   ResponsiveContainer,
   Tooltip,
   Legend,
+  Cell,
 } from "recharts";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -54,6 +55,19 @@ function formatPct(value: number | null): string {
   if (value === null || value === undefined) return "—";
   const sign = value >= 0 ? "+" : "";
   return `${sign}${value.toFixed(2)}%`;
+}
+
+function formatUnitsPerActor(units: number, count: number): string {
+  if (count == null || count <= 0) return "—";
+  return (units / count).toFixed(1);
+}
+
+/** Returns Tailwind background class for heatmap: bottom 35% red, middle 30% yellow, top 35% green (by percentile). */
+function heatmapClass(value: number | null, p35: number, p65: number): string {
+  if (value == null || !Number.isFinite(p35) || !Number.isFinite(p65)) return "";
+  if (value <= p35) return "bg-red-100 dark:bg-red-950/50";
+  if (value >= p65) return "bg-emerald-100 dark:bg-emerald-950/50";
+  return "bg-yellow-100 dark:bg-yellow-950/50";
 }
 
 /** Ordinal suffix: 1 -> "1st", 2 -> "2nd", 3 -> "3rd", 13 -> "13th", etc. */
@@ -125,7 +139,11 @@ export function PipelineAnalysisView({
   const [viewMode, setViewMode] = useState<PipelineViewMode>("week");
   const [pctMetric, setPctMetric] = useState<PipelinePctMetric>("volume");
   const [dataViewTab, setDataViewTab] = useState<"table" | "chart" | "loCountChart">("table");
-  const [startDateField, setStartDateField] = useState<"application_date" | "lock_date" | "processing_date">("application_date");
+  const [startDateField, setStartDateField] = useState<"application_date" | "lock_date" | "processing_date" | "credit_pull_date" | "submitted_to_underwriting_date">("application_date");
+  /** Selected week values (1–53) in week mode; selection persists when switching tabs. */
+  const [selectedWeekValues, setSelectedWeekValues] = useState<number[]>([]);
+  /** Selected months (1–12) in month mode; selection persists when switching tabs. */
+  const [selectedMonths, setSelectedMonths] = useState<number[]>([]);
 
   type FilterState = { loanTypes: string[]; loanPurposes: string[]; branches: string[] };
   const emptyFilters: FilterState = { loanTypes: [], loanPurposes: [], branches: [] };
@@ -191,6 +209,105 @@ export function PipelineAnalysisView({
     filters: filtersForApi,
   });
 
+  const [startYear, endYear] = useMemo(() => {
+    if (!effectiveYearRange) return [null, null] as [number | null, number | null];
+    const parts = effectiveYearRange.split("-").map(Number);
+    return [parts[0], parts[1]];
+  }, [effectiveYearRange]);
+
+  const years = useMemo(() => {
+    if (startYear != null && endYear != null) return [startYear, endYear];
+    const set = new Set(snapshots.map((s) => s.year));
+    return Array.from(set).sort((a, b) => a - b);
+  }, [startYear, endYear, snapshots]);
+
+  const selectedSnapshotDates = useMemo(() => {
+    const out: string[] = [];
+    if (viewMode !== "month" && selectedWeekValues.length > 0) {
+      snapshots.forEach((row) => {
+        if (years.includes(row.year) && selectedWeekValues.includes(row.week_value) && row.date) {
+          const d = typeof row.date === "string" ? row.date.slice(0, 10) : format(new Date(row.date), "yyyy-MM-dd");
+          out.push(d);
+        }
+      });
+    } else if (viewMode === "month" && selectedMonths.length > 0) {
+      const byYM = snapshotsToByYearMonth(snapshots);
+      years.forEach((y) => {
+        selectedMonths.forEach((month) => {
+          const row = byYM.get(`${y}-${month}`);
+          if (row?.date) {
+            const d = typeof row.date === "string" ? row.date.slice(0, 10) : format(new Date(row.date), "yyyy-MM-dd");
+            out.push(d);
+          }
+        });
+      });
+    }
+    return out;
+  }, [viewMode, selectedWeekValues, selectedMonths, years, snapshots]);
+
+  const { loans: pipelineLoans, loading: loansLoading, error: loansError } = usePipelineAnalysisLoans({
+    from: from || null,
+    to: to || null,
+    tenantId: tenantId ?? null,
+    startDateField,
+    filters: filtersForApi,
+    snapshotDates: selectedSnapshotDates.length > 0 ? selectedSnapshotDates : undefined,
+  });
+
+  const startDateColumnLabel =
+    startDateField === "lock_date"
+      ? "Lock date"
+      : startDateField === "processing_date"
+        ? "Processing date"
+        : startDateField === "credit_pull_date"
+          ? "Credit pull date"
+          : startDateField === "submitted_to_underwriting_date"
+            ? "Submitted to UW date"
+            : "Application date";
+
+  type LoanDetailSortKey = keyof PipelineLoanDetailRow;
+  const [loanDetailSortColumn, setLoanDetailSortColumn] = useState<LoanDetailSortKey | null>(null);
+  const [loanDetailSortDirection, setLoanDetailSortDirection] = useState<"asc" | "desc">("asc");
+
+  const sortedPipelineLoans = useMemo(() => {
+    if (!loanDetailSortColumn || pipelineLoans.length === 0) return pipelineLoans;
+    const key = loanDetailSortColumn;
+    const mult = loanDetailSortDirection === "asc" ? 1 : -1;
+    const numericKeys: LoanDetailSortKey[] = ["loan_amount", "fico_score", "ltv_ratio", "be_dti_ratio"];
+    const dateKeys: LoanDetailSortKey[] = ["start_date", "current_status_date"];
+    return [...pipelineLoans].sort((a, b) => {
+      const va = a[key];
+      const vb = b[key];
+      const aNull = va === null || va === undefined || (typeof va === "string" && va.trim() === "");
+      const bNull = vb === null || vb === undefined || (typeof vb === "string" && vb.trim() === "");
+      if (aNull && bNull) return 0;
+      if (aNull) return mult * 1;
+      if (bNull) return mult * -1;
+      if (numericKeys.includes(key)) {
+        const na = Number(va);
+        const nb = Number(vb);
+        if (!Number.isNaN(na) && !Number.isNaN(nb)) return mult * (na - nb);
+      }
+      if (dateKeys.includes(key) && typeof va === "string" && typeof vb === "string") {
+        return mult * va.localeCompare(vb);
+      }
+      const sa = String(va).trim();
+      const sb = String(vb).trim();
+      return mult * sa.localeCompare(sb, undefined, { numeric: true });
+    });
+  }, [pipelineLoans, loanDetailSortColumn, loanDetailSortDirection]);
+
+  const handleLoanDetailSort = useCallback((column: LoanDetailSortKey) => {
+    setLoanDetailSortColumn((prev) => {
+      if (prev === column) {
+        setLoanDetailSortDirection((d) => (d === "asc" ? "desc" : "asc"));
+        return column;
+      }
+      setLoanDetailSortDirection("asc");
+      return column;
+    });
+  }, []);
+
   const handleApplyFilters = useCallback(() => {
     setAppliedFilters({ ...draftFilters });
     // Don't call refetch() here: it would use stale options (previous filters). The hook's
@@ -200,6 +317,17 @@ export function PipelineAnalysisView({
   const handleCancelFilters = useCallback(() => {
     setDraftFilters({ ...appliedFilters });
   }, [appliedFilters]);
+
+  const toggleWeek = useCallback((w: number) => {
+    setSelectedWeekValues((prev) =>
+      prev.includes(w) ? prev.filter((x) => x !== w) : [...prev, w].sort((a, b) => a - b)
+    );
+  }, []);
+  const toggleMonth = useCallback((month: number) => {
+    setSelectedMonths((prev) =>
+      prev.includes(month) ? prev.filter((x) => x !== month) : [...prev, month].sort((a, b) => a - b)
+    );
+  }, []);
 
   const [backfillLoading, setBackfillLoading] = useState(false);
   const [backfillMessage, setBackfillMessage] = useState<string | null>(null);
@@ -233,23 +361,11 @@ export function PipelineAnalysisView({
     if (defaultYearRange && selectedYearRange === null) setSelectedYearRange(defaultYearRange);
   }, [defaultYearRange, selectedYearRange]);
 
-  const [startYear, endYear] = useMemo(() => {
-    if (!effectiveYearRange) return [null, null];
-    const parts = effectiveYearRange.split("-").map(Number);
-    return [parts[0], parts[1]];
-  }, [effectiveYearRange]);
-
   // Week-by-week: fixed columns 1–53 and years = [startYear, endYear] when year range is selected
   const weekValues = useMemo(
     () => (startYear != null && endYear != null ? ALL_WEEK_VALUES : Array.from(new Set(snapshots.map((s) => s.week_value))).sort((a, b) => a - b)),
     [startYear, endYear, snapshots]
   );
-
-  const years = useMemo(() => {
-    if (startYear != null && endYear != null) return [startYear, endYear];
-    const set = new Set(snapshots.map((s) => s.year));
-    return Array.from(set).sort((a, b) => a - b);
-  }, [startYear, endYear, snapshots]);
 
   const byYearWeek = useMemo(() => {
     const m = new Map<string, PipelineSnapshotRow>();
@@ -333,7 +449,7 @@ export function PipelineAnalysisView({
   const pipelineChartData = isMonthMode ? pipelineChartDataMonth : pipelineChartDataWeek;
   const chartXKey = isMonthMode ? "periodLabel" : "weekLabel";
 
-  /** LO Count chart data: same structure as volume/units chart but with active_lo_count per year. */
+  /** LO Count chart data: same structure as volume/units chart but with active_lo_count and active_units per year. */
   const pipelineLoCountChartDataWeek = useMemo(() => {
     if (years.length === 0 || weekValues.length === 0) return [];
     return weekValues.map((w) => {
@@ -341,6 +457,7 @@ export function PipelineAnalysisView({
       years.forEach((y) => {
         const row = byYearWeek.get(`${y}-${w}`);
         point[`${y} LO Count`] = row?.active_lo_count ?? null;
+        point[`${y} Units`] = row?.active_units ?? null;
       });
       return point;
     });
@@ -354,6 +471,7 @@ export function PipelineAnalysisView({
       years.forEach((y) => {
         const row = byYearMonth.get(`${y}-${month}`);
         point[`${y} LO Count`] = row?.active_lo_count ?? null;
+        point[`${y} Units`] = row?.active_units ?? null;
       });
       return point;
     });
@@ -399,6 +517,50 @@ export function PipelineAnalysisView({
     return result;
   }, [years, endYear, byYearMonth]);
 
+  const monthHeatmapAvgs = useMemo(() => {
+    const lo: number[] = [];
+    const op: number[] = [];
+    years.forEach((y) => {
+      for (let m = 1; m <= 12; m++) {
+        const row = byYearMonth.get(`${y}-${m}`);
+        if (row && row.active_lo_count > 0) lo.push(row.active_units / row.active_lo_count);
+        if (row && row.active_ops_count > 0) op.push(row.active_units / row.active_ops_count);
+      }
+    });
+    const sortedLO = [...lo].sort((a, b) => a - b);
+    const sortedOP = [...op].sort((a, b) => a - b);
+    const nLO = sortedLO.length;
+    const nOP = sortedOP.length;
+    return {
+      p35LO: nLO > 0 ? sortedLO[Math.floor(0.35 * nLO)] : 0,
+      p65LO: nLO > 0 ? sortedLO[Math.floor(0.65 * nLO)] : 0,
+      p35OPs: nOP > 0 ? sortedOP[Math.floor(0.35 * nOP)] : 0,
+      p65OPs: nOP > 0 ? sortedOP[Math.floor(0.65 * nOP)] : 0,
+    };
+  }, [years, byYearMonth]);
+
+  const weekHeatmapAvgs = useMemo(() => {
+    const lo: number[] = [];
+    const op: number[] = [];
+    years.forEach((y) => {
+      weekValues.forEach((w) => {
+        const row = byYearWeek.get(`${y}-${w}`);
+        if (row && row.active_lo_count > 0) lo.push(row.active_units / row.active_lo_count);
+        if (row && row.active_ops_count > 0) op.push(row.active_units / row.active_ops_count);
+      });
+    });
+    const sortedLO = [...lo].sort((a, b) => a - b);
+    const sortedOP = [...op].sort((a, b) => a - b);
+    const nLO = sortedLO.length;
+    const nOP = sortedOP.length;
+    return {
+      p35LO: nLO > 0 ? sortedLO[Math.floor(0.35 * nLO)] : 0,
+      p65LO: nLO > 0 ? sortedLO[Math.floor(0.65 * nLO)] : 0,
+      p35OPs: nOP > 0 ? sortedOP[Math.floor(0.35 * nOP)] : 0,
+      p65OPs: nOP > 0 ? sortedOP[Math.floor(0.65 * nOP)] : 0,
+    };
+  }, [years, byYearWeek, weekValues]);
+
   return (
     <div className="space-y-4">
       <Card>
@@ -408,7 +570,11 @@ export function PipelineAnalysisView({
               ? "Locked Pipeline Analysis"
               : startDateField === "processing_date"
                 ? "Processing Pipeline Analysis"
-                : "Active Pipeline Analysis"}
+                : startDateField === "credit_pull_date"
+                  ? "Credit Pull Pipeline Analysis"
+                  : startDateField === "submitted_to_underwriting_date"
+                    ? "Submitted to UW Pipeline Analysis"
+                    : "Active Pipeline Analysis"}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -464,7 +630,7 @@ export function PipelineAnalysisView({
               </label>
               <Select
                 value={startDateField}
-                onValueChange={(v) => setStartDateField(v as "application_date" | "lock_date" | "processing_date")}
+                onValueChange={(v) => setStartDateField(v as "application_date" | "lock_date" | "processing_date" | "credit_pull_date" | "submitted_to_underwriting_date")}
                 disabled={loading || backfillLoading}
               >
                 <SelectTrigger className="w-[180px]">
@@ -474,6 +640,8 @@ export function PipelineAnalysisView({
                   <SelectItem value="application_date">Application date</SelectItem>
                   <SelectItem value="lock_date">Lock date</SelectItem>
                   <SelectItem value="processing_date">Processing date</SelectItem>
+                  <SelectItem value="credit_pull_date">Credit pull date</SelectItem>
+                  <SelectItem value="submitted_to_underwriting_date">Submitted to underwriting date</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -502,6 +670,32 @@ export function PipelineAnalysisView({
                   <SelectItem value="units">Units</SelectItem>
                 </SelectContent>
               </Select>
+              {viewMode === "week" && selectedWeekValues.length > 0 && (
+                <span className="inline-flex items-center gap-1 rounded-md bg-sky-100 dark:bg-sky-900/40 px-2 py-0.5 text-xs">
+                  {selectedWeekValues.sort((a, b) => a - b).map((w) => ordinal(w)).join(", ")}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedWeekValues([])}
+                    className="p-0.5 rounded hover:bg-sky-200 dark:hover:bg-sky-800"
+                    aria-label="Clear week filter"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              )}
+              {viewMode === "month" && selectedMonths.length > 0 && (
+                <span className="inline-flex items-center gap-1 rounded-md bg-sky-100 dark:bg-sky-900/40 px-2 py-0.5 text-xs">
+                  {selectedMonths.sort((a, b) => a - b).map((m) => MONTH_LABELS[m - 1]).join(", ")}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedMonths([])}
+                    className="p-0.5 rounded hover:bg-sky-200 dark:hover:bg-sky-800"
+                    aria-label="Clear month filter"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              )}
             </div>
           </div>
 
@@ -718,11 +912,24 @@ export function PipelineAnalysisView({
                 <TableHeader>
                   <TableRow>
                     <TableHead className="min-w-[120px] sticky left-0 bg-background z-10 font-semibold" />
-                    {MONTH_LABELS.map((label) => (
-                      <TableHead key={label} className="text-right whitespace-nowrap">
-                        {label}
-                      </TableHead>
-                    ))}
+                    {MONTH_LABELS.map((label, i) => {
+                      const month = i + 1;
+                      return (
+                        <TableHead
+                          key={label}
+                          className={cn(
+                            "text-right whitespace-nowrap cursor-pointer select-none",
+                            selectedMonths.includes(month) && "bg-sky-100 dark:bg-sky-900/40"
+                          )}
+                          onClick={() => toggleMonth(month)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => e.key === "Enter" && toggleMonth(month)}
+                        >
+                          {label}
+                        </TableHead>
+                      );
+                    })}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -733,7 +940,17 @@ export function PipelineAnalysisView({
                         const month = i + 1;
                         const row = byYearMonth.get(`${year}-${month}`);
                         return (
-                          <TableCell key={`${year}-${month}`} className="text-right">
+                          <TableCell
+                            key={`${year}-${month}`}
+                            className={cn(
+                              "text-right cursor-pointer",
+                              selectedMonths.includes(month) && "bg-sky-100 dark:bg-sky-900/40"
+                            )}
+                            onClick={() => toggleMonth(month)}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => e.key === "Enter" && toggleMonth(month)}
+                          >
                             {row != null ? formatVolume(row.active_volume) : "—"}
                           </TableCell>
                         );
@@ -747,22 +964,18 @@ export function PipelineAnalysisView({
                         const month = i + 1;
                         const row = byYearMonth.get(`${year}-${month}`);
                         return (
-                          <TableCell key={`${year}-${month}`} className="text-right">
+                          <TableCell
+                            key={`${year}-${month}`}
+                            className={cn(
+                              "text-right cursor-pointer",
+                              selectedMonths.includes(month) && "bg-sky-100 dark:bg-sky-900/40"
+                            )}
+                            onClick={() => toggleMonth(month)}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => e.key === "Enter" && toggleMonth(month)}
+                          >
                             {row != null ? row.active_units : "—"}
-                          </TableCell>
-                        );
-                      })}
-                    </TableRow>
-                  ))}
-                  {years.map((year) => (
-                    <TableRow key={`lo-${year}`}>
-                      <TableCell className="font-medium sticky left-0 bg-background z-10">{year} LO Count</TableCell>
-                      {MONTH_LABELS.map((_, i) => {
-                        const month = i + 1;
-                        const row = byYearMonth.get(`${year}-${month}`);
-                        return (
-                          <TableCell key={`${year}-${month}`} className="text-right">
-                            {row != null ? row.active_lo_count : "—"}
                           </TableCell>
                         );
                       })}
@@ -777,7 +990,17 @@ export function PipelineAnalysisView({
                       const p = byMonthPct.get(month);
                       const val = pctMetric === "volume" ? p?.weeklyVolume : p?.weeklyUnits;
                       return (
-                        <TableCell key={`w-${month}`} className="text-right">
+                        <TableCell
+                          key={`w-${month}`}
+                          className={cn(
+                            "text-right cursor-pointer",
+                            selectedMonths.includes(month) && "bg-sky-100 dark:bg-sky-900/40"
+                          )}
+                          onClick={() => toggleMonth(month)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => e.key === "Enter" && toggleMonth(month)}
+                        >
                           {val != null ? formatPct(val) : "—"}
                         </TableCell>
                       );
@@ -792,7 +1015,17 @@ export function PipelineAnalysisView({
                       const p = byMonthPct.get(month);
                       const val = pctMetric === "volume" ? p?.monthlyVolume : p?.monthlyUnits;
                       return (
-                        <TableCell key={`m-${month}`} className="text-right">
+                        <TableCell
+                          key={`m-${month}`}
+                          className={cn(
+                            "text-right cursor-pointer",
+                            selectedMonths.includes(month) && "bg-sky-100 dark:bg-sky-900/40"
+                          )}
+                          onClick={() => toggleMonth(month)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => e.key === "Enter" && toggleMonth(month)}
+                        >
                           {val != null ? formatPct(val) : "—"}
                         </TableCell>
                       );
@@ -807,12 +1040,122 @@ export function PipelineAnalysisView({
                       const p = byMonthPct.get(month);
                       const val = pctMetric === "volume" ? p?.annualVolume : p?.annualUnits;
                       return (
-                        <TableCell key={`a-${month}`} className="text-right">
+                        <TableCell
+                          key={`a-${month}`}
+                          className={cn(
+                            "text-right cursor-pointer",
+                            selectedMonths.includes(month) && "bg-sky-100 dark:bg-sky-900/40"
+                          )}
+                          onClick={() => toggleMonth(month)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => e.key === "Enter" && toggleMonth(month)}
+                        >
                           {val != null ? formatPct(val) : "—"}
                         </TableCell>
                       );
                     })}
                   </TableRow>
+                  {years.map((year) => (
+                    <TableRow key={`lo-${year}`}>
+                      <TableCell className="font-medium sticky left-0 bg-background z-10">{year} LO Count</TableCell>
+                      {MONTH_LABELS.map((_, i) => {
+                        const month = i + 1;
+                        const row = byYearMonth.get(`${year}-${month}`);
+                        return (
+                          <TableCell
+                            key={`${year}-${month}`}
+                            className={cn(
+                              "text-right cursor-pointer",
+                              selectedMonths.includes(month) && "bg-sky-100 dark:bg-sky-900/40"
+                            )}
+                            onClick={() => toggleMonth(month)}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => e.key === "Enter" && toggleMonth(month)}
+                          >
+                            {row != null ? row.active_lo_count : "—"}
+                          </TableCell>
+                        );
+                      })}
+                    </TableRow>
+                  ))}
+                  {years.map((year) => (
+                    <TableRow key={`ops-${year}`}>
+                      <TableCell className="font-medium sticky left-0 bg-background z-10">{year} OPs Count</TableCell>
+                      {MONTH_LABELS.map((_, i) => {
+                        const month = i + 1;
+                        const row = byYearMonth.get(`${year}-${month}`);
+                        return (
+                          <TableCell
+                            key={`${year}-${month}`}
+                            className={cn(
+                              "text-right cursor-pointer",
+                              selectedMonths.includes(month) && "bg-sky-100 dark:bg-sky-900/40"
+                            )}
+                            onClick={() => toggleMonth(month)}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => e.key === "Enter" && toggleMonth(month)}
+                          >
+                            {row != null ? row.active_ops_count : "—"}
+                          </TableCell>
+                        );
+                      })}
+                    </TableRow>
+                  ))}
+                  {years.map((year) => (
+                    <TableRow key={`uplo-${year}`}>
+                      <TableCell className="font-medium sticky left-0 bg-background z-10 text-muted-foreground">{year} Units per LO</TableCell>
+                      {MONTH_LABELS.map((_, i) => {
+                        const month = i + 1;
+                        const row = byYearMonth.get(`${year}-${month}`);
+                        const val = row && row.active_lo_count > 0 ? row.active_units / row.active_lo_count : null;
+                        return (
+                          <TableCell
+                            key={`${year}-${month}`}
+                            className={cn(
+                              "text-right cursor-pointer",
+                              heatmapClass(val, monthHeatmapAvgs.p35LO, monthHeatmapAvgs.p65LO),
+                              selectedMonths.includes(month) && "bg-sky-100 dark:bg-sky-900/40"
+                            )}
+                            onClick={() => toggleMonth(month)}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => e.key === "Enter" && toggleMonth(month)}
+                          >
+                            {row != null ? formatUnitsPerActor(row.active_units, row.active_lo_count) : "—"}
+                          </TableCell>
+                        );
+                      })}
+                    </TableRow>
+                  ))}
+                  {years.map((year) => (
+                    <TableRow key={`upops-${year}`}>
+                      <TableCell className="font-medium sticky left-0 bg-background z-10 text-muted-foreground">{year} Units per OPs</TableCell>
+                      {MONTH_LABELS.map((_, i) => {
+                        const month = i + 1;
+                        const row = byYearMonth.get(`${year}-${month}`);
+                        const val = row && row.active_ops_count > 0 ? row.active_units / row.active_ops_count : null;
+                        return (
+                          <TableCell
+                            key={`${year}-${month}`}
+                            className={cn(
+                              "text-right cursor-pointer",
+                              heatmapClass(val, monthHeatmapAvgs.p35OPs, monthHeatmapAvgs.p65OPs),
+                              selectedMonths.includes(month) && "bg-sky-100 dark:bg-sky-900/40"
+                            )}
+                            onClick={() => toggleMonth(month)}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => e.key === "Enter" && toggleMonth(month)}
+                          >
+                            {row != null ? formatUnitsPerActor(row.active_units, row.active_ops_count) : "—"}
+                          </TableCell>
+                        );
+                      })}
+                    </TableRow>
+                  ))}
                 </TableBody>
               </Table>
             </div>
@@ -825,7 +1168,17 @@ export function PipelineAnalysisView({
                   <TableRow>
                     <TableHead className="min-w-[120px] sticky left-0 bg-background z-10 font-semibold" />
                     {weekValues.map((w) => (
-                      <TableHead key={w} className="text-right whitespace-nowrap">
+                      <TableHead
+                        key={w}
+                        className={cn(
+                          "text-right whitespace-nowrap cursor-pointer select-none",
+                          selectedWeekValues.includes(w) && "bg-sky-100 dark:bg-sky-900/40"
+                        )}
+                        onClick={() => toggleWeek(w)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => e.key === "Enter" && toggleWeek(w)}
+                      >
                         {ordinal(w)} {snapshotDayLabel}
                       </TableHead>
                     ))}
@@ -838,7 +1191,17 @@ export function PipelineAnalysisView({
                       {weekValues.map((w) => {
                         const row = byYearWeek.get(`${year}-${w}`);
                         return (
-                          <TableCell key={`${year}-${w}`} className="text-right">
+                          <TableCell
+                            key={`${year}-${w}`}
+                            className={cn(
+                              "text-right cursor-pointer",
+                              selectedWeekValues.includes(w) && "bg-sky-100 dark:bg-sky-900/40"
+                            )}
+                            onClick={() => toggleWeek(w)}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => e.key === "Enter" && toggleWeek(w)}
+                          >
                             {row != null ? formatVolume(row.active_volume) : "—"}
                           </TableCell>
                         );
@@ -851,21 +1214,18 @@ export function PipelineAnalysisView({
                       {weekValues.map((w) => {
                         const row = byYearWeek.get(`${year}-${w}`);
                         return (
-                          <TableCell key={`${year}-${w}`} className="text-right">
+                          <TableCell
+                            key={`${year}-${w}`}
+                            className={cn(
+                              "text-right cursor-pointer",
+                              selectedWeekValues.includes(w) && "bg-sky-100 dark:bg-sky-900/40"
+                            )}
+                            onClick={() => toggleWeek(w)}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => e.key === "Enter" && toggleWeek(w)}
+                          >
                             {row != null ? row.active_units : "—"}
-                          </TableCell>
-                        );
-                      })}
-                    </TableRow>
-                  ))}
-                  {years.map((year) => (
-                    <TableRow key={`lo-${year}`}>
-                      <TableCell className="font-medium sticky left-0 bg-background z-10">{year} LO Count</TableCell>
-                      {weekValues.map((w) => {
-                        const row = byYearWeek.get(`${year}-${w}`);
-                        return (
-                          <TableCell key={`${year}-${w}`} className="text-right">
-                            {row != null ? row.active_lo_count : "—"}
                           </TableCell>
                         );
                       })}
@@ -879,7 +1239,17 @@ export function PipelineAnalysisView({
                       const p = byWeekPct.get(w);
                       const val = pctMetric === "volume" ? p?.weeklyVolume : p?.weeklyUnits;
                       return (
-                        <TableCell key={`w-${w}`} className="text-right">
+                        <TableCell
+                          key={`w-${w}`}
+                          className={cn(
+                            "text-right cursor-pointer",
+                            selectedWeekValues.includes(w) && "bg-sky-100 dark:bg-sky-900/40"
+                          )}
+                          onClick={() => toggleWeek(w)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => e.key === "Enter" && toggleWeek(w)}
+                        >
                           {val != null ? formatPct(val) : "—"}
                         </TableCell>
                       );
@@ -893,7 +1263,17 @@ export function PipelineAnalysisView({
                       const p = byWeekPct.get(w);
                       const val = pctMetric === "volume" ? p?.monthlyVolume : p?.monthlyUnits;
                       return (
-                        <TableCell key={`m-${w}`} className="text-right">
+                        <TableCell
+                          key={`m-${w}`}
+                          className={cn(
+                            "text-right cursor-pointer",
+                            selectedWeekValues.includes(w) && "bg-sky-100 dark:bg-sky-900/40"
+                          )}
+                          onClick={() => toggleWeek(w)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => e.key === "Enter" && toggleWeek(w)}
+                        >
                           {val != null ? formatPct(val) : "—"}
                         </TableCell>
                       );
@@ -907,12 +1287,118 @@ export function PipelineAnalysisView({
                       const p = byWeekPct.get(w);
                       const val = pctMetric === "volume" ? p?.annualVolume : p?.annualUnits;
                       return (
-                        <TableCell key={`a-${w}`} className="text-right">
+                        <TableCell
+                          key={`a-${w}`}
+                          className={cn(
+                            "text-right cursor-pointer",
+                            selectedWeekValues.includes(w) && "bg-sky-100 dark:bg-sky-900/40"
+                          )}
+                          onClick={() => toggleWeek(w)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => e.key === "Enter" && toggleWeek(w)}
+                        >
                           {val != null ? formatPct(val) : "—"}
                         </TableCell>
                       );
                     })}
                   </TableRow>
+                  {years.map((year) => (
+                    <TableRow key={`lo-${year}`}>
+                      <TableCell className="font-medium sticky left-0 bg-background z-10">{year} LO Count</TableCell>
+                      {weekValues.map((w) => {
+                        const row = byYearWeek.get(`${year}-${w}`);
+                        return (
+                          <TableCell
+                            key={`${year}-${w}`}
+                            className={cn(
+                              "text-right cursor-pointer",
+                              selectedWeekValues.includes(w) && "bg-sky-100 dark:bg-sky-900/40"
+                            )}
+                            onClick={() => toggleWeek(w)}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => e.key === "Enter" && toggleWeek(w)}
+                          >
+                            {row != null ? row.active_lo_count : "—"}
+                          </TableCell>
+                        );
+                      })}
+                    </TableRow>
+                  ))}
+                  {years.map((year) => (
+                    <TableRow key={`ops-${year}`}>
+                      <TableCell className="font-medium sticky left-0 bg-background z-10">{year} OPs Count</TableCell>
+                      {weekValues.map((w) => {
+                        const row = byYearWeek.get(`${year}-${w}`);
+                        return (
+                          <TableCell
+                            key={`${year}-${w}`}
+                            className={cn(
+                              "text-right cursor-pointer",
+                              selectedWeekValues.includes(w) && "bg-sky-100 dark:bg-sky-900/40"
+                            )}
+                            onClick={() => toggleWeek(w)}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => e.key === "Enter" && toggleWeek(w)}
+                          >
+                            {row != null ? row.active_ops_count : "—"}
+                          </TableCell>
+                        );
+                      })}
+                    </TableRow>
+                  ))}
+                  {years.map((year) => (
+                    <TableRow key={`uplo-${year}`}>
+                      <TableCell className="font-medium sticky left-0 bg-background z-10 text-muted-foreground">{year} Units per LO</TableCell>
+                      {weekValues.map((w) => {
+                        const row = byYearWeek.get(`${year}-${w}`);
+                        const val = row && row.active_lo_count > 0 ? row.active_units / row.active_lo_count : null;
+                        return (
+                          <TableCell
+                            key={`${year}-${w}`}
+                            className={cn(
+                              "text-right cursor-pointer",
+                              heatmapClass(val, weekHeatmapAvgs.p35LO, weekHeatmapAvgs.p65LO),
+                              selectedWeekValues.includes(w) && "bg-sky-100 dark:bg-sky-900/40"
+                            )}
+                            onClick={() => toggleWeek(w)}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => e.key === "Enter" && toggleWeek(w)}
+                          >
+                            {row != null ? formatUnitsPerActor(row.active_units, row.active_lo_count) : "—"}
+                          </TableCell>
+                        );
+                      })}
+                    </TableRow>
+                  ))}
+                  {years.map((year) => (
+                    <TableRow key={`upops-${year}`}>
+                      <TableCell className="font-medium sticky left-0 bg-background z-10 text-muted-foreground">{year} Units per OPs</TableCell>
+                      {weekValues.map((w) => {
+                        const row = byYearWeek.get(`${year}-${w}`);
+                        const val = row && row.active_ops_count > 0 ? row.active_units / row.active_ops_count : null;
+                        return (
+                          <TableCell
+                            key={`${year}-${w}`}
+                            className={cn(
+                              "text-right cursor-pointer",
+                              heatmapClass(val, weekHeatmapAvgs.p35OPs, weekHeatmapAvgs.p65OPs),
+                              selectedWeekValues.includes(w) && "bg-sky-100 dark:bg-sky-900/40"
+                            )}
+                            onClick={() => toggleWeek(w)}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => e.key === "Enter" && toggleWeek(w)}
+                          >
+                            {row != null ? formatUnitsPerActor(row.active_units, row.active_ops_count) : "—"}
+                          </TableCell>
+                        );
+                      })}
+                    </TableRow>
+                  ))}
                 </TableBody>
               </Table>
             </div>
@@ -929,6 +1415,15 @@ export function PipelineAnalysisView({
                       margin={{ top: 12, right: 12, left: 12, bottom: 12 }}
                       barCategoryGap="20%"
                       barGap={2}
+                      onClick={(data: { activeTooltipIndex?: number }) => {
+                        const idx = data?.activeTooltipIndex;
+                        if (idx != null && pipelineChartData[idx]) {
+                          const p = pipelineChartData[idx] as { week?: number; month?: number };
+                          if (p.week != null) toggleWeek(p.week);
+                          if (p.month != null) toggleMonth(p.month);
+                        }
+                      }}
+                      style={{ cursor: "pointer" }}
                     >
                       <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
                       <XAxis
@@ -937,19 +1432,19 @@ export function PipelineAnalysisView({
                         label={{ value: isMonthMode ? "Month" : "Week", position: "insideBottom", offset: -8, fontSize: 12 }}
                       />
                       <YAxis
-                        yAxisId="volume"
+                        yAxisId="units"
                         orientation="left"
                         width={52}
                         tick={{ fontSize: 10 }}
-                        tickFormatter={(v) => (v >= 1e6 ? `${(v / 1e6).toFixed(0)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(0)}K` : String(v))}
-                        label={{ value: "Volume", angle: -90, position: "insideLeft", fontSize: 11 }}
+                        label={{ value: "Units", angle: -90, position: "insideLeft", fontSize: 11 }}
                       />
                       <YAxis
-                        yAxisId="units"
+                        yAxisId="volume"
                         orientation="right"
-                        width={40}
+                        width={52}
                         tick={{ fontSize: 10 }}
-                        label={{ value: "Units", angle: 90, position: "insideRight", fontSize: 11 }}
+                        tickFormatter={(v) => (v >= 1e6 ? `${(v / 1e6).toFixed(0)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(0)}K` : String(v))}
+                        label={{ value: "Volume", angle: 90, position: "insideRight", fontSize: 11 }}
                       />
                       <Tooltip
                         content={({ active, payload }) => {
@@ -980,21 +1475,38 @@ export function PipelineAnalysisView({
                       />
                       {years.map((y, i) => (
                         <Bar
-                          key={`${y}-volume`}
-                          yAxisId="volume"
-                          dataKey={`${y} Volume`}
-                          name={`${y} Volume`}
+                          key={`${y}-units`}
+                          yAxisId="units"
+                          dataKey={`${y} Units`}
+                          name={`${y} Units`}
                           fill={i === 0 ? "#00008f" : "#52b852"}
                           radius={[2, 2, 0, 0]}
-                        />
+                          onClick={(_, index) => {
+                            const p = pipelineChartData[index] as { week?: number; month?: number } | undefined;
+                            if (p?.week != null) toggleWeek(p.week);
+                            if (p?.month != null) toggleMonth(p.month);
+                          }}
+                        >
+                          {pipelineChartData.map((entry, index) => {
+                            const selected = isMonthMode
+                              ? selectedMonths.includes((entry as { month?: number }).month ?? 0)
+                              : selectedWeekValues.includes((entry as { week?: number }).week ?? 0);
+                            return (
+                              <Cell
+                                key={index}
+                                fill={selected ? "#7dd3fc" : i === 0 ? "#00008f" : "#52b852"}
+                              />
+                            );
+                          })}
+                        </Bar>
                       ))}
                       {years.map((y, i) => (
                         <Line
-                          key={`${y}-units`}
-                          yAxisId="units"
+                          key={`${y}-volume`}
+                          yAxisId="volume"
                           type="monotone"
-                          dataKey={`${y} Units`}
-                          name={`${y} Units`}
+                          dataKey={`${y} Volume`}
+                          name={`${y} Volume`}
                           stroke={i === 0 ? "#8080c7" : "#a9dca9"}
                           strokeWidth={2}
                           dot={{ r: 3 }}
@@ -1022,6 +1534,15 @@ export function PipelineAnalysisView({
                       margin={{ top: 12, right: 12, left: 12, bottom: 12 }}
                       barCategoryGap="20%"
                       barGap={2}
+                      onClick={(data: { activeTooltipIndex?: number }) => {
+                        const idx = data?.activeTooltipIndex;
+                        if (idx != null && pipelineLoCountChartData[idx]) {
+                          const p = pipelineLoCountChartData[idx] as { week?: number; month?: number };
+                          if (p.week != null) toggleWeek(p.week);
+                          if (p.month != null) toggleMonth(p.month);
+                        }
+                      }}
+                      style={{ cursor: "pointer" }}
                     >
                       <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
                       <XAxis
@@ -1030,10 +1551,19 @@ export function PipelineAnalysisView({
                         label={{ value: isMonthMode ? "Month" : "Week", position: "insideBottom", offset: -8, fontSize: 12 }}
                       />
                       <YAxis
+                        yAxisId="loCount"
                         width={40}
                         allowDecimals={false}
                         tick={{ fontSize: 10 }}
                         label={{ value: "LO Count", angle: -90, position: "insideLeft", fontSize: 11 }}
+                      />
+                      <YAxis
+                        yAxisId="units"
+                        orientation="right"
+                        width={40}
+                        allowDecimals={false}
+                        tick={{ fontSize: 10 }}
+                        label={{ value: "Units", angle: 90, position: "insideRight", fontSize: 11 }}
                       />
                       <Tooltip
                         content={({ active, payload }) => {
@@ -1045,9 +1575,15 @@ export function PipelineAnalysisView({
                             <div className="rounded-lg border border-border bg-background px-3 py-2 shadow-md text-xs">
                               <p className="font-medium text-foreground mb-1.5">{title}</p>
                               {years.map((y) => (
-                                <div key={y} className="flex justify-between gap-4">
-                                  <span className="text-muted-foreground">{y} LO Count</span>
-                                  <span className="font-medium tabular-nums">{p[`${y} LO Count`] != null ? String(p[`${y} LO Count`]) : "—"}</span>
+                                <div key={y} className="space-y-0.5 mb-1">
+                                  <div className="flex justify-between gap-4">
+                                    <span className="text-muted-foreground">{y} LO Count</span>
+                                    <span className="font-medium tabular-nums">{p[`${y} LO Count`] != null ? String(p[`${y} LO Count`]) : "—"}</span>
+                                  </div>
+                                  <div className="flex justify-between gap-4">
+                                    <span className="text-muted-foreground">{y} Units</span>
+                                    <span className="font-medium tabular-nums">{p[`${y} Units`] != null ? String(p[`${y} Units`]) : "—"}</span>
+                                  </div>
                                 </div>
                               ))}
                             </div>
@@ -1063,10 +1599,41 @@ export function PipelineAnalysisView({
                       {years.map((y, i) => (
                         <Bar
                           key={`${y}-lo`}
+                          yAxisId="loCount"
                           dataKey={`${y} LO Count`}
                           name={`${y} LO Count`}
                           fill={i === 0 ? "#00008f" : "#52b852"}
                           radius={[2, 2, 0, 0]}
+                          onClick={(_, index) => {
+                            const p = pipelineLoCountChartData[index] as { week?: number; month?: number } | undefined;
+                            if (p?.week != null) toggleWeek(p.week);
+                            if (p?.month != null) toggleMonth(p.month);
+                          }}
+                        >
+                          {pipelineLoCountChartData.map((entry, index) => {
+                            const selected = isMonthMode
+                              ? selectedMonths.includes((entry as { month?: number }).month ?? 0)
+                              : selectedWeekValues.includes((entry as { week?: number }).week ?? 0);
+                            return (
+                              <Cell
+                                key={index}
+                                fill={selected ? "#7dd3fc" : i === 0 ? "#00008f" : "#52b852"}
+                              />
+                            );
+                          })}
+                        </Bar>
+                      ))}
+                      {years.map((y, i) => (
+                        <Line
+                          key={`${y}-units`}
+                          yAxisId="units"
+                          type="monotone"
+                          dataKey={`${y} Units`}
+                          name={`${y} Units`}
+                          stroke={i === 0 ? "#8080c7" : "#a9dca9"}
+                          strokeWidth={2}
+                          dot={{ r: 3 }}
+                          connectNulls
                         />
                       ))}
                     </ComposedChart>
@@ -1080,6 +1647,104 @@ export function PipelineAnalysisView({
               )}
             </TabsContent>
           </Tabs>
+
+          {/* Loan detail table: visible under all tabs; reloads when filters, year range, or start date change */}
+          <div className="mt-6 space-y-2">
+            <h3 className="text-sm font-semibold text-foreground">Loan detail</h3>
+            {loansError && (
+              <div className="rounded-md bg-destructive/10 text-destructive text-sm p-3">
+                {loansError}
+              </div>
+            )}
+            {!loansError && (
+              <div className="border rounded-md overflow-x-auto max-h-[800px] overflow-y-auto">
+                {loansLoading && pipelineLoans.length === 0 ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                ) : pipelineLoans.length === 0 ? (
+                  <div className="text-muted-foreground text-sm py-8 text-center">
+                    No loans in the selected date range. Adjust year range or start date.
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="sticky top-0 bg-background z-10 shadow-sm">
+                        {([
+                          { id: "loan_number" as const, label: "Loan #", align: "left" },
+                          { id: "loan_amount" as const, label: "Loan amount", align: "right" },
+                          { id: "loan_type" as const, label: "Loan type", align: "left" },
+                          { id: "loan_purpose" as const, label: "Loan purpose", align: "left" },
+                          { id: "current_loan_status" as const, label: "Current loan status", align: "left" },
+                          { id: "start_date" as const, label: startDateColumnLabel, align: "left" },
+                          { id: "current_status_date" as const, label: "Current status date", align: "left" },
+                          { id: "fico_score" as const, label: "FICO score", align: "right" },
+                          { id: "ltv_ratio" as const, label: "LTV ratio", align: "right" },
+                          { id: "be_dti_ratio" as const, label: "BE DTI ratio", align: "right" },
+                          { id: "loan_officer" as const, label: "Loan officer", align: "left" },
+                          { id: "processor" as const, label: "Processor", align: "left" },
+                          { id: "underwriter" as const, label: "Underwriter", align: "left" },
+                          { id: "closer" as const, label: "Closer", align: "left" },
+                        ]).map(({ id, label, align }) => {
+                          const isSorted = loanDetailSortColumn === id;
+                          return (
+                            <TableHead
+                              key={id}
+                              className={cn(
+                                "whitespace-nowrap bg-background cursor-pointer select-none hover:bg-muted/60",
+                                align === "right" && "text-right"
+                              )}
+                              onClick={() => handleLoanDetailSort(id)}
+                              aria-sort={isSorted ? (loanDetailSortDirection === "asc" ? "ascending" : "descending") : undefined}
+                            >
+                              <span className="inline-flex items-center gap-1">
+                                {label}
+                                {isSorted ? (
+                                  loanDetailSortDirection === "asc" ? (
+                                    <ArrowUp className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+                                  ) : (
+                                    <ArrowDown className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+                                  )
+                                ) : (
+                                  <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-40" aria-hidden />
+                                )}
+                              </span>
+                            </TableHead>
+                          );
+                        })}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {sortedPipelineLoans.map((loan, idx) => (
+                        <TableRow key={loan.loan_id || `loan-${idx}`}>
+                          <TableCell className="font-mono text-xs">{loan.loan_number ?? "—"}</TableCell>
+                          <TableCell className="text-right">
+                            {loan.loan_amount != null ? formatVolume(loan.loan_amount) : "—"}
+                          </TableCell>
+                          <TableCell>{loan.loan_type ?? "—"}</TableCell>
+                          <TableCell>{loan.loan_purpose ?? "—"}</TableCell>
+                          <TableCell>{loan.current_loan_status ?? "—"}</TableCell>
+                          <TableCell>
+                            {loan.start_date ? format(parseISO(loan.start_date), "yyyy-MM-dd") : "—"}
+                          </TableCell>
+                          <TableCell>
+                            {loan.current_status_date ? format(parseISO(loan.current_status_date), "yyyy-MM-dd") : "—"}
+                          </TableCell>
+                          <TableCell className="text-right">{loan.fico_score != null ? String(loan.fico_score) : "—"}</TableCell>
+                          <TableCell className="text-right">{loan.ltv_ratio != null ? String(loan.ltv_ratio) : "—"}</TableCell>
+                          <TableCell className="text-right">{loan.be_dti_ratio != null ? String(loan.be_dti_ratio) : "—"}</TableCell>
+                          <TableCell>{loan.loan_officer ?? "—"}</TableCell>
+                          <TableCell>{loan.processor ?? "—"}</TableCell>
+                          <TableCell>{loan.underwriter ?? "—"}</TableCell>
+                          <TableCell>{loan.closer ?? "—"}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </div>
+            )}
+          </div>
         </CardContent>
       </Card>
     </div>

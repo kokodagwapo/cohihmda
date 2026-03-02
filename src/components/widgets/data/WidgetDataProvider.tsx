@@ -514,7 +514,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     from: pipelineFromTo.from,
     to: pipelineFromTo.to,
     tenantId: selectedTenantId ?? null,
-    startDateField: (paFilters?.pipelineAnalysisStartDateField ?? 'application_date') as 'application_date' | 'lock_date' | 'processing_date',
+    startDateField: (paFilters?.pipelineAnalysisStartDateField ?? 'application_date') as 'application_date' | 'lock_date' | 'processing_date' | 'credit_pull_date' | 'submitted_to_underwriting_date',
     filters: pipelineFiltersForApi,
     dimensionFilters: paDimensionFilters,
   });

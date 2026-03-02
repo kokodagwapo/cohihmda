@@ -111,7 +111,7 @@ export interface SectionFilters {
   /** Pipeline Analysis: year range "YYYY-YYYY" (e.g. "2024-2025") */
   pipelineAnalysisYearRange?: string;
   /** Pipeline Analysis: start date field for pipeline */
-  pipelineAnalysisStartDateField?: 'application_date' | 'lock_date' | 'processing_date';
+  pipelineAnalysisStartDateField?: 'application_date' | 'lock_date' | 'processing_date' | 'credit_pull_date' | 'submitted_to_underwriting_date';
   /** Pipeline Analysis: selected loan types (empty = all) */
   pipelineAnalysisLoanTypes?: string[];
   /** Pipeline Analysis: selected loan purposes (empty = all) */

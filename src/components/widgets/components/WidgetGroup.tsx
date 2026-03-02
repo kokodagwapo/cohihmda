@@ -449,16 +449,18 @@ function PipelineAnalysisFilterRow({
       <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mr-0.5">Start date</span>
       <Select
         value={filters.pipelineAnalysisStartDateField ?? 'application_date'}
-        onValueChange={(v) => updateFilters(groupId, { pipelineAnalysisStartDateField: v as 'application_date' | 'lock_date' | 'processing_date' })}
+        onValueChange={(v) => updateFilters(groupId, { pipelineAnalysisStartDateField: v as 'application_date' | 'lock_date' | 'processing_date' | 'credit_pull_date' | 'submitted_to_underwriting_date' })}
         disabled={loading}
       >
-        <SelectTrigger className="h-7 w-[140px] text-xs">
+        <SelectTrigger className="h-7 w-[200px] text-xs">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="application_date">Application date</SelectItem>
           <SelectItem value="lock_date">Lock date</SelectItem>
           <SelectItem value="processing_date">Processing date</SelectItem>
+          <SelectItem value="credit_pull_date">Credit pull date</SelectItem>
+          <SelectItem value="submitted_to_underwriting_date">Submitted to underwriting date</SelectItem>
         </SelectContent>
       </Select>
       <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mr-0.5">View</span>

@@ -15,6 +15,8 @@ export interface PipelineSnapshotRow {
   active_units: number;
   active_volume: number;
   active_lo_count: number;
+  /** Sum of distinct processor + closer + underwriter counts (OPs). */
+  active_ops_count: number;
   weekly_pct_change_volume: number | null;
   monthly_pct_change_volume: number | null;
   annual_pct_change_volume: number | null;
@@ -29,8 +31,8 @@ export interface UsePipelineAnalysisDataOptions {
   to?: string | null;
   /** Tenant ID for API (required for platform staff; use selectedTenantId ?? user?.tenant_id) */
   tenantId?: string | null;
-  /** Which date to use as the pipeline start: application_date (default), lock_date, or processing_date. Changing triggers refetch. */
-  startDateField?: "application_date" | "lock_date" | "processing_date";
+  /** Which date to use as the pipeline start: application_date (default), lock_date, processing_date, credit_pull_date, or submitted_to_underwriting_date. Changing triggers refetch. */
+  startDateField?: "application_date" | "lock_date" | "processing_date" | "credit_pull_date" | "submitted_to_underwriting_date";
   /** Filters applied before counting. Empty/undefined = no filter (all). When any array has items, only those are included. */
   filters?: {
     loanTypes?: string[];
@@ -38,6 +40,8 @@ export interface UsePipelineAnalysisDataOptions {
     branches?: string[];
   } | null;
   dimensionFilters?: Array<{ column: string; value: string }>;
+  /** When set, loan detail is filtered to loans active on at least one of these snapshot dates (YYYY-MM-DD). */
+  snapshotDates?: string[] | null;
 }
 
 export interface UsePipelineAnalysisDataResult {
@@ -45,6 +49,83 @@ export interface UsePipelineAnalysisDataResult {
   loading: boolean;
   error: string | null;
   refetch: () => void;
+}
+
+/** Loan detail row for pipeline analysis loan detail table (GET /api/pipeline-analysis/loans). */
+export interface PipelineLoanDetailRow {
+  loan_id: string;
+  loan_number: string | null;
+  loan_amount: number | null;
+  loan_type: string | null;
+  loan_purpose: string | null;
+  current_loan_status: string | null;
+  start_date: string | null;
+  current_status_date: string | null;
+  fico_score: number | null;
+  ltv_ratio: number | null;
+  be_dti_ratio: number | null;
+  loan_officer: string | null;
+  processor: string | null;
+  underwriter: string | null;
+  closer: string | null;
+}
+
+export function usePipelineAnalysisLoans(
+  options: UsePipelineAnalysisDataOptions
+): { loans: PipelineLoanDetailRow[]; loading: boolean; error: string | null; refetch: () => void } {
+  const [loans, setLoans] = useState<PipelineLoanDetailRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchLoans = useCallback(async () => {
+    if (!options.from || !options.to) {
+      setLoans([]);
+      setLoading(false);
+      return;
+    }
+    const params = new URLSearchParams();
+    if (options.tenantId) params.set("tenant_id", options.tenantId);
+    params.set("from", options.from);
+    params.set("to", options.to);
+    if (options.startDateField === "lock_date") params.set("start_date_field", "lock_date");
+    if (options.startDateField === "processing_date") params.set("start_date_field", "processing_date");
+    if (options.startDateField === "credit_pull_date") params.set("start_date_field", "credit_pull_date");
+    if (options.startDateField === "submitted_to_underwriting_date") params.set("start_date_field", "submitted_to_underwriting_date");
+    const f = options.filters;
+    if (f?.loanTypes?.length) f.loanTypes.forEach((v) => params.append("loan_type", v));
+    if (f?.loanPurposes?.length) f.loanPurposes.forEach((v) => params.append("loan_purpose", v));
+    if (f?.branches?.length) f.branches.forEach((v) => params.append("branch", v));
+    if (options.snapshotDates?.length) {
+      options.snapshotDates.forEach((d) => params.append("snapshot_dates", d));
+    }
+    if (options.dimensionFilters) {
+      for (const df of options.dimensionFilters) {
+        if (df.value && df.value !== "all") params.append(df.column, df.value);
+      }
+    }
+    const qs = params.toString();
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await api.request<{ loans: PipelineLoanDetailRow[] }>(
+        `/api/pipeline-analysis/loans?${qs}`,
+        { headers: { "Cache-Control": "no-cache" } }
+      );
+      setLoans(data.loans ?? []);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Failed to load pipeline loans";
+      setError(msg);
+      setLoans([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [options.tenantId, options.from, options.to, options.startDateField, options.filters, options.snapshotDates, JSON.stringify(options.dimensionFilters)]);
+
+  useEffect(() => {
+    fetchLoans();
+  }, [fetchLoans]);
+
+  return { loans, loading, error, refetch: fetchLoans };
 }
 
 export function usePipelineAnalysisData(
@@ -61,6 +142,8 @@ export function usePipelineAnalysisData(
     if (options.to) params.set("to", options.to);
     if (options.startDateField === "lock_date") params.set("start_date_field", "lock_date");
     if (options.startDateField === "processing_date") params.set("start_date_field", "processing_date");
+    if (options.startDateField === "credit_pull_date") params.set("start_date_field", "credit_pull_date");
+    if (options.startDateField === "submitted_to_underwriting_date") params.set("start_date_field", "submitted_to_underwriting_date");
     const f = options.filters;
     if (f?.loanTypes?.length) f.loanTypes.forEach((v) => params.append("loan_type", v));
     if (f?.loanPurposes?.length) f.loanPurposes.forEach((v) => params.append("loan_purpose", v));

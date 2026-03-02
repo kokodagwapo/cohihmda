@@ -54,6 +54,13 @@ import {
   type ComplexityConfigV2,
 } from "../../utils/scorecard-utils.js";
 import { getOperationsScorecardTrends } from "../../services/scorecard/operationsScorecardTrendsService.js";
+import {
+  getSalesScorecardOverview,
+  getSalesScorecardOverviewBranches,
+  getSalesScorecardOverviewLoanOfficers,
+  type SalesScorecardOverviewMeasure,
+  type SalesScorecardOverviewTimePeriod,
+} from "../../services/dashboard/salesScorecardOverviewService.js";
 
 const router = Router();
 
@@ -2208,6 +2215,89 @@ router.get(
       });
       res.status(500).json({
         error: error.message || "Failed to fetch sales trends drilldown",
+      });
+    }
+  }
+);
+
+// =============================================================================
+// SALES SCORECARD OVERVIEW - GET /api/scorecard/sales-scorecard-overview
+// =============================================================================
+
+/**
+ * GET /api/scorecard/sales-scorecard-overview
+ * Volume or units by pipeline stage (started, application, locked, closed, funded) per time period.
+ *
+ * Query: measure=volume|units, time_period=monthly-ytd|quarterly-ytd|weekly-mtd|weekly-last-3|daily-mtd|daily-last-month,
+ *        branch?, loan_officer?
+ */
+router.get(
+  "/sales-scorecard-overview",
+  authenticateToken,
+  attachTenantContext,
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantPool = getTenantContext(req).tenantPool;
+      if (!tenantPool) {
+        return res.status(400).json({ error: "Tenant context required" });
+      }
+      const measure = (req.query.measure as SalesScorecardOverviewMeasure) || "volume";
+      const timePeriod =
+        (req.query.time_period as SalesScorecardOverviewTimePeriod) || "monthly-ytd";
+      const filters = {
+        branch: req.query.branch ? [].concat(req.query.branch as any).filter(Boolean) : undefined,
+        loan_officer: req.query.loan_officer
+          ? [].concat(req.query.loan_officer as any).filter(Boolean)
+          : undefined,
+      };
+      const queryParams = req.query as Record<string, unknown>;
+      const rows = await getSalesScorecardOverview(
+        tenantPool,
+        measure,
+        timePeriod,
+        filters,
+        queryParams
+      );
+      return res.json({ rows });
+    } catch (error: any) {
+      logError("Error fetching sales scorecard overview", error, {
+        userId: req.userId,
+      });
+      res.status(500).json({
+        error: error.message || "Failed to fetch sales scorecard overview",
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/scorecard/sales-scorecard-overview/filter-options
+ * Returns { branches, loanOfficers } for filter dropdowns.
+ */
+router.get(
+  "/sales-scorecard-overview/filter-options",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantPool = getTenantContext(req).tenantPool;
+      if (!tenantPool) {
+        return res.status(400).json({ error: "Tenant context required" });
+      }
+      const [branches, loanOfficers] = await Promise.all([
+        getSalesScorecardOverviewBranches(tenantPool),
+        getSalesScorecardOverviewLoanOfficers(tenantPool),
+      ]);
+      return res.json({ branches, loanOfficers });
+    } catch (error: any) {
+      logError("Error fetching sales scorecard overview filter options", error, {
+        userId: req.userId,
+      });
+      res.status(500).json({
+        error:
+          error.message ||
+          "Failed to fetch sales scorecard overview filter options",
       });
     }
   }
