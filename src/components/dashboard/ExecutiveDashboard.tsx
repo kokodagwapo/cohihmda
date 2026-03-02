@@ -1757,7 +1757,7 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
   return (
     <div className="mb-8">
       {/* Business Overview Card */}
-      <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-white dark:bg-slate-900/70 border border-slate-100 dark:border-slate-800 shadow-[0_1px_3px_rgba(0,0,0,0.04)] p-4 sm:p-6 md:p-8">
+      <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-white dark:bg-slate-900/70 border border-slate-100 dark:border-slate-800 shadow-[0_8px_32px_rgba(15,23,42,0.08)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.24)] p-4 sm:p-6 md:p-8">
         {/* Section Header - Matching Cohi Dialogues */}
         <div className="flex items-center justify-between gap-3 sm:gap-4 mb-4 sm:mb-6">
           <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">

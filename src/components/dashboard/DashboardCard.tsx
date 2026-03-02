@@ -14,7 +14,7 @@ export const DashboardCard = ({
   children: React.ReactNode;
   className?: string;
 }) => (
-  <div className={`bg-white dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700 rounded-xl shadow-[0_1px_3px_rgba(0,0,0,0.04)] ${className}`}>
+  <div className={`bg-white dark:bg-slate-900/70 border border-slate-100 dark:border-slate-800 rounded-2xl sm:rounded-3xl shadow-[0_8px_32px_rgba(15,23,42,0.08)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.24)] ${className}`}>
     {children}
   </div>
 );

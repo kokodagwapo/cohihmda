@@ -1,7 +1,7 @@
 /**
  * useCanvasExport
  *
- * Extracted export functionality from WorkbenchCanvas:
+ * Workbench canvas export: per-widget capture + composite for exact look.
  * PNG, PDF, PowerPoint, Excel, and Email screenshot.
  */
 
@@ -9,37 +9,116 @@ import { useCallback } from 'react';
 import * as XLSX from 'xlsx';
 import { useToast } from '@/hooks/use-toast';
 import type { CanvasLayoutItem } from '@/components/workbench/canvas/types';
+import {
+  captureChartAsImage,
+  captureWidgetElement,
+  compositeCanvasFromCaptures,
+  buildExportImageWithHeader,
+  isChartType,
+  type WidgetCapture,
+} from '@/utils/canvasExportUtils';
 
 export interface UseCanvasExportOptions {
   items: CanvasLayoutItem[];
   saveTitle: string;
+  /** Optional logo URL (data URL or same-origin) for export header */
+  logoUrl?: string;
+  /** Optional title shown on export header */
+  exportTitle?: string;
 }
 
-export function useCanvasExport({ items, saveTitle }: UseCanvasExportOptions) {
+export function useCanvasExport({ items, saveTitle, logoUrl, exportTitle }: UseCanvasExportOptions) {
   const { toast } = useToast();
 
   const captureCanvasAsBlob = useCallback(async (): Promise<Blob | null> => {
-    const el = document.getElementById('workbench-canvas-root');
-    if (!el) return null;
-    try {
-      const html2canvas = (await import('html2canvas')).default;
-      const canvas = await html2canvas(el, {
-        useCORS: true,
-        allowTaint: true,
-        scale: 2,
-        backgroundColor: undefined,
-        logging: false,
-      });
-      return new Promise<Blob | null>((resolve) => {
-        canvas.toBlob((b) => resolve(b ?? null), 'image/png', 1);
-      });
-    } catch (e) {
-      console.error('Canvas capture error:', e);
-      return null;
+    const root = document.getElementById('workbench-canvas-root');
+    if (!root) return null;
+
+    await document.fonts.ready();
+
+    if (items.length === 0) {
+      try {
+        const html2canvas = (await import('html2canvas')).default;
+        const canvas = await html2canvas(root, {
+          useCORS: true,
+          allowTaint: true,
+          scale: 2,
+          backgroundColor: undefined,
+          logging: false,
+        });
+        return new Promise<Blob | null>((resolve) => {
+          canvas.toBlob((b) => resolve(b ?? null), 'image/png', 1);
+        });
+      } catch (e) {
+        console.error('Canvas capture error:', e);
+        return null;
+      }
     }
-  }, []);
+
+    const captures: WidgetCapture[] = [];
+    let failedCount = 0;
+
+    for (const item of items) {
+      const node = root.querySelector<HTMLElement>(`[data-item-id="${item.i}"]`);
+      if (!node) {
+        failedCount += 1;
+        continue;
+      }
+      const blob = isChartType(item)
+        ? await captureChartAsImage(node)
+        : await captureWidgetElement(node);
+      if (blob) {
+        captures.push({
+          itemId: item.i,
+          blob,
+          x: item.x,
+          y: item.y,
+          w: item.w,
+          h: item.h,
+        });
+      } else {
+        failedCount += 1;
+      }
+    }
+
+    let composite: Blob | null = await compositeCanvasFromCaptures(captures);
+    if (!composite && captures.length === 0) {
+      try {
+        const html2canvas = (await import('html2canvas')).default;
+        const canvas = await html2canvas(root, {
+          useCORS: true,
+          allowTaint: true,
+          scale: 2,
+          backgroundColor: undefined,
+          logging: false,
+        });
+        composite = await new Promise<Blob | null>((resolve) => {
+          canvas.toBlob((b) => resolve(b ?? null), 'image/png', 1);
+        });
+      } catch {
+        return null;
+      }
+    }
+
+    if (!composite) return null;
+
+    if (logoUrl || exportTitle) {
+      try {
+        return await buildExportImageWithHeader(composite, {
+          logoUrl,
+          title: (exportTitle ?? saveTitle) || 'Canvas',
+          backgroundColor: '#ffffff',
+        });
+      } catch {
+        return composite;
+      }
+    }
+
+    return composite;
+  }, [items, saveTitle, logoUrl, exportTitle]);
 
   const handleExportPng = useCallback(async () => {
+    toast({ title: 'Exporting…', description: 'Capturing canvas.' });
     const blob = await captureCanvasAsBlob();
     if (!blob) {
       toast({ title: 'Capture failed', description: 'Could not capture canvas.', variant: 'destructive' });
@@ -55,6 +134,7 @@ export function useCanvasExport({ items, saveTitle }: UseCanvasExportOptions) {
   }, [captureCanvasAsBlob, saveTitle, toast]);
 
   const handleExportPdf = useCallback(async () => {
+    toast({ title: 'Exporting…', description: 'Capturing canvas.' });
     const blob = await captureCanvasAsBlob();
     if (!blob) {
       toast({ title: 'Capture failed', description: 'Could not capture canvas.', variant: 'destructive' });
@@ -71,7 +151,18 @@ export function useCanvasExport({ items, saveTitle }: UseCanvasExportOptions) {
         r.onerror = reject;
         r.readAsDataURL(blob);
       });
-      doc.addImage(imgData, 'PNG', 0, 0, pageW, pageH);
+      const img = new Image();
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = reject;
+        img.src = imgData;
+      });
+      const aspect = img.naturalHeight / img.naturalWidth;
+      const fitW = pageW;
+      const fitH = Math.min(pageH, pageW * aspect);
+      const marginX = (pageW - fitW) / 2;
+      const marginY = (pageH - fitH) / 2;
+      doc.addImage(imgData, 'PNG', marginX, marginY, fitW, fitH);
       doc.save(`${(saveTitle || 'canvas').replace(/[^a-z0-9]/gi, '_')}.pdf`);
       toast({ title: 'Downloaded', description: 'Canvas saved as PDF.' });
     } catch (err) {
@@ -80,6 +171,7 @@ export function useCanvasExport({ items, saveTitle }: UseCanvasExportOptions) {
   }, [captureCanvasAsBlob, saveTitle, toast]);
 
   const handleExportPptx = useCallback(async () => {
+    toast({ title: 'Exporting…', description: 'Capturing canvas.' });
     const blob = await captureCanvasAsBlob();
     if (!blob) {
       toast({ title: 'Capture failed', description: 'Could not capture canvas.', variant: 'destructive' });
@@ -97,20 +189,21 @@ export function useCanvasExport({ items, saveTitle }: UseCanvasExportOptions) {
         r.onerror = reject;
         r.readAsDataURL(blob);
       });
-      slide.addImage({ data: dataUrl, x: 0.5, y: 0.5, w: 9, h: 5.25 });
-      slide.addText(saveTitle || 'Canvas', { x: 0.5, y: 0.2, w: 9, fontSize: 24, bold: true, color: '1e293b' });
+        const title = (exportTitle ?? saveTitle) || 'Canvas';
+      slide.addText(title, { x: 0.5, y: 0.2, w: 9, fontSize: 24, bold: true, color: '1e293b' });
+      slide.addImage({ data: dataUrl, x: 0.5, y: 0.6, w: 9, h: 5.25 });
       await pres.writeFile({ fileName: `${(saveTitle || 'canvas').replace(/[^a-z0-9]/gi, '_')}.pptx` });
       toast({ title: 'Downloaded', description: 'PowerPoint saved.' });
     } catch (err) {
       toast({ title: 'Export failed', description: err instanceof Error ? err.message : 'Could not create PowerPoint', variant: 'destructive' });
     }
-  }, [captureCanvasAsBlob, saveTitle, toast]);
+  }, [captureCanvasAsBlob, saveTitle, exportTitle, toast]);
 
   /** Excel export: multi-sheet workbook from widget data. */
   const handleExportExcel = useCallback(() => {
     const safeName = (saveTitle || 'canvas').replace(/[^a-z0-9]/gi, '_');
     const sanitizeSheetName = (name: string) =>
-      name.replace(/[\s\\/*?:\[\]]/g, '_').slice(0, 31) || 'Sheet';
+      name.replace(/[\s\\/*?:[\]]]/g, '_').slice(0, 31) || 'Sheet';
     const stripHtml = (html: string) =>
       html.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').trim();
 
@@ -143,10 +236,10 @@ export function useCanvasExport({ items, saveTitle }: UseCanvasExportOptions) {
     // Table widgets
     const tableItems = items.filter((i) => i.type === 'table' && i.payload.type === 'table');
     tableItems.forEach((item, idx) => {
-      const p = item.payload as { columns: { key: string; label: string }[]; data: any[] };
+      const p = item.payload as { columns: { key: string; label: string }[]; data: Record<string, unknown>[] };
       const cols = p.columns ?? [];
       const header = cols.map((c) => c.label || c.key);
-      const rows = (p.data ?? []).map((row) => cols.map((c) => row[c.key] ?? ''));
+      const rows = (p.data ?? []).map((row: Record<string, unknown>) => cols.map((c) => String(row[c.key] ?? '')));
       XLSX.utils.book_append_sheet(
         wb,
         XLSX.utils.aoa_to_sheet([header, ...rows]),
@@ -157,11 +250,11 @@ export function useCanvasExport({ items, saveTitle }: UseCanvasExportOptions) {
     // Chart widgets
     const chartItems = items.filter((i) => i.type === 'chart' && i.payload.type === 'chart');
     chartItems.forEach((item, idx) => {
-      const p = item.payload as { config?: { title?: string; data?: any[] } };
+      const p = item.payload as { config?: { title?: string; data?: Record<string, unknown>[] } };
       const chartData = p.config?.data;
       if (Array.isArray(chartData) && chartData.length > 0) {
         const cols = Object.keys(chartData[0]);
-        const rows = chartData.map((row: any) => cols.map((c) => row[c] ?? ''));
+        const rows = chartData.map((row: Record<string, unknown>) => cols.map((c) => String(row[c] ?? '')));
         const sheetName = sanitizeSheetName(`Chart ${idx + 1}` + (p.config?.title ? ` - ${p.config.title}` : ''));
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([cols, ...rows]), sheetName);
       }
