@@ -164,6 +164,12 @@ const topTieringMenuGroups = {
         iconColor: "blue" as const,
       },
       {
+        id: "salesScorecardOverview",
+        label: "Sales Scorecard Overview",
+        icon: BarChart3,
+        iconColor: "blue" as const,
+      },
+      {
         id: "salesTrends",
         label: "Trends",
         icon: TrendingUp,
@@ -253,6 +259,7 @@ const routeMap: Record<string, string> = {
   highPerformers: "/high-performers",
   actors: "/actors",
   salesScorecard: "/sales-scorecard",
+  salesScorecardOverview: "/sales-scorecard-overview",
   salesTrends: "/sales-trends",
   operationsScorecard: "/performance/operation-scorecard",
   operationsTrends: "/performance/operation-scorecard-trends",
@@ -495,6 +502,7 @@ export function Navigation(
       "/loan-detail",
       "/high-performers",
       "/sales-scorecard",
+      "/sales-scorecard-overview",
       "/sales-trends",
       "/performance/operation-scorecard",
       "/performance/operation-scorecard-trends",
