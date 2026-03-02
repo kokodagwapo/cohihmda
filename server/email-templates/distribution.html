@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; color: #1e293b; background: #f8fafc; }
+    .wrap { max-width: 600px; margin: 0 auto; padding: 24px; }
+    .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; }
+    h1 { font-size: 22px; font-weight: 600; margin: 0 0 8px; color: #0f172a; }
+    .meta { font-size: 13px; color: #64748b; margin-bottom: 16px; }
+    .desc { font-size: 14px; line-height: 1.5; color: #475569; margin-bottom: 20px; }
+    .cta { display: inline-block; background: #1e40af; color: #fff; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: 500; }
+    .attach { font-size: 12px; color: #64748b; margin-top: 16px; padding-top: 16px; border-top: 1px solid #e2e8f0; }
+    .footer { font-size: 11px; color: #94a3b8; margin-top: 24px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>{{DISTRIBUTION_NAME}}</h1>
+      <p class="meta">{{DATE_LABEL}}</p>
+      <p class="desc">{{DESCRIPTION}}</p>
+      <p>{{BODY_TEXT}}</p>
+      <p>{{VIEW_IN_APP_HTML}}</p>
+      <div>{{CONTENT_HTML}}</div>
+      <p class="attach">{{ATTACHMENT_NOTE}}</p>
+      <p class="footer">Powered by Coheus</p>
+    </div>
+  </div>
+</body>
+</html>

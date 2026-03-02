@@ -36,7 +36,6 @@ router.get(
         `SELECT id, email, full_name, role
          FROM public.users
          WHERE COALESCE(is_active, true) = true
-           AND (is_platform_user IS NULL OR is_platform_user = false)
          ORDER BY COALESCE(full_name, email) ASC
          LIMIT 500`,
       );

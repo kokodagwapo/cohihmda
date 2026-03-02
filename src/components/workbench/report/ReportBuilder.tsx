@@ -12,12 +12,14 @@
  */
 
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import {
   ArrowLeft,
   Download,
   Presentation,
   FileText,
+  Mail,
   Palette,
   LayoutTemplate,
   Save,
@@ -539,6 +541,7 @@ export function ReportBuilder({
   inline = false,
 }: ReportBuilderProps) {
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   // Build initial slides: if an initialDefinition is provided, use that
   // (hydrated with canvas data as a safety net); otherwise auto-populate from canvas.
@@ -1184,6 +1187,18 @@ export function ReportBuilder({
           <FileText className="h-3.5 w-3.5" />
           PDF
         </Button>
+        {/* Distributions page hidden for now */}
+        {false && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 text-xs"
+            onClick={() => navigate('/workbench/distributions')}
+          >
+            <Mail className="h-3.5 w-3.5" />
+            Schedule distribution
+          </Button>
+        )}
       </div>
 
       {/* Main content */}

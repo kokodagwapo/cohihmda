@@ -30,8 +30,8 @@ import MyDashboardLegacy from "./pages/MyDashboardLegacy";
 import NotFound from "./pages/NotFound";
 import { SubscriptionSuccess } from "./pages/SubscriptionSuccess";
 import { SubscriptionCancel } from "./pages/SubscriptionCancel";
-// Top Tiering pages
-import LoanFunnel from "./pages/LoanFunnel";
+// Top Tiering pages (Loan Funnel page hidden – references removed)
+// import LoanFunnel from "./pages/LoanFunnel";
 import TopTieringComparison from "./pages/TopTieringComparison";
 import OperationScorecard from "./pages/OperationScorecard";
 import OperationScorecardTrends from "./pages/OperationScorecardTrends";
@@ -44,7 +44,8 @@ import HighPerformers from "./pages/HighPerformers";
 import CreditRiskManagement from "./pages/CreditRiskManagement";
 import LoanDetail from "./pages/LoanDetail";
 import WorkflowConversion from "./pages/WorkflowConversion";
-import PricingDashboard from "./pages/PricingDashboard";
+// Hidden for now – needs work
+// import PricingDashboard from "./pages/PricingDashboard";
 import PipelineAnalysisDashboard from "./pages/PipelineAnalysisDashboard";
 import Actors from "./pages/Actors";
 import { KnowledgeBaseEditor } from "./components/admin/KnowledgeBaseEditor";
@@ -57,6 +58,8 @@ import { ActiveTourRunner } from "@/components/tutorial/ActiveTourRunner";
 import SharedWithMe from "./pages/workbench/SharedWithMe";
 import TeamFolders from "./pages/workbench/TeamFolders";
 import Favorites from "./pages/workbench/Favorites";
+// Hidden for now
+// import Distributions from "./pages/workbench/Distributions";
 // Research Lab
 import ResearchAnalyst from "./pages/ResearchAnalyst";
 // Help Center
@@ -183,6 +186,8 @@ const App = () => (
                   <Favorites />
                 </ProtectedRoute>
               } />
+              {/* Distributions page hidden for now; redirect so bookmarks don't 404 */}
+              <Route path="/workbench/distributions" element={<Navigate to="/my-dashboard" replace />} />
               
               {/* Research Lab */}
               <Route path="/research" element={
@@ -191,12 +196,8 @@ const App = () => (
                 </ProtectedRoute>
               } />
               
-              {/* Top Tiering routes */}
-              <Route path="/loan-funnel" element={
-                <ProtectedRoute>
-                  <LoanFunnel />
-                </ProtectedRoute>
-              } />
+              {/* Top Tiering routes – Loan Funnel page hidden; redirect so bookmarks don't 404 */}
+              <Route path="/loan-funnel" element={<Navigate to="/insights" replace />} />
               <Route path="/workflow-conversion" element={
                 <ProtectedRoute>
                   <WorkflowConversion />
@@ -207,11 +208,8 @@ const App = () => (
                   <LoanDetail />
                 </ProtectedRoute>
               } />
-              <Route path="/pricing-dashboard" element={
-                <ProtectedRoute>
-                  <PricingDashboard />
-                </ProtectedRoute>
-              } />
+              {/* Pricing Dashboard hidden for now – needs work; redirect so bookmarks don't 404 */}
+              <Route path="/pricing-dashboard" element={<Navigate to="/insights" replace />} />
               <Route path="/pipeline-analysis" element={
                 <ProtectedRoute>
                   <PipelineAnalysisDashboard />
