@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutGrid, Library, LayoutDashboard, PanelLeftClose, PanelLeftOpen, Search, Plus, Trash2, Heart, FolderOpen, Globe, Users, Lock } from 'lucide-react';
+import { LayoutGrid, Library, LayoutDashboard, PanelLeftClose, PanelLeftOpen, Search, Plus, Trash2, Heart, FolderOpen, Globe, Users, Lock, Mail } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,7 +24,7 @@ export type CanvasListItem = {
 
 const appNavLinks = [
   { path: '/my-dashboard', label: 'My Workbench', icon: LayoutDashboard, variant: 'violet' as const },
-  // Shared With Me, Team Folders, and Bookmarks are hidden until implemented
+  { path: '/workbench/distributions', label: 'Distributions', icon: Mail, variant: 'violet' as const },
   { label: 'Cohi Dashboard Library', icon: Library, variant: 'sky' as const, scrollTarget: 'cohi-dashboard-library' },
 ];
 

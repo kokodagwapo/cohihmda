@@ -1169,6 +1169,78 @@ export class ApiClient {
       method: "POST",
     });
   }
+
+  // Report distributions
+  private _distTq(tenantId?: string | null): string {
+    return tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+  }
+  private _distTqAmp(tenantId?: string | null): string {
+    return tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : "";
+  }
+
+  async getDistributionSchedules(params?: { limit?: number; offset?: number; is_active?: string; tenantId?: string | null }) {
+    const sp = new URLSearchParams();
+    if (params?.limit != null) sp.set("limit", String(params.limit));
+    if (params?.offset != null) sp.set("offset", String(params.offset));
+    if (params?.is_active != null) sp.set("is_active", params.is_active);
+    if (params?.tenantId) sp.set("tenant_id", params.tenantId);
+    const qs = sp.toString() ? `?${sp.toString()}` : "";
+    return this.request<{ schedules: any[]; total: number; limit: number; offset: number }>(
+      `/api/distributions${qs}`
+    );
+  }
+
+  async getDistributionSchedule(id: string, tenantId?: string | null) {
+    return this.request<any>(`/api/distributions/${id}${this._distTq(tenantId)}`);
+  }
+
+  async createDistributionSchedule(data: Record<string, unknown>, tenantId?: string | null) {
+    return this.request<any>(`/api/distributions${this._distTq(tenantId)}`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateDistributionSchedule(id: string, data: Record<string, unknown>, tenantId?: string | null) {
+    return this.request<any>(`/api/distributions/${id}${this._distTq(tenantId)}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteDistributionSchedule(id: string, tenantId?: string | null) {
+    return this.request<void>(`/api/distributions/${id}${this._distTq(tenantId)}`, { method: "DELETE" });
+  }
+
+  async getDistributionHistory(id: string, limit = 20, tenantId?: string | null) {
+    return this.request<{ history: any[] }>(`/api/distributions/${id}/history?limit=${limit}${this._distTqAmp(tenantId)}`);
+  }
+
+  async sendDistributionNow(id: string, tenantId?: string | null) {
+    return this.request<any>(`/api/distributions/${id}/send-now${this._distTq(tenantId)}`, { method: "POST" });
+  }
+
+  async getDistributionRecipientLists(tenantId?: string | null) {
+    return this.request<{ lists: any[] }>(`/api/distributions/recipient-lists${this._distTq(tenantId)}`);
+  }
+
+  async createDistributionRecipientList(data: Record<string, unknown>, tenantId?: string | null) {
+    return this.request<any>(`/api/distributions/recipient-lists${this._distTq(tenantId)}`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateDistributionRecipientList(id: string, data: Record<string, unknown>, tenantId?: string | null) {
+    return this.request<any>(`/api/distributions/recipient-lists/${id}${this._distTq(tenantId)}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteDistributionRecipientList(id: string, tenantId?: string | null) {
+    return this.request<void>(`/api/distributions/recipient-lists/${id}${this._distTq(tenantId)}`, { method: "DELETE" });
+  }
 }
 
 export const api = new ApiClient();

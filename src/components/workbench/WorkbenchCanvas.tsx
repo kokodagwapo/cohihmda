@@ -10,6 +10,7 @@ import React, {
   useEffect,
   useMemo,
 } from "react";
+import { useNavigate } from "react-router-dom";
 import type { SectionType } from "@/stores/widgetSectionStore";
 import { Rnd } from "react-rnd";
 import { api } from "@/lib/api";
@@ -19,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import {
   Save,
   Share2,
+  Mail,
   Image,
   Upload,
   Palette,
@@ -34,7 +36,6 @@ import {
   Sparkles,
   Download,
   Presentation,
-  Mail,
   Link as LinkIcon,
   Code,
   Undo2,
@@ -817,6 +818,7 @@ export function WorkbenchCanvas({
   const [tenantUsersLoaded, setTenantUsersLoaded] = useState(false);
   const [visibilitySaving, setVisibilitySaving] = useState(false);
   const { user } = useAuth();
+  const navigate = useNavigate();
   const isOwner = isOwnerProp ?? true; // Default to true for new/own canvases
   const [activeAddGroup, setActiveAddGroup] = useState(
     () => DASHBOARD_SECTION_GROUPS[0]?.label ?? "Insights",
@@ -3932,6 +3934,27 @@ Structure it as a narrative-first executive briefing:
                       <TooltipContent side="bottom">Share</TooltipContent>
                     </Tooltip>
                   )}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400"
+                        onClick={() =>
+                          navigate(
+                            canvasId
+                              ? `/workbench/distributions?canvas=${canvasId}`
+                              : "/workbench/distributions",
+                          )
+                        }
+                      >
+                        <Mail className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      Schedule distribution
+                    </TooltipContent>
+                  </Tooltip>
                   <input
                     ref={backgroundImageInputRef}
                     type="file"

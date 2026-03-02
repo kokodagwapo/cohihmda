@@ -363,6 +363,15 @@ async function startWorker() {
   }
 
   try {
+    const { startDistributionScheduler } = await import(
+      "./services/distributionScheduler.js"
+    );
+    startDistributionScheduler();
+  } catch (error) {
+    console.warn("⚠️ Failed to start distribution scheduler:", error);
+  }
+
+  try {
     const { startSyncJobPoller } = await import(
       "./services/syncJobPoller.js"
     );
@@ -421,6 +430,15 @@ if (SKIP_DB) {
           startNewsRefreshScheduler();
         } catch (error) {
           console.warn("⚠️ Failed to start news refresh scheduler:", error);
+        }
+
+        try {
+          const { startDistributionScheduler } = await import(
+            "./services/distributionScheduler.js"
+          );
+          startDistributionScheduler();
+        } catch (error) {
+          console.warn("⚠️ Failed to start distribution scheduler:", error);
         }
 
         try {
