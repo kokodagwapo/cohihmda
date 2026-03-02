@@ -34,6 +34,10 @@ export interface ScheduleRow {
   content_type: ContentType;
   content_id: string | null;
   content_config: Record<string, any>;
+  /** Inline recipient emails (from distribution_schedules.recipient_emails) */
+  recipient_emails?: string[];
+  /** FK to distribution_recipient_lists (from distribution_schedules.recipient_list_id) */
+  recipient_list_id?: string | null;
 }
 
 /**
