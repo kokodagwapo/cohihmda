@@ -8,6 +8,7 @@ import pg from "pg";
 import {
   getTenantRevenueExpression,
   buildChannelWhereClause,
+  buildDimensionFilterWhereClause,
 } from "../../utils/scorecard-utils.js";
 
 export type PricingEntityType = "branch" | "broker_lender_name" | "channel" | "investor";
@@ -31,6 +32,8 @@ export interface PricingDashboardFilters {
   loanFunding: PricingLoanFunding;
   loanStatus: PricingLoanStatus;
   lockStatus: PricingLockStatus;
+  /** Pre-built SQL fragment from buildDimensionFilterWhereClause (includes leading AND per condition) */
+  dimensionFilterClause?: string;
 }
 
 export interface PricingKPIs {
@@ -244,7 +247,13 @@ function buildBaseWhere(
     idx++;
   }
 
-  const clause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const dimFilter = filters.dimensionFilterClause || '';
+  let clause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  if (dimFilter) {
+    clause = clause
+      ? `${clause} ${dimFilter}`
+      : `WHERE ${dimFilter.replace(/^\s*AND\s+/i, '')}`;
+  }
   return { clause, nextIndex: idx };
 }
 

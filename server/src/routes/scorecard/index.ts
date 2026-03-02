@@ -47,6 +47,7 @@ import {
   OPS_TTS_WEIGHTS,
   SALES_TTS_WEIGHTS,
   type ActorConfig,
+  buildDimensionFilterWhereClause,
   type ActorMissingMode,
   type TTSTier,
   type ComplexityConfig,
@@ -313,6 +314,7 @@ router.get(
 
       // SQL filtering setup
       const channelClause = buildChannelWhereClause(channelGroup);
+      const dimensionFilterClause = buildDimensionFilterWhereClause(req.query as Record<string, any>, '', new Set(['channel_group', 'tenant_id']));
       const startDateStr = formatDateForSQL(effectiveStartDate);
       const endDateStr = formatDateForSQL(effectiveEndDate);
 
@@ -353,7 +355,8 @@ router.get(
            AND UPPER(TRIM(${actorColumn})) NOT IN ('99-MISSING', 'MISSING', 'NO LO FOUND', 'NO LOAN OFFICER', 'NO BRANCH FOUND', 'UNKNOWN')
            AND UPPER(TRIM(${actorColumn})) NOT LIKE '99-%'
            ${accessWhereClause}
-           ${channelClause}`,
+           ${channelClause}
+           ${dimensionFilterClause}`,
             fundedQueryParams
           ),
         2,
@@ -376,7 +379,8 @@ router.get(
          WHERE COALESCE(started_date, application_date) >= $1
            AND COALESCE(started_date, application_date) <= $2
            ${accessWhereClause}
-           ${channelClause}`,
+           ${channelClause}
+           ${dimensionFilterClause}`,
             fundedQueryParams
           ),
         2,
@@ -1165,6 +1169,7 @@ router.get(
 
       // SQL filtering
       const channelClause = buildChannelWhereClause(channelGroup);
+      const dimensionFilterClause = buildDimensionFilterWhereClause(req.query as Record<string, any>, '', new Set(['channel_group', 'tenant_id']));
       const startDateStr = formatDateForSQL(effectiveStartDate);
       const endDateStr = formatDateForSQL(effectiveEndDate);
 
@@ -1188,6 +1193,7 @@ router.get(
         AND TRIM(${config.actorColumn}) != ''
         AND UPPER(TRIM(${config.actorColumn})) != '99-MISSING'
         ${channelClause}
+        ${dimensionFilterClause}
     `,
         [startDateStr, endDateStr]
       );
@@ -1651,10 +1657,13 @@ router.get(
         months: monthsCount,
       });
 
+      const dimensionFilterClause = buildDimensionFilterWhereClause(req.query as Record<string, any>, '', new Set(['channel_group', 'tenant_id']));
+
       const result = await getOperationsScorecardTrends(tenantPool, {
         actorType,
         monthsCount,
         channelGroup,
+        dimensionFilterClause,
       });
 
       logInfo("[Scorecard/Operations-Trends] Complete", {
@@ -1719,6 +1728,12 @@ router.get(
       previousStartDate.setMonth(previousStartDate.getMonth() - monthsBack + 1);
       previousStartDate.setDate(1);
 
+      const dimensionFilterClause = buildDimensionFilterWhereClause(
+        req.query as Record<string, any>,
+        '',
+        new Set(['channel_group', 'tenant_id', 'date_range'])
+      );
+
       logInfo("[Scorecard/Sales-Trends] Start", {
         dateRange,
         channel: channelGroup,
@@ -1738,6 +1753,7 @@ router.get(
       WHERE funding_date IS NOT NULL
         AND funding_date >= $1
         AND funding_date <= $2
+        ${dimensionFilterClause}
     `,
         [previousStartDate.toISOString(), currentEndDate.toISOString()]
       );
@@ -2022,6 +2038,12 @@ router.get(
       startDate.setMonth(startDate.getMonth() - monthsBack);
       startDate.setDate(1);
 
+      const dimensionFilterClause = buildDimensionFilterWhereClause(
+        req.query as Record<string, any>,
+        '',
+        new Set(['channel_group', 'tenant_id', 'date_range', 'loan_officer'])
+      );
+
       // Fetch LO's loans with tenant-specific revenue calculation
       const loansResult = await tenantPool.query(
         `
@@ -2037,6 +2059,7 @@ router.get(
         AND funding_date IS NOT NULL
         AND funding_date >= $2
         AND funding_date <= $3
+        ${dimensionFilterClause}
     `,
         [decodedLoName, startDate.toISOString(), endDate.toISOString()]
       );

@@ -31,6 +31,7 @@ function WorkflowConversionEmbedInner({ width, height, config }: WidgetRenderPro
         segments: { from: string; to: string }[];
       }) => void)
     | undefined;
+  const groupId = config?.groupId as string | undefined;
 
   return (
     <div
@@ -41,6 +42,7 @@ function WorkflowConversionEmbedInner({ width, height, config }: WidgetRenderPro
         selectedTenantId={selectedTenantId}
         selectedChannel={selectedChannel}
         embeddedInWorkbench
+        groupId={groupId}
         initialWorkflowState={workflowInitialState}
         onWorkflowStateChange={onWorkflowStateChange}
       />

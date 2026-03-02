@@ -21,6 +21,7 @@ import {
   type PricingLoanStatus,
   type PricingLockStatus,
 } from "../../services/dashboard/pricingDashboardService.js";
+import { buildDimensionFilterWhereClause } from "../../utils/scorecard-utils.js";
 
 const router = Router();
 
@@ -39,6 +40,11 @@ function parseFilters(query: Record<string, unknown>): PricingDashboardFilters {
   const actorType = (query.actor_type as string) || "loan_officer";
   const entityFilterType = query.entity_filter_type as string | undefined;
   const actorFilterType = query.actor_filter_type as string | undefined;
+  const dimensionFilterClause = buildDimensionFilterWhereClause(
+    query as Record<string, any>,
+    'l',
+    new Set(['channel_group', 'channel', 'tenant_id', 'date_range'])
+  );
   return {
     channel: parseChannelParam(query),
     entityType: entityType as PricingEntityType,
@@ -51,6 +57,7 @@ function parseFilters(query: Record<string, unknown>): PricingDashboardFilters {
     loanFunding: (query.loan_funding as PricingLoanFunding) || "funded",
     loanStatus: (query.loan_status as PricingLoanStatus) || "active",
     lockStatus: (query.lock_status as PricingLockStatus) || "total",
+    dimensionFilterClause,
   };
 }
 

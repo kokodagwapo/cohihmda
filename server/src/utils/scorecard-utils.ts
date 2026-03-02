@@ -258,6 +258,52 @@ export const buildChannelWhereClause = (
 };
 
 /**
+ * Map of frontend dimension filter param names to actual DB column names on the loans table.
+ * Used by buildDimensionFilterWhereClause to translate query params into SQL filters.
+ */
+const DIMENSION_FILTER_COLUMNS: Record<string, string> = {
+  branch: 'branch',
+  loan_officer: 'loan_officer',
+  loan_type: 'loan_type',
+  loan_purpose: 'loan_purpose',
+  property_state: 'property_state',
+  property_county: 'property_county',
+  property_type: 'property_type',
+  current_loan_status: 'current_loan_status',
+  investor_name: 'investor',
+};
+
+/**
+ * Build a SQL WHERE clause fragment from workbench dimension filter query params.
+ * Inspects `query` for known dimension filter keys and produces AND clauses.
+ * Uses ILIKE for case-insensitive matching.
+ *
+ * @param query - Express req.query (or plain object with string values)
+ * @param tableAlias - Table alias used in the query (e.g. "l"). Empty string for no alias.
+ * @param skip - Optional set of param keys to skip (when the route already handles them).
+ * @returns SQL fragment to append to WHERE clause (includes leading AND per condition, or empty string).
+ */
+export const buildDimensionFilterWhereClause = (
+  query: Record<string, any>,
+  tableAlias: string = 'l',
+  skip?: Set<string>,
+): string => {
+  const parts: string[] = [];
+  const prefix = tableAlias ? `${tableAlias}.` : '';
+
+  for (const [param, dbCol] of Object.entries(DIMENSION_FILTER_COLUMNS)) {
+    if (skip?.has(param)) continue;
+    const v = query[param];
+    if (v && typeof v === 'string' && v.toLowerCase() !== 'all' && v.trim() !== '') {
+      const escaped = v.replace(/'/g, "''");
+      parts.push(`AND ${prefix}${dbCol} ILIKE '${escaped}'`);
+    }
+  }
+
+  return parts.join(' ');
+};
+
+/**
  * Build a SQL CASE expression that classifies a loan into a channel group.
  * TPO requires BOTH a TPO channel pattern AND a populated account_executive.
  * Loans with a TPO channel but no AE are classified as Retail.

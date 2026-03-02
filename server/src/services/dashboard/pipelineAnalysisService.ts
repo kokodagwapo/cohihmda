@@ -174,7 +174,8 @@ export async function computeSnapshotForDate(
   pool: pg.Pool,
   snapshotDate: Date,
   startDateField: StartDateField = "application_date",
-  filters?: PipelineSnapshotFilters | null
+  filters?: PipelineSnapshotFilters | null,
+  dimensionFilterClause?: string
 ): Promise<{ activeUnits: number; activeVolume: number; activeLoCount: number }> {
   const dateStr = formatDateForSql(snapshotDate);
   const useLockDate = startDateField === "lock_date";
@@ -217,7 +218,7 @@ export async function computeSnapshotForDate(
     params.push(filters.branches);
   }
 
-  const whereClause = conditions.join(" AND ");
+  const whereClause = conditions.join(" AND ") + (dimensionFilterClause ?? "");
   const sql = `
     WITH active_loans AS (
       SELECT l.loan_amount,
@@ -309,9 +310,10 @@ export async function getPipelineSnapshots(
   from?: string,
   to?: string,
   startDateField: StartDateField = "application_date",
-  filters?: PipelineSnapshotFilters | null
+  filters?: PipelineSnapshotFilters | null,
+  dimensionFilterClause?: string
 ): Promise<PipelineSnapshotRow[]> {
-  return getPipelineSnapshotsComputed(pool, from, to, startDateField, filters ?? undefined);
+  return getPipelineSnapshotsComputed(pool, from, to, startDateField, filters ?? undefined, dimensionFilterClause);
 }
 
 /** Compute snapshots on the fly from loans. Used for all snapshot requests (100% live, no table). */
@@ -320,7 +322,8 @@ async function getPipelineSnapshotsComputed(
   from?: string,
   to?: string,
   startDateField: StartDateField = "lock_date",
-  filters?: PipelineSnapshotFilters
+  filters?: PipelineSnapshotFilters,
+  dimensionFilterClause?: string
 ): Promise<PipelineSnapshotRow[]> {
   const snapshotDay = await getPipelineSnapshotDay(pool);
   const dayName = SNAPSHOT_DAY_NAMES[snapshotDay];
@@ -356,7 +359,13 @@ async function getPipelineSnapshotsComputed(
 
   const snapshots: Array<{ snapshotDate: Date; activeUnits: number; activeVolume: number; activeLoCount: number }> = [];
   for (const d of dates) {
-    const { activeUnits, activeVolume, activeLoCount } = await computeSnapshotForDate(pool, d, startDateField, filters);
+    const { activeUnits, activeVolume, activeLoCount } = await computeSnapshotForDate(
+      pool,
+      d,
+      startDateField,
+      filters,
+      dimensionFilterClause,
+    );
     snapshots.push({ snapshotDate: d, activeUnits, activeVolume, activeLoCount });
   }
 

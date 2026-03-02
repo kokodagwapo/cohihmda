@@ -229,6 +229,16 @@ const SECTION_FILTER_CONFIG: Partial<Record<SectionType, SectionFilterField[]>> 
   'pipeline-analysis': [],
 };
 
+/**
+ * Section-specific filter dimensions already shown in the section's filter bar.
+ * AddFilterPicker excludes these so we don't offer duplicate filters (e.g. Pipeline Analysis
+ * already has Loan Type, Purpose, Branch; Pricing already has entity/actor columns).
+ */
+const SECTION_BUILTIN_FILTER_COLUMNS: Partial<Record<SectionType, string[]>> = {
+  'pipeline-analysis': ['loan_type', 'loan_purpose', 'branch'],
+  'pricing-dashboard': ['branch', 'loan_officer', 'channel', 'investor_name'],
+};
+
 const HIGH_PERFORMERS_DATE_TYPE_OPTIONS: { value: 'funding_date' | 'closing_date' | 'application_date'; label: string }[] = [
   { value: 'funding_date', label: 'Funded Loans' },
   { value: 'closing_date', label: 'Closed Loans' },
@@ -757,6 +767,7 @@ function layoutToMap(layout: Layout[]): Record<string, { x: number; y: number; w
 function GridCellWidget({
   item,
   itemId,
+  groupId,
   width,
   height,
   dateFilter,
@@ -774,6 +785,8 @@ function GridCellWidget({
   item: GroupWidgetItem;
   /** Stable unique ID used for canvasDataStore reporting */
   itemId: string;
+  /** Section/group id – used for workflow-conversion embed to show Filter/Presets */
+  groupId: string;
   width: number;
   height: number;
   dateFilter: DateFilter | null;
@@ -1152,6 +1165,7 @@ function GridCellRegistryWidget({
   const isWorkflowConversion = defId === 'workflow-conversion-embed';
   const workflowConfig = isWorkflowConversion
     ? {
+        groupId,
         workflowInitialState:
           filters.workflowPeriodSelection != null ||
           filters.workflowCalculationType != null ||
@@ -2007,6 +2021,37 @@ export function WidgetGroup({
                     </button>
                   </span>
                 )}
+                {/* Dynamic (user-added) filters */}
+                {(filters.dynamicFilters || []).map((df) => (
+                  <DynamicDimensionFilter
+                    key={df.column}
+                    entry={df}
+                    tenantId={tenantIdForEdit}
+                    onChange={(value) => updateDynamicFilter(groupId, df.column, value)}
+                    onRemove={() => removeDynamicFilter(groupId, df.column)}
+                  />
+                ))}
+                {/* Divider before add-filter */}
+                <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+                {/* Add filter dimension button */}
+                <AddFilterPicker
+                  groupId={groupId}
+                  existingColumns={[
+                    ...(SECTION_FILTER_CONFIG[sectionType] ?? [])
+                      .filter((f) => f.optionsSource)
+                      .map((f) => f.optionsSource!),
+                    ...(SECTION_BUILTIN_FILTER_COLUMNS[sectionType] ?? []),
+                    ...(filters.dynamicFilters || []).map((f) => f.column),
+                  ]}
+                  onAdd={(col, label) => addDynamicFilter(groupId, { column: col, label, value: 'all' })}
+                />
+                {/* Divider before presets */}
+                <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+                {/* Filter preset bookmarks */}
+                <GroupFilterBookmarkButton
+                  filters={filters}
+                  onApplyPreset={handleApplyGroupPreset}
+                />
               </>
             ) : sectionType === 'pipeline-analysis' ? (
               <>
@@ -2019,6 +2064,37 @@ export function WidgetGroup({
                   pipelineFilterOptions={pipelineFilterOptions}
                   loading={pipelineRange.loading}
                   tenantId={selectedTenantId ?? null}
+                />
+                {/* Dynamic (user-added) filters */}
+                {(filters.dynamicFilters || []).map((df) => (
+                  <DynamicDimensionFilter
+                    key={df.column}
+                    entry={df}
+                    tenantId={tenantIdForEdit}
+                    onChange={(value) => updateDynamicFilter(groupId, df.column, value)}
+                    onRemove={() => removeDynamicFilter(groupId, df.column)}
+                  />
+                ))}
+                {/* Divider before add-filter */}
+                <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+                {/* Add filter dimension button */}
+                <AddFilterPicker
+                  groupId={groupId}
+                  existingColumns={[
+                    ...(SECTION_FILTER_CONFIG[sectionType] ?? [])
+                      .filter((f) => f.optionsSource)
+                      .map((f) => f.optionsSource!),
+                    ...(SECTION_BUILTIN_FILTER_COLUMNS[sectionType] ?? []),
+                    ...(filters.dynamicFilters || []).map((f) => f.column),
+                  ]}
+                  onAdd={(col, label) => addDynamicFilter(groupId, { column: col, label, value: 'all' })}
+                />
+                {/* Divider before presets */}
+                <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+                {/* Filter preset bookmarks */}
+                <GroupFilterBookmarkButton
+                  filters={filters}
+                  onApplyPreset={handleApplyGroupPreset}
                 />
               </>
             ) : sectionType === 'actors' ? (
@@ -2160,6 +2236,37 @@ export function WidgetGroup({
                     </button>
                   </span>
                 )}
+                {/* Dynamic (user-added) filters */}
+                {(filters.dynamicFilters || []).map((df) => (
+                  <DynamicDimensionFilter
+                    key={df.column}
+                    entry={df}
+                    tenantId={tenantIdForEdit}
+                    onChange={(value) => updateDynamicFilter(groupId, df.column, value)}
+                    onRemove={() => removeDynamicFilter(groupId, df.column)}
+                  />
+                ))}
+                {/* Divider before add-filter */}
+                <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+                {/* Add filter dimension button */}
+                <AddFilterPicker
+                  groupId={groupId}
+                  existingColumns={[
+                    ...(SECTION_FILTER_CONFIG[sectionType] ?? [])
+                      .filter((f) => f.optionsSource)
+                      .map((f) => f.optionsSource!),
+                    ...(SECTION_BUILTIN_FILTER_COLUMNS[sectionType] ?? []),
+                    ...(filters.dynamicFilters || []).map((f) => f.column),
+                  ]}
+                  onAdd={(col, label) => addDynamicFilter(groupId, { column: col, label, value: 'all' })}
+                />
+                {/* Divider before presets */}
+                <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+                {/* Filter preset bookmarks */}
+                <GroupFilterBookmarkButton
+                  filters={filters}
+                  onApplyPreset={handleApplyGroupPreset}
+                />
               </>
             ) : sectionType === 'high-performers' ? (
               <>
@@ -2175,6 +2282,37 @@ export function WidgetGroup({
                     {opt.label}
                   </Button>
                 ))}
+                {/* Dynamic (user-added) filters */}
+                {(filters.dynamicFilters || []).map((df) => (
+                  <DynamicDimensionFilter
+                    key={df.column}
+                    entry={df}
+                    tenantId={tenantIdForEdit}
+                    onChange={(value) => updateDynamicFilter(groupId, df.column, value)}
+                    onRemove={() => removeDynamicFilter(groupId, df.column)}
+                  />
+                ))}
+                {/* Divider before add-filter */}
+                <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+                {/* Add filter dimension button */}
+                <AddFilterPicker
+                  groupId={groupId}
+                  existingColumns={[
+                    ...(SECTION_FILTER_CONFIG[sectionType] ?? [])
+                      .filter((f) => f.optionsSource)
+                      .map((f) => f.optionsSource!),
+                    ...(SECTION_BUILTIN_FILTER_COLUMNS[sectionType] ?? []),
+                    ...(filters.dynamicFilters || []).map((f) => f.column),
+                  ]}
+                  onAdd={(col, label) => addDynamicFilter(groupId, { column: col, label, value: 'all' })}
+                />
+                {/* Divider before presets */}
+                <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+                {/* Filter preset bookmarks */}
+                <GroupFilterBookmarkButton
+                  filters={filters}
+                  onApplyPreset={handleApplyGroupPreset}
+                />
               </>
             ) : (
               <>
@@ -2234,11 +2372,10 @@ export function WidgetGroup({
             <AddFilterPicker
               groupId={groupId}
               existingColumns={[
-                // Built-in filter columns
                 ...(SECTION_FILTER_CONFIG[sectionType] ?? [])
                   .filter((f) => f.optionsSource)
                   .map((f) => f.optionsSource!),
-                // Dynamic filter columns already added
+                ...(SECTION_BUILTIN_FILTER_COLUMNS[sectionType] ?? []),
                 ...(filters.dynamicFilters || []).map((f) => f.column),
               ]}
               onAdd={(col, label) => addDynamicFilter(groupId, { column: col, label, value: 'all' })}
@@ -2302,6 +2439,7 @@ export function WidgetGroup({
                   <GridCellWidget
                     item={item}
                     itemId={`${groupId}__${key}`}
+                    groupId={groupId}
                     width={cellW}
                     height={cellH}
                     dateFilter={groupDateFilter}
@@ -2852,3 +2990,6 @@ function GroupFilterBookmarkButton({
     </div>
   );
 }
+
+// Export for use in WorkflowConversionView (workbench Filter + Presets bar)
+export { AddFilterPicker, GroupFilterBookmarkButton, DynamicDimensionFilter };

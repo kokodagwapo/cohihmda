@@ -23,6 +23,7 @@ import { getLoanAccessContext } from "../../services/userLoanAccessService.js";
 import {
   isActorMissing,
   buildChannelWhereClause,
+  buildDimensionFilterWhereClause,
   calcLoanRevenue,
   getVMaxDate,
   formatDateForSQL,
@@ -713,6 +714,11 @@ router.get(
       const channelCondition = buildChannelWhereClause(channelGroup);
       // Channel-aware funded filter: Retail uses rate_lock > 0, TPO/All do not.
       const compFundedFilter = buildFundedFilter(channelGroup);
+      const dimensionFilterClause = buildDimensionFilterWhereClause(
+        req.query as Record<string, any>,
+        '',
+        new Set(['channel_group', 'tenant_id', 'actor_type', 'date_range', 'start_date', 'end_date']),
+      );
       const queryParams: any[] = [
         effectiveStartDate.toISOString().split("T")[0],
         effectiveEndDate.toISOString().split("T")[0],
@@ -734,6 +740,7 @@ router.get(
           AND funding_date >= $1
           AND funding_date <= $2
           ${channelCondition}
+          ${dimensionFilterClause}
       ),
       actor_aggregates AS (
         SELECT 
@@ -890,6 +897,7 @@ router.get(
           AND funding_date >= $1
           AND funding_date <= $2
           ${channelCondition}
+          ${dimensionFilterClause}
       `;
 
         const lastYearParams = [

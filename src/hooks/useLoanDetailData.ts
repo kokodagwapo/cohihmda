@@ -139,7 +139,9 @@ export function useLoanDetailData(
     } finally {
       setLoading(false);
     }
-  }, [tenantId, filters?.dateField, filters?.dateRange?.start, filters?.dateRange?.end, filters?.branch, filters?.loanOfficer, filters?.dimensionFilters]);
+  // Serialize dimensionFilters to a stable string so a new array ref doesn't cause a fetch loop
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenantId, filters?.dateField, filters?.dateRange?.start, filters?.dateRange?.end, filters?.branch, filters?.loanOfficer, JSON.stringify(filters?.dimensionFilters)]);
 
   useEffect(() => {
     // Backend returns 400 when tenant_id is missing (e.g. super_admin with no tenant selected)

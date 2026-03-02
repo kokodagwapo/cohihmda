@@ -14,6 +14,8 @@ export interface ScorecardFilters {
   dateRange?: { start: string; end: string }; // Optional: explicit date range (overrides year)
   dateField?: string; // Which date field to filter on (application_date, funding_date, started_date, etc.)
   tenantId?: string | null; // Tenant ID for multi-tenant support (admins viewing other tenants)
+  /** Additional dimension filters from workbench "Add Filter" (branch, loan_officer, channel, etc.) */
+  dimensionFilters?: Array<{ column: string; value: string }>;
 }
 
 export interface GroupedMetricResult {
@@ -220,7 +222,7 @@ export function useCompanyScorecardData(filters: ScorecardFilters) {
       const dateRangeStart = filters.dateRange?.start || `${filters.year}-01-01`;
       const dateRangeEnd = filters.dateRange?.end || `${filters.year}-12-31`;
 
-      // Build additional filters
+      // Build additional filters (built-in branch/loanOfficer + workbench "Add Filter" dimensions)
       const additionalFilters: Record<string, any> = {};
       if (filters.branch !== 'all') {
         additionalFilters.branch = filters.branch;
@@ -232,6 +234,9 @@ export function useCompanyScorecardData(filters: ScorecardFilters) {
       if (filters.channel && filters.channel !== 'All') {
         additionalFilters.consolidated_channel = filters.channel;
       }
+      (filters.dimensionFilters || []).forEach((df) => {
+        if (df.value && df.value !== 'all') additionalFilters[df.column] = df.value;
+      });
 
       // Build request body - each metric uses its own defaultDateField
       // (matching Qlik where each expression has its own DateType, e.g. Application, Started, Funding)
@@ -280,7 +285,9 @@ export function useCompanyScorecardData(filters: ScorecardFilters) {
     } finally {
       setLoading(false);
     }
-  }, [filters.year, filters.branch, filters.loanOfficer, filters.channel, filters.dateRange?.start, filters.dateRange?.end, filters.tenantId]);
+  // Serialize dimensionFilters to a stable string so a new array ref doesn't cause a fetch loop
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.year, filters.branch, filters.loanOfficer, filters.channel, filters.dateRange?.start, filters.dateRange?.end, filters.tenantId, JSON.stringify(filters.dimensionFilters)]);
 
   useEffect(() => {
     fetchData();

@@ -9,6 +9,7 @@ import { Router } from "express";
 import { authenticateToken, AuthRequest } from "../../middleware/auth.js";
 import { attachTenantContext, getTenantContext } from "../../middleware/tenantContext.js";
 import { handleDatabaseError } from "../../config/database.js";
+import { buildDimensionFilterWhereClause } from "../../utils/scorecard-utils.js";
 import {
   getPipelineSnapshots,
   recalculatePipelineSnapshots,
@@ -117,12 +118,17 @@ router.get(
       (loanTypes?.length ?? 0) > 0 || (loanPurposes?.length ?? 0) > 0 || (branches?.length ?? 0) > 0
         ? { loanTypes, loanPurposes, branches }
         : undefined;
+    const dimensionFilterClause = buildDimensionFilterWhereClause(
+      req.query as Record<string, any>,
+      "l",
+      new Set(["tenant_id", "from", "to", "start_date_field", "loan_type", "loan_purpose", "branch"]),
+    );
     try {
       const ctx = getTenantContext(req);
       if (!ctx?.tenantPool) {
         return res.status(400).json({ error: "Tenant context required" });
       }
-      const rows = await getPipelineSnapshots(ctx.tenantPool, from, to, startDateField, filters);
+      const rows = await getPipelineSnapshots(ctx.tenantPool, from, to, startDateField, filters, dimensionFilterClause);
       const snapshots = rows.map((r) => ({
         date: typeof r.date === "string" ? r.date : r.date?.toISOString?.()?.slice(0, 10) ?? String(r.date),
         index: Number(r.index),

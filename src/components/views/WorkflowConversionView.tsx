@@ -42,6 +42,16 @@ import {
   Dialog,
   DialogContent,
 } from "@/components/ui/dialog";
+import { useWidgetSectionStore } from "@/stores/widgetSectionStore";
+import type { SectionFilters } from "@/stores/widgetSectionStore";
+import { useTenantStore } from "@/stores/tenantStore";
+import { useFilterPresetStore, type FilterPreset } from "@/stores/filterPresetStore";
+import { computePresetDateRange } from "@/components/ui/DatePeriodPicker";
+import {
+  AddFilterPicker,
+  GroupFilterBookmarkButton,
+  DynamicDimensionFilter,
+} from "@/components/widgets/components/WidgetGroup";
 
 const PERIOD_PRESETS: PeriodPreset[] = [
   "mtd",
@@ -69,6 +79,8 @@ export interface WorkflowConversionViewProps {
   selectedChannel?: string | null;
   /** When true, show +/- buttons to add/remove cards (workbench only). */
   embeddedInWorkbench?: boolean;
+  /** Section/group id when embedded in workbench – enables Filter + Presets bar. */
+  groupId?: string;
   /** Initial state when embedded (e.g. from saved canvas). */
   initialWorkflowState?: {
     periodSelection?: PeriodSelection;
@@ -89,9 +101,40 @@ export function WorkflowConversionView({
   selectedTenantId,
   selectedChannel,
   embeddedInWorkbench = false,
+  groupId,
   initialWorkflowState,
   onWorkflowStateChange,
 }: WorkflowConversionViewProps) {
+  const filters = useWidgetSectionStore((s) =>
+    groupId ? s.getFilters(groupId) : null
+  ) as SectionFilters | null;
+  const updateFilters = useWidgetSectionStore((s) => s.updateFilters);
+  const addDynamicFilter = useWidgetSectionStore((s) => s.addDynamicFilter);
+  const removeDynamicFilter = useWidgetSectionStore((s) => s.removeDynamicFilter);
+  const updateDynamicFilter = useWidgetSectionStore((s) => s.updateDynamicFilter);
+  const { selectedTenantId: tenantIdFromStore } = useTenantStore();
+  const tenantIdForEdit = tenantIdFromStore ?? selectedTenantId ?? null;
+
+  const handleApplyGroupPreset = useCallback(
+    (preset: FilterPreset) => {
+      if (!groupId) return;
+      const f = preset.filters;
+      const patch: Partial<SectionFilters> = {};
+      if (f.dateField) patch.dateField = f.dateField;
+      if (f.preset) {
+        const range = computePresetDateRange(f.preset as PeriodPreset);
+        patch.periodSelection = { type: "preset", preset: f.preset as PeriodPreset, dateRange: range };
+        patch.dateRange = range;
+      } else if (f.year) {
+        patch.year = f.year;
+        patch.dateRange = { start: `${f.year}-01-01`, end: `${f.year}-12-31` };
+      } else if (f.dateRange) {
+        patch.dateRange = f.dateRange;
+      }
+      updateFilters(groupId, patch);
+    },
+    [groupId, updateFilters]
+  );
   const [periodSelection, setPeriodSelection] = useState<PeriodSelection>(() => {
     const initial = initialWorkflowState?.periodSelection;
     if (initial?.dateRange) return initial;
@@ -243,10 +286,24 @@ export function WorkflowConversionView({
 
   return (
     <div className="space-y-4">
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-4">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Period</span>
+      {/* Toolbar – compact style when embedded in workbench to match other widget filter bars */}
+      <div
+        className={
+          embeddedInWorkbench
+            ? "flex flex-wrap items-center gap-1.5 px-2.5 pb-1.5"
+            : "flex flex-wrap items-center gap-4"
+        }
+      >
+        <div className="flex items-center gap-1.5">
+          <span
+            className={
+              embeddedInWorkbench
+                ? "text-[10px] font-medium text-slate-500 dark:text-slate-400 mr-0.5"
+                : "text-sm font-medium text-slate-600 dark:text-slate-400"
+            }
+          >
+            Period
+          </span>
           <DatePeriodPicker
             year={new Date().getFullYear()}
             onYearChange={() => {}}
@@ -258,13 +315,23 @@ export function WorkflowConversionView({
             size="sm"
           />
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Calculation</span>
+        <div className="flex items-center gap-1.5">
+          <span
+            className={
+              embeddedInWorkbench
+                ? "text-[10px] font-medium text-slate-500 dark:text-slate-400 mr-0.5"
+                : "text-sm font-medium text-slate-600 dark:text-slate-400"
+            }
+          >
+            Calculation
+          </span>
           <Select
             value={calculationType}
             onValueChange={(v) => setCalculationType(v as WorkflowConversionMetric)}
           >
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger
+              className={embeddedInWorkbench ? "h-7 w-[120px] text-xs" : "w-[180px]"}
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -273,13 +340,23 @@ export function WorkflowConversionView({
             </SelectContent>
           </Select>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Grouping</span>
+        <div className="flex items-center gap-1.5">
+          <span
+            className={
+              embeddedInWorkbench
+                ? "text-[10px] font-medium text-slate-500 dark:text-slate-400 mr-0.5"
+                : "text-sm font-medium text-slate-600 dark:text-slate-400"
+            }
+          >
+            Grouping
+          </span>
           <Select
             value={grouping}
             onValueChange={(v) => setGrouping(v as WorkflowGrouping)}
           >
-            <SelectTrigger className="w-[140px]">
+            <SelectTrigger
+              className={embeddedInWorkbench ? "h-7 w-[100px] text-xs" : "w-[140px]"}
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -290,39 +367,67 @@ export function WorkflowConversionView({
         </div>
         {embeddedInWorkbench && (
           <div className="flex items-center gap-1">
-            <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Cards</span>
+            <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mr-0.5">Cards</span>
             <Button
               type="button"
               variant="outline"
               size="icon"
-              className="h-8 w-8"
+              className="h-7 w-7"
               onClick={removeCard}
               disabled={!canRemoveCard}
               aria-label="Remove last card"
             >
-              <Minus className="h-3.5 w-3.5" />
+              <Minus className="h-3 w-3" />
             </Button>
             <Button
               type="button"
               variant="outline"
               size="icon"
-              className="h-8 w-8"
+              className="h-7 w-7"
               onClick={addCard}
               disabled={!canAddCard}
               aria-label="Add card"
             >
-              <Plus className="h-3.5 w-3.5" />
+              <Plus className="h-3 w-3" />
             </Button>
           </div>
+        )}
+        {groupId && filters && (
+          <>
+            <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+            {(filters.dynamicFilters || []).map((df) => (
+              <DynamicDimensionFilter
+                key={df.column}
+                entry={df}
+                tenantId={tenantIdForEdit}
+                onChange={(value) => updateDynamicFilter(groupId, df.column, value)}
+                onRemove={() => removeDynamicFilter(groupId, df.column)}
+              />
+            ))}
+            <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+            <AddFilterPicker
+              groupId={groupId}
+              existingColumns={(filters.dynamicFilters || []).map((f) => f.column)}
+              onAdd={(col, label) => addDynamicFilter(groupId, { column: col, label, value: "all" })}
+            />
+            <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+            <GroupFilterBookmarkButton
+              filters={filters}
+              onApplyPreset={handleApplyGroupPreset}
+            />
+          </>
         )}
         <Button
           type="button"
           variant="outline"
           size="sm"
           onClick={resetToDefault}
-          className="gap-1.5 ml-auto"
+          className={cn(
+            "gap-1.5",
+            embeddedInWorkbench && "!h-7 !py-0 !min-h-0 px-2.5 text-xs",
+          )}
         >
-          <RotateCcw className="h-3.5 w-3.5" />
+          <RotateCcw className={embeddedInWorkbench ? "h-2.5 w-2.5" : "h-3.5 w-3.5"} />
           Reset to Default
         </Button>
       </div>

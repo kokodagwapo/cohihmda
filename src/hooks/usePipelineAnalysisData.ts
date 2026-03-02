@@ -37,6 +37,7 @@ export interface UsePipelineAnalysisDataOptions {
     loanPurposes?: string[];
     branches?: string[];
   } | null;
+  dimensionFilters?: Array<{ column: string; value: string }>;
 }
 
 export interface UsePipelineAnalysisDataResult {
@@ -64,6 +65,11 @@ export function usePipelineAnalysisData(
     if (f?.loanTypes?.length) f.loanTypes.forEach((v) => params.append("loan_type", v));
     if (f?.loanPurposes?.length) f.loanPurposes.forEach((v) => params.append("loan_purpose", v));
     if (f?.branches?.length) f.branches.forEach((v) => params.append("branch", v));
+    if (options.dimensionFilters) {
+      for (const df of options.dimensionFilters) {
+        if (df.value && df.value !== 'all') params.append(df.column, df.value);
+      }
+    }
     const qs = params.toString();
     try {
       setLoading(true);
@@ -80,7 +86,8 @@ export function usePipelineAnalysisData(
     } finally {
       setLoading(false);
     }
-  }, [options.tenantId, options.from, options.to, options.startDateField, options.filters]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [options.tenantId, options.from, options.to, options.startDateField, options.filters, JSON.stringify(options.dimensionFilters)]);
 
   useEffect(() => {
     fetchSnapshots();

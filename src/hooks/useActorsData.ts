@@ -73,6 +73,7 @@ export interface UseActorsDataParams {
   /** When set, filter to loans with this current_loan_status (raw value; use 'Unknown' for null/empty) */
   selectedStatus?: string | null;
   tableDimensions?: [ActorDimension, ActorDimension, ActorDimension, ActorDimension];
+  dimensionFilters?: Array<{ column: string; value: string }>;
 }
 
 const DEFAULT_TABLE_DIMENSIONS: [ActorDimension, ActorDimension, ActorDimension, ActorDimension] = [
@@ -94,6 +95,7 @@ export function useActorsData({
   selectedActor,
   selectedStatus,
   tableDimensions = DEFAULT_TABLE_DIMENSIONS,
+  dimensionFilters,
 }: UseActorsDataParams): {
   data: ActorsDashboardData | null;
   loading: boolean;
@@ -125,6 +127,11 @@ export function useActorsData({
         params.set("status_filter", selectedStatus);
       }
       params.set("tableDimensions", JSON.stringify(tableDimensions));
+      if (dimensionFilters) {
+        for (const df of dimensionFilters) {
+          if (df.value && df.value !== 'all') params.set(df.column, df.value);
+        }
+      }
       const res = await api.request<ActorsDashboardData>(
         `/api/dashboard/actors?${params.toString()}`
       );
@@ -149,6 +156,8 @@ export function useActorsData({
     selectedActor?.name,
     selectedStatus,
     tableDimensions,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    JSON.stringify(dimensionFilters),
   ]);
 
   useEffect(() => {

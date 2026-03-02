@@ -81,6 +81,8 @@ export interface ActorsDashboardOptions {
   statusFilter?: string;
   /** Which dimension each of the 4 table slots shows (default: loan_officer, processor, underwriter, closer) */
   tableDimensions?: [ActorDimension, ActorDimension, ActorDimension, ActorDimension];
+  /** Additional SQL WHERE fragment from dimension filters (includes leading AND per condition) */
+  dimensionFilterClause?: string;
 }
 
 export interface StatusCount {
@@ -186,6 +188,7 @@ export async function getActorsDashboardData(
     selectedActor,
     statusFilter,
     tableDimensions = ["loan_officer", "processor", "underwriter", "closer"],
+    dimensionFilterClause = "",
   } = options;
 
   const conditions: string[] = [
@@ -225,7 +228,7 @@ export async function getActorsDashboardData(
     }
   }
 
-  const whereSql = conditions.join(" AND ");
+  const whereSql = conditions.join(" AND ") + (dimensionFilterClause ? ` ${dimensionFilterClause}` : "");
 
   // ---- Status counts (bar chart): count and volume per status ----
   const statusResult = await tenantPool.query(

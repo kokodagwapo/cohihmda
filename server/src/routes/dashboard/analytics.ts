@@ -26,6 +26,7 @@ import {
   type ActorDimension,
 } from "../../services/dashboard/actorsService.js";
 import { getStaffingUnitTargets } from "../../utils/staffingUnitTargets.js";
+import { buildDimensionFilterWhereClause } from "../../utils/scorecard-utils.js";
 import { deleteInsightById } from "../../services/insights/llmInsightGenerator.js";
 import {
   runInsightGeneration,
@@ -106,6 +107,7 @@ router.get(
       }
 
       // Build filters object with access filter
+      const dimensionFilterClause = buildDimensionFilterWhereClause(req.query as Record<string, any>, 'l', new Set(['channel_group', 'tenant_id']));
       const filters = {
         branch: branch || undefined,
         scope: (scope as "all" | "branch" | "team") || "all",
@@ -113,6 +115,7 @@ router.get(
         endDate: endDate || undefined,
         channelGroup: channel_group || undefined,
         userAccessFilter: accessCtx.getFilter("l"),
+        dimensionFilterClause: dimensionFilterClause || undefined,
       };
 
       const result = await getLeaderboardData(
@@ -183,11 +186,13 @@ router.get(
         });
       }
       const filter = accessCtx.getFilter("l", 3);
+      const hpDimensionFilterClause = buildDimensionFilterWhereClause(req.query as Record<string, any>, 'l', new Set(['channel_group', 'tenant_id']));
       const result = await getHighPerformersRankings(tenantContext.tenantPool, {
         dateType: dateType as "funding_date" | "closing_date" | "application_date",
         timePeriod: timePeriod as "mtd" | "lm" | "ytd" | "ly" | "rolling_13",
         userAccessFilter: filter ?? undefined,
         channelGroup: channel_group,
+        dimensionFilterClause: hpDimensionFilterClause || undefined,
       });
       res.json(result);
     } catch (error: any) {
@@ -1108,6 +1113,7 @@ router.get(
         });
       }
       const { accessClause, accessParams } = accessCtx.buildWhereClause("l", 3);
+      const actorsDimensionFilterClause = buildDimensionFilterWhereClause(req.query as Record<string, any>, 'l', new Set(['channel_group', 'tenant_id']));
       const selectedActor =
         parsed.actor_type && parsed.actor_name != null && parsed.actor_name !== ""
           ? { type: parsed.actor_type as ActorDimension, name: parsed.actor_name }
@@ -1125,6 +1131,7 @@ router.get(
         selectedActor,
         statusFilter: parsed.status_filter || undefined,
         tableDimensions: parsed.tableDimensions,
+        dimensionFilterClause: actorsDimensionFilterClause || undefined,
       });
       res.json(result);
     } catch (error: any) {

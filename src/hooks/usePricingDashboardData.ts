@@ -82,7 +82,11 @@ export interface PricingDetailRow {
   lenderCredits: number | null;
 }
 
-function buildParams(filters: PricingDashboardFilters, tenantId?: string | null): URLSearchParams {
+function buildParams(
+  filters: PricingDashboardFilters,
+  tenantId?: string | null,
+  dimensionFilters?: Array<{ column: string; value: string }>,
+): URLSearchParams {
   const p = new URLSearchParams();
   if (tenantId) p.set("tenant_id", tenantId);
   if (filters.channel) p.set("channel", filters.channel);
@@ -96,6 +100,11 @@ function buildParams(filters: PricingDashboardFilters, tenantId?: string | null)
   p.set("loan_funding", filters.loanFunding);
   p.set("loan_status", filters.loanStatus);
   p.set("lock_status", filters.lockStatus);
+  if (dimensionFilters) {
+    for (const df of dimensionFilters) {
+      if (df.value && df.value !== 'all') p.set(df.column, df.value);
+    }
+  }
   return p;
 }
 
@@ -219,7 +228,7 @@ export interface PricingDashboardWorkbenchData {
 /** Fetches KPIs + all 4 pricing tables in one go for workbench (5 API calls). */
 export function usePricingDashboardWorkbenchData(
   filters: PricingDashboardFilters,
-  options: { tenantId?: string | null; selectedChannel?: string | null }
+  options: { tenantId?: string | null; selectedChannel?: string | null; dimensionFilters?: Array<{ column: string; value: string }> }
 ): PricingDashboardWorkbenchData {
   const [state, setState] = useState<PricingDashboardWorkbenchData>({
     kpis: null,
@@ -242,7 +251,7 @@ export function usePricingDashboardWorkbenchData(
       ...filters,
       channel: effectiveChannel,
     };
-    const base = buildParams(filtersWithChannel, tenantId);
+    const base = buildParams(filtersWithChannel, tenantId, options.dimensionFilters);
     try {
       setState((s) => ({ ...s, loading: true, error: null }));
       const [kpisRes, reportLORes, reportEntityRes, detailLORes, detailEntityRes] = await Promise.all([
@@ -295,6 +304,8 @@ export function usePricingDashboardWorkbenchData(
     filters.loanStatus,
     filters.lockStatus,
     options.tenantId,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    JSON.stringify(options.dimensionFilters),
   ]);
 
   useEffect(() => {
