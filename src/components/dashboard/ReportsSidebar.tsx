@@ -1,7 +1,7 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, Zap, BarChart3, Target, Check, Home, Trophy, X, Sun, FileText, LayoutGrid, TrendingUp, LayoutDashboard, Filter, ArrowLeftRight, Shield, ClipboardList, Calculator, LineChart } from 'lucide-react';
+import { ChevronDown, Zap, BarChart3, Target, Trophy, X, Sun, FileText, LayoutGrid, TrendingUp, LayoutDashboard, Filter, ArrowLeftRight, Shield, ClipboardList, Calculator, LineChart, Pin, PinOff, FlaskConical, GripVertical } from 'lucide-react';
 import { getReportById, ReportData, allReports } from '@/data/reportSimulations';
 import { useTheme } from '@/components/theme-provider';
 import {
@@ -22,6 +22,24 @@ import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
+import { usePinnedDashboardsStore, type PinnedItem } from '@/stores/pinnedDashboardsStore';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 export interface DashboardVisibility {
   executiveDashboard: boolean;
@@ -231,79 +249,172 @@ const TOPTIERING_GROUPS: Array<{ key: SubsectionKey; label: string; items: Topti
   { key: 'financialModeling', label: 'Financial Modeling', items: TOPTIERING_CHILDREN.filter((it): it is ToptieringRouteItem => it.type === 'route' && it.subsectionKey === 'financialModeling') },
 ];
 
-// Color mapping for section colors
+/** Hide TopTiering from sidebar; its routes are available under Dashboards and via pinning. */
+const HIDE_TOPTIERING_IN_SIDEBAR = true;
+
+export type PinnedItem =
+  | { type: 'section'; id: SectionId }
+  | { type: 'route'; id: string; path: string; label: string };
+function getSectionLabel(id: string): string {
+  const fromDash = DASHBOARD_CHILDREN.find((it) => it.type === 'section' && it.id === id);
+  if (fromDash && fromDash.type === 'section') return fromDash.label;
+  const fromInsights = INSIGHTS_CHILDREN.find((it) => it.type === 'section' && it.id === id);
+  if (fromInsights && fromInsights.type === 'section') return fromInsights.label;
+  return id;
+}
+
+// Icon style map matching top nav Dashboard submenu (Navigation.tsx)
+const navIconStyleMap: Record<string, { bg: string; icon: string }> = {
+  amber: { bg: 'bg-amber-500/10 dark:bg-amber-500/20', icon: 'text-amber-500 dark:text-amber-400' },
+  blue: { bg: 'bg-blue-500/10 dark:bg-blue-500/20', icon: 'text-blue-500 dark:text-blue-400' },
+  indigo: { bg: 'bg-indigo-500/10 dark:bg-indigo-500/20', icon: 'text-indigo-500 dark:text-indigo-400' },
+  emerald: { bg: 'bg-emerald-500/10 dark:bg-emerald-500/20', icon: 'text-emerald-500 dark:text-emerald-400' },
+};
+
+// Item id -> iconColor matching top nav Dashboard submenu
+const navIconColorByItemId: Record<string, string> = {
+  leaderboard: 'amber',
+  executiveDashboard: 'blue',
+  closingFalloutForecast: 'indigo',
+  topTieringComparison: 'blue',
+  creditRiskManagement: 'emerald',
+  companyScorecard: 'indigo',
+  workflowConversion: 'blue',
+  highPerformers: 'amber',
+  loanDetail: 'blue',
+  financialModeling: 'blue',
+  salesScorecard: 'blue',
+  salesTrends: 'emerald',
+  operationsScorecard: 'blue',
+  operationsTrends: 'indigo',
+};
+
+function getIconAndColorForPinnedItem(item: PinnedItem): { Icon: React.ComponentType<{ size?: number; className?: string; style?: React.CSSProperties }>; iconColor: string } {
+  if (item.type === 'section') {
+    const found = DASHBOARD_FLOATING_ITEMS.find((it) => it.id === item.id);
+    const iconColor = navIconColorByItemId[item.id] ?? 'blue';
+    return found ? { Icon: found.icon, iconColor } : { Icon: LayoutDashboard, iconColor: 'blue' };
+  }
+  const found = TOPTIERING_CHILDREN.find((it) => it.type === 'route' && it.id === item.id);
+  const iconColor = navIconColorByItemId[item.id] ?? 'blue';
+  return found && found.type === 'route' ? { Icon: found.icon, iconColor } : { Icon: LayoutDashboard, iconColor: 'blue' };
+}
+
+// Color mapping for section colors (used by Insights items)
 const colorMap: Record<string, { bg: string; text: string }> = {
   'text-emerald-500': { bg: 'rgba(16, 185, 129, 0.1)', text: '#10b981' },
   'text-blue-500': { bg: 'rgba(59, 130, 246, 0.1)', text: '#3b82f6' },
   'text-amber-500': { bg: 'rgba(245, 158, 11, 0.1)', text: '#f59e0b' },
   'text-indigo-500': { bg: 'rgba(99, 102, 241, 0.1)', text: '#6366f1' },
   'text-violet-500': { bg: 'rgba(139, 92, 246, 0.1)', text: '#8b5cf6' },
+  'text-slate-500': { bg: 'rgba(100, 116, 139, 0.1)', text: '#64748b' },
 };
 
-// Bypass Landing Page Toggle Component
-const BypassLandingToggle = ({ isExpanded }: { isExpanded: boolean }) => {
-  const [bypassEnabled, setBypassEnabled] = useState(() => {
-    const stored = localStorage.getItem('bypass-landing-page');
-    return stored === 'true';
-  });
+interface SortablePinnedItemProps {
+  id: string;
+  item: PinnedItem;
+  isDarkMode: boolean;
+  isCurrent: boolean;
+  label: string;
+  Icon: React.ComponentType<{ size?: number; className?: string; style?: React.CSSProperties }>;
+  style: { bg: string; icon: string };
+  onNavigate: () => void;
+  onRemove: () => void;
+  onSectionClick?: (sectionId: string) => void;
+}
 
-  const handleToggle = () => {
-    const newValue = !bypassEnabled;
-    setBypassEnabled(newValue);
-    localStorage.setItem('bypass-landing-page', String(newValue));
+function SortablePinnedItem({
+  id,
+  item,
+  isDarkMode,
+  isCurrent,
+  label,
+  Icon,
+  style,
+  onNavigate,
+  onRemove,
+  onSectionClick,
+}: SortablePinnedItemProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const styleTransform = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
   };
-
   return (
-    <div className={`
-      w-full flex items-center rounded-xl transition-all duration-150 group 
-      hover:bg-slate-100/80 dark:hover:bg-slate-800/80 
-      ${isExpanded ? 'h-11 gap-2 px-2' : 'h-10'}
-    `}
-    style={{ justifyContent: isExpanded ? 'flex-start' : 'center' }}
-    >
-      {/* Icon */}
-      <button
-        onClick={handleToggle}
-        className="relative flex-shrink-0"
-      >
-        <div className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors duration-150 ${bypassEnabled ? 'bg-slate-100 dark:bg-slate-800/60' : 'bg-slate-50 dark:bg-slate-800/30'}`}>
-          <Home className={`w-4 h-4 ${bypassEnabled ? 'text-blue-500' : 'text-slate-400 dark:text-slate-500'}`} />
-        </div>
-        {/* Checkbox indicator */}
-        <div className={`absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full flex items-center justify-center transition-all duration-150 ${bypassEnabled ? 'bg-blue-500' : 'bg-slate-300 dark:bg-slate-600'}`}>
-          {bypassEnabled && <Check className="w-2 h-2 text-white" strokeWidth={3} />}
-        </div>
-      </button>
-      
-      {/* Content - only render when expanded */}
-      {isExpanded && (
-        <>
-          <button
-            onClick={handleToggle}
-            className="flex-1 min-w-0 text-left overflow-hidden"
-          >
-            <p className={`text-xs font-semibold truncate leading-tight transition-colors ${bypassEnabled ? 'text-slate-800 dark:text-slate-200' : 'text-slate-400 dark:text-slate-500'}`}>
-              Bypass Landing Page
-            </p>
-            <p className={`text-[10px] mt-0.5 ${bypassEnabled ? 'text-blue-600 dark:text-blue-400' : 'text-slate-400 dark:text-slate-500'}`}>
-              {bypassEnabled ? 'Go straight to dashboard' : 'Show landing page'}
-            </p>
-          </button>
-          
-          {/* Toggle indicator */}
-          <button
-            onClick={handleToggle}
-            className="flex-shrink-0"
-          >
-            <div className={`w-8 h-5 rounded-full transition-colors duration-150 flex items-center ${bypassEnabled ? 'bg-blue-500 justify-end' : 'bg-slate-300 dark:bg-slate-600 justify-start'}`}>
-              <div className="w-4 h-4 rounded-full bg-white shadow-sm mx-0.5" />
-            </div>
-          </button>
-        </>
+    <div
+      ref={setNodeRef}
+      style={styleTransform}
+      className={cn(
+        'flex items-center gap-1 group rounded-lg',
+        isDarkMode ? 'hover:bg-slate-700/50' : 'hover:bg-slate-100',
+        isCurrent && (isDarkMode ? 'bg-slate-700/40' : 'bg-slate-100'),
       )}
+    >
+      <div
+        {...attributes}
+        {...listeners}
+        className="shrink-0 p-1 rounded cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 hover:bg-slate-200/60 dark:hover:bg-slate-600/60 touch-none"
+        title="Drag to reorder"
+        aria-label="Drag to reorder"
+      >
+        <GripVertical className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
+      </div>
+      <button
+        type="button"
+        onClick={() => (item.type === 'section' ? onSectionClick?.(item.id) : onNavigate())}
+        style={{
+          flex: 1,
+          padding: '12px 12px 12px 8px',
+          background: 'transparent',
+          border: 'none',
+          textAlign: 'left',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          transition: 'all 0.2s ease',
+          minWidth: 0,
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.backgroundColor = 'transparent';
+        }}
+        className="rounded-lg"
+      >
+        <div
+          className={cn(
+            'flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center',
+            style.bg,
+            isCurrent && 'ring-1 ring-emerald-400/50',
+          )}
+        >
+          <Icon className={cn('w-4 h-4', isCurrent ? 'text-emerald-500 dark:text-emerald-400' : style.icon)} />
+        </div>
+        <span
+          style={{ fontSize: 13, fontWeight: 500, color: isDarkMode ? '#e2e8f0' : '#1a1d29', flex: 1 }}
+          className="truncate"
+        >
+          {label}
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onRemove();
+        }}
+        className="shrink-0 p-1.5 rounded opacity-0 group-hover:opacity-100 hover:bg-slate-200/60 dark:hover:bg-slate-600/60 mr-2"
+        title="Unpin from sidebar"
+        aria-label="Unpin"
+      >
+        <PinOff className="w-3.5 h-3.5 text-amber-500" />
+      </button>
     </div>
   );
-};
+}
 
 export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({ 
   onReportClick, 
@@ -326,17 +437,31 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
   const isDashboardPage = isInsightsPage; // dashboard content moved to /insights
   const [internalMobileOpen, setInternalMobileOpen] = useState(false);
   const [insightsFlyoutOpen, setInsightsFlyoutOpen] = useState(false);
-  const [dashboardsFlyoutOpen, setDashboardsFlyoutOpen] = useState(false);
+  const [pinnedDashboardFlyoutOpen, setPinnedDashboardFlyoutOpen] = useState(false);
   const [toptieringFlyoutOpen, setToptieringFlyoutOpen] = useState(false);
   const flyoutLeaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMobileOpen = externalMobileOpen !== undefined ? externalMobileOpen : internalMobileOpen;
   const [insightsExpanded, setInsightsExpanded] = useState(true);
-  const [dashboardExpanded, setDashboardExpanded] = useState(true);
   const [toptieringExpanded, setToptieringExpanded] = useState(false);
   const [topTieringSubExpanded, setTopTieringSubExpanded] = useState(true);
   const [salesSubExpanded, setSalesSubExpanded] = useState(true);
   const [operationsSubExpanded, setOperationsSubExpanded] = useState(true);
   const [financialModelingSubExpanded, setFinancialModelingSubExpanded] = useState(true);
+  const { pinned: pinnedItems, removePinned, reorderPinned, getPinnedItemId } = usePinnedDashboardsStore();
+  const pinnedIds = useMemo(() => pinnedItems.map((p) => getPinnedItemId(p)), [pinnedItems, getPinnedItemId]);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+  const handlePinnedDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = pinnedIds.indexOf(String(active.id));
+    const newIndex = pinnedIds.indexOf(String(over.id));
+    if (oldIndex === -1 || newIndex === -1) return;
+    const reordered = arrayMove(pinnedIds, oldIndex, newIndex);
+    reorderPinned(reordered);
+  };
   const realtimeStats = useRealtimeStats();
 
   const subExpanded: Record<SubsectionKey, boolean> = {
@@ -574,109 +699,48 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                   </AnimatePresence>
                 </div>
 
-                {/* Dashboard */}
+                {/* Dashboard - category always shown; submenu shows pinned items from top nav */}
                 <div>
-                  <button
-                    onClick={() => setDashboardExpanded(!dashboardExpanded)}
-                    className="w-full flex items-center gap-3 p-3 min-h-[44px] rounded-xl hover:bg-slate-100/80 dark:hover:bg-slate-800/80 transition-all touch-manipulation"
-                  >
-                    <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-slate-50 dark:bg-slate-800/30">
-                      <TrendingUp className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+                  <div className="px-4 pt-3 pb-2 flex items-center gap-2.5">
+                    <div className="flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center bg-slate-100 dark:bg-slate-800/30">
+                      <LayoutGrid className="w-[18px] h-[18px] text-slate-600 dark:text-slate-400" />
                     </div>
-                    <p className="text-sm font-medium text-slate-800 dark:text-slate-200 flex-1 text-left">Dashboards</p>
-                    <ChevronDown className={cn("w-4 h-4 text-slate-400 transition-transform duration-200", !dashboardExpanded && "-rotate-90")} />
-                  </button>
-                  <AnimatePresence initial={false}>
-                    {dashboardExpanded && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.2, ease: 'easeInOut' }}
-                        className="overflow-hidden"
-                      >
-                        <div className="pl-4 pr-2 pb-2 space-y-1">
-                      {DASHBOARD_CHILDREN.map((it, i) => {
-                        if (it.type === 'subheader') {
-                          const key = it.subsectionKey;
-                          if (key === 'dashboard') {
-                            return (
-                              <div key={`sh-${i}`} className="px-2 pt-3 pb-1">
-                                <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{it.label}</p>
-                              </div>
-                            );
-                          }
-                          const isExp = subExpanded[key];
-                          return (
-                            <button
-                              key={`sh-${i}`}
-                              type="button"
-                              onClick={() => setSubExpanded(key, !isExp)}
-                              className="w-full flex items-center gap-2 px-2 pt-2 pb-1 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 text-left touch-manipulation"
-                            >
-                              <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex-1">{it.label}</p>
-                              <ChevronDown className={cn("w-3.5 h-3.5 text-slate-400 flex-shrink-0 transition-transform", !isExp && "-rotate-90")} />
-                            </button>
-                          );
-                        }
-                        if (!subExpanded[it.subsectionKey]) return null;
-                        if (it.type === 'section') {
-                          const Icon = it.icon;
-                          const isActive = currentVisibility[it.id];
-                          return (
-                            <div key={it.id} className="flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 touch-manipulation">
-                              <button onClick={() => handleToggleSection(it.id)} className="relative flex-shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center">
-                                <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center", isActive ? "bg-slate-100 dark:bg-slate-800/60" : "bg-slate-50 dark:bg-slate-800/30")}>
-                                  <Icon className={cn("w-4 h-4", isActive ? it.color : "text-slate-400 dark:text-slate-500")} />
-                                </div>
-                                {isActive && <span className="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500" />}
-                              </button>
-                              <button onClick={() => { onSectionClick?.(it.id); onMobileMenuToggle?.(); }} className="flex-1 text-left text-sm text-slate-700 dark:text-slate-300 min-h-[44px] flex items-center">{it.label}</button>
-                              <button onClick={() => handleToggleSection(it.id)} className={cn("w-8 h-5 min-w-[44px] min-h-[44px] rounded-full flex items-center transition-colors touch-manipulation", isActive ? "bg-emerald-500 justify-end" : "bg-slate-300 dark:bg-slate-600 justify-start")}>
-                                <div className="w-4 h-4 rounded-full bg-white shadow-sm mx-0.5" />
-                              </button>
-                            </div>
-                          );
-                        }
-                        const Icon = it.icon;
-                        const isCurrent = location.pathname === (it as { path?: string }).path;
-                        const vid = 'visibilityId' in it ? (it as { visibilityId?: SectionId }).visibilityId : undefined;
-                        if (vid) {
-                          const isActive = currentVisibility[vid];
-                          return (
-                            <div key={it.id} className="flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 touch-manipulation">
-                              <button onClick={() => { navigate(it.path); onMobileMenuToggle?.(); }} className="relative flex-shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center">
-                                <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-slate-50 dark:bg-slate-800/30">
-                                  <Icon className="w-4 h-4 text-slate-600 dark:text-slate-400" />
-                                </div>
-                              </button>
-                              <button onClick={() => { navigate(it.path); onMobileMenuToggle?.(); }} className="flex-1 text-left text-sm font-medium text-slate-800 dark:text-slate-200 min-h-[44px] flex items-center">{it.label}</button>
-                              <button onClick={(e) => { e.stopPropagation(); handleToggleSection(vid); }} className={cn("w-8 h-5 min-w-[44px] min-h-[44px] rounded-full flex items-center transition-colors touch-manipulation", isActive ? "bg-emerald-500 justify-end" : "bg-slate-300 dark:bg-slate-600 justify-start")}>
-                                <div className="w-4 h-4 rounded-full bg-white shadow-sm mx-0.5" />
-                              </button>
-                            </div>
-                          );
-                        }
+                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Dashboards</p>
+                  </div>
+                  <div className="pl-4 pr-2 pb-2 space-y-1">
+                    {pinnedItems.map((item) => {
+                      const { Icon, iconColor } = getIconAndColorForPinnedItem(item);
+                      const style = navIconStyleMap[iconColor] ?? navIconStyleMap.blue;
+                      if (item.type === 'section') {
+                        const label = getSectionLabel(item.id);
                         return (
-                          <button
-                            key={it.id}
-                            onClick={() => { navigate(it.path); onMobileMenuToggle?.(); }}
-                            className={cn("w-full flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 text-left touch-manipulation", isCurrent && "bg-slate-100 dark:bg-slate-800/60")}
-                          >
-                            <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center", isCurrent ? "bg-slate-100 dark:bg-slate-800/60" : "bg-slate-50 dark:bg-slate-800/30")}>
-                              <Icon className={cn("w-4 h-4", isCurrent ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500 dark:text-slate-400")} />
-                            </div>
-                            <span className={cn("text-sm", isCurrent ? "text-slate-900 dark:text-slate-100 font-medium" : "text-slate-700 dark:text-slate-300")}>{it.label}</span>
-                          </button>
+                          <div key={`section-${item.id}`} className="flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 touch-manipulation">
+                            <button onClick={() => { onSectionClick?.(item.id); onMobileMenuToggle?.(); }} className="relative flex-shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center">
+                              <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center", style.bg)}>
+                                <Icon className={cn("w-4 h-4", style.icon)} />
+                              </div>
+                            </button>
+                            <button onClick={() => { onSectionClick?.(item.id); onMobileMenuToggle?.(); }} className="flex-1 text-left text-sm text-slate-700 dark:text-slate-300 min-h-[44px] flex items-center">{label}</button>
+                            <button onClick={(e) => { e.stopPropagation(); removePinned(item); }} className="shrink-0 p-1.5 rounded hover:bg-slate-200/60 dark:hover:bg-slate-600/60" title="Unpin"><PinOff className="w-3.5 h-3.5 text-amber-500" /></button>
+                          </div>
                         );
-                      })}
+                      }
+                      const isCurrent = location.pathname === item.path;
+                      return (
+                        <div key={`route-${item.id}`} className="flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 touch-manipulation">
+                          <button onClick={() => { navigate(item.path); onMobileMenuToggle?.(); }} className={cn("flex-shrink-0 min-w-[44px] min-h-[44px] rounded-lg flex items-center justify-center", style.bg, isCurrent && "ring-1 ring-emerald-400/50")}>
+                            <Icon className={cn("w-4 h-4", isCurrent ? "text-emerald-600 dark:text-emerald-400" : style.icon)} />
+                          </button>
+                          <button onClick={() => { navigate(item.path); onMobileMenuToggle?.(); }} className="flex-1 text-left text-sm text-slate-700 dark:text-slate-300 min-h-[44px] flex items-center">{item.label}</button>
+                          <button onClick={(e) => { e.stopPropagation(); removePinned(item); }} className="shrink-0 p-1.5 rounded hover:bg-slate-200/60 dark:hover:bg-slate-600/60" title="Unpin"><PinOff className="w-3.5 h-3.5 text-amber-500" /></button>
                         </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
+                      );
+                    })}
+                  </div>
                 </div>
 
-                {/* Toptiering - main menu like Dashboards, submenus: Core Analytics, Sales, Operations, Financial Modeling */}
+                {/* Toptiering - hidden from sidebar; routes available under Dashboards and via pinning */}
+                {!HIDE_TOPTIERING_IN_SIDEBAR && (
                 <div>
                   <button
                     onClick={() => setToptieringExpanded(!toptieringExpanded)}
@@ -748,6 +812,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                     )}
                   </AnimatePresence>
                 </div>
+                )}
 
                 {/* My Workbench */}
                 <div className={cn("flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 touch-manipulation", location.pathname === '/my-dashboard' && "bg-slate-100 dark:bg-slate-800/60")}>
@@ -757,9 +822,16 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                     </div>
                   </button>
                   <button onClick={() => { navigate('/my-dashboard'); onMobileMenuToggle?.(); }} className="flex-1 text-left text-sm text-slate-700 dark:text-slate-300 min-h-[44px] flex items-center">My Workbench</button>
-                  <button onClick={(e) => { e.stopPropagation(); handleToggleSection('myWorkbench'); }} className={cn("w-8 h-5 min-w-[44px] min-h-[44px] rounded-full flex items-center transition-colors touch-manipulation", currentVisibility.myWorkbench ? "bg-emerald-500 justify-end" : "bg-slate-300 dark:bg-slate-600 justify-start")}>
-                    <div className="w-4 h-4 rounded-full bg-white shadow-sm mx-0.5" />
+                </div>
+
+                {/* Research Lab */}
+                <div className={cn("flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 touch-manipulation", location.pathname === '/research' && "bg-slate-100 dark:bg-slate-800/60")}>
+                  <button onClick={() => { navigate('/research'); onMobileMenuToggle?.(); }} className="relative flex-shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center">
+                    <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center", location.pathname === '/research' ? "bg-slate-100 dark:bg-slate-800/60" : "bg-slate-50 dark:bg-slate-800/30")}>
+                      <FlaskConical className={cn("w-4 h-4", location.pathname === '/research' ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500 dark:text-slate-400")} />
+                    </div>
                   </button>
+                  <button onClick={() => { navigate('/research'); onMobileMenuToggle?.(); }} className="flex-1 text-left text-sm text-slate-700 dark:text-slate-300 min-h-[44px] flex items-center">Research Lab</button>
                 </div>
               </div>
               </>
@@ -782,7 +854,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
         className={cn(
           "top-16 h-[calc(100vh-4rem)] p-0 z-30",
           "border-blue-200/40 dark:border-slate-700/50 bg-white/95 dark:bg-slate-800/80 backdrop-blur-xl",
-          "shadow-[0_8px_30px_rgba(59,130,246,0.12)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.3)]",
+          "shadow-[0_8px_32px_rgba(15,23,42,0.08)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.24)]",
           "flex flex-col",
         )}
       >
@@ -819,6 +891,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
 
         <SidebarContent className={cn("pb-3 overflow-y-auto flex-1 min-h-0")}>
         <div className={cn("py-2", isExpanded ? "pl-1 pr-2" : "px-1")}>
+          {/* Search moved to top nav - sidebar no longer shows search bar */}
           {/* Insights */}
           <div>
             {isExpanded ? (
@@ -939,206 +1012,10 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
             )}
           </div>
 
-          {/* Dashboard */}
-          <div>
-            {isExpanded ? (
-              <>
-            <button
-              onClick={() => setDashboardExpanded(!dashboardExpanded)}
-              style={{ width: '100%', padding: '12px 10px', background: 'transparent', border: 'none', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 10, transition: 'all 0.2s ease' }}
-              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-            >
-              <div style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)' }}>
-                <TrendingUp size={18} style={{ color: isDarkMode ? '#94a3b8' : '#64748b' }} />
-              </div>
-              <h4 style={{ fontSize: 14, fontWeight: 600, color: isDarkMode ? '#e2e8f0' : '#1a1d29', margin: 0, flex: 1 }}>Dashboards</h4>
-              <ChevronDown size={18} style={{ color: isDarkMode ? '#94a3b8' : '#64748b', transform: dashboardExpanded ? 'none' : 'rotate(-90deg)', transition: 'transform 0.2s ease' }} />
-            </button>
-            <AnimatePresence initial={false}>
-              {dashboardExpanded && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  transition={{ duration: 0.2, ease: 'easeInOut' }}
-                  style={{ overflow: 'hidden' }}
-                >
-            {DASHBOARD_CHILDREN.map((it, i) => {
-              if (it.type === 'subheader') {
-                const key = it.subsectionKey;
-                if (key === 'dashboard') {
-                  return (
-                    <div key={`sh-${i}`} style={{ padding: '12px 20px 4px 36px' }}>
-                      <p style={{ fontSize: 10, fontWeight: 600, color: isDarkMode ? '#94a3b8' : '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>{it.label}</p>
-                    </div>
-                  );
-                }
-                const isExp = subExpanded[key];
-                return (
-                  <button
-                    key={`sh-${i}`}
-                    onClick={() => setSubExpanded(key, !isExp)}
-                    style={{ width: '100%', padding: '10px 20px 10px 36px', background: 'transparent', border: 'none', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, transition: 'all 0.2s ease' }}
-                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-                  >
-                    <p style={{ fontSize: 10, fontWeight: 600, color: isDarkMode ? '#94a3b8' : '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0, flex: 1 }}>{it.label}</p>
-                    <ChevronDown size={14} style={{ color: isDarkMode ? '#94a3b8' : '#64748b', flexShrink: 0, transform: isExp ? 'none' : 'rotate(-90deg)' }} />
-                  </button>
-                );
-              }
-              const skip = !subExpanded[it.subsectionKey];
-              if (skip) return null;
-              if (it.type === 'section') {
-                const Icon = it.icon;
-                const isActive = currentVisibility[it.id];
-                return (
-                  <button
-                    key={it.id}
-                    onClick={() => onSectionClick?.(it.id)}
-                    style={{ width: '100%', padding: '12px 20px 12px 36px', background: 'transparent', border: 'none', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12, transition: 'all 0.2s ease' }}
-                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-                  >
-                    <div style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: colorMap[it.color]?.bg || 'rgba(100, 116, 139, 0.1)' }}>
-                      <Icon size={18} style={{ color: colorMap[it.color]?.text || '#64748b' }} />
-                    </div>
-                    <span style={{ fontSize: 13, fontWeight: 500, color: isDarkMode ? '#e2e8f0' : '#1a1d29', flex: 1 }}>{it.label}</span>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleToggleSection(it.id); }}
-                      style={{ flexShrink: 0, width: 32, height: 20, borderRadius: 9999, backgroundColor: isActive ? '#10b981' : (isDarkMode ? '#475569' : '#cbd5e1'), border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 2, justifyContent: isActive ? 'flex-end' : 'flex-start' }}
-                    >
-                      <div style={{ width: 16, height: 16, borderRadius: '50%', backgroundColor: 'white', boxShadow: '0 1px 2px rgba(0,0,0,0.1)' }} />
-                    </button>
-                  </button>
-                );
-              }
-              const Icon = it.icon;
-              const vid = 'visibilityId' in it ? (it as { visibilityId?: SectionId }).visibilityId : undefined;
-              if (vid) {
-                const isActive = currentVisibility[vid];
-                const handleNavToPath = () => navigate(it.path);
-                return (
-                  <div
-                    key={it.id}
-                    style={{ width: '100%', padding: '12px 20px 12px 36px', display: 'flex', alignItems: 'center', gap: 12 }}
-                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-                  >
-                    <button onClick={handleNavToPath} style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: isDarkMode ? 'rgba(100, 116, 139, 0.15)' : 'rgba(235, 240, 245, 1)', border: 'none', cursor: 'pointer' }}>
-                      <Icon size={18} style={{ color: isDarkMode ? '#94a3b8' : '#5a677b' }} />
-                    </button>
-                    <button onClick={handleNavToPath} style={{ flex: 1, fontSize: 13, fontWeight: 600, color: isDarkMode ? '#e2e8f0' : '#2d3748', textAlign: 'left', border: 'none', background: 'none', cursor: 'pointer', padding: 0 }}>{it.label}</button>
-                    <button onClick={(e) => { e.stopPropagation(); handleToggleSection(vid); }} style={{ flexShrink: 0, width: 32, height: 20, borderRadius: 9999, backgroundColor: isActive ? '#10b981' : (isDarkMode ? '#475569' : '#cbd5e1'), border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 2, justifyContent: isActive ? 'flex-end' : 'flex-start' }}>
-                      <div style={{ width: 16, height: 16, borderRadius: '50%', backgroundColor: 'white', boxShadow: '0 1px 2px rgba(0,0,0,0.1)' }} />
-                    </button>
-                  </div>
-                );
-              }
-              return (
-                <button
-                  key={it.id}
-                  onClick={() => navigate(it.path)}
-                  style={{ width: '100%', padding: '12px 20px 12px 36px', background: 'transparent', border: 'none', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12, transition: 'all 0.2s ease' }}
-                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-                >
-                  <div style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)' }}>
-                    <Icon size={18} style={{ color: isDarkMode ? '#94a3b8' : '#64748b' }} />
-                  </div>
-                  <span style={{ fontSize: 13, fontWeight: 500, color: isDarkMode ? '#e2e8f0' : '#1a1d29', flex: 1 }}>{it.label}</span>
-                </button>
-              );
-            })}
-                </motion.div>
-              )}
-            </AnimatePresence>
-            </>
-            ) : (
-            <Popover open={dashboardsFlyoutOpen} onOpenChange={setDashboardsFlyoutOpen}>
-              <PopoverTrigger asChild>
-                <div
-                  className="w-full"
-                  onMouseEnter={() => { if (flyoutLeaveRef.current) clearTimeout(flyoutLeaveRef.current); setDashboardsFlyoutOpen(true); }}
-                  onMouseLeave={() => { flyoutLeaveRef.current = window.setTimeout(() => setDashboardsFlyoutOpen(false), 150); }}
-                >
-                  <button
-                    type="button"
-                    style={{ width: '100%', padding: '10px', background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease' }}
-                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-                  >
-                    <div style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)' }}>
-                      <TrendingUp size={18} style={{ color: isDarkMode ? '#94a3b8' : '#64748b' }} />
-                    </div>
-                  </button>
-                </div>
-              </PopoverTrigger>
-              <PopoverContent
-                side="right"
-                align="start"
-                className="w-64 max-h-[70vh] overflow-y-auto p-1"
-                onMouseEnter={() => { if (flyoutLeaveRef.current) clearTimeout(flyoutLeaveRef.current); setDashboardsFlyoutOpen(true); }}
-                onMouseLeave={() => setDashboardsFlyoutOpen(false)}
-              >
-                <div className="py-0.5 space-y-0.5">
-                  {DASHBOARD_CHILDREN.map((it, i) => {
-                    if (it.type === 'subheader') {
-                      const key = it.subsectionKey;
-                      if (key === 'dashboard') return <div key={`sh-${i}`} className="px-2 pt-2 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{it.label}</div>;
-                      const isExp = subExpanded[key];
-                      return (
-                        <button key={`sh-${i}`} type="button" onClick={() => setSubExpanded(key, !isExp)} className={cn("w-full flex items-center justify-between rounded-md px-2 py-1.5 text-xs font-semibold uppercase text-muted-foreground", isDarkMode ? "hover:bg-slate-700/50" : "hover:bg-slate-100")}>
-                          {it.label}
-                          <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", !isExp && "-rotate-90")} />
-                        </button>
-                      );
-                    }
-                    if (!subExpanded[it.subsectionKey]) return null;
-                    if (it.type === 'section') {
-                      const Icon = it.icon;
-                      const isActive = currentVisibility[it.id];
-                      return (
-                        <button key={it.id} type="button" onClick={() => { onSectionClick?.(it.id); setDashboardsFlyoutOpen(false); }} className={cn("w-full flex items-center gap-2 rounded-md px-2 py-2 text-sm", isDarkMode ? "hover:bg-slate-700/50" : "hover:bg-slate-100")}>
-                          <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-md", isActive ? (isDarkMode ? "bg-slate-600/50" : "bg-slate-200") : (isDarkMode ? "bg-slate-700/30" : "bg-slate-100"))}>
-                            <Icon className="h-4 w-4" style={{ color: colorMap[it.color]?.text }} />
-                          </div>
-                          <span className="flex-1 text-left truncate">{it.label}</span>
-                          <button type="button" onClick={(e) => { e.stopPropagation(); handleToggleSection(it.id); }} className={cn("shrink-0 w-8 h-5 rounded-full flex items-center p-0.5", isActive ? "bg-emerald-500 justify-end" : (isDarkMode ? "bg-slate-600 justify-start" : "bg-slate-300 justify-start"))}>
-                            <span className="w-4 h-4 rounded-full bg-white shadow-sm" />
-                          </button>
-                        </button>
-                      );
-                    }
-                    const Icon = it.icon;
-                    const vid = 'visibilityId' in it ? (it as { visibilityId?: SectionId }).visibilityId : undefined;
-                    if (vid) {
-                      const isActive = currentVisibility[vid];
-                      return (
-                        <div key={it.id} className={cn("flex items-center gap-2 rounded-md px-2 py-2", isDarkMode ? "hover:bg-slate-700/50" : "hover:bg-slate-100")}>
-                          <button type="button" onClick={() => { navigate(it.path); setDashboardsFlyoutOpen(false); }} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted"><Icon className="h-4 w-4" /></button>
-                          <button type="button" onClick={() => { navigate(it.path); setDashboardsFlyoutOpen(false); }} className="flex-1 text-left text-sm font-medium truncate">{it.label}</button>
-                          <button type="button" onClick={(e) => { e.stopPropagation(); handleToggleSection(vid); }} className={cn("shrink-0 w-8 h-5 rounded-full flex items-center p-0.5", isActive ? "bg-emerald-500 justify-end" : "bg-slate-300 dark:bg-slate-600 justify-start")}>
-                            <span className="w-4 h-4 rounded-full bg-white shadow-sm" />
-                          </button>
-                        </div>
-                      );
-                    }
-                    return (
-                      <button key={it.id} type="button" onClick={() => { navigate(it.path); setDashboardsFlyoutOpen(false); }} className={cn("w-full flex items-center gap-2 rounded-md px-2 py-2 text-sm", isDarkMode ? "hover:bg-slate-700/50" : "hover:bg-slate-100")}>
-                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted"><Icon className="h-4 w-4" /></div>
-                        <span className="flex-1 text-left truncate">{it.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </PopoverContent>
-            </Popover>
-            )}
-          </div>
+          {/* Dashboard submenus hidden from sidebar; only pinned items shown above */}
 
-          {/* Toptiering - main menu like Dashboards */}
+          {/* Toptiering - hidden from sidebar; routes available under Dashboards and via pinning */}
+          {!HIDE_TOPTIERING_IN_SIDEBAR && (
           <div>
             {isExpanded ? (
               <>
@@ -1268,6 +1145,125 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
             </Popover>
             )}
           </div>
+          )}
+
+          {/* Dashboard - category always shown; submenu shows pinned items from top nav */}
+          {isExpanded ? (
+            <div className={cn("mb-2")}>
+              <div className="flex items-center gap-2.5 px-2 pb-2">
+                <div className="flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center bg-slate-100 dark:bg-slate-800/30">
+                  <LayoutGrid className="w-[18px] h-[18px] text-slate-600 dark:text-slate-400" />
+                </div>
+                <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Dashboards</p>
+              </div>
+              <div className="space-y-0.5">
+                {pinnedItems.length === 0 ? (
+                  <p className="px-2 py-2 text-xs text-slate-500 dark:text-slate-400">Pin dashboards from the top navigation</p>
+                ) : (
+                  <DndContext
+                    sensors={sensors}
+                    collisionDetection={closestCenter}
+                    onDragEnd={handlePinnedDragEnd}
+                  >
+                    <SortableContext items={pinnedIds} strategy={verticalListSortingStrategy}>
+                      {pinnedItems.map((item) => {
+                        const { Icon, iconColor } = getIconAndColorForPinnedItem(item);
+                        const style = navIconStyleMap[iconColor] ?? navIconStyleMap.blue;
+                        const itemId = getPinnedItemId(item);
+                        const label = item.type === 'section' ? getSectionLabel(item.id) : item.label;
+                        const isCurrent = item.type === 'route' && location.pathname === item.path;
+                        return (
+                          <SortablePinnedItem
+                            key={itemId}
+                            id={itemId}
+                            item={item}
+                            isDarkMode={isDarkMode}
+                            isCurrent={isCurrent}
+                            label={label}
+                            Icon={Icon}
+                            style={style}
+                            onNavigate={() => item.type === 'route' && navigate(item.path)}
+                            onRemove={() => removePinned(item)}
+                            onSectionClick={item.type === 'section' ? onSectionClick : undefined}
+                          />
+                        );
+                      })}
+                    </SortableContext>
+                  </DndContext>
+                )}
+              </div>
+            </div>
+          ) : (
+            <Popover open={pinnedDashboardFlyoutOpen} onOpenChange={setPinnedDashboardFlyoutOpen}>
+              <PopoverTrigger asChild>
+                <div
+                  className="w-full flex justify-center py-2"
+                  onMouseEnter={() => { if (flyoutLeaveRef.current) clearTimeout(flyoutLeaveRef.current); setPinnedDashboardFlyoutOpen(true); }}
+                  onMouseLeave={() => { flyoutLeaveRef.current = window.setTimeout(() => setPinnedDashboardFlyoutOpen(false), 150); }}
+                >
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        className="w-9 h-9 rounded-lg flex items-center justify-center bg-slate-50 dark:bg-slate-800/30"
+                      >
+                        <LayoutDashboard className="w-4 h-4 text-slate-500 dark:text-slate-400" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">Dashboards</TooltipContent>
+                  </Tooltip>
+                </div>
+              </PopoverTrigger>
+              <PopoverContent
+                side="right"
+                align="start"
+                className="w-56 p-2"
+                onMouseEnter={() => { if (flyoutLeaveRef.current) clearTimeout(flyoutLeaveRef.current); setPinnedDashboardFlyoutOpen(true); }}
+                onMouseLeave={() => { flyoutLeaveRef.current = window.setTimeout(() => setPinnedDashboardFlyoutOpen(false), 150); }}
+              >
+                <div className="flex items-center gap-2 px-2 pb-2">
+                  <div className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 dark:bg-slate-800/30">
+                    <LayoutGrid className="w-4 h-4 text-slate-600 dark:text-slate-400" />
+                  </div>
+                  <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Dashboards</p>
+                </div>
+                <div className="space-y-0.5">
+                  {pinnedItems.length === 0 ? (
+                    <p className="px-2 py-3 text-xs text-slate-500 dark:text-slate-400">Pin dashboards from the top navigation</p>
+                  ) : pinnedItems.map((item) => {
+                    const { Icon, iconColor } = getIconAndColorForPinnedItem(item);
+                    const style = navIconStyleMap[iconColor] ?? navIconStyleMap.blue;
+                    if (item.type === 'section') {
+                      const label = getSectionLabel(item.id);
+                      return (
+                        <div key={`section-${item.id}`} className="flex items-center gap-1 group rounded-md">
+                          <button type="button" onClick={() => { onSectionClick?.(item.id); setPinnedDashboardFlyoutOpen(false); }} className="flex-1 flex items-center gap-2 px-2 py-2 rounded-md text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-800/60 min-w-0">
+                            <div className={cn("flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center", style.bg)}>
+                              <Icon className={cn("w-4 h-4", style.icon)} />
+                            </div>
+                            <span className="truncate">{label}</span>
+                          </button>
+                          <button type="button" onClick={(e) => { e.stopPropagation(); removePinned(item); }} className="shrink-0 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-slate-200/60 dark:hover:bg-slate-600/60" title="Unpin"><PinOff className="w-3.5 h-3.5 text-amber-500" /></button>
+                        </div>
+                      );
+                    }
+                    const isCurrent = location.pathname === item.path;
+                    return (
+                      <div key={`route-${item.id}`} className="flex items-center gap-1 group rounded-md">
+                        <button type="button" onClick={() => { navigate(item.path); setPinnedDashboardFlyoutOpen(false); }} className={cn("flex-1 flex items-center gap-2 px-2 py-2 rounded-md text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-800/60 min-w-0", isCurrent && "bg-slate-100 dark:bg-slate-800/40")}>
+                          <div className={cn("flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center", style.bg, isCurrent && "ring-1 ring-emerald-400/50")}>
+                            <Icon className={cn("w-4 h-4", isCurrent ? "text-emerald-500 dark:text-emerald-400" : style.icon)} />
+                          </div>
+                          <span className="truncate">{item.label}</span>
+                        </button>
+                        <button type="button" onClick={(e) => { e.stopPropagation(); removePinned(item); }} className="shrink-0 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-slate-200/60 dark:hover:bg-slate-600/60" title="Unpin"><PinOff className="w-3.5 h-3.5 text-amber-500" /></button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </PopoverContent>
+            </Popover>
+          )}
 
           {/* My Workbench */}
           {isExpanded ? (
@@ -1281,9 +1277,6 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
               <LayoutDashboard size={18} style={{ color: isDarkMode ? '#94a3b8' : '#64748b' }} />
             </button>
             <button onClick={() => navigate('/my-dashboard')} style={{ flex: 1, fontSize: 14, fontWeight: 600, color: isDarkMode ? '#e2e8f0' : '#1a1d29', textAlign: 'left', border: 'none', background: 'none', cursor: 'pointer', padding: 0 }}>My Workbench</button>
-            <button onClick={(e) => { e.stopPropagation(); handleToggleSection('myWorkbench'); }} style={{ flexShrink: 0, width: 32, height: 20, borderRadius: 9999, backgroundColor: currentVisibility.myWorkbench ? '#10b981' : (isDarkMode ? '#475569' : '#cbd5e1'), border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 2, justifyContent: currentVisibility.myWorkbench ? 'flex-end' : 'flex-start' }}>
-              <div style={{ width: 16, height: 16, borderRadius: '50%', backgroundColor: 'white', boxShadow: '0 1px 2px rgba(0,0,0,0.1)' }} />
-            </button>
           </div>
           ) : (
           <Tooltip>
@@ -1302,12 +1295,40 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
             <TooltipContent side="right">My Workbench</TooltipContent>
           </Tooltip>
           )}
+
+          {/* Research Lab */}
+          {isExpanded ? (
+          <div
+            style={{ width: '100%', padding: '12px 10px', display: 'flex', alignItems: 'center', gap: 10, transition: 'all 0.2s ease', cursor: 'pointer' }}
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+            onClick={() => navigate('/research')}
+          >
+            <button onClick={(e) => { e.stopPropagation(); navigate('/research'); }} style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)', border: 'none', cursor: 'pointer' }}>
+              <FlaskConical size={18} style={{ color: isDarkMode ? '#94a3b8' : '#64748b' }} />
+            </button>
+            <button onClick={() => navigate('/research')} style={{ flex: 1, fontSize: 14, fontWeight: 600, color: isDarkMode ? '#e2e8f0' : '#1a1d29', textAlign: 'left', border: 'none', background: 'none', cursor: 'pointer', padding: 0 }}>Research Lab</button>
+          </div>
+          ) : (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div
+                style={{ width: '100%', padding: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, transition: 'all 0.2s ease', cursor: 'pointer' }}
+                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                onClick={() => navigate('/research')}
+              >
+                <button onClick={(e) => { e.stopPropagation(); navigate('/research'); }} style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)', border: 'none', cursor: 'pointer' }}>
+                  <FlaskConical size={18} style={{ color: isDarkMode ? '#94a3b8' : '#64748b' }} />
+                </button>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="right">Research Lab</TooltipContent>
+          </Tooltip>
+          )}
         </div>
         </SidebarContent>
 
-        <SidebarFooter className="p-2 mt-auto border-t border-sidebar-border shrink-0">
-          <BypassLandingToggle isExpanded={state !== 'collapsed'} />
-        </SidebarFooter>
         <SidebarRail />
       </Sidebar>
     </>

@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useEffect } from "react";
 import { EditProvider } from "@/contexts/EditContext";
-import { AuthProvider } from "@/contexts/AuthContext";
+import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { AnalyticsWrapper, AnalyticsPageViewTracker } from "@/contexts/AnalyticsContext";
 import { DebugModeProvider } from "@/contexts/DebugModeContext";
 import { DebugModeIndicator } from "@/components/layout/DebugModeIndicator";
@@ -97,6 +97,12 @@ function WorkbenchRedirect() {
   return <Navigate to="/my-dashboard" replace />;
 }
 
+function RootRoute() {
+  const { isAuthenticated } = useAuth();
+  if (isAuthenticated) return <Navigate to="/insights" replace />;
+  return <Index />;
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme">
@@ -117,7 +123,7 @@ const App = () => (
               <ScrollToTop />
               <Routes>
               {/* Public routes */}
-              <Route path="/" element={<Navigate to="/insights" replace />} />
+              <Route path="/" element={<RootRoute />} />
               <Route path="/landing" element={<Index />} />
               <Route path="/login" element={<Login />} />
               <Route path="/forgot-password" element={<ForgotPassword />} />

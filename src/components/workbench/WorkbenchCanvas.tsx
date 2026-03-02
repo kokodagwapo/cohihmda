@@ -84,6 +84,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
+import { useCanvasExport } from "@/hooks/useCanvasExport";
 import { useCanvasHistory } from "@/hooks/useCanvasHistory";
 import { useCanvasPinStore } from "@/stores/canvasPinStore";
 import { useAuth } from "@/contexts/AuthContext";
@@ -749,6 +750,9 @@ function convertLayoutToPixels(
 
 export type SaveStatus = "saved" | "saving" | "unsaved" | "idle";
 
+/** Fixed ID for the seeded demo canvas; in dev it is loaded via /api/workbench/canvases/demo (no auth). */
+export const DEMO_CANVAS_ID = "00000000-0000-0000-0000-000000000002";
+
 export interface WorkbenchCanvasProps {
   loadCanvasId?: string | null;
   onLoaded?: () => void;
@@ -818,6 +822,13 @@ export function WorkbenchCanvas({
   const [visibilitySaving, setVisibilitySaving] = useState(false);
   const { user } = useAuth();
   const isOwner = isOwnerProp ?? true; // Default to true for new/own canvases
+  const {
+    handleExportPng,
+    handleExportPdf,
+    handleExportPptx,
+    handleExportExcel,
+    handleEmailScreenshot,
+  } = useCanvasExport({ items, saveTitle });
   const [activeAddGroup, setActiveAddGroup] = useState(
     () => DASHBOARD_SECTION_GROUPS[0]?.label ?? "Insights",
   );
@@ -1902,9 +1913,13 @@ export function WorkbenchCanvas({
     let cancelled = false;
     (async () => {
       try {
-        const data = await api.request<any>(
-          `/api/workbench/canvases/${loadCanvasId}${tenantQs}`,
-        );
+        // In dev, load demo canvas via unauthenticated endpoint so export can be tested without login
+        const isDemoCanvas =
+          import.meta.env.DEV && loadCanvasId === DEMO_CANVAS_ID;
+        const url = isDemoCanvas
+          ? "/api/workbench/canvases/demo"
+          : `/api/workbench/canvases/${loadCanvasId}${tenantQs}`;
+        const data = await api.request<any>(url);
         if (cancelled || !data) return;
         const content = data.content ?? {};
         if (Array.isArray(content.layout)) {
@@ -2828,308 +2843,6 @@ export function WorkbenchCanvas({
     setSaveDialogOpen(true);
   }, []);
 
-  const captureCanvasAsBlob = useCallback(async (): Promise<Blob | null> => {
-    const el = document.getElementById("workbench-canvas-root");
-    if (!el) return null;
-    try {
-      const html2canvas = (await import("html2canvas")).default;
-      const canvas = await html2canvas(el, {
-        useCORS: true,
-        allowTaint: true,
-        scale: 2,
-        backgroundColor: undefined,
-        logging: false,
-      });
-      return new Promise<Blob | null>((resolve) => {
-        canvas.toBlob((b) => resolve(b ?? null), "image/png", 1);
-      });
-    } catch (e) {
-      console.error("Canvas capture error:", e);
-      return null;
-    }
-  }, []);
-
-  const handleExportPng = useCallback(async () => {
-    const blob = await captureCanvasAsBlob();
-    if (!blob) {
-      toast({
-        title: "Capture failed",
-        description: "Could not capture canvas.",
-        variant: "destructive",
-      });
-      return;
-    }
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${(saveTitle || "canvas").replace(/[^a-z0-9]/gi, "_")}.png`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast({ title: "Downloaded", description: "Canvas saved as PNG." });
-  }, [captureCanvasAsBlob, saveTitle, toast]);
-
-  const handleExportPdf = useCallback(async () => {
-    const blob = await captureCanvasAsBlob();
-    if (!blob) {
-      toast({
-        title: "Capture failed",
-        description: "Could not capture canvas.",
-        variant: "destructive",
-      });
-      return;
-    }
-    try {
-      const { jsPDF } = await import("jspdf");
-      const doc = new jsPDF({ orientation: "landscape" });
-      const pageW = doc.internal.pageSize.getWidth();
-      const pageH = doc.internal.pageSize.getHeight();
-      const imgData = await new Promise<string>((resolve, reject) => {
-        const r = new FileReader();
-        r.onload = () => resolve(r.result as string);
-        r.onerror = reject;
-        r.readAsDataURL(blob);
-      });
-      doc.addImage(imgData, "PNG", 0, 0, pageW, pageH);
-      doc.save(`${(saveTitle || "canvas").replace(/[^a-z0-9]/gi, "_")}.pdf`);
-      toast({ title: "Downloaded", description: "Canvas saved as PDF." });
-    } catch (err) {
-      toast({
-        title: "Export failed",
-        description:
-          err instanceof Error ? err.message : "Could not create PDF",
-        variant: "destructive",
-      });
-    }
-  }, [captureCanvasAsBlob, saveTitle, toast]);
-
-  const handleExportPptx = useCallback(async () => {
-    const blob = await captureCanvasAsBlob();
-    if (!blob) {
-      toast({
-        title: "Capture failed",
-        description: "Could not capture canvas.",
-        variant: "destructive",
-      });
-      return;
-    }
-    try {
-      const pptxgen = (await import("pptxgenjs")).default;
-      const pres = new pptxgen();
-      pres.author = "Coheus";
-      pres.title = saveTitle || "Canvas";
-      const slide = pres.addSlide();
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const r = new FileReader();
-        r.onload = () => resolve(r.result as string);
-        r.onerror = reject;
-        r.readAsDataURL(blob);
-      });
-      slide.addImage({ data: dataUrl, x: 0.5, y: 0.5, w: 9, h: 5.25 });
-      slide.addText(saveTitle || "Canvas", {
-        x: 0.5,
-        y: 0.2,
-        w: 9,
-        fontSize: 24,
-        bold: true,
-        color: "1e293b",
-      });
-      await pres.writeFile({
-        fileName: `${(saveTitle || "canvas").replace(/[^a-z0-9]/gi, "_")}.pptx`,
-      });
-      toast({ title: "Downloaded", description: "PowerPoint saved." });
-    } catch (err) {
-      toast({
-        title: "Export failed",
-        description:
-          err instanceof Error ? err.message : "Could not create PowerPoint",
-        variant: "destructive",
-      });
-    }
-  }, [captureCanvasAsBlob, saveTitle, toast]);
-
-  /** Excel export: multi-sheet workbook from widget data (KPIs, tables, charts, text, insights). */
-  const handleExportExcel = useCallback(() => {
-    const safeName = (saveTitle || "canvas").replace(/[^a-z0-9]/gi, "_");
-    const sanitizeSheetName = (name: string) =>
-      name.replace(/[\s\\/*?:\[\]]/g, "_").slice(0, 31) || "Sheet";
-    const stripHtml = (html: string) =>
-      html
-        .replace(/<br\s*\/?>/gi, "\n")
-        .replace(/<[^>]+>/g, "")
-        .trim();
-
-    const wb = XLSX.utils.book_new();
-
-    // Summary
-    const typeCounts: Record<string, number> = {};
-    items.forEach((i) => {
-      typeCounts[i.type] = (typeCounts[i.type] ?? 0) + 1;
-    });
-    const summaryRows: (string | number)[][] = [
-      ["Canvas Export"],
-      ["Title", saveTitle || "Untitled canvas"],
-      ["Exported", new Date().toISOString()],
-      [],
-      ["Widget type", "Count"],
-      ...Object.entries(typeCounts).map(([k, v]) => [k, v]),
-    ];
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.aoa_to_sheet(summaryRows),
-      sanitizeSheetName("Summary"),
-    );
-
-    // KPIs
-    const kpiItems = items.filter(
-      (i) => i.type === "kpi" && i.payload.type === "kpi",
-    );
-    if (kpiItems.length > 0) {
-      const kpiRows: (string | number)[][] = [["Label", "Value", "Format"]];
-      kpiItems.forEach((i) => {
-        const p = i.payload as {
-          label: string;
-          value: number | string;
-          format?: string;
-        };
-        kpiRows.push([p.label, p.value, p.format ?? ""]);
-      });
-      XLSX.utils.book_append_sheet(
-        wb,
-        XLSX.utils.aoa_to_sheet(kpiRows),
-        sanitizeSheetName("KPIs"),
-      );
-    }
-
-    // Table widgets (each table → own sheet)
-    const tableItems = items.filter(
-      (i) => i.type === "table" && i.payload.type === "table",
-    );
-    tableItems.forEach((item, idx) => {
-      const p = item.payload as {
-        columns: { key: string; label: string }[];
-        data: any[];
-      };
-      const cols = p.columns ?? [];
-      const header = cols.map((c) => c.label || c.key);
-      const rows = (p.data ?? []).map((row) =>
-        cols.map((c) => row[c.key] ?? ""),
-      );
-      XLSX.utils.book_append_sheet(
-        wb,
-        XLSX.utils.aoa_to_sheet([header, ...rows]),
-        sanitizeSheetName(`Table ${idx + 1}`),
-      );
-    });
-
-    // Chart widgets (data array → sheet per chart)
-    const chartItems = items.filter(
-      (i) => i.type === "chart" && i.payload.type === "chart",
-    );
-    chartItems.forEach((item, idx) => {
-      const p = item.payload as { config?: { title?: string; data?: any[] } };
-      const chartData = p.config?.data;
-      if (Array.isArray(chartData) && chartData.length > 0) {
-        const cols = Object.keys(chartData[0]);
-        const rows = chartData.map((row: any) => cols.map((c) => row[c] ?? ""));
-        const sheetName = sanitizeSheetName(
-          `Chart ${idx + 1}` + (p.config?.title ? ` - ${p.config.title}` : ""),
-        );
-        XLSX.utils.book_append_sheet(
-          wb,
-          XLSX.utils.aoa_to_sheet([cols, ...rows]),
-          sheetName,
-        );
-      }
-    });
-
-    // Text (text_block + rich_text)
-    const textRows: (string | number)[][] = [["Title", "Content"]];
-    items.forEach((i) => {
-      if (i.type === "text_block" && i.payload.type === "text_block") {
-        const p = i.payload as { title?: string; content: string };
-        textRows.push([p.title ?? "", p.content ?? ""]);
-      } else if (i.type === "rich_text" && i.payload.type === "rich_text") {
-        const p = i.payload as { html: string };
-        textRows.push(["", stripHtml(p.html ?? "")]);
-      }
-    });
-    if (textRows.length > 1) {
-      XLSX.utils.book_append_sheet(
-        wb,
-        XLSX.utils.aoa_to_sheet(textRows),
-        sanitizeSheetName("Text"),
-      );
-    }
-
-    // Insights (pinned_insight, news_card)
-    const insightRows: (string | number)[][] = [
-      ["Title", "Content/Summary", "Link"],
-    ];
-    items.forEach((i) => {
-      if (i.type === "pinned_insight" && i.payload.type === "pinned_insight") {
-        const p = i.payload as { title: string; content: string };
-        insightRows.push([p.title ?? "", p.content ?? "", ""]);
-      } else if (i.type === "news_card" && i.payload.type === "news_card") {
-        const p = i.payload as {
-          title: string;
-          summary: string;
-          link?: string;
-        };
-        insightRows.push([p.title ?? "", p.summary ?? "", p.link ?? ""]);
-      }
-    });
-    if (insightRows.length > 1) {
-      XLSX.utils.book_append_sheet(
-        wb,
-        XLSX.utils.aoa_to_sheet(insightRows),
-        sanitizeSheetName("Insights"),
-      );
-    }
-
-    // Dashboard sections (sectionId + title only)
-    const sectionItems = items.filter(
-      (i) =>
-        i.type === "dashboard_section" &&
-        i.payload.type === "dashboard_section",
-    );
-    if (sectionItems.length > 0) {
-      const sectionRows: (string | number)[][] = [["Section ID", "Title"]];
-      sectionItems.forEach((i) => {
-        const p = i.payload as { sectionId: string; title: string };
-        sectionRows.push([p.sectionId ?? "", p.title ?? ""]);
-      });
-      XLSX.utils.book_append_sheet(
-        wb,
-        XLSX.utils.aoa_to_sheet(sectionRows),
-        sanitizeSheetName("Dashboard Sections"),
-      );
-    }
-
-    try {
-      const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
-      const blob = new Blob([out], {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${safeName}.xlsx`;
-      a.click();
-      URL.revokeObjectURL(url);
-      toast({
-        title: "Downloaded",
-        description: "Canvas data exported as Excel.",
-      });
-    } catch (err) {
-      toast({
-        title: "Export failed",
-        description:
-          err instanceof Error ? err.message : "Could not create Excel file",
-        variant: "destructive",
-      });
-    }
-  }, [items, saveTitle, toast]);
-
   /** Per-widget Excel export: pulls data from canvasDataStore and writes a single-sheet workbook. */
   const handleExportWidgetExcel = useCallback(
     (widgetId: string) => {
@@ -3426,39 +3139,6 @@ Structure it as a narrative-first executive briefing:
   const [aiReportDefinition, setAiReportDefinition] = useState<any | null>(
     null,
   );
-
-  const handleEmailScreenshot = useCallback(async () => {
-    const blob = await captureCanvasAsBlob();
-    if (!blob) {
-      toast({
-        title: "Capture failed",
-        description: "Could not capture canvas.",
-        variant: "destructive",
-      });
-      return;
-    }
-    try {
-      await navigator.clipboard.write([
-        new ClipboardItem({ "image/png": blob }),
-      ]);
-      const subject = encodeURIComponent(`${saveTitle || "Canvas"} – Coheus`);
-      const body = encodeURIComponent(
-        "Hi,\n\nThe canvas image has been copied to your clipboard. Paste it here with Ctrl+V (Windows/Linux) or Cmd+V (Mac).\n\n— Coheus",
-      );
-      window.open(`mailto:?subject=${subject}&body=${body}`, "_blank");
-      toast({
-        title: "Ready to email",
-        description:
-          "Canvas image copied. Paste (Ctrl+V / Cmd+V) into the email body.",
-      });
-    } catch {
-      toast({
-        title: "Clipboard failed",
-        description: "Could not copy image.",
-        variant: "destructive",
-      });
-    }
-  }, [captureCanvasAsBlob, saveTitle, toast]);
 
   const getShareUrl = useCallback(() => {
     if (!canvasId) return "";
@@ -4643,6 +4323,7 @@ Structure it as a narrative-first executive briefing:
                   return (
                     <Rnd
                       key={item.i}
+                      data-item-id={item.i}
                       size={{ width: item.w, height: item.h }}
                       position={{ x: item.x, y: item.y }}
                       onDragStart={() => setSelectedWidgetId(item.i)}
@@ -5260,6 +4941,58 @@ Structure it as a narrative-first executive briefing:
                 >
                   {visibilitySaving ? "Saving..." : "Save sharing settings"}
                 </Button>
+              </div>
+              <div className="h-px bg-slate-200 dark:bg-slate-700" />
+              <div className="space-y-2">
+                <div className="text-xs font-medium text-slate-500 dark:text-slate-400 px-0.5">
+                  Export canvas
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      handleExportPdf();
+                      setShareDialogOpen(false);
+                    }}
+                    className="w-full gap-2"
+                  >
+                    <FileText className="h-4 w-4" />
+                    Download as PDF
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      handleExportPptx();
+                      setShareDialogOpen(false);
+                    }}
+                    className="w-full gap-2"
+                  >
+                    <Presentation className="h-4 w-4" />
+                    Download as PowerPoint
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      handleExportPng();
+                      setShareDialogOpen(false);
+                    }}
+                    className="w-full gap-2"
+                  >
+                    <Download className="h-4 w-4" />
+                    Download as PNG
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      handleEmailScreenshot();
+                      setShareDialogOpen(false);
+                    }}
+                    className="w-full gap-2"
+                  >
+                    <Mail className="h-4 w-4" />
+                    Copy image for email
+                  </Button>
+                </div>
               </div>
               <div className="h-px bg-slate-200 dark:bg-slate-700" />
               <div className="flex flex-col gap-2">

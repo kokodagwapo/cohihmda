@@ -408,7 +408,7 @@ export const LeaderBoardSection = ({
   return (
     <section
       ref={sectionRef}
-      className="mt-4 sm:mt-6 rounded-2xl sm:rounded-3xl bg-white dark:bg-slate-900/70 border border-slate-100 dark:border-slate-800 shadow-[0_1px_3px_rgba(0,0,0,0.04)] p-5 sm:p-6 md:p-8 space-y-6 sm:space-y-8"
+      className="mt-4 sm:mt-6 rounded-2xl sm:rounded-3xl bg-white dark:bg-slate-900/70 border border-slate-100 dark:border-slate-800 shadow-[0_8px_32px_rgba(15,23,42,0.08)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.24)] p-5 sm:p-6 md:p-8 space-y-6 sm:space-y-8"
     >
       {/* Header */}
       <div className="flex flex-col gap-3 sm:gap-4 sm:flex-row sm:items-center sm:justify-between">

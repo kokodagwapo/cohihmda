@@ -194,6 +194,17 @@ All colors MUST be HSL.
   }
 }
 
+/* Hide scrollbar but keep scroll functionality */
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 /* Glassmorphic UI Styles */
 @layer utilities {
   .glass {
