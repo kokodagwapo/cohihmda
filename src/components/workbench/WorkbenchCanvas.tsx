@@ -3651,27 +3651,30 @@ Structure it as a narrative-first executive briefing:
                       <TooltipContent side="bottom">Share</TooltipContent>
                     </Tooltip>
                   )}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400"
-                        onClick={() =>
-                          navigate(
-                            canvasId
-                              ? `/workbench/distributions?canvas=${canvasId}`
-                              : "/workbench/distributions",
-                          )
-                        }
-                      >
-                        <Mail className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">
-                      Schedule distribution
-                    </TooltipContent>
-                  </Tooltip>
+                  {/* Distributions page hidden for now – entire Schedule distribution button removed */}
+                  {false && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400"
+                          onClick={() =>
+                            navigate(
+                              canvasId
+                                ? `/workbench/distributions?canvas=${canvasId}`
+                                : "/workbench/distributions",
+                            )
+                          }
+                        >
+                          <Mail className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">
+                        Schedule distribution
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
                   <input
                     ref={backgroundImageInputRef}
                     type="file"

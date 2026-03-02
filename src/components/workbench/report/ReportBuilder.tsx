@@ -1187,15 +1187,18 @@ export function ReportBuilder({
           <FileText className="h-3.5 w-3.5" />
           PDF
         </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-1.5 text-xs"
-          onClick={() => navigate('/workbench/distributions')}
-        >
-          <Mail className="h-3.5 w-3.5" />
-          Schedule distribution
-        </Button>
+        {/* Distributions page hidden for now */}
+        {false && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 text-xs"
+            onClick={() => navigate('/workbench/distributions')}
+          >
+            <Mail className="h-3.5 w-3.5" />
+            Schedule distribution
+          </Button>
+        )}
       </div>
 
       {/* Main content */}

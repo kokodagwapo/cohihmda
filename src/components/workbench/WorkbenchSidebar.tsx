@@ -24,7 +24,8 @@ export type CanvasListItem = {
 
 const appNavLinks = [
   { path: '/my-dashboard', label: 'My Workbench', icon: LayoutDashboard, variant: 'violet' as const },
-  { path: '/workbench/distributions', label: 'Distributions', icon: Mail, variant: 'violet' as const },
+  // Distributions page hidden for now
+  // { path: '/workbench/distributions', label: 'Distributions', icon: Mail, variant: 'violet' as const },
   { label: 'Cohi Dashboard Library', icon: Library, variant: 'sky' as const, scrollTarget: 'cohi-dashboard-library' },
 ];
 
