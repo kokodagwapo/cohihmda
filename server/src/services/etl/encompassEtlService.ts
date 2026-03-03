@@ -70,6 +70,11 @@ export class EncompassEtlService {
         if (colType === "integer" || colType === "bigint" || colType === "smallint") return Math.round(numValue);
         if (colType === "numeric" || colType === "decimal" || colType === "double precision" || colType === "real") return numValue;
       }
+      // Non-parseable string targeting a numeric/integer column (e.g. Encompass "Y"/"N" in a numeric field)
+      if (!isNumericString && (colType === "integer" || colType === "bigint" || colType === "smallint" ||
+          colType === "numeric" || colType === "decimal" || colType === "double precision" || colType === "real")) {
+        return null;
+      }
       if (colType === "boolean") {
         const lower = trimmed.toLowerCase();
         return lower === "true" || lower === "yes" || lower === "y" || lower === "1" || lower === "x";
@@ -808,6 +813,13 @@ export class EncompassEtlService {
                   ) {
                     value = numValue;
                   }
+                } else if (
+                  colType === "integer" || colType === "bigint" || colType === "smallint" ||
+                  colType === "numeric" || colType === "decimal" ||
+                  colType === "double precision" || colType === "real"
+                ) {
+                  // Non-parseable string targeting a numeric column (e.g. Encompass "Y"/"N")
+                  value = null;
                 } else if (colType === "boolean") {
                   // Convert string to boolean
                   const lower = trimmed.toLowerCase();
