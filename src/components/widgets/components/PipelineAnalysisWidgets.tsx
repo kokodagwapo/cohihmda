@@ -262,6 +262,59 @@ export function PipelineAnalysisTableWidget({
 }: WidgetRenderProps<PipelineAnalysisSource>) {
   const derived = useMemo(() => buildDerived(data), [data]);
 
+  const monthHeatmapAvgs = useMemo(() => {
+    if (!derived?.years?.length || !derived?.byYearMonth) {
+      return { p35LO: 0, p65LO: 0, p35OPs: 0, p65OPs: 0 };
+    }
+    const { years, byYearMonth } = derived;
+    const lo: number[] = [];
+    const op: number[] = [];
+    years.forEach((y) => {
+      for (let m = 1; m <= 12; m++) {
+        const row = byYearMonth.get(`${y}-${m}`);
+        if (row && row.active_lo_count > 0) lo.push(row.active_units / row.active_lo_count);
+        if (row && row.active_ops_count > 0) op.push(row.active_units / row.active_ops_count);
+      }
+    });
+    const sortedLO = [...lo].sort((a, b) => a - b);
+    const sortedOP = [...op].sort((a, b) => a - b);
+    const nLO = sortedLO.length;
+    const nOP = sortedOP.length;
+    return {
+      p35LO: nLO > 0 ? sortedLO[Math.floor(0.35 * nLO)] : 0,
+      p65LO: nLO > 0 ? sortedLO[Math.floor(0.65 * nLO)] : 0,
+      p35OPs: nOP > 0 ? sortedOP[Math.floor(0.35 * nOP)] : 0,
+      p65OPs: nOP > 0 ? sortedOP[Math.floor(0.65 * nOP)] : 0,
+    };
+  }, [derived]);
+
+  const weekHeatmapAvgs = useMemo(() => {
+    if (!derived?.years?.length || !derived?.byYearWeek || !derived?.weekValues?.length) {
+      return { p35LO: 0, p65LO: 0, p35OPs: 0, p65OPs: 0 };
+    }
+    const { years, byYearWeek, weekValues } = derived;
+    const lo: number[] = [];
+    const op: number[] = [];
+    const weeks = weekValues.slice(0, 26);
+    years.forEach((y) => {
+      weeks.forEach((w) => {
+        const row = byYearWeek.get(`${y}-${w}`);
+        if (row && row.active_lo_count > 0) lo.push(row.active_units / row.active_lo_count);
+        if (row && row.active_ops_count > 0) op.push(row.active_units / row.active_ops_count);
+      });
+    });
+    const sortedLO = [...lo].sort((a, b) => a - b);
+    const sortedOP = [...op].sort((a, b) => a - b);
+    const nLO = sortedLO.length;
+    const nOP = sortedOP.length;
+    return {
+      p35LO: nLO > 0 ? sortedLO[Math.floor(0.35 * nLO)] : 0,
+      p65LO: nLO > 0 ? sortedLO[Math.floor(0.65 * nLO)] : 0,
+      p35OPs: nOP > 0 ? sortedOP[Math.floor(0.35 * nOP)] : 0,
+      p65OPs: nOP > 0 ? sortedOP[Math.floor(0.65 * nOP)] : 0,
+    };
+  }, [derived]);
+
   if (loading) {
     return (
       <WidgetShell loading>
@@ -289,51 +342,6 @@ export function PipelineAnalysisTableWidget({
 
   const { years, byYearWeek, byWeekPct, byYearMonth, snapshotDayLabel, viewMode, pctMetric } = derived;
   const pctMetricLabel = pctMetric === 'volume' ? 'Volume' : 'Units';
-
-  const monthHeatmapAvgs = useMemo(() => {
-    const lo: number[] = [];
-    const op: number[] = [];
-    years.forEach((y) => {
-      for (let m = 1; m <= 12; m++) {
-        const row = byYearMonth.get(`${y}-${m}`);
-        if (row && row.active_lo_count > 0) lo.push(row.active_units / row.active_lo_count);
-        if (row && row.active_ops_count > 0) op.push(row.active_units / row.active_ops_count);
-      }
-    });
-    const sortedLO = [...lo].sort((a, b) => a - b);
-    const sortedOP = [...op].sort((a, b) => a - b);
-    const nLO = sortedLO.length;
-    const nOP = sortedOP.length;
-    return {
-      p35LO: nLO > 0 ? sortedLO[Math.floor(0.35 * nLO)] : 0,
-      p65LO: nLO > 0 ? sortedLO[Math.floor(0.65 * nLO)] : 0,
-      p35OPs: nOP > 0 ? sortedOP[Math.floor(0.35 * nOP)] : 0,
-      p65OPs: nOP > 0 ? sortedOP[Math.floor(0.65 * nOP)] : 0,
-    };
-  }, [years, byYearMonth]);
-
-  const weekHeatmapAvgs = useMemo(() => {
-    const lo: number[] = [];
-    const op: number[] = [];
-    const weeks = derived.weekValues.slice(0, 26);
-    years.forEach((y) => {
-      weeks.forEach((w) => {
-        const row = byYearWeek.get(`${y}-${w}`);
-        if (row && row.active_lo_count > 0) lo.push(row.active_units / row.active_lo_count);
-        if (row && row.active_ops_count > 0) op.push(row.active_units / row.active_ops_count);
-      });
-    });
-    const sortedLO = [...lo].sort((a, b) => a - b);
-    const sortedOP = [...op].sort((a, b) => a - b);
-    const nLO = sortedLO.length;
-    const nOP = sortedOP.length;
-    return {
-      p35LO: nLO > 0 ? sortedLO[Math.floor(0.35 * nLO)] : 0,
-      p65LO: nLO > 0 ? sortedLO[Math.floor(0.65 * nLO)] : 0,
-      p35OPs: nOP > 0 ? sortedOP[Math.floor(0.35 * nOP)] : 0,
-      p65OPs: nOP > 0 ? sortedOP[Math.floor(0.65 * nOP)] : 0,
-    };
-  }, [years, byYearWeek, derived.weekValues]);
 
   if (viewMode === 'month') {
     const { byYearMonth, byMonthPct } = derived;
