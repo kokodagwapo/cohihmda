@@ -31,7 +31,7 @@ import type {
   PricingReportRow,
   PricingDetailRow,
 } from "@/hooks/usePricingDashboardData";
-import { Loader2, ArrowUp, ArrowDown, X, SlidersHorizontal } from "lucide-react";
+import { Loader2, ArrowUp, ArrowDown, X, SlidersHorizontal, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { usePricingDashboardStandaloneColumnsStore } from "@/stores/pricingDashboardStandaloneColumnsStore";
@@ -155,6 +155,53 @@ function sortDetailRows(
     if (typeof va === "number" && typeof vb === "number") return mult * (va - vb);
     return mult * String(va).localeCompare(String(vb), undefined, { numeric: true });
   });
+}
+
+/** Escape a cell value for CSV (wrap in quotes if contains comma, newline, or quote). */
+function csvEscape(val: string): string {
+  if (val.includes(",") || val.includes('"') || val.includes("\n") || val.includes("\r")) {
+    return `"${val.replace(/"/g, '""')}"`;
+  }
+  return val;
+}
+
+/** Build CSV string from columns and rows, optionally prepend a totals row. */
+function buildCsv(
+  columns: { key: string; label: string }[],
+  rows: Record<string, unknown>[],
+  totals?: Record<string, unknown>
+): string {
+  const header = columns.map((c) => csvEscape(c.label)).join(",");
+  const lines: string[] = [header];
+  if (totals) {
+    const totalRow = columns.map((c) => {
+      const v = totals[c.key];
+      if (v === undefined || v === null) return "";
+      return csvEscape(String(v));
+    }).join(",");
+    lines.push(totalRow);
+  }
+  for (const row of rows) {
+    const cells = columns.map((c) => {
+      const v = row[c.key];
+      if (v === undefined || v === null) return "";
+      if (typeof v === "number") return String(v);
+      return csvEscape(String(v));
+    });
+    lines.push(cells.join(","));
+  }
+  return lines.join("\r\n");
+}
+
+/** Trigger download of a CSV file. */
+function downloadCsv(content: string, filename: string): void {
+  const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export interface PricingDashboardViewProps {
@@ -334,6 +381,28 @@ export function PricingDashboardView({
       return key;
     });
   }, []);
+
+  const handleExportTable = useCallback(() => {
+    const isReport = activeTab === "loan_officer_report" || activeTab === "entity_report";
+    const baseName = activeTab.replace(/_/g, "-");
+    const filename = `pricing-${baseName}-${new Date().toISOString().slice(0, 10)}.csv`;
+    if (isReport) {
+      const cols = reportColumns.map((c) => ({ key: c.key as string, label: c.label }));
+      const csv = buildCsv(cols, sortedReportRows as Record<string, unknown>[], reportTotals as Record<string, unknown>);
+      downloadCsv(csv, filename);
+    } else {
+      const csv = buildCsv(detailCols, sortedDetailRows as Record<string, unknown>[], detailTotals as Record<string, unknown>);
+      downloadCsv(csv, filename);
+    }
+  }, [
+    activeTab,
+    reportColumns,
+    detailCols,
+    sortedReportRows,
+    sortedDetailRows,
+    reportTotals,
+    detailTotals,
+  ]);
 
   const renderReportTable = () => {
     const totals = reportTotals;
@@ -734,32 +803,44 @@ export function PricingDashboardView({
       <Card className={cn("rounded-xl border overflow-hidden", isDark ? "border-slate-700 bg-slate-800/50" : "border-slate-200/60 bg-white")}>
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabId)}>
           <div className="border-b border-slate-200/60 dark:border-slate-700/60 px-4 pt-4">
-            <TabsList className={cn("bg-slate-100/80 dark:bg-slate-800/80 p-0.5 rounded-lg")}>
-              <TabsTrigger
-                value="loan_officer_report"
-                className="rounded-md data-[state=active]:bg-[#10B981]/10 data-[state=active]:text-emerald-900 data-[state=active]:shadow-sm dark:data-[state=active]:bg-[#10B981]/20 dark:data-[state=active]:text-emerald-100"
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <TabsList className={cn("bg-slate-100/80 dark:bg-slate-800/80 p-0.5 rounded-lg")}>
+                <TabsTrigger
+                  value="loan_officer_report"
+                  className="rounded-md data-[state=active]:bg-[#10B981]/10 data-[state=active]:text-emerald-900 data-[state=active]:shadow-sm dark:data-[state=active]:bg-[#10B981]/20 dark:data-[state=active]:text-emerald-100"
+                >
+                  Loan Officer Report
+                </TabsTrigger>
+                <TabsTrigger
+                  value="loan_officer_detail"
+                  className="rounded-md data-[state=active]:bg-[#10B981]/40 data-[state=active]:text-emerald-900 data-[state=active]:shadow-sm dark:data-[state=active]:bg-[#10B981]/50 dark:data-[state=active]:text-emerald-100"
+                >
+                  Loan Officer Detail
+                </TabsTrigger>
+                <TabsTrigger
+                  value="entity_report"
+                  className="rounded-md data-[state=active]:bg-blue-50 data-[state=active]:text-blue-800 data-[state=active]:shadow-sm dark:data-[state=active]:bg-blue-900/30 dark:data-[state=active]:text-blue-200"
+                >
+                  {entityLabel} Report
+                </TabsTrigger>
+                <TabsTrigger
+                  value="entity_detail"
+                  className="rounded-md data-[state=active]:bg-blue-200 data-[state=active]:text-blue-900 data-[state=active]:shadow-sm dark:data-[state=active]:bg-blue-800/50 dark:data-[state=active]:text-blue-100"
+                >
+                  {entityLabel} Detail
+                </TabsTrigger>
+              </TabsList>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 shrink-0"
+                onClick={handleExportTable}
+                disabled={loading || (isDetailTab ? detailRows.length === 0 : reportRows.length === 0)}
               >
-                Loan Officer Report
-              </TabsTrigger>
-              <TabsTrigger
-                value="loan_officer_detail"
-                className="rounded-md data-[state=active]:bg-[#10B981]/40 data-[state=active]:text-emerald-900 data-[state=active]:shadow-sm dark:data-[state=active]:bg-[#10B981]/50 dark:data-[state=active]:text-emerald-100"
-              >
-                Loan Officer Detail
-              </TabsTrigger>
-              <TabsTrigger
-                value="entity_report"
-                className="rounded-md data-[state=active]:bg-blue-50 data-[state=active]:text-blue-800 data-[state=active]:shadow-sm dark:data-[state=active]:bg-blue-900/30 dark:data-[state=active]:text-blue-200"
-              >
-                {entityLabel} Report
-              </TabsTrigger>
-              <TabsTrigger
-                value="entity_detail"
-                className="rounded-md data-[state=active]:bg-blue-200 data-[state=active]:text-blue-900 data-[state=active]:shadow-sm dark:data-[state=active]:bg-blue-800/50 dark:data-[state=active]:text-blue-100"
-              >
-                {entityLabel} Detail
-              </TabsTrigger>
-            </TabsList>
+                <Download className="h-4 w-4" />
+                Export CSV
+              </Button>
+            </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
               {activeTab === "loan_officer_report" && "Loan Officer Report"}
               {activeTab === "loan_officer_detail" && "Loan Officer Detail"}
