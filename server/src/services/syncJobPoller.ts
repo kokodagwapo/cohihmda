@@ -6,10 +6,21 @@
 
 import { pool as managementPool } from "../config/managementDatabase.js";
 import { tenantDbManager } from "../config/tenantDatabaseManager.js";
-import { EncompassApiService } from "./encompassApiService.js";
 import { EncompassEtlService } from "./etl/encompassEtlService.js";
 
 const POLL_INTERVAL_MS = 5000;
+
+export interface SyncJobOptions {
+  fullSync?: boolean;
+  modifiedFrom?: string;
+  limit?: number;
+  fields?: string[];
+  folderName?: string;
+  folderNames?: string[];
+  loanStartDate?: string;
+  loanStartDateField?: string;
+  clearDatabase?: boolean;
+}
 
 interface SyncJobRow {
   id: string;
@@ -17,7 +28,7 @@ interface SyncJobRow {
   los_connection_id: string;
   job_type: string;
   status: string;
-  options: Record<string, unknown>;
+  options: SyncJobOptions;
   requested_by: string | null;
   progress: number;
   progress_message: string | null;
@@ -26,6 +37,25 @@ interface SyncJobRow {
   created_at: Date;
   started_at: Date | null;
   completed_at: Date | null;
+}
+
+/**
+ * Enqueue a sync job into the management DB for the worker to pick up.
+ * Returns the job ID so the caller can poll for status.
+ */
+export async function enqueueSyncJob(
+  tenantId: string,
+  losConnectionId: string,
+  options: SyncJobOptions,
+  requestedBy?: string | null
+): Promise<string> {
+  const result = await managementPool.query(
+    `INSERT INTO sync_jobs (tenant_id, los_connection_id, job_type, status, options, requested_by)
+     VALUES ($1, $2, 'encompass-sync', 'pending', $3, $4)
+     RETURNING id`,
+    [tenantId, losConnectionId, JSON.stringify(options), requestedBy ?? null]
+  );
+  return result.rows[0].id;
 }
 
 /**
@@ -111,19 +141,16 @@ async function failSyncJob(jobId: string, error: string): Promise<void> {
  * Process a single sync job: get tenant pool, run ETL, update sync_jobs.
  */
 async function processJob(job: SyncJobRow): Promise<void> {
-  const { id: jobId, tenant_id: tenantId, los_connection_id: losConnectionId, options } = job;
-  const opts = (options || {}) as {
-    fullSync?: boolean;
-    modifiedFrom?: string;
-    limit?: number;
-    fields?: string[];
-    folderName?: string;
-  };
+  const { id: jobId, tenant_id: tenantId, los_connection_id: losConnectionId, options: opts } = job;
 
   try {
     const tenantPool = await tenantDbManager.getTenantPool(tenantId);
 
-    const apiService = new EncompassApiService(tenantPool);
+    if (opts.clearDatabase) {
+      console.log(`[SyncJobPoller] Clearing loans table before full sync for tenant ${tenantId}`);
+      await tenantPool.query("TRUNCATE TABLE public.loans RESTART IDENTITY CASCADE").catch(() => {});
+    }
+
     const etlService = new EncompassEtlService(tenantPool);
 
     await updateSyncJobProgress(jobId, 20, "Syncing loans from Encompass...");
@@ -134,6 +161,9 @@ async function processJob(job: SyncJobRow): Promise<void> {
       limit: opts.limit,
       fields: opts.fields,
       folderName: opts.folderName,
+      folderNames: opts.folderNames,
+      loanStartDate: opts.loanStartDate ? new Date(opts.loanStartDate) : undefined,
+      loanStartDateField: opts.loanStartDateField,
     });
 
     await completeSyncJob(jobId, result as unknown as Record<string, unknown>);
