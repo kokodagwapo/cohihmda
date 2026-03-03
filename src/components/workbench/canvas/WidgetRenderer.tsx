@@ -53,6 +53,8 @@ interface WidgetRendererProps {
   otherGroups?: { id: string; title: string }[];
   /** Called when an item inside a widget_group is moved out to another group */
   onMoveItemOut?: (item: GroupWidgetItem, targetGroupId: string) => void;
+  /** Whether canvas interactions are editable (owner/editor). */
+  canEdit?: boolean;
 }
 
 const CHART_TYPE_OPTIONS: {
@@ -884,6 +886,7 @@ export function WidgetRenderer({
   onUpdatePayload,
   otherGroups,
   onMoveItemOut,
+  canEdit = true,
 }: WidgetRendererProps) {
   const { type, payload } = item;
   const style = { minHeight: height };
@@ -1011,6 +1014,8 @@ export function WidgetRenderer({
           onMoveItemOut={onMoveItemOut}
           savedFilters={payload.savedFilters}
           filtersCollapsed={payload.filtersCollapsed}
+          filterLocked={payload.filterLocked}
+          canEdit={canEdit}
         />
       </div>
     );

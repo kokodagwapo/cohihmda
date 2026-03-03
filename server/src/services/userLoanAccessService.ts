@@ -237,7 +237,7 @@ export async function getUserAccessInfo(
       `
       SELECT 
         id, role, encompass_user_id, los_connection_id,
-        COALESCE(loan_access_mode, 'encompass_sync') as loan_access_mode,
+        COALESCE(loan_access_mode, 'full_access') as loan_access_mode,
         loan_access_synced_at
       FROM users 
       WHERE id = $1 AND is_active = true

@@ -4,7 +4,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate, useSearchParams, Outlet } from "react-router-dom";
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
 import { EditProvider } from "@/contexts/EditContext";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { AnalyticsWrapper, AnalyticsPageViewTracker } from "@/contexts/AnalyticsContext";
@@ -121,12 +121,19 @@ function WorkbenchRedirect() {
 }
 
 function RootRoute() {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, isLoading } = useAuth();
+  if (isLoading) return null;
   if (isAuthenticated) {
     if (user?.access_mode === "canvas_only") return <Navigate to="/my-dashboard" replace />;
     return <Navigate to="/insights" replace />;
   }
   return <Index />;
+}
+
+function FullAccessOnly({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  if (user?.access_mode === "canvas_only") return null;
+  return <>{children}</>;
 }
 
 const App = () => (
@@ -144,7 +151,9 @@ const App = () => (
             <Toaster />
             <Sonner />
             <Router basename={import.meta.env.BASE_URL}>
-              <AnalyticsPageViewTracker />
+              <FullAccessOnly>
+                <AnalyticsPageViewTracker />
+              </FullAccessOnly>
               <Handle404Redirect />
               <ScrollToTop />
               <Routes>
@@ -218,10 +227,12 @@ const App = () => (
               {/* Catch-all route */}
               <Route path="*" element={<NotFound />} />
             </Routes>
-              <GlobalCohiChat />
-              <CohiDemoExperience />
-              <WelcomeTourTrigger />
-              <ActiveTourRunner />
+              <FullAccessOnly>
+                <GlobalCohiChat />
+                <CohiDemoExperience />
+                <WelcomeTourTrigger />
+                <ActiveTourRunner />
+              </FullAccessOnly>
           </Router>
         </TooltipProvider>
         </EditProvider>

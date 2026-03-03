@@ -867,6 +867,7 @@ export function WorkbenchCanvas({
   const { user } = useAuth();
   const navigate = useNavigate();
   const isOwner = isOwnerProp ?? true; // Default to true for new/own canvases
+  const canEdit = isOwner;
   const {
     handleExportPng,
     handleExportPdf,
@@ -2285,6 +2286,7 @@ export function WorkbenchCanvas({
       payload: CanvasLayoutItem["payload"],
       size?: { w?: number; h?: number },
     ) => {
+      if (!canEdit) return;
       const id = `widget-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       const { x, y } = getNextPosition(items);
       const newItem = createLayoutItem(id, type, payload, {
@@ -2295,20 +2297,22 @@ export function WorkbenchCanvas({
       });
       setItemsWithHistory((prev) => [...prev, newItem]);
     },
-    [items, setItemsWithHistory],
+    [canEdit, items, setItemsWithHistory],
   );
 
   const removeWidget = useCallback(
     (id: string) => {
+      if (!canEdit) return;
       setItemsWithHistory((prev) => prev.filter((i) => i.i !== id));
       if (selectedWidgetId === id) setSelectedWidgetId(null);
       toast({ title: "Widget removed" });
     },
-    [setItemsWithHistory, selectedWidgetId, toast],
+    [canEdit, setItemsWithHistory, selectedWidgetId, toast],
   );
 
   const duplicateWidget = useCallback(
     (id: string) => {
+      if (!canEdit) return;
       const item = items.find((i) => i.i === id);
       if (!item) return;
       const newId = `widget-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -2323,7 +2327,7 @@ export function WorkbenchCanvas({
       setSelectedWidgetId(newId);
       toast({ title: "Widget duplicated" });
     },
-    [items, setItemsWithHistory, toast],
+    [canEdit, items, setItemsWithHistory, toast],
   );
 
   const updateItemRect = useCallback(
@@ -2332,6 +2336,7 @@ export function WorkbenchCanvas({
       next: Partial<Pick<CanvasLayoutItem, "x" | "y" | "w" | "h">>,
       withHistory = false,
     ) => {
+      if (!canEdit) return;
       // Clamp position so widgets can't be dragged off the left/top edges
       const clamped = { ...next };
       if (clamped.x !== undefined) clamped.x = Math.max(0, clamped.x);
@@ -2341,14 +2346,15 @@ export function WorkbenchCanvas({
         prev.map((i) => (i.i === id ? { ...i, ...clamped } : i)),
       );
     },
-    [setItems, setItemsWithHistory],
+    [canEdit, setItems, setItemsWithHistory],
   );
 
   const updateWidgetPayload = useCallback(
     (id: string, payload: CanvasLayoutItem["payload"]) => {
+      if (!canEdit) return;
       setItems((prev) => prev.map((i) => (i.i === id ? { ...i, payload } : i)));
     },
-    [],
+    [canEdit],
   );
 
   const addTextBlock = useCallback(() => {
@@ -2562,6 +2568,7 @@ export function WorkbenchCanvas({
   // Listen for dashboard section additions from the sidebar
   useEffect(() => {
     const handler = (e: Event) => {
+      if (!canEdit) return;
       const detail = (e as CustomEvent).detail;
       if (detail?.sectionId) {
         const item = DASHBOARD_SECTION_ITEMS.find(
@@ -2574,11 +2581,12 @@ export function WorkbenchCanvas({
     };
     window.addEventListener("add-dashboard-section", handler);
     return () => window.removeEventListener("add-dashboard-section", handler);
-  }, [addDashboardSection]);
+  }, [addDashboardSection, canEdit]);
 
   // Listen for generic canvas widget additions (from Cohi Chat "Add to Workbench")
   useEffect(() => {
     const handler = (e: Event) => {
+      if (!canEdit) return;
       const detail = (e as CustomEvent).detail;
       if (detail?.type && detail?.payload) {
         addWidget(
@@ -2594,7 +2602,7 @@ export function WorkbenchCanvas({
     };
     window.addEventListener("add-canvas-widget", handler);
     return () => window.removeEventListener("add-canvas-widget", handler);
-  }, [addWidget, toast]);
+  }, [addWidget, canEdit, toast]);
 
   // (Sidebar report builder links removed — reports are generated from canvas via the header button)
 
@@ -2795,6 +2803,7 @@ export function WorkbenchCanvas({
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") setSelectedWidgetId(null);
+      if (!canEdit) return;
       if ((e.key === "Delete" || e.key === "Backspace") && selectedWidgetId) {
         const t = e.target as HTMLElement;
         if (!t.closest?.("input, textarea, [contenteditable]")) {
@@ -2810,7 +2819,7 @@ export function WorkbenchCanvas({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedWidgetId, removeWidget, undo, redo, canUndo, canRedo]);
+  }, [canEdit, selectedWidgetId, removeWidget, undo, redo, canUndo, canRedo]);
 
   const handleAnnotationMouseDown = useCallback(
     (e: React.MouseEvent, id: string) => {
@@ -3900,8 +3909,10 @@ Structure it as a narrative-first executive briefing:
               <TooltipContent side="bottom">Create dashboard from image</TooltipContent>
             </Tooltip>
             */}
-                  <div className="w-px h-5 bg-slate-200 dark:bg-slate-600 shrink-0 mx-0.5" />
-                  <DropdownMenu>
+                  {canEdit && (
+                    <>
+                      <div className="w-px h-5 bg-slate-200 dark:bg-slate-600 shrink-0 mx-0.5" />
+                      <DropdownMenu>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <DropdownMenuTrigger asChild>
@@ -4006,7 +4017,9 @@ Structure it as a narrative-first executive briefing:
                         Text block
                       </DropdownMenuItem>
                     </DropdownMenuContent>
-                  </DropdownMenu>
+                      </DropdownMenu>
+                    </>
+                  )}
                   {/* Logo button hidden – not ready for release
             <Tooltip>
               <TooltipTrigger asChild>
@@ -4023,7 +4036,7 @@ Structure it as a narrative-first executive briefing:
               <TooltipContent side="bottom">Add logo</TooltipContent>
             </Tooltip>
             */}
-                  {selectedWidgetId && (
+                  {canEdit && selectedWidgetId && (
                     <>
                       <Tooltip>
                         <TooltipTrigger asChild>
@@ -4237,22 +4250,19 @@ Structure it as a narrative-first executive briefing:
             {/* Per-widget export is available in each widget's context menu */}
           </div>
 
-          {/* Inline Report Builder — always mounted, hidden when inactive to preserve state */}
-          <div
-            className={cn(
-              "flex-1 min-h-0 overflow-hidden",
-              !showReportBuilder && "hidden",
-            )}
-          >
-            <ReportBuilder
-              onClose={() => setShowReportBuilder(false)}
-              canvasWidgetData={useCanvasDataStore.getState().getSnapshot()}
-              canvasTitle={saveTitle || "Untitled Canvas"}
-              tenantId={tenantId}
-              initialDefinition={aiReportDefinition ?? undefined}
-              inline
-            />
-          </div>
+          {/* Inline Report Builder (mount only when active to avoid hidden background requests) */}
+          {showReportBuilder && (
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <ReportBuilder
+                onClose={() => setShowReportBuilder(false)}
+                canvasWidgetData={useCanvasDataStore.getState().getSnapshot()}
+                canvasTitle={saveTitle || "Untitled Canvas"}
+                tenantId={tenantId}
+                initialDefinition={aiReportDefinition ?? undefined}
+                inline
+              />
+            </div>
+          )}
 
           {/* Canvas surface: freeform or empty state + annotations overlay */}
           <div
@@ -4499,7 +4509,8 @@ Structure it as a narrative-first executive briefing:
                           true,
                         )
                       }
-                      enableResizing
+                      disableDragging={!canEdit}
+                      enableResizing={canEdit}
                       dragHandleClassName={
                         item.type === "rich_text"
                           ? "canvas-drag-handle"
@@ -4514,17 +4525,25 @@ Structure it as a narrative-first executive briefing:
                         selected={selectedWidgetId === item.i}
                         editing={editingWidgetId === item.i}
                         onSelect={() => setSelectedWidgetId(item.i)}
-                        onDuplicate={() => duplicateWidget(item.i)}
-                        onDelete={() => removeWidget(item.i)}
+                        onDuplicate={
+                          canEdit ? () => duplicateWidget(item.i) : undefined
+                        }
+                        onDelete={
+                          canEdit ? () => removeWidget(item.i) : undefined
+                        }
                         className="overflow-hidden"
-                        hideableSections={hideableSections}
+                        hideableSections={canEdit ? hideableSections : []}
                         hiddenSections={hiddenSections}
-                        onToggleSection={onToggleSection}
-                        onBringToFront={() => bringToFront(item.i)}
-                        onSendToBack={() => sendToBack(item.i)}
+                        onToggleSection={canEdit ? onToggleSection : undefined}
+                        onBringToFront={
+                          canEdit ? () => bringToFront(item.i) : undefined
+                        }
+                        onSendToBack={
+                          canEdit ? () => sendToBack(item.i) : undefined
+                        }
                         displayMode={displayMode}
                         onChangeDisplayMode={
-                          isDashboardSection
+                          canEdit && isDashboardSection
                             ? (mode) =>
                                 updateWidgetPayload(item.i, {
                                   ...payload,
@@ -4532,9 +4551,9 @@ Structure it as a narrative-first executive briefing:
                                 })
                             : undefined
                         }
-                        availableGroups={availableGroups}
-                        onMoveToGroup={handleMoveToGroup}
-                        onWrapInGroup={handleWrapInGroup}
+                        availableGroups={canEdit ? availableGroups : []}
+                        onMoveToGroup={canEdit ? handleMoveToGroup : undefined}
+                        onWrapInGroup={canEdit ? handleWrapInGroup : undefined}
                         onExportExcel={() => handleExportWidgetExcel(item.i)}
                         onEditWithCohi={
                           WORKBENCH_COHI_HIDDEN
@@ -4557,12 +4576,14 @@ Structure it as a narrative-first executive briefing:
                           item={displayItem}
                           height={item.h}
                           width={item.w}
+                          canEdit={canEdit}
                           onUpdatePayload={
-                            item.type === "text_block" ||
-                            item.type === "rich_text" ||
-                            item.type === "widget_group"
+                            canEdit &&
+                            (item.type === "text_block" ||
+                              item.type === "rich_text" ||
+                              item.type === "widget_group")
                               ? (p) => updateWidgetPayload(item.i, p)
-                              : isLegacyLoanDetail
+                              : canEdit && isLegacyLoanDetail
                                 ? (p) =>
                                     setItemsWithHistory((prev) =>
                                       prev.map((i) =>

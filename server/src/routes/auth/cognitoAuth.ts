@@ -597,8 +597,8 @@ async function findOrCreateSsoUser(
     // JIT provisioning - create new user
     const newUserResult = await tenantPool.query(
       `
-      INSERT INTO users (email, full_name, role, encrypted_password, is_active, encompass_user_id, cognito_sub)
-      VALUES ($1, $2, $3, $4, true, $5, $6)
+      INSERT INTO users (email, full_name, role, encrypted_password, is_active, encompass_user_id, cognito_sub, loan_access_mode)
+      VALUES ($1, $2, $3, $4, true, $5, $6, 'full_access')
       RETURNING id, email, full_name, role, is_active, encompass_user_id
     `,
       [

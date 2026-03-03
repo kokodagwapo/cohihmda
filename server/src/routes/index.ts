@@ -65,7 +65,9 @@ export function setupRoutes(app: Express) {
   // by default even if the developer forgets attachTenantContext.
   app.use("/api", globalTenantContext);
 
-  // Block canvas_only users from any path other than auth and workbench/canvases
+  // Canvas-only guard:
+  // - keep the user inside workbench + data endpoints needed to render shared dashboards
+  // - block admin/management and write operations outside workbench
   app.use("/api", (req: any, res: any, next: any) => {
     const authHeader = req.headers?.authorization;
     const token = authHeader && authHeader.split(" ")[1];
@@ -74,7 +76,25 @@ export function setupRoutes(app: Express) {
       const decoded = jwt.verify(token, getJwtSecret()) as { access_mode?: string };
       if (decoded.access_mode === "canvas_only") {
         const path = req.originalUrl || req.url || "";
-        if (!path.startsWith("/api/auth") && !path.startsWith("/api/workbench/canvases")) {
+        const method = (req.method || "GET").toUpperCase();
+        const allowedPrefixes = [
+          "/api/auth",
+          "/api/workbench/canvases",
+          "/api/loans",
+          "/api/metrics",
+          "/api/dashboard",
+          "/api/pipeline-analysis",
+          "/api/scorecard",
+          "/api/toptiering",
+          "/api/predictions",
+          "/api/fallout",
+          "/api/pricing-dashboard",
+        ];
+        const pathAllowed = allowedPrefixes.some((prefix) =>
+          path.startsWith(prefix),
+        );
+        const methodAllowed = method === "GET" || method === "POST";
+        if (!pathAllowed || !methodAllowed) {
           return res.status(403).json({
             error: "Forbidden",
             message: "Canvas-only users cannot access this resource.",

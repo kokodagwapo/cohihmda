@@ -127,7 +127,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         if (response.user) {
           setUser(response.user as AuthUser);
           api.setUserRole(response.user.role);
-          enforcePlatformOnly(response.user.role);
+          enforcePlatformOnly(response.user.role, response.user.tenant_id);
         }
       } catch (err) {
         // Token is invalid or expired
@@ -214,7 +214,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (response.user) {
         setUser(response.user);
         api.setUserRole(response.user.role || null);
-        enforcePlatformOnly(response.user.role);
+        enforcePlatformOnly(response.user.role, response.user.tenant_id);
       }
     } catch (err: any) {
       if (err.mfaRequired || err.newPasswordRequired) {
@@ -259,7 +259,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       setUser(response.user);
       api.setUserRole(response.user?.role || null);
-      enforcePlatformOnly(response.user?.role);
+      enforcePlatformOnly(response.user?.role, response.user?.tenant_id);
     } catch (err: any) {
       const message = err.message || 'MFA verification failed';
       setError(message);

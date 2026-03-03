@@ -464,8 +464,8 @@ export class EncompassUserSyncService {
         `
         INSERT INTO users 
           (email, encrypted_password, full_name, role, is_active, 
-           encompass_user_id, los_connection_id, access_mode)
-        VALUES ($1, $2, $3, $4, true, $5, $6, $7)
+           encompass_user_id, los_connection_id, access_mode, loan_access_mode)
+        VALUES ($1, $2, $3, $4, true, $5, $6, $7, 'full_access')
         RETURNING id
       `,
         [

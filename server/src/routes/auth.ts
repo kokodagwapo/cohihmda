@@ -790,6 +790,10 @@ function buildUserResponse(user: AuthUser, isSuperAdmin: boolean) {
     tenant_id: "tenant_id" in user ? user.tenant_id : null,
     tenant_name: "tenant_name" in user ? user.tenant_name : null,
     tenant_slug: "tenant_slug" in user ? user.tenant_slug : null,
+    access_mode:
+      !isSuperAdmin && "access_mode" in user
+        ? (user.access_mode || "full")
+        : "full",
   };
 }
 
