@@ -3,7 +3,7 @@
  * Filters, KPIs, and four tabbed tables (Loan Officer Report/Detail, Entity Report/Detail).
  */
 
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -31,9 +31,12 @@ import type {
   PricingReportRow,
   PricingDetailRow,
 } from "@/hooks/usePricingDashboardData";
-import { Loader2, ArrowUp, ArrowDown, X } from "lucide-react";
+import { Loader2, ArrowUp, ArrowDown, X, SlidersHorizontal, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { usePricingDashboardStandaloneColumnsStore } from "@/stores/pricingDashboardStandaloneColumnsStore";
+import { PricingDashboardColumnsModal } from "@/components/widgets/components/PricingDashboardColumnsModal";
+import { usePricingDashboardColumnsPreference } from "@/hooks/usePricingDashboardColumnsPreference";
 
 const ENTITY_TYPE_OPTIONS: { value: PricingEntityType; label: string }[] = [
   { value: "branch", label: "Branch" },
@@ -155,6 +158,53 @@ function sortDetailRows(
   });
 }
 
+/** Escape a cell value for CSV (wrap in quotes if contains comma, newline, or quote). */
+function csvEscape(val: string): string {
+  if (val.includes(",") || val.includes('"') || val.includes("\n") || val.includes("\r")) {
+    return `"${val.replace(/"/g, '""')}"`;
+  }
+  return val;
+}
+
+/** Build CSV string from columns and rows, optionally prepend a totals row. */
+function buildCsv(
+  columns: { key: string; label: string }[],
+  rows: Record<string, unknown>[],
+  totals?: Record<string, unknown>
+): string {
+  const header = columns.map((c) => csvEscape(c.label)).join(",");
+  const lines: string[] = [header];
+  if (totals) {
+    const totalRow = columns.map((c) => {
+      const v = totals[c.key];
+      if (v === undefined || v === null) return "";
+      return csvEscape(String(v));
+    }).join(",");
+    lines.push(totalRow);
+  }
+  for (const row of rows) {
+    const cells = columns.map((c) => {
+      const v = row[c.key];
+      if (v === undefined || v === null) return "";
+      if (typeof v === "number") return String(v);
+      return csvEscape(String(v));
+    });
+    lines.push(cells.join(","));
+  }
+  return lines.join("\r\n");
+}
+
+/** Trigger download of a CSV file. */
+function downloadCsv(content: string, filename: string): void {
+  const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export interface PricingDashboardViewProps {
   /** Effective tenant for API (selectedTenantId || user?.tenant_id); required for platform staff */
   tenantId?: string | null;
@@ -164,6 +214,51 @@ export interface PricingDashboardViewProps {
 
 type TabId = "loan_officer_report" | "loan_officer_detail" | "entity_report" | "entity_detail";
 
+const PRICING_DASHBOARD_FILTERS_KEY = "cohi-pricing-dashboard-filters";
+
+interface PersistedPricingFilters {
+  entityType?: PricingEntityType;
+  actorType?: PricingActorType;
+  dateRange?: PricingDateRange;
+  loanFunding?: PricingLoanFunding;
+  loanStatus?: PricingLoanStatus;
+  lockStatus?: PricingLockStatus;
+  activeTab?: TabId;
+  reportSortKey?: keyof PricingReportRow;
+  reportSortDir?: "asc" | "desc";
+  detailSortKey?: string;
+  detailSortDir?: "asc" | "desc";
+  selectedEntityOrActor?: {
+    kind: "entity";
+    entityType: PricingEntityType;
+    value: string;
+    label: string;
+  } | {
+    kind: "actor";
+    actorType: PricingActorType;
+    value: string;
+    label: string;
+  } | null;
+}
+
+function loadPricingDashboardFilters(): Partial<PersistedPricingFilters> {
+  try {
+    const raw = localStorage.getItem(PRICING_DASHBOARD_FILTERS_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) as Partial<PersistedPricingFilters>;
+  } catch {
+    return {};
+  }
+}
+
+function savePricingDashboardFilters(f: PersistedPricingFilters): void {
+  try {
+    localStorage.setItem(PRICING_DASHBOARD_FILTERS_KEY, JSON.stringify(f));
+  } catch {
+    // ignore
+  }
+}
+
 export function PricingDashboardView({
   tenantId,
   selectedTenantId: _selectedTenantId,
@@ -171,23 +266,59 @@ export function PricingDashboardView({
 }: PricingDashboardViewProps) {
   const { theme } = useTheme();
   const isDark = theme === "dark";
+  const { persistColumns } = usePricingDashboardColumnsPreference();
 
-  const [entityType, setEntityType] = useState<PricingEntityType>("branch");
-  const [actorType, setActorType] = useState<PricingActorType>("loan_officer");
-  const [dateRange, setDateRange] = useState<PricingDateRange>("mtd");
-  const [loanFunding, setLoanFunding] = useState<PricingLoanFunding>("funded");
-  const [loanStatus, setLoanStatus] = useState<PricingLoanStatus>("active");
-  const [lockStatus, setLockStatus] = useState<PricingLockStatus>("total");
-  const [activeTab, setActiveTab] = useState<TabId>("loan_officer_report");
-  const [reportSortKey, setReportSortKey] = useState<keyof PricingReportRow>("entityName");
-  const [reportSortDir, setReportSortDir] = useState<"asc" | "desc">("asc");
-  const [detailSortKey, setDetailSortKey] = useState<string>("entityName");
-  const [detailSortDir, setDetailSortDir] = useState<"asc" | "desc">("asc");
+  const saved = useMemo(() => loadPricingDashboardFilters(), []);
+
+  const [entityType, setEntityType] = useState<PricingEntityType>(saved.entityType ?? "branch");
+  const [actorType, setActorType] = useState<PricingActorType>(saved.actorType ?? "loan_officer");
+  const [dateRange, setDateRange] = useState<PricingDateRange>(saved.dateRange ?? "mtd");
+  const [loanFunding, setLoanFunding] = useState<PricingLoanFunding>(saved.loanFunding ?? "funded");
+  const [loanStatus, setLoanStatus] = useState<PricingLoanStatus>(saved.loanStatus ?? "active");
+  const [lockStatus, setLockStatus] = useState<PricingLockStatus>(saved.lockStatus ?? "total");
+  const [activeTab, setActiveTab] = useState<TabId>(saved.activeTab ?? "loan_officer_report");
+  const [reportSortKey, setReportSortKey] = useState<keyof PricingReportRow>(saved.reportSortKey ?? "entityName");
+  const [reportSortDir, setReportSortDir] = useState<"asc" | "desc">(saved.reportSortDir ?? "asc");
+  const [detailSortKey, setDetailSortKey] = useState<string>(saved.detailSortKey ?? "entityName");
+  const [detailSortDir, setDetailSortDir] = useState<"asc" | "desc">(saved.detailSortDir ?? "asc");
   const [selectedEntityOrActor, setSelectedEntityOrActor] = useState<
     | { kind: "entity"; entityType: PricingEntityType; value: string; label: string }
     | { kind: "actor"; actorType: PricingActorType; value: string; label: string }
     | null
-  >(null);
+  >(saved.selectedEntityOrActor ?? null);
+  const [editColumnsModalOpen, setEditColumnsModalOpen] = useState(false);
+  const standaloneColumns = usePricingDashboardStandaloneColumnsStore((s) => s.columns);
+  const getStandaloneColumns = usePricingDashboardStandaloneColumnsStore((s) => s.getColumns);
+
+  useEffect(() => {
+    savePricingDashboardFilters({
+      entityType,
+      actorType,
+      dateRange,
+      loanFunding,
+      loanStatus,
+      lockStatus,
+      activeTab,
+      reportSortKey,
+      reportSortDir,
+      detailSortKey,
+      detailSortDir,
+      selectedEntityOrActor,
+    });
+  }, [
+    entityType,
+    actorType,
+    dateRange,
+    loanFunding,
+    loanStatus,
+    lockStatus,
+    activeTab,
+    reportSortKey,
+    reportSortDir,
+    detailSortKey,
+    detailSortDir,
+    selectedEntityOrActor,
+  ]);
 
   const filters: PricingDashboardFilters = useMemo(
     () => ({
@@ -233,6 +364,7 @@ export function PricingDashboardView({
     detailType,
     tenantId,
     selectedChannel,
+    metricColumns: getStandaloneColumns().map((c) => c.key),
   });
 
   const entityLabel = getEntityLabel(entityType);
@@ -251,33 +383,19 @@ export function PricingDashboardView({
   const textTd = isDark ? "text-slate-200" : "text-slate-900";
 
   const reportColumns: { key: keyof PricingReportRow; label: string }[] = useMemo(() => {
+    const metricCols = getStandaloneColumns();
     const isBranchReport = activeTab === "entity_report" && entityType === "branch";
     const cols: { key: keyof PricingReportRow; label: string }[] = [
       { key: "entityName", label: `Entity: ${entityLabel}` },
     ];
     if (!isBranchReport) cols.push({ key: "actorName", label: `Actor: ${actorLabel}` });
-    cols.push(
-      { key: "units", label: "Units" },
-      { key: "volume", label: "Volume" },
-      { key: "loanPricingDollars", label: "Loan Pricing $" },
-      { key: "pricingMargin", label: "Pricing Margin" },
-      { key: "cdLenderCredits", label: "CD Lender Credits" },
-      { key: "purchaseAdviceSellAmount", label: "Purchase Advice Sell Amount" },
-      { key: "line800TotalBorrowerPaidAmount", label: "Line 800 Total Borrower Paid Amount" },
-      { key: "feesAppraisalFeeBorr", label: "Fees Appraisal Fee Borr" },
-      { key: "line800TotalSellerPaidAmount", label: "+ Line 800 Total Seller Amount" },
-      { key: "feesInterestBorr", label: "Fees Interest Borr" },
-      { key: "purchaseAdvExpectedIntPymtFromInvestor", label: "Purchase Adv Expected Int Pymt from Investor" },
-      { key: "purchaseAdviceExpctdPayout1Amt", label: "Purchase Advice Expctd Payout 1 Amt" },
-      { key: "purchaseAdviceExpctdPayout2Amt", label: "Purchase Advice Expctd Payout 2 Amt" },
-      { key: "purchaseAdviceExpctdPayout3Amt", label: "Purchase Advice Expctd Payout 3 Amt" },
-      { key: "lenderCredits", label: "Lender Credits" },
-    );
+    metricCols.forEach((m) => cols.push({ key: m.key as keyof PricingReportRow, label: m.label }));
     return cols;
-  }, [activeTab, entityType, entityLabel, actorLabel]);
+  }, [activeTab, entityType, entityLabel, actorLabel, standaloneColumns, getStandaloneColumns]);
 
   const detailColumnsEntityDetail = useMemo(
     () => {
+      const metricCols = getStandaloneColumns();
       const base = [
         { key: "entityName", label: `Entity: ${entityLabel}` },
         { key: "loanNumber", label: "Loan Number" },
@@ -296,25 +414,10 @@ export function PricingDashboardView({
       if (loanStatus !== "active") {
         base.push({ key: "currentLoanStatus", label: "Current Loan Status" });
       }
-      base.push(
-        { key: "volume", label: "Volume" },
-        { key: "loanPricingDollars", label: "Loan Pricing $" },
-        { key: "pricingMargin", label: "Pricing Margin" },
-        { key: "cdLenderCredits", label: "CD Lender Credits" },
-        { key: "purchaseAdviceSellAmount", label: "Purchase Advice Sell Amount" },
-        { key: "line800TotalBorrowerPaidAmount", label: "Line 800 Total Borrower Paid Amount" },
-        { key: "feesAppraisalFeeBorr", label: "Fees Appraisal Fee Borr" },
-        { key: "line800TotalSellerPaidAmount", label: "+ Line 800 Total Seller Amount" },
-        { key: "feesInterestBorr", label: "Fees Interest Borr" },
-        { key: "purchaseAdvExpectedIntPymtFromInvestor", label: "Purchase Adv Expected Int Pymt from Investor" },
-        { key: "purchaseAdviceExpctdPayout1Amt", label: "Purchase Advice Expctd Payout 1 Amt" },
-        { key: "purchaseAdviceExpctdPayout2Amt", label: "Purchase Advice Expctd Payout 2 Amt" },
-        { key: "purchaseAdviceExpctdPayout3Amt", label: "Purchase Advice Expctd Payout 3 Amt" },
-        { key: "lenderCredits", label: "Lender Credits" },
-      );
+      metricCols.forEach((m) => base.push({ key: m.key, label: m.label }));
       return base;
     },
-    [entityLabel, loanFunding, loanStatus]
+    [entityLabel, loanFunding, loanStatus, standaloneColumns, getStandaloneColumns]
   );
 
   const detailColumnsWithActor = [
@@ -358,6 +461,28 @@ export function PricingDashboardView({
       return key;
     });
   }, []);
+
+  const handleExportTable = useCallback(() => {
+    const isReport = activeTab === "loan_officer_report" || activeTab === "entity_report";
+    const baseName = activeTab.replace(/_/g, "-");
+    const filename = `pricing-${baseName}-${new Date().toISOString().slice(0, 10)}.csv`;
+    if (isReport) {
+      const cols = reportColumns.map((c) => ({ key: c.key as string, label: c.label }));
+      const csv = buildCsv(cols, sortedReportRows as unknown as Record<string, unknown>[], reportTotals as Record<string, unknown>);
+      downloadCsv(csv, filename);
+    } else {
+      const csv = buildCsv(detailCols, sortedDetailRows as unknown as Record<string, unknown>[], detailTotals as Record<string, unknown>);
+      downloadCsv(csv, filename);
+    }
+  }, [
+    activeTab,
+    reportColumns,
+    detailCols,
+    sortedReportRows,
+    sortedDetailRows,
+    reportTotals,
+    detailTotals,
+  ]);
 
   const renderReportTable = () => {
     const totals = reportTotals;
@@ -417,8 +542,7 @@ export function PricingDashboardView({
               <tr key={i} className={cn("border-b", borderRow)}>
                 {reportColumns.map((c) => {
                   const val = row[c.key as keyof PricingReportRow];
-                  const isNumber = typeof val === "number";
-                  const isRightAlign = isNumber || c.key === "units";
+                  const isRightAlign = c.key !== "entityName" && c.key !== "actorName";
                   const isEntityOrActor = c.key === "entityName" || c.key === "actorName";
                   const canSelect = isEntityOrActor && val != null && String(val).trim() !== "";
                   return (
@@ -467,17 +591,13 @@ export function PricingDashboardView({
             <tr className={cn("border-b", borderTh, bgTh)}>
               {detailCols.map((c) => {
                 const isSorted = detailSortKey === c.key;
+                const isRightAlign = c.key !== "entityName" && c.key !== "actorName";
                 return (
                   <th
                     key={c.key}
                     className={cn(
                       "py-2.5 px-4 font-semibold whitespace-nowrap cursor-pointer select-none hover:opacity-80 transition-opacity",
-                      ["volume", "loanPricingDollars", "pricingMargin", "cdLenderCredits", "purchaseAdviceSellAmount",
-                        "line800TotalBorrowerPaidAmount", "feesAppraisalFeeBorr", "line800TotalSellerPaidAmount",
-                        "feesInterestBorr", "purchaseAdvExpectedIntPymtFromInvestor", "purchaseAdviceExpctdPayout1Amt",
-                        "purchaseAdviceExpctdPayout2Amt", "purchaseAdviceExpctdPayout3Amt", "lenderCredits"].includes(c.key)
-                        ? "text-right"
-                        : "text-left"
+                      isRightAlign ? "text-right" : "text-left"
                     )}
                     onClick={() => handleDetailSort(c.key)}
                     role="columnheader"
@@ -518,8 +638,8 @@ export function PricingDashboardView({
               <tr key={i} className={cn("border-b", borderRow)}>
                 {detailCols.map((c) => {
                   const val = row[c.key as keyof PricingDetailRow];
+                  const isRight = c.key !== "entityName" && c.key !== "actorName";
                   const isNum = typeof val === "number";
-                  const isRight = isNum || ["loanNumber", "applicationDate", "lockExpirationDate"].includes(c.key);
                   const isDateCol = ["applicationDate", "lockExpirationDate", "fundingDate", "closingDate"].includes(c.key);
                   const isEntityOrActor = c.key === "entityName" || c.key === "actorName";
                   const canSelect = isEntityOrActor && val != null && String(val).trim() !== "";
@@ -679,6 +799,17 @@ export function PricingDashboardView({
               </Button>
             </div>
           )}
+          <div className="flex items-end">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 gap-1.5"
+              onClick={() => setEditColumnsModalOpen(true)}
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              Edit columns
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -750,32 +881,44 @@ export function PricingDashboardView({
       <Card className={cn("rounded-xl border overflow-hidden", isDark ? "border-slate-700 bg-slate-800/50" : "border-slate-200/60 bg-white")}>
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabId)}>
           <div className="border-b border-slate-200/60 dark:border-slate-700/60 px-4 pt-4">
-            <TabsList className={cn("bg-slate-100/80 dark:bg-slate-800/80 p-0.5 rounded-lg")}>
-              <TabsTrigger
-                value="loan_officer_report"
-                className="rounded-md data-[state=active]:bg-[#10B981]/10 data-[state=active]:text-emerald-900 data-[state=active]:shadow-sm dark:data-[state=active]:bg-[#10B981]/20 dark:data-[state=active]:text-emerald-100"
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <TabsList className={cn("bg-slate-100/80 dark:bg-slate-800/80 p-0.5 rounded-lg")}>
+                <TabsTrigger
+                  value="loan_officer_report"
+                  className="rounded-md data-[state=active]:bg-[#10B981]/10 data-[state=active]:text-emerald-900 data-[state=active]:shadow-sm dark:data-[state=active]:bg-[#10B981]/20 dark:data-[state=active]:text-emerald-100"
+                >
+                  Loan Officer Report
+                </TabsTrigger>
+                <TabsTrigger
+                  value="loan_officer_detail"
+                  className="rounded-md data-[state=active]:bg-[#10B981]/40 data-[state=active]:text-emerald-900 data-[state=active]:shadow-sm dark:data-[state=active]:bg-[#10B981]/50 dark:data-[state=active]:text-emerald-100"
+                >
+                  Loan Officer Detail
+                </TabsTrigger>
+                <TabsTrigger
+                  value="entity_report"
+                  className="rounded-md data-[state=active]:bg-blue-50 data-[state=active]:text-blue-800 data-[state=active]:shadow-sm dark:data-[state=active]:bg-blue-900/30 dark:data-[state=active]:text-blue-200"
+                >
+                  {entityLabel} Report
+                </TabsTrigger>
+                <TabsTrigger
+                  value="entity_detail"
+                  className="rounded-md data-[state=active]:bg-blue-200 data-[state=active]:text-blue-900 data-[state=active]:shadow-sm dark:data-[state=active]:bg-blue-800/50 dark:data-[state=active]:text-blue-100"
+                >
+                  {entityLabel} Detail
+                </TabsTrigger>
+              </TabsList>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 shrink-0"
+                onClick={handleExportTable}
+                disabled={loading || (isDetailTab ? detailRows.length === 0 : reportRows.length === 0)}
               >
-                Loan Officer Report
-              </TabsTrigger>
-              <TabsTrigger
-                value="loan_officer_detail"
-                className="rounded-md data-[state=active]:bg-[#10B981]/40 data-[state=active]:text-emerald-900 data-[state=active]:shadow-sm dark:data-[state=active]:bg-[#10B981]/50 dark:data-[state=active]:text-emerald-100"
-              >
-                Loan Officer Detail
-              </TabsTrigger>
-              <TabsTrigger
-                value="entity_report"
-                className="rounded-md data-[state=active]:bg-blue-50 data-[state=active]:text-blue-800 data-[state=active]:shadow-sm dark:data-[state=active]:bg-blue-900/30 dark:data-[state=active]:text-blue-200"
-              >
-                {entityLabel} Report
-              </TabsTrigger>
-              <TabsTrigger
-                value="entity_detail"
-                className="rounded-md data-[state=active]:bg-blue-200 data-[state=active]:text-blue-900 data-[state=active]:shadow-sm dark:data-[state=active]:bg-blue-800/50 dark:data-[state=active]:text-blue-100"
-              >
-                {entityLabel} Detail
-              </TabsTrigger>
-            </TabsList>
+                <Download className="h-4 w-4" />
+                Export CSV
+              </Button>
+            </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
               {activeTab === "loan_officer_report" && "Loan Officer Report"}
               {activeTab === "loan_officer_detail" && "Loan Officer Detail"}
@@ -802,6 +945,13 @@ export function PricingDashboardView({
           </TabsContent>
         </Tabs>
       </Card>
+
+      <PricingDashboardColumnsModal
+        open={editColumnsModalOpen}
+        onClose={() => setEditColumnsModalOpen(false)}
+        onPersistColumns={persistColumns}
+        tenantId={tenantId}
+      />
     </div>
   );
 }

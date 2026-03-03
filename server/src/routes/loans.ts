@@ -850,7 +850,9 @@ router.get(
       const whereClause =
         conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-      const selectColumns = [
+      // Build desired columns: fixed list + additional_field_definitions (column_created = true).
+      // Then restrict to columns that actually exist on this tenant's public.loans so we never SELECT a missing column.
+      let selectColumnsList: string[] = [
         "loan_id",
         "loan_number",
         "loan_amount",
@@ -912,7 +914,52 @@ router.get(
         "fees_loan_discount_fee_borr",
         "rush_closing_on_file",
         "scrub_rating_of_file",
-      ].join(", ");
+      ];
+      try {
+        const additionalColsResult = await tenantPool.query(
+          `SELECT column_name FROM additional_field_definitions WHERE column_created = TRUE ORDER BY sort_order, display_name`,
+          [],
+        );
+        const validIdentifier = /^[a-z_][a-z0-9_]*$/i;
+        for (const row of additionalColsResult.rows) {
+          const col = row?.column_name;
+          if (typeof col === "string" && validIdentifier.test(col) && !selectColumnsList.includes(col)) {
+            selectColumnsList.push(col);
+          }
+        }
+      } catch (additionalColErr: any) {
+        logWarn("Loan detail-list: additional_field_definitions not available, using fixed columns only", {
+          error: additionalColErr?.message,
+          hint: "Run tenant migrations so additional fields appear in Loan Detail.",
+        });
+      }
+
+      // Restrict to columns that exist on this tenant's public.loans (tenant schemas can differ)
+      let existingColumns: Set<string>;
+      try {
+        const schemaResult = await tenantPool.query(
+          `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'loans'`,
+          [],
+        );
+        existingColumns = new Set(schemaResult.rows.map((r: { column_name: string }) => r.column_name));
+      } catch (schemaErr: any) {
+        logWarn("Loan detail-list: could not read loans schema, using requested columns", {
+          error: schemaErr?.message,
+        });
+        existingColumns = new Set(selectColumnsList);
+      }
+      const selectColumnsFiltered = selectColumnsList.filter((col) => existingColumns.has(col));
+      if (selectColumnsFiltered.length === 0) {
+        return res.status(503).json({
+          error: "Loan detail list unavailable: no valid columns on public.loans.",
+          retry: false,
+        });
+      }
+      const missingCols = selectColumnsList.filter((col) => !existingColumns.has(col));
+      if (missingCols.length > 0) {
+        logDebug("Loan detail-list: skipping columns not present on tenant loans", { missing: missingCols });
+      }
+      const selectColumns = selectColumnsFiltered.join(", ");
 
       const query = `
         SELECT ${selectColumns}
@@ -7223,6 +7270,43 @@ router.get(
     } catch (error: any) {
       logError("Error fetching current market rates", error);
       return res.status(500).json({ error: "Failed to fetch market rates" });
+    }
+  },
+);
+
+/**
+ * GET /api/loans/market-rates/treasury-10y
+ * Returns 10-Year Treasury (FRED DGS10) observations for a date range.
+ * Query: observation_start=YYYY-MM-DD (e.g. 1/1 start year), observation_end=YYYY-MM-DD (e.g. 12/31 end year).
+ * On-demand FRED call; no DB storage.
+ */
+router.get(
+  "/market-rates/treasury-10y",
+  authenticateToken,
+  async (req: AuthRequest, res) => {
+    try {
+      const observationStart = req.query.observation_start as string | undefined;
+      const observationEnd = req.query.observation_end as string | undefined;
+      if (!observationStart || !observationEnd) {
+        return res.status(400).json({
+          error: "observation_start and observation_end query params required (YYYY-MM-DD)",
+        });
+      }
+      const { fetchFredSeriesObservations, FRED_SERIES_DGS10 } =
+        await import("../services/dashboard/marketRateService.js");
+      const observations = await fetchFredSeriesObservations(
+        FRED_SERIES_DGS10,
+        observationStart,
+        observationEnd
+      );
+      return res.json({
+        observations: observations.map((o) => ({ date: o.date, yield: o.value })),
+      });
+    } catch (error: any) {
+      logError("Error fetching treasury 10y rates", error);
+      return res.status(500).json({
+        error: error.message || "Failed to fetch 10-Year Treasury rates",
+      });
     }
   },
 );

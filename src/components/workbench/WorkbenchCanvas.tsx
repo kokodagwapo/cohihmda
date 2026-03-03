@@ -708,6 +708,10 @@ const SECTION_TO_WIDGETS: Record<
       "pipeline-analysis-lo-count",
     ],
   },
+  salesScorecardOverview: {
+    sectionType: "sales-scorecard-overview",
+    widgetIds: ["sales-scorecard-overview-chart", "sales-scorecard-overview-table"],
+  },
 };
 
 /**

@@ -32,6 +32,7 @@ export interface WorkflowMilestoneOption {
 /** Convert snake_case column name to human-readable label (strip trailing _date for brevity). */
 function columnNameToLabel(columnName: string): string {
   const base = columnName.replace(/_date$/, "").replace(/_/g, " ");
+  if (base.toLowerCase() === "ctc") return "CTC";
   return base
     .split(" ")
     .map((w) => (w.length > 0 ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w))

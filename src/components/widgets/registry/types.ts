@@ -33,7 +33,8 @@ export type DataSourceId =
   | 'high-performers'
   | 'actors'
   | 'pricing-dashboard'
-  | 'pipeline-analysis';
+  | 'pipeline-analysis'
+  | 'sales-scorecard-overview';
 
 // ---------------------------------------------------------------------------
 // Widget categories – drives catalog grouping & icon selection
