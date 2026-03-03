@@ -1756,6 +1756,8 @@ router.post(
         role,
         invite_method,
         tenant_id,
+        access_mode,
+        group_ids,
       } = req.body;
 
       if (
