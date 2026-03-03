@@ -236,17 +236,25 @@ export class AdditionalFieldService {
   }
 
   /**
-   * Drop a column from the loans table (for additional fields only)
+   * Drop a column from the loans table (for additional fields only).
+   * Refuses to drop core schema columns (only af_-prefixed columns are safe to drop).
    */
   async dropColumn(columnName: string): Promise<void> {
     console.log(`[AdditionalFieldService] Dropping column ${columnName} from loans table`);
 
-    // Validate column name is safe
     if (!/^[a-z][a-z0-9_]*$/.test(columnName)) {
       throw new Error(`Invalid column name format: ${columnName}`);
     }
 
-    // Check if column exists
+    // Only drop columns created by the additional fields system (af_ prefix).
+    // Core schema columns (funding_date, loan_amount, etc.) must never be dropped.
+    if (!columnName.startsWith("af_")) {
+      console.warn(
+        `[AdditionalFieldService] REFUSING to drop column "${columnName}" - only af_-prefixed additional field columns can be dropped. This column appears to be part of the core schema.`
+      );
+      return;
+    }
+
     const existsResult = await this.tenantPool.query(`
       SELECT COUNT(*) FROM information_schema.columns 
       WHERE table_schema = 'public' 
@@ -259,7 +267,6 @@ export class AdditionalFieldService {
       return;
     }
 
-    // Drop the column
     await this.tenantPool.query(`
       ALTER TABLE public.loans DROP COLUMN ${columnName}
     `);
@@ -556,11 +563,15 @@ export class AdditionalFieldService {
         VALUES ($1, 'delete', $2, $3)
       `, [id, JSON.stringify(existing), userId || null]);
 
-      // Drop the column if it was created
-      if (existing.columnCreated) {
+      // Drop the column if it was created (only af_-prefixed columns are safe to drop)
+      if (existing.columnCreated && existing.columnName.startsWith("af_")) {
         await client.query(`
           ALTER TABLE public.loans DROP COLUMN IF EXISTS ${existing.columnName}
         `);
+      } else if (existing.columnCreated) {
+        console.warn(
+          `[AdditionalFieldService] Skipping column drop for "${existing.columnName}" - not an af_-prefixed column, likely a core schema column`
+        );
       }
 
       // Delete the definition
