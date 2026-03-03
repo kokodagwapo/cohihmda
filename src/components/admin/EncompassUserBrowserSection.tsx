@@ -92,6 +92,11 @@ interface SyncHistory {
   completed_at?: string;
 }
 
+interface GroupOption {
+  id: string;
+  name: string;
+}
+
 interface EncompassUserBrowserSectionProps {
   losConnections: LOSConnection[];
   selectedConnectionId?: string;
@@ -126,7 +131,16 @@ export function EncompassUserBrowserSection({
     "manual", // Default to manual for dev convenience
   );
   const [invitePassword, setInvitePassword] = useState("");
+  const [inviteAccessMode, setInviteAccessMode] = useState<"full" | "canvas_only">("full");
+  const [inviteGroupIds, setInviteGroupIds] = useState<string[]>([]);
   const [isInviting, setIsInviting] = useState(false);
+
+  // Bulk invite: shared role/method plus access_mode and groups
+  const [bulkInviteAccessMode, setBulkInviteAccessMode] = useState<"full" | "canvas_only">("full");
+  const [bulkInviteGroupIds, setBulkInviteGroupIds] = useState<string[]>([]);
+
+  // Groups for invite dropdowns (tenant-scoped)
+  const [groups, setGroups] = useState<GroupOption[]>([]);
 
   // Loan access sync state
   const [syncingLoanAccessUserId, setSyncingLoanAccessUserId] = useState<string | null>(null);
@@ -210,11 +224,38 @@ export function EncompassUserBrowserSection({
     }
   }, [connectionId, isPlatformAdmin, selectedTenantId]);
 
+  // Fetch groups for invite (tenant-scoped)
+  const fetchGroups = useCallback(async () => {
+    if (!selectedTenantId) {
+      setGroups([]);
+      return;
+    }
+    try {
+      const token = localStorage.getItem("auth_token");
+      const res = await fetch(
+        `/api/groups?tenant_id=${encodeURIComponent(selectedTenantId)}`,
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setGroups(data?.groups ?? []);
+      } else {
+        setGroups([]);
+      }
+    } catch {
+      setGroups([]);
+    }
+  }, [selectedTenantId]);
+
   // Initial fetch
   useEffect(() => {
     fetchUsers();
     fetchSyncHistory();
   }, [fetchUsers, fetchSyncHistory]);
+
+  useEffect(() => {
+    fetchGroups();
+  }, [fetchGroups]);
 
   // Sync users from Encompass
   const handleSync = async () => {
@@ -279,10 +320,12 @@ export function EncompassUserBrowserSection({
 
     setIsInviting(true);
     try {
-      const requestBody: any = {
+      const requestBody: Record<string, unknown> = {
         los_connection_id: connectionId,
         role: inviteRole,
         invite_method: inviteMethod,
+        access_mode: inviteAccessMode,
+        group_ids: inviteGroupIds.length > 0 ? inviteGroupIds : undefined,
       };
 
       // Include password for manual invites
@@ -324,7 +367,9 @@ export function EncompassUserBrowserSection({
 
       setInviteDialogOpen(false);
       setInviteUser(null);
-      setInvitePassword(""); // Clear password
+      setInvitePassword("");
+      setInviteAccessMode("full");
+      setInviteGroupIds([]);
       fetchUsers();
     } catch (error: any) {
       toast({
@@ -343,11 +388,13 @@ export function EncompassUserBrowserSection({
 
     setIsInviting(true);
     try {
-      const body: Record<string, any> = {
+      const body: Record<string, unknown> = {
         los_connection_id: connectionId,
         encompass_user_ids: Array.from(selectedUsers),
         role: inviteRole,
         invite_method: inviteMethod,
+        access_mode: bulkInviteAccessMode,
+        group_ids: bulkInviteGroupIds.length > 0 ? bulkInviteGroupIds : undefined,
       };
       
       // For platform admins, include tenant_id
@@ -525,7 +572,7 @@ export function EncompassUserBrowserSection({
 
           {/* Bulk Actions */}
           {selectedUsers.size > 0 && (
-            <div className="flex items-center gap-4 mb-4 p-3 bg-blue-50 dark:bg-blue-950 rounded-lg">
+            <div className="flex flex-wrap items-center gap-4 mb-4 p-3 bg-blue-50 dark:bg-blue-950 rounded-lg">
               <span className="text-sm font-medium">
                 {selectedUsers.size} user{selectedUsers.size > 1 ? "s" : ""}{" "}
                 selected
@@ -541,6 +588,39 @@ export function EncompassUserBrowserSection({
                   <SelectItem value="admin">Admin</SelectItem>
                 </SelectContent>
               </Select>
+              <Select
+                value={bulkInviteAccessMode}
+                onValueChange={(v: "full" | "canvas_only") => setBulkInviteAccessMode(v)}
+              >
+                <SelectTrigger className="w-[140px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="full">Full platform</SelectItem>
+                  <SelectItem value="canvas_only">Canvas only</SelectItem>
+                </SelectContent>
+              </Select>
+              {groups.length > 0 && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Label className="text-sm whitespace-nowrap">Groups:</Label>
+                  {groups.map((g) => (
+                    <div key={g.id} className="flex items-center gap-1">
+                      <Checkbox
+                        id={`bulk-group-${g.id}`}
+                        checked={bulkInviteGroupIds.includes(g.id)}
+                        onCheckedChange={(checked) => {
+                          setBulkInviteGroupIds((prev) =>
+                            checked ? [...prev, g.id] : prev.filter((id) => id !== g.id)
+                          );
+                        }}
+                      />
+                      <label htmlFor={`bulk-group-${g.id}`} className="text-sm cursor-pointer whitespace-nowrap">
+                        {g.name}
+                      </label>
+                    </div>
+                  ))}
+                </div>
+              )}
               <Button onClick={handleBulkInvite} disabled={isInviting}>
                 <UserPlus className="h-4 w-4 mr-2" />
                 Invite Selected
@@ -750,6 +830,21 @@ export function EncompassUserBrowserSection({
               </Select>
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">Access</Label>
+              <Select
+                value={inviteAccessMode}
+                onValueChange={(v: "full" | "canvas_only") => setInviteAccessMode(v)}
+              >
+                <SelectTrigger className="col-span-3">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="full">Full platform</SelectItem>
+                  <SelectItem value="canvas_only">Canvas only</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
               <Label className="text-right">Method</Label>
               <div className="col-span-3 flex flex-wrap gap-2">
                 <Button
@@ -778,6 +873,29 @@ export function EncompassUserBrowserSection({
                 </Button>
               </div>
             </div>
+            {groups.length > 0 && (
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label className="text-right">Groups</Label>
+                <div className="col-span-3 space-y-2 max-h-32 overflow-y-auto rounded-md border p-2">
+                  {groups.map((g) => (
+                    <div key={g.id} className="flex items-center gap-2">
+                      <Checkbox
+                        id={`invite-group-${g.id}`}
+                        checked={inviteGroupIds.includes(g.id)}
+                        onCheckedChange={(checked) => {
+                          setInviteGroupIds((prev) =>
+                            checked ? [...prev, g.id] : prev.filter((id) => id !== g.id)
+                          );
+                        }}
+                      />
+                      <label htmlFor={`invite-group-${g.id}`} className="text-sm cursor-pointer">
+                        {g.name}
+                      </label>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {inviteMethod === "manual" && (
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label className="text-right">Password</Label>

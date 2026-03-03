@@ -44,6 +44,8 @@ export interface AuthUser {
   is_active?: boolean;
   last_login_at?: string;
   created_at?: string;
+  /** 'full' = normal platform; 'canvas_only' = only shared canvases (slim UI) */
+  access_mode?: 'full' | 'canvas_only';
 }
 
 /**
@@ -82,6 +84,8 @@ interface AuthContextType {
   isPlatformStaff: () => boolean;
   isTenantAdmin: () => boolean;
   isAdmin: () => boolean;
+  /** True when user only sees shared canvases (slim UI) */
+  isCanvasOnly: () => boolean;
   
   // Impersonation (for super admins)
   impersonatingTenant: string | null;
@@ -361,6 +365,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [isSuperAdmin, isTenantAdmin]);
 
   /**
+   * Check if user is canvas-only (restricted to shared canvases, slim UI)
+   */
+  const isCanvasOnly = useCallback((): boolean => {
+    return user?.access_mode === 'canvas_only';
+  }, [user]);
+
+  /**
    * Impersonate a tenant (super admin only)
    */
   const impersonateTenant = useCallback((tenantSlug: string) => {
@@ -410,6 +421,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     isPlatformStaff,
     isTenantAdmin,
     isAdmin,
+    isCanvasOnly,
     impersonatingTenant,
     impersonateTenant,
     stopImpersonating,

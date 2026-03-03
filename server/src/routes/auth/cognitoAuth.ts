@@ -236,6 +236,7 @@ router.post("/callback", authLimiter, async (req, res) => {
       tenantId: user.tenant_id,
       tenantSlug,
       authMethod: "cognito_sso",
+      access_mode: isSuperAdmin ? "full" : (user.access_mode || "full"),
     };
 
     const token = jwt.sign(jwtPayload, getJwtSecret(), { expiresIn: "7d" });
@@ -286,6 +287,7 @@ router.post("/callback", authLimiter, async (req, res) => {
         tenant_id: user.tenant_id,
         tenant_name: user.tenant_name,
         tenant_slug: tenantSlug,
+        access_mode: isSuperAdmin ? "full" : (user.access_mode || "full"),
       },
       token,
       returnUrl: ssoState?.returnUrl,
@@ -561,7 +563,8 @@ async function findOrCreateSsoUser(
   try {
     // Check if user exists in tenant DB
     const userResult = await tenantPool.query(
-      `SELECT id, email, full_name, role, is_active, encompass_user_id 
+      `SELECT id, email, full_name, role, is_active, encompass_user_id,
+              COALESCE(access_mode, 'full') AS access_mode
        FROM users WHERE email = $1`,
       [email],
     );
