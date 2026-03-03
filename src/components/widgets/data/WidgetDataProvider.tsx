@@ -486,6 +486,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     tenantId: selectedTenantId,
     selectedChannel,
     dimensionFilters: pdDimensionFilters,
+    metricColumns: pdFilters?.pricingDashboardColumns?.map((c) => c.key),
   });
 
   // Pipeline Analysis (workbench: use section filters when present)

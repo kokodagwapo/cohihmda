@@ -3,7 +3,7 @@
  * Filters, KPIs, and four tabbed tables (Loan Officer Report/Detail, Entity Report/Detail).
  */
 
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -36,6 +36,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { usePricingDashboardStandaloneColumnsStore } from "@/stores/pricingDashboardStandaloneColumnsStore";
 import { PricingDashboardColumnsModal } from "@/components/widgets/components/PricingDashboardColumnsModal";
+import { usePricingDashboardColumnsPreference } from "@/hooks/usePricingDashboardColumnsPreference";
 
 const ENTITY_TYPE_OPTIONS: { value: PricingEntityType; label: string }[] = [
   { value: "branch", label: "Branch" },
@@ -213,6 +214,51 @@ export interface PricingDashboardViewProps {
 
 type TabId = "loan_officer_report" | "loan_officer_detail" | "entity_report" | "entity_detail";
 
+const PRICING_DASHBOARD_FILTERS_KEY = "cohi-pricing-dashboard-filters";
+
+interface PersistedPricingFilters {
+  entityType?: PricingEntityType;
+  actorType?: PricingActorType;
+  dateRange?: PricingDateRange;
+  loanFunding?: PricingLoanFunding;
+  loanStatus?: PricingLoanStatus;
+  lockStatus?: PricingLockStatus;
+  activeTab?: TabId;
+  reportSortKey?: keyof PricingReportRow;
+  reportSortDir?: "asc" | "desc";
+  detailSortKey?: string;
+  detailSortDir?: "asc" | "desc";
+  selectedEntityOrActor?: {
+    kind: "entity";
+    entityType: PricingEntityType;
+    value: string;
+    label: string;
+  } | {
+    kind: "actor";
+    actorType: PricingActorType;
+    value: string;
+    label: string;
+  } | null;
+}
+
+function loadPricingDashboardFilters(): Partial<PersistedPricingFilters> {
+  try {
+    const raw = localStorage.getItem(PRICING_DASHBOARD_FILTERS_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) as Partial<PersistedPricingFilters>;
+  } catch {
+    return {};
+  }
+}
+
+function savePricingDashboardFilters(f: PersistedPricingFilters): void {
+  try {
+    localStorage.setItem(PRICING_DASHBOARD_FILTERS_KEY, JSON.stringify(f));
+  } catch {
+    // ignore
+  }
+}
+
 export function PricingDashboardView({
   tenantId,
   selectedTenantId: _selectedTenantId,
@@ -220,26 +266,59 @@ export function PricingDashboardView({
 }: PricingDashboardViewProps) {
   const { theme } = useTheme();
   const isDark = theme === "dark";
+  const { persistColumns } = usePricingDashboardColumnsPreference();
 
-  const [entityType, setEntityType] = useState<PricingEntityType>("branch");
-  const [actorType, setActorType] = useState<PricingActorType>("loan_officer");
-  const [dateRange, setDateRange] = useState<PricingDateRange>("mtd");
-  const [loanFunding, setLoanFunding] = useState<PricingLoanFunding>("funded");
-  const [loanStatus, setLoanStatus] = useState<PricingLoanStatus>("active");
-  const [lockStatus, setLockStatus] = useState<PricingLockStatus>("total");
-  const [activeTab, setActiveTab] = useState<TabId>("loan_officer_report");
-  const [reportSortKey, setReportSortKey] = useState<keyof PricingReportRow>("entityName");
-  const [reportSortDir, setReportSortDir] = useState<"asc" | "desc">("asc");
-  const [detailSortKey, setDetailSortKey] = useState<string>("entityName");
-  const [detailSortDir, setDetailSortDir] = useState<"asc" | "desc">("asc");
+  const saved = useMemo(() => loadPricingDashboardFilters(), []);
+
+  const [entityType, setEntityType] = useState<PricingEntityType>(saved.entityType ?? "branch");
+  const [actorType, setActorType] = useState<PricingActorType>(saved.actorType ?? "loan_officer");
+  const [dateRange, setDateRange] = useState<PricingDateRange>(saved.dateRange ?? "mtd");
+  const [loanFunding, setLoanFunding] = useState<PricingLoanFunding>(saved.loanFunding ?? "funded");
+  const [loanStatus, setLoanStatus] = useState<PricingLoanStatus>(saved.loanStatus ?? "active");
+  const [lockStatus, setLockStatus] = useState<PricingLockStatus>(saved.lockStatus ?? "total");
+  const [activeTab, setActiveTab] = useState<TabId>(saved.activeTab ?? "loan_officer_report");
+  const [reportSortKey, setReportSortKey] = useState<keyof PricingReportRow>(saved.reportSortKey ?? "entityName");
+  const [reportSortDir, setReportSortDir] = useState<"asc" | "desc">(saved.reportSortDir ?? "asc");
+  const [detailSortKey, setDetailSortKey] = useState<string>(saved.detailSortKey ?? "entityName");
+  const [detailSortDir, setDetailSortDir] = useState<"asc" | "desc">(saved.detailSortDir ?? "asc");
   const [selectedEntityOrActor, setSelectedEntityOrActor] = useState<
     | { kind: "entity"; entityType: PricingEntityType; value: string; label: string }
     | { kind: "actor"; actorType: PricingActorType; value: string; label: string }
     | null
-  >(null);
+  >(saved.selectedEntityOrActor ?? null);
   const [editColumnsModalOpen, setEditColumnsModalOpen] = useState(false);
   const standaloneColumns = usePricingDashboardStandaloneColumnsStore((s) => s.columns);
   const getStandaloneColumns = usePricingDashboardStandaloneColumnsStore((s) => s.getColumns);
+
+  useEffect(() => {
+    savePricingDashboardFilters({
+      entityType,
+      actorType,
+      dateRange,
+      loanFunding,
+      loanStatus,
+      lockStatus,
+      activeTab,
+      reportSortKey,
+      reportSortDir,
+      detailSortKey,
+      detailSortDir,
+      selectedEntityOrActor,
+    });
+  }, [
+    entityType,
+    actorType,
+    dateRange,
+    loanFunding,
+    loanStatus,
+    lockStatus,
+    activeTab,
+    reportSortKey,
+    reportSortDir,
+    detailSortKey,
+    detailSortDir,
+    selectedEntityOrActor,
+  ]);
 
   const filters: PricingDashboardFilters = useMemo(
     () => ({
@@ -285,6 +364,7 @@ export function PricingDashboardView({
     detailType,
     tenantId,
     selectedChannel,
+    metricColumns: getStandaloneColumns().map((c) => c.key),
   });
 
   const entityLabel = getEntityLabel(entityType);
@@ -388,10 +468,10 @@ export function PricingDashboardView({
     const filename = `pricing-${baseName}-${new Date().toISOString().slice(0, 10)}.csv`;
     if (isReport) {
       const cols = reportColumns.map((c) => ({ key: c.key as string, label: c.label }));
-      const csv = buildCsv(cols, sortedReportRows as Record<string, unknown>[], reportTotals as Record<string, unknown>);
+      const csv = buildCsv(cols, sortedReportRows as unknown as Record<string, unknown>[], reportTotals as Record<string, unknown>);
       downloadCsv(csv, filename);
     } else {
-      const csv = buildCsv(detailCols, sortedDetailRows as Record<string, unknown>[], detailTotals as Record<string, unknown>);
+      const csv = buildCsv(detailCols, sortedDetailRows as unknown as Record<string, unknown>[], detailTotals as Record<string, unknown>);
       downloadCsv(csv, filename);
     }
   }, [
@@ -462,8 +542,7 @@ export function PricingDashboardView({
               <tr key={i} className={cn("border-b", borderRow)}>
                 {reportColumns.map((c) => {
                   const val = row[c.key as keyof PricingReportRow];
-                  const isNumber = typeof val === "number";
-                  const isRightAlign = isNumber || c.key === "units";
+                  const isRightAlign = c.key !== "entityName" && c.key !== "actorName";
                   const isEntityOrActor = c.key === "entityName" || c.key === "actorName";
                   const canSelect = isEntityOrActor && val != null && String(val).trim() !== "";
                   return (
@@ -512,14 +591,13 @@ export function PricingDashboardView({
             <tr className={cn("border-b", borderTh, bgTh)}>
               {detailCols.map((c) => {
                 const isSorted = detailSortKey === c.key;
+                const isRightAlign = c.key !== "entityName" && c.key !== "actorName";
                 return (
                   <th
                     key={c.key}
                     className={cn(
                       "py-2.5 px-4 font-semibold whitespace-nowrap cursor-pointer select-none hover:opacity-80 transition-opacity",
-                      ["volume", "loanPricingDollars", "pricingMargin", "cdLenderCredits"].includes(c.key)
-                        ? "text-right"
-                        : "text-left"
+                      isRightAlign ? "text-right" : "text-left"
                     )}
                     onClick={() => handleDetailSort(c.key)}
                     role="columnheader"
@@ -560,8 +638,8 @@ export function PricingDashboardView({
               <tr key={i} className={cn("border-b", borderRow)}>
                 {detailCols.map((c) => {
                   const val = row[c.key as keyof PricingDetailRow];
+                  const isRight = c.key !== "entityName" && c.key !== "actorName";
                   const isNum = typeof val === "number";
-                  const isRight = isNum || ["loanNumber", "applicationDate", "lockExpirationDate"].includes(c.key);
                   const isDateCol = ["applicationDate", "lockExpirationDate", "fundingDate", "closingDate"].includes(c.key);
                   const isEntityOrActor = c.key === "entityName" || c.key === "actorName";
                   const canSelect = isEntityOrActor && val != null && String(val).trim() !== "";
@@ -871,6 +949,8 @@ export function PricingDashboardView({
       <PricingDashboardColumnsModal
         open={editColumnsModalOpen}
         onClose={() => setEditColumnsModalOpen(false)}
+        onPersistColumns={persistColumns}
+        tenantId={tenantId}
       />
     </div>
   );

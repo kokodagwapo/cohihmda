@@ -227,7 +227,7 @@ const SECTION_FILTER_CONFIG: Partial<Record<SectionType, SectionFilterField[]>> 
     { key: 'actorType', label: 'View', allLabel: '', staticOptions: ACTOR_TYPE_OPTIONS },
   ],
   'sales-scorecard-overview': [
-    { key: 'salesScorecardOverviewMeasure', label: 'Measure', allLabel: '', staticOptions: [{ value: 'volume', label: 'Volume' }, { value: 'units', label: 'Units' }, { value: 'wa-interest-rate', label: 'WA Interest Rate' }] },
+    { key: 'salesScorecardOverviewMeasure', label: 'Measure', allLabel: '', staticOptions: [{ value: 'volume', label: 'Volume' }, { value: 'units', label: 'Units' }] },
     { key: 'salesScorecardOverviewTimeMeasure', label: 'Time', allLabel: '', staticOptions: [{ value: 'quarterly', label: 'Quarterly' }, { value: 'monthly', label: 'Monthly' }, { value: 'weekly', label: 'Weekly' }, { value: 'daily', label: 'Daily' }] },
     { key: 'branch', label: 'Branch', allLabel: 'All Branches', optionsSource: 'branch' },
     { key: 'loanOfficer', label: 'Loan Officer', allLabel: 'All Loan Officers', optionsSource: 'loan_officer', dependsOn: 'branch' },
@@ -1075,7 +1075,9 @@ function GridCellRegistryWidget({
   const savedColumns = isLoanDetail ? getColumns(canvasItemId) : undefined;
   const customColumns: ColumnDef[] | undefined =
     savedColumns?.length
-      ? savedColumns.map((c) => ({ id: c.id, label: c.label, field: c.field }))
+      ? savedColumns
+          .filter((c) => c.field !== '__blank__')
+          .map((c) => ({ id: c.id, label: c.label, field: c.field }))
       : undefined;
 
   const Component = definition.component;

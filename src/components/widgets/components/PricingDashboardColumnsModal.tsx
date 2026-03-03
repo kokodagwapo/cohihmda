@@ -20,6 +20,7 @@ import {
   PRICING_AVAILABLE_FIELDS,
   type PricingDashboardColumnDef,
 } from '@/lib/pricingDashboardColumns';
+import { api } from '@/lib/api';
 import {
   Command,
   CommandEmpty,
@@ -39,12 +40,18 @@ export interface PricingDashboardColumnsModalProps {
   onClose: () => void;
   /** When provided, edits are stored in the workbench group filters. When undefined, standalone store is used. */
   groupId?: string;
+  /** When provided (standalone mode), called after saving columns so they can be persisted cross-device. */
+  onPersistColumns?: (columns: PricingDashboardColumnDef[]) => void;
+  /** When provided (standalone mode), used to fetch all DB columns for the "Add column" dropdown (schema + Encompass/LOS IDs). */
+  tenantId?: string | null;
 }
 
 export function PricingDashboardColumnsModal({
   open,
   onClose,
   groupId,
+  onPersistColumns,
+  tenantId,
 }: PricingDashboardColumnsModalProps) {
   const getFilters = useWidgetSectionStore((s) => s.getFilters);
   const updateFilters = useWidgetSectionStore((s) => s.updateFilters);
@@ -58,11 +65,69 @@ export function PricingDashboardColumnsModal({
   const [columnNamePickerOpen, setColumnNamePickerOpen] = useState(false);
   const [losFieldPickerOpen, setLosFieldPickerOpen] = useState(false);
   const [selectedForAdd, setSelectedForAdd] = useState<PricingDashboardColumnDef | null>(null);
+  const [availableFields, setAvailableFields] = useState<PricingDashboardColumnDef[]>(() => PRICING_AVAILABLE_FIELDS);
 
-  const availableFields = useMemo(() => PRICING_AVAILABLE_FIELDS, []);
+  useEffect(() => {
+    if (!open || !isStandalone || !tenantId) return;
+    let cancelled = false;
+    type SchemaCol = { name: string; displayName?: string };
+    type MappingRow = { coheusAlias: string; defaultEncompassFieldId: string | null; postgresqlColumn: string };
+    type SwapRow = { coheusAlias: string; encompassFieldId: string };
+    type AdditionalFieldRow = { columnName: string; displayName: string; losFieldId?: string; columnCreated?: boolean };
+    const tenantParam = `?tenant_id=${encodeURIComponent(tenantId)}`;
+    Promise.all([
+      api.request<{ columns: SchemaCol[] }>(`/api/loans/schema${tenantParam}`),
+      api.request<{ mappings: MappingRow[] }>('/api/encompass/field-mappings').catch(() => ({ mappings: [] })),
+      api
+        .request<{ connections: { id: string; los_type?: string }[] }>(`/api/los/connections${tenantParam}`)
+        .then((r) => r.connections?.find((c) => c.los_type === 'encompass')?.id ?? null)
+        .catch(() => null),
+      api.request<{ fields: AdditionalFieldRow[] }>(`/api/tenant-config/additional-fields${tenantParam}`).catch(() => ({ fields: [] as AdditionalFieldRow[] })),
+    ])
+      .then(async ([schemaRes, mappingsRes, firstEncompassConnectionId, additionalRes]) => {
+        if (cancelled) return;
+        const columns = schemaRes?.columns ?? [];
+        const mappings = mappingsRes?.mappings ?? [];
+        const additionalFields = additionalRes?.fields ?? [];
+        const encompassIdByColumn = new Map<string, string>();
+        for (const m of mappings) {
+          if (m.defaultEncompassFieldId) encompassIdByColumn.set(m.postgresqlColumn, m.defaultEncompassFieldId);
+        }
+        if (firstEncompassConnectionId) {
+          try {
+            const swapsRes = await api.request<{ swaps: SwapRow[] }>(
+              `/api/encompass/field-swaps/${firstEncompassConnectionId}${tenantParam}`,
+            );
+            const swaps = swapsRes?.swaps ?? [];
+            const aliasToSwap = new Map(swaps.map((s) => [s.coheusAlias, s.encompassFieldId]));
+            for (const m of mappings) {
+              const swapped = aliasToSwap.get(m.coheusAlias);
+              if (swapped) encompassIdByColumn.set(m.postgresqlColumn, swapped);
+            }
+          } catch {
+            // use defaults only
+          }
+        }
+        for (const f of additionalFields) {
+          if (f.columnCreated && f.losFieldId) encompassIdByColumn.set(f.columnName, f.losFieldId);
+        }
+        const fields: PricingDashboardColumnDef[] = columns.map((c) => {
+          const title = c.displayName ?? c.name;
+          const encompassId = encompassIdByColumn.get(c.name);
+          const label = encompassId ? `${title} (${encompassId})` : title;
+          return { key: c.name, label };
+        });
+        setAvailableFields(fields);
+      })
+      .catch(() => {
+        if (!cancelled) setAvailableFields(PRICING_AVAILABLE_FIELDS);
+      });
+    return () => { cancelled = true; };
+  }, [open, isStandalone, tenantId]);
 
   useEffect(() => {
     if (open) {
+      if (!isStandalone) setAvailableFields(PRICING_AVAILABLE_FIELDS);
       setDraft(
         isStandalone
           ? (standaloneGetColumns().map((c) => ({ ...c })) as PricingDashboardColumnDef[])
@@ -131,11 +196,12 @@ export function PricingDashboardColumnsModal({
     if (valid.length === 0) return;
     if (isStandalone) {
       standaloneSetColumns(valid);
+      onPersistColumns?.(valid);
     } else {
       updateFilters(groupId!, { pricingDashboardColumns: valid });
     }
     onClose();
-  }, [isStandalone, groupId, draft, updateFilters, standaloneSetColumns, onClose]);
+  }, [isStandalone, groupId, draft, updateFilters, standaloneSetColumns, onPersistColumns, onClose]);
 
   const hasValidColumns = useMemo(
     () => draft.some((r) => r.key.trim() !== '' && r.label.trim() !== ''),

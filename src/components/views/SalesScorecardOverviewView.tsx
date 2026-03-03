@@ -68,9 +68,6 @@ function getColorForColumn(column: string, index: number): string {
 
 function formatValue(value: number | undefined | null, measure: SalesScorecardOverviewMeasure): string {
   const n = value != null && typeof value === "number" ? value : 0;
-  if (measure === "wa-interest-rate") {
-    return `${Number(n).toFixed(2)}%`;
-  }
   if (measure === "volume") {
     if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
     if (n >= 1_000) return `${(n / 1_000).toFixed(2)}K`;
@@ -151,7 +148,7 @@ export function SalesScorecardOverviewView({
       ? (groupFilters.periodSelection as PeriodSelection)
       : defaultPeriodSelection;
   const measure: SalesScorecardOverviewMeasure =
-    (groupFilters?.salesScorecardOverviewMeasure as SalesScorecardOverviewMeasure) ?? "volume";
+    groupFilters?.salesScorecardOverviewMeasure === "units" ? "units" : "volume";
   const timeMeasure: SalesScorecardOverviewTimeMeasure =
     (groupFilters?.salesScorecardOverviewTimeMeasure as SalesScorecardOverviewTimeMeasure) ?? "monthly";
   const branch = groupFilters?.branch ?? "all";

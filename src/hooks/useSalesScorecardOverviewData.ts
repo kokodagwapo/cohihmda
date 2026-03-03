@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
 import { MAX_MILESTONE_DATES } from "@/components/widgets/components/SalesScorecardMilestoneDatesModal";
 
-export type SalesScorecardOverviewMeasure = "volume" | "units" | "wa-interest-rate";
+export type SalesScorecardOverviewMeasure = "volume" | "units";
 
 /** Time granularity when using Period + Time measure filters */
 export type SalesScorecardOverviewTimeMeasure = "quarterly" | "monthly" | "weekly" | "daily";

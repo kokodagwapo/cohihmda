@@ -18,6 +18,7 @@ import {
   getPipelineFilterOptions,
   getPipelineLoansInRange,
   getPipelineLoansActiveInRange,
+  getPipeline30YearFixedWeightedRates,
   type SnapshotDayOfWeek,
   type StartDateField,
   type PipelineSnapshotFilters,
@@ -248,6 +249,65 @@ router.get(
       console.error("[Pipeline Analysis] GET /loans error:", error);
       if (handleDatabaseError(error, res, "Pipeline analysis loans")) return;
       return res.status(500).json({ error: "Failed to load pipeline loans" });
+    }
+  }
+);
+
+/**
+ * GET /api/pipeline-analysis/treasury-30yr-rate
+ * Returns weighted average interest rate for 30-year fixed loans per snapshot date.
+ * Same query params as /loans: from, to, start_date_field, loan_type[], loan_purpose[], branch[], snapshot_dates[].
+ * Response: { rates: Array<{ date: string, weighted_avg_rate: number | null }> }.
+ */
+router.get(
+  "/treasury-30yr-rate",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    const from = req.query.from as string | undefined;
+    const to = req.query.to as string | undefined;
+    if (!from || !to) {
+      return res.status(400).json({ error: "from and to date parameters are required (YYYY-MM-DD)." });
+    }
+    const startDateFieldRaw = req.query.start_date_field as string | undefined;
+    const startDateField: StartDateField =
+      startDateFieldRaw === "lock_date" ? "lock_date"
+      : startDateFieldRaw === "processing_date" ? "processing_date"
+      : startDateFieldRaw === "credit_pull_date" ? "credit_pull_date"
+      : startDateFieldRaw === "submitted_to_underwriting_date" ? "submitted_to_underwriting_date"
+      : "application_date";
+    const loanTypes = parseStringArray(req.query.loan_type);
+    const loanPurposes = parseStringArray(req.query.loan_purpose);
+    const branches = parseStringArray(req.query.branch);
+    const filters: PipelineSnapshotFilters | undefined =
+      (loanTypes?.length ?? 0) > 0 || (loanPurposes?.length ?? 0) > 0 || (branches?.length ?? 0) > 0
+        ? { loanTypes, loanPurposes, branches }
+        : undefined;
+    const dimensionFilterClause = buildDimensionFilterWhereClause(
+      req.query as Record<string, unknown>,
+      "l",
+      new Set(["tenant_id", "from", "to", "start_date_field", "loan_type", "loan_purpose", "branch", "snapshot_dates"]),
+    );
+    const snapshotDates = parseStringArray(req.query.snapshot_dates);
+    try {
+      const ctx = getTenantContext(req);
+      if (!ctx?.tenantPool) {
+        return res.status(400).json({ error: "Tenant context required" });
+      }
+      const rates = await getPipeline30YearFixedWeightedRates(
+        ctx.tenantPool,
+        from,
+        to,
+        startDateField,
+        filters,
+        dimensionFilterClause,
+        snapshotDates && snapshotDates.length > 0 ? snapshotDates : undefined
+      );
+      return res.json({ rates });
+    } catch (error) {
+      console.error("[Pipeline Analysis] GET /treasury-30yr-rate error:", error);
+      if (handleDatabaseError(error, res, "Pipeline 30yr rate")) return;
+      return res.status(500).json({ error: "Failed to load 30-year fixed weighted rates" });
     }
   }
 );

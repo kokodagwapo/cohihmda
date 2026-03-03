@@ -127,8 +127,8 @@ export interface SectionFilters {
   pipelineAnalysisViewMode?: 'week' | 'month';
   /** Pipeline Analysis: percent change rows by volume or units */
   pipelineAnalysisPctMetric?: 'volume' | 'units';
-  /** Sales Scorecard Overview: measure (volume, units, wa-interest-rate) */
-  salesScorecardOverviewMeasure?: 'volume' | 'units' | 'wa-interest-rate';
+  /** Sales Scorecard Overview: measure (volume, units) */
+  salesScorecardOverviewMeasure?: 'volume' | 'units';
   /** Sales Scorecard Overview: time granularity (quarterly, monthly, weekly, daily) */
   salesScorecardOverviewTimeMeasure?: 'quarterly' | 'monthly' | 'weekly' | 'daily';
   /** Sales Scorecard Overview: milestone date columns to show (e.g. started_date, application_date). Empty = backend default five. */

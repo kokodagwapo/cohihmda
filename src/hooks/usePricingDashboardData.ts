@@ -86,6 +86,7 @@ function buildParams(
   filters: PricingDashboardFilters,
   tenantId?: string | null,
   dimensionFilters?: Array<{ column: string; value: string }>,
+  metricColumns?: string[],
 ): URLSearchParams {
   const p = new URLSearchParams();
   if (tenantId) p.set("tenant_id", tenantId);
@@ -105,6 +106,7 @@ function buildParams(
       if (df.value && df.value !== 'all') p.set(df.column, df.value);
     }
   }
+  if (metricColumns?.length) p.set("metric_columns", metricColumns.join(","));
   return p;
 }
 
@@ -128,6 +130,8 @@ export function usePricingDashboardData(
     tenantId?: string | null;
     /** Global channel from nav (overrides filters.channel so request always reflects current selection) */
     selectedChannel?: string | null;
+    /** Metric column keys to request (report: aggregated; detail: raw per loan) */
+    metricColumns?: string[];
   }
 ): UsePricingDashboardDataResult {
   const [kpis, setKpis] = useState<PricingKPIs | null>(null);
@@ -149,7 +153,7 @@ export function usePricingDashboardData(
       ...filters,
       channel: effectiveChannel,
     };
-    const base = buildParams(filtersWithChannel, tenantId);
+    const base = buildParams(filtersWithChannel, tenantId, undefined, options.metricColumns);
     try {
       setLoading(true);
       setError(null);
@@ -196,6 +200,7 @@ export function usePricingDashboardData(
     options.reportType,
     options.detailType,
     options.tenantId,
+    options.metricColumns,
   ]);
 
   useEffect(() => {
@@ -228,7 +233,12 @@ export interface PricingDashboardWorkbenchData {
 /** Fetches KPIs + all 4 pricing tables in one go for workbench (5 API calls). */
 export function usePricingDashboardWorkbenchData(
   filters: PricingDashboardFilters,
-  options: { tenantId?: string | null; selectedChannel?: string | null; dimensionFilters?: Array<{ column: string; value: string }> }
+  options: {
+    tenantId?: string | null;
+    selectedChannel?: string | null;
+    dimensionFilters?: Array<{ column: string; value: string }>;
+    metricColumns?: string[];
+  }
 ): PricingDashboardWorkbenchData {
   const [state, setState] = useState<PricingDashboardWorkbenchData>({
     kpis: null,
@@ -251,7 +261,7 @@ export function usePricingDashboardWorkbenchData(
       ...filters,
       channel: effectiveChannel,
     };
-    const base = buildParams(filtersWithChannel, tenantId, options.dimensionFilters);
+    const base = buildParams(filtersWithChannel, tenantId, options.dimensionFilters, options.metricColumns);
     try {
       setState((s) => ({ ...s, loading: true, error: null }));
       const [kpisRes, reportLORes, reportEntityRes, detailLORes, detailEntityRes] = await Promise.all([
@@ -304,6 +314,7 @@ export function usePricingDashboardWorkbenchData(
     filters.loanStatus,
     filters.lockStatus,
     options.tenantId,
+    options.metricColumns,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     JSON.stringify(options.dimensionFilters),
   ]);

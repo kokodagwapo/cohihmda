@@ -10,7 +10,7 @@ import { getVMaxDate } from "../../utils/scorecard-utils.js";
 import { buildDimensionFilterWhereClause } from "../../utils/scorecard-utils.js";
 import { getWorkflowConversionMilestones } from "./workflowConversionService.js";
 
-export type SalesScorecardOverviewMeasure = "volume" | "units" | "wa-interest-rate";
+export type SalesScorecardOverviewMeasure = "volume" | "units";
 export type SalesScorecardOverviewTimePeriod =
   | "monthly-ytd"
   | "quarterly-ytd"
@@ -238,10 +238,8 @@ export async function getSalesScorecardOverview(
     ])
   );
 
-  const isWaInterestRate = measure === "wa-interest-rate";
-  const selectValue = isWaInterestRate
-    ? "COALESCE(SUM(COALESCE(interest_rate, 0) * COALESCE(loan_amount, 0)) / NULLIF(SUM(COALESCE(loan_amount, 0)), 0), 0)"
-    : measure === "volume"
+  const selectValue =
+    measure === "volume"
       ? "COALESCE(SUM(loan_amount), 0)"
       : "COUNT(*)::numeric";
 

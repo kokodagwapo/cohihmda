@@ -36,6 +36,8 @@ import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 const NONE_FIELD_VALUE = '__none__';
+/** Sentinel for "no field selected yet" on a new column; dropdown enabled so user can pick a real field. */
+const BLANK_FIELD_VALUE = '__blank__';
 
 const MODAL_STYLES = `
 .loan-detail-cols-wrap { width: 100%; max-width: 100%; overflow-x: hidden; min-width: 0; }
@@ -50,14 +52,16 @@ function getFallbackFieldOptions(): { value: string; label: string }[] {
   DEFAULT_LOAN_DETAIL_COLUMNS.forEach((c) => {
     if (c.field) fields.add(c.field);
   });
-  return [
-    { value: NONE_FIELD_VALUE, label: 'Calculated Value' },
-    ...Array.from(fields).sort().map((name) => ({ value: name, label: name })),
-  ];
+  return Array.from(fields).sort().map((name) => ({ value: name, label: name }));
 }
 
 function toSaved(c: ColumnDef): SavedLoanDetailColumn {
-  return { id: c.id, label: c.label, field: c.field };
+  const raw = c.field;
+  const field =
+    raw === undefined || raw === BLANK_FIELD_VALUE
+      ? BLANK_FIELD_VALUE
+      : raw;
+  return { id: c.id, label: c.label, field: field === BLANK_FIELD_VALUE ? BLANK_FIELD_VALUE : field };
 }
 
 type FieldOption = { value: string; label: string };
@@ -77,9 +81,14 @@ const ColumnRow = memo(function ColumnRow({
 }) {
   const [open, setOpen] = useState(false);
   const isCalculated = row.field === null;
+  const isBlank = row.field === BLANK_FIELD_VALUE;
   const selectedLabel = isCalculated
     ? 'Calculated Value'
-    : (row.field ? (fieldOptions.find((o) => o.value === row.field)?.label ?? row.field) : 'Calculated Value');
+    : isBlank
+      ? 'Select field...'
+      : (row.field ? (fieldOptions.find((o) => o.value === row.field)?.label ?? row.field) : 'Select field...');
+  const dropdownDisabled = isCalculated;
+  const selectableOptions = fieldOptions.filter((o) => o.value !== NONE_FIELD_VALUE);
   return (
     <div className="loan-detail-cols-row gap-2">
       <Input
@@ -89,16 +98,16 @@ const ColumnRow = memo(function ColumnRow({
         className="min-w-0"
       />
       <div className="loan-detail-cols-field min-w-0">
-        <Popover open={open} onOpenChange={isCalculated ? () => {} : setOpen}>
+        <Popover open={open} onOpenChange={dropdownDisabled ? () => {} : setOpen}>
           <PopoverTrigger asChild>
             <Button
               variant="outline"
               role="combobox"
               aria-expanded={open}
-              disabled={isCalculated}
+              disabled={dropdownDisabled}
               className={cn(
                 'loan-detail-cols-field-trigger h-9 min-w-0 w-full font-normal',
-                isCalculated && 'cursor-not-allowed opacity-60',
+                dropdownDisabled && 'cursor-not-allowed opacity-60',
               )}
             >
               <span className="truncate">{selectedLabel}</span>
@@ -111,21 +120,19 @@ const ColumnRow = memo(function ColumnRow({
               <CommandList className="max-h-[300px]">
                 <CommandEmpty>No field found.</CommandEmpty>
                 <CommandGroup>
-                  {fieldOptions.map((opt) => (
+                  {selectableOptions.map((opt) => (
                     <CommandItem
                       key={opt.value}
                       value={opt.label}
                       onSelect={() => {
-                        onUpdate(index, { field: opt.value === NONE_FIELD_VALUE ? null : opt.value });
+                        onUpdate(index, { field: opt.value });
                         setOpen(false);
                       }}
                     >
                       <Check
                         className={cn(
                           'mr-2 h-4 w-4 shrink-0',
-                          (row.field === null && opt.value === NONE_FIELD_VALUE) || row.field === opt.value
-                            ? 'opacity-100'
-                            : 'opacity-0',
+                          row.field === opt.value ? 'opacity-100' : 'opacity-0',
                         )}
                       />
                       <span className="truncate">{opt.label}</span>
@@ -242,15 +249,12 @@ export function LoanDetailColumnsModal({
           if (f.columnCreated && f.losFieldId) encompassIdByColumn.set(f.columnName, f.losFieldId);
         }
 
-        const options: { value: string; label: string }[] = [
-          { value: NONE_FIELD_VALUE, label: 'Calculated Value' },
-          ...columns.map((c) => {
-            const title = c.displayName ?? c.name;
-            const encompassId = encompassIdByColumn.get(c.name);
-            const label = encompassId ? `${title} (${encompassId})` : title;
-            return { value: c.name, label };
-          }),
-        ];
+        const options: { value: string; label: string }[] = columns.map((c) => {
+          const title = c.displayName ?? c.name;
+          const encompassId = encompassIdByColumn.get(c.name);
+          const label = encompassId ? `${title} (${encompassId})` : title;
+          return { value: c.name, label };
+        });
         setFieldOptions(options);
       })
       .catch(() => {
@@ -275,7 +279,7 @@ export function LoanDetailColumnsModal({
   const addColumn = useCallback(() => {
     setDraft((prev) => [
       ...prev,
-      { id: `custom_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`, label: '', field: null },
+      { id: `custom_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`, label: '', field: BLANK_FIELD_VALUE },
     ]);
     // Scroll list to bottom after the new row is in the DOM
     setTimeout(() => {

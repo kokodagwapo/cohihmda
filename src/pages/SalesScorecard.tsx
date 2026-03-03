@@ -33,6 +33,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
   DatePeriodPicker,
   useDatePeriodState,
+  type PeriodSelection,
 } from "@/components/ui/DatePeriodPicker";
 import { useChannelStore } from "@/stores/channelStore";
 import { useTenantStore } from "@/stores/tenantStore";
@@ -67,7 +68,44 @@ const SalesScorecard = () => {
     setYear: setSelectedYear,
     dateRange,
     setDateRange,
+    periodSelection,
+    setPeriodSelection,
   } = useDatePeriodState();
+
+  // Persist and restore date period (localStorage)
+  const SALES_SCORECARD_PERIOD_KEY = "sales-scorecard-period";
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SALES_SCORECARD_PERIOD_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as {
+          year?: number;
+          periodSelection?: PeriodSelection;
+        };
+        if (parsed.periodSelection?.dateRange) {
+          setPeriodSelection(parsed.periodSelection);
+        } else if (parsed.year != null) {
+          setSelectedYear(parsed.year);
+        }
+      }
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        SALES_SCORECARD_PERIOD_KEY,
+        JSON.stringify({
+          year: selectedYear,
+          periodSelection,
+        })
+      );
+    } catch {
+      // ignore
+    }
+  }, [selectedYear, periodSelection]);
 
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     const saved = localStorage.getItem("sales-scorecard-tab");
@@ -1302,6 +1340,8 @@ const SalesScorecard = () => {
                             year={selectedYear}
                             onYearChange={setSelectedYear}
                             onDateRangeChange={setDateRange}
+                            onPeriodChange={setPeriodSelection}
+                            periodSelectionFromStore={periodSelection}
                             yearsToShow={4}
                             size="sm"
                             showLabel={false}

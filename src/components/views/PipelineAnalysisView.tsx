@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/table";
 import { usePipelineAnalysisData, usePipelineAnalysisRange, usePipelineAnalysisConfig, usePipelineAnalysisFilterOptions, usePipelineAnalysisLoans, type PipelineSnapshotRow, type PipelineLoanDetailRow } from "@/hooks/usePipelineAnalysisData";
 import { useTreasury10y } from "@/hooks/useTreasury10y";
+import { usePipeline30yrRates } from "@/hooks/usePipeline30yrRates";
 import { Loader2, Table2, BarChart3, TrendingUp, ChevronDown, ArrowUp, ArrowDown, ChevronsUpDown, X, Download } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { api } from "@/lib/api";
@@ -41,12 +42,69 @@ import {
 } from "recharts";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip as UITooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 
 export type PipelineViewMode = "week" | "month";
 
 export type PipelinePctMetric = "volume" | "units";
+
+const PIPELINE_ANALYSIS_STATE_KEY = "cohi-pipeline-analysis-state";
+
+type FilterState = { loanTypes: string[]; loanPurposes: string[]; branches: string[] };
+const emptyFilters: FilterState = { loanTypes: [], loanPurposes: [], branches: [] };
+
+function loadPipelineAnalysisState(): Partial<{
+  viewMode: PipelineViewMode;
+  pctMetric: PipelinePctMetric;
+  dataViewTab: "table" | "chart" | "loCountChart" | "treasury10y" | "treasury10yYoY";
+  startDateField: "application_date" | "lock_date" | "processing_date" | "credit_pull_date" | "submitted_to_underwriting_date";
+  selectedWeekValues: number[];
+  selectedMonths: number[];
+  appliedFilters: FilterState;
+  selectedYearRange: string | null;
+  loanDetailSortColumn: keyof PipelineLoanDetailRow | null;
+  loanDetailSortDirection: "asc" | "desc";
+}> {
+  try {
+    const raw = localStorage.getItem(PIPELINE_ANALYSIS_STATE_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) as Partial<{
+      viewMode: PipelineViewMode;
+      pctMetric: PipelinePctMetric;
+      dataViewTab: "table" | "chart" | "loCountChart" | "treasury10y" | "treasury10yYoY";
+      startDateField: "application_date" | "lock_date" | "processing_date" | "credit_pull_date" | "submitted_to_underwriting_date";
+      selectedWeekValues: number[];
+      selectedMonths: number[];
+      appliedFilters: FilterState;
+      selectedYearRange: string | null;
+      loanDetailSortColumn: keyof PipelineLoanDetailRow | null;
+      loanDetailSortDirection: "asc" | "desc";
+    }>;
+  } catch {
+    return {};
+  }
+}
+
+function savePipelineAnalysisState(state: {
+  viewMode: PipelineViewMode;
+  pctMetric: PipelinePctMetric;
+  dataViewTab: "table" | "chart" | "loCountChart" | "treasury10y" | "treasury10yYoY";
+  startDateField: string;
+  selectedWeekValues: number[];
+  selectedMonths: number[];
+  appliedFilters: FilterState;
+  selectedYearRange: string | null;
+  loanDetailSortColumn: string | null;
+  loanDetailSortDirection: "asc" | "desc";
+}): void {
+  try {
+    localStorage.setItem(PIPELINE_ANALYSIS_STATE_KEY, JSON.stringify(state));
+  } catch {
+    // ignore
+  }
+}
 
 function formatVolume(n: number): string {
   return n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
@@ -100,6 +158,9 @@ function getFirstMondayOfMonth(year: number, month: number): Date {
 
 const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+/** Treasury YoY: same dark/light pairs as Units & Volume chart (dark = 10-Yr Treasury, light = 30yr Rate per year). */
+const TREASURY_YOY_COLORS = ["#00008f", "#8080c7", "#52b852", "#a9dca9", "#c2410c", "#fdba74", "#6d28d9", "#c4b5fd"];
+
 const SNAPSHOT_DAY_LABELS: Record<number, string> = {
   1: "Monday",
   2: "Tuesday",
@@ -145,19 +206,19 @@ export function PipelineAnalysisView({
   selectedTenantId,
   selectedChannel,
 }: PipelineAnalysisViewProps) {
-  const [viewMode, setViewMode] = useState<PipelineViewMode>("week");
-  const [pctMetric, setPctMetric] = useState<PipelinePctMetric>("volume");
-  const [dataViewTab, setDataViewTab] = useState<"table" | "chart" | "loCountChart" | "treasury10y">("table");
-  const [startDateField, setStartDateField] = useState<"application_date" | "lock_date" | "processing_date" | "credit_pull_date" | "submitted_to_underwriting_date">("application_date");
-  /** Selected week values (1–53) in week mode; selection persists when switching tabs. */
-  const [selectedWeekValues, setSelectedWeekValues] = useState<number[]>([]);
-  /** Selected months (1–12) in month mode; selection persists when switching tabs. */
-  const [selectedMonths, setSelectedMonths] = useState<number[]>([]);
+  const saved = useMemo(() => loadPipelineAnalysisState(), []);
 
-  type FilterState = { loanTypes: string[]; loanPurposes: string[]; branches: string[] };
-  const emptyFilters: FilterState = { loanTypes: [], loanPurposes: [], branches: [] };
-  const [appliedFilters, setAppliedFilters] = useState<FilterState>(emptyFilters);
-  const [draftFilters, setDraftFilters] = useState<FilterState>(emptyFilters);
+  const [viewMode, setViewMode] = useState<PipelineViewMode>(saved.viewMode ?? "week");
+  const [pctMetric, setPctMetric] = useState<PipelinePctMetric>(saved.pctMetric ?? "volume");
+  const [dataViewTab, setDataViewTab] = useState<"table" | "chart" | "loCountChart" | "treasury10y" | "treasury10yYoY">(saved.dataViewTab ?? "table");
+  const [startDateField, setStartDateField] = useState<"application_date" | "lock_date" | "processing_date" | "credit_pull_date" | "submitted_to_underwriting_date">(saved.startDateField ?? "application_date");
+  /** Selected week values (1–53) in week mode; selection persists when switching tabs. */
+  const [selectedWeekValues, setSelectedWeekValues] = useState<number[]>(saved.selectedWeekValues ?? []);
+  /** Selected months (1–12) in month mode; selection persists when switching tabs. */
+  const [selectedMonths, setSelectedMonths] = useState<number[]>(saved.selectedMonths ?? []);
+
+  const [appliedFilters, setAppliedFilters] = useState<FilterState>(saved.appliedFilters ?? emptyFilters);
+  const [draftFilters, setDraftFilters] = useState<FilterState>(saved.appliedFilters ?? emptyFilters);
 
   const { range, loading: rangeLoading, refetch: refetchRange } = usePipelineAnalysisRange(tenantId ?? null);
   const { config, loading: configLoading, refetch: refetchConfig } = usePipelineAnalysisConfig(tenantId ?? null);
@@ -177,7 +238,7 @@ export function PipelineAnalysisView({
     [yearRangeOptions]
   );
 
-  const [selectedYearRange, setSelectedYearRange] = useState<string | null>(null);
+  const [selectedYearRange, setSelectedYearRange] = useState<string | null>(saved.selectedYearRange ?? null);
   const effectiveYearRange = selectedYearRange ?? defaultYearRange;
 
   const { from, to } = useMemo(() => {
@@ -282,6 +343,15 @@ export function PipelineAnalysisView({
     return Array.from(set).sort();
   }, [viewMode, selectedSnapshotDates, snapshots]);
 
+  const { rates: pipeline30yrRates, loading: pipeline30yrLoading } = usePipeline30yrRates({
+    from: from || null,
+    to: to || null,
+    tenantId: tenantId ?? null,
+    startDateField,
+    filters: filtersForApi,
+    snapshotDates: chartDatesForTreasury.length > 0 ? chartDatesForTreasury : undefined,
+  });
+
   /** Treasury chart data: only dates that are snapshot dates; yield from that date or nearest prior FRED date. */
   const treasuryChartData = useMemo(() => {
     if (!treasury10yData || treasury10yData.length === 0 || chartDatesForTreasury.length === 0) return [];
@@ -290,6 +360,10 @@ export function PipelineAnalysisView({
     for (const o of sorted) {
       const d = o.date.slice(0, 10);
       dateToYield.set(d, o.yield);
+    }
+    const dateTo30yrRate = new Map<string, number | null>();
+    for (const r of pipeline30yrRates) {
+      dateTo30yrRate.set(r.date, r.weighted_avg_rate);
     }
     return chartDatesForTreasury
       .map((date) => {
@@ -304,10 +378,25 @@ export function PipelineAnalysisView({
           }
         }
         if (y === undefined) return null;
-        return { date, dateLabel: format(parseISO(date), "MMM d, yyyy"), yield: y };
+        const weightedAvgRate30yr = dateTo30yrRate.get(date) ?? null;
+        return { date, dateLabel: format(parseISO(date), "MMM d, yyyy"), yield: y, weightedAvgRate30yr };
       })
-      .filter((row): row is { date: string; dateLabel: string; yield: number } => row != null);
-  }, [treasury10yData, chartDatesForTreasury]);
+      .filter((row): row is { date: string; dateLabel: string; yield: number; weightedAvgRate30yr: number | null } => row != null);
+  }, [treasury10yData, chartDatesForTreasury, pipeline30yrRates]);
+
+  /** Map snapshot date (YYYY-MM-DD) -> { year, week_value, month } for treasury YoY. */
+  const dateToTreasuryMeta = useMemo(() => {
+    const map = new Map<string, { year: number; week_value: number; month: number }>();
+    snapshots.forEach((row) => {
+      const d = typeof row.date === "string" ? row.date.slice(0, 10) : format(new Date(row.date), "yyyy-MM-dd");
+      map.set(d, {
+        year: row.year,
+        week_value: row.week_value,
+        month: parseISO(d).getMonth() + 1,
+      });
+    });
+    return map;
+  }, [snapshots]);
 
   const { loans: pipelineLoans, loading: loansLoading, error: loansError } = usePipelineAnalysisLoans({
     from: from || null,
@@ -330,8 +419,34 @@ export function PipelineAnalysisView({
             : "Application date";
 
   type LoanDetailSortKey = keyof PipelineLoanDetailRow;
-  const [loanDetailSortColumn, setLoanDetailSortColumn] = useState<LoanDetailSortKey | null>(null);
-  const [loanDetailSortDirection, setLoanDetailSortDirection] = useState<"asc" | "desc">("asc");
+  const [loanDetailSortColumn, setLoanDetailSortColumn] = useState<LoanDetailSortKey | null>(saved.loanDetailSortColumn ?? null);
+  const [loanDetailSortDirection, setLoanDetailSortDirection] = useState<"asc" | "desc">(saved.loanDetailSortDirection ?? "asc");
+
+  useEffect(() => {
+    savePipelineAnalysisState({
+      viewMode,
+      pctMetric,
+      dataViewTab,
+      startDateField,
+      selectedWeekValues,
+      selectedMonths,
+      appliedFilters,
+      selectedYearRange,
+      loanDetailSortColumn,
+      loanDetailSortDirection,
+    });
+  }, [
+    viewMode,
+    pctMetric,
+    dataViewTab,
+    startDateField,
+    selectedWeekValues,
+    selectedMonths,
+    appliedFilters,
+    selectedYearRange,
+    loanDetailSortColumn,
+    loanDetailSortDirection,
+  ]);
 
   const sortedPipelineLoans = useMemo(() => {
     if (!loanDetailSortColumn || pipelineLoans.length === 0) return pipelineLoans;
@@ -445,6 +560,60 @@ export function PipelineAnalysisView({
     [snapshots, config?.snapshot_day_of_week]
   );
 
+  /** Map (year, week_value) -> month (1-12) for converting week selection to months when switching to month view. */
+  const byYearWeekToMonth = useMemo(() => {
+    const m = new Map<string, number>();
+    snapshots.forEach((row) => {
+      const dateStr = typeof row.date === "string" ? row.date.slice(0, 10) : format(new Date(row.date), "yyyy-MM-dd");
+      const month = parseISO(dateStr).getMonth() + 1;
+      m.set(`${row.year}-${row.week_value}`, month);
+    });
+    return m;
+  }, [snapshots]);
+
+  /** Map (year, month) -> week_value[] for converting month selection to weeks when switching to week view. */
+  const byYearMonthToWeeks = useMemo(() => {
+    const m = new Map<string, number[]>();
+    snapshots.forEach((row) => {
+      const dateStr = typeof row.date === "string" ? row.date.slice(0, 10) : format(new Date(row.date), "yyyy-MM-dd");
+      const month = parseISO(dateStr).getMonth() + 1;
+      const key = `${row.year}-${month}`;
+      const list = m.get(key) ?? [];
+      if (!list.includes(row.week_value)) list.push(row.week_value);
+      m.set(key, list);
+    });
+    return m;
+  }, [snapshots]);
+
+  /** When switching view mode, convert selection so it persists: week→month selects all months containing selected weeks; month→week selects all weeks in selected months. */
+  const handleViewModeChange = useCallback(
+    (newMode: PipelineViewMode) => {
+      if (newMode === "month") {
+        const monthSet = new Set<number>();
+        selectedWeekValues.forEach((w) => {
+          years.forEach((y) => {
+            const month = byYearWeekToMonth.get(`${y}-${w}`);
+            if (month != null) monthSet.add(month);
+          });
+        });
+        setSelectedMonths([...monthSet].sort((a, b) => a - b));
+        setSelectedWeekValues([]);
+      } else {
+        const weekSet = new Set<number>();
+        selectedMonths.forEach((m) => {
+          years.forEach((y) => {
+            const weeks = byYearMonthToWeeks.get(`${y}-${m}`) ?? [];
+            weeks.forEach((w) => weekSet.add(w));
+          });
+        });
+        setSelectedWeekValues([...weekSet].sort((a, b) => a - b));
+        setSelectedMonths([]);
+      }
+      setViewMode(newMode);
+    },
+    [years, selectedWeekValues, selectedMonths, byYearWeekToMonth, byYearMonthToWeeks]
+  );
+
   /** For percent rows: one value per week_value; use only the most recent year in the range (e.g. 2026 for 2025-2026). */
   const byWeekPct = useMemo(() => {
     const result = new Map<
@@ -542,6 +711,42 @@ export function PipelineAnalysisView({
   }, [years, byYearMonth]);
 
   const pipelineLoCountChartData = isMonthMode ? pipelineLoCountChartDataMonth : pipelineLoCountChartDataWeek;
+
+  /** Treasury YoY chart data: one point per week (or month), with per-year series for 10-Yr Treasury and 30yr Rate. */
+  const treasuryYoYChartData = useMemo(() => {
+    if (treasuryChartData.length === 0 || years.length === 0) return [];
+    const byYearWeek = new Map<string, { yield: number; weightedAvgRate30yr: number | null }>();
+    const byYearMonth = new Map<string, { yield: number; weightedAvgRate30yr: number | null }>();
+    for (const row of treasuryChartData) {
+      const meta = dateToTreasuryMeta.get(row.date);
+      if (!meta) continue;
+      const { yield: y } = row;
+      const wr = row.weightedAvgRate30yr;
+      byYearWeek.set(`${meta.year}-${meta.week_value}`, { yield: y, weightedAvgRate30yr: wr });
+      byYearMonth.set(`${meta.year}-${meta.month}`, { yield: y, weightedAvgRate30yr: wr });
+    }
+    if (isMonthMode) {
+      return MONTH_LABELS.map((label, i) => {
+        const month = i + 1;
+        const point: Record<string, number | string | null> = { periodLabel: label, month };
+        years.forEach((y) => {
+          const v = byYearMonth.get(`${y}-${month}`);
+          point[`${y} 10-Yr Treasury`] = v?.yield ?? null;
+          point[`${y} 30yr Rate`] = v?.weightedAvgRate30yr ?? null;
+        });
+        return point;
+      });
+    }
+    return weekValues.map((w) => {
+      const point: Record<string, number | string | null> = { week: w, weekLabel: ordinal(w) };
+      years.forEach((y) => {
+        const v = byYearWeek.get(`${y}-${w}`);
+        point[`${y} 10-Yr Treasury`] = v?.yield ?? null;
+        point[`${y} 30yr Rate`] = v?.weightedAvgRate30yr ?? null;
+      });
+      return point;
+    });
+  }, [treasuryChartData, years, dateToTreasuryMeta, isMonthMode, weekValues]);
 
   /** For month table/chart: do we have any first-Monday data for the selected years? */
   const hasMonthData = useMemo(
@@ -819,7 +1024,7 @@ export function PipelineAnalysisView({
             </div>
             <div className="flex items-center gap-2">
               <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">View</label>
-              <Select value={viewMode} onValueChange={(v) => setViewMode(v as PipelineViewMode)}>
+              <Select value={viewMode} onValueChange={(v) => handleViewModeChange(v as PipelineViewMode)}>
                 <SelectTrigger className="w-[180px]">
                   <SelectValue />
                 </SelectTrigger>
@@ -843,29 +1048,45 @@ export function PipelineAnalysisView({
                 </SelectContent>
               </Select>
               {viewMode === "week" && selectedWeekValues.length > 0 && (
-                <span className="inline-flex items-center gap-1 rounded-md bg-sky-100 dark:bg-sky-900/40 px-2 py-0.5 text-xs">
+                <span className="inline-flex items-center gap-1 rounded-md bg-sky-100 dark:bg-sky-900/40 px-2 py-0.5 text-sm">
+                  <span className="text-muted-foreground whitespace-nowrap">
+                    Selected {snapshotDayLabel}:
+                  </span>
                   {selectedWeekValues.sort((a, b) => a - b).map((w) => ordinal(w)).join(", ")}
-                  <button
-                    type="button"
-                    onClick={() => setSelectedWeekValues([])}
-                    className="p-0.5 rounded hover:bg-sky-200 dark:hover:bg-sky-800"
-                    aria-label="Clear week filter"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
+                  <UITooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedWeekValues([])}
+                        className="p-0.5 rounded hover:bg-sky-200 dark:hover:bg-sky-800"
+                        aria-label="Clear week filter"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">Clear Selection</TooltipContent>
+                  </UITooltip>
                 </span>
               )}
               {viewMode === "month" && selectedMonths.length > 0 && (
-                <span className="inline-flex items-center gap-1 rounded-md bg-sky-100 dark:bg-sky-900/40 px-2 py-0.5 text-xs">
+                <span className="inline-flex items-center gap-1 rounded-md bg-sky-100 dark:bg-sky-900/40 px-2 py-0.5 text-sm">
+                  <span className="text-muted-foreground whitespace-nowrap">
+                    Selected Months:
+                  </span>
                   {selectedMonths.sort((a, b) => a - b).map((m) => MONTH_LABELS[m - 1]).join(", ")}
-                  <button
-                    type="button"
-                    onClick={() => setSelectedMonths([])}
-                    className="p-0.5 rounded hover:bg-sky-200 dark:hover:bg-sky-800"
-                    aria-label="Clear month filter"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
+                  <UITooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedMonths([])}
+                        className="p-0.5 rounded hover:bg-sky-200 dark:hover:bg-sky-800"
+                        aria-label="Clear month filter"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">Clear Selection</TooltipContent>
+                  </UITooltip>
                 </span>
               )}
             </div>
@@ -1059,7 +1280,7 @@ export function PipelineAnalysisView({
             </div>
           )}
 
-          <Tabs value={dataViewTab} onValueChange={(v) => setDataViewTab(v as "table" | "chart" | "loCountChart" | "treasury10y")} className="w-full">
+          <Tabs value={dataViewTab} onValueChange={(v) => setDataViewTab(v as "table" | "chart" | "loCountChart" | "treasury10y" | "treasury10yYoY")} className="w-full">
             <div className="flex items-center justify-between gap-4 mt-2">
               <TabsList className={cn("bg-muted p-0.5 rounded-lg")}>
                 <TabsTrigger value="table" className="rounded-md gap-1.5">
@@ -1077,6 +1298,10 @@ export function PipelineAnalysisView({
                 <TabsTrigger value="treasury10y" className="rounded-md gap-1.5">
                   <TrendingUp className="h-3.5 w-3.5" />
                   10-Yr Treasury
+                </TabsTrigger>
+                <TabsTrigger value="treasury10yYoY" className="rounded-md gap-1.5">
+                  <TrendingUp className="h-3.5 w-3.5" />
+                  10-Yr Treasury Year Over Year
                 </TabsTrigger>
               </TabsList>
               {dataViewTab === "table" && (
@@ -1847,16 +2072,19 @@ export function PipelineAnalysisView({
                 </div>
               )}
               {!treasury10yLoading && !treasury10yError && treasuryChartData.length > 0 && (
-                <div className="rounded-md border bg-card p-4" style={{ minHeight: 440 }}>
+                <div className="rounded-md border bg-card pt-4 px-4 pb-2" style={{ minHeight: 440 }}>
                   <p className="text-sm font-medium text-foreground mb-3">
                     {isMonthMode
                       ? "10-Year Treasury Yield (FRED DGS10) — by month (first snapshot per month)"
                       : `10-Year Treasury Yield (FRED DGS10) — by week (${snapshotDayLabel} snapshots)`}
                   </p>
+                  {pipeline30yrLoading && (
+                    <p className="text-xs text-muted-foreground mb-2">Loading 30-year fixed weighted average rate…</p>
+                  )}
                   <ResponsiveContainer width="100%" height={420}>
                     <ComposedChart
                       data={treasuryChartData}
-                      margin={{ top: 12, right: 12, left: 12, bottom: 12 }}
+                      margin={{ top: 12, right: 12, left: 12, bottom: 16 }}
                     >
                       <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
                       <XAxis
@@ -1871,9 +2099,13 @@ export function PipelineAnalysisView({
                         label={{ value: "Yield %", angle: -90, position: "insideLeft", fontSize: 11 }}
                       />
                       <Tooltip
-                        formatter={(value: number) => [`${value.toFixed(2)}%`, "10-Yr Treasury"]}
+                        formatter={(value: number | null, name: string) => [
+                          value != null && Number.isFinite(value) ? `${Number(value).toFixed(2)}%` : "—",
+                          name,
+                        ]}
                         labelFormatter={(label) => label}
                       />
+                      <Legend wrapperStyle={{ paddingTop: 16 }} />
                       <Line
                         type="monotone"
                         dataKey="yield"
@@ -1883,11 +2115,119 @@ export function PipelineAnalysisView({
                         dot={{ r: 3 }}
                         connectNulls
                       />
+                      <Line
+                        type="monotone"
+                        dataKey="weightedAvgRate30yr"
+                        name="30 Year Fixed Weighted Average Rate"
+                        stroke="#f97316"
+                        strokeWidth={2}
+                        dot={{ r: 3 }}
+                        connectNulls
+                      />
                     </ComposedChart>
                   </ResponsiveContainer>
                 </div>
               )}
               {!treasury10yLoading && !treasury10yError && treasuryChartData.length === 0 && (from && to) && (
+                <div className="text-muted-foreground text-sm py-12 text-center rounded-md border">
+                  No treasury data for the selected year range or no snapshot dates match. Select a year range and ensure pipeline snapshots exist.
+                </div>
+              )}
+              {!treasury10yLoading && !treasury10yError && (!from || !to) && (
+                <div className="text-muted-foreground text-sm py-12 text-center rounded-md border">
+                  Select a year range to load 10-Year Treasury data.
+                </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="treasury10yYoY" className="mt-3">
+              {!treasury10yLoading && !treasury10yError && treasuryYoYChartData.length > 0 && years.length >= 1 && (
+                <div className="rounded-md border bg-card pt-4 px-4 pb-2" style={{ minHeight: 440 }}>
+                  <p className="text-sm font-medium text-foreground mb-3">
+                    {isMonthMode
+                      ? "10-Year Treasury & 30yr Rate Year Over Year — by month"
+                      : `10-Year Treasury & 30yr Rate Year Over Year — by week (${snapshotDayLabel} snapshots)`}
+                  </p>
+                  <ResponsiveContainer width="100%" height={420}>
+                    <ComposedChart
+                      data={treasuryYoYChartData}
+                      margin={{ top: 12, right: 12, left: 12, bottom: 28 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
+                      <XAxis
+                        dataKey={chartXKey}
+                        tick={{ fontSize: 11 }}
+                        label={{ value: isMonthMode ? "Month" : "Week", position: "insideBottom", offset: -8, fontSize: 12 }}
+                      />
+                      <YAxis
+                        width={48}
+                        tick={{ fontSize: 10 }}
+                        tickFormatter={(v) => `${v}%`}
+                        label={{ value: "Yield %", angle: -90, position: "insideLeft", fontSize: 11 }}
+                      />
+                      <Tooltip
+                        content={({ active, payload }) => {
+                          if (!active || !payload?.length) return null;
+                          const p = payload[0]?.payload as Record<string, unknown>;
+                          if (!p) return null;
+                          const title = isMonthMode ? (p.periodLabel as string) : `${p.weekLabel} ${snapshotDayLabel}`;
+                          return (
+                            <div className="rounded-lg border border-border bg-background px-3 py-2 shadow-md text-xs">
+                              <p className="font-medium text-foreground mb-1.5">{title}</p>
+                              {years.map((y) => (
+                                <div key={y} className="space-y-0.5 mb-1">
+                                  <div className="flex justify-between gap-4">
+                                    <span className="text-muted-foreground">{y} 10-Yr Treasury</span>
+                                    <span className="font-medium tabular-nums">
+                                      {p[`${y} 10-Yr Treasury`] != null && Number.isFinite(p[`${y} 10-Yr Treasury`])
+                                        ? `${Number(p[`${y} 10-Yr Treasury`]).toFixed(2)}%`
+                                        : "—"}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between gap-4">
+                                    <span className="text-muted-foreground">{y} 30yr Rate</span>
+                                    <span className="font-medium tabular-nums">
+                                      {p[`${y} 30yr Rate`] != null && Number.isFinite(p[`${y} 30yr Rate`])
+                                        ? `${Number(p[`${y} 30yr Rate`]).toFixed(2)}%`
+                                        : "—"}
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        }}
+                      />
+                      <Legend wrapperStyle={{ paddingTop: 16 }} formatter={(value) => value} />
+                      {years.map((y, i) => (
+                        <Line
+                          key={`${y}-treasury`}
+                          type="monotone"
+                          dataKey={`${y} 10-Yr Treasury`}
+                          name={`${y} 10-Yr Treasury`}
+                          stroke={TREASURY_YOY_COLORS[i * 2]}
+                          strokeWidth={2}
+                          dot={{ r: 3 }}
+                          connectNulls
+                        />
+                      ))}
+                      {years.map((y, i) => (
+                        <Line
+                          key={`${y}-30yr`}
+                          type="monotone"
+                          dataKey={`${y} 30yr Rate`}
+                          name={`${y} 30yr Rate`}
+                          stroke={TREASURY_YOY_COLORS[i * 2 + 1]}
+                          strokeWidth={2}
+                          dot={{ r: 3 }}
+                          connectNulls
+                        />
+                      ))}
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+              {!treasury10yLoading && !treasury10yError && (treasuryYoYChartData.length === 0 || years.length < 1) && (from && to) && (
                 <div className="text-muted-foreground text-sm py-12 text-center rounded-md border">
                   No treasury data for the selected year range or no snapshot dates match. Select a year range and ensure pipeline snapshots exist.
                 </div>

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { TopTieringLayout } from "@/components/layout/TopTieringLayout";
 import { TopTieringTopBar } from "@/components/layout/TopTieringTopBar";
 import {
@@ -35,11 +35,11 @@ import {
   DEFAULT_SALES_SCORECARD_MILESTONE_COLUMNS,
   MAX_MILESTONE_DATES,
 } from "@/components/widgets/components/SalesScorecardMilestoneDatesModal";
+import { useSalesScorecardOverviewMilestoneDates } from "@/hooks/useSalesScorecardOverviewMilestoneDates";
 
 const MEASURE_OPTIONS: { value: SalesScorecardOverviewMeasure; label: string }[] = [
   { value: "volume", label: "Volume" },
   { value: "units", label: "Units" },
-  { value: "wa-interest-rate", label: "WA Interest Rate" },
 ];
 
 const TIME_MEASURE_OPTIONS: { value: SalesScorecardOverviewTimeMeasure; label: string }[] = [
@@ -86,9 +86,6 @@ function getColorForColumn(column: string, index: number): string {
 
 function formatValue(value: number | undefined | null, measure: SalesScorecardOverviewMeasure): string {
   const n = value != null && typeof value === "number" ? value : 0;
-  if (measure === "wa-interest-rate") {
-    return `${Number(n).toFixed(2)}%`;
-  }
   if (measure === "volume") {
     if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
     if (n >= 1_000) return `${(n / 1_000).toFixed(2)}K`;
@@ -146,19 +143,72 @@ const SalesScorecardOverview = () => {
   const { user } = useAuth();
   const tenantId = selectedTenantId || user?.tenant_id || null;
 
-  const [measure, setMeasure] = useState<SalesScorecardOverviewMeasure>("volume");
+  const {
+    milestoneColumns: selectedMilestoneColumns,
+    setMilestoneColumns: setSelectedMilestoneColumns,
+    persistMilestoneColumns,
+    isLoading: milestoneColumnsLoading,
+  } = useSalesScorecardOverviewMilestoneDates();
+
+  const FILTERS_KEY = "cohi-sales-scorecard-overview-filters";
+  const loadFilters = (): Partial<{
+    measure: SalesScorecardOverviewMeasure;
+    timeMeasure: SalesScorecardOverviewTimeMeasure;
+    branch: string;
+    loanOfficer: string;
+    periodSelection: PeriodSelection;
+  }> => {
+    try {
+      const raw = localStorage.getItem(FILTERS_KEY);
+      if (!raw) return {};
+      return JSON.parse(raw) as Partial<{
+        measure: SalesScorecardOverviewMeasure;
+        timeMeasure: SalesScorecardOverviewTimeMeasure;
+        branch: string;
+        loanOfficer: string;
+        periodSelection: PeriodSelection;
+      }>;
+    } catch {
+      return {};
+    }
+  };
+  const savedFilters = loadFilters();
+  const initialMeasure: SalesScorecardOverviewMeasure =
+    savedFilters.measure === "volume" || savedFilters.measure === "units"
+      ? savedFilters.measure
+      : "volume";
+
+  const [measure, setMeasure] = useState<SalesScorecardOverviewMeasure>(initialMeasure);
   const defaultPeriodSelection: PeriodSelection = useMemo(
     () => ({ type: "preset", preset: "ytd", dateRange: computePresetDateRange("ytd") }),
     []
   );
-  const [periodSelection, setPeriodSelection] = useState<PeriodSelection>(defaultPeriodSelection);
-  const [timeMeasure, setTimeMeasure] = useState<SalesScorecardOverviewTimeMeasure>("monthly");
-  const [branch, setBranch] = useState("");
-  const [loanOfficer, setLoanOfficer] = useState("");
-  const [milestoneDatesModalOpen, setMilestoneDatesModalOpen] = useState(false);
-  const [selectedMilestoneColumns, setSelectedMilestoneColumns] = useState<string[]>(
-    () => [...DEFAULT_SALES_SCORECARD_MILESTONE_COLUMNS]
+  const [periodSelection, setPeriodSelection] = useState<PeriodSelection>(
+    savedFilters.periodSelection ?? defaultPeriodSelection
   );
+  const [timeMeasure, setTimeMeasure] = useState<SalesScorecardOverviewTimeMeasure>(
+    savedFilters.timeMeasure ?? "monthly"
+  );
+  const [branch, setBranch] = useState(savedFilters.branch ?? "");
+  const [loanOfficer, setLoanOfficer] = useState(savedFilters.loanOfficer ?? "");
+  const [milestoneDatesModalOpen, setMilestoneDatesModalOpen] = useState(false);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        FILTERS_KEY,
+        JSON.stringify({
+          measure,
+          timeMeasure,
+          branch,
+          loanOfficer,
+          periodSelection,
+        })
+      );
+    } catch {
+      // ignore
+    }
+  }, [measure, timeMeasure, branch, loanOfficer, periodSelection]);
 
   const filters = useMemo(
     () => ({
@@ -511,7 +561,10 @@ const SalesScorecardOverview = () => {
         open={milestoneDatesModalOpen}
         onClose={() => setMilestoneDatesModalOpen(false)}
         selectedColumns={selectedMilestoneColumns}
-        onSave={setSelectedMilestoneColumns}
+        onSave={(cols) => {
+          setSelectedMilestoneColumns(cols);
+          persistMilestoneColumns(cols);
+        }}
         tenantId={tenantId}
       />
     </TopTieringLayout>
