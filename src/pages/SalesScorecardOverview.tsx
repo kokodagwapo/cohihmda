@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
 import {
   useSalesScorecardOverviewData,
   type SalesScorecardOverviewMeasure,
@@ -19,7 +20,7 @@ import type { PeriodSelection, PeriodPreset } from "@/components/ui/DatePeriodPi
 import { computePresetDateRange } from "@/components/ui/DatePeriodPicker";
 import { useTenantStore } from "@/stores/tenantStore";
 import { useAuth } from "@/contexts/AuthContext";
-import { Loader2 } from "lucide-react";
+import { Loader2, CalendarDays } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -29,6 +30,12 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
+import { useWorkflowMilestones } from "@/hooks/useWorkflowMilestones";
+import {
+  SalesScorecardMilestoneDatesModal,
+  DEFAULT_SALES_SCORECARD_MILESTONE_COLUMNS,
+  MAX_MILESTONE_DATES,
+} from "@/components/widgets/components/SalesScorecardMilestoneDatesModal";
 
 const MEASURE_OPTIONS: { value: SalesScorecardOverviewMeasure; label: string }[] = [
   { value: "volume", label: "Volume" },
@@ -66,24 +73,29 @@ function getPeriodLabel(selection: PeriodSelection): string {
   return selection.preset ? PERIOD_LABELS[selection.preset] ?? "Custom" : "Custom";
 }
 
-const STAGE_COLORS = {
-  started: "#1e3a5f",
-  application: "#3b82f6",
-  locked: "#15803d",
-  closed: "#fcd703",
-  funded: "#fc5c17",
+const STAGE_COLORS: Record<string, string> = {
+  started_date: "#1e3a5f",
+  application_date: "#3b82f6",
+  lock_date: "#15803d",
+  closing_date: "#fcd703",
+  funding_date: "#fc5c17",
 };
+const FALLBACK_COLORS = ["#6366f1", "#8b5cf6", "#a855f7", "#d946ef", "#ec4899", "#f43f5e", "#14b8a6", "#0ea5e9"];
+function getColorForColumn(column: string, index: number): string {
+  return STAGE_COLORS[column] ?? FALLBACK_COLORS[index % FALLBACK_COLORS.length];
+}
 
-function formatValue(value: number, measure: SalesScorecardOverviewMeasure): string {
+function formatValue(value: number | undefined | null, measure: SalesScorecardOverviewMeasure): string {
+  const n = value != null && typeof value === "number" ? value : 0;
   if (measure === "wa-interest-rate") {
-    return `${Number(value).toFixed(2)}%`;
+    return `${Number(n).toFixed(2)}%`;
   }
   if (measure === "volume") {
-    if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
-    if (value >= 1_000) return `${(value / 1_000).toFixed(2)}K`;
-    return value.toLocaleString(undefined, { maximumFractionDigits: 0 });
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(2)}K`;
+    return n.toLocaleString(undefined, { maximumFractionDigits: 0 });
   }
-  return value.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  return n.toLocaleString(undefined, { maximumFractionDigits: 0 });
 }
 
 function getMonthStartEnd(monthStr: string): { start: string; end: string } {
@@ -146,6 +158,10 @@ const SalesScorecardOverview = () => {
   const [timeMeasure, setTimeMeasure] = useState<SalesScorecardOverviewTimeMeasure>("monthly");
   const [branch, setBranch] = useState("");
   const [loanOfficer, setLoanOfficer] = useState("");
+  const [milestoneDatesModalOpen, setMilestoneDatesModalOpen] = useState(false);
+  const [selectedMilestoneColumns, setSelectedMilestoneColumns] = useState<string[]>(
+    () => [...DEFAULT_SALES_SCORECARD_MILESTONE_COLUMNS]
+  );
 
   const filters = useMemo(
     () => ({
@@ -155,9 +171,22 @@ const SalesScorecardOverview = () => {
       timeMeasure,
       branch,
       loanOfficer,
+      milestoneColumns: selectedMilestoneColumns,
     }),
-    [measure, periodSelection.dateRange, timeMeasure, branch, loanOfficer]
+    [measure, periodSelection.dateRange, timeMeasure, branch, loanOfficer, selectedMilestoneColumns]
   );
+
+  const { milestones } = useWorkflowMilestones(tenantId);
+  const columnToLabel = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const m of milestones) map[m.column] = m.label;
+    if (!map.started_date) map.started_date = "Started";
+    if (!map.application_date) map.application_date = "Application";
+    if (!map.lock_date) map.lock_date = "Locked";
+    if (!map.closing_date) map.closing_date = "Closed";
+    if (!map.funding_date) map.funding_date = "Funded";
+    return map;
+  }, [milestones]);
 
   const {
     rows,
@@ -169,15 +198,15 @@ const SalesScorecardOverview = () => {
 
   const chartData = useMemo(
     () =>
-      rows.map((r) => ({
-        period: r.periodLabel,
-        "Started": r.started,
-        "Application": r.application,
-        "Locked": r.locked,
-        "Closed": r.closed,
-        "Funded": r.funded,
-      })),
-    [rows]
+      rows.map((r) => {
+        const item: Record<string, string | number> = { period: r.periodLabel };
+        for (const col of selectedMilestoneColumns.slice(0, MAX_MILESTONE_DATES)) {
+          const label = columnToLabel[col] ?? col;
+          item[label] = typeof r[col] === "number" ? r[col] : 0;
+        }
+        return item;
+      }),
+    [rows, selectedMilestoneColumns, columnToLabel]
   );
 
   const canDrillToWeek = timeMeasure === "monthly" || timeMeasure === "quarterly";
@@ -213,7 +242,9 @@ const SalesScorecardOverview = () => {
       const period =
         (typeof raw?.period === "string" ? raw.period : null) ??
         (typeof payload?.period === "string" ? payload.period : null) ??
-        (typeof index === "number" && chartData[index] ? chartData[index].period : null);
+        (typeof index === "number" && chartData[index]
+          ? String(chartData[index].period)
+          : null);
       if (period) handlePeriodClick(period);
     },
     [canDrillToWeek, canDrillToDay, handlePeriodClick, chartData]
@@ -334,6 +365,18 @@ const SalesScorecardOverview = () => {
                     </SelectContent>
                   </Select>
                 </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-9 gap-1.5"
+                    onClick={() => setMilestoneDatesModalOpen(true)}
+                  >
+                    <CalendarDays className="h-4 w-4" />
+                    Milestone Dates
+                  </Button>
+                </div>
               </div>
 
               {error && (
@@ -356,26 +399,16 @@ const SalesScorecardOverview = () => {
                       </h2>
                       {chartData.length > 0 && (
                         <ul className="flex flex-wrap items-center justify-center gap-6 mt-2 text-xs text-slate-600 dark:text-slate-400 list-none p-0 m-0">
-                          <li className="flex items-center gap-1.5">
-                            <span className="inline-block w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: STAGE_COLORS.started }} aria-hidden />
-                            <span>Started</span>
-                          </li>
-                          <li className="flex items-center gap-1.5">
-                            <span className="inline-block w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: STAGE_COLORS.application }} aria-hidden />
-                            <span>Application</span>
-                          </li>
-                          <li className="flex items-center gap-1.5">
-                            <span className="inline-block w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: STAGE_COLORS.locked }} aria-hidden />
-                            <span>Locked</span>
-                          </li>
-                          <li className="flex items-center gap-1.5">
-                            <span className="inline-block w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: STAGE_COLORS.closed }} aria-hidden />
-                            <span>Closed</span>
-                          </li>
-                          <li className="flex items-center gap-1.5">
-                            <span className="inline-block w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: STAGE_COLORS.funded }} aria-hidden />
-                            <span>Funded</span>
-                          </li>
+                          {selectedMilestoneColumns.slice(0, MAX_MILESTONE_DATES).map((col, idx) => (
+                            <li key={col} className="flex items-center gap-1.5">
+                              <span
+                                className="inline-block w-3 h-3 rounded-sm shrink-0"
+                                style={{ backgroundColor: getColorForColumn(col, idx) }}
+                                aria-hidden
+                              />
+                              <span>{columnToLabel[col] ?? col}</span>
+                            </li>
+                          ))}
                         </ul>
                       )}
                     </div>
@@ -413,46 +446,20 @@ const SalesScorecardOverview = () => {
                                 boxShadow: "0 1px 3px 0 rgb(0 0 0 / 0.08)",
                               }}
                             />
-                            <Bar
-                              dataKey="Started"
-                              fill={STAGE_COLORS.started}
-                              name="Started"
-                              radius={[0, 2, 2, 0]}
-                              cursor={canDrillToWeek || canDrillToDay ? "pointer" : undefined}
-                              onClick={handleBarClick}
-                            />
-                            <Bar
-                              dataKey="Application"
-                              fill={STAGE_COLORS.application}
-                              name="Application"
-                              radius={[0, 2, 2, 0]}
-                              cursor={canDrillToWeek || canDrillToDay ? "pointer" : undefined}
-                              onClick={handleBarClick}
-                            />
-                            <Bar
-                              dataKey="Locked"
-                              fill={STAGE_COLORS.locked}
-                              name="Locked"
-                              radius={[0, 2, 2, 0]}
-                              cursor={canDrillToWeek || canDrillToDay ? "pointer" : undefined}
-                              onClick={handleBarClick}
-                            />
-                            <Bar
-                              dataKey="Closed"
-                              fill={STAGE_COLORS.closed}
-                              name="Closed"
-                              radius={[0, 2, 2, 0]}
-                              cursor={canDrillToWeek || canDrillToDay ? "pointer" : undefined}
-                              onClick={handleBarClick}
-                            />
-                            <Bar
-                              dataKey="Funded"
-                              fill={STAGE_COLORS.funded}
-                              name="Funded"
-                              radius={[0, 2, 2, 0]}
-                              cursor={canDrillToWeek || canDrillToDay ? "pointer" : undefined}
-                              onClick={handleBarClick}
-                            />
+                            {selectedMilestoneColumns.slice(0, MAX_MILESTONE_DATES).map((col, idx) => {
+                              const label = columnToLabel[col] ?? col;
+                              return (
+                                <Bar
+                                  key={col}
+                                  dataKey={label}
+                                  fill={getColorForColumn(col, idx)}
+                                  name={label}
+                                  radius={[0, 2, 2, 0]}
+                                  cursor={canDrillToWeek || canDrillToDay ? "pointer" : undefined}
+                                  onClick={handleBarClick}
+                                />
+                              );
+                            })}
                           </BarChart>
                         </ResponsiveContainer>
                       )}
@@ -468,21 +475,14 @@ const SalesScorecardOverview = () => {
                               <th className="text-left py-2.5 px-3 font-medium text-slate-700 dark:text-slate-300">
                                 Period
                               </th>
-                              <th className="text-right py-2.5 px-3 font-medium text-slate-700 dark:text-slate-300">
-                                Started
-                              </th>
-                              <th className="text-right py-2.5 px-3 font-medium text-slate-700 dark:text-slate-300">
-                                Application
-                              </th>
-                              <th className="text-right py-2.5 px-3 font-medium text-slate-700 dark:text-slate-300">
-                                Locked
-                              </th>
-                              <th className="text-right py-2.5 px-3 font-medium text-slate-700 dark:text-slate-300">
-                                Closed
-                              </th>
-                              <th className="text-right py-2.5 px-3 font-medium text-slate-700 dark:text-slate-300">
-                                Funded
-                              </th>
+                              {selectedMilestoneColumns.slice(0, MAX_MILESTONE_DATES).map((col) => (
+                                <th
+                                  key={col}
+                                  className="text-right py-2.5 px-3 font-medium text-slate-700 dark:text-slate-300"
+                                >
+                                  {columnToLabel[col] ?? col}
+                                </th>
+                              ))}
                             </tr>
                           </thead>
                           <tbody>
@@ -499,26 +499,22 @@ const SalesScorecardOverview = () => {
                                   tabIndex={isClickable ? 0 : undefined}
                                   onKeyDown={(e) => isClickable && (e.key === "Enter" || e.key === " ") && handlePeriodClick(r.periodLabel)}
                                 >
-                                <td className="py-2 px-3 text-slate-700 dark:text-slate-300 font-medium">
-                                  {r.periodLabel}
-                                </td>
-                                <td className="text-right py-2 px-3 text-slate-600 dark:text-slate-400 tabular-nums">
-                                  {formatValue(r.started, measure)}
-                                </td>
-                                <td className="text-right py-2 px-3 text-slate-600 dark:text-slate-400 tabular-nums">
-                                  {formatValue(r.application, measure)}
-                                </td>
-                                <td className="text-right py-2 px-3 text-slate-600 dark:text-slate-400 tabular-nums">
-                                  {formatValue(r.locked, measure)}
-                                </td>
-                                <td className="text-right py-2 px-3 text-slate-600 dark:text-slate-400 tabular-nums">
-                                  {formatValue(r.closed, measure)}
-                                </td>
-                                <td className="text-right py-2 px-3 text-slate-600 dark:text-slate-400 tabular-nums">
-                                  {formatValue(r.funded, measure)}
-                                </td>
-                              </tr>
-                            );
+                                  <td className="py-2 px-3 text-slate-700 dark:text-slate-300 font-medium">
+                                    {r.periodLabel}
+                                  </td>
+                                  {selectedMilestoneColumns.slice(0, MAX_MILESTONE_DATES).map((col) => (
+                                    <td
+                                      key={col}
+                                      className="text-right py-2 px-3 text-slate-600 dark:text-slate-400 tabular-nums"
+                                    >
+                                      {formatValue(
+                                        typeof r[col] === "number" ? r[col] : 0,
+                                        measure
+                                      )}
+                                    </td>
+                                  ))}
+                                </tr>
+                              );
                             })}
                           </tbody>
                         </table>
@@ -531,6 +527,14 @@ const SalesScorecardOverview = () => {
           </main>
         </div>
       </div>
+
+      <SalesScorecardMilestoneDatesModal
+        open={milestoneDatesModalOpen}
+        onClose={() => setMilestoneDatesModalOpen(false)}
+        selectedColumns={selectedMilestoneColumns}
+        onSave={setSelectedMilestoneColumns}
+        tenantId={tenantId}
+      />
     </div>
   );
 };

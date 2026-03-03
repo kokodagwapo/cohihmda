@@ -2,11 +2,13 @@
  * Sales Scorecard Overview Service
  * Aggregates loans by pipeline stage (started, application, locked, closed, funded) per time period.
  * Used by the Sales Scorecard Overview page.
+ * When milestone_columns are provided, uses those date columns dynamically; otherwise uses the default five.
  */
 
 import pg from "pg";
 import { getVMaxDate } from "../../utils/scorecard-utils.js";
 import { buildDimensionFilterWhereClause } from "../../utils/scorecard-utils.js";
+import { getWorkflowConversionMilestones } from "./workflowConversionService.js";
 
 export type SalesScorecardOverviewMeasure = "volume" | "units" | "wa-interest-rate";
 export type SalesScorecardOverviewTimePeriod =
@@ -24,11 +26,8 @@ export type SalesScorecardOverviewTimePeriod =
 
 export interface SalesScorecardOverviewRow {
   periodLabel: string;
-  started: number;
-  application: number;
-  locked: number;
-  closed: number;
-  funded: number;
+  /** Dynamic keys: column names (e.g. started_date, application_date). Values are measure aggregates. */
+  [key: string]: string | number;
 }
 
 export interface SalesScorecardOverviewFilters {
@@ -161,6 +160,15 @@ function periodExprForColumn(periodExpr: string, dateCol: string): string {
   return periodExpr.replace(/\?/g, dateCol);
 }
 
+/** Default date columns used when milestone_columns is not provided (same as original fixed five). */
+export const DEFAULT_SALES_SCORECARD_MILESTONE_COLUMNS = [
+  "started_date",
+  "application_date",
+  "lock_date",
+  "closing_date",
+  "funding_date",
+] as const;
+
 export async function getSalesScorecardOverview(
   pool: pg.Pool,
   measure: SalesScorecardOverviewMeasure,
@@ -226,6 +234,7 @@ export async function getSalesScorecardOverview(
       "start_date",
       "end_date",
       "time_measure",
+      "milestone_columns",
     ])
   );
 
@@ -235,13 +244,25 @@ export async function getSalesScorecardOverview(
     : measure === "volume"
       ? "COALESCE(SUM(loan_amount), 0)"
       : "COUNT(*)::numeric";
-  const dateColumns = [
-    { key: "started", col: "started_date" },
-    { key: "application", col: "application_date" },
-    { key: "locked", col: "lock_date" },
-    { key: "closed", col: "closing_date" },
-    { key: "funded", col: "funding_date" },
-  ] as const;
+
+  const rawMilestoneParam = queryParams.milestone_columns;
+  const requestedColumns: string[] =
+    rawMilestoneParam == null
+      ? []
+      : Array.isArray(rawMilestoneParam)
+        ? (rawMilestoneParam as string[]).filter(Boolean)
+        : String(rawMilestoneParam)
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
+
+  const allowedMilestones = await getWorkflowConversionMilestones(pool);
+  const allowedColumnSet = new Set(allowedMilestones.map((m) => m.column));
+
+  const dateColumns: { key: string; col: string }[] =
+    requestedColumns.length > 0
+      ? requestedColumns.filter((col) => allowedColumnSet.has(col)).map((col) => ({ key: col, col }))
+      : DEFAULT_SALES_SCORECARD_MILESTONE_COLUMNS.map((col) => ({ key: col, col }));
 
   const allPeriods = new Map<string, SalesScorecardOverviewRow>();
 
@@ -266,12 +287,8 @@ export async function getSalesScorecardOverview(
       if (!rec) {
         rec = {
           periodLabel: label,
-          started: 0,
-          application: 0,
-          locked: 0,
-          closed: 0,
-          funded: 0,
-        };
+          ...Object.fromEntries(dateColumns.map((d) => [d.col, 0])),
+        } as SalesScorecardOverviewRow;
         allPeriods.set(label, rec);
       }
       rec[key] = parseFloat(row.val) || 0;

@@ -42,6 +42,7 @@ import {
   Check,
   Sparkles,
   Calendar,
+  CalendarDays,
   SlidersHorizontal,
   Unlink2,
   Bookmark,
@@ -83,6 +84,7 @@ import { AddWidgetDialog } from '@/components/widgets/components/AddWidgetDialog
 import { LoanDetailColumnsModal } from '@/components/widgets/components/LoanDetailColumnsModal';
 import { PricingDashboardColumnsModal } from '@/components/widgets/components/PricingDashboardColumnsModal';
 import { ActorsTableColumnsModal } from '@/components/widgets/components/ActorsTableColumnsModal';
+import { SalesScorecardMilestoneDatesModal, DEFAULT_SALES_SCORECARD_MILESTONE_COLUMNS } from '@/components/widgets/components/SalesScorecardMilestoneDatesModal';
 import { WidgetDataProvider } from '@/components/widgets/data';
 import { useLoanDetailColumnsStore } from '@/stores/loanDetailColumnsStore';
 import { useTenantStore } from '@/stores/tenantStore';
@@ -1459,6 +1461,7 @@ export function WidgetGroup({
   const [editingItemIdx, setEditingItemIdx] = useState<number | null>(null);
   const [actorsColumnsModalOpen, setActorsColumnsModalOpen] = useState(false);
   const [pricingDashboardColumnsModalOpen, setPricingDashboardColumnsModalOpen] = useState(false);
+  const [salesScorecardMilestoneDatesModalOpen, setSalesScorecardMilestoneDatesModalOpen] = useState(false);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const filtersRestoredRef = useRef(false);
 
@@ -1599,13 +1602,14 @@ export function WidgetGroup({
     if (sectionType === 'sales-scorecard-overview') {
       if (filters.salesScorecardOverviewMeasure && filters.salesScorecardOverviewMeasure !== 'volume') toSave.salesScorecardOverviewMeasure = filters.salesScorecardOverviewMeasure;
       if (filters.salesScorecardOverviewTimeMeasure && filters.salesScorecardOverviewTimeMeasure !== 'monthly') toSave.salesScorecardOverviewTimeMeasure = filters.salesScorecardOverviewTimeMeasure;
+      if (filters.salesScorecardOverviewMilestoneColumns && filters.salesScorecardOverviewMilestoneColumns.length > 0) toSave.salesScorecardOverviewMilestoneColumns = filters.salesScorecardOverviewMilestoneColumns;
     }
     if (sectionType === 'pricing-dashboard') {
       if (filters.pricingDashboardColumns && filters.pricingDashboardColumns.length > 0) toSave.pricingDashboardColumns = filters.pricingDashboardColumns;
     }
     patchPayload({ savedFilters: Object.keys(toSave).length > 0 ? toSave : undefined });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sectionType, filters.year, filters.dateRange, filters.periodSelection, filters.dateField, filters.applicationType, filters.actorType, filters.branch, filters.loanOfficer, filters.dynamicFilters, filters.workflowPeriodSelection, filters.workflowCalculationType, filters.workflowGrouping, filters.workflowSegments, filters.pipelineAnalysisYearRange, filters.pipelineAnalysisStartDateField, filters.pipelineAnalysisViewMode, filters.pipelineAnalysisPctMetric, filters.pipelineAnalysisSnapshotDay, filters.pipelineAnalysisLoanTypes, filters.pipelineAnalysisLoanPurposes, filters.pipelineAnalysisBranches, filters.salesScorecardOverviewMeasure, filters.salesScorecardOverviewTimeMeasure, filters.pricingDashboardColumns]);
+  }, [sectionType, filters.year, filters.dateRange, filters.periodSelection, filters.dateField, filters.applicationType, filters.actorType, filters.branch, filters.loanOfficer, filters.dynamicFilters, filters.workflowPeriodSelection, filters.workflowCalculationType, filters.workflowGrouping, filters.workflowSegments, filters.pipelineAnalysisYearRange, filters.pipelineAnalysisStartDateField, filters.pipelineAnalysisViewMode, filters.pipelineAnalysisPctMetric, filters.pipelineAnalysisSnapshotDay, filters.pipelineAnalysisLoanTypes, filters.pipelineAnalysisLoanPurposes, filters.pipelineAnalysisBranches, filters.salesScorecardOverviewMeasure, filters.salesScorecardOverviewTimeMeasure, filters.salesScorecardOverviewMilestoneColumns, filters.pricingDashboardColumns]);
 
   // ─── Grid layout ───
   const contentWidth = Math.max(width - 24, MIN_GRID_WIDTH);
@@ -2448,6 +2452,22 @@ export function WidgetGroup({
               );
             })}
 
+            {/* Milestone Dates button (Sales Scorecard Overview only) – before dynamic filters */}
+            {sectionType === 'sales-scorecard-overview' && (
+              <>
+                <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs gap-1.5"
+                  onClick={() => setSalesScorecardMilestoneDatesModalOpen(true)}
+                >
+                  <CalendarDays className="h-3.5 w-3.5" />
+                  Milestone Dates
+                </Button>
+              </>
+            )}
+
             {/* Dynamic (user-added) filters */}
             {(filters.dynamicFilters || []).map((df) => (
               <DynamicDimensionFilter
@@ -2598,6 +2618,20 @@ export function WidgetGroup({
           open={pricingDashboardColumnsModalOpen}
           onClose={() => setPricingDashboardColumnsModalOpen(false)}
           groupId={groupId}
+        />
+      )}
+
+      {/* Sales Scorecard Overview: Milestone Dates modal */}
+      {sectionType === 'sales-scorecard-overview' && (
+        <SalesScorecardMilestoneDatesModal
+          open={salesScorecardMilestoneDatesModalOpen}
+          onClose={() => setSalesScorecardMilestoneDatesModalOpen(false)}
+          selectedColumns={filters.salesScorecardOverviewMilestoneColumns ?? [...DEFAULT_SALES_SCORECARD_MILESTONE_COLUMNS]}
+          onSave={(columns) => {
+            updateFilters(groupId, { salesScorecardOverviewMilestoneColumns: columns });
+            setSalesScorecardMilestoneDatesModalOpen(false);
+          }}
+          tenantId={tenantIdForEdit}
         />
       )}
 

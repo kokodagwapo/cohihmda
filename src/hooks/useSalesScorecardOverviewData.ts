@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
+import { MAX_MILESTONE_DATES } from "@/components/widgets/components/SalesScorecardMilestoneDatesModal";
 
 export type SalesScorecardOverviewMeasure = "volume" | "units" | "wa-interest-rate";
 
@@ -21,11 +22,8 @@ export type SalesScorecardOverviewTimePeriod =
 
 export interface SalesScorecardOverviewRow {
   periodLabel: string;
-  started: number;
-  application: number;
-  locked: number;
-  closed: number;
-  funded: number;
+  /** Dynamic keys: column names (e.g. started_date, application_date). Values are measure aggregates. */
+  [key: string]: string | number;
 }
 
 /** Base time periods shown in the dropdown (excludes drill-only weekly-scoped/daily-scoped) */
@@ -76,6 +74,8 @@ export interface SalesScorecardOverviewFilters {
   scopeEnd?: string;
   /** Extra dimension filters from workbench (dynamic filters); applied as query params */
   dimensionFilters?: SalesScorecardOverviewDimensionFilter[];
+  /** Milestone date columns to include in chart/table (e.g. started_date, application_date). When empty/undefined, backend uses default five. */
+  milestoneColumns?: string[];
 }
 
 export interface UseSalesScorecardOverviewDataResult {
@@ -125,6 +125,11 @@ export function useSalesScorecardOverviewData(
       if (tenantId) params.set("tenant_id", tenantId);
       if (filters.branch) params.set("branch", filters.branch);
       if (filters.loanOfficer) params.set("loan_officer", filters.loanOfficer);
+      if (filters.milestoneColumns?.length) {
+        filters.milestoneColumns.slice(0, MAX_MILESTONE_DATES).forEach((col) =>
+          params.append("milestone_columns", col)
+        );
+      }
       (filters.dimensionFilters ?? []).forEach((df) => {
         if (df.value && df.value !== "all") params.set(df.column, df.value);
       });
@@ -149,6 +154,7 @@ export function useSalesScorecardOverviewData(
     filters.scopeEnd,
     filters.branch,
     filters.loanOfficer,
+    filters.milestoneColumns,
     filters.dimensionFilters,
   ]);
 

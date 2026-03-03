@@ -131,6 +131,8 @@ export interface SectionFilters {
   salesScorecardOverviewMeasure?: 'volume' | 'units' | 'wa-interest-rate';
   /** Sales Scorecard Overview: time granularity (quarterly, monthly, weekly, daily) */
   salesScorecardOverviewTimeMeasure?: 'quarterly' | 'monthly' | 'weekly' | 'daily';
+  /** Sales Scorecard Overview: milestone date columns to show (e.g. started_date, application_date). Empty = backend default five. */
+  salesScorecardOverviewMilestoneColumns?: string[];
   /** User-added dynamic filters (column = value conditions) */
   dynamicFilters?: DynamicFilterEntry[];
 }
