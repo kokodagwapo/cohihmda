@@ -160,7 +160,7 @@ const topTieringMenuGroups = {
     items: [
       {
         id: "salesScorecard",
-        label: "Scorecard",
+        label: "Sales Scorecard",
         icon: Target,
         iconColor: "blue" as const,
       },
@@ -172,7 +172,7 @@ const topTieringMenuGroups = {
       },
       {
         id: "salesTrends",
-        label: "Trends",
+        label: "Sales Trends",
         icon: TrendingUp,
         iconColor: "emerald" as const,
       },
@@ -184,13 +184,13 @@ const topTieringMenuGroups = {
     items: [
       {
         id: "operationsScorecard",
-        label: "Scorecard",
+        label: "Operations Scorecard",
         icon: Target,
         iconColor: "blue" as const,
       },
       {
         id: "operationsTrends",
-        label: "Trends",
+        label: "Operations Trends",
         icon: LineChart,
         iconColor: "indigo" as const,
       },

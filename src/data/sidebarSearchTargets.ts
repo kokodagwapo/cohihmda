@@ -21,10 +21,10 @@ export function getSidebarSearchTargets(): SidebarRouteSearchTarget[] {
     { id: 'route:workflowConversion', label: 'Workflow Conversion', group: 'TopTiering', kind: 'route', path: '/workflow-conversion', keywords: ['toptiering', 'top tiering', 'performance'] },
     { id: 'route:highPerformers', label: 'High Performers', group: 'TopTiering', kind: 'route', path: '/high-performers', keywords: ['toptiering', 'top tiering', 'performance'] },
     { id: 'route:loanDetail', label: 'Loan Detail', group: 'TopTiering', kind: 'route', path: '/loan-detail', keywords: ['toptiering', 'top tiering', 'performance'] },
-    { id: 'route:salesScorecard', label: 'Scorecard', group: 'TopTiering', kind: 'route', path: '/sales-scorecard', keywords: ['toptiering', 'top tiering', 'performance'] },
-    { id: 'route:salesTrends', label: 'Trends', group: 'TopTiering', kind: 'route', path: '/sales-trends', keywords: ['toptiering', 'top tiering', 'performance'] },
-    { id: 'route:operationsScorecard', label: 'Scorecard', group: 'TopTiering', kind: 'route', path: '/performance/operation-scorecard', keywords: ['toptiering', 'top tiering', 'performance'] },
-    { id: 'route:operationsTrends', label: 'Trends', group: 'TopTiering', kind: 'route', path: '/performance/operation-scorecard-trends', keywords: ['toptiering', 'top tiering', 'performance'] },
+    { id: 'route:salesScorecard', label: 'Sales Scorecard', group: 'TopTiering', kind: 'route', path: '/sales-scorecard', keywords: ['toptiering', 'top tiering', 'performance'] },
+    { id: 'route:salesTrends', label: 'Sales Trends', group: 'TopTiering', kind: 'route', path: '/sales-trends', keywords: ['toptiering', 'top tiering', 'performance'] },
+    { id: 'route:operationsScorecard', label: 'Operations Scorecard', group: 'TopTiering', kind: 'route', path: '/performance/operation-scorecard', keywords: ['toptiering', 'top tiering', 'performance'] },
+    { id: 'route:operationsTrends', label: 'Operations Trends', group: 'TopTiering', kind: 'route', path: '/performance/operation-scorecard-trends', keywords: ['toptiering', 'top tiering', 'performance'] },
     { id: 'route:financialModeling', label: 'Financial Modeling Sandbox', group: 'TopTiering', kind: 'route', path: '/performance/financial-modeling-sandbox', keywords: ['toptiering', 'top tiering', 'performance'] },
   ];
 
