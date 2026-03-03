@@ -4231,10 +4231,10 @@ router.get(
  *
  * Weights: Units = 70%, Turn Time = 15%, Loan Complexity = 15%
  *
- * Each actor type uses different milestone dates (from Homestead CoheusConfig.xml TriggerDateFields):
- * - Processor: output = approval_date (Qlik: [Sent To Underwriting] = Log.MS.Date.Approval)
- * - Underwriter: output = closing_date (Qlik: [Sent To Closing] = Fields.748)
- * - Closer: output = disbursement_date (Qlik: [End Date to indicate Loan Closed/Funded] = Fields.1997)
+ * Each actor type uses different milestone dates (see OPERATIONS_ACTOR_CONFIGS in scorecard-utils.ts):
+ * - Processor: output = submitted_to_underwriting_date
+ * - Underwriter: output = closing_date
+ * - Closer: output = funding_date
  *
  * Query Parameters:
  * - actor_type: 'processor' | 'underwriter' | 'closer' (default: 'underwriter')
