@@ -830,10 +830,6 @@ function GridCellWidget({
 }) {
   const [hovered, setHovered] = useState(false);
   const [moveMenuOpen, setMoveMenuOpen] = useState(false);
-  const [loanDetailColumnsModalOpen, setLoanDetailColumnsModalOpen] = useState(false);
-  const { selectedTenantId } = useTenantStore();
-
-  const isLoanDetailTable = item.kind === 'registry' && item.defId === 'loan-detail-table';
 
   const isValid =
     item.kind === 'cohi' ||
@@ -899,18 +895,6 @@ function GridCellWidget({
               aria-label="Edit with Cohi"
             >
               <MessageSquare className="h-3 w-3" />
-            </button>
-          )}
-          {/* Edit columns (only for Loan Detail table) */}
-          {isLoanDetailTable && (
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); setLoanDetailColumnsModalOpen(true); }}
-              className="p-0.5 rounded text-slate-400 hover:text-sky-600 hover:bg-sky-50 dark:hover:text-sky-400 dark:hover:bg-sky-900/30 canvas-interactive transition-colors"
-              title="Edit columns"
-              aria-label="Edit columns"
-            >
-              <Pencil className="h-3 w-3" />
             </button>
           )}
           {/* Move to group popover */}
@@ -997,15 +981,6 @@ function GridCellWidget({
           <GridCellCohiWidget item={item} canvasItemId={itemId} width={width} height={height - 20} dateFilter={dateFilter} dimensionFilters={dimensionFilters} filterSyncEnabled={filterSyncEnabled} onFilterChange={onFilterChange} onVizTypeChange={onVizTypeChange} />
         )}
       </div>
-
-      {isLoanDetailTable && (
-        <LoanDetailColumnsModal
-          open={loanDetailColumnsModalOpen}
-          onClose={() => setLoanDetailColumnsModalOpen(false)}
-          canvasItemId={itemId}
-          tenantId={selectedTenantId}
-        />
-      )}
     </div>
   );
 }
@@ -1461,6 +1436,7 @@ export function WidgetGroup({
   const [editingItemIdx, setEditingItemIdx] = useState<number | null>(null);
   const [actorsColumnsModalOpen, setActorsColumnsModalOpen] = useState(false);
   const [pricingDashboardColumnsModalOpen, setPricingDashboardColumnsModalOpen] = useState(false);
+  const [loanDetailColumnsModalOpen, setLoanDetailColumnsModalOpen] = useState(false);
   const [salesScorecardMilestoneDatesModalOpen, setSalesScorecardMilestoneDatesModalOpen] = useState(false);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const filtersRestoredRef = useRef(false);
@@ -1898,6 +1874,13 @@ export function WidgetGroup({
   const registryCount = items.filter((i) => i.kind === 'registry').length;
   const cohiCount = items.filter((i) => i.kind === 'cohi').length;
   const itemLabel = `${items.length} widget${items.length !== 1 ? 's' : ''}${cohiCount > 0 ? ` (${cohiCount} Cohi)` : ''}`;
+
+  // First Loan Detail table widget's canvas item id (for Edit Columns modal opened from group filter bar)
+  const loanDetailCanvasItemId = useMemo(() => {
+    const idx = items.findIndex((i) => i.kind === 'registry' && (i as { defId?: string }).defId === 'loan-detail-table');
+    if (idx < 0) return null;
+    return `${groupId}__${itemKey(items[idx], idx)}`;
+  }, [items, groupId]);
 
   return (
     <div
@@ -2452,6 +2435,22 @@ export function WidgetGroup({
               );
             })}
 
+            {/* Edit Columns (Loan Detail only) — next to filters like pricing dashboard */}
+            {sectionType === 'loan-detail' && (
+              <>
+                <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => setLoanDetailColumnsModalOpen(true)}
+                >
+                  <SlidersHorizontal className="h-3.5 w-3.5 mr-1" />
+                  Edit Columns
+                </Button>
+              </>
+            )}
+
             {/* Milestone Dates button (Sales Scorecard Overview only) – before dynamic filters */}
             {sectionType === 'sales-scorecard-overview' && (
               <>
@@ -2618,6 +2617,16 @@ export function WidgetGroup({
           open={pricingDashboardColumnsModalOpen}
           onClose={() => setPricingDashboardColumnsModalOpen(false)}
           groupId={groupId}
+        />
+      )}
+
+      {/* Loan Detail columns modal (opened from group filter bar "Edit Columns") */}
+      {sectionType === 'loan-detail' && loanDetailCanvasItemId && (
+        <LoanDetailColumnsModal
+          open={loanDetailColumnsModalOpen}
+          onClose={() => setLoanDetailColumnsModalOpen(false)}
+          canvasItemId={loanDetailCanvasItemId}
+          tenantId={selectedTenantId}
         />
       )}
 

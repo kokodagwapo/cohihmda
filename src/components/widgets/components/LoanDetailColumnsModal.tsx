@@ -1,9 +1,9 @@
 /**
  * Modal to edit Loan Detail table columns (workbench only).
- * Simple two even columns: Column name (text box), Field (dropdown). Long dropdown values truncate with "...".
+ * Column name (text box) + Field dropdown with search and scroll (Popover + Command, like milestone dropdown).
  */
 
-import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, memo, useRef } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -13,19 +13,27 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { X } from 'lucide-react';
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
+import { X, ChevronsUpDown, Check } from 'lucide-react';
 import { useLoanDetailColumnsStore, type SavedLoanDetailColumn } from '@/stores/loanDetailColumnsStore';
 import {
   DEFAULT_LOAN_DETAIL_COLUMNS,
   type ColumnDef,
 } from '@/components/views/LoanDetailView';
+import { useAdditionalFieldColumns } from '@/hooks/useAdditionalFieldColumns';
 import { api } from '@/lib/api';
+import { cn } from '@/lib/utils';
 
 const NONE_FIELD_VALUE = '__none__';
 
@@ -33,13 +41,8 @@ const MODAL_STYLES = `
 .loan-detail-cols-wrap { width: 100%; max-width: 100%; overflow-x: hidden; min-width: 0; }
 .loan-detail-cols-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 0.5rem; align-items: center; width: 100%; min-width: 0; }
 .loan-detail-cols-field { min-width: 0; max-width: 100%; overflow: hidden; }
-.loan-detail-cols-field-trigger { min-width: 0 !important; max-width: 100% !important; overflow: hidden !important; }
+.loan-detail-cols-field-trigger { min-width: 0 !important; max-width: 100% !important; overflow: hidden !important; justify-content: space-between; }
 .loan-detail-cols-field-trigger > span { overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important; display: block !important; min-width: 0 !important; }
-.loan-detail-cols-dropdown { max-width: 280px !important; overflow: hidden; }
-.loan-detail-cols-dropdown [data-radix-select-viewport] { min-width: 0 !important; }
-.loan-detail-cols-dropdown [data-radix-select-item] { min-width: 0; overflow: hidden; }
-.loan-detail-cols-dropdown [data-radix-select-item] > *:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-.loan-detail-cols-dropdown .loan-detail-cols-option-text { display: block !important; max-width: 240px !important; min-width: 0 !important; overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important; }
 `;
 
 function getFallbackFieldOptions(): { value: string; label: string }[] {
@@ -48,7 +51,7 @@ function getFallbackFieldOptions(): { value: string; label: string }[] {
     if (c.field) fields.add(c.field);
   });
   return [
-    { value: NONE_FIELD_VALUE, label: '— None / Calculated' },
+    { value: NONE_FIELD_VALUE, label: 'Calculated Value' },
     ...Array.from(fields).sort().map((name) => ({ value: name, label: name })),
   ];
 }
@@ -72,6 +75,11 @@ const ColumnRow = memo(function ColumnRow({
   onUpdate: (index: number, patch: Partial<SavedLoanDetailColumn>) => void;
   onRemove: (index: number) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const isCalculated = row.field === null;
+  const selectedLabel = isCalculated
+    ? 'Calculated Value'
+    : (row.field ? (fieldOptions.find((o) => o.value === row.field)?.label ?? row.field) : 'Calculated Value');
   return (
     <div className="loan-detail-cols-row gap-2">
       <Input
@@ -81,21 +89,53 @@ const ColumnRow = memo(function ColumnRow({
         className="min-w-0"
       />
       <div className="loan-detail-cols-field min-w-0">
-        <Select
-          value={row.field ?? NONE_FIELD_VALUE}
-          onValueChange={(v) => onUpdate(index, { field: v === NONE_FIELD_VALUE ? null : v })}
-        >
-          <SelectTrigger className="loan-detail-cols-field-trigger h-9 min-w-0 w-full">
-            <SelectValue placeholder="— None / Calculated" />
-          </SelectTrigger>
-          <SelectContent className="loan-detail-cols-dropdown">
-            {fieldOptions.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value} className="min-w-0">
-                <span className="loan-detail-cols-option-text truncate block">{opt.label}</span>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <Popover open={open} onOpenChange={isCalculated ? () => {} : setOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              role="combobox"
+              aria-expanded={open}
+              disabled={isCalculated}
+              className={cn(
+                'loan-detail-cols-field-trigger h-9 min-w-0 w-full font-normal',
+                isCalculated && 'cursor-not-allowed opacity-60',
+              )}
+            >
+              <span className="truncate">{selectedLabel}</span>
+              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-[280px] p-0" align="start">
+            <Command>
+              <CommandInput placeholder="Search field..." />
+              <CommandList className="max-h-[300px]">
+                <CommandEmpty>No field found.</CommandEmpty>
+                <CommandGroup>
+                  {fieldOptions.map((opt) => (
+                    <CommandItem
+                      key={opt.value}
+                      value={opt.label}
+                      onSelect={() => {
+                        onUpdate(index, { field: opt.value === NONE_FIELD_VALUE ? null : opt.value });
+                        setOpen(false);
+                      }}
+                    >
+                      <Check
+                        className={cn(
+                          'mr-2 h-4 w-4 shrink-0',
+                          (row.field === null && opt.value === NONE_FIELD_VALUE) || row.field === opt.value
+                            ? 'opacity-100'
+                            : 'opacity-0',
+                        )}
+                      />
+                      <span className="truncate">{opt.label}</span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
       </div>
       <button
         type="button"
@@ -124,34 +164,99 @@ export function LoanDetailColumnsModal({
 }: LoanDetailColumnsModalProps) {
   const getColumns = useLoanDetailColumnsStore((s) => s.getColumns);
   const setColumns = useLoanDetailColumnsStore((s) => s.setColumns);
+  const { columns: additionalColumns } = useAdditionalFieldColumns(tenantId ?? null);
 
   const [draft, setDraft] = useState<SavedLoanDetailColumn[]>([]);
   const [fieldOptions, setFieldOptions] = useState<{ value: string; label: string }[]>(() => getFallbackFieldOptions());
+  const listWrapRef = useRef<HTMLDivElement>(null);
+
+  const defaultColumnsWithAdditional = useMemo(
+    () =>
+      DEFAULT_LOAN_DETAIL_COLUMNS.concat(
+        additionalColumns.filter((c) => c.field && !DEFAULT_LOAN_DETAIL_COLUMNS.some((d) => d.field === c.field)),
+      ),
+    [additionalColumns],
+  );
 
   useEffect(() => {
     if (open) {
       const saved = getColumns(canvasItemId);
-      const defaultSaved = DEFAULT_LOAN_DETAIL_COLUMNS.map(toSaved);
+      const defaultSaved = defaultColumnsWithAdditional.map(toSaved);
       setDraft(saved?.length ? saved.map((c) => ({ ...c })) : defaultSaved.map((c) => ({ ...c })));
     }
-  }, [open, canvasItemId, getColumns]);
+  }, [open, canvasItemId, getColumns, defaultColumnsWithAdditional]);
 
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    const qs = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : '';
-    api
-      .request<{ columns: { name: string }[] }>(`/api/loans/schema${qs}`)
-      .then((data) => {
-        if (cancelled || !data?.columns?.length) return;
-        setFieldOptions([
-          { value: NONE_FIELD_VALUE, label: '— None / Calculated' },
-          ...data.columns.map((c) => ({ value: c.name, label: c.name })),
-        ]);
+
+    type SchemaCol = { name: string; displayName?: string };
+    type MappingRow = { coheusAlias: string; defaultEncompassFieldId: string | null; postgresqlColumn: string };
+    type SwapRow = { coheusAlias: string; encompassFieldId: string };
+    type AdditionalFieldRow = { columnName: string; displayName: string; losFieldId?: string; columnCreated?: boolean };
+
+    const tenantParam = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : '';
+
+    Promise.all([
+      api.request<{ columns: SchemaCol[] }>(`/api/loans/schema${tenantParam}`),
+      api.request<{ mappings: MappingRow[] }>('/api/encompass/field-mappings').catch(() => ({ mappings: [] })),
+      tenantId
+        ? api
+            .request<{ connections: { id: string; los_type?: string }[] }>(`/api/los/connections${tenantParam}`)
+            .then((r) => r.connections?.find((c) => c.los_type === 'encompass')?.id ?? null)
+            .catch(() => null)
+        : Promise.resolve(null),
+      tenantId
+        ? api.request<{ fields: AdditionalFieldRow[] }>(`/api/tenant-config/additional-fields${tenantParam}`).catch(() => ({ fields: [] }))
+        : Promise.resolve({ fields: [] as AdditionalFieldRow[] }),
+    ])
+      .then(async ([schemaRes, mappingsRes, firstEncompassConnectionId, additionalRes]) => {
+        if (cancelled) return;
+        const columns = schemaRes?.columns ?? [];
+        const mappings = mappingsRes?.mappings ?? [];
+        const additionalFields = additionalRes?.fields ?? [];
+
+        const encompassIdByColumn = new Map<string, string>();
+
+        for (const m of mappings) {
+          if (m.defaultEncompassFieldId) encompassIdByColumn.set(m.postgresqlColumn, m.defaultEncompassFieldId);
+        }
+
+        if (firstEncompassConnectionId && tenantId) {
+          try {
+            const swapsRes = await api.request<{ swaps: SwapRow[] }>(
+              `/api/encompass/field-swaps/${firstEncompassConnectionId}${tenantParam}`,
+            );
+            const swaps = swapsRes?.swaps ?? [];
+            const aliasToSwap = new Map(swaps.map((s) => [s.coheusAlias, s.encompassFieldId]));
+            for (const m of mappings) {
+              const swapped = aliasToSwap.get(m.coheusAlias);
+              if (swapped) encompassIdByColumn.set(m.postgresqlColumn, swapped);
+            }
+          } catch {
+            // use defaults only
+          }
+        }
+
+        for (const f of additionalFields) {
+          if (f.columnCreated && f.losFieldId) encompassIdByColumn.set(f.columnName, f.losFieldId);
+        }
+
+        const options: { value: string; label: string }[] = [
+          { value: NONE_FIELD_VALUE, label: 'Calculated Value' },
+          ...columns.map((c) => {
+            const title = c.displayName ?? c.name;
+            const encompassId = encompassIdByColumn.get(c.name);
+            const label = encompassId ? `${title} (${encompassId})` : title;
+            return { value: c.name, label };
+          }),
+        ];
+        setFieldOptions(options);
       })
       .catch(() => {
         if (!cancelled) setFieldOptions(getFallbackFieldOptions());
       });
+
     return () => { cancelled = true; };
   }, [open, tenantId]);
 
@@ -172,11 +277,16 @@ export function LoanDetailColumnsModal({
       ...prev,
       { id: `custom_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`, label: '', field: null },
     ]);
+    // Scroll list to bottom after the new row is in the DOM
+    setTimeout(() => {
+      const el = listWrapRef.current;
+      if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    }, 0);
   }, []);
 
   const resetToDefault = useCallback(() => {
-    setDraft(DEFAULT_LOAN_DETAIL_COLUMNS.map(toSaved).map((c) => ({ ...c })));
-  }, []);
+    setDraft(defaultColumnsWithAdditional.map(toSaved).map((c) => ({ ...c })));
+  }, [defaultColumnsWithAdditional]);
 
   const handleSave = useCallback(() => {
     const valid = draft.filter((r) => r.label.trim() !== '');
@@ -201,7 +311,10 @@ export function LoanDetailColumnsModal({
           Edit the column name and choose which data field populates it. Long field names are truncated with "...".
         </p>
 
-        <div className="loan-detail-cols-wrap flex flex-col flex-1 min-h-0 overflow-y-auto border rounded-lg p-3 space-y-2">
+        <div
+          ref={listWrapRef}
+          className="loan-detail-cols-wrap flex flex-col flex-1 min-h-0 overflow-y-auto border rounded-lg p-3 space-y-2"
+        >
           <div className="loan-detail-cols-row text-xs font-medium text-muted-foreground">
             <span>Column name</span>
             <span>Field</span>

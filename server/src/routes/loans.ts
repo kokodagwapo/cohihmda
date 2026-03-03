@@ -850,7 +850,9 @@ router.get(
       const whereClause =
         conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-      const selectColumns = [
+      // Build desired columns: fixed list + additional_field_definitions (column_created = true).
+      // Then restrict to columns that actually exist on this tenant's public.loans so we never SELECT a missing column.
+      let selectColumnsList: string[] = [
         "loan_id",
         "loan_number",
         "loan_amount",
@@ -912,7 +914,52 @@ router.get(
         "fees_loan_discount_fee_borr",
         "rush_closing_on_file",
         "scrub_rating_of_file",
-      ].join(", ");
+      ];
+      try {
+        const additionalColsResult = await tenantPool.query(
+          `SELECT column_name FROM additional_field_definitions WHERE column_created = TRUE ORDER BY sort_order, display_name`,
+          [],
+        );
+        const validIdentifier = /^[a-z_][a-z0-9_]*$/i;
+        for (const row of additionalColsResult.rows) {
+          const col = row?.column_name;
+          if (typeof col === "string" && validIdentifier.test(col) && !selectColumnsList.includes(col)) {
+            selectColumnsList.push(col);
+          }
+        }
+      } catch (additionalColErr: any) {
+        logWarn("Loan detail-list: additional_field_definitions not available, using fixed columns only", {
+          error: additionalColErr?.message,
+          hint: "Run tenant migrations so additional fields appear in Loan Detail.",
+        });
+      }
+
+      // Restrict to columns that exist on this tenant's public.loans (tenant schemas can differ)
+      let existingColumns: Set<string>;
+      try {
+        const schemaResult = await tenantPool.query(
+          `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'loans'`,
+          [],
+        );
+        existingColumns = new Set(schemaResult.rows.map((r: { column_name: string }) => r.column_name));
+      } catch (schemaErr: any) {
+        logWarn("Loan detail-list: could not read loans schema, using requested columns", {
+          error: schemaErr?.message,
+        });
+        existingColumns = new Set(selectColumnsList);
+      }
+      const selectColumnsFiltered = selectColumnsList.filter((col) => existingColumns.has(col));
+      if (selectColumnsFiltered.length === 0) {
+        return res.status(503).json({
+          error: "Loan detail list unavailable: no valid columns on public.loans.",
+          retry: false,
+        });
+      }
+      const missingCols = selectColumnsList.filter((col) => !existingColumns.has(col));
+      if (missingCols.length > 0) {
+        logDebug("Loan detail-list: skipping columns not present on tenant loans", { missing: missingCols });
+      }
+      const selectColumns = selectColumnsFiltered.join(", ");
 
       const query = `
         SELECT ${selectColumns}

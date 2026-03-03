@@ -11,6 +11,8 @@ import {
   type LoanDetailRow,
   type LoanDetailListResponse,
 } from "@/hooks/useLoanDetailData";
+import { useAdditionalFieldColumns } from "@/hooks/useAdditionalFieldColumns";
+import { useTenantStore } from "@/stores/tenantStore";
 import { useTheme } from "@/components/theme-provider";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -91,7 +93,6 @@ export const DEFAULT_LOAN_DETAIL_COLUMNS: ColumnDef[] = [
   { id: "uw_final_approval_date", label: "UW Final Approval Date", field: "uw_final_approval_date" },
   { id: "uw_suspended_date", label: "UW Suspended Date", field: "uw_suspended_date" },
   { id: "uw_denied_date", label: "UW Denied Date", field: "uw_denied_date" },
-  { id: "denial_date", label: "Denial Date", field: "denial_date" },
   { id: "investor_lock_date", label: "Investor Lock Date", field: "investor_lock_date" },
   { id: "locked_flag", label: "Locked Flag", field: null },
   { id: "lock_expiration_date", label: "Lock Expiration Date", field: "lock_expiration_date" },
@@ -103,24 +104,19 @@ export const DEFAULT_LOAN_DETAIL_COLUMNS: ColumnDef[] = [
   { id: "closing_date", label: "Closing Date", field: "closing_date" },
   { id: "funding_date", label: "Funding Date", field: "funding_date" },
   { id: "investor_purchase_date", label: "Investor Purchase Date", field: "investor_purchase_date" },
-  { id: "shipped_date", label: "Shipped Date", field: "shipped_date" },
-  { id: "subject_property_type_fannie_mae", label: "Subject Property Type Fannie Mae", field: "subject_property_type_fannie_mae" },
-  { id: "fees_va_fund_fee_borr", label: "Fees VA Fund Fee Borr", field: "fees_va_fund_fee_borr" },
-  { id: "mers_min", label: "Mers Min #", field: "mers_min" },
-  { id: "fha_lender_id", label: "FHA Lender ID", field: "fha_lender_id" },
-  { id: "fees_loan_discount_fee_pct", label: "Fees Loan Discount Fee %", field: "fees_loan_discount_fee" },
-  { id: "fees_loan_discount_fee_borr", label: "Fees Loan Discount Fee Borr", field: "fees_loan_discount_fee_borr" },
-  { id: "subject_property_street", label: "Subject Property Street", field: "property_street", minWidth: 220 },
-  { id: "loan_type_2", label: "Loan Type", field: "loan_type" },
-  { id: "interest_only_mos", label: "Interest Only Mos", field: "number_of_months_interest_only_payments" },
-  { id: "borr_info_points_paid", label: "Borr Info Points Paid", field: "origination_points" },
-  { id: "income_total_mo_income", label: "Income Total Mo Income (Borr/Co-Borr)", field: "income_total_mo_income", minWidth: 260 },
-  { id: "subject_property_county", label: "Subject Property County", field: "property_county" },
-  { id: "rush_closing_on_file", label: "Rush Closing on File", field: "rush_closing_on_file" },
-  { id: "scrub_rating_of_file", label: "Scrub Rating of File", field: "scrub_rating_of_file" },
 ];
 
 const COLUMNS = DEFAULT_LOAN_DETAIL_COLUMNS;
+
+/** Build effective column list: base columns (default or custom) + additional fields from additional_field_definitions, appended after. */
+function buildEffectiveColumns(
+  baseColumns: ColumnDef[],
+  additionalColumns: ColumnDef[],
+): ColumnDef[] {
+  const baseIds = new Set(baseColumns.map((c) => c.field).filter(Boolean));
+  const extra = additionalColumns.filter((c) => c.field && !baseIds.has(c.field));
+  return baseColumns.concat(extra);
+}
 
 /** Column headers that are not populated from the database (calculated or not in schema) */
 export const UNPOPULATED_LOAN_DETAIL_COLUMNS = COLUMNS.filter((c) => c.field === null).map(
@@ -234,14 +230,22 @@ function computeWacFormatted(loans: LoanDetailRow[]): string {
   });
 }
 
-/** Display value for a cell: handles Units (1), WAC (aggregate), Locked Flag (Yes/No), Volume (comma-separated), and Fees Loan Discount Fee % */
+/** Display value for a cell: handles Units (1), WAC (interest rate per row / aggregate in total), Locked Flag (Yes/No), Volume (comma-separated), and Fees Loan Discount Fee % */
+function formatInterestRate(val: number | null | undefined): string {
+  if (val == null || Number.isNaN(Number(val))) return BLANK_PLACEHOLDER;
+  return Number(val).toLocaleString("en-US", {
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
+  });
+}
+
 function getCellDisplay(
   col: ColumnDef,
   row: LoanDetailRow,
   wacFormatted: string,
 ): string {
   if (col.id === "units") return "1";
-  if (col.id === "wac") return wacFormatted || BLANK_PLACEHOLDER;
+  if (col.id === "wac") return formatInterestRate(row.interest_rate ?? null);
   if (col.field === "loan_amount") return formatVolumeWithCommas(row.loan_amount);
   if (col.id === "locked_flag") return isLockedFlagYes(row) ? "Yes" : "No";
   if (col.id === "fees_loan_discount_fee_pct" && col.field) {
@@ -265,8 +269,8 @@ function getSortValue(
 ): number | string | null {
   if (col.id === "units") return 1;
   if (col.id === "wac") {
-    const n = parseFloat(wacFormatted.replace(/,/g, ""));
-    return Number.isNaN(n) ? null : n;
+    const r = row.interest_rate;
+    return r != null && !Number.isNaN(Number(r)) ? Number(r) : null;
   }
   if (col.id === "locked_flag") return isLockedFlagYes(row) ? "Yes" : "No";
   if (col.id === "fees_loan_discount_fee_pct" && col.field) {
@@ -380,8 +384,13 @@ function getColumnWidthFromContent(
   let dataMaxLen = 0;
   if (col.id === "loan_number") dataMaxLen = Math.max(6, dataMaxLen); // "Totals"
   if (col.id === "units") dataMaxLen = Math.max(dataMaxLen, 1);
-  else if (col.id === "wac") dataMaxLen = Math.max(dataMaxLen, wacFormatted.length);
-  else if (col.id === "locked_flag") dataMaxLen = Math.max(dataMaxLen, 3); // "Yes"
+  else if (col.id === "wac" && loans.length > 0) {
+    for (let i = 0; i < loans.length; i++) {
+      const s = formatInterestRate(loans[i].interest_rate ?? null);
+      dataMaxLen = Math.max(dataMaxLen, String(s).length);
+    }
+    dataMaxLen = Math.max(dataMaxLen, wacFormatted.length); // totals row
+  } else if (col.id === "locked_flag") dataMaxLen = Math.max(dataMaxLen, 3); // "Yes"
   if (col.field && loans.length > 0) {
     for (let i = 0; i < loans.length; i++) {
       const s = getCellDisplay(col, loans[i], wacFormatted);
@@ -397,7 +406,7 @@ function getColumnWidthFromContent(
 }
 
 export function LoanDetailView({
-  selectedTenantId,
+  selectedTenantId: selectedTenantIdProp,
   data: dataProp,
   loading: loadingProp,
   error: errorProp,
@@ -407,13 +416,20 @@ export function LoanDetailView({
   columns: columnsProp,
 }: LoanDetailViewProps) {
   const { theme } = useTheme();
+  const { selectedTenantId: storeTenantId } = useTenantStore();
+  const tenantId = selectedTenantIdProp ?? storeTenantId;
+  const { columns: additionalColumns } = useAdditionalFieldColumns(tenantId);
   const isDarkMode = theme === "dark";
-  const fetched = useLoanDetailData(selectedTenantId);
+  const fetched = useLoanDetailData(selectedTenantIdProp ?? storeTenantId);
   const isControlled = dataProp !== undefined;
   const data = isControlled ? dataProp ?? null : fetched.data;
   const loading = isControlled ? (loadingProp ?? false) : fetched.loading;
   const error = isControlled ? (errorProp ?? null) : fetched.error;
-  const columnsToUse = columnsProp && columnsProp.length > 0 ? columnsProp : COLUMNS;
+  const baseColumns = columnsProp && columnsProp.length > 0 ? columnsProp : COLUMNS;
+  const columnsToUse = useMemo(
+    () => buildEffectiveColumns(baseColumns, additionalColumns),
+    [baseColumns, additionalColumns],
+  );
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const [, setScrollReady] = useState(0);
 
