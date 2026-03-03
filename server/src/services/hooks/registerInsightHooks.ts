@@ -1,8 +1,9 @@
 /**
  * Register Insight Hooks
  *
- * Registers the agent insight generation and tracked insight evaluation
- * as post-sync hooks. Call once at server startup.
+ * Registers post-sync hooks in order: prediction pipeline (so market data is populated)
+ * → agent insight generation → tracked insight evaluation.
+ * Call once at server startup.
  */
 
 import { registerPostSyncHook, type PostSyncContext } from "./postSyncHookService.js";
@@ -13,6 +14,45 @@ let registered = false;
 export function registerInsightHooks(): void {
   if (registered) return;
   registered = true;
+
+  // Run predictions first so loan_predictions and loans.market_* are populated before insights.
+  registerPostSyncHook(
+    "prediction-pipeline",
+    async (ctx: PostSyncContext) => {
+      try {
+        const connResult = await ctx.tenantPool.query(
+          "SELECT insights_auto_enabled FROM public.los_connections WHERE id = $1",
+          [ctx.connectionId],
+        );
+        const enabled = connResult.rows[0]?.insights_auto_enabled ?? true;
+        if (!enabled) {
+          logInfo(
+            `[PostSyncHook] Auto-insights disabled for connection ${ctx.connectionId} — skipping prediction pipeline`,
+          );
+          return;
+        }
+
+        const { runPredictionPipeline } = await import(
+          "../dashboard/predictionPipelineService.js"
+        );
+        logInfo(
+          `[PostSyncHook] Running prediction pipeline for tenant ${ctx.tenantId} (before insights)`,
+        );
+        const result = await runPredictionPipeline(ctx.tenantPool, {
+          tenantId: ctx.tenantId,
+        });
+        logInfo(
+          `[PostSyncHook] Prediction pipeline: ${result.summary.totalAnalyzed} loans, ${result.summary.predictedWithdraw} withdraw, ${result.summary.predictedDeny} deny in ${result.metadata.processingTimeMs}ms`,
+        );
+      } catch (err: any) {
+        logError(
+          `[PostSyncHook] Prediction pipeline failed: ${err.message}`,
+          err,
+        );
+      }
+    },
+    50
+  );
 
   registerPostSyncHook(
     "agent-insight-generation",
