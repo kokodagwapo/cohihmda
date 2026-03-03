@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
+import { MAX_MILESTONE_DATES } from "@/components/widgets/components/SalesScorecardMilestoneDatesModal";
 
-export type SalesScorecardOverviewMeasure = "volume" | "units" | "wa-interest-rate";
+export type SalesScorecardOverviewMeasure = "volume" | "units";
 
 /** Time granularity when using Period + Time measure filters */
 export type SalesScorecardOverviewTimeMeasure = "quarterly" | "monthly" | "weekly" | "daily";
@@ -21,11 +22,8 @@ export type SalesScorecardOverviewTimePeriod =
 
 export interface SalesScorecardOverviewRow {
   periodLabel: string;
-  started: number;
-  application: number;
-  locked: number;
-  closed: number;
-  funded: number;
+  /** Dynamic keys: column names (e.g. started_date, application_date). Values are measure aggregates. */
+  [key: string]: string | number;
 }
 
 /** Base time periods shown in the dropdown (excludes drill-only weekly-scoped/daily-scoped) */
@@ -54,6 +52,12 @@ export const TIME_PERIOD_LABELS: Record<SalesScorecardOverviewTimePeriod, string
   "daily-scoped": "Day",
 };
 
+/** Dimension filter for workbench (e.g. dynamic filters + branch/loan_officer) */
+export interface SalesScorecardOverviewDimensionFilter {
+  column: string;
+  value: string;
+}
+
 export interface SalesScorecardOverviewFilters {
   measure: SalesScorecardOverviewMeasure;
   /** When not scoped: date range and granularity (used as start_date, end_date, time_measure) */
@@ -68,6 +72,10 @@ export interface SalesScorecardOverviewFilters {
   effectiveTimePeriod?: "weekly-scoped" | "daily-scoped";
   scopeStart?: string;
   scopeEnd?: string;
+  /** Extra dimension filters from workbench (dynamic filters); applied as query params */
+  dimensionFilters?: SalesScorecardOverviewDimensionFilter[];
+  /** Milestone date columns to include in chart/table (e.g. started_date, application_date). When empty/undefined, backend uses default five. */
+  milestoneColumns?: string[];
 }
 
 export interface UseSalesScorecardOverviewDataResult {
@@ -117,6 +125,14 @@ export function useSalesScorecardOverviewData(
       if (tenantId) params.set("tenant_id", tenantId);
       if (filters.branch) params.set("branch", filters.branch);
       if (filters.loanOfficer) params.set("loan_officer", filters.loanOfficer);
+      if (filters.milestoneColumns?.length) {
+        filters.milestoneColumns.slice(0, MAX_MILESTONE_DATES).forEach((col) =>
+          params.append("milestone_columns", col)
+        );
+      }
+      (filters.dimensionFilters ?? []).forEach((df) => {
+        if (df.value && df.value !== "all") params.set(df.column, df.value);
+      });
 
       const url = `/api/scorecard/sales-scorecard-overview?${params.toString()}`;
       const data = await api.request<{ rows: SalesScorecardOverviewRow[] }>(url);
@@ -138,6 +154,8 @@ export function useSalesScorecardOverviewData(
     filters.scopeEnd,
     filters.branch,
     filters.loanOfficer,
+    filters.milestoneColumns,
+    filters.dimensionFilters,
   ]);
 
   const fetchFilterOptions = useCallback(async () => {

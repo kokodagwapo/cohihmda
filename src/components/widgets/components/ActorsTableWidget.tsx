@@ -177,19 +177,20 @@ export function ActorsTableWidget({
       if (colId === 'name') return data.name;
       if (colId === 'units') return data.units;
       if (colId === 'volume') return formatVolume(data.volume);
-      if (colId === 'avgAppToFund') return data.avgAppToFund != null ? data.avgAppToFund.toFixed(2) : '—';
+      if (colId === 'avgAppToFund') return data.avgAppToFund != null ? data.avgAppToFund.toFixed(2) : '-';
       if (colId === 'approvalPct') return data.approvalPct.toFixed(1) + '%';
       if (colId === 'deniedPct') return data.deniedPct.toFixed(1) + '%';
       if (colId === 'withdrawnPct') return data.withdrawnPct.toFixed(1) + '%';
-      if (colId === 'loanComplexity') return data.loanComplexity != null ? data.loanComplexity.toFixed(1) : '—';
-      return '—';
+      if (colId === 'loanComplexity') return data.loanComplexity != null ? data.loanComplexity.toFixed(1) : '-';
+      return '-';
     },
     []
   );
 
   const exportToCsv = useCallback(() => {
     const escapeCsv = (v: string | number | null | undefined) => {
-      const s = String(v ?? '');
+      const raw = String(v ?? '');
+      const s = raw.replace(/\u2014|\u2013/g, '-'); // Use ASCII hyphen for CSV/Excel compatibility
       if (s.includes(',') || s.includes('"') || s.includes('\n')) return `"${s.replace(/"/g, '""')}"`;
       return s;
     };

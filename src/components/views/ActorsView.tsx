@@ -787,7 +787,8 @@ function ActorsTableCard({
 
   const exportToCsv = useCallback(() => {
     const escapeCsv = (v: string | number | null | undefined) => {
-      const s = String(v ?? "");
+      const raw = String(v ?? "");
+      const s = raw.replace(/\u2014|\u2013/g, "-"); // Use ASCII hyphen for CSV/Excel compatibility
       if (s.includes(",") || s.includes('"') || s.includes("\n")) return `"${s.replace(/"/g, '""')}"`;
       return s;
     };
@@ -798,11 +799,11 @@ function ActorsTableCard({
         escapeCsv("Totals"),
         escapeCsv(totals.units),
         escapeCsv(formatVolume(totals.volume)),
-        escapeCsv(totals.avgAppToFund != null ? totals.avgAppToFund.toFixed(2) : "—"),
+        escapeCsv(totals.avgAppToFund != null ? totals.avgAppToFund.toFixed(2) : "-"),
         escapeCsv(totals.approvalPct.toFixed(1) + "%"),
         escapeCsv(totals.deniedPct.toFixed(1) + "%"),
         escapeCsv(totals.withdrawnPct.toFixed(1) + "%"),
-        escapeCsv(totals.loanComplexity != null ? totals.loanComplexity.toFixed(1) : "—"),
+        escapeCsv(totals.loanComplexity != null ? totals.loanComplexity.toFixed(1) : "-"),
       ]);
     }
     sortedRows.forEach((row) => {
@@ -810,11 +811,11 @@ function ActorsTableCard({
         escapeCsv(row.name),
         escapeCsv(row.units),
         escapeCsv(formatVolume(row.volume)),
-        escapeCsv(row.avgAppToFund != null ? row.avgAppToFund.toFixed(2) : "—"),
+        escapeCsv(row.avgAppToFund != null ? row.avgAppToFund.toFixed(2) : "-"),
         escapeCsv(row.approvalPct.toFixed(1) + "%"),
         escapeCsv(row.deniedPct.toFixed(1) + "%"),
         escapeCsv(row.withdrawnPct.toFixed(1) + "%"),
-        escapeCsv(row.loanComplexity != null ? row.loanComplexity.toFixed(1) : "—"),
+        escapeCsv(row.loanComplexity != null ? row.loanComplexity.toFixed(1) : "-"),
       ]);
     });
     const csv = rows.map((row) => row.join(",")).join("\n");
