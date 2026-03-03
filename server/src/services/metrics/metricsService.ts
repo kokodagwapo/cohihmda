@@ -1101,40 +1101,40 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
       "Higher complexity = more difficult to process. Used in Operations Scorecard.",
   },
 
-  // Processor Turn Time - Days from processing to approval
-  // Source: scorecard-utils.ts lines 103-124 (OPERATIONS_ACTOR_CONFIGS)
+  // Processor Turn Time - Days from processing to submitted-to-underwriting
+  // Source: scorecard-utils.ts OPERATIONS_ACTOR_CONFIGS
   processor_turn_time: {
     id: "processor_turn_time",
     name: "Processor Turn Time",
     description:
-      "Average days from processing_date to approval_date. Used in Operations Scorecard for Processor actors.",
+      "Average days from processing_date to submitted_to_underwriting_date. Used in Operations Scorecard for Processor actors.",
     category: "turn_time",
-    formula: "AVG(approval_date - processing_date)",
+    formula: "AVG(submitted_to_underwriting_date - processing_date)",
     sqlQuery: `AVG(
       CASE 
-        WHEN l.processing_date IS NOT NULL AND l.approval_date IS NOT NULL 
-          AND l.approval_date > l.processing_date
-        THEN EXTRACT(EPOCH FROM (l.approval_date - l.processing_date)) / 86400
+        WHEN l.processing_date IS NOT NULL AND l.submitted_to_underwriting_date IS NOT NULL 
+          AND l.submitted_to_underwriting_date > l.processing_date
+        THEN EXTRACT(EPOCH FROM (l.submitted_to_underwriting_date - l.processing_date)) / 86400
       END
     )`,
     dependencies: [],
-    defaultDateField: "approval_date",
+    defaultDateField: "submitted_to_underwriting_date",
   },
 
-  // Underwriter Turn Time - Days from approval to closing
-  // Source: scorecard-utils.ts lines 103-124 (OPERATIONS_ACTOR_CONFIGS)
+  // Underwriter Turn Time - Days from submitted-to-underwriting to closing
+  // Source: scorecard-utils.ts OPERATIONS_ACTOR_CONFIGS
   underwriter_turn_time: {
     id: "underwriter_turn_time",
     name: "Underwriter Turn Time",
     description:
-      "Average days from approval_date to closing_date. Used in Operations Scorecard for Underwriter actors.",
+      "Average days from submitted_to_underwriting_date to closing_date. Used in Operations Scorecard for Underwriter actors.",
     category: "turn_time",
-    formula: "AVG(closing_date - approval_date)",
+    formula: "AVG(closing_date - submitted_to_underwriting_date)",
     sqlQuery: `AVG(
       CASE 
-        WHEN l.approval_date IS NOT NULL AND l.closing_date IS NOT NULL 
-          AND l.closing_date > l.approval_date
-        THEN EXTRACT(EPOCH FROM (l.closing_date - l.approval_date)) / 86400
+        WHEN l.submitted_to_underwriting_date IS NOT NULL AND l.closing_date IS NOT NULL 
+          AND l.closing_date > l.submitted_to_underwriting_date
+        THEN EXTRACT(EPOCH FROM (l.closing_date - l.submitted_to_underwriting_date)) / 86400
       END
     )`,
     dependencies: [],

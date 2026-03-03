@@ -284,9 +284,14 @@ const Dashboard = () => {
     userName?: string;
   } | null>(null);
 
-  // Catch any unhandled errors
+  // Catch unhandled errors (ignore third-party lib noise like rrweb MutationObserver errors)
   useEffect(() => {
     const handleError = (event: ErrorEvent) => {
+      const msg = event.message || event.error?.message || "";
+      if (msg.includes("node.matches is not a function") || msg.includes("rrweb")) {
+        event.preventDefault();
+        return;
+      }
       console.error("Unhandled error:", event.error);
       setPageError(event.error);
     };

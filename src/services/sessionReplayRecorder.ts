@@ -68,7 +68,6 @@ export async function startSessionReplay(): Promise<void> {
       emit: handler,
       maskAllText: true,
       blockClass: "rr-block",
-      blockSelector: "img, video, svg, [data-no-track]",
       maskTextSelector: "*",
       maskInputOptions: {
         password: true,
