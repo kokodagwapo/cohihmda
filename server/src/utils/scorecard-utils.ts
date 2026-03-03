@@ -103,16 +103,16 @@ export interface ActorConfig {
 export const OPERATIONS_ACTOR_CONFIGS: Record<string, ActorConfig> = {
   processor: {
     actorColumn: "processor",
-    outputDateField: "approval_date",
-    // Turn Time: processing_date → approval_date
+    outputDateField: "submitted_to_underwriting_date",
+    // Turn Time: processing_date → submitted_to_underwriting_date
     turnTimeStartField: "processing_date",
-    turnTimeEndField: "approval_date",
+    turnTimeEndField: "submitted_to_underwriting_date",
   },
   underwriter: {
     actorColumn: "underwriter",
     outputDateField: "closing_date",
-    // Turn Time: approval_date → closing_date
-    turnTimeStartField: "approval_date",
+    // Turn Time: submitted_to_underwriting_date → closing_date
+    turnTimeStartField: "submitted_to_underwriting_date",
     turnTimeEndField: "closing_date",
   },
   closer: {
