@@ -81,6 +81,7 @@ import { CohiWidgetRenderer } from '@/components/workbench/canvas/CohiWidgetRend
 import { EditWidgetDialog } from '@/components/widgets/components/EditWidgetDialog';
 import { AddWidgetDialog } from '@/components/widgets/components/AddWidgetDialog';
 import { LoanDetailColumnsModal } from '@/components/widgets/components/LoanDetailColumnsModal';
+import { PricingDashboardColumnsModal } from '@/components/widgets/components/PricingDashboardColumnsModal';
 import { ActorsTableColumnsModal } from '@/components/widgets/components/ActorsTableColumnsModal';
 import { WidgetDataProvider } from '@/components/widgets/data';
 import { useLoanDetailColumnsStore } from '@/stores/loanDetailColumnsStore';
@@ -223,6 +224,12 @@ const SECTION_FILTER_CONFIG: Partial<Record<SectionType, SectionFilterField[]>> 
   'sales-scorecard': [
     { key: 'actorType', label: 'View', allLabel: '', staticOptions: ACTOR_TYPE_OPTIONS },
   ],
+  'sales-scorecard-overview': [
+    { key: 'salesScorecardOverviewMeasure', label: 'Measure', allLabel: '', staticOptions: [{ value: 'volume', label: 'Volume' }, { value: 'units', label: 'Units' }, { value: 'wa-interest-rate', label: 'WA Interest Rate' }] },
+    { key: 'salesScorecardOverviewTimeMeasure', label: 'Time', allLabel: '', staticOptions: [{ value: 'quarterly', label: 'Quarterly' }, { value: 'monthly', label: 'Monthly' }, { value: 'weekly', label: 'Weekly' }, { value: 'daily', label: 'Daily' }] },
+    { key: 'branch', label: 'Branch', allLabel: 'All Branches', optionsSource: 'branch' },
+    { key: 'loanOfficer', label: 'Loan Officer', allLabel: 'All Loan Officers', optionsSource: 'loan_officer', dependsOn: 'branch' },
+  ],
   'high-performers': [],
   'actors': [],
   'pricing-dashboard': [],
@@ -232,11 +239,18 @@ const SECTION_FILTER_CONFIG: Partial<Record<SectionType, SectionFilterField[]>> 
 /**
  * Section-specific filter dimensions already shown in the section's filter bar.
  * AddFilterPicker excludes these so we don't offer duplicate filters (e.g. Pipeline Analysis
- * already has Loan Type, Purpose, Branch; Pricing already has entity/actor columns).
+ * already has Loan Type, Purpose, Branch; Pricing has Loan Status as a default dropdown).
+ *
+ * Rule: Only list dimensions that are already exposed as a default filter in the UI. Do NOT
+ * list dimensions that are merely "entity/actor type" selectors (e.g. pricing Entity = Branch
+ * chooses what to group by; it is not the same as a "Branch" filter that filters to branch
+ * 1000). So for pricing-dashboard, branch and loan_officer are NOT builtins—they are valid
+ * additional dynamic filters (filter to a specific branch or loan officer).
  */
 const SECTION_BUILTIN_FILTER_COLUMNS: Partial<Record<SectionType, string[]>> = {
   'pipeline-analysis': ['loan_type', 'loan_purpose', 'branch'],
-  'pricing-dashboard': ['branch', 'loan_officer', 'channel', 'investor_name'],
+  'pricing-dashboard': ['current_loan_status'],
+  'sales-scorecard-overview': ['branch', 'loan_officer'],
 };
 
 const HIGH_PERFORMERS_DATE_TYPE_OPTIONS: { value: 'funding_date' | 'closing_date' | 'application_date'; label: string }[] = [
@@ -621,6 +635,7 @@ const SECTION_COLORS: Record<SectionType, { border: string; bg: string; accent: 
   'actors':              { border: 'border-cyan-400/50',   bg: 'bg-cyan-50/50 dark:bg-cyan-950/20',    accent: 'text-cyan-600 dark:text-cyan-400',   dot: 'bg-cyan-500' },
   'pricing-dashboard':   { border: 'border-emerald-400/50', bg: 'bg-emerald-50/50 dark:bg-emerald-950/20', accent: 'text-emerald-600 dark:text-emerald-400', dot: 'bg-emerald-500' },
   'pipeline-analysis':   { border: 'border-sky-400/50', bg: 'bg-sky-50/50 dark:bg-sky-950/20', accent: 'text-sky-600 dark:text-sky-400', dot: 'bg-sky-500' },
+  'sales-scorecard-overview': { border: 'border-violet-400/50', bg: 'bg-violet-50/50 dark:bg-violet-950/20', accent: 'text-violet-600 dark:text-violet-400', dot: 'bg-violet-500' },
 };
 
 /**
@@ -670,6 +685,12 @@ function getGridSizeForItem(item: GroupWidgetItem): GridSize {
   if (item.kind === 'cohi') return GRID_SIZES.cohi;
   if (item.kind === 'registry' && item.defId === 'workflow-conversion-embed') {
     return { w: GRID_COLS, h: WORKFLOW_EMBED_GRID_H, minW: 24, minH: 40 };
+  }
+  if (item.kind === 'registry' && item.defId === 'sales-scorecard-overview-chart') {
+    return { w: 24, h: 20, minW: 18, minH: 14 };
+  }
+  if (item.kind === 'registry' && item.defId === 'sales-scorecard-overview-table') {
+    return { w: 36, h: 20, minW: 24, minH: 12 };
   }
   // High Performers: 2x2 grid (two columns of 18 units each)
   if (item.kind === 'registry' && item.defId.startsWith('high-performers-')) {
@@ -1178,6 +1199,8 @@ function GridCellRegistryWidget({
     : {};
 
   const isWorkflowConversion = defId === 'workflow-conversion-embed';
+  const isSalesScorecardOverview = defId === 'sales-scorecard-overview-chart' || defId === 'sales-scorecard-overview-table';
+  const salesScorecardOverviewConfig = isSalesScorecardOverview ? { groupId } : {};
   const workflowConfig = isWorkflowConversion
     ? {
         groupId,
@@ -1219,6 +1242,7 @@ function GridCellRegistryWidget({
     ...actorsConfig,
     ...pricingConfig,
     ...workflowConfig,
+    ...salesScorecardOverviewConfig,
   };
 
   return (
@@ -1434,6 +1458,7 @@ export function WidgetGroup({
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingItemIdx, setEditingItemIdx] = useState<number | null>(null);
   const [actorsColumnsModalOpen, setActorsColumnsModalOpen] = useState(false);
+  const [pricingDashboardColumnsModalOpen, setPricingDashboardColumnsModalOpen] = useState(false);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const filtersRestoredRef = useRef(false);
 
@@ -1571,9 +1596,16 @@ export function WidgetGroup({
       if (filters.pipelineAnalysisLoanPurposes && filters.pipelineAnalysisLoanPurposes.length > 0) toSave.pipelineAnalysisLoanPurposes = filters.pipelineAnalysisLoanPurposes;
       if (filters.pipelineAnalysisBranches && filters.pipelineAnalysisBranches.length > 0) toSave.pipelineAnalysisBranches = filters.pipelineAnalysisBranches;
     }
+    if (sectionType === 'sales-scorecard-overview') {
+      if (filters.salesScorecardOverviewMeasure && filters.salesScorecardOverviewMeasure !== 'volume') toSave.salesScorecardOverviewMeasure = filters.salesScorecardOverviewMeasure;
+      if (filters.salesScorecardOverviewTimeMeasure && filters.salesScorecardOverviewTimeMeasure !== 'monthly') toSave.salesScorecardOverviewTimeMeasure = filters.salesScorecardOverviewTimeMeasure;
+    }
+    if (sectionType === 'pricing-dashboard') {
+      if (filters.pricingDashboardColumns && filters.pricingDashboardColumns.length > 0) toSave.pricingDashboardColumns = filters.pricingDashboardColumns;
+    }
     patchPayload({ savedFilters: Object.keys(toSave).length > 0 ? toSave : undefined });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sectionType, filters.year, filters.dateRange, filters.periodSelection, filters.dateField, filters.applicationType, filters.actorType, filters.branch, filters.loanOfficer, filters.dynamicFilters, filters.workflowPeriodSelection, filters.workflowCalculationType, filters.workflowGrouping, filters.workflowSegments, filters.pipelineAnalysisYearRange, filters.pipelineAnalysisStartDateField, filters.pipelineAnalysisViewMode, filters.pipelineAnalysisPctMetric, filters.pipelineAnalysisSnapshotDay, filters.pipelineAnalysisLoanTypes, filters.pipelineAnalysisLoanPurposes, filters.pipelineAnalysisBranches]);
+  }, [sectionType, filters.year, filters.dateRange, filters.periodSelection, filters.dateField, filters.applicationType, filters.actorType, filters.branch, filters.loanOfficer, filters.dynamicFilters, filters.workflowPeriodSelection, filters.workflowCalculationType, filters.workflowGrouping, filters.workflowSegments, filters.pipelineAnalysisYearRange, filters.pipelineAnalysisStartDateField, filters.pipelineAnalysisViewMode, filters.pipelineAnalysisPctMetric, filters.pipelineAnalysisSnapshotDay, filters.pipelineAnalysisLoanTypes, filters.pipelineAnalysisLoanPurposes, filters.pipelineAnalysisBranches, filters.salesScorecardOverviewMeasure, filters.salesScorecardOverviewTimeMeasure, filters.pricingDashboardColumns]);
 
   // ─── Grid layout ───
   const contentWidth = Math.max(width - 24, MIN_GRID_WIDTH);
@@ -1836,6 +1868,8 @@ export function WidgetGroup({
         return { presets: ['mtd', 'ytd', 'last-month', 'last-year'], showYears: false };
       case 'actors':
         return { presets: ['mtd', 'last-month', 'qtd', 'last-quarter', 'ytd', 'last-year'], showYears: false };
+      case 'sales-scorecard-overview':
+        return { presets: ['mtd', 'last-month', 'qtd', 'last-quarter', 'ytd', 'last-year'], showYears: false };
       default:
         return {}; // default behavior: rolling-13, rolling-12 + year buttons
     }
@@ -2057,6 +2091,15 @@ export function WidgetGroup({
                   options={PRICING_LOCK_STATUS_OPTIONS}
                   onChange={(v) => updateFilters(groupId, { pricingLockStatus: v })}
                 />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => setPricingDashboardColumnsModalOpen(true)}
+                >
+                  <SlidersHorizontal className="h-3.5 w-3.5 mr-1" />
+                  Edit columns
+                </Button>
                 {((filters.pricingEntityValue ?? '').trim() !== '' || (filters.pricingActorValue ?? '').trim() !== '') && (
                   <span className="inline-flex items-center gap-1 rounded-md bg-emerald-100 dark:bg-emerald-900/40 px-2 py-0.5 text-xs">
                     {(filters.pricingEntityValue ?? '').trim() !== ''
@@ -2383,7 +2426,7 @@ export function WidgetGroup({
                   ? () => updateFilters(groupId, { periodSelection: undefined, dateRange: undefined })
                   : undefined
               }
-              periodSelectionFromStore={sectionType === 'loan-detail' ? filters.periodSelection : undefined}
+              periodSelectionFromStore={sectionType === 'loan-detail' || sectionType === 'sales-scorecard-overview' ? filters.periodSelection : undefined}
             />
 
             {/* Data-driven filters from SECTION_FILTER_CONFIG */}
@@ -2546,6 +2589,15 @@ export function WidgetGroup({
           sectionId={groupId}
           columnIds={filters.actorsTableColumnIds ?? []}
           onSave={(sid, columnIds) => updateFilters(sid, { actorsTableColumnIds: columnIds })}
+        />
+      )}
+
+      {/* Pricing Dashboard columns modal */}
+      {sectionType === 'pricing-dashboard' && (
+        <PricingDashboardColumnsModal
+          open={pricingDashboardColumnsModalOpen}
+          onClose={() => setPricingDashboardColumnsModalOpen(false)}
+          groupId={groupId}
         />
       )}
 

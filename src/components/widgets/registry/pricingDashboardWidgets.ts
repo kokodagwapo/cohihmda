@@ -29,6 +29,9 @@ interface PricingDashboardSource {
   entityDetail: { rows: PricingDetailRow[]; totals: Partial<PricingDetailRow> };
   loading: boolean;
   error: string | null;
+  /** When set (from Edit columns modal), used by all four table widgets */
+  reportColumns?: TableColumn[];
+  detailColumns?: TableColumn[];
 }
 
 function t(raw: unknown): PricingDashboardSource {
@@ -47,16 +50,6 @@ const REPORT_COLUMNS: TableColumn[] = [
   { key: 'loanPricingDollars', label: 'Loan Pricing $', sortable: true, align: 'right', format: 'currency' },
   { key: 'pricingMargin', label: 'Pricing Margin', sortable: true, align: 'right', format: 'number' },
   { key: 'cdLenderCredits', label: 'CD Lender Credits', sortable: true, align: 'right', format: 'currency' },
-  { key: 'purchaseAdviceSellAmount', label: 'Purchase Advice Sell Amount', sortable: true, align: 'right', format: 'currency' },
-  { key: 'line800TotalBorrowerPaidAmount', label: 'Line 800 Borrower Paid', sortable: true, align: 'right', format: 'currency' },
-  { key: 'feesAppraisalFeeBorr', label: 'Fees Appraisal Fee Borr', sortable: true, align: 'right', format: 'currency' },
-  { key: 'line800TotalSellerPaidAmount', label: 'Line 800 Seller Amount', sortable: true, align: 'right', format: 'currency' },
-  { key: 'feesInterestBorr', label: 'Fees Interest Borr', sortable: true, align: 'right', format: 'currency' },
-  { key: 'purchaseAdvExpectedIntPymtFromInvestor', label: 'Purchase Adv Expected Int', sortable: true, align: 'right', format: 'currency' },
-  { key: 'purchaseAdviceExpctdPayout1Amt', label: 'Payout 1 Amt', sortable: true, align: 'right', format: 'currency' },
-  { key: 'purchaseAdviceExpctdPayout2Amt', label: 'Payout 2 Amt', sortable: true, align: 'right', format: 'currency' },
-  { key: 'purchaseAdviceExpctdPayout3Amt', label: 'Payout 3 Amt', sortable: true, align: 'right', format: 'currency' },
-  { key: 'lenderCredits', label: 'Lender Credits', sortable: true, align: 'right', format: 'currency' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -76,16 +69,6 @@ const DETAIL_COLUMNS: TableColumn[] = [
   { key: 'loanPricingDollars', label: 'Loan Pricing $', sortable: true, align: 'right', format: 'currency' },
   { key: 'pricingMargin', label: 'Pricing Margin', sortable: true, align: 'right', format: 'number' },
   { key: 'cdLenderCredits', label: 'CD Lender Credits', sortable: true, align: 'right', format: 'currency' },
-  { key: 'purchaseAdviceSellAmount', label: 'Purchase Advice Sell Amount', sortable: true, align: 'right', format: 'currency' },
-  { key: 'line800TotalBorrowerPaidAmount', label: 'Line 800 Borrower Paid', sortable: true, align: 'right', format: 'currency' },
-  { key: 'feesAppraisalFeeBorr', label: 'Fees Appraisal Fee Borr', sortable: true, align: 'right', format: 'currency' },
-  { key: 'line800TotalSellerPaidAmount', label: 'Line 800 Seller Amount', sortable: true, align: 'right', format: 'currency' },
-  { key: 'feesInterestBorr', label: 'Fees Interest Borr', sortable: true, align: 'right', format: 'currency' },
-  { key: 'purchaseAdvExpectedIntPymtFromInvestor', label: 'Purchase Adv Expected Int', sortable: true, align: 'right', format: 'currency' },
-  { key: 'purchaseAdviceExpctdPayout1Amt', label: 'Payout 1 Amt', sortable: true, align: 'right', format: 'currency' },
-  { key: 'purchaseAdviceExpctdPayout2Amt', label: 'Payout 2 Amt', sortable: true, align: 'right', format: 'currency' },
-  { key: 'purchaseAdviceExpctdPayout3Amt', label: 'Payout 3 Amt', sortable: true, align: 'right', format: 'currency' },
-  { key: 'lenderCredits', label: 'Lender Credits', sortable: true, align: 'right', format: 'currency' },
 ];
 
 function reportRowsToTableRows(rows: PricingReportRow[], totals: Partial<PricingReportRow>): Record<string, unknown>[] {
@@ -214,7 +197,7 @@ const loanOfficerReportTable: WidgetDefinition<TableData> = {
     const { rows, totals } = d.loanOfficerReport;
     return {
       title: 'Loan Officer Report',
-      columns: REPORT_COLUMNS,
+      columns: d.reportColumns ?? REPORT_COLUMNS,
       rows: reportRowsToTableRows(rows, totals),
       stickyFirstColumn: true,
     };
@@ -236,7 +219,7 @@ const loanOfficerDetailTable: WidgetDefinition<TableData> = {
     const { rows, totals } = d.loanOfficerDetail;
     return {
       title: 'Loan Officer Detail',
-      columns: DETAIL_COLUMNS,
+      columns: d.detailColumns ?? DETAIL_COLUMNS,
       rows: detailRowsToTableRows(rows, totals),
       stickyFirstColumn: true,
     };
@@ -258,7 +241,7 @@ const entityReportTable: WidgetDefinition<TableData> = {
     const { rows, totals } = d.entityReport;
     return {
       title: 'Entity Report',
-      columns: REPORT_COLUMNS,
+      columns: d.reportColumns ?? REPORT_COLUMNS,
       rows: reportRowsToTableRows(rows, totals),
       stickyFirstColumn: true,
     };
@@ -280,7 +263,7 @@ const entityDetailTable: WidgetDefinition<TableData> = {
     const { rows, totals } = d.entityDetail;
     return {
       title: 'Entity Detail',
-      columns: DETAIL_COLUMNS,
+      columns: d.detailColumns ?? DETAIL_COLUMNS,
       rows: detailRowsToTableRows(rows, totals),
       stickyFirstColumn: true,
     };

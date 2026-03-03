@@ -67,6 +67,7 @@ export const DASHBOARD_SECTION_GROUPS: { label: string; items: DashboardSectionI
     items: [
       { id: 'companyScorecard', title: 'Company Scorecard', icon: ClipboardList, iconClass: 'text-indigo-500' },
       { id: 'salesScorecard', title: 'Sales Scorecard', icon: Target, iconClass: 'text-violet-500' },
+      { id: 'salesScorecardOverview', title: 'Sales Scorecard Overview', icon: BarChart3, iconClass: 'text-violet-500' },
       { id: 'operationsScorecard', title: 'Operations Scorecard', icon: Target, iconClass: 'text-indigo-500' },
       { id: 'creditRiskManagement', title: 'Credit Risk Management', icon: Shield, iconClass: 'text-emerald-500' },
       { id: 'loanDetail', title: 'Loan Detail', icon: FileText, iconClass: 'text-sky-500' },

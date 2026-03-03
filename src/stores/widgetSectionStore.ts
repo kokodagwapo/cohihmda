@@ -26,7 +26,8 @@ export type SectionType =
   | 'high-performers'
   | 'actors'
   | 'pricing-dashboard'
-  | 'pipeline-analysis';
+  | 'pipeline-analysis'
+  | 'sales-scorecard-overview';
 
 /**
  * A dynamic (user-added) filter dimension.
@@ -100,6 +101,8 @@ export interface SectionFilters {
   pricingActorValue?: string;
   /** Pricing Dashboard: column to apply actor value filter */
   pricingActorFilterType?: string;
+  /** Pricing Dashboard: custom table columns (key = LOS field ID, label = display name). Applies to all four tables. */
+  pricingDashboardColumns?: { key: string; label: string }[];
   /** Workflow Conversion: period selection (MTD, QTD, etc.) */
   workflowPeriodSelection?: PeriodSelection;
   /** Workflow Conversion: conversion % vs turn time */
@@ -124,6 +127,10 @@ export interface SectionFilters {
   pipelineAnalysisViewMode?: 'week' | 'month';
   /** Pipeline Analysis: percent change rows by volume or units */
   pipelineAnalysisPctMetric?: 'volume' | 'units';
+  /** Sales Scorecard Overview: measure (volume, units, wa-interest-rate) */
+  salesScorecardOverviewMeasure?: 'volume' | 'units' | 'wa-interest-rate';
+  /** Sales Scorecard Overview: time granularity (quarterly, monthly, weekly, daily) */
+  salesScorecardOverviewTimeMeasure?: 'quarterly' | 'monthly' | 'weekly' | 'daily';
   /** User-added dynamic filters (column = value conditions) */
   dynamicFilters?: DynamicFilterEntry[];
 }
@@ -261,6 +268,20 @@ export const useWidgetSectionStore = create<WidgetSectionState>((set, get) => ({
           pipelineAnalysisBranches: [],
           pipelineAnalysisViewMode: 'week',
           pipelineAnalysisPctMetric: 'volume',
+        };
+      } else if (sectionType === 'sales-scorecard-overview') {
+        const now = new Date();
+        const start = new Date(now.getFullYear(), 0, 1);
+        const range = {
+          start: start.toISOString().slice(0, 10),
+          end: now.toISOString().slice(0, 10),
+        };
+        filters = {
+          ...base,
+          periodSelection: { type: 'preset' as const, preset: 'ytd' as const, dateRange: range },
+          dateRange: range,
+          salesScorecardOverviewMeasure: 'volume',
+          salesScorecardOverviewTimeMeasure: 'monthly',
         };
       }
       return {

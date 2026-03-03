@@ -31,9 +31,11 @@ import type {
   PricingReportRow,
   PricingDetailRow,
 } from "@/hooks/usePricingDashboardData";
-import { Loader2, ArrowUp, ArrowDown, X } from "lucide-react";
+import { Loader2, ArrowUp, ArrowDown, X, SlidersHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { usePricingDashboardStandaloneColumnsStore } from "@/stores/pricingDashboardStandaloneColumnsStore";
+import { PricingDashboardColumnsModal } from "@/components/widgets/components/PricingDashboardColumnsModal";
 
 const ENTITY_TYPE_OPTIONS: { value: PricingEntityType; label: string }[] = [
   { value: "branch", label: "Branch" },
@@ -188,6 +190,9 @@ export function PricingDashboardView({
     | { kind: "actor"; actorType: PricingActorType; value: string; label: string }
     | null
   >(null);
+  const [editColumnsModalOpen, setEditColumnsModalOpen] = useState(false);
+  const standaloneColumns = usePricingDashboardStandaloneColumnsStore((s) => s.columns);
+  const getStandaloneColumns = usePricingDashboardStandaloneColumnsStore((s) => s.getColumns);
 
   const filters: PricingDashboardFilters = useMemo(
     () => ({
@@ -251,33 +256,19 @@ export function PricingDashboardView({
   const textTd = isDark ? "text-slate-200" : "text-slate-900";
 
   const reportColumns: { key: keyof PricingReportRow; label: string }[] = useMemo(() => {
+    const metricCols = getStandaloneColumns();
     const isBranchReport = activeTab === "entity_report" && entityType === "branch";
     const cols: { key: keyof PricingReportRow; label: string }[] = [
       { key: "entityName", label: `Entity: ${entityLabel}` },
     ];
     if (!isBranchReport) cols.push({ key: "actorName", label: `Actor: ${actorLabel}` });
-    cols.push(
-      { key: "units", label: "Units" },
-      { key: "volume", label: "Volume" },
-      { key: "loanPricingDollars", label: "Loan Pricing $" },
-      { key: "pricingMargin", label: "Pricing Margin" },
-      { key: "cdLenderCredits", label: "CD Lender Credits" },
-      { key: "purchaseAdviceSellAmount", label: "Purchase Advice Sell Amount" },
-      { key: "line800TotalBorrowerPaidAmount", label: "Line 800 Total Borrower Paid Amount" },
-      { key: "feesAppraisalFeeBorr", label: "Fees Appraisal Fee Borr" },
-      { key: "line800TotalSellerPaidAmount", label: "+ Line 800 Total Seller Amount" },
-      { key: "feesInterestBorr", label: "Fees Interest Borr" },
-      { key: "purchaseAdvExpectedIntPymtFromInvestor", label: "Purchase Adv Expected Int Pymt from Investor" },
-      { key: "purchaseAdviceExpctdPayout1Amt", label: "Purchase Advice Expctd Payout 1 Amt" },
-      { key: "purchaseAdviceExpctdPayout2Amt", label: "Purchase Advice Expctd Payout 2 Amt" },
-      { key: "purchaseAdviceExpctdPayout3Amt", label: "Purchase Advice Expctd Payout 3 Amt" },
-      { key: "lenderCredits", label: "Lender Credits" },
-    );
+    metricCols.forEach((m) => cols.push({ key: m.key as keyof PricingReportRow, label: m.label }));
     return cols;
-  }, [activeTab, entityType, entityLabel, actorLabel]);
+  }, [activeTab, entityType, entityLabel, actorLabel, standaloneColumns, getStandaloneColumns]);
 
   const detailColumnsEntityDetail = useMemo(
     () => {
+      const metricCols = getStandaloneColumns();
       const base = [
         { key: "entityName", label: `Entity: ${entityLabel}` },
         { key: "loanNumber", label: "Loan Number" },
@@ -296,25 +287,10 @@ export function PricingDashboardView({
       if (loanStatus !== "active") {
         base.push({ key: "currentLoanStatus", label: "Current Loan Status" });
       }
-      base.push(
-        { key: "volume", label: "Volume" },
-        { key: "loanPricingDollars", label: "Loan Pricing $" },
-        { key: "pricingMargin", label: "Pricing Margin" },
-        { key: "cdLenderCredits", label: "CD Lender Credits" },
-        { key: "purchaseAdviceSellAmount", label: "Purchase Advice Sell Amount" },
-        { key: "line800TotalBorrowerPaidAmount", label: "Line 800 Total Borrower Paid Amount" },
-        { key: "feesAppraisalFeeBorr", label: "Fees Appraisal Fee Borr" },
-        { key: "line800TotalSellerPaidAmount", label: "+ Line 800 Total Seller Amount" },
-        { key: "feesInterestBorr", label: "Fees Interest Borr" },
-        { key: "purchaseAdvExpectedIntPymtFromInvestor", label: "Purchase Adv Expected Int Pymt from Investor" },
-        { key: "purchaseAdviceExpctdPayout1Amt", label: "Purchase Advice Expctd Payout 1 Amt" },
-        { key: "purchaseAdviceExpctdPayout2Amt", label: "Purchase Advice Expctd Payout 2 Amt" },
-        { key: "purchaseAdviceExpctdPayout3Amt", label: "Purchase Advice Expctd Payout 3 Amt" },
-        { key: "lenderCredits", label: "Lender Credits" },
-      );
+      metricCols.forEach((m) => base.push({ key: m.key, label: m.label }));
       return base;
     },
-    [entityLabel, loanFunding, loanStatus]
+    [entityLabel, loanFunding, loanStatus, standaloneColumns, getStandaloneColumns]
   );
 
   const detailColumnsWithActor = [
@@ -472,10 +448,7 @@ export function PricingDashboardView({
                     key={c.key}
                     className={cn(
                       "py-2.5 px-4 font-semibold whitespace-nowrap cursor-pointer select-none hover:opacity-80 transition-opacity",
-                      ["volume", "loanPricingDollars", "pricingMargin", "cdLenderCredits", "purchaseAdviceSellAmount",
-                        "line800TotalBorrowerPaidAmount", "feesAppraisalFeeBorr", "line800TotalSellerPaidAmount",
-                        "feesInterestBorr", "purchaseAdvExpectedIntPymtFromInvestor", "purchaseAdviceExpctdPayout1Amt",
-                        "purchaseAdviceExpctdPayout2Amt", "purchaseAdviceExpctdPayout3Amt", "lenderCredits"].includes(c.key)
+                      ["volume", "loanPricingDollars", "pricingMargin", "cdLenderCredits"].includes(c.key)
                         ? "text-right"
                         : "text-left"
                     )}
@@ -679,6 +652,17 @@ export function PricingDashboardView({
               </Button>
             </div>
           )}
+          <div className="flex items-end">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 gap-1.5"
+              onClick={() => setEditColumnsModalOpen(true)}
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              Edit columns
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -802,6 +786,11 @@ export function PricingDashboardView({
           </TabsContent>
         </Tabs>
       </Card>
+
+      <PricingDashboardColumnsModal
+        open={editColumnsModalOpen}
+        onClose={() => setEditColumnsModalOpen(false)}
+      />
     </div>
   );
 }

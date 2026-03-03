@@ -43,6 +43,7 @@ import {
   usePipelineAnalysisConfig,
 } from '@/hooks/usePipelineAnalysisData';
 import type { DataSourceId } from '../registry/types';
+import { buildPricingReportColumns, buildPricingDetailColumns } from '@/lib/pricingDashboardColumns';
 
 /** Build dimension filter array from section dynamicFilters (for APIs that accept them).
  *  @param exclude – column names already handled natively by the hook (e.g. branch, loan_officer). */
@@ -634,6 +635,11 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
       loading: false,
       error: null,
     },
+    'sales-scorecard-overview': {
+      data: { ready: true },
+      loading: false,
+      error: null,
+    },
     'high-performers': {
       data: highPerformersData,
       loading: highPerformersLoading,
@@ -645,7 +651,11 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
       error: actorsError,
     },
     'pricing-dashboard': {
-      data: pricingDashboard,
+      data: {
+        ...pricingDashboard,
+        reportColumns: buildPricingReportColumns(pdFilters?.pricingDashboardColumns),
+        detailColumns: buildPricingDetailColumns(pdFilters?.pricingDashboardColumns),
+      },
       loading: pricingDashboard.loading,
       error: pricingDashboard.error,
     },
@@ -675,6 +685,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     highPerformersData, highPerformersLoading, highPerformersError,
     actorsData, actorsLoading, actorsError,
     pricingDashboard,
+    pdFilters?.pricingDashboardColumns,
     pipelineAnalysisSource,
     paFilters?.pipelineAnalysisYearRange,
     paFilters?.pipelineAnalysisViewMode,

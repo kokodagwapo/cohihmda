@@ -26,6 +26,7 @@ import { highPerformersWidgets } from './highPerformersWidgets';
 import { actorsWidgets } from './actorsWidgets';
 import { pricingDashboardWidgets } from './pricingDashboardWidgets';
 import { pipelineAnalysisWidgets } from './pipelineAnalysisWidgets';
+import { salesScorecardOverviewWidgets } from './salesScorecardOverviewWidgets';
 
 // ---------------------------------------------------------------------------
 // Aggregate all widgets
@@ -52,6 +53,7 @@ const allWidgets: WidgetDefinition[] = [
   ...actorsWidgets,
   ...pricingDashboardWidgets,
   ...pipelineAnalysisWidgets,
+  ...salesScorecardOverviewWidgets,
 ];
 
 // ---------------------------------------------------------------------------

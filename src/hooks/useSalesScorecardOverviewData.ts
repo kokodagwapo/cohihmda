@@ -54,6 +54,12 @@ export const TIME_PERIOD_LABELS: Record<SalesScorecardOverviewTimePeriod, string
   "daily-scoped": "Day",
 };
 
+/** Dimension filter for workbench (e.g. dynamic filters + branch/loan_officer) */
+export interface SalesScorecardOverviewDimensionFilter {
+  column: string;
+  value: string;
+}
+
 export interface SalesScorecardOverviewFilters {
   measure: SalesScorecardOverviewMeasure;
   /** When not scoped: date range and granularity (used as start_date, end_date, time_measure) */
@@ -68,6 +74,8 @@ export interface SalesScorecardOverviewFilters {
   effectiveTimePeriod?: "weekly-scoped" | "daily-scoped";
   scopeStart?: string;
   scopeEnd?: string;
+  /** Extra dimension filters from workbench (dynamic filters); applied as query params */
+  dimensionFilters?: SalesScorecardOverviewDimensionFilter[];
 }
 
 export interface UseSalesScorecardOverviewDataResult {
@@ -117,6 +125,9 @@ export function useSalesScorecardOverviewData(
       if (tenantId) params.set("tenant_id", tenantId);
       if (filters.branch) params.set("branch", filters.branch);
       if (filters.loanOfficer) params.set("loan_officer", filters.loanOfficer);
+      (filters.dimensionFilters ?? []).forEach((df) => {
+        if (df.value && df.value !== "all") params.set(df.column, df.value);
+      });
 
       const url = `/api/scorecard/sales-scorecard-overview?${params.toString()}`;
       const data = await api.request<{ rows: SalesScorecardOverviewRow[] }>(url);
@@ -138,6 +149,7 @@ export function useSalesScorecardOverviewData(
     filters.scopeEnd,
     filters.branch,
     filters.loanOfficer,
+    filters.dimensionFilters,
   ]);
 
   const fetchFilterOptions = useCallback(async () => {
