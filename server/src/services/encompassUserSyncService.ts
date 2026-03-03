@@ -43,6 +43,8 @@ export interface InviteUserOptions {
   invite_method?: "email" | "sso_only" | "manual";
   password?: string;
   inviter_name?: string;
+  access_mode?: "full" | "canvas_only";
+  group_ids?: string[];
 }
 
 export interface InviteResult {
@@ -346,6 +348,26 @@ export class EncompassUserSyncService {
   }
 
   /**
+   * Add a user to the given groups (idempotent)
+   */
+  private async addUserToGroups(
+    userId: string,
+    groupIds: string[],
+  ): Promise<void> {
+    if (groupIds.length === 0) return;
+    for (const groupId of groupIds) {
+      await this.tenantPool.query(
+        `
+        INSERT INTO user_group_memberships (group_id, user_id)
+        VALUES ($1, $2)
+        ON CONFLICT (group_id, user_id) DO NOTHING
+        `,
+        [groupId, userId],
+      );
+    }
+  }
+
+  /**
    * Invite an Encompass user to Cohi
    */
   async inviteUser(
@@ -358,6 +380,8 @@ export class EncompassUserSyncService {
       invite_method = "email",
       password,
       inviter_name,
+      access_mode = "full",
+      group_ids = [],
     } = options || {};
 
     try {
@@ -411,6 +435,9 @@ export class EncompassUserSyncService {
           losConnectionId,
         );
 
+        // Add to requested groups
+        await this.addUserToGroups(existingUser.rows[0].id, group_ids);
+
         return {
           success: true,
           cohi_user_id: existingUser.rows[0].id,
@@ -437,8 +464,8 @@ export class EncompassUserSyncService {
         `
         INSERT INTO users 
           (email, encrypted_password, full_name, role, is_active, 
-           encompass_user_id, los_connection_id)
-        VALUES ($1, $2, $3, $4, true, $5, $6)
+           encompass_user_id, los_connection_id, access_mode, loan_access_mode)
+        VALUES ($1, $2, $3, $4, true, $5, $6, $7, 'full_access')
         RETURNING id
       `,
         [
@@ -449,10 +476,14 @@ export class EncompassUserSyncService {
           role,
           encompassUser.encompass_user_id,
           losConnectionId,
+          access_mode,
         ],
       );
 
       const newUserId = newUserResult.rows[0].id;
+
+      // Add to requested groups
+      await this.addUserToGroups(newUserId, group_ids);
 
       // Link the encompass_users record
       await this.tenantPool.query(

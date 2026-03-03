@@ -32,6 +32,7 @@ import tenantConfigExportRoutes from "./admin/tenantConfigExport.js";
 import insightFeedbackRoutes from "./admin/insightFeedback.js";
 import knowledgeCenterRoutes from "./knowledgeCenter.js";
 import workbenchRoutes from "./workbench.js";
+import groupsRoutes from "./groups.js";
 import reportRoutes from "./reports.js";
 import distributionsRoutes from "./distributions.js";
 import researchRoutes from "./research.js";
@@ -44,6 +45,8 @@ import { pool, resetPool } from "../config/database.js";
 import { setupMockLosApi } from "../services/mockLosApi.js";
 import { getVersionInfo } from "../services/versionService.js";
 import { globalTenantContext } from "../middleware/tenantContext.js";
+import { getJwtSecret } from "../middleware/auth.js";
+import jwt from "jsonwebtoken";
 import crypto from "crypto";
 
 export function setupRoutes(app: Express) {
@@ -61,6 +64,48 @@ export function setupRoutes(app: Express) {
   // attaches tenant context to authenticated requests so new routes get it
   // by default even if the developer forgets attachTenantContext.
   app.use("/api", globalTenantContext);
+
+  // Canvas-only guard:
+  // - keep the user inside workbench + data endpoints needed to render shared dashboards
+  // - block admin/management and write operations outside workbench
+  app.use("/api", (req: any, res: any, next: any) => {
+    const authHeader = req.headers?.authorization;
+    const token = authHeader && authHeader.split(" ")[1];
+    if (!token) return next();
+    try {
+      const decoded = jwt.verify(token, getJwtSecret()) as { access_mode?: string };
+      if (decoded.access_mode === "canvas_only") {
+        const path = req.originalUrl || req.url || "";
+        const method = (req.method || "GET").toUpperCase();
+        const allowedPrefixes = [
+          "/api/auth",
+          "/api/workbench/canvases",
+          "/api/loans",
+          "/api/metrics",
+          "/api/dashboard",
+          "/api/pipeline-analysis",
+          "/api/scorecard",
+          "/api/toptiering",
+          "/api/predictions",
+          "/api/fallout",
+          "/api/pricing-dashboard",
+        ];
+        const pathAllowed = allowedPrefixes.some((prefix) =>
+          path.startsWith(prefix),
+        );
+        const methodAllowed = method === "GET" || method === "POST";
+        if (!pathAllowed || !methodAllowed) {
+          return res.status(403).json({
+            error: "Forbidden",
+            message: "Canvas-only users cannot access this resource.",
+          });
+        }
+      }
+    } catch {
+      // Invalid or expired token — let the route's auth middleware return 401
+    }
+    next();
+  });
 
   app.use("/api/auth", authRoutes);
   app.use("/api/auth/cognito", cognitoAuth);
@@ -98,6 +143,7 @@ export function setupRoutes(app: Express) {
   app.use("/api/admin/insight-feedback", insightFeedbackRoutes);
   app.use("/api/knowledge-center", knowledgeCenterRoutes);
   app.use("/api/workbench/canvases", workbenchRoutes); // Workbench canvas CRUD (tenant DB)
+  app.use("/api/groups", groupsRoutes); // User groups for canvas sharing (tenant DB)
   app.use("/api/workbench/reports", reportRoutes); // Report generation (PPTX/PDF)
   app.use("/api/distributions", distributionsRoutes); // Report distribution schedules (tenant DB)
   app.use("/api/research", researchRoutes); // Research Analyst agentic system

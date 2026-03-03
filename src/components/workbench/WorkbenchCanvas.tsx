@@ -851,14 +851,23 @@ export function WorkbenchCanvas({
     "private" | "global" | "shared"
   >("private");
   const [sharedWithUserIds, setSharedWithUserIds] = useState<string[]>([]);
+  /** Granular shares (user/group + permission). Synced from API and used when saving. */
+  const [canvasShares, setCanvasShares] = useState<
+    Array<{ userId?: string; groupId?: string; permission: "viewer" | "editor" }>
+  >([]);
   const [tenantUsers, setTenantUsers] = useState<
     Array<{ id: string; email: string; full_name?: string; role?: string }>
   >([]);
   const [tenantUsersLoaded, setTenantUsersLoaded] = useState(false);
+  const [tenantGroups, setTenantGroups] = useState<
+    Array<{ id: string; name: string; description?: string; color?: string }>
+  >([]);
+  const [tenantGroupsLoaded, setTenantGroupsLoaded] = useState(false);
   const [visibilitySaving, setVisibilitySaving] = useState(false);
   const { user } = useAuth();
   const navigate = useNavigate();
   const isOwner = isOwnerProp ?? true; // Default to true for new/own canvases
+  const canEdit = isOwner;
   const {
     handleExportPng,
     handleExportPdf,
@@ -1988,8 +1997,26 @@ export function WorkbenchCanvas({
         if (typeof data.favorited === "boolean")
           setShareFavorited(data.favorited);
         if (data.visibility) setCanvasVisibility(data.visibility);
-        if (Array.isArray(data.shared_with_user_ids))
+        if (Array.isArray(data.shares) && data.shares.length > 0) {
+          setCanvasShares(
+            data.shares.map((s: any) => ({
+              userId: s.userId ?? undefined,
+              groupId: s.groupId ?? undefined,
+              permission: s.permission === "editor" ? "editor" : "viewer",
+            }))
+          );
+          setSharedWithUserIds(
+            data.shares.filter((s: any) => s.userId).map((s: any) => s.userId)
+          );
+        } else if (Array.isArray(data.shared_with_user_ids)) {
           setSharedWithUserIds(data.shared_with_user_ids);
+          setCanvasShares(
+            data.shared_with_user_ids.map((id: string) => ({
+              userId: id,
+              permission: "viewer" as const,
+            }))
+          );
+        }
         setCanvasId(data.id);
         // Snapshot baseline for dirty-state tracking.
         // Use double-RAF to ensure React has flushed all state updates from the
@@ -2259,6 +2286,7 @@ export function WorkbenchCanvas({
       payload: CanvasLayoutItem["payload"],
       size?: { w?: number; h?: number },
     ) => {
+      if (!canEdit) return;
       const id = `widget-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       const { x, y } = getNextPosition(items);
       const newItem = createLayoutItem(id, type, payload, {
@@ -2269,20 +2297,22 @@ export function WorkbenchCanvas({
       });
       setItemsWithHistory((prev) => [...prev, newItem]);
     },
-    [items, setItemsWithHistory],
+    [canEdit, items, setItemsWithHistory],
   );
 
   const removeWidget = useCallback(
     (id: string) => {
+      if (!canEdit) return;
       setItemsWithHistory((prev) => prev.filter((i) => i.i !== id));
       if (selectedWidgetId === id) setSelectedWidgetId(null);
       toast({ title: "Widget removed" });
     },
-    [setItemsWithHistory, selectedWidgetId, toast],
+    [canEdit, setItemsWithHistory, selectedWidgetId, toast],
   );
 
   const duplicateWidget = useCallback(
     (id: string) => {
+      if (!canEdit) return;
       const item = items.find((i) => i.i === id);
       if (!item) return;
       const newId = `widget-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -2297,7 +2327,7 @@ export function WorkbenchCanvas({
       setSelectedWidgetId(newId);
       toast({ title: "Widget duplicated" });
     },
-    [items, setItemsWithHistory, toast],
+    [canEdit, items, setItemsWithHistory, toast],
   );
 
   const updateItemRect = useCallback(
@@ -2306,6 +2336,7 @@ export function WorkbenchCanvas({
       next: Partial<Pick<CanvasLayoutItem, "x" | "y" | "w" | "h">>,
       withHistory = false,
     ) => {
+      if (!canEdit) return;
       // Clamp position so widgets can't be dragged off the left/top edges
       const clamped = { ...next };
       if (clamped.x !== undefined) clamped.x = Math.max(0, clamped.x);
@@ -2315,14 +2346,15 @@ export function WorkbenchCanvas({
         prev.map((i) => (i.i === id ? { ...i, ...clamped } : i)),
       );
     },
-    [setItems, setItemsWithHistory],
+    [canEdit, setItems, setItemsWithHistory],
   );
 
   const updateWidgetPayload = useCallback(
     (id: string, payload: CanvasLayoutItem["payload"]) => {
+      if (!canEdit) return;
       setItems((prev) => prev.map((i) => (i.i === id ? { ...i, payload } : i)));
     },
-    [],
+    [canEdit],
   );
 
   const addTextBlock = useCallback(() => {
@@ -2536,6 +2568,7 @@ export function WorkbenchCanvas({
   // Listen for dashboard section additions from the sidebar
   useEffect(() => {
     const handler = (e: Event) => {
+      if (!canEdit) return;
       const detail = (e as CustomEvent).detail;
       if (detail?.sectionId) {
         const item = DASHBOARD_SECTION_ITEMS.find(
@@ -2548,11 +2581,12 @@ export function WorkbenchCanvas({
     };
     window.addEventListener("add-dashboard-section", handler);
     return () => window.removeEventListener("add-dashboard-section", handler);
-  }, [addDashboardSection]);
+  }, [addDashboardSection, canEdit]);
 
   // Listen for generic canvas widget additions (from Cohi Chat "Add to Workbench")
   useEffect(() => {
     const handler = (e: Event) => {
+      if (!canEdit) return;
       const detail = (e as CustomEvent).detail;
       if (detail?.type && detail?.payload) {
         addWidget(
@@ -2568,7 +2602,7 @@ export function WorkbenchCanvas({
     };
     window.addEventListener("add-canvas-widget", handler);
     return () => window.removeEventListener("add-canvas-widget", handler);
-  }, [addWidget, toast]);
+  }, [addWidget, canEdit, toast]);
 
   // (Sidebar report builder links removed — reports are generated from canvas via the header button)
 
@@ -2769,6 +2803,7 @@ export function WorkbenchCanvas({
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") setSelectedWidgetId(null);
+      if (!canEdit) return;
       if ((e.key === "Delete" || e.key === "Backspace") && selectedWidgetId) {
         const t = e.target as HTMLElement;
         if (!t.closest?.("input, textarea, [contenteditable]")) {
@@ -2784,7 +2819,7 @@ export function WorkbenchCanvas({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedWidgetId, removeWidget, undo, redo, canUndo, canRedo]);
+  }, [canEdit, selectedWidgetId, removeWidget, undo, redo, canUndo, canRedo]);
 
   const handleAnnotationMouseDown = useCallback(
     (e: React.MouseEvent, id: string) => {
@@ -3355,7 +3390,7 @@ Structure it as a narrative-first executive briefing:
       return;
     }
     setShareDialogOpen(true);
-    // Lazy-load tenant users when dialog opens
+    // Lazy-load tenant users and groups when dialog opens
     if (!tenantUsersLoaded) {
       (async () => {
         try {
@@ -3374,7 +3409,21 @@ Structure it as a narrative-first executive briefing:
         }
       })();
     }
-  }, [canvasId, toast, tenantUsersLoaded, tenantQs, user?.id]);
+    if (!tenantGroupsLoaded) {
+      (async () => {
+        try {
+          const data = await api.request<{ groups: Array<{ id: string; name: string; description?: string; color?: string }> }>(
+            `/api/groups${tenantQs}`
+          );
+          setTenantGroups(data?.groups ?? []);
+          setTenantGroupsLoaded(true);
+        } catch {
+          setTenantGroups([]);
+          setTenantGroupsLoaded(true);
+        }
+      })();
+    }
+  }, [canvasId, toast, tenantUsersLoaded, tenantGroupsLoaded, tenantQs, user?.id]);
 
   const handleSaveVisibility = useCallback(async () => {
     if (!canvasId) return;
@@ -3387,7 +3436,17 @@ Structure it as a narrative-first executive briefing:
           body: JSON.stringify({
             visibility: canvasVisibility,
             shared_with_user_ids:
-              canvasVisibility === "shared" ? sharedWithUserIds : [],
+              canvasVisibility === "shared"
+                ? canvasShares.filter((s) => s.userId).map((s) => s.userId!)
+                : [],
+            shares:
+              canvasVisibility === "shared"
+                ? canvasShares.map((s) => ({
+                    userId: s.userId,
+                    groupId: s.groupId,
+                    permission: s.permission,
+                  }))
+                : [],
           }),
         },
       );
@@ -3405,15 +3464,45 @@ Structure it as a narrative-first executive briefing:
     } finally {
       setVisibilitySaving(false);
     }
-  }, [canvasId, canvasVisibility, sharedWithUserIds, tenantQs, toast]);
+  }, [canvasId, canvasVisibility, canvasShares, tenantQs, toast]);
 
   const toggleSharedUser = useCallback((userId: string) => {
+    setCanvasShares((prev) => {
+      const existing = prev.find((s) => s.userId === userId);
+      if (existing) return prev.filter((s) => s.userId !== userId);
+      return [...prev, { userId, permission: "viewer" as const }];
+    });
     setSharedWithUserIds((prev) =>
       prev.includes(userId)
         ? prev.filter((id) => id !== userId)
         : [...prev, userId],
     );
   }, []);
+
+  const toggleSharedGroup = useCallback((groupId: string) => {
+    setCanvasShares((prev) => {
+      const existing = prev.find((s) => s.groupId === groupId);
+      if (existing) return prev.filter((s) => s.groupId !== groupId);
+      return [...prev, { groupId, permission: "viewer" as const }];
+    });
+  }, []);
+
+  const setSharePermission = useCallback(
+    (
+      key: string,
+      type: "user" | "group",
+      permission: "viewer" | "editor"
+    ) => {
+      setCanvasShares((prev) =>
+        prev.map((s) => {
+          if (type === "user" && s.userId === key) return { ...s, permission };
+          if (type === "group" && s.groupId === key) return { ...s, permission };
+          return s;
+        })
+      );
+    },
+    []
+  );
 
   const handleSaveConfirm = useCallback(async () => {
     const title = saveTitle.trim() || "Untitled canvas";
@@ -3820,8 +3909,10 @@ Structure it as a narrative-first executive briefing:
               <TooltipContent side="bottom">Create dashboard from image</TooltipContent>
             </Tooltip>
             */}
-                  <div className="w-px h-5 bg-slate-200 dark:bg-slate-600 shrink-0 mx-0.5" />
-                  <DropdownMenu>
+                  {canEdit && (
+                    <>
+                      <div className="w-px h-5 bg-slate-200 dark:bg-slate-600 shrink-0 mx-0.5" />
+                      <DropdownMenu>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <DropdownMenuTrigger asChild>
@@ -3926,7 +4017,9 @@ Structure it as a narrative-first executive briefing:
                         Text block
                       </DropdownMenuItem>
                     </DropdownMenuContent>
-                  </DropdownMenu>
+                      </DropdownMenu>
+                    </>
+                  )}
                   {/* Logo button hidden – not ready for release
             <Tooltip>
               <TooltipTrigger asChild>
@@ -3943,7 +4036,7 @@ Structure it as a narrative-first executive briefing:
               <TooltipContent side="bottom">Add logo</TooltipContent>
             </Tooltip>
             */}
-                  {selectedWidgetId && (
+                  {canEdit && selectedWidgetId && (
                     <>
                       <Tooltip>
                         <TooltipTrigger asChild>
@@ -4157,22 +4250,19 @@ Structure it as a narrative-first executive briefing:
             {/* Per-widget export is available in each widget's context menu */}
           </div>
 
-          {/* Inline Report Builder — always mounted, hidden when inactive to preserve state */}
-          <div
-            className={cn(
-              "flex-1 min-h-0 overflow-hidden",
-              !showReportBuilder && "hidden",
-            )}
-          >
-            <ReportBuilder
-              onClose={() => setShowReportBuilder(false)}
-              canvasWidgetData={useCanvasDataStore.getState().getSnapshot()}
-              canvasTitle={saveTitle || "Untitled Canvas"}
-              tenantId={tenantId}
-              initialDefinition={aiReportDefinition ?? undefined}
-              inline
-            />
-          </div>
+          {/* Inline Report Builder (mount only when active to avoid hidden background requests) */}
+          {showReportBuilder && (
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <ReportBuilder
+                onClose={() => setShowReportBuilder(false)}
+                canvasWidgetData={useCanvasDataStore.getState().getSnapshot()}
+                canvasTitle={saveTitle || "Untitled Canvas"}
+                tenantId={tenantId}
+                initialDefinition={aiReportDefinition ?? undefined}
+                inline
+              />
+            </div>
+          )}
 
           {/* Canvas surface: freeform or empty state + annotations overlay */}
           <div
@@ -4419,7 +4509,8 @@ Structure it as a narrative-first executive briefing:
                           true,
                         )
                       }
-                      enableResizing
+                      disableDragging={!canEdit}
+                      enableResizing={canEdit}
                       dragHandleClassName={
                         item.type === "rich_text"
                           ? "canvas-drag-handle"
@@ -4434,17 +4525,25 @@ Structure it as a narrative-first executive briefing:
                         selected={selectedWidgetId === item.i}
                         editing={editingWidgetId === item.i}
                         onSelect={() => setSelectedWidgetId(item.i)}
-                        onDuplicate={() => duplicateWidget(item.i)}
-                        onDelete={() => removeWidget(item.i)}
+                        onDuplicate={
+                          canEdit ? () => duplicateWidget(item.i) : undefined
+                        }
+                        onDelete={
+                          canEdit ? () => removeWidget(item.i) : undefined
+                        }
                         className="overflow-hidden"
-                        hideableSections={hideableSections}
+                        hideableSections={canEdit ? hideableSections : []}
                         hiddenSections={hiddenSections}
-                        onToggleSection={onToggleSection}
-                        onBringToFront={() => bringToFront(item.i)}
-                        onSendToBack={() => sendToBack(item.i)}
+                        onToggleSection={canEdit ? onToggleSection : undefined}
+                        onBringToFront={
+                          canEdit ? () => bringToFront(item.i) : undefined
+                        }
+                        onSendToBack={
+                          canEdit ? () => sendToBack(item.i) : undefined
+                        }
                         displayMode={displayMode}
                         onChangeDisplayMode={
-                          isDashboardSection
+                          canEdit && isDashboardSection
                             ? (mode) =>
                                 updateWidgetPayload(item.i, {
                                   ...payload,
@@ -4452,9 +4551,9 @@ Structure it as a narrative-first executive briefing:
                                 })
                             : undefined
                         }
-                        availableGroups={availableGroups}
-                        onMoveToGroup={handleMoveToGroup}
-                        onWrapInGroup={handleWrapInGroup}
+                        availableGroups={canEdit ? availableGroups : []}
+                        onMoveToGroup={canEdit ? handleMoveToGroup : undefined}
+                        onWrapInGroup={canEdit ? handleWrapInGroup : undefined}
                         onExportExcel={() => handleExportWidgetExcel(item.i)}
                         onEditWithCohi={
                           WORKBENCH_COHI_HIDDEN
@@ -4477,12 +4576,14 @@ Structure it as a narrative-first executive briefing:
                           item={displayItem}
                           height={item.h}
                           width={item.w}
+                          canEdit={canEdit}
                           onUpdatePayload={
-                            item.type === "text_block" ||
-                            item.type === "rich_text" ||
-                            item.type === "widget_group"
+                            canEdit &&
+                            (item.type === "text_block" ||
+                              item.type === "rich_text" ||
+                              item.type === "widget_group")
                               ? (p) => updateWidgetPayload(item.i, p)
-                              : isLegacyLoanDetail
+                              : canEdit && isLegacyLoanDetail
                                 ? (p) =>
                                     setItemsWithHistory((prev) =>
                                       prev.map((i) =>
@@ -4956,63 +5057,184 @@ Structure it as a narrative-first executive briefing:
                 </div>
               </div>
 
-              {/* User picker — shown when visibility is 'shared' */}
+              {/* Users + Groups with permission — shown when visibility is 'shared' */}
               {canvasVisibility === "shared" && (
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                    Share with
-                  </label>
-                  {tenantUsers.length > 0 ? (
-                    <div className="max-h-[200px] overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800">
-                      {tenantUsers.map((u) => {
-                        const selected = sharedWithUserIds.includes(u.id);
-                        return (
-                          <button
-                            key={u.id}
-                            type="button"
-                            className={cn(
-                              "flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors",
-                              selected
-                                ? "bg-violet-50 dark:bg-violet-900/20"
-                                : "hover:bg-slate-50 dark:hover:bg-slate-800/50",
-                            )}
-                            onClick={() => toggleSharedUser(u.id)}
-                          >
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                      Users
+                    </label>
+                    {tenantUsers.length > 0 ? (
+                      <div className="max-h-[180px] overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800">
+                        {tenantUsers.map((u) => {
+                          const shareEntry = canvasShares.find((s) => s.userId === u.id);
+                          const selected = !!shareEntry;
+                          return (
                             <div
+                              key={u.id}
                               className={cn(
-                                "h-4 w-4 rounded border flex items-center justify-center shrink-0 transition-colors",
+                                "flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors",
                                 selected
-                                  ? "bg-violet-600 border-violet-600 text-white"
-                                  : "border-slate-300 dark:border-slate-600",
+                                  ? "bg-violet-50 dark:bg-violet-900/20"
+                                  : "hover:bg-slate-50 dark:hover:bg-slate-800/50",
                               )}
                             >
-                              {selected && <Check className="h-3 w-3" />}
-                            </div>
-                            <div className="flex-1 min-w-0 truncate">
-                              <span className="text-slate-700 dark:text-slate-200">
-                                {u.full_name || u.email}
-                              </span>
-                              {u.full_name && (
-                                <span className="ml-1.5 text-xs text-slate-400">
-                                  {u.email}
-                                </span>
+                              <button
+                                type="button"
+                                className="flex items-center gap-2.5 flex-1 min-w-0"
+                                onClick={() => toggleSharedUser(u.id)}
+                              >
+                                <div
+                                  className={cn(
+                                    "h-4 w-4 rounded border flex items-center justify-center shrink-0 transition-colors",
+                                    selected
+                                      ? "bg-violet-600 border-violet-600 text-white"
+                                      : "border-slate-300 dark:border-slate-600",
+                                  )}
+                                >
+                                  {selected && <Check className="h-3 w-3" />}
+                                </div>
+                                <div className="flex-1 min-w-0 truncate">
+                                  <span className="text-slate-700 dark:text-slate-200">
+                                    {u.full_name || u.email}
+                                  </span>
+                                  {u.full_name && (
+                                    <span className="ml-1.5 text-xs text-slate-400">
+                                      {u.email}
+                                    </span>
+                                  )}
+                                </div>
+                              </button>
+                              {selected && (
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 gap-1 text-xs shrink-0"
+                                    >
+                                      {shareEntry.permission === "editor"
+                                        ? "Editor"
+                                        : "Viewer"}
+                                      <ChevronDown className="h-3 w-3" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    <DropdownMenuItem
+                                      onClick={() =>
+                                        setSharePermission(u.id, "user", "viewer")
+                                      }
+                                    >
+                                      Viewer
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() =>
+                                        setSharePermission(u.id, "user", "editor")
+                                      }
+                                    >
+                                      Editor
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
                               )}
                             </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-slate-500 dark:text-slate-400 py-2">
-                      {tenantUsersLoaded
-                        ? "No users found in this tenant."
-                        : "Loading users..."}
-                    </p>
-                  )}
-                  {sharedWithUserIds.length > 0 && (
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500 dark:text-slate-400 py-2">
+                        {tenantUsersLoaded
+                          ? "No users found in this tenant."
+                          : "Loading users..."}
+                      </p>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                      Groups
+                    </label>
+                    {tenantGroupsLoaded && tenantGroups.length > 0 ? (
+                      <div className="max-h-[180px] overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800">
+                        {tenantGroups.map((g) => {
+                          const shareEntry = canvasShares.find((s) => s.groupId === g.id);
+                          const selected = !!shareEntry;
+                          return (
+                            <div
+                              key={g.id}
+                              className={cn(
+                                "flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors",
+                                selected
+                                  ? "bg-violet-50 dark:bg-violet-900/20"
+                                  : "hover:bg-slate-50 dark:hover:bg-slate-800/50",
+                              )}
+                            >
+                              <button
+                                type="button"
+                                className="flex items-center gap-2.5 flex-1 min-w-0"
+                                onClick={() => toggleSharedGroup(g.id)}
+                              >
+                                <div
+                                  className={cn(
+                                    "h-4 w-4 rounded border flex items-center justify-center shrink-0 transition-colors",
+                                    selected
+                                      ? "bg-violet-600 border-violet-600 text-white"
+                                      : "border-slate-300 dark:border-slate-600",
+                                  )}
+                                >
+                                  {selected && <Check className="h-3 w-3" />}
+                                </div>
+                                <span className="text-slate-700 dark:text-slate-200 truncate">
+                                  {g.name}
+                                </span>
+                              </button>
+                              {selected && (
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 gap-1 text-xs shrink-0"
+                                    >
+                                      {shareEntry.permission === "editor"
+                                        ? "Editor"
+                                        : "Viewer"}
+                                      <ChevronDown className="h-3 w-3" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    <DropdownMenuItem
+                                      onClick={() =>
+                                        setSharePermission(g.id, "group", "viewer")
+                                      }
+                                    >
+                                      Viewer
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() =>
+                                        setSharePermission(g.id, "group", "editor")
+                                      }
+                                    >
+                                      Editor
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500 dark:text-slate-400 py-2">
+                        {tenantGroupsLoaded
+                          ? "No groups. Admins can create groups in Admin → Groups."
+                          : "Loading groups..."}
+                      </p>
+                    )}
+                  </div>
+                  {canvasShares.length > 0 && (
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      {sharedWithUserIds.length} user
-                      {sharedWithUserIds.length !== 1 ? "s" : ""} selected
+                      {canvasShares.length} share
+                      {canvasShares.length !== 1 ? "s" : ""} (Viewer = read-only, Editor = can edit)
                     </p>
                   )}
                 </div>

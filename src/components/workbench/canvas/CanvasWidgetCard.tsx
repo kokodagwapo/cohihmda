@@ -33,8 +33,8 @@ interface CanvasWidgetCardProps {
   widgetId: string;
   selected: boolean;
   onSelect: () => void;
-  onDuplicate: () => void;
-  onDelete: () => void;
+  onDuplicate?: () => void;
+  onDelete?: () => void;
   children: React.ReactNode;
   className?: string;
   displayMode?: 'full' | 'compact' | 'hidden';
@@ -89,6 +89,15 @@ export function CanvasWidgetCard({
   const hasLayerActions = typeof onBringToFront === 'function' || typeof onSendToBack === 'function';
   const hasDisplayModes = typeof onChangeDisplayMode === 'function';
   const hasGroupActions = (availableGroups.length > 0 && typeof onMoveToGroup === 'function') || typeof onWrapInGroup === 'function';
+  const hasAnyMenuActions =
+    hasDisplayModes ||
+    hasHideableSections ||
+    hasLayerActions ||
+    hasGroupActions ||
+    typeof onEditWithCohi === 'function' ||
+    typeof onExportExcel === 'function' ||
+    typeof onDuplicate === 'function' ||
+    typeof onDelete === 'function';
   return (
     <div
       role="button"
@@ -112,6 +121,7 @@ export function CanvasWidgetCard({
           Editing
         </div>
       )}
+      {hasAnyMenuActions && (
       <div className="absolute top-9 right-1 z-10 opacity-0 group-hover:opacity-100 focus-within:opacity-100 hover:opacity-100 transition-opacity">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -245,20 +255,25 @@ export function CanvasWidgetCard({
                 <DropdownMenuSeparator />
               </>
             )}
-            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onDuplicate(); }} className="gap-2">
+            {onDuplicate && (
+              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onDuplicate(); }} className="gap-2">
               <Copy className="h-4 w-4" />
               Duplicate
-            </DropdownMenuItem>
-            <DropdownMenuItem
+              </DropdownMenuItem>
+            )}
+            {onDelete && (
+              <DropdownMenuItem
               onClick={(e) => { e.stopPropagation(); onDelete(); }}
               className="gap-2 text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400"
             >
               <Trash2 className="h-4 w-4" />
               Delete
-            </DropdownMenuItem>
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      )}
       <div className="flex-1 min-h-0 overflow-auto group relative">
         {children}
       </div>

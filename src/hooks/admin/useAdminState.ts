@@ -5,7 +5,6 @@ export type AdminSection =
   | "tenants"
   | "platform-team" // Cohi internal team management (super_admin only)
   | "users"
-  | "roles"
   | "sso"
   | "org"
   | "data-quality"
