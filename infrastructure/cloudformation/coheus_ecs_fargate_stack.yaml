@@ -112,6 +112,26 @@ Parameters:
     Description: Maximum tasks for auto-scaling
 
   # Sync worker (dedicated container for Encompass ETL)
+  WorkerCpu:
+    Type: Number
+    Default: 2048
+    AllowedValues:
+      - 512
+      - 1024
+      - 2048
+      - 4096
+    Description: CPU units for worker tasks (ETL workloads need more CPU than API)
+
+  WorkerMemory:
+    Type: Number
+    Default: 4096
+    AllowedValues:
+      - 1024
+      - 2048
+      - 4096
+      - 8192
+    Description: Memory in MB for worker tasks
+
   WorkerDesiredCount:
     Type: Number
     Default: 1
@@ -819,8 +839,8 @@ Resources:
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
-      Cpu: !Ref ContainerCpu
-      Memory: !Ref ContainerMemory
+      Cpu: !Ref WorkerCpu
+      Memory: !Ref WorkerMemory
       ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
       TaskRoleArn: !GetAtt ECSTaskRole.Arn
       ContainerDefinitions:
