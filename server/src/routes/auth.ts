@@ -56,6 +56,7 @@ interface TenantUser {
   tenant_slug: string;
   locked_until?: Date | null;
   failed_login_attempts?: number;
+  access_mode?: 'full' | 'canvas_only';
 }
 
 type AuthUser =
@@ -74,6 +75,7 @@ interface JwtPayload {
   tenantId?: string;
   tenantSlug?: string;
   isSuperAdmin: boolean;
+  access_mode?: 'full' | 'canvas_only';
 }
 
 // Database pools
@@ -282,7 +284,8 @@ async function findTenantUser(
       try {
         const userResult = await tenantPool.query(
           `SELECT id, email, encrypted_password, full_name, role, is_active,
-                  failed_login_attempts, locked_until
+                  failed_login_attempts, locked_until,
+                  COALESCE(access_mode, 'full') AS access_mode
            FROM users 
            WHERE email = $1`,
           [email]
@@ -349,6 +352,7 @@ async function issueAppToken(
     email: user.email,
     role: user.role,
     isSuperAdmin,
+    access_mode: !isSuperAdmin && 'access_mode' in user ? (user.access_mode || 'full') : 'full',
   };
 
   if (!isSuperAdmin && "tenant_id" in user) {
@@ -786,6 +790,10 @@ function buildUserResponse(user: AuthUser, isSuperAdmin: boolean) {
     tenant_id: "tenant_id" in user ? user.tenant_id : null,
     tenant_name: "tenant_name" in user ? user.tenant_name : null,
     tenant_slug: "tenant_slug" in user ? user.tenant_slug : null,
+    access_mode:
+      !isSuperAdmin && "access_mode" in user
+        ? (user.access_mode || "full")
+        : "full",
   };
 }
 
@@ -892,13 +900,15 @@ router.get("/me", async (req, res) => {
           tenant_id: null,
           tenant_name: null,
           tenant_slug: null,
+          access_mode: 'full',
         };
       }
     } else if (decoded.tenantSlug) {
       const tenantPool = await getTenantPool(decoded.tenantSlug);
       if (tenantPool) {
         const result = await tenantPool.query(
-          `SELECT id, email, full_name, role, is_active, last_login_at, created_at
+          `SELECT id, email, full_name, role, is_active, last_login_at, created_at,
+                  COALESCE(access_mode, 'full') AS access_mode
            FROM users WHERE id = $1`,
           [decoded.userId]
         );

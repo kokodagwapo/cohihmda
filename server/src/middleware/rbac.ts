@@ -403,6 +403,36 @@ export function enforceTenantIsolation() {
 }
 
 /**
+ * Middleware: block canvas_only users from non-canvas routes.
+ * Allow only /api/auth and /api/workbench/canvases. Must run after authenticateToken.
+ */
+export function requireFullAccess() {
+  return async (req: RBACRequest, res: Response, next: NextFunction) => {
+    try {
+      if (!req.userId) {
+        return next();
+      }
+      const accessMode = req.userAccessMode ?? 'full';
+      if (accessMode !== 'canvas_only') {
+        return next();
+      }
+      const path = req.originalUrl || req.url || '';
+      const allowed = path.startsWith('/api/auth') || path.startsWith('/api/workbench/canvases');
+      if (allowed) {
+        return next();
+      }
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'Canvas-only users cannot access this resource.',
+      });
+    } catch (error: any) {
+      logError('requireFullAccess error', error, { userId: req.userId });
+      res.status(500).json({ error: 'Access check failed' });
+    }
+  };
+}
+
+/**
  * Get all permissions for a role
  */
 export async function getRolePermissions(role: string): Promise<Array<{ resource: string; action: string }>> {

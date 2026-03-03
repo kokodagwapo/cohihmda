@@ -15,6 +15,20 @@ import {
 } from "../config/defaultEncompassFieldMappings.js";
 import { coheusAliasToColumnName } from "./encompassFieldMapper.js";
 
+/**
+ * Build a set of all core column names derived from the default field mappings.
+ * This is used to prevent the import from creating additional fields that would
+ * collide with core schema columns (e.g. milestone short names like "Funding"
+ * that resolve to "funding_date" via COLUMN_NAME_ALIASES).
+ */
+function buildCoreColumnNameSet(): Set<string> {
+  const coreColumns = new Set<string>();
+  for (const alias of Object.keys(DEFAULT_ENCOMPASS_FIELD_MAPPINGS)) {
+    coreColumns.add(coheusAliasToColumnName(alias).toLowerCase());
+  }
+  return coreColumns;
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -75,6 +89,7 @@ export function parseLegacyXml(xmlContent: string): {
     newFieldId: string;
     isDate: boolean;
   }>;
+  milestones: Array<{ name: string; fieldId: string; isCustom: boolean }>;
 } {
   const result = {
     clientInfo: { id: "", name: "" },
@@ -85,6 +100,11 @@ export function parseLegacyXml(xmlContent: string): {
       defaultFieldId: string;
       newFieldId: string;
       isDate: boolean;
+    }>,
+    milestones: [] as Array<{
+      name: string;
+      fieldId: string;
+      isCustom: boolean;
     }>,
   };
 
@@ -138,6 +158,23 @@ export function parseLegacyXml(xmlContent: string): {
         defaultFieldId: match[2],
         newFieldId: match[3],
         isDate: match[4].toLowerCase() === "true",
+      });
+    }
+  }
+
+  // Extract Milestones (used to recognize milestone date entries in the DataDictionary)
+  const milestonesMatch = xmlContent.match(
+    /<Milestones>([\s\S]*?)<\/Milestones>/
+  );
+  if (milestonesMatch) {
+    const milestoneRegex =
+      /<Milestone\s+Name="([^"]+)"\s+SortOrder="[^"]*"\s+FieldId="([^"]+)"\s+IsCustom="([^"]+)"/g;
+    let match;
+    while ((match = milestoneRegex.exec(milestonesMatch[1])) !== null) {
+      result.milestones.push({
+        name: match[1],
+        fieldId: match[2],
+        isCustom: match[3].toLowerCase() === "true",
       });
     }
   }
@@ -275,19 +312,35 @@ export function analyzeImport(
 
   const processedAliases = new Set<string>();
 
+  // Build set of core column names so we can detect when a proposed additional
+  // field would collide with an existing core schema column.
+  const coreColumnNames = buildCoreColumnNameSet();
+
+  // Build a set of milestone field IDs from the XML's <Milestones> section.
+  // Entries whose field ID matches a milestone are milestone date values that
+  // map to existing core columns (e.g. "Funding" -> funding_date) and should
+  // NOT be imported as additional fields.
+  const milestoneFieldIds = new Set<string>();
+  for (const ms of parsed.milestones) {
+    milestoneFieldIds.add(normalizeFieldId(ms.fieldId).toLowerCase());
+  }
+
   // 1. Process DataDictionary fields
   for (const field of parsed.dataDictionary) {
     const alias = field.alias;
     const clientFieldId = field.fieldId;
     const defaultFieldId = getDefaultEncompassFieldId(alias);
 
+    // Check if this is a milestone short name (e.g. "Funding" -> "Funding Date")
+    const variantDefaultFieldId = !defaultFieldId
+      ? getDefaultEncompassFieldId(alias + " Date")
+      : null;
+
     if (defaultFieldId) {
-      // This alias exists in our defaults
+      // This alias exists directly in our defaults
       if (fieldIdsMatch(clientFieldId, defaultFieldId)) {
-        // Field IDs match - no action needed
         analysis.matchingFields++;
       } else {
-        // Field IDs differ - need a swap
         analysis.fieldSwaps.push({
           alias,
           clientFieldId,
@@ -295,9 +348,39 @@ export function analyzeImport(
           reason: "different_mapping",
         });
       }
+    } else if (variantDefaultFieldId) {
+      // Milestone short name matched via " Date" variant (e.g. "Funding" -> "Funding Date").
+      // These are duplicate entries for milestone dates that are already handled by the
+      // full-name alias. Count as matching and skip - the real swap (if any) comes from
+      // the full-name entry (e.g. "Funding Date").
+      analysis.matchingFields++;
     } else {
-      // This alias is NOT in our defaults - it's an additional field
       const columnName = coheusAliasToColumnName(alias);
+      const normalizedFieldId = normalizeFieldId(clientFieldId).toLowerCase();
+
+      // Skip if this is a milestone date entry whose column resolves to a core column.
+      // This catches cases like "Funding" (Fields.Log.MS.Date.Funding) -> "funding_date"
+      // and "Processing" (Fields.Log.MS.Date.Processing) -> "processing_date".
+      if (coreColumnNames.has(columnName.toLowerCase())) {
+        analysis.warnings.push(
+          `Skipping "${alias}": column "${columnName}" is a core schema column`
+        );
+        processedAliases.add(alias.toLowerCase());
+        analysis.matchingFields++;
+        continue;
+      }
+
+      // Also skip entries whose field ID is a known milestone
+      if (milestoneFieldIds.has(normalizedFieldId)) {
+        analysis.warnings.push(
+          `Skipping "${alias}": field "${clientFieldId}" is a milestone date handled by core schema`
+        );
+        processedAliases.add(alias.toLowerCase());
+        analysis.matchingFields++;
+        continue;
+      }
+
+      // This alias is genuinely NOT in our defaults - it's an additional field
       analysis.additionalFields.push({
         alias,
         fieldId: clientFieldId,
@@ -322,9 +405,10 @@ export function analyzeImport(
     }
 
     // Check if it exists in defaults (shouldn't, but check anyway)
-    const defaultFieldId = getDefaultEncompassFieldId(alias);
+    const defaultFieldId =
+      getDefaultEncompassFieldId(alias) ||
+      getDefaultEncompassFieldId(alias + " Date");
     if (defaultFieldId) {
-      // It's in defaults but in AdHoc section - weird, add warning
       analysis.warnings.push(
         `AdHoc field "${alias}" exists in default mappings`
       );
@@ -332,6 +416,16 @@ export function analyzeImport(
     }
 
     const columnName = coheusAliasToColumnName(alias);
+
+    // Skip if column collides with core schema
+    if (coreColumnNames.has(columnName.toLowerCase())) {
+      analysis.warnings.push(
+        `Skipping AdHoc "${alias}": column "${columnName}" is a core schema column`
+      );
+      processedAliases.add(aliasLower);
+      continue;
+    }
+
     analysis.additionalFields.push({
       alias,
       fieldId: field.fieldId,
@@ -351,7 +445,9 @@ export function analyzeImport(
 
     // If NewFieldId is set, this is an explicit swap
     if (swap.newFieldId && swap.newFieldId.trim()) {
-      const defaultFieldId = getDefaultEncompassFieldId(alias);
+      const defaultFieldId =
+        getDefaultEncompassFieldId(alias) ||
+        getDefaultEncompassFieldId(alias + " Date");
 
       if (defaultFieldId) {
         // Check if this swap is already captured from DataDictionary
@@ -373,6 +469,15 @@ export function analyzeImport(
           const columnName = coheusAliasToColumnName(alias);
           const effectiveFieldId = swap.newFieldId || swap.defaultFieldId;
 
+          // Skip if column collides with core schema
+          if (coreColumnNames.has(columnName.toLowerCase())) {
+            analysis.warnings.push(
+              `Skipping FieldSwap "${alias}": column "${columnName}" is a core schema column`
+            );
+            processedAliases.add(aliasLower);
+            continue;
+          }
+
           analysis.additionalFields.push({
             alias,
             fieldId: normalizeFieldId(effectiveFieldId),
@@ -389,11 +494,21 @@ export function analyzeImport(
       }
     } else if (swap.defaultFieldId && !processedAliases.has(aliasLower)) {
       // No NewFieldId but has DefaultFieldId - check if it's a custom field
-      const ourDefaultFieldId = getDefaultEncompassFieldId(alias);
+      const ourDefaultFieldId =
+        getDefaultEncompassFieldId(alias) ||
+        getDefaultEncompassFieldId(alias + " Date");
 
       if (!ourDefaultFieldId) {
-        // Not in our defaults - it's a custom field
         const columnName = coheusAliasToColumnName(alias);
+
+        // Skip if column collides with core schema
+        if (coreColumnNames.has(columnName.toLowerCase())) {
+          analysis.warnings.push(
+            `Skipping FieldSwap "${alias}": column "${columnName}" is a core schema column`
+          );
+          processedAliases.add(aliasLower);
+          continue;
+        }
 
         analysis.additionalFields.push({
           alias,
@@ -541,7 +656,19 @@ export async function executeImport(
           )
         : analysis.additionalFields;
 
+    // Build core column set for runtime safety check
+    const coreColumns = buildCoreColumnNameSet();
+
     for (const field of fieldsToImport) {
+      // Safety net: refuse to create additional fields that collide with core columns.
+      // The analysis phase should already filter these, but this catches edge cases.
+      if (coreColumns.has(field.columnName.toLowerCase())) {
+        console.warn(
+          `[LegacyImport] Skipping "${field.alias}": column "${field.columnName}" is a core schema column`
+        );
+        continue;
+      }
+
       const client = await tenantPool.connect();
       try {
         // Check if field already exists
@@ -555,13 +682,21 @@ export async function executeImport(
           continue;
         }
 
-        // Skip if a built-in column already exists (e.g. disclosure_prep_date when columnName is disclosure_prep)
-        const builtinCheck = await client.query(
+        // Skip if column already exists in the loans table (core or previously created).
+        // This prevents creating additional_field_definitions rows that point to
+        // columns not managed by the additional field system.
+        const columnExistsAlready = await client.query(
           `SELECT 1 FROM information_schema.columns
            WHERE table_schema = 'public' AND table_name = 'loans' AND column_name = $1`,
-          [field.columnName + "_date"]
+          [field.columnName]
         );
-        if (builtinCheck.rows.length > 0) {
+        if (
+          columnExistsAlready.rows.length > 0 &&
+          !field.columnName.startsWith("af_")
+        ) {
+          console.warn(
+            `[LegacyImport] Skipping "${field.alias}": column "${field.columnName}" already exists in loans table (likely a core column)`
+          );
           continue;
         }
 

@@ -954,7 +954,8 @@ router.get(
         encompass_user_id,
         los_connection_id,
         loan_access_mode,
-        loan_access_synced_at
+        loan_access_synced_at,
+        COALESCE(access_mode, 'full') AS access_mode
       FROM users
       WHERE role != 'super_admin'
       ORDER BY created_at DESC
@@ -1071,6 +1072,7 @@ router.post(
             "processor",
           ])
           .default("user"),
+      access_mode: z.enum(["full", "canvas_only"]).optional(),
     });
     
     const validated = schema.parse(req.body);
@@ -1132,10 +1134,11 @@ router.post(
       }
     }
 
+    const accessMode = validated.access_mode ?? "full";
     const result = await tenantPool.query(
         `
-      INSERT INTO users (email, encrypted_password, full_name, role, is_active, loan_access_mode, cognito_sub)
-      VALUES ($1, $2, $3, $4, true, 'full_access', $5)
+      INSERT INTO users (email, encrypted_password, full_name, role, is_active, loan_access_mode, cognito_sub, access_mode)
+      VALUES ($1, $2, $3, $4, true, 'full_access', $5, $6)
       RETURNING id, email, full_name, role, is_active, created_at
     `,
         [
@@ -1144,6 +1147,7 @@ router.post(
           validated.full_name || null,
           validated.role,
           cognitoSub,
+          accessMode,
         ],
       );
     
@@ -1224,6 +1228,7 @@ router.put(
           .optional(),
       is_active: z.boolean().optional(),
       loan_access_mode: z.enum(["encompass_sync", "full_access", "no_access", "manual"]).optional(),
+      access_mode: z.enum(["full", "canvas_only"]).optional(),
     });
     
     const validated = schema.parse(req.body);
@@ -1255,6 +1260,10 @@ router.put(
     if (validated.loan_access_mode !== undefined) {
       updates.push(`loan_access_mode = $${paramIndex++}`);
       params.push(validated.loan_access_mode);
+    }
+    if (validated.access_mode !== undefined) {
+      updates.push(`access_mode = $${paramIndex++}`);
+      params.push(validated.access_mode);
     }
     
     if (updates.length === 0) {
@@ -1653,8 +1662,15 @@ router.post(
   async (req: AuthRequest, res) => {
     try {
       const encompassUserId = req.params.encompassUserId as string;
-      const { los_connection_id, role, invite_method, password, tenant_id } =
-        req.body;
+      const {
+        los_connection_id,
+        role,
+        invite_method,
+        password,
+        tenant_id,
+        access_mode,
+        group_ids,
+      } = req.body;
 
       if (!los_connection_id) {
         return res.status(400).json({ error: "los_connection_id is required" });
@@ -1693,6 +1709,9 @@ router.post(
           invite_method: invite_method || "email",
           password: password, // Pass password for manual invites
           inviter_name: req.userEmail,
+          access_mode:
+            access_mode === "canvas_only" ? "canvas_only" : "full",
+          group_ids: Array.isArray(group_ids) ? group_ids : undefined,
         },
       );
 
@@ -1737,6 +1756,8 @@ router.post(
         role,
         invite_method,
         tenant_id,
+        access_mode,
+        group_ids,
       } = req.body;
 
       if (
@@ -1773,6 +1794,9 @@ router.post(
           role: role || "user",
           invite_method: invite_method || "email",
           inviter_name: req.userEmail,
+          access_mode:
+            access_mode === "canvas_only" ? "canvas_only" : "full",
+          group_ids: Array.isArray(group_ids) ? group_ids : undefined,
         },
       );
 
@@ -2562,18 +2586,9 @@ router.post(
 
       // Trigger sync based on type (same logic as los.ts sync route)
       if (conn.connection_method === "api" && conn.los_type === "encompass") {
-        const { EncompassEtlService } = await import(
-          "../services/etl/encompassEtlService.js"
-        );
-        const etlService = new EncompassEtlService(tenantPool);
-
-        // Determine modifiedFrom for incremental sync (same logic as manual sync in los.ts)
-        // When fullSync is requested (e.g. after adding new field mappings), skip date filter to re-fetch all loans
         let modifiedFrom: Date | undefined;
         const lastLoanModifiedAt = conn.last_loan_modified_at;
-        const lastSyncedAt = conn.last_synced_at;
 
-        // Check if there are existing loans
         let loansCount = 0;
         try {
           const countResult = await tenantPool.query(
@@ -2585,12 +2600,8 @@ router.post(
         }
 
         if (!fullSync && lastLoanModifiedAt && loansCount > 0) {
-          // Best case: use last_loan_modified_at from a previous successful sync
           modifiedFrom = new Date(lastLoanModifiedAt);
         } else if (!fullSync && loansCount > 0) {
-          // Fallback: query MAX(last_modified_date) directly from loans table.
-          // This handles the case where a previous sync was interrupted before
-          // last_loan_modified_at could be written, but loans were already loaded.
           try {
             const maxResult = await tenantPool.query(
               `SELECT MAX(last_modified_date) as max_modified FROM public.loans WHERE last_modified_date IS NOT NULL`
@@ -2602,15 +2613,12 @@ router.post(
             // will do full sync
           }
         }
-        // If fullSync requested, or no modifiedFrom and no existing loans, full sync (modifiedFrom stays undefined)
 
-        // Set loanStartDate to 36 months ago (matching Qlik's vLoanStartDate)
         const threeYearsAgo = new Date();
         threeYearsAgo.setMonth(threeYearsAgo.getMonth() - 36);
         threeYearsAgo.setDate(1);
         threeYearsAgo.setHours(0, 0, 0, 0);
 
-        // Parse selected folders
         let selectedFolders: string[] = [];
         if (conn.encompass_selected_folders) {
           try {
@@ -2631,25 +2639,32 @@ router.post(
           folders: selectedFolders.length,
         });
 
-        // Run sync asynchronously
-        etlService
-          .syncLoans(tenantId, connectionId, {
+        // Enqueue sync job for the worker to process (keeps ETL off the API container)
+        const { enqueueSyncJob } = await import(
+          "../services/syncJobPoller.js"
+        );
+        const jobId = await enqueueSyncJob(
+          tenantId,
+          connectionId,
+          {
             fullSync,
-            modifiedFrom,
-            loanStartDate: threeYearsAgo,
+            modifiedFrom: modifiedFrom?.toISOString(),
+            loanStartDate: threeYearsAgo.toISOString(),
             loanStartDateField: "Fields.Log.MS.Date.Started",
             folderNames: selectedFolders.length > 0 ? selectedFolders : undefined,
-          })
-          .catch((error) => {
-            logError("Background sync error (admin trigger)", error, {
-              userId: req.userId,
-              connectionId,
-              tenant_id,
-            });
-          });
+          },
+          req.userId
+        );
+
+        // Mark connection as pending so the sync-status endpoint reflects it
+        await tenantPool.query(
+          `UPDATE public.los_connections SET last_sync_status = 'pending', updated_at = NOW() WHERE id = $1`,
+          [connectionId]
+        ).catch(() => {});
 
         return res.json({
           success: true,
+          jobId,
           message: fullSync
             ? "Full sync started (re-fetching all loans)"
             : modifiedFrom

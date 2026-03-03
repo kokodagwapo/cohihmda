@@ -13,7 +13,6 @@ import { LoanFoldersSection } from "@/components/admin/LoanFoldersSection";
 import { RAGVoiceSection } from "@/components/admin/RAGVoiceSection";
 import { UserManagementSection } from "@/components/admin/UserManagementSection";
 import { PlatformTeamSection } from "@/components/admin/PlatformTeamSection";
-import { RolesPermissionsSection } from "@/components/admin/RolesPermissionsSection";
 import { SSOConfigSection } from "@/components/admin/SSOConfigSection";
 import { OrgSettingsSection } from "@/components/admin/OrgSettingsSection";
 import { DataQualitySection } from "@/components/admin/DataQualitySection";
@@ -184,7 +183,6 @@ export const Admin = () => {
           case "users":
             // UserManagementSection handles its own data loading
             break;
-          case "roles":
           case "sso":
           case "org":
           case "data-quality":
@@ -238,8 +236,7 @@ export const Admin = () => {
     const sections = [
       { id: "overview", label: "Platform Overview" },
       { id: "tenants", label: "Tenants" },
-      { id: "users", label: "Users" },
-      { id: "roles", label: "Access & Permissions" },
+      { id: "users", label: "Users & Access" },
       { id: "sso", label: "SSO Configuration" },
       { id: "org", label: "Organization Settings" },
       { id: "data-quality", label: "Data Quality" },
@@ -349,9 +346,6 @@ export const Admin = () => {
 
               {/* Users Section */}
               {activeSection === "users" && <UserManagementSection />}
-
-              {/* Access & Permissions Section */}
-              {activeSection === "roles" && <RolesPermissionsSection />}
 
               {/* SSO Configuration Section */}
               {activeSection === "sso" && <SSOConfigSection />}

@@ -10,6 +10,7 @@ import React, {
   useEffect,
   useMemo,
 } from "react";
+import { useNavigate } from "react-router-dom";
 import type { SectionType } from "@/stores/widgetSectionStore";
 import { Rnd } from "react-rnd";
 import { api } from "@/lib/api";
@@ -19,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import {
   Save,
   Share2,
+  Mail,
   Image,
   Upload,
   Palette,
@@ -34,7 +36,6 @@ import {
   Sparkles,
   Download,
   Presentation,
-  Mail,
   Link as LinkIcon,
   Code,
   Undo2,
@@ -120,6 +121,9 @@ import type {
 import type { GroupWidgetItem } from "@/components/workbench/canvas/types";
 import { ImageToDashboardDialog } from "@/components/workbench/ImageToDashboardDialog";
 import { Camera } from "lucide-react";
+
+/** Set to true to hide Cohi chat/panel in workbench (panel + toggle + empty-state entry points). */
+const WORKBENCH_COHI_HIDDEN = true;
 
 /**
  * Helper: make an authenticated POST that returns a Blob (for PPTX/PDF downloads).
@@ -851,13 +855,23 @@ export function WorkbenchCanvas({
     "private" | "global" | "shared"
   >("private");
   const [sharedWithUserIds, setSharedWithUserIds] = useState<string[]>([]);
+  /** Granular shares (user/group + permission). Synced from API and used when saving. */
+  const [canvasShares, setCanvasShares] = useState<
+    Array<{ userId?: string; groupId?: string; permission: "viewer" | "editor" }>
+  >([]);
   const [tenantUsers, setTenantUsers] = useState<
     Array<{ id: string; email: string; full_name?: string; role?: string }>
   >([]);
   const [tenantUsersLoaded, setTenantUsersLoaded] = useState(false);
+  const [tenantGroups, setTenantGroups] = useState<
+    Array<{ id: string; name: string; description?: string; color?: string }>
+  >([]);
+  const [tenantGroupsLoaded, setTenantGroupsLoaded] = useState(false);
   const [visibilitySaving, setVisibilitySaving] = useState(false);
   const { user } = useAuth();
+  const navigate = useNavigate();
   const isOwner = isOwnerProp ?? true; // Default to true for new/own canvases
+  const canEdit = isOwner;
   const {
     handleExportPng,
     handleExportPdf,
@@ -1987,8 +2001,26 @@ export function WorkbenchCanvas({
         if (typeof data.favorited === "boolean")
           setShareFavorited(data.favorited);
         if (data.visibility) setCanvasVisibility(data.visibility);
-        if (Array.isArray(data.shared_with_user_ids))
+        if (Array.isArray(data.shares) && data.shares.length > 0) {
+          setCanvasShares(
+            data.shares.map((s: any) => ({
+              userId: s.userId ?? undefined,
+              groupId: s.groupId ?? undefined,
+              permission: s.permission === "editor" ? "editor" : "viewer",
+            }))
+          );
+          setSharedWithUserIds(
+            data.shares.filter((s: any) => s.userId).map((s: any) => s.userId)
+          );
+        } else if (Array.isArray(data.shared_with_user_ids)) {
           setSharedWithUserIds(data.shared_with_user_ids);
+          setCanvasShares(
+            data.shared_with_user_ids.map((id: string) => ({
+              userId: id,
+              permission: "viewer" as const,
+            }))
+          );
+        }
         setCanvasId(data.id);
         // Snapshot baseline for dirty-state tracking.
         // Use double-RAF to ensure React has flushed all state updates from the
@@ -2258,6 +2290,7 @@ export function WorkbenchCanvas({
       payload: CanvasLayoutItem["payload"],
       size?: { w?: number; h?: number },
     ) => {
+      if (!canEdit) return;
       const id = `widget-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       const { x, y } = getNextPosition(items);
       const newItem = createLayoutItem(id, type, payload, {
@@ -2268,20 +2301,22 @@ export function WorkbenchCanvas({
       });
       setItemsWithHistory((prev) => [...prev, newItem]);
     },
-    [items, setItemsWithHistory],
+    [canEdit, items, setItemsWithHistory],
   );
 
   const removeWidget = useCallback(
     (id: string) => {
+      if (!canEdit) return;
       setItemsWithHistory((prev) => prev.filter((i) => i.i !== id));
       if (selectedWidgetId === id) setSelectedWidgetId(null);
       toast({ title: "Widget removed" });
     },
-    [setItemsWithHistory, selectedWidgetId, toast],
+    [canEdit, setItemsWithHistory, selectedWidgetId, toast],
   );
 
   const duplicateWidget = useCallback(
     (id: string) => {
+      if (!canEdit) return;
       const item = items.find((i) => i.i === id);
       if (!item) return;
       const newId = `widget-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -2296,7 +2331,7 @@ export function WorkbenchCanvas({
       setSelectedWidgetId(newId);
       toast({ title: "Widget duplicated" });
     },
-    [items, setItemsWithHistory, toast],
+    [canEdit, items, setItemsWithHistory, toast],
   );
 
   const updateItemRect = useCallback(
@@ -2305,6 +2340,7 @@ export function WorkbenchCanvas({
       next: Partial<Pick<CanvasLayoutItem, "x" | "y" | "w" | "h">>,
       withHistory = false,
     ) => {
+      if (!canEdit) return;
       // Clamp position so widgets can't be dragged off the left/top edges
       const clamped = { ...next };
       if (clamped.x !== undefined) clamped.x = Math.max(0, clamped.x);
@@ -2314,14 +2350,15 @@ export function WorkbenchCanvas({
         prev.map((i) => (i.i === id ? { ...i, ...clamped } : i)),
       );
     },
-    [setItems, setItemsWithHistory],
+    [canEdit, setItems, setItemsWithHistory],
   );
 
   const updateWidgetPayload = useCallback(
     (id: string, payload: CanvasLayoutItem["payload"]) => {
+      if (!canEdit) return;
       setItems((prev) => prev.map((i) => (i.i === id ? { ...i, payload } : i)));
     },
-    [],
+    [canEdit],
   );
 
   const addTextBlock = useCallback(() => {
@@ -2535,6 +2572,7 @@ export function WorkbenchCanvas({
   // Listen for dashboard section additions from the sidebar
   useEffect(() => {
     const handler = (e: Event) => {
+      if (!canEdit) return;
       const detail = (e as CustomEvent).detail;
       if (detail?.sectionId) {
         const item = DASHBOARD_SECTION_ITEMS.find(
@@ -2547,11 +2585,12 @@ export function WorkbenchCanvas({
     };
     window.addEventListener("add-dashboard-section", handler);
     return () => window.removeEventListener("add-dashboard-section", handler);
-  }, [addDashboardSection]);
+  }, [addDashboardSection, canEdit]);
 
   // Listen for generic canvas widget additions (from Cohi Chat "Add to Workbench")
   useEffect(() => {
     const handler = (e: Event) => {
+      if (!canEdit) return;
       const detail = (e as CustomEvent).detail;
       if (detail?.type && detail?.payload) {
         addWidget(
@@ -2567,7 +2606,7 @@ export function WorkbenchCanvas({
     };
     window.addEventListener("add-canvas-widget", handler);
     return () => window.removeEventListener("add-canvas-widget", handler);
-  }, [addWidget, toast]);
+  }, [addWidget, canEdit, toast]);
 
   // (Sidebar report builder links removed — reports are generated from canvas via the header button)
 
@@ -2768,6 +2807,7 @@ export function WorkbenchCanvas({
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") setSelectedWidgetId(null);
+      if (!canEdit) return;
       if ((e.key === "Delete" || e.key === "Backspace") && selectedWidgetId) {
         const t = e.target as HTMLElement;
         if (!t.closest?.("input, textarea, [contenteditable]")) {
@@ -2783,7 +2823,7 @@ export function WorkbenchCanvas({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedWidgetId, removeWidget, undo, redo, canUndo, canRedo]);
+  }, [canEdit, selectedWidgetId, removeWidget, undo, redo, canUndo, canRedo]);
 
   const handleAnnotationMouseDown = useCallback(
     (e: React.MouseEvent, id: string) => {
@@ -3354,7 +3394,7 @@ Structure it as a narrative-first executive briefing:
       return;
     }
     setShareDialogOpen(true);
-    // Lazy-load tenant users when dialog opens
+    // Lazy-load tenant users and groups when dialog opens
     if (!tenantUsersLoaded) {
       (async () => {
         try {
@@ -3373,7 +3413,21 @@ Structure it as a narrative-first executive briefing:
         }
       })();
     }
-  }, [canvasId, toast, tenantUsersLoaded, tenantQs, user?.id]);
+    if (!tenantGroupsLoaded) {
+      (async () => {
+        try {
+          const data = await api.request<{ groups: Array<{ id: string; name: string; description?: string; color?: string }> }>(
+            `/api/groups${tenantQs}`
+          );
+          setTenantGroups(data?.groups ?? []);
+          setTenantGroupsLoaded(true);
+        } catch {
+          setTenantGroups([]);
+          setTenantGroupsLoaded(true);
+        }
+      })();
+    }
+  }, [canvasId, toast, tenantUsersLoaded, tenantGroupsLoaded, tenantQs, user?.id]);
 
   const handleSaveVisibility = useCallback(async () => {
     if (!canvasId) return;
@@ -3386,7 +3440,17 @@ Structure it as a narrative-first executive briefing:
           body: JSON.stringify({
             visibility: canvasVisibility,
             shared_with_user_ids:
-              canvasVisibility === "shared" ? sharedWithUserIds : [],
+              canvasVisibility === "shared"
+                ? canvasShares.filter((s) => s.userId).map((s) => s.userId!)
+                : [],
+            shares:
+              canvasVisibility === "shared"
+                ? canvasShares.map((s) => ({
+                    userId: s.userId,
+                    groupId: s.groupId,
+                    permission: s.permission,
+                  }))
+                : [],
           }),
         },
       );
@@ -3404,15 +3468,45 @@ Structure it as a narrative-first executive briefing:
     } finally {
       setVisibilitySaving(false);
     }
-  }, [canvasId, canvasVisibility, sharedWithUserIds, tenantQs, toast]);
+  }, [canvasId, canvasVisibility, canvasShares, tenantQs, toast]);
 
   const toggleSharedUser = useCallback((userId: string) => {
+    setCanvasShares((prev) => {
+      const existing = prev.find((s) => s.userId === userId);
+      if (existing) return prev.filter((s) => s.userId !== userId);
+      return [...prev, { userId, permission: "viewer" as const }];
+    });
     setSharedWithUserIds((prev) =>
       prev.includes(userId)
         ? prev.filter((id) => id !== userId)
         : [...prev, userId],
     );
   }, []);
+
+  const toggleSharedGroup = useCallback((groupId: string) => {
+    setCanvasShares((prev) => {
+      const existing = prev.find((s) => s.groupId === groupId);
+      if (existing) return prev.filter((s) => s.groupId !== groupId);
+      return [...prev, { groupId, permission: "viewer" as const }];
+    });
+  }, []);
+
+  const setSharePermission = useCallback(
+    (
+      key: string,
+      type: "user" | "group",
+      permission: "viewer" | "editor"
+    ) => {
+      setCanvasShares((prev) =>
+        prev.map((s) => {
+          if (type === "user" && s.userId === key) return { ...s, permission };
+          if (type === "group" && s.groupId === key) return { ...s, permission };
+          return s;
+        })
+      );
+    },
+    []
+  );
 
   const handleSaveConfirm = useCallback(async () => {
     const title = saveTitle.trim() || "Untitled canvas";
@@ -3650,6 +3744,30 @@ Structure it as a narrative-first executive briefing:
                       <TooltipContent side="bottom">Share</TooltipContent>
                     </Tooltip>
                   )}
+                  {/* Distributions page hidden for now – entire Schedule distribution button removed */}
+                  {false && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400"
+                          onClick={() =>
+                            navigate(
+                              canvasId
+                                ? `/workbench/distributions?canvas=${canvasId}`
+                                : "/workbench/distributions",
+                            )
+                          }
+                        >
+                          <Mail className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">
+                        Schedule distribution
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
                   <input
                     ref={backgroundImageInputRef}
                     type="file"
@@ -3795,8 +3913,10 @@ Structure it as a narrative-first executive briefing:
               <TooltipContent side="bottom">Create dashboard from image</TooltipContent>
             </Tooltip>
             */}
-                  <div className="w-px h-5 bg-slate-200 dark:bg-slate-600 shrink-0 mx-0.5" />
-                  <DropdownMenu>
+                  {canEdit && (
+                    <>
+                      <div className="w-px h-5 bg-slate-200 dark:bg-slate-600 shrink-0 mx-0.5" />
+                      <DropdownMenu>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <DropdownMenuTrigger asChild>
@@ -3901,7 +4021,9 @@ Structure it as a narrative-first executive briefing:
                         Text block
                       </DropdownMenuItem>
                     </DropdownMenuContent>
-                  </DropdownMenu>
+                      </DropdownMenu>
+                    </>
+                  )}
                   {/* Logo button hidden – not ready for release
             <Tooltip>
               <TooltipTrigger asChild>
@@ -3918,7 +4040,7 @@ Structure it as a narrative-first executive briefing:
               <TooltipContent side="bottom">Add logo</TooltipContent>
             </Tooltip>
             */}
-                  {selectedWidgetId && (
+                  {canEdit && selectedWidgetId && (
                     <>
                       <Tooltip>
                         <TooltipTrigger asChild>
@@ -4020,27 +4142,29 @@ Structure it as a narrative-first executive briefing:
               )}
               {/* --- End canvas-only tools --- */}
 
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className={cn(
-                      "h-8 gap-1.5 text-xs px-2.5 font-medium shrink-0",
-                      showCohiPanel
-                        ? "bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-700"
-                        : "",
-                    )}
-                    onClick={() => setShowCohiPanel(!showCohiPanel)}
-                  >
-                    <Sparkles className="h-3.5 w-3.5" />
-                    Cohi
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  Toggle Cohi Assistant
-                </TooltipContent>
-              </Tooltip>
+              {!WORKBENCH_COHI_HIDDEN && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className={cn(
+                        "h-8 gap-1.5 text-xs px-2.5 font-medium shrink-0",
+                        showCohiPanel
+                          ? "bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-700"
+                          : "",
+                      )}
+                      onClick={() => setShowCohiPanel(!showCohiPanel)}
+                    >
+                      <Sparkles className="h-3.5 w-3.5" />
+                      Cohi
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    Toggle Cohi Assistant
+                  </TooltipContent>
+                </Tooltip>
+              )}
 
               {/* Primary: Generate Report — one-click, AI-powered */}
               <Tooltip>
@@ -4130,22 +4254,19 @@ Structure it as a narrative-first executive briefing:
             {/* Per-widget export is available in each widget's context menu */}
           </div>
 
-          {/* Inline Report Builder — always mounted, hidden when inactive to preserve state */}
-          <div
-            className={cn(
-              "flex-1 min-h-0 overflow-hidden",
-              !showReportBuilder && "hidden",
-            )}
-          >
-            <ReportBuilder
-              onClose={() => setShowReportBuilder(false)}
-              canvasWidgetData={useCanvasDataStore.getState().getSnapshot()}
-              canvasTitle={saveTitle || "Untitled Canvas"}
-              tenantId={tenantId}
-              initialDefinition={aiReportDefinition ?? undefined}
-              inline
-            />
-          </div>
+          {/* Inline Report Builder (mount only when active to avoid hidden background requests) */}
+          {showReportBuilder && (
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <ReportBuilder
+                onClose={() => setShowReportBuilder(false)}
+                canvasWidgetData={useCanvasDataStore.getState().getSnapshot()}
+                canvasTitle={saveTitle || "Untitled Canvas"}
+                tenantId={tenantId}
+                initialDefinition={aiReportDefinition ?? undefined}
+                inline
+              />
+            </div>
+          )}
 
           {/* Canvas surface: freeform or empty state + annotations overlay */}
           <div
@@ -4392,7 +4513,8 @@ Structure it as a narrative-first executive briefing:
                           true,
                         )
                       }
-                      enableResizing
+                      disableDragging={!canEdit}
+                      enableResizing={canEdit}
                       dragHandleClassName={
                         item.type === "rich_text"
                           ? "canvas-drag-handle"
@@ -4407,17 +4529,25 @@ Structure it as a narrative-first executive briefing:
                         selected={selectedWidgetId === item.i}
                         editing={editingWidgetId === item.i}
                         onSelect={() => setSelectedWidgetId(item.i)}
-                        onDuplicate={() => duplicateWidget(item.i)}
-                        onDelete={() => removeWidget(item.i)}
+                        onDuplicate={
+                          canEdit ? () => duplicateWidget(item.i) : undefined
+                        }
+                        onDelete={
+                          canEdit ? () => removeWidget(item.i) : undefined
+                        }
                         className="overflow-hidden"
-                        hideableSections={hideableSections}
+                        hideableSections={canEdit ? hideableSections : []}
                         hiddenSections={hiddenSections}
-                        onToggleSection={onToggleSection}
-                        onBringToFront={() => bringToFront(item.i)}
-                        onSendToBack={() => sendToBack(item.i)}
+                        onToggleSection={canEdit ? onToggleSection : undefined}
+                        onBringToFront={
+                          canEdit ? () => bringToFront(item.i) : undefined
+                        }
+                        onSendToBack={
+                          canEdit ? () => sendToBack(item.i) : undefined
+                        }
                         displayMode={displayMode}
                         onChangeDisplayMode={
-                          isDashboardSection
+                          canEdit && isDashboardSection
                             ? (mode) =>
                                 updateWidgetPayload(item.i, {
                                   ...payload,
@@ -4425,33 +4555,39 @@ Structure it as a narrative-first executive briefing:
                                 })
                             : undefined
                         }
-                        availableGroups={availableGroups}
-                        onMoveToGroup={handleMoveToGroup}
-                        onWrapInGroup={handleWrapInGroup}
+                        availableGroups={canEdit ? availableGroups : []}
+                        onMoveToGroup={canEdit ? handleMoveToGroup : undefined}
+                        onWrapInGroup={canEdit ? handleWrapInGroup : undefined}
                         onExportExcel={() => handleExportWidgetExcel(item.i)}
-                        onEditWithCohi={() => {
-                          setEditingWidgetId(item.i);
-                          setSelectedWidgetId(item.i);
-                          setShowCohiPanel(true);
-                          const widgetTitle =
-                            (payload as any).title ||
-                            (payload as any).sectionId ||
-                            item.type;
-                          const widgetType = item.type;
-                          const contextMsg = `Help me edit the "${widgetTitle}" widget (type: ${widgetType}, ID: ${item.i}). What changes can I make?`;
-                          cohiSendMessage(contextMsg);
-                        }}
+                        onEditWithCohi={
+                          WORKBENCH_COHI_HIDDEN
+                            ? undefined
+                            : () => {
+                                setEditingWidgetId(item.i);
+                                setSelectedWidgetId(item.i);
+                                setShowCohiPanel(true);
+                                const widgetTitle =
+                                  (payload as any).title ||
+                                  (payload as any).sectionId ||
+                                  item.type;
+                                const widgetType = item.type;
+                                const contextMsg = `Help me edit the "${widgetTitle}" widget (type: ${widgetType}, ID: ${item.i}). What changes can I make?`;
+                                cohiSendMessage(contextMsg);
+                              }
+                        }
                       >
                         <WidgetRenderer
                           item={displayItem}
                           height={item.h}
                           width={item.w}
+                          canEdit={canEdit}
                           onUpdatePayload={
-                            item.type === "text_block" ||
-                            item.type === "rich_text" ||
-                            item.type === "widget_group"
+                            canEdit &&
+                            (item.type === "text_block" ||
+                              item.type === "rich_text" ||
+                              item.type === "widget_group")
                               ? (p) => updateWidgetPayload(item.i, p)
-                              : isLegacyLoanDetail
+                              : canEdit && isLegacyLoanDetail
                                 ? (p) =>
                                     setItemsWithHistory((prev) =>
                                       prev.map((i) =>
@@ -4534,73 +4670,88 @@ Structure it as a narrative-first executive briefing:
               ) : (
                 <div className="flex items-center justify-center p-8 min-h-[400px]">
                   <div className="text-center max-w-2xl w-full">
-                    <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-200/60 dark:shadow-violet-900/40">
-                      <Sparkles className="w-7 h-7 text-white" />
-                    </div>
-                    <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-1">
-                      What would you like to review?
-                    </h3>
-                    <p className="text-sm text-slate-400 dark:text-slate-500 mb-6">
-                      Ask Cohi to prepare dashboards, analyze performance, or
-                      build executive presentations.
-                    </p>
-
-                    {/* Primary: Natural language input */}
-                    <div className="max-w-lg mx-auto mb-6">
-                      <button
-                        type="button"
-                        onClick={() => setShowCohiPanel(true)}
-                        className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-md hover:border-violet-300 dark:hover:border-violet-600 hover:shadow-lg transition-all group text-left"
-                      >
-                        <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shrink-0">
-                          <Sparkles className="h-4 w-4 text-white" />
+                    {!WORKBENCH_COHI_HIDDEN ? (
+                      <>
+                        <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-200/60 dark:shadow-violet-900/40">
+                          <Sparkles className="w-7 h-7 text-white" />
                         </div>
-                        <span className="flex-1 text-sm text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300 transition-colors">
-                          &ldquo;Prepare a board-ready overview of monthly
-                          performance&rdquo;
-                        </span>
-                        <MessageSquare className="h-4 w-4 text-slate-300 dark:text-slate-600 shrink-0 group-hover:text-violet-500 transition-colors" />
-                      </button>
-                    </div>
+                        <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-1">
+                          What would you like to review?
+                        </h3>
+                        <p className="text-sm text-slate-400 dark:text-slate-500 mb-6">
+                          Ask Cohi to prepare dashboards, analyze performance, or
+                          build executive presentations.
+                        </p>
 
-                    {/* Quick executive prompts */}
-                    <div className="flex flex-wrap gap-2 justify-center mb-6">
-                      {[
-                        {
-                          label: "Executive Dashboard",
-                          prompt:
-                            "Build me a comprehensive executive dashboard with key KPIs, production trends, and pull-through analysis",
-                        },
-                        {
-                          label: "Monthly Performance",
-                          prompt:
-                            "Prepare a monthly performance overview with funded volume, pull-through, turn times, and highlights",
-                        },
-                        {
-                          label: "Pipeline Review",
-                          prompt:
-                            "Show me a pipeline review dashboard with active loans by stage, aging analysis, and fallout risk",
-                        },
-                        {
-                          label: "Board Presentation",
-                          prompt:
-                            "Create a board-ready presentation with executive summary, key metrics, trends, and recommendations",
-                        },
-                      ].map((q) => (
-                        <button
-                          key={q.label}
-                          type="button"
-                          onClick={() => {
-                            setShowCohiPanel(true);
-                            // Small delay to let the panel open before sending the message
-                            setTimeout(() => cohiSendMessage(q.prompt), 300);
-                          }}
-                          className="px-3 py-1.5 text-xs font-medium rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:border-violet-300 dark:hover:border-violet-600 hover:text-violet-700 dark:hover:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-all"
-                        >
-                          {q.label}
-                        </button>
-                      ))}
-                    </div>
+                        {/* Primary: Natural language input */}
+                        <div className="max-w-lg mx-auto mb-6">
+                          <button
+                            type="button"
+                            onClick={() => setShowCohiPanel(true)}
+                            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-md hover:border-violet-300 dark:hover:border-violet-600 hover:shadow-lg transition-all group text-left"
+                          >
+                            <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shrink-0">
+                              <Sparkles className="h-4 w-4 text-white" />
+                            </div>
+                            <span className="flex-1 text-sm text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300 transition-colors">
+                              &ldquo;Prepare a board-ready overview of monthly
+                              performance&rdquo;
+                            </span>
+                            <MessageSquare className="h-4 w-4 text-slate-300 dark:text-slate-600 shrink-0 group-hover:text-violet-500 transition-colors" />
+                          </button>
+                        </div>
+
+                        {/* Quick executive prompts */}
+                        <div className="flex flex-wrap gap-2 justify-center mb-6">
+                          {[
+                            {
+                              label: "Executive Dashboard",
+                              prompt:
+                                "Build me a comprehensive executive dashboard with key KPIs, production trends, and pull-through analysis",
+                            },
+                            {
+                              label: "Monthly Performance",
+                              prompt:
+                                "Prepare a monthly performance overview with funded volume, pull-through, turn times, and highlights",
+                            },
+                            {
+                              label: "Pipeline Review",
+                              prompt:
+                                "Show me a pipeline review dashboard with active loans by stage, aging analysis, and fallout risk",
+                            },
+                            {
+                              label: "Board Presentation",
+                              prompt:
+                                "Create a board-ready presentation with executive summary, key metrics, trends, and recommendations",
+                            },
+                          ].map((q) => (
+                            <button
+                              key={q.label}
+                              type="button"
+                              onClick={() => {
+                                setShowCohiPanel(true);
+                                setTimeout(() => cohiSendMessage(q.prompt), 300);
+                              }}
+                              className="px-3 py-1.5 text-xs font-medium rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:border-violet-300 dark:hover:border-violet-600 hover:text-violet-700 dark:hover:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-all"
+                            >
+                              {q.label}
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+                          <LayoutDashboard className="w-7 h-7 text-slate-500 dark:text-slate-400" />
+                        </div>
+                        <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-1">
+                          Your canvas is empty
+                        </h3>
+                        <p className="text-sm text-slate-400 dark:text-slate-500 mb-6">
+                          Add widgets from the library or browse templates below.
+                        </p>
+                      </>
+                    )}
 
                     {/* Secondary: Browse library */}
                     <div className="flex items-center justify-center gap-4">
@@ -4778,20 +4929,22 @@ Structure it as a narrative-first executive briefing:
           </div>
         </div>
 
-        {/* Cohi Assistant Panel (docks right) */}
-        <WorkbenchCohiPanel
-          open={showCohiPanel}
-          onClose={() => {
-            setShowCohiPanel(false);
-            setEditingWidgetId(null);
-          }}
-          messages={cohiMessages}
-          isLoading={cohiLoading}
-          suggestedQuestions={cohiSuggestions}
-          onSendMessage={cohiSendMessage}
-          onClearMessages={cohiClearMessages}
-          onExecuteAction={handleCohiAction}
-        />
+        {/* Cohi Assistant Panel (docks right) – hidden when WORKBENCH_COHI_HIDDEN */}
+        {!WORKBENCH_COHI_HIDDEN && (
+          <WorkbenchCohiPanel
+            open={showCohiPanel}
+            onClose={() => {
+              setShowCohiPanel(false);
+              setEditingWidgetId(null);
+            }}
+            messages={cohiMessages}
+            isLoading={cohiLoading}
+            suggestedQuestions={cohiSuggestions}
+            onSendMessage={cohiSendMessage}
+            onClearMessages={cohiClearMessages}
+            onExecuteAction={handleCohiAction}
+          />
+        )}
 
         <AlertDialog open={clearConfirmOpen} onOpenChange={setClearConfirmOpen}>
           <AlertDialogContent>
@@ -4908,63 +5061,184 @@ Structure it as a narrative-first executive briefing:
                 </div>
               </div>
 
-              {/* User picker — shown when visibility is 'shared' */}
+              {/* Users + Groups with permission — shown when visibility is 'shared' */}
               {canvasVisibility === "shared" && (
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                    Share with
-                  </label>
-                  {tenantUsers.length > 0 ? (
-                    <div className="max-h-[200px] overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800">
-                      {tenantUsers.map((u) => {
-                        const selected = sharedWithUserIds.includes(u.id);
-                        return (
-                          <button
-                            key={u.id}
-                            type="button"
-                            className={cn(
-                              "flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors",
-                              selected
-                                ? "bg-violet-50 dark:bg-violet-900/20"
-                                : "hover:bg-slate-50 dark:hover:bg-slate-800/50",
-                            )}
-                            onClick={() => toggleSharedUser(u.id)}
-                          >
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                      Users
+                    </label>
+                    {tenantUsers.length > 0 ? (
+                      <div className="max-h-[180px] overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800">
+                        {tenantUsers.map((u) => {
+                          const shareEntry = canvasShares.find((s) => s.userId === u.id);
+                          const selected = !!shareEntry;
+                          return (
                             <div
+                              key={u.id}
                               className={cn(
-                                "h-4 w-4 rounded border flex items-center justify-center shrink-0 transition-colors",
+                                "flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors",
                                 selected
-                                  ? "bg-violet-600 border-violet-600 text-white"
-                                  : "border-slate-300 dark:border-slate-600",
+                                  ? "bg-violet-50 dark:bg-violet-900/20"
+                                  : "hover:bg-slate-50 dark:hover:bg-slate-800/50",
                               )}
                             >
-                              {selected && <Check className="h-3 w-3" />}
-                            </div>
-                            <div className="flex-1 min-w-0 truncate">
-                              <span className="text-slate-700 dark:text-slate-200">
-                                {u.full_name || u.email}
-                              </span>
-                              {u.full_name && (
-                                <span className="ml-1.5 text-xs text-slate-400">
-                                  {u.email}
-                                </span>
+                              <button
+                                type="button"
+                                className="flex items-center gap-2.5 flex-1 min-w-0"
+                                onClick={() => toggleSharedUser(u.id)}
+                              >
+                                <div
+                                  className={cn(
+                                    "h-4 w-4 rounded border flex items-center justify-center shrink-0 transition-colors",
+                                    selected
+                                      ? "bg-violet-600 border-violet-600 text-white"
+                                      : "border-slate-300 dark:border-slate-600",
+                                  )}
+                                >
+                                  {selected && <Check className="h-3 w-3" />}
+                                </div>
+                                <div className="flex-1 min-w-0 truncate">
+                                  <span className="text-slate-700 dark:text-slate-200">
+                                    {u.full_name || u.email}
+                                  </span>
+                                  {u.full_name && (
+                                    <span className="ml-1.5 text-xs text-slate-400">
+                                      {u.email}
+                                    </span>
+                                  )}
+                                </div>
+                              </button>
+                              {selected && (
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 gap-1 text-xs shrink-0"
+                                    >
+                                      {shareEntry.permission === "editor"
+                                        ? "Editor"
+                                        : "Viewer"}
+                                      <ChevronDown className="h-3 w-3" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    <DropdownMenuItem
+                                      onClick={() =>
+                                        setSharePermission(u.id, "user", "viewer")
+                                      }
+                                    >
+                                      Viewer
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() =>
+                                        setSharePermission(u.id, "user", "editor")
+                                      }
+                                    >
+                                      Editor
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
                               )}
                             </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-slate-500 dark:text-slate-400 py-2">
-                      {tenantUsersLoaded
-                        ? "No users found in this tenant."
-                        : "Loading users..."}
-                    </p>
-                  )}
-                  {sharedWithUserIds.length > 0 && (
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500 dark:text-slate-400 py-2">
+                        {tenantUsersLoaded
+                          ? "No users found in this tenant."
+                          : "Loading users..."}
+                      </p>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                      Groups
+                    </label>
+                    {tenantGroupsLoaded && tenantGroups.length > 0 ? (
+                      <div className="max-h-[180px] overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800">
+                        {tenantGroups.map((g) => {
+                          const shareEntry = canvasShares.find((s) => s.groupId === g.id);
+                          const selected = !!shareEntry;
+                          return (
+                            <div
+                              key={g.id}
+                              className={cn(
+                                "flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors",
+                                selected
+                                  ? "bg-violet-50 dark:bg-violet-900/20"
+                                  : "hover:bg-slate-50 dark:hover:bg-slate-800/50",
+                              )}
+                            >
+                              <button
+                                type="button"
+                                className="flex items-center gap-2.5 flex-1 min-w-0"
+                                onClick={() => toggleSharedGroup(g.id)}
+                              >
+                                <div
+                                  className={cn(
+                                    "h-4 w-4 rounded border flex items-center justify-center shrink-0 transition-colors",
+                                    selected
+                                      ? "bg-violet-600 border-violet-600 text-white"
+                                      : "border-slate-300 dark:border-slate-600",
+                                  )}
+                                >
+                                  {selected && <Check className="h-3 w-3" />}
+                                </div>
+                                <span className="text-slate-700 dark:text-slate-200 truncate">
+                                  {g.name}
+                                </span>
+                              </button>
+                              {selected && (
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 gap-1 text-xs shrink-0"
+                                    >
+                                      {shareEntry.permission === "editor"
+                                        ? "Editor"
+                                        : "Viewer"}
+                                      <ChevronDown className="h-3 w-3" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    <DropdownMenuItem
+                                      onClick={() =>
+                                        setSharePermission(g.id, "group", "viewer")
+                                      }
+                                    >
+                                      Viewer
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() =>
+                                        setSharePermission(g.id, "group", "editor")
+                                      }
+                                    >
+                                      Editor
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500 dark:text-slate-400 py-2">
+                        {tenantGroupsLoaded
+                          ? "No groups. Admins can create groups in Admin → Groups."
+                          : "Loading groups..."}
+                      </p>
+                    )}
+                  </div>
+                  {canvasShares.length > 0 && (
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      {sharedWithUserIds.length} user
-                      {sharedWithUserIds.length !== 1 ? "s" : ""} selected
+                      {canvasShares.length} share
+                      {canvasShares.length !== 1 ? "s" : ""} (Viewer = read-only, Editor = can edit)
                     </p>
                   )}
                 </div>

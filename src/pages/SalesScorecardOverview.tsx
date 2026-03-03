@@ -299,11 +299,14 @@ const SalesScorecardOverview = () => {
 
   return (
     <TopTieringLayout>
-      <div className="flex flex-col min-h-[calc(100vh-4rem)]">
+      <div className="flex flex-col min-h-[calc(100vh-4rem)] bg-gradient-to-br from-blue-50/30 via-white to-blue-50/20 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950/50 relative">
+        <div
+          className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.03),transparent_50%),radial-gradient(circle_at_80%_80%,rgba(168,85,247,0.02),transparent_50%)] pointer-events-none"
+          aria-hidden
+        />
         <TopTieringTopBar title="Sales Scorecard Overview" />
-
-          <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-4">
-            <div className="max-w-[1400px] mx-auto space-y-4">
+        <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 relative">
+          <div className="max-w-[1400px] mx-auto space-y-4">
               {/* Filters */}
               <div className="flex flex-wrap items-end gap-4">
                 <div className="flex flex-col gap-1.5">

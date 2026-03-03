@@ -11,6 +11,7 @@
 import React, { createContext, useContext, useEffect, useMemo } from 'react';
 import { useTenantStore } from '@/stores/tenantStore';
 import { useChannelStore } from '@/stores/channelStore';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   useWidgetSectionStore,
   DEFAULT_SECTION_FILTERS,
@@ -202,6 +203,8 @@ function findSectionFilters(
 
 export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderProps) {
   const { selectedTenantId } = useTenantStore();
+  const { user } = useAuth();
+  const effectiveTenantId = selectedTenantId || user?.tenant_id || null;
   const { selectedChannel } = useChannelStore();
 
   // Subscribe to the full section map – any filter change triggers re-render
@@ -270,7 +273,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     channel: selectedChannel,
     dateField: csFilters.dateField,
     dateRange: csFilters.periodSelection?.dateRange ?? csFilters.dateRange,
-    tenantId: selectedTenantId,
+    tenantId: effectiveTenantId,
     dimensionFilters: csDimensionFilters,
   });
 
@@ -279,7 +282,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     channel: selectedChannel,
     year: crFilters.year,
     dateRange: crFilters.periodSelection?.dateRange ?? crFilters.dateRange,
-    tenantId: selectedTenantId,
+    tenantId: effectiveTenantId,
     dimensionFilters: crDimensionFilters,
   });
 
@@ -288,7 +291,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
   const salesScorecard = useSalesScorecardData(
     ssFilters.actorType,
     ssDateRange,
-    selectedTenantId,
+    effectiveTenantId,
     selectedChannel,
     ssDimensionFilters,
   );
@@ -305,7 +308,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
   const operationsScorecard = useOperationsScorecardData(
     'underwriter',
     osDR,
-    selectedTenantId,
+    effectiveTenantId,
     selectedChannel,
     osCustomDR,
     osDimensionFilters,
@@ -315,7 +318,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
   const operationsTrends = useOperationsScorecardTrendsData(
     otFilters.actorType === 'branch' ? 'underwriter' : 'underwriter',
     'vs-target',
-    selectedTenantId,
+    effectiveTenantId,
     selectedChannel,
     13,
     otDimensionFilters,
@@ -333,7 +336,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
   const salesTrends = useSalesTrendsData(
     stDR,
     selectedChannel ?? 'Retail',
-    selectedTenantId,
+    effectiveTenantId,
     stCustomDR,
     stDimensionFilters,
   );
@@ -350,7 +353,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
 
   const { funnelData, loading: funnelLoading } = useFunnelData(
     funnelDateFilter,
-    selectedTenantId,
+    effectiveTenantId,
     { channelGroup: selectedChannel },
     fnDimensionFilters,
   );
@@ -360,7 +363,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
   const topTieringComparison = useTopTieringComparisonData(
     ttcFilters.actorType === 'branch' ? 'branch' : 'loan-officer',
     ttcMapping.timeFilter,
-    selectedTenantId,
+    effectiveTenantId,
     selectedChannel,
     ttcMapping.customDateRange,
     ttcDimensionFilters,
@@ -370,7 +373,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
   const lbMapping = useMemo(() => mapToLeaderboardTimeframe(lbFilters), [lbFilters]);
   const { leaderboardData, loading: leaderboardLoading } = useLeaderboardData(
     lbMapping.timeframe,
-    selectedTenantId,
+    effectiveTenantId,
     {
       channelGroup: selectedChannel,
       ...(lbMapping.startDate ? { startDate: lbMapping.startDate, endDate: lbMapping.endDate } : {}),
@@ -417,7 +420,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
         : undefined,
     [ldFilters?.dateField, ldDateRange, ldEffectiveBranch, ldEffectiveLoanOfficer, ldDimensionFilters],
   );
-  const loanDetail = useLoanDetailData(selectedTenantId, loanDetailFilters ?? undefined);
+  const loanDetail = useLoanDetailData(effectiveTenantId, loanDetailFilters ?? undefined);
 
   // High Performers: left and right period with shared date type
   const hpDateType = (hpFilters?.highPerformersDateType ?? 'funding_date') as HighPerformersDateType;
@@ -426,12 +429,12 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
   const { data: hpLeftData, loading: hpLeftLoading, error: hpLeftError } = useHighPerformersData(
     hpDateType,
     hpLeftPeriod,
-    { channelGroup: selectedChannel, tenantId: selectedTenantId, dimensionFilters: hpDimensionFilters },
+    { channelGroup: selectedChannel, tenantId: effectiveTenantId, dimensionFilters: hpDimensionFilters },
   );
   const { data: hpRightData, loading: hpRightLoading, error: hpRightError } = useHighPerformersData(
     hpDateType,
     hpRightPeriod,
-    { channelGroup: selectedChannel, tenantId: selectedTenantId, dimensionFilters: hpDimensionFilters },
+    { channelGroup: selectedChannel, tenantId: effectiveTenantId, dimensionFilters: hpDimensionFilters },
   );
   const highPerformersData = useMemo(
     () => ({ left: hpLeftData, right: hpRightData }),
@@ -460,7 +463,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     turnTimeType: (actorsFilters?.actorsTurnTimeType as 'app_to_fund_days' | 'app_to_closing_days') ?? 'app_to_fund_days',
     dateRangeType: (actorsFilters?.actorsDateRangeType as 'calendar_days' | 'business_days') ?? 'calendar_days',
     measure: (actorsFilters?.actorsMeasure as 'units' | 'volume') ?? 'units',
-    selectedTenantId,
+    effectiveTenantId,
     channelGroup: selectedChannel,
     selectedActor: (actorsFilters?.actorsSelectedActor ?? null) as { type: ActorDimension; name: string } | null,
     selectedStatus: actorsFilters?.actorsSelectedStatus ?? null,
@@ -483,15 +486,15 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     lockStatus: (pdFilters?.pricingLockStatus ?? 'total') as PricingFilters['lockStatus'],
   }), [selectedChannel, pdFilters?.pricingEntityType, pdFilters?.pricingEntityFilterType, pdFilters?.pricingEntityValue, pdFilters?.pricingActorType, pdFilters?.pricingActorFilterType, pdFilters?.pricingActorValue, pdFilters?.pricingDateRange, pdFilters?.pricingLoanFunding, pdFilters?.pricingLoanStatus, pdFilters?.pricingLockStatus]);
   const pricingDashboard = usePricingDashboardWorkbenchData(pricingFilters, {
-    tenantId: selectedTenantId,
+    tenantId: effectiveTenantId,
     selectedChannel,
     dimensionFilters: pdDimensionFilters,
     metricColumns: pdFilters?.pricingDashboardColumns?.map((c) => c.key),
   });
 
   // Pipeline Analysis (workbench: use section filters when present)
-  const pipelineRange = usePipelineAnalysisRange(selectedTenantId ?? null);
-  const pipelineConfig = usePipelineAnalysisConfig(selectedTenantId ?? null);
+  const pipelineRange = usePipelineAnalysisRange(effectiveTenantId ?? null);
+  const pipelineConfig = usePipelineAnalysisConfig(effectiveTenantId ?? null);
   const pipelineFromTo = useMemo(() => {
     if (paFilters?.pipelineAnalysisYearRange) {
       const [start, end] = paFilters.pipelineAnalysisYearRange.split('-').map(Number);
@@ -515,7 +518,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
   const pipelineSnapshots = usePipelineAnalysisData({
     from: pipelineFromTo.from,
     to: pipelineFromTo.to,
-    tenantId: selectedTenantId ?? null,
+    tenantId: effectiveTenantId ?? null,
     startDateField: (paFilters?.pipelineAnalysisStartDateField ?? 'application_date') as 'application_date' | 'lock_date' | 'processing_date' | 'credit_pull_date' | 'submitted_to_underwriting_date',
     filters: pipelineFiltersForApi,
     dimensionFilters: paDimensionFilters,

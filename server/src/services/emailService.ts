@@ -58,11 +58,29 @@ export interface DailyBriefEmailOptions {
   tenantId?: string | null;
 }
 
+export interface EmailAttachment {
+  buffer: Buffer;
+  filename: string;
+  mimeType: string;
+}
+
+export interface SendEmailWithAttachmentOptions {
+  to: string;
+  subject: string;
+  html: string;
+  text?: string;
+  attachment: EmailAttachment;
+  emailType?: string;
+  containsPii?: boolean;
+  userId?: string | null;
+  tenantId?: string | null;
+}
+
 /**
  * Send email using configured provider.
  * Returns SES MessageId when using SES (for delivery tracking in AWS console).
  */
-async function sendEmail(options: EmailOptions): Promise<string | undefined> {
+export async function sendEmail(options: EmailOptions): Promise<string | undefined> {
   const emailProvider = process.env.EMAIL_PROVIDER || "ses"; // ses, sendgrid, resend
 
   try {
@@ -88,6 +106,138 @@ async function sendEmail(options: EmailOptions): Promise<string | undefined> {
     // Log for manual retry
     return undefined;
   }
+}
+
+/**
+ * Send email with a single attachment (e.g. PDF/PPTX for report distribution).
+ */
+export async function sendEmailWithAttachment(
+  options: SendEmailWithAttachmentOptions,
+): Promise<string | undefined> {
+  const emailProvider = process.env.EMAIL_PROVIDER || "ses";
+  try {
+    switch (emailProvider) {
+      case "ses":
+        return await withRetry(() => sendViaSESWithAttachment(options));
+      case "sendgrid":
+        await withRetry(() => sendViaSendGridWithAttachment(options));
+        return undefined;
+      case "resend":
+        await withRetry(() => sendViaResendWithAttachment(options));
+        return undefined;
+      default:
+        await sendEmail({
+          to: options.to,
+          subject: options.subject,
+          html: options.html,
+          text: options.text,
+          emailType: options.emailType,
+          containsPii: options.containsPii,
+          userId: options.userId,
+          tenantId: options.tenantId,
+        });
+        return undefined;
+    }
+  } catch (error: unknown) {
+    console.error("Error sending email with attachment:", error);
+    throw error;
+  } finally {
+    await logEmailSend({
+      recipientEmail: options.to,
+      emailType: options.emailType ?? "distribution",
+      containsPii: options.containsPii ?? false,
+      userId: options.userId ?? null,
+      tenantId: options.tenantId ?? null,
+    });
+  }
+}
+
+async function sendViaSESWithAttachment(
+  options: SendEmailWithAttachmentOptions,
+): Promise<string | undefined> {
+  const { SESClient, SendRawEmailCommand } = await import("@aws-sdk/client-ses");
+  const sesClient = new SESClient({
+    region: process.env.AWS_SES_REGION || "us-east-1",
+  });
+  const from = process.env.EMAIL_FROM_ADDRESS || "noreply@coheus.com";
+  const boundary = "boundary_" + Math.random().toString(36).slice(2);
+  const subject = Buffer.from(options.subject, "utf-8").toString("base64");
+  const encodedSubject = "=?UTF-8?B?" + subject + "?=";
+  const attachmentB64 = options.attachment.buffer.toString("base64");
+
+  const rawMessage = [
+    `From: ${from}`,
+    `To: ${options.to}`,
+    `Subject: ${encodedSubject}`,
+    "MIME-Version: 1.0",
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    "",
+    `--${boundary}`,
+    "Content-Type: text/html; charset=UTF-8",
+    "",
+    options.html,
+    "",
+    `--${boundary}`,
+    `Content-Type: ${options.attachment.mimeType}; name="${options.attachment.filename}"`,
+    'Content-Disposition: attachment; filename="' + options.attachment.filename + '"',
+    "Content-Transfer-Encoding: base64",
+    "",
+    attachmentB64,
+    "",
+    `--${boundary}--`,
+  ].join("\r\n");
+
+  const command = new SendRawEmailCommand({
+    RawMessage: { Data: Buffer.from(rawMessage, "utf-8") },
+    ConfigurationSetName: SES_CONFIGURATION_SET,
+  });
+  const result = await sesClient.send(command);
+  return result.MessageId ?? undefined;
+}
+
+async function sendViaSendGridWithAttachment(
+  options: SendEmailWithAttachmentOptions,
+): Promise<void> {
+  const sgMail = (await import("@sendgrid/mail")) as {
+    setApiKey: (k: string) => void;
+    send: (o: Record<string, unknown>) => Promise<unknown>;
+  };
+  sgMail.setApiKey(process.env.SENDGRID_API_KEY || "");
+  await sgMail.send({
+    to: options.to,
+    from: process.env.EMAIL_FROM_ADDRESS || "noreply@coheus.com",
+    subject: options.subject,
+    html: options.html,
+    text: options.text,
+    attachments: [
+      {
+        content: options.attachment.buffer.toString("base64"),
+        filename: options.attachment.filename,
+        type: options.attachment.mimeType,
+        disposition: "attachment",
+      },
+    ],
+  });
+}
+
+async function sendViaResendWithAttachment(
+  options: SendEmailWithAttachmentOptions,
+): Promise<void> {
+  const resendModule = await import("resend");
+  const { Resend } = resendModule;
+  const resend = new Resend(process.env.RESEND_API_KEY || "");
+  await resend.emails.send({
+    from: process.env.EMAIL_FROM_ADDRESS || "noreply@coheus.com",
+    to: options.to,
+    subject: options.subject,
+    html: options.html,
+    attachments: [
+      {
+        filename: options.attachment.filename,
+        content: options.attachment.buffer,
+      },
+    ],
+  });
 }
 
 export async function sendDailyBriefNewsletterEmail(

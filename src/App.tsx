@@ -3,8 +3,8 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { useEffect } from "react";
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate, useSearchParams, Outlet } from "react-router-dom";
+import { useEffect, type ReactNode } from "react";
 import { EditProvider } from "@/contexts/EditContext";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { AnalyticsWrapper, AnalyticsPageViewTracker } from "@/contexts/AnalyticsContext";
@@ -30,8 +30,8 @@ import MyDashboardLegacy from "./pages/MyDashboardLegacy";
 import NotFound from "./pages/NotFound";
 import { SubscriptionSuccess } from "./pages/SubscriptionSuccess";
 import { SubscriptionCancel } from "./pages/SubscriptionCancel";
-// Top Tiering pages
-import LoanFunnel from "./pages/LoanFunnel";
+// Top Tiering pages (Loan Funnel page hidden – references removed)
+// import LoanFunnel from "./pages/LoanFunnel";
 import TopTieringComparison from "./pages/TopTieringComparison";
 import OperationScorecard from "./pages/OperationScorecard";
 import OperationScorecardTrends from "./pages/OperationScorecardTrends";
@@ -44,7 +44,8 @@ import HighPerformers from "./pages/HighPerformers";
 import CreditRiskManagement from "./pages/CreditRiskManagement";
 import LoanDetail from "./pages/LoanDetail";
 import WorkflowConversion from "./pages/WorkflowConversion";
-import PricingDashboard from "./pages/PricingDashboard";
+// Hidden for now – needs work
+// import PricingDashboard from "./pages/PricingDashboard";
 import PipelineAnalysisDashboard from "./pages/PipelineAnalysisDashboard";
 import Actors from "./pages/Actors";
 import { KnowledgeBaseEditor } from "./components/admin/KnowledgeBaseEditor";
@@ -57,12 +58,30 @@ import { ActiveTourRunner } from "@/components/tutorial/ActiveTourRunner";
 import SharedWithMe from "./pages/workbench/SharedWithMe";
 import TeamFolders from "./pages/workbench/TeamFolders";
 import Favorites from "./pages/workbench/Favorites";
+// Hidden for now
+// import Distributions from "./pages/workbench/Distributions";
 // Research Lab
 import ResearchAnalyst from "./pages/ResearchAnalyst";
 // Help Center
 import HelpCenter from "./pages/HelpCenter";
+import { CanvasOnlyLayout } from "@/components/layout/CanvasOnlyLayout";
 
 const queryClient = new QueryClient();
+
+/**
+ * For canvas_only users: only allow /my-dashboard and /my-dashboard/:canvasId; render CanvasOnlyLayout.
+ * Otherwise render full app (Outlet).
+ */
+function AccessModeGate() {
+  const { user } = useAuth();
+  const location = useLocation();
+  if (user?.access_mode === "canvas_only") {
+    const onWorkbench = location.pathname === "/my-dashboard" || location.pathname.startsWith("/my-dashboard/");
+    if (!onWorkbench) return <Navigate to="/my-dashboard" replace />;
+    return <CanvasOnlyLayout />;
+  }
+  return <Outlet />;
+}
 
 // Component to initialize timezone on app load
 function TimezoneInitializer() {
@@ -102,9 +121,19 @@ function WorkbenchRedirect() {
 }
 
 function RootRoute() {
-  const { isAuthenticated } = useAuth();
-  if (isAuthenticated) return <Navigate to="/insights" replace />;
+  const { isAuthenticated, user, isLoading } = useAuth();
+  if (isLoading) return null;
+  if (isAuthenticated) {
+    if (user?.access_mode === "canvas_only") return <Navigate to="/my-dashboard" replace />;
+    return <Navigate to="/insights" replace />;
+  }
   return <Index />;
+}
+
+function FullAccessOnly({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  if (user?.access_mode === "canvas_only") return null;
+  return <>{children}</>;
 }
 
 const App = () => (
@@ -122,7 +151,9 @@ const App = () => (
             <Toaster />
             <Sonner />
             <Router basename={import.meta.env.BASE_URL}>
-              <AnalyticsPageViewTracker />
+              <FullAccessOnly>
+                <AnalyticsPageViewTracker />
+              </FullAccessOnly>
               <Handle404Redirect />
               <ScrollToTop />
               <Routes>
@@ -135,143 +166,43 @@ const App = () => (
               <Route path="/auth/sso/callback" element={<SSOCallback />} />
               <Route path="/unsubscribe/:token" element={<Unsubscribe />} />
 
-              {/* Protected routes - require authentication */}
-              <Route path="/settings" element={
-                <ProtectedRoute>
-                  <UserSettings />
-                </ProtectedRoute>
-              } />
-                <Route path="/insights" element={
-                  <ProtectedRoute>
-                    <Dashboard />
-                  </ProtectedRoute>
-                } />
-                <Route path="/legacy" element={
-                  <ProtectedRoute>
-                    <DashboardLegacy />
-                  </ProtectedRoute>
-                } />
-              <Route path="/loans" element={
-                <ProtectedRoute>
-                  <Loans />
-                </ProtectedRoute>
-              } />
-              <Route path="/my-dashboard/:canvasId?" element={
-                <ProtectedRoute>
-                  <MyDashboard />
-                </ProtectedRoute>
-              } />
-              <Route path="/my-dashboard-legacy" element={
-                <ProtectedRoute>
-                  <MyDashboardLegacy />
-                </ProtectedRoute>
-              } />
+              {/* Protected routes - require authentication; canvas_only users see only CanvasOnlyLayout on /my-dashboard* */}
+              <Route element={<ProtectedRoute><AccessModeGate /></ProtectedRoute>}>
+              <Route path="/settings" element={<UserSettings />} />
+                <Route path="/insights" element={<Dashboard />} />
+                <Route path="/legacy" element={<DashboardLegacy />} />
+              <Route path="/loans" element={<Loans />} />
+              <Route path="/my-dashboard/:canvasId?" element={<MyDashboard />} />
+              <Route path="/my-dashboard-legacy" element={<MyDashboardLegacy />} />
               {/* Redirect /workbench to /my-dashboard (preserves search params like ?canvas=...) */}
               <Route path="/workbench" element={<WorkbenchRedirect />} />
-              <Route path="/workbench/shared" element={
-                <ProtectedRoute>
-                  <SharedWithMe />
-                </ProtectedRoute>
-              } />
-              <Route path="/workbench/team-folders" element={
-                <ProtectedRoute>
-                  <TeamFolders />
-                </ProtectedRoute>
-              } />
-              <Route path="/workbench/favorites" element={
-                <ProtectedRoute>
-                  <Favorites />
-                </ProtectedRoute>
-              } />
+              <Route path="/workbench/shared" element={<SharedWithMe />} />
+              <Route path="/workbench/team-folders" element={<TeamFolders />} />
+              <Route path="/workbench/favorites" element={<Favorites />} />
+              {/* Distributions page hidden for now; redirect so bookmarks don't 404 */}
+              <Route path="/workbench/distributions" element={<Navigate to="/my-dashboard" replace />} />
               
               {/* Research Lab */}
-              <Route path="/research" element={
-                <ProtectedRoute>
-                  <ResearchAnalyst />
-                </ProtectedRoute>
-              } />
+              <Route path="/research" element={<ResearchAnalyst />} />
               
-              {/* Top Tiering routes */}
-              <Route path="/loan-funnel" element={
-                <ProtectedRoute>
-                  <LoanFunnel />
-                </ProtectedRoute>
-              } />
-              <Route path="/workflow-conversion" element={
-                <ProtectedRoute>
-                  <WorkflowConversion />
-                </ProtectedRoute>
-              } />
-              <Route path="/loan-detail" element={
-                <ProtectedRoute>
-                  <LoanDetail />
-                </ProtectedRoute>
-              } />
-              <Route path="/pricing-dashboard" element={
-                <ProtectedRoute>
-                  <PricingDashboard />
-                </ProtectedRoute>
-              } />
-              <Route path="/pipeline-analysis" element={
-                <ProtectedRoute>
-                  <PipelineAnalysisDashboard />
-                </ProtectedRoute>
-              } />
-              <Route path="/credit-risk-management" element={
-                <ProtectedRoute>
-                  <CreditRiskManagement />
-                </ProtectedRoute>
-              } />
-                <Route path="/company-scorecard" element={
-                <ProtectedRoute>
-                  <CompanyScorecard />
-                </ProtectedRoute>
-              } />
-              <Route path="/high-performers" element={
-                <ProtectedRoute>
-                  <HighPerformers />
-                </ProtectedRoute>
-              } />
-              <Route path="/actors" element={
-                <ProtectedRoute>
-                  <Actors />
-                </ProtectedRoute>
-              } />
-              <Route path="/performance/toptiering-comparison" element={
-                <ProtectedRoute>
-                  <TopTieringComparison />
-                </ProtectedRoute>
-              } />
-              <Route path="/performance/financial-modeling-sandbox" element={
-                <ProtectedRoute>
-                  <FinancialModelingSandbox />
-                </ProtectedRoute>
-              } />
-              <Route path="/sales-scorecard" element={
-                <ProtectedRoute>
-                  <SalesScorecard />
-                </ProtectedRoute>
-              } />
-              <Route path="/sales-trends" element={
-                <ProtectedRoute>
-                  <SalesTrends />
-                </ProtectedRoute>
-              } />
-              <Route path="/sales-scorecard-overview" element={
-                <ProtectedRoute>
-                  <SalesScorecardOverview />
-                </ProtectedRoute>
-              } />
-              <Route path="/performance/operation-scorecard" element={
-                <ProtectedRoute>
-                  <OperationScorecard />
-                </ProtectedRoute>
-              } />
-              <Route path="/performance/operation-scorecard-trends" element={
-                <ProtectedRoute>
-                  <OperationScorecardTrends />
-                </ProtectedRoute>
-              } />
+              {/* Top Tiering routes – Loan Funnel page hidden; redirect so bookmarks don't 404 */}
+              <Route path="/loan-funnel" element={<Navigate to="/insights" replace />} />
+              <Route path="/workflow-conversion" element={<WorkflowConversion />} />
+              <Route path="/loan-detail" element={<LoanDetail />} />
+              {/* Pricing Dashboard hidden for now – needs work; redirect so bookmarks don't 404 */}
+              <Route path="/pricing-dashboard" element={<Navigate to="/insights" replace />} />
+              <Route path="/pipeline-analysis" element={<PipelineAnalysisDashboard />} />
+              <Route path="/credit-risk-management" element={<CreditRiskManagement />} />
+                <Route path="/company-scorecard" element={<CompanyScorecard />} />
+              <Route path="/high-performers" element={<HighPerformers />} />
+              <Route path="/actors" element={<Actors />} />
+              <Route path="/performance/toptiering-comparison" element={<TopTieringComparison />} />
+              <Route path="/performance/financial-modeling-sandbox" element={<FinancialModelingSandbox />} />
+              <Route path="/sales-scorecard" element={<SalesScorecard />} />
+              <Route path="/sales-trends" element={<SalesTrends />} />
+              <Route path="/sales-scorecard-overview" element={<SalesScorecardOverview />} />
+              <Route path="/performance/operation-scorecard" element={<OperationScorecard />} />
+              <Route path="/performance/operation-scorecard-trends" element={<OperationScorecardTrends />} />
               
               {/* Admin route - requires admin role */}
               <Route path="/admin" element={
@@ -286,31 +217,22 @@ const App = () => (
               } />
               
               {/* Subscription routes */}
-              <Route path="/subscription/success" element={
-                <ProtectedRoute>
-                  <SubscriptionSuccess />
-                </ProtectedRoute>
-              } />
-              <Route path="/subscription/cancel" element={
-                <ProtectedRoute>
-                  <SubscriptionCancel />
-                </ProtectedRoute>
-              } />
+              <Route path="/subscription/success" element={<SubscriptionSuccess />} />
+              <Route path="/subscription/cancel" element={<SubscriptionCancel />} />
               
               {/* Help Center */}
-              <Route path="/help/*" element={
-                <ProtectedRoute>
-                  <HelpCenter />
-                </ProtectedRoute>
-              } />
+              <Route path="/help/*" element={<HelpCenter />} />
+              </Route>
               
               {/* Catch-all route */}
               <Route path="*" element={<NotFound />} />
             </Routes>
-              <GlobalCohiChat />
-              <CohiDemoExperience />
-              <WelcomeTourTrigger />
-              <ActiveTourRunner />
+              <FullAccessOnly>
+                <GlobalCohiChat />
+                <CohiDemoExperience />
+                <WelcomeTourTrigger />
+                <ActiveTourRunner />
+              </FullAccessOnly>
           </Router>
         </TooltipProvider>
         </EditProvider>

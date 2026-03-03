@@ -47,6 +47,8 @@ import {
   Unlink2,
   Bookmark,
   BookmarkCheck,
+  Lock,
+  Unlock,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { DatePeriodPicker, type DateRange, type PeriodSelection, type PeriodPreset, computePresetDateRange } from '@/components/ui/DatePeriodPicker';
@@ -139,6 +141,10 @@ export interface WidgetGroupProps {
    * Defaults to true for backward compatibility.
    */
   filterSync?: boolean;
+  /** Whether this group's filters are locked for viewers */
+  filterLocked?: boolean;
+  /** Whether this group is editable by current user (owner/editor) */
+  canEdit?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -1408,6 +1414,8 @@ export function WidgetGroup({
   savedFilters: savedFiltersProp,
   filtersCollapsed: filtersCollapsedProp,
   filterSync: filterSyncProp,
+  filterLocked: filterLockedProp,
+  canEdit = true,
 }: WidgetGroupProps) {
   const registerSection = useWidgetSectionStore((s) => s.registerSection);
   const updateFilters = useWidgetSectionStore((s) => s.updateFilters);
@@ -1430,6 +1438,9 @@ export function WidgetGroup({
   const [filtersCollapsed, setFiltersCollapsed] = useState(filtersCollapsedProp ?? false);
   // filterSync defaults to true for backward compat with existing canvases
   const [filterSync, setFilterSync] = useState(filterSyncProp ?? true);
+  const filterLocked = filterLockedProp ?? false;
+  const filtersReadOnly = filterLocked && !canEdit;
+  const effectiveFilterSync = filtersReadOnly ? true : filterSync;
   const [isRenaming, setIsRenaming] = useState(false);
   const [localTitle, setLocalTitle] = useState(title);
   const [maximizedItem, setMaximizedItem] = useState<GroupWidgetItem | null>(null);
@@ -1746,13 +1757,14 @@ export function WidgetGroup({
 
   // ─── Title management ───
   const commitTitle = useCallback(() => {
+    if (!canEdit) return;
     setIsRenaming(false);
     if (localTitle.trim() && localTitle !== title) {
       patchPayload({ title: localTitle.trim() });
     } else {
       setLocalTitle(title);
     }
-  }, [localTitle, title, patchPayload]);
+  }, [canEdit, localTitle, title, patchPayload]);
 
   // ─── Collapse management ───
   const toggleCollapse = useCallback(() => {
@@ -1763,6 +1775,7 @@ export function WidgetGroup({
 
   // ─── Filter sync toggle ───
   const toggleFilterSync = useCallback(() => {
+    if (!canEdit || filtersReadOnly) return;
     const next = !filterSync;
     setFilterSync(next);
     patchPayload({ filterSync: next });
@@ -1790,7 +1803,12 @@ export function WidgetGroup({
       });
       persistItems(broadcastItems);
     }
-  }, [filterSync, patchPayload, items, filters, persistItems]);
+  }, [canEdit, filtersReadOnly, filterSync, patchPayload, items, filters, persistItems]);
+
+  const toggleFilterLock = useCallback(() => {
+    if (!canEdit) return;
+    patchPayload({ filterLocked: !filterLocked });
+  }, [canEdit, filterLocked, patchPayload]);
 
   // ─── Filter handlers ───
   const handleYearChange = useCallback(
@@ -1941,15 +1959,19 @@ export function WidgetGroup({
           ) : (
             <h3
               className={cn('text-xs font-semibold tracking-tight flex-1 min-w-0 truncate cursor-pointer', colors.accent)}
-              onDoubleClick={() => { setLocalTitle(title); setIsRenaming(true); }}
-              title="Double-click to rename"
+              onDoubleClick={() => {
+                if (!canEdit) return;
+                setLocalTitle(title);
+                setIsRenaming(true);
+              }}
+              title={canEdit ? "Double-click to rename" : title}
             >
               {title}
             </h3>
           )}
 
           {/* Rename pencil — only on hover */}
-          {!isRenaming && (
+          {!isRenaming && canEdit && (
             <button
               type="button"
               onClick={() => { setLocalTitle(title); setIsRenaming(true); }}
@@ -1961,8 +1983,38 @@ export function WidgetGroup({
             </button>
           )}
 
-          {/* Filter sync toggle */}
+          {/* Filter lock toggle (owner/editor) or lock badge (viewer) */}
           {!collapsed && !SELF_MANAGED_SECTIONS.has(sectionType) && (
+            canEdit ? (
+              <button
+                type="button"
+                onClick={toggleFilterLock}
+                className={cn(
+                  'flex items-center gap-0.5 h-5 px-1.5 rounded text-[9px] font-medium canvas-interactive transition-all shrink-0',
+                  filterLocked
+                    ? 'text-amber-600 dark:text-amber-400 bg-amber-50/80 dark:bg-amber-950/30'
+                    : 'text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800',
+                )}
+                title={filterLocked ? 'Filters locked for viewers' : 'Allow viewers to adjust filters'}
+                aria-label={filterLocked ? 'Unlock filters for viewers' : 'Lock filters for viewers'}
+              >
+                {filterLocked ? <Lock className="h-2.5 w-2.5" /> : <Unlock className="h-2.5 w-2.5" />}
+                <span>{filterLocked ? 'Locked' : 'Unlocked'}</span>
+              </button>
+            ) : filterLocked ? (
+              <div
+                className="flex items-center gap-0.5 h-5 px-1.5 rounded text-[9px] font-medium shrink-0 text-amber-600 dark:text-amber-400 bg-amber-50/80 dark:bg-amber-950/30"
+                title="Filters are locked by the canvas owner"
+                aria-label="Filters locked"
+              >
+                <Lock className="h-2.5 w-2.5" />
+                <span>Locked</span>
+              </div>
+            ) : null
+          )}
+
+          {/* Filter sync toggle */}
+          {!collapsed && !SELF_MANAGED_SECTIONS.has(sectionType) && !filtersReadOnly && (
             <button
               type="button"
               onClick={toggleFilterSync}
@@ -1981,7 +2033,7 @@ export function WidgetGroup({
           )}
 
           {/* Filter bar toggle (only when sync is on) */}
-          {!collapsed && !SELF_MANAGED_SECTIONS.has(sectionType) && filterSync && (
+          {!collapsed && !SELF_MANAGED_SECTIONS.has(sectionType) && effectiveFilterSync && !filtersReadOnly && (
             <button
               type="button"
               onClick={() => setFiltersCollapsed((v) => !v)}
@@ -2000,23 +2052,25 @@ export function WidgetGroup({
           )}
 
           {/* Add widget — opens the multi-tab dialog */}
-          <button
-            type="button"
-            onClick={() => setShowAddDialog(true)}
-            className={cn(
-              'flex items-center gap-0.5 h-5 px-1.5 rounded border text-[9px] font-medium canvas-interactive transition-colors shrink-0',
-              'border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-blue-300 dark:hover:border-blue-600 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50/50 dark:hover:bg-blue-950/20',
-            )}
-            title="Add widget to group"
-            aria-label="Add widget"
-          >
-            <Plus className="h-2.5 w-2.5" />
-            Add
-          </button>
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => setShowAddDialog(true)}
+              className={cn(
+                'flex items-center gap-0.5 h-5 px-1.5 rounded border text-[9px] font-medium canvas-interactive transition-colors shrink-0',
+                'border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-blue-300 dark:hover:border-blue-600 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50/50 dark:hover:bg-blue-950/20',
+              )}
+              title="Add widget to group"
+              aria-label="Add widget"
+            >
+              <Plus className="h-2.5 w-2.5" />
+              Add
+            </button>
+          )}
         </div>
 
         {/* Expanded filter controls — compact row below header, only when sync ON and filters expanded */}
-        {!collapsed && !SELF_MANAGED_SECTIONS.has(sectionType) && filterSync && !filtersCollapsed && (
+        {!collapsed && !SELF_MANAGED_SECTIONS.has(sectionType) && effectiveFilterSync && !filtersCollapsed && !filtersReadOnly && (
           <div className="flex items-center gap-1.5 px-2.5 pb-1.5 flex-wrap">
             {sectionType === 'workflow-conversion' ? (
               <>
@@ -2559,7 +2613,7 @@ export function WidgetGroup({
                     height={cellH}
                     dateFilter={groupDateFilter}
                     dimensionFilters={groupDimensionFilters}
-                    filterSyncEnabled={filterSync}
+                    filterSyncEnabled={effectiveFilterSync}
                     onFilterChange={item.kind === 'cohi' ? (f) => handleCohiWidgetFilterChange(idx, f) : undefined}
                     onDelete={() => handleDelete(idx)}
                     onDuplicate={() => handleDuplicate(idx)}
@@ -2599,7 +2653,7 @@ export function WidgetGroup({
         onClose={() => setMaximizedItem(null)}
         dateFilter={groupDateFilter}
         dimensionFilters={groupDimensionFilters}
-        filterSyncEnabled={filterSync}
+        filterSyncEnabled={effectiveFilterSync}
       />
 
       {/* Actors table columns modal (workbench only) */}
