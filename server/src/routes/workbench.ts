@@ -201,7 +201,7 @@ router.get(
       const row = result.rows[0];
       const permission = await resolveCanvasPermission(
         tenantPool,
-        canvasId,
+        canvasId as string,
         userId,
         !!row.is_owner,
       );
@@ -309,7 +309,7 @@ router.put(
         return res.status(404).json({ error: 'Canvas not found' });
       }
       const isOwner = canvasRow.rows[0].user_id === req.userId;
-      const permission = await resolveCanvasPermission(tenantPool, id, req.userId!, isOwner);
+      const permission = await resolveCanvasPermission(tenantPool, id as string, req.userId!, isOwner);
       if (permission === 'viewer') {
         return res.status(403).json({ error: 'Viewers cannot edit this canvas' });
       }
