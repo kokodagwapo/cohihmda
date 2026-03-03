@@ -20,6 +20,8 @@ export type CanvasListItem = {
   is_owner?: boolean;
   owner_email?: string;
   owner_name?: string;
+  /** Resolved permission: owner (full), editor (can edit), viewer (read-only) */
+  permission?: 'owner' | 'editor' | 'viewer';
 };
 
 const appNavLinks = [

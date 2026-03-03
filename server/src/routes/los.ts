@@ -1602,12 +1602,6 @@ router.post(
         connection.connection_method === "api" &&
         connection.los_type === "encompass"
       ) {
-        // Use Encompass ETL service for Encompass connections
-        const { EncompassEtlService } = await import(
-          "../services/etl/encompassEtlService.js"
-        );
-        const etlService = new EncompassEtlService(tenantPool);
-
         // Clear database if requested (before checking loan count)
         if (clearDatabase) {
           logInfo("Clearing loans database before sync", {
@@ -1804,27 +1798,29 @@ router.post(
           });
         }
 
-        // Run sync asynchronously (don't block response)
-        etlService
-          .syncLoans(tenantId, id, {
-            fullSync: fullSync,
-            modifiedFrom: modifiedFrom,
+        // Enqueue sync job for the worker to process (keeps ETL off the API container)
+        const { enqueueSyncJob } = await import(
+          "../services/syncJobPoller.js"
+        );
+        const jobId = await enqueueSyncJob(
+          tenantId,
+          id,
+          {
+            fullSync,
+            modifiedFrom: modifiedFrom?.toISOString(),
             limit: syncLimit,
-            loanStartDate: threeYearsAgo, // Always filter by loan start date (36 months ago, matching Qlik)
-            loanStartDateField: "Fields.Log.MS.Date.Started", // Match Qlik's field
+            loanStartDate: threeYearsAgo.toISOString(),
+            loanStartDateField: "Fields.Log.MS.Date.Started",
             folderNames:
-              selectedFolders.length > 0 ? selectedFolders : undefined, // Pass all selected folders
-          })
-          .catch((error) => {
-            logError("Background sync error", error, {
-              userId: req.userId,
-              connectionId: id,
-              tenantId: tenantId,
-            });
-          });
+              selectedFolders.length > 0 ? selectedFolders : undefined,
+            clearDatabase,
+          },
+          req.userId
+        );
 
         res.json({
           success: true,
+          jobId,
           message: fullSync ? "Full sync started" : "Incremental sync started",
           syncType: fullSync ? "full" : "incremental",
           modifiedFrom: modifiedFrom?.toISOString(),

@@ -148,6 +148,11 @@ export type CanvasWidgetPayload =
        * independent filter bar.  Registry widgets always use group filters.
        */
       filterSync?: boolean;
+      /**
+       * When true, viewers cannot change this group's filters.
+       * Owners/editors can still update filters and can toggle this lock.
+       */
+      filterLocked?: boolean;
       /** Persisted filter state (year, dateRange, periodSelection, dateField, etc.) */
       savedFilters?: Partial<SectionFilters>;
     }

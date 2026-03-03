@@ -55,13 +55,15 @@ import {
   Clock,
   AlertCircle,
   Unlink,
-  MoreHorizontal
+  MoreHorizontal,
+  Folder
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { useAdminTenant } from '@/contexts/AdminTenantContext';
 import { EncompassUserBrowserSection } from './EncompassUserBrowserSection';
+import { GroupManagementSection } from './GroupManagementSection';
 
 /**
  * User type for display
@@ -83,6 +85,7 @@ interface UserDisplay {
   los_connection_id?: string;
   loan_access_mode?: 'encompass_sync' | 'full_access' | 'no_access' | 'manual';
   loan_access_synced_at?: string;
+  access_mode?: 'full' | 'canvas_only';
 }
 
 // Role display names and colors
@@ -135,6 +138,7 @@ export function UserManagementSection() {
     full_name: '',
     role: 'user',
     tenant_slug: '',
+    access_mode: 'full' as 'full' | 'canvas_only',
   });
 
   // When true, new users receive an email with sign-in instructions (no password field in form)
@@ -304,6 +308,7 @@ export function UserManagementSection() {
         email: formData.email,
         full_name: formData.full_name,
         role: formData.role || 'user',
+        access_mode: formData.access_mode || 'full',
       };
       if (!useInviteFlow && formData.password) body.password = formData.password;
 
@@ -339,6 +344,7 @@ export function UserManagementSection() {
       if (formData.full_name !== selectedUser.full_name) updateData.full_name = formData.full_name;
       if (formData.role !== selectedUser.role) updateData.role = formData.role;
       if (formData.password) updateData.password = formData.password;
+      if (formData.access_mode !== (selectedUser.access_mode ?? 'full')) updateData.access_mode = formData.access_mode;
       
       await api.request(`/api/admin/tenants/${selectedUser.tenant_id}/users/${selectedUser.id}`, {
         method: 'PUT',
@@ -411,6 +417,7 @@ export function UserManagementSection() {
       full_name: '',
       role: 'user',
       tenant_slug: '',
+      access_mode: 'full',
     });
   };
 
@@ -422,6 +429,7 @@ export function UserManagementSection() {
       full_name: user.full_name || '',
       role: user.role,
       tenant_slug: user.tenant_slug || '',
+      access_mode: (user.access_mode === 'canvas_only' ? 'canvas_only' : 'full') as 'full' | 'canvas_only',
     });
     setEditDialogOpen(true);
   };
@@ -625,10 +633,14 @@ export function UserManagementSection() {
 
       {/* Tabs for tenant user management */}
       <Tabs defaultValue="tenant-users" className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
+        <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="tenant-users">
             <Users className="h-4 w-4 mr-2" />
             Users ({tenantUsers.length})
+          </TabsTrigger>
+          <TabsTrigger value="groups">
+            <Folder className="h-4 w-4 mr-2" />
+            Groups
           </TabsTrigger>
           <TabsTrigger value="encompass-users">
             <Link2 className="h-4 w-4 mr-2" />
@@ -685,6 +697,7 @@ export function UserManagementSection() {
                   <TableRow>
                     <TableHead>User</TableHead>
                     <TableHead>Role</TableHead>
+                    <TableHead>Access</TableHead>
                     <TableHead>Encompass</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Last Login</TableHead>
@@ -706,6 +719,11 @@ export function UserManagementSection() {
                           <Badge className={roleConfig.color}>
                             {roleConfig.label}
                           </Badge>
+                    </TableCell>
+                    <TableCell>
+                          <span className="text-sm text-slate-600 dark:text-slate-400">
+                            {user.access_mode === 'canvas_only' ? 'Canvas only' : 'Full'}
+                          </span>
                     </TableCell>
                     <TableCell>
                           {user.encompass_user_id ? (
@@ -795,6 +813,11 @@ export function UserManagementSection() {
       </Card>
             </>
           )}
+        </TabsContent>
+
+        {/* Groups Tab */}
+        <TabsContent value="groups" className="space-y-4 mt-6">
+          <GroupManagementSection />
         </TabsContent>
 
         {/* Encompass Users Tab */}
@@ -935,6 +958,27 @@ export function UserManagementSection() {
                 </SelectContent>
               </Select>
             </div>
+
+            <div className="space-y-2">
+              <Label>Access mode</Label>
+              <Select
+                value={formData.access_mode}
+                onValueChange={(v) => setFormData({ ...formData, access_mode: v as 'full' | 'canvas_only' })}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="full">Full platform</SelectItem>
+                  <SelectItem value="canvas_only">Canvas only</SelectItem>
+                </SelectContent>
+              </Select>
+              {formData.access_mode === 'canvas_only' && (
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  This user will only see canvases shared with them (slim UI, no Insights/Loans/Admin).
+                </p>
+              )}
+            </div>
           </div>
 
           <DialogFooter>
@@ -1010,6 +1054,27 @@ export function UserManagementSection() {
                   <SelectItem value="viewer">Viewer</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Access mode</Label>
+              <Select
+                value={formData.access_mode}
+                onValueChange={(v) => setFormData({ ...formData, access_mode: v as 'full' | 'canvas_only' })}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="full">Full platform</SelectItem>
+                  <SelectItem value="canvas_only">Canvas only</SelectItem>
+                </SelectContent>
+              </Select>
+              {formData.access_mode === 'canvas_only' && (
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  This user will only see canvases shared with them (slim UI).
+                </p>
+              )}
             </div>
           </div>
 

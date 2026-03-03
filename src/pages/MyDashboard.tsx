@@ -287,12 +287,13 @@ export default function MyDashboard() {
   // If no tabs are open, show an empty state
   const showEmptyState = openTabs.length === 0;
 
-  // Determine if the current user owns the active canvas
+  // Can edit = owner or editor (viewer is read-only)
   const activeCanvasIsOwner = useMemo(() => {
     if (!activeTabId) return true;
     if (activeTabId.startsWith('new-')) return true; // New canvases are always owned
     const canvas = canvasList.find((c) => c.id === activeTabId);
     if (!canvas) return true; // Not loaded yet — assume owner until data arrives
+    if (canvas.permission !== undefined) return canvas.permission === 'owner' || canvas.permission === 'editor';
     return canvas.is_owner !== false;
   }, [activeTabId, canvasList]);
 

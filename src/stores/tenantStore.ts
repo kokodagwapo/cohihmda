@@ -33,11 +33,17 @@ export const useTenantStore = create<TenantState>()(
 );
 
 /**
- * Call once after login/auth to ensure a non-platform user never has a stale
- * tenant override sitting in localStorage.
+ * Call once after login/auth.
+ * - Platform staff: leave selection untouched (they pick a tenant in the UI).
+ * - Tenant users: set selectedTenantId to their own tenant so every page
+ *   that reads from the store gets a valid value without per-page fallbacks.
  */
-export function enforcePlatformOnly(userRole: string | undefined) {
+export function enforcePlatformOnly(userRole: string | undefined, tenantId?: string | null) {
   if (!PLATFORM_ROLES.has(userRole || "")) {
-    useTenantStore.getState().clearTenantSelection();
+    if (tenantId) {
+      useTenantStore.getState().setSelectedTenantId(tenantId);
+    } else {
+      useTenantStore.getState().clearTenantSelection();
+    }
   }
 }
