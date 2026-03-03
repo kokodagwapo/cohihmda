@@ -101,6 +101,78 @@ const ACTOR_COLUMN: Record<PricingActorType, string> = {
   account_executive: "account_executive",
 };
 
+/** Keys we already return in report rows (camelCase). Dynamic metric columns are only for keys not in this set. */
+const FIXED_REPORT_KEYS = new Set([
+  "entityName",
+  "actorName",
+  "units",
+  "volume",
+  "loanPricingDollars",
+  "pricingMargin",
+  "cdLenderCredits",
+  "purchaseAdviceSellAmount",
+  "line800TotalBorrowerPaidAmount",
+  "feesAppraisalFeeBorr",
+  "line800TotalSellerPaidAmount",
+  "feesInterestBorr",
+  "purchaseAdvExpectedIntPymtFromInvestor",
+  "purchaseAdviceExpctdPayout1Amt",
+  "purchaseAdviceExpctdPayout2Amt",
+  "purchaseAdviceExpctdPayout3Amt",
+  "lenderCredits",
+]);
+
+/** Return map of column_name -> data_type for public.loans (for dynamic metric columns). */
+async function getLoansColumnMeta(
+  tenantPool: pg.Pool
+): Promise<Map<string, string>> {
+  const result = await tenantPool.query(
+    `SELECT column_name, data_type
+     FROM information_schema.columns
+     WHERE table_schema = 'public' AND table_name = 'loans'
+     ORDER BY ordinal_position`
+  );
+  const map = new Map<string, string>();
+  for (const row of result.rows || []) {
+    const name = (row as { column_name: string }).column_name;
+    const type = (row as { data_type: string }).data_type;
+    if (name && type) map.set(name, type);
+  }
+  return map;
+}
+
+/** Numeric types that support SUM/AVG. */
+const NUMERIC_TYPES = new Set([
+  "integer",
+  "bigint",
+  "smallint",
+  "real",
+  "double precision",
+  "numeric",
+]);
+
+/** Date/timestamp types: leave blank in report aggregates. */
+const DATE_TYPES = new Set([
+  "date",
+  "timestamp with time zone",
+  "timestamp without time zone",
+]);
+
+/** Column names that suggest “amount” → use SUM; others (scores, ratios) → AVG. */
+function isSumColumn(columnName: string): boolean {
+  const lower = columnName.toLowerCase();
+  return (
+    lower.includes("amount") ||
+    lower.includes("credits") ||
+    lower.includes("volume") ||
+    lower.includes("dollars") ||
+    lower.includes("paid") ||
+    lower.includes("payout") ||
+    lower.includes("fee") ||
+    lower === "units"
+  );
+}
+
 function toLocalDateStr(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -315,7 +387,7 @@ export async function getPricingKPIs(
 export async function getPricingReport(
   tenantPool: pg.Pool,
   filters: PricingDashboardFilters,
-  options: { isEntityDetail: boolean }
+  options: { isEntityDetail: boolean; metricColumns?: string[] }
 ): Promise<{ rows: PricingReportRow[]; totals: Partial<PricingReportRow> }> {
   const revenueExpr = await getTenantRevenueExpression(tenantPool, "l");
   const entityCol = ENTITY_COLUMN[filters.entityType];
@@ -325,6 +397,37 @@ export async function getPricingReport(
 
   const isBranchReport = options.isEntityDetail && filters.entityType === "branch";
   const groupByCols = isBranchReport ? `l.${entityCol}` : `l.${entityCol}, l.${actorCol}`;
+
+  let dynamicReportCols: { key: string; type: string }[] = [];
+  if (options.metricColumns?.length) {
+    const meta = await getLoansColumnMeta(tenantPool);
+    for (const key of options.metricColumns) {
+      if (FIXED_REPORT_KEYS.has(key)) continue;
+      const col = key;
+      const dataType = meta.get(col);
+      if (dataType) dynamicReportCols.push({ key: col, type: dataType });
+    }
+  }
+
+  const dynamicSelectFragments: string[] = [];
+  for (const { key, type } of dynamicReportCols) {
+    const quoted = `l."${key}"`;
+    if (NUMERIC_TYPES.has(type)) {
+      const agg = isSumColumn(key) ? "SUM" : "AVG";
+      dynamicSelectFragments.push(
+        `${agg}(${quoted})::double precision AS "${key}"`
+      );
+    } else if (DATE_TYPES.has(type)) {
+      dynamicSelectFragments.push(`NULL::text AS "${key}"`);
+    } else {
+      dynamicSelectFragments.push(`MAX(${quoted}) AS "${key}"`);
+    }
+  }
+  const dynamicSelectSql =
+    dynamicSelectFragments.length > 0
+      ? ",\n    " + dynamicSelectFragments.join(",\n    ")
+      : "";
+
   const selectCols = isBranchReport
     ? `
     COALESCE(l.${entityCol}, '') AS entity_name,
@@ -346,6 +449,7 @@ export async function getPricingReport(
     COALESCE(SUM(l.pa_payout_2), 0)::double precision AS purchase_advice_expctd_payout_2_amt,
     COALESCE(SUM(l.pa_payout_3), 0)::double precision AS purchase_advice_expctd_payout_3_amt,
     COALESCE(SUM(l.lender_credits), 0)::double precision AS lender_credits
+    ${dynamicSelectSql}
   `
     : `
     COALESCE(l.${entityCol}, '') AS entity_name,
@@ -367,6 +471,7 @@ export async function getPricingReport(
     COALESCE(SUM(l.pa_payout_2), 0)::double precision AS purchase_advice_expctd_payout_2_amt,
     COALESCE(SUM(l.pa_payout_3), 0)::double precision AS purchase_advice_expctd_payout_3_amt,
     COALESCE(SUM(l.lender_credits), 0)::double precision AS lender_credits
+    ${dynamicSelectSql}
   `;
 
   const orderBy = isBranchReport ? `entity_name` : `entity_name, actor_name`;
@@ -379,25 +484,36 @@ export async function getPricingReport(
   `;
 
   const result = await tenantPool.query(sql, params);
-  const rows: PricingReportRow[] = (result.rows || []).map((r: Record<string, unknown>) => ({
-    entityName: String(r.entity_name ?? ""),
-    actorName: String(r.actor_name ?? ""),
-    units: Number(r.units) ?? 0,
-    volume: Number(r.volume) ?? 0,
-    loanPricingDollars: Number(r.loan_pricing_dollars) ?? 0,
-    pricingMargin: Number(r.pricing_margin) ?? 0,
-    cdLenderCredits: Number(r.cd_lender_credits) ?? 0,
-    purchaseAdviceSellAmount: Number(r.purchase_advice_sell_amount) ?? 0,
-    line800TotalBorrowerPaidAmount: Number(r.line_800_total_borrower_paid_amount) ?? 0,
-    feesAppraisalFeeBorr: Number(r.fees_appraisal_fee_borr) ?? 0,
-    line800TotalSellerPaidAmount: Number(r.line_800_total_seller_paid_amount) ?? 0,
-    feesInterestBorr: Number(r.fees_interest_borr) ?? 0,
-    purchaseAdvExpectedIntPymtFromInvestor: Number(r.purchase_adv_expected_int_pymt_from_investor) ?? 0,
-    purchaseAdviceExpctdPayout1Amt: Number(r.purchase_advice_expctd_payout_1_amt) ?? 0,
-    purchaseAdviceExpctdPayout2Amt: Number(r.purchase_advice_expctd_payout_2_amt) ?? 0,
-    purchaseAdviceExpctdPayout3Amt: Number(r.purchase_advice_expctd_payout_3_amt) ?? 0,
-    lenderCredits: Number(r.lender_credits) ?? 0,
-  }));
+  const rows: PricingReportRow[] = (result.rows || []).map((r: Record<string, unknown>) => {
+    const base: Record<string, unknown> = {
+      entityName: String(r.entity_name ?? ""),
+      actorName: String(r.actor_name ?? ""),
+      units: Number(r.units) ?? 0,
+      volume: Number(r.volume) ?? 0,
+      loanPricingDollars: Number(r.loan_pricing_dollars) ?? 0,
+      pricingMargin: Number(r.pricing_margin) ?? 0,
+      cdLenderCredits: Number(r.cd_lender_credits) ?? 0,
+      purchaseAdviceSellAmount: Number(r.purchase_advice_sell_amount) ?? 0,
+      line800TotalBorrowerPaidAmount: Number(r.line_800_total_borrower_paid_amount) ?? 0,
+      feesAppraisalFeeBorr: Number(r.fees_appraisal_fee_borr) ?? 0,
+      line800TotalSellerPaidAmount: Number(r.line_800_total_seller_paid_amount) ?? 0,
+      feesInterestBorr: Number(r.fees_interest_borr) ?? 0,
+      purchaseAdvExpectedIntPymtFromInvestor: Number(r.purchase_adv_expected_int_pymt_from_investor) ?? 0,
+      purchaseAdviceExpctdPayout1Amt: Number(r.purchase_advice_expctd_payout_1_amt) ?? 0,
+      purchaseAdviceExpctdPayout2Amt: Number(r.purchase_advice_expctd_payout_2_amt) ?? 0,
+      purchaseAdviceExpctdPayout3Amt: Number(r.purchase_advice_expctd_payout_3_amt) ?? 0,
+      lenderCredits: Number(r.lender_credits) ?? 0,
+    };
+    for (const { key } of dynamicReportCols) {
+      const val = r[key];
+      if (val !== undefined && val !== null) {
+        base[key] = typeof val === "number" ? val : String(val);
+      } else {
+        base[key] = null;
+      }
+    }
+    return base as unknown as PricingReportRow;
+  });
 
   const totals: Partial<PricingReportRow> = rows.length
     ? {
@@ -422,13 +538,24 @@ export async function getPricingReport(
       }
     : {};
 
+  for (const { key, type } of dynamicReportCols) {
+    if (NUMERIC_TYPES.has(type) && rows.length > 0) {
+      let sum = 0;
+      for (const r of rows) {
+        const v = (r as unknown as Record<string, unknown>)[key];
+        if (typeof v === "number" && !Number.isNaN(v)) sum += v;
+      }
+      (totals as unknown as Record<string, unknown>)[key] = sum;
+    }
+  }
+
   return { rows, totals };
 }
 
 export async function getPricingDetail(
   tenantPool: pg.Pool,
   filters: PricingDashboardFilters,
-  options: { isEntityDetail: boolean }
+  options: { isEntityDetail: boolean; metricColumns?: string[] }
 ): Promise<{ rows: PricingDetailRow[]; totals: Partial<PricingDetailRow> }> {
   const revenueExpr = await getTenantRevenueExpression(tenantPool, "l");
   const entityCol = ENTITY_COLUMN[filters.entityType];
@@ -437,6 +564,48 @@ export async function getPricingDetail(
   const { clause: whereClause } = buildBaseWhere(filters, "l", params, 1);
 
   const includeActor = !options.isEntityDetail;
+
+  let dynamicDetailCols: { key: string; type: string }[] = [];
+  if (options.metricColumns?.length) {
+    const meta = await getLoansColumnMeta(tenantPool);
+    const fixedDetailKeys = new Set([
+      "entityName",
+      "actorName",
+      "loanNumber",
+      "applicationDate",
+      "lockExpirationDate",
+      "fundingDate",
+      "closingDate",
+      "currentLoanStatus",
+      "volume",
+      "loanPricingDollars",
+      "pricingMargin",
+      "cdLenderCredits",
+      "purchaseAdviceSellAmount",
+      "line800TotalBorrowerPaidAmount",
+      "feesAppraisalFeeBorr",
+      "line800TotalSellerPaidAmount",
+      "feesInterestBorr",
+      "purchaseAdvExpectedIntPymtFromInvestor",
+      "purchaseAdviceExpctdPayout1Amt",
+      "purchaseAdviceExpctdPayout2Amt",
+      "purchaseAdviceExpctdPayout3Amt",
+      "lenderCredits",
+    ]);
+    for (const key of options.metricColumns) {
+      if (fixedDetailKeys.has(key)) continue;
+      const dataType = meta.get(key);
+      if (dataType) dynamicDetailCols.push({ key, type: dataType });
+    }
+  }
+
+  const dynamicSelectSql =
+    dynamicDetailCols.length > 0
+      ? ",\n      " +
+        dynamicDetailCols
+          .map(({ key }) => `l."${key}" AS "${key}"`)
+          .join(",\n      ")
+      : "";
 
   const sql = `
     SELECT
@@ -464,36 +633,48 @@ export async function getPricingDetail(
       l.pa_payout_2,
       l.pa_payout_3,
       l.lender_credits
+      ${dynamicSelectSql}
     FROM public.loans l
     ${whereClause}
     ORDER BY l.${entityCol}, ${includeActor ? `l.${actorCol},` : ""} l.loan_id
   `;
 
   const result = await tenantPool.query(sql, params);
-  const rows: PricingDetailRow[] = (result.rows || []).map((r: Record<string, unknown>) => ({
-    entityName: String(r.entity_name ?? ""),
-    actorName: String(r.actor_name ?? ""),
-    loanNumber: r.loan_number != null ? String(r.loan_number) : null,
-    applicationDate: r.application_date != null ? String(r.application_date) : null,
-    lockExpirationDate: r.lock_expiration_date != null ? String(r.lock_expiration_date) : null,
-    fundingDate: r.funding_date != null ? String(r.funding_date) : null,
-    closingDate: r.closing_date != null ? String(r.closing_date) : null,
-    currentLoanStatus: r.current_loan_status != null ? String(r.current_loan_status) : null,
-    volume: r.volume != null ? Number(r.volume) : null,
-    loanPricingDollars: Number(r.loan_pricing_dollars) ?? 0,
-    pricingMargin: Number(r.pricing_margin) ?? 0,
-    cdLenderCredits: r.cd_lender_credits != null ? Number(r.cd_lender_credits) : null,
-    purchaseAdviceSellAmount: r.pa_sell_amt != null ? Number(r.pa_sell_amt) : null,
-    line800TotalBorrowerPaidAmount: r.line_800_total_borrower_paid_amount != null ? Number(r.line_800_total_borrower_paid_amount) : null,
-    feesAppraisalFeeBorr: r.fees_appraisal_fee_borr != null ? Number(r.fees_appraisal_fee_borr) : null,
-    line800TotalSellerPaidAmount: r.line_800_total_seller_paid_amount != null ? Number(r.line_800_total_seller_paid_amount) : null,
-    feesInterestBorr: r.fees_interest_borr != null ? Number(r.fees_interest_borr) : null,
-    purchaseAdvExpectedIntPymtFromInvestor: r.purchase_adv_expected_int_pymt_from_investor != null ? Number(r.purchase_adv_expected_int_pymt_from_investor) : null,
-    purchaseAdviceExpctdPayout1Amt: r.pa_payout_1 != null ? Number(r.pa_payout_1) : null,
-    purchaseAdviceExpctdPayout2Amt: r.pa_payout_2 != null ? Number(r.pa_payout_2) : null,
-    purchaseAdviceExpctdPayout3Amt: r.pa_payout_3 != null ? Number(r.pa_payout_3) : null,
-    lenderCredits: r.lender_credits != null ? Number(r.lender_credits) : null,
-  }));
+  const rows: PricingDetailRow[] = (result.rows || []).map((r: Record<string, unknown>) => {
+    const base: Record<string, unknown> = {
+      entityName: String(r.entity_name ?? ""),
+      actorName: String(r.actor_name ?? ""),
+      loanNumber: r.loan_number != null ? String(r.loan_number) : null,
+      applicationDate: r.application_date != null ? String(r.application_date) : null,
+      lockExpirationDate: r.lock_expiration_date != null ? String(r.lock_expiration_date) : null,
+      fundingDate: r.funding_date != null ? String(r.funding_date) : null,
+      closingDate: r.closing_date != null ? String(r.closing_date) : null,
+      currentLoanStatus: r.current_loan_status != null ? String(r.current_loan_status) : null,
+      volume: r.volume != null ? Number(r.volume) : null,
+      loanPricingDollars: Number(r.loan_pricing_dollars) ?? 0,
+      pricingMargin: Number(r.pricing_margin) ?? 0,
+      cdLenderCredits: r.cd_lender_credits != null ? Number(r.cd_lender_credits) : null,
+      purchaseAdviceSellAmount: r.pa_sell_amt != null ? Number(r.pa_sell_amt) : null,
+      line800TotalBorrowerPaidAmount: r.line_800_total_borrower_paid_amount != null ? Number(r.line_800_total_borrower_paid_amount) : null,
+      feesAppraisalFeeBorr: r.fees_appraisal_fee_borr != null ? Number(r.fees_appraisal_fee_borr) : null,
+      line800TotalSellerPaidAmount: r.line_800_total_seller_paid_amount != null ? Number(r.line_800_total_seller_paid_amount) : null,
+      feesInterestBorr: r.fees_interest_borr != null ? Number(r.fees_interest_borr) : null,
+      purchaseAdvExpectedIntPymtFromInvestor: r.purchase_adv_expected_int_pymt_from_investor != null ? Number(r.purchase_adv_expected_int_pymt_from_investor) : null,
+      purchaseAdviceExpctdPayout1Amt: r.pa_payout_1 != null ? Number(r.pa_payout_1) : null,
+      purchaseAdviceExpctdPayout2Amt: r.pa_payout_2 != null ? Number(r.pa_payout_2) : null,
+      purchaseAdviceExpctdPayout3Amt: r.pa_payout_3 != null ? Number(r.pa_payout_3) : null,
+      lenderCredits: r.lender_credits != null ? Number(r.lender_credits) : null,
+    };
+    for (const { key } of dynamicDetailCols) {
+      const val = r[key];
+      if (val !== undefined && val !== null) {
+        base[key] = typeof val === "number" ? val : String(val);
+      } else {
+        base[key] = null;
+      }
+    }
+    return base as unknown as PricingDetailRow;
+  });
 
   const sumVolume = rows.reduce((s, r) => s + (r.volume ?? 0), 0);
   const sumPricing = rows.reduce((s, r) => s + r.loanPricingDollars, 0);
@@ -513,6 +694,17 @@ export async function getPricingDetail(
     purchaseAdviceExpctdPayout3Amt: rows.reduce((s, r) => s + (r.purchaseAdviceExpctdPayout3Amt ?? 0), 0),
     lenderCredits: rows.reduce((s, r) => s + (r.lenderCredits ?? 0), 0),
   };
+
+  for (const { key, type } of dynamicDetailCols) {
+    if (NUMERIC_TYPES.has(type) && rows.length > 0) {
+      let sum = 0;
+      for (const r of rows) {
+        const v = (r as unknown as Record<string, unknown>)[key];
+        if (typeof v === "number" && !Number.isNaN(v)) sum += v;
+      }
+      (totals as unknown as Record<string, unknown>)[key] = sum;
+    }
+  }
 
   return { rows, totals };
 }

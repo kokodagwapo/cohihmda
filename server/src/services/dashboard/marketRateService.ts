@@ -53,6 +53,52 @@ export interface FREDResponse {
   file_type: string;
 }
 
+/** FRED series ID for 10-Year Treasury Constant Maturity Rate (daily, percent). */
+export const FRED_SERIES_DGS10 = 'DGS10';
+
+/**
+ * Fetch observations for any FRED series (on-demand, no DB storage).
+ * @param seriesId - FRED series ID (e.g. DGS10 for 10-Year Treasury)
+ * @param startDate - Start date YYYY-MM-DD (e.g. 1/1 of start year)
+ * @param endDate - End date YYYY-MM-DD (e.g. 12/31 of end year)
+ * @returns Array of { date, value } with numeric value (percent)
+ */
+export async function fetchFredSeriesObservations(
+  seriesId: string,
+  startDate: string,
+  endDate: string
+): Promise<{ date: string; value: number }[]> {
+  const apiKey = getFredApiKey();
+  if (!apiKey) {
+    throw new Error('FRED_API_KEY is not configured. Please set it in environment variables.');
+  }
+
+  const url = new URL(FRED_API_BASE_URL);
+  url.searchParams.append('series_id', seriesId);
+  url.searchParams.append('api_key', apiKey);
+  url.searchParams.append('file_type', 'json');
+  url.searchParams.append('observation_start', startDate);
+  url.searchParams.append('observation_end', endDate);
+
+  const response = await fetch(url.toString());
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`FRED API error: ${response.status} ${response.statusText} - ${errorText}`);
+  }
+
+  const data = (await response.json()) as FREDResponse;
+  if (!data.observations || !Array.isArray(data.observations)) {
+    throw new Error('Invalid FRED API response: missing observations array');
+  }
+
+  return data.observations
+    .filter((obs) => obs.value && obs.value !== '.' && !isNaN(parseFloat(obs.value)))
+    .map((obs) => ({
+      date: obs.date,
+      value: parseFloat(obs.value),
+    }));
+}
+
 /**
  * Fetch market rates from FRED API
  * @param startDate - Start date in YYYY-MM-DD format (default: 3 years ago)

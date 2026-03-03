@@ -61,6 +61,15 @@ function parseFilters(query: Record<string, unknown>): PricingDashboardFilters {
   };
 }
 
+/** Parse metric_columns from query: comma-separated list of column keys. */
+function parseMetricColumns(query: Record<string, unknown>): string[] | undefined {
+  const raw = query.metric_columns;
+  if (raw == null) return undefined;
+  const str = Array.isArray(raw) ? (raw[0] as string) : (raw as string);
+  if (typeof str !== "string" || str.trim() === "") return undefined;
+  return str.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
 router.get(
   "/kpis",
   authenticateToken,
@@ -93,8 +102,10 @@ router.get(
       }
       const filters = parseFilters(req.query as Record<string, unknown>);
       const isEntityDetail = (req.query.report_type as string) === "entity_report";
+      const metricColumns = parseMetricColumns(req.query as Record<string, unknown>);
       const result = await getPricingReport(ctx.tenantPool, filters, {
         isEntityDetail,
+        metricColumns,
       });
       return res.json(result);
     } catch (error) {
@@ -116,8 +127,10 @@ router.get(
       }
       const filters = parseFilters(req.query as Record<string, unknown>);
       const isEntityDetail = (req.query.report_type as string) === "entity_detail";
+      const metricColumns = parseMetricColumns(req.query as Record<string, unknown>);
       const result = await getPricingDetail(ctx.tenantPool, filters, {
         isEntityDetail,
+        metricColumns,
       });
       return res.json(result);
     } catch (error) {

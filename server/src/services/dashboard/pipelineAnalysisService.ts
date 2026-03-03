@@ -703,3 +703,110 @@ export async function getPipelineLoansActiveInRange(
     closer: r.closer != null ? String(r.closer) : null,
   }));
 }
+
+/** 30-year fixed loan_program match: contains "30 year fixed" or "30 yr fixed" (case-insensitive). */
+const LOAN_PROGRAM_30_YEAR_FIXED_CONDITION = `(
+  LOWER(COALESCE(l.loan_program, '')) LIKE '%30 year fixed%'
+  OR LOWER(COALESCE(l.loan_program, '')) LIKE '%30 yr fixed%'
+)`;
+
+/**
+ * Compute weighted average interest rate for 30-year fixed loans active on each snapshot date.
+ * Formula: sum(interest_rate * loan_amount) / sum(loan_amount) per date.
+ * Returns one entry per snapshot date; weighted_avg_rate is null when no qualifying loans.
+ */
+export async function getPipeline30YearFixedWeightedRates(
+  pool: pg.Pool,
+  from: string,
+  to: string,
+  startDateField: StartDateField = "application_date",
+  filters?: PipelineSnapshotFilters | null,
+  dimensionFilterClause?: string,
+  snapshotDatesOverride?: string[] | null
+): Promise<Array<{ date: string; weighted_avg_rate: number | null }>> {
+  let dateStrings: string[];
+  if (snapshotDatesOverride != null && snapshotDatesOverride.length > 0) {
+    dateStrings = snapshotDatesOverride.filter((d) => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d.trim()));
+    if (dateStrings.length === 0) return [];
+  } else {
+    const snapshotDay = await getPipelineSnapshotDay(pool);
+    const startDate = new Date(from);
+    const endDate = new Date(to);
+    startDate.setHours(0, 0, 0, 0);
+    endDate.setHours(0, 0, 0, 0);
+    const dates = getSnapshotDatesInRange(startDate, endDate, snapshotDay);
+    if (dates.length === 0) return [];
+    dateStrings = dates.map((d) => formatDateForSql(d));
+  }
+
+  const useLockDate = startDateField === "lock_date";
+  const useProcessingDate = startDateField === "processing_date";
+  const useCreditPullDate = startDateField === "credit_pull_date";
+  const useSubmittedToUwDate = startDateField === "submitted_to_underwriting_date";
+  const startCol =
+    useLockDate ? "l.lock_date"
+    : useProcessingDate ? "l.processing_date"
+    : useCreditPullDate ? "l.credit_pull_date"
+    : useSubmittedToUwDate ? "l.submitted_to_underwriting_date"
+    : "l.application_date";
+  const startNotNull =
+    useLockDate ? "l.lock_date IS NOT NULL"
+    : useProcessingDate ? "l.processing_date IS NOT NULL"
+    : useCreditPullDate ? "l.credit_pull_date IS NOT NULL"
+    : useSubmittedToUwDate ? "l.submitted_to_underwriting_date IS NOT NULL"
+    : "l.application_date IS NOT NULL";
+
+  const baseConditions: string[] = [
+    startNotNull,
+    "(l.is_archived IS NULL OR l.is_archived IS NOT TRUE OR TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan')",
+    "l.interest_rate IS NOT NULL AND l.interest_rate > 0 AND l.interest_rate <= 15",
+    "l.loan_amount IS NOT NULL AND l.loan_amount > 0",
+    LOAN_PROGRAM_30_YEAR_FIXED_CONDITION,
+  ];
+  let nextParam = 1;
+  if (filters?.loanTypes != null && filters.loanTypes.length > 0) {
+    baseConditions.push(`l.loan_type = ANY($${nextParam}::text[])`);
+    nextParam++;
+  }
+  if (filters?.loanPurposes != null && filters.loanPurposes.length > 0) {
+    baseConditions.push(`l.loan_purpose = ANY($${nextParam}::text[])`);
+    nextParam++;
+  }
+  if (filters?.branches != null && filters.branches.length > 0) {
+    baseConditions.push(`l.branch = ANY($${nextParam}::text[])`);
+    nextParam++;
+  }
+  const baseWhere = baseConditions.join(" AND ") + (dimensionFilterClause ?? "");
+  const baseParams: unknown[] = [];
+  if (filters?.loanTypes?.length) baseParams.push(filters.loanTypes);
+  if (filters?.loanPurposes?.length) baseParams.push(filters.loanPurposes);
+  if (filters?.branches?.length) baseParams.push(filters.branches);
+
+  const results: Array<{ date: string; weighted_avg_rate: number | null }> = [];
+  for (const dateStr of dateStrings) {
+    const conditions = [
+      baseWhere,
+      `(
+        (TRIM(COALESCE(l.current_loan_status, '')) = 'Active Loan' AND (${startCol})::date < $${nextParam}::date)
+        OR
+        (TRIM(COALESCE(l.current_loan_status, '')) != 'Active Loan'
+         AND (${startCol})::date <= $${nextParam}::date
+         AND (l.current_status_date IS NULL OR l.current_status_date::date > $${nextParam}::date))
+      )`,
+    ].join(" AND ");
+    const params = [...baseParams, dateStr];
+    const sql = `
+      SELECT
+        SUM(l.interest_rate * l.loan_amount)::double precision / NULLIF(SUM(l.loan_amount), 0) AS weighted_avg_rate
+      FROM public.loans l
+      WHERE ${conditions}
+    `;
+    const result = await pool.query(sql, params);
+    const row = result.rows[0];
+    const rate = row?.weighted_avg_rate != null && Number.isFinite(Number(row.weighted_avg_rate))
+      ? Number(row.weighted_avg_rate)
+      : null;
+    results.push({ date: dateStr, weighted_avg_rate: rate });
+  }
+  return results;
+}

@@ -63,6 +63,7 @@ const SECTION_TO_SOURCE: Record<SectionType, string> = {
   'actors': 'actors',
   'pricing-dashboard': 'pricing-dashboard',
   'pipeline-analysis': 'pipeline-analysis',
+  'sales-scorecard-overview': 'sales-scorecard-overview',
 };
 
 // Contextual suggested prompts per section type
