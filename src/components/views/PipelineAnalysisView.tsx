@@ -23,7 +23,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { usePipelineAnalysisData, usePipelineAnalysisRange, usePipelineAnalysisConfig, usePipelineAnalysisFilterOptions, usePipelineAnalysisLoans, type PipelineSnapshotRow, type PipelineLoanDetailRow } from "@/hooks/usePipelineAnalysisData";
-import { Loader2, Table2, BarChart3, ChevronDown, ArrowUp, ArrowDown, ChevronsUpDown, X } from "lucide-react";
+import { useTreasury10y } from "@/hooks/useTreasury10y";
+import { Loader2, Table2, BarChart3, TrendingUp, ChevronDown, ArrowUp, ArrowDown, ChevronsUpDown, X, Download } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { api } from "@/lib/api";
 import {
@@ -52,13 +53,13 @@ function formatVolume(n: number): string {
 }
 
 function formatPct(value: number | null): string {
-  if (value === null || value === undefined) return "—";
+  if (value === null || value === undefined) return "-";
   const sign = value >= 0 ? "+" : "";
   return `${sign}${value.toFixed(2)}%`;
 }
 
 function formatUnitsPerActor(units: number, count: number): string {
-  if (count == null || count <= 0) return "—";
+  if (count == null || count <= 0) return "-";
   return (units / count).toFixed(1);
 }
 
@@ -78,6 +79,14 @@ function ordinal(n: number): string {
   if (s === 2 && t !== 12) return `${n}nd`;
   if (s === 3 && t !== 13) return `${n}rd`;
   return `${n}th`;
+}
+
+function escapeCsvCell(val: string | number | null | undefined): string {
+  const s = val === null || val === undefined ? "" : String(val);
+  if (s.includes('"') || s.includes(",") || s.includes("\n") || s.includes("\r")) {
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+  return s;
 }
 
 /** First Monday on or after the 1st of the given month. */
@@ -138,7 +147,7 @@ export function PipelineAnalysisView({
 }: PipelineAnalysisViewProps) {
   const [viewMode, setViewMode] = useState<PipelineViewMode>("week");
   const [pctMetric, setPctMetric] = useState<PipelinePctMetric>("volume");
-  const [dataViewTab, setDataViewTab] = useState<"table" | "chart" | "loCountChart">("table");
+  const [dataViewTab, setDataViewTab] = useState<"table" | "chart" | "loCountChart" | "treasury10y">("table");
   const [startDateField, setStartDateField] = useState<"application_date" | "lock_date" | "processing_date" | "credit_pull_date" | "submitted_to_underwriting_date">("application_date");
   /** Selected week values (1–53) in week mode; selection persists when switching tabs. */
   const [selectedWeekValues, setSelectedWeekValues] = useState<number[]>([]);
@@ -209,6 +218,11 @@ export function PipelineAnalysisView({
     filters: filtersForApi,
   });
 
+  const { data: treasury10yData, loading: treasury10yLoading, error: treasury10yError } = useTreasury10y(
+    from && to ? from : null,
+    from && to ? to : null
+  );
+
   const [startYear, endYear] = useMemo(() => {
     if (!effectiveYearRange) return [null, null] as [number | null, number | null];
     const parts = effectiveYearRange.split("-").map(Number);
@@ -244,6 +258,56 @@ export function PipelineAnalysisView({
     }
     return out;
   }, [viewMode, selectedWeekValues, selectedMonths, years, snapshots]);
+
+  /** Dates to show on treasury chart: respect view mode. In week mode use week snapshot dates; in month mode use first snapshot of each month (or selected months). */
+  const chartDatesForTreasury = useMemo(() => {
+    if (viewMode === "month") {
+      if (selectedSnapshotDates.length > 0) return selectedSnapshotDates;
+      const byYM = snapshotsToByYearMonth(snapshots);
+      const set = new Set<string>();
+      byYM.forEach((row) => {
+        if (!row.date) return;
+        const d = typeof row.date === "string" ? row.date.slice(0, 10) : format(new Date(row.date), "yyyy-MM-dd");
+        set.add(d);
+      });
+      return Array.from(set).sort();
+    }
+    if (selectedSnapshotDates.length > 0) return selectedSnapshotDates;
+    const set = new Set<string>();
+    snapshots.forEach((row) => {
+      if (!row.date) return;
+      const d = typeof row.date === "string" ? row.date.slice(0, 10) : format(new Date(row.date), "yyyy-MM-dd");
+      set.add(d);
+    });
+    return Array.from(set).sort();
+  }, [viewMode, selectedSnapshotDates, snapshots]);
+
+  /** Treasury chart data: only dates that are snapshot dates; yield from that date or nearest prior FRED date. */
+  const treasuryChartData = useMemo(() => {
+    if (!treasury10yData || treasury10yData.length === 0 || chartDatesForTreasury.length === 0) return [];
+    const sorted = [...treasury10yData].sort((a, b) => a.date.localeCompare(b.date));
+    const dateToYield = new Map<string, number>();
+    for (const o of sorted) {
+      const d = o.date.slice(0, 10);
+      dateToYield.set(d, o.yield);
+    }
+    return chartDatesForTreasury
+      .map((date) => {
+        let y = dateToYield.get(date);
+        if (y === undefined) {
+          for (let i = sorted.length - 1; i >= 0; i--) {
+            const d = sorted[i].date.slice(0, 10);
+            if (d <= date) {
+              y = sorted[i].yield;
+              break;
+            }
+          }
+        }
+        if (y === undefined) return null;
+        return { date, dateLabel: format(parseISO(date), "MMM d, yyyy"), yield: y };
+      })
+      .filter((row): row is { date: string; dateLabel: string; yield: number } => row != null);
+  }, [treasury10yData, chartDatesForTreasury]);
 
   const { loans: pipelineLoans, loading: loansLoading, error: loansError } = usePipelineAnalysisLoans({
     from: from || null,
@@ -560,6 +624,114 @@ export function PipelineAnalysisView({
       p65OPs: nOP > 0 ? sortedOP[Math.floor(0.65 * nOP)] : 0,
     };
   }, [years, byYearWeek, weekValues]);
+
+  const exportTableToCsv = useCallback(() => {
+    const pctLabel = pctMetric === "volume" ? "Volume" : "Units";
+    const rows: string[][] = [];
+    if (isMonthMode) {
+      const headers = ["Metric", ...MONTH_LABELS];
+      rows.push(headers.map(escapeCsvCell));
+      years.forEach((y) => {
+        rows.push([`${y} Volume`, ...MONTH_LABELS.map((_, i) => (byYearMonth.get(`${y}-${i + 1}`)?.active_volume != null ? formatVolume(byYearMonth.get(`${y}-${i + 1}`)!.active_volume) : "-"))].map(escapeCsvCell));
+        rows.push([`${y} Units`, ...MONTH_LABELS.map((_, i) => (byYearMonth.get(`${y}-${i + 1}`)?.active_units != null ? String(byYearMonth.get(`${y}-${i + 1}`)!.active_units) : "-"))].map(escapeCsvCell));
+      });
+      rows.push(["Weekly Increase/Decrease (" + pctLabel + ")", ...MONTH_LABELS.map((_, i) => formatPct(byMonthPct.get(i + 1)?.[pctMetric === "volume" ? "weeklyVolume" : "weeklyUnits"] ?? null))].map(escapeCsvCell));
+      rows.push(["Monthly Increase/Decrease (" + pctLabel + ")", ...MONTH_LABELS.map((_, i) => formatPct(byMonthPct.get(i + 1)?.[pctMetric === "volume" ? "monthlyVolume" : "monthlyUnits"] ?? null))].map(escapeCsvCell));
+      rows.push(["Annual Increase/Decrease (" + pctLabel + ")", ...MONTH_LABELS.map((_, i) => formatPct(byMonthPct.get(i + 1)?.[pctMetric === "volume" ? "annualVolume" : "annualUnits"] ?? null))].map(escapeCsvCell));
+      years.forEach((y) => {
+        rows.push([`${y} LO Count`, ...MONTH_LABELS.map((_, i) => (byYearMonth.get(`${y}-${i + 1}`)?.active_lo_count != null ? String(byYearMonth.get(`${y}-${i + 1}`)!.active_lo_count) : "-"))].map(escapeCsvCell));
+        rows.push([`${y} OPs Count`, ...MONTH_LABELS.map((_, i) => (byYearMonth.get(`${y}-${i + 1}`)?.active_ops_count != null ? String(byYearMonth.get(`${y}-${i + 1}`)!.active_ops_count) : "-"))].map(escapeCsvCell));
+      });
+      years.forEach((y) => {
+        const loRow = [`${y} Units per LO`, ...MONTH_LABELS.map((_, i) => {
+          const row = byYearMonth.get(`${y}-${i + 1}`);
+          return row && row.active_lo_count > 0 ? formatUnitsPerActor(row.active_units, row.active_lo_count) : "-";
+        })];
+        rows.push(loRow.map(escapeCsvCell));
+        const opRow = [`${y} Units per OPs`, ...MONTH_LABELS.map((_, i) => {
+          const row = byYearMonth.get(`${y}-${i + 1}`);
+          return row && row.active_ops_count > 0 ? formatUnitsPerActor(row.active_units, row.active_ops_count) : "-";
+        })];
+        rows.push(opRow.map(escapeCsvCell));
+      });
+    } else {
+      const colLabels = weekValues.map((w) => `${ordinal(w)} ${snapshotDayLabel}`);
+      const headers = ["Metric", ...colLabels];
+      rows.push(headers.map(escapeCsvCell));
+      years.forEach((y) => {
+        rows.push([`${y} Volume`, ...weekValues.map((w) => (byYearWeek.get(`${y}-${w}`)?.active_volume != null ? formatVolume(byYearWeek.get(`${y}-${w}`)!.active_volume) : "-"))].map(escapeCsvCell));
+        rows.push([`${y} Units`, ...weekValues.map((w) => (byYearWeek.get(`${y}-${w}`)?.active_units != null ? String(byYearWeek.get(`${y}-${w}`)!.active_units) : "-"))].map(escapeCsvCell));
+      });
+      rows.push(["Weekly Increase/Decrease (" + pctLabel + ")", ...weekValues.map((w) => formatPct(byWeekPct.get(w)?.[pctMetric === "volume" ? "weeklyVolume" : "weeklyUnits"] ?? null))].map(escapeCsvCell));
+      rows.push(["Monthly Increase/Decrease (" + pctLabel + ")", ...weekValues.map((w) => formatPct(byWeekPct.get(w)?.[pctMetric === "volume" ? "monthlyVolume" : "monthlyUnits"] ?? null))].map(escapeCsvCell));
+      rows.push(["Annual Increase/Decrease (" + pctLabel + ")", ...weekValues.map((w) => formatPct(byWeekPct.get(w)?.[pctMetric === "volume" ? "annualVolume" : "annualUnits"] ?? null))].map(escapeCsvCell));
+      years.forEach((y) => {
+        rows.push([`${y} LO Count`, ...weekValues.map((w) => (byYearWeek.get(`${y}-${w}`)?.active_lo_count != null ? String(byYearWeek.get(`${y}-${w}`)!.active_lo_count) : "-"))].map(escapeCsvCell));
+        rows.push([`${y} OPs Count`, ...weekValues.map((w) => (byYearWeek.get(`${y}-${w}`)?.active_ops_count != null ? String(byYearWeek.get(`${y}-${w}`)!.active_ops_count) : "-"))].map(escapeCsvCell));
+      });
+      years.forEach((y) => {
+        const loRow = [`${y} Units per LO`, ...weekValues.map((w) => {
+          const row = byYearWeek.get(`${y}-${w}`);
+          return row && row.active_lo_count > 0 ? formatUnitsPerActor(row.active_units, row.active_lo_count) : "-";
+        })];
+        rows.push(loRow.map(escapeCsvCell));
+        const opRow = [`${y} Units per OPs`, ...weekValues.map((w) => {
+          const row = byYearWeek.get(`${y}-${w}`);
+          return row && row.active_ops_count > 0 ? formatUnitsPerActor(row.active_units, row.active_ops_count) : "-";
+        })];
+        rows.push(opRow.map(escapeCsvCell));
+      });
+    }
+    const csv = rows.map((row) => row.join(",")).join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `pipeline-analysis-table-${new Date().toISOString().split("T")[0]}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  }, [isMonthMode, pctMetric, years, weekValues, byYearWeek, byYearMonth, byWeekPct, byMonthPct, snapshotDayLabel]);
+
+  const exportLoanDetailToCsv = useCallback(() => {
+    const headers = [
+      "Loan #",
+      "Loan amount",
+      "Loan type",
+      "Loan purpose",
+      "Current loan status",
+      startDateColumnLabel,
+      "Current status date",
+      "FICO score",
+      "LTV ratio",
+      "BE DTI ratio",
+      "Loan officer",
+      "Processor",
+      "Underwriter",
+      "Closer",
+    ];
+    const rows = sortedPipelineLoans.map((loan) => [
+      loan.loan_number ?? "",
+      loan.loan_amount != null ? formatVolume(loan.loan_amount) : "",
+      loan.loan_type ?? "",
+      loan.loan_purpose ?? "",
+      loan.current_loan_status ?? "",
+      loan.start_date ? format(parseISO(loan.start_date), "yyyy-MM-dd") : "",
+      loan.current_status_date ? format(parseISO(loan.current_status_date), "yyyy-MM-dd") : "",
+      loan.fico_score != null ? String(loan.fico_score) : "",
+      loan.ltv_ratio != null ? String(loan.ltv_ratio) : "",
+      loan.be_dti_ratio != null ? String(loan.be_dti_ratio) : "",
+      loan.loan_officer ?? "",
+      loan.processor ?? "",
+      loan.underwriter ?? "",
+      loan.closer ?? "",
+    ]);
+    const csv = [headers.map(escapeCsvCell).join(","), ...rows.map((row) => row.map(escapeCsvCell).join(","))].join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `pipeline-loan-detail-${new Date().toISOString().split("T")[0]}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  }, [sortedPipelineLoans, startDateColumnLabel]);
 
   return (
     <div className="space-y-4">
@@ -880,14 +1052,14 @@ export function PipelineAnalysisView({
             </div>
           )}
 
-          {!loading && !backfillLoading && !rangeLoading && !configLoading && !error && (isMonthMode ? !hasMonthData : snapshots.length === 0 && years.length === 0) && (
+          {!loading && !backfillLoading && !rangeLoading && !configLoading && !error && (isMonthMode ? !hasMonthData && years.length === 0 : snapshots.length === 0 && years.length === 0) && (
             <div className="text-muted-foreground text-sm py-8 text-center">
               No pipeline snapshot data in the selected range.
               {tenantId && " Backfill will run automatically, or try adjusting the date range."}
             </div>
           )}
 
-          <Tabs value={dataViewTab} onValueChange={(v) => setDataViewTab(v as "table" | "chart" | "loCountChart")} className="w-full">
+          <Tabs value={dataViewTab} onValueChange={(v) => setDataViewTab(v as "table" | "chart" | "loCountChart" | "treasury10y")} className="w-full">
             <div className="flex items-center justify-between gap-4 mt-2">
               <TabsList className={cn("bg-muted p-0.5 rounded-lg")}>
                 <TabsTrigger value="table" className="rounded-md gap-1.5">
@@ -902,11 +1074,27 @@ export function PipelineAnalysisView({
                   <BarChart3 className="h-3.5 w-3.5" />
                   LO Count Chart
                 </TabsTrigger>
+                <TabsTrigger value="treasury10y" className="rounded-md gap-1.5">
+                  <TrendingUp className="h-3.5 w-3.5" />
+                  10-Yr Treasury
+                </TabsTrigger>
               </TabsList>
+              {dataViewTab === "table" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={exportTableToCsv}
+                  disabled={loading || (isMonthMode ? !hasMonthData : (snapshots.length === 0 || years.length === 0))}
+                  className="gap-1.5 shrink-0"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Export
+                </Button>
+              )}
             </div>
 
             <TabsContent value="table" className="mt-3">
-          {!loading && !backfillLoading && !error && isMonthMode && hasMonthData && (
+          {!loading && !backfillLoading && !error && isMonthMode && years.length > 0 && (
             <div className="overflow-x-auto border rounded-md">
               <Table>
                 <TableHeader>
@@ -951,7 +1139,7 @@ export function PipelineAnalysisView({
                             tabIndex={0}
                             onKeyDown={(e) => e.key === "Enter" && toggleMonth(month)}
                           >
-                            {row != null ? formatVolume(row.active_volume) : "—"}
+                            {row != null ? formatVolume(row.active_volume) : "-"}
                           </TableCell>
                         );
                       })}
@@ -975,7 +1163,7 @@ export function PipelineAnalysisView({
                             tabIndex={0}
                             onKeyDown={(e) => e.key === "Enter" && toggleMonth(month)}
                           >
-                            {row != null ? row.active_units : "—"}
+                            {row != null ? row.active_units : "-"}
                           </TableCell>
                         );
                       })}
@@ -1001,7 +1189,7 @@ export function PipelineAnalysisView({
                           tabIndex={0}
                           onKeyDown={(e) => e.key === "Enter" && toggleMonth(month)}
                         >
-                          {val != null ? formatPct(val) : "—"}
+                          {val != null ? formatPct(val) : "-"}
                         </TableCell>
                       );
                     })}
@@ -1026,7 +1214,7 @@ export function PipelineAnalysisView({
                           tabIndex={0}
                           onKeyDown={(e) => e.key === "Enter" && toggleMonth(month)}
                         >
-                          {val != null ? formatPct(val) : "—"}
+                          {val != null ? formatPct(val) : "-"}
                         </TableCell>
                       );
                     })}
@@ -1051,7 +1239,7 @@ export function PipelineAnalysisView({
                           tabIndex={0}
                           onKeyDown={(e) => e.key === "Enter" && toggleMonth(month)}
                         >
-                          {val != null ? formatPct(val) : "—"}
+                          {val != null ? formatPct(val) : "-"}
                         </TableCell>
                       );
                     })}
@@ -1074,7 +1262,7 @@ export function PipelineAnalysisView({
                             tabIndex={0}
                             onKeyDown={(e) => e.key === "Enter" && toggleMonth(month)}
                           >
-                            {row != null ? row.active_lo_count : "—"}
+                            {row != null ? row.active_lo_count : "-"}
                           </TableCell>
                         );
                       })}
@@ -1098,7 +1286,7 @@ export function PipelineAnalysisView({
                             tabIndex={0}
                             onKeyDown={(e) => e.key === "Enter" && toggleMonth(month)}
                           >
-                            {row != null ? row.active_ops_count : "—"}
+                            {row != null ? row.active_ops_count : "-"}
                           </TableCell>
                         );
                       })}
@@ -1124,7 +1312,7 @@ export function PipelineAnalysisView({
                             tabIndex={0}
                             onKeyDown={(e) => e.key === "Enter" && toggleMonth(month)}
                           >
-                            {row != null ? formatUnitsPerActor(row.active_units, row.active_lo_count) : "—"}
+                            {row != null ? formatUnitsPerActor(row.active_units, row.active_lo_count) : "-"}
                           </TableCell>
                         );
                       })}
@@ -1150,7 +1338,7 @@ export function PipelineAnalysisView({
                             tabIndex={0}
                             onKeyDown={(e) => e.key === "Enter" && toggleMonth(month)}
                           >
-                            {row != null ? formatUnitsPerActor(row.active_units, row.active_ops_count) : "—"}
+                            {row != null ? formatUnitsPerActor(row.active_units, row.active_ops_count) : "-"}
                           </TableCell>
                         );
                       })}
@@ -1202,7 +1390,7 @@ export function PipelineAnalysisView({
                             tabIndex={0}
                             onKeyDown={(e) => e.key === "Enter" && toggleWeek(w)}
                           >
-                            {row != null ? formatVolume(row.active_volume) : "—"}
+                            {row != null ? formatVolume(row.active_volume) : "-"}
                           </TableCell>
                         );
                       })}
@@ -1225,7 +1413,7 @@ export function PipelineAnalysisView({
                             tabIndex={0}
                             onKeyDown={(e) => e.key === "Enter" && toggleWeek(w)}
                           >
-                            {row != null ? row.active_units : "—"}
+                            {row != null ? row.active_units : "-"}
                           </TableCell>
                         );
                       })}
@@ -1250,7 +1438,7 @@ export function PipelineAnalysisView({
                           tabIndex={0}
                           onKeyDown={(e) => e.key === "Enter" && toggleWeek(w)}
                         >
-                          {val != null ? formatPct(val) : "—"}
+                          {val != null ? formatPct(val) : "-"}
                         </TableCell>
                       );
                     })}
@@ -1274,7 +1462,7 @@ export function PipelineAnalysisView({
                           tabIndex={0}
                           onKeyDown={(e) => e.key === "Enter" && toggleWeek(w)}
                         >
-                          {val != null ? formatPct(val) : "—"}
+                          {val != null ? formatPct(val) : "-"}
                         </TableCell>
                       );
                     })}
@@ -1298,7 +1486,7 @@ export function PipelineAnalysisView({
                           tabIndex={0}
                           onKeyDown={(e) => e.key === "Enter" && toggleWeek(w)}
                         >
-                          {val != null ? formatPct(val) : "—"}
+                          {val != null ? formatPct(val) : "-"}
                         </TableCell>
                       );
                     })}
@@ -1320,7 +1508,7 @@ export function PipelineAnalysisView({
                             tabIndex={0}
                             onKeyDown={(e) => e.key === "Enter" && toggleWeek(w)}
                           >
-                            {row != null ? row.active_lo_count : "—"}
+                            {row != null ? row.active_lo_count : "-"}
                           </TableCell>
                         );
                       })}
@@ -1343,7 +1531,7 @@ export function PipelineAnalysisView({
                             tabIndex={0}
                             onKeyDown={(e) => e.key === "Enter" && toggleWeek(w)}
                           >
-                            {row != null ? row.active_ops_count : "—"}
+                            {row != null ? row.active_ops_count : "-"}
                           </TableCell>
                         );
                       })}
@@ -1368,7 +1556,7 @@ export function PipelineAnalysisView({
                             tabIndex={0}
                             onKeyDown={(e) => e.key === "Enter" && toggleWeek(w)}
                           >
-                            {row != null ? formatUnitsPerActor(row.active_units, row.active_lo_count) : "—"}
+                            {row != null ? formatUnitsPerActor(row.active_units, row.active_lo_count) : "-"}
                           </TableCell>
                         );
                       })}
@@ -1393,7 +1581,7 @@ export function PipelineAnalysisView({
                             tabIndex={0}
                             onKeyDown={(e) => e.key === "Enter" && toggleWeek(w)}
                           >
-                            {row != null ? formatUnitsPerActor(row.active_units, row.active_ops_count) : "—"}
+                            {row != null ? formatUnitsPerActor(row.active_units, row.active_ops_count) : "-"}
                           </TableCell>
                         );
                       })}
@@ -1458,9 +1646,9 @@ export function PipelineAnalysisView({
                               {years.map((y) => (
                                 <div key={y} className="grid grid-cols-2 gap-x-4 gap-y-0.5">
                                   <span className="text-muted-foreground">{y} Volume</span>
-                                  <span className="font-medium tabular-nums">{p[`${y} Volume`] != null ? formatVolume(p[`${y} Volume`] as number) : "—"}</span>
+                                  <span className="font-medium tabular-nums">{p[`${y} Volume`] != null ? formatVolume(p[`${y} Volume`] as number) : "-"}</span>
                                   <span className="text-muted-foreground">{y} Units</span>
-                                  <span className="font-medium tabular-nums">{p[`${y} Units`] != null ? String(p[`${y} Units`]) : "—"}</span>
+                                  <span className="font-medium tabular-nums">{p[`${y} Units`] != null ? String(p[`${y} Units`]) : "-"}</span>
                                 </div>
                               ))}
                             </div>
@@ -1578,11 +1766,11 @@ export function PipelineAnalysisView({
                                 <div key={y} className="space-y-0.5 mb-1">
                                   <div className="flex justify-between gap-4">
                                     <span className="text-muted-foreground">{y} LO Count</span>
-                                    <span className="font-medium tabular-nums">{p[`${y} LO Count`] != null ? String(p[`${y} LO Count`]) : "—"}</span>
+                                    <span className="font-medium tabular-nums">{p[`${y} LO Count`] != null ? String(p[`${y} LO Count`]) : "-"}</span>
                                   </div>
                                   <div className="flex justify-between gap-4">
                                     <span className="text-muted-foreground">{y} Units</span>
-                                    <span className="font-medium tabular-nums">{p[`${y} Units`] != null ? String(p[`${y} Units`]) : "—"}</span>
+                                    <span className="font-medium tabular-nums">{p[`${y} Units`] != null ? String(p[`${y} Units`]) : "-"}</span>
                                   </div>
                                 </div>
                               ))}
@@ -1646,11 +1834,87 @@ export function PipelineAnalysisView({
                 </div>
               )}
             </TabsContent>
+
+            <TabsContent value="treasury10y" className="mt-3">
+              {treasury10yLoading && (
+                <div className="flex items-center justify-center py-16">
+                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                </div>
+              )}
+              {treasury10yError && (
+                <div className="rounded-md bg-destructive/10 text-destructive text-sm p-3">
+                  {treasury10yError}
+                </div>
+              )}
+              {!treasury10yLoading && !treasury10yError && treasuryChartData.length > 0 && (
+                <div className="rounded-md border bg-card p-4" style={{ minHeight: 440 }}>
+                  <p className="text-sm font-medium text-foreground mb-3">
+                    {isMonthMode
+                      ? "10-Year Treasury Yield (FRED DGS10) — by month (first snapshot per month)"
+                      : `10-Year Treasury Yield (FRED DGS10) — by week (${snapshotDayLabel} snapshots)`}
+                  </p>
+                  <ResponsiveContainer width="100%" height={420}>
+                    <ComposedChart
+                      data={treasuryChartData}
+                      margin={{ top: 12, right: 12, left: 12, bottom: 12 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
+                      <XAxis
+                        dataKey="dateLabel"
+                        tick={{ fontSize: 11 }}
+                        label={{ value: "Date", position: "insideBottom", offset: -8, fontSize: 12 }}
+                      />
+                      <YAxis
+                        width={48}
+                        tick={{ fontSize: 10 }}
+                        tickFormatter={(v) => `${v}%`}
+                        label={{ value: "Yield %", angle: -90, position: "insideLeft", fontSize: 11 }}
+                      />
+                      <Tooltip
+                        formatter={(value: number) => [`${value.toFixed(2)}%`, "10-Yr Treasury"]}
+                        labelFormatter={(label) => label}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="yield"
+                        name="10-Yr Treasury"
+                        stroke="#0ea5e9"
+                        strokeWidth={2}
+                        dot={{ r: 3 }}
+                        connectNulls
+                      />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+              {!treasury10yLoading && !treasury10yError && treasuryChartData.length === 0 && (from && to) && (
+                <div className="text-muted-foreground text-sm py-12 text-center rounded-md border">
+                  No treasury data for the selected year range or no snapshot dates match. Select a year range and ensure pipeline snapshots exist.
+                </div>
+              )}
+              {!treasury10yLoading && !treasury10yError && (!from || !to) && (
+                <div className="text-muted-foreground text-sm py-12 text-center rounded-md border">
+                  Select a year range to load 10-Year Treasury data.
+                </div>
+              )}
+            </TabsContent>
           </Tabs>
 
           {/* Loan detail table: visible under all tabs; reloads when filters, year range, or start date change */}
           <div className="mt-6 space-y-2">
-            <h3 className="text-sm font-semibold text-foreground">Loan detail</h3>
+            <div className="flex items-center justify-between gap-4">
+              <h3 className="text-sm font-semibold text-foreground">Loan detail</h3>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={exportLoanDetailToCsv}
+                disabled={loansLoading || pipelineLoans.length === 0}
+                className="gap-1.5 shrink-0"
+              >
+                <Download className="h-3.5 w-3.5" />
+                Export
+              </Button>
+            </div>
             {loansError && (
               <div className="rounded-md bg-destructive/10 text-destructive text-sm p-3">
                 {loansError}
@@ -1717,26 +1981,26 @@ export function PipelineAnalysisView({
                     <TableBody>
                       {sortedPipelineLoans.map((loan, idx) => (
                         <TableRow key={loan.loan_id || `loan-${idx}`}>
-                          <TableCell className="font-mono text-xs">{loan.loan_number ?? "—"}</TableCell>
+                          <TableCell className="font-mono text-xs">{loan.loan_number ?? "-"}</TableCell>
                           <TableCell className="text-right">
-                            {loan.loan_amount != null ? formatVolume(loan.loan_amount) : "—"}
+                            {loan.loan_amount != null ? formatVolume(loan.loan_amount) : "-"}
                           </TableCell>
-                          <TableCell>{loan.loan_type ?? "—"}</TableCell>
-                          <TableCell>{loan.loan_purpose ?? "—"}</TableCell>
-                          <TableCell>{loan.current_loan_status ?? "—"}</TableCell>
+                          <TableCell>{loan.loan_type ?? "-"}</TableCell>
+                          <TableCell>{loan.loan_purpose ?? "-"}</TableCell>
+                          <TableCell>{loan.current_loan_status ?? "-"}</TableCell>
                           <TableCell>
-                            {loan.start_date ? format(parseISO(loan.start_date), "yyyy-MM-dd") : "—"}
+                            {loan.start_date ? format(parseISO(loan.start_date), "yyyy-MM-dd") : "-"}
                           </TableCell>
                           <TableCell>
-                            {loan.current_status_date ? format(parseISO(loan.current_status_date), "yyyy-MM-dd") : "—"}
+                            {loan.current_status_date ? format(parseISO(loan.current_status_date), "yyyy-MM-dd") : "-"}
                           </TableCell>
-                          <TableCell className="text-right">{loan.fico_score != null ? String(loan.fico_score) : "—"}</TableCell>
-                          <TableCell className="text-right">{loan.ltv_ratio != null ? String(loan.ltv_ratio) : "—"}</TableCell>
-                          <TableCell className="text-right">{loan.be_dti_ratio != null ? String(loan.be_dti_ratio) : "—"}</TableCell>
-                          <TableCell>{loan.loan_officer ?? "—"}</TableCell>
-                          <TableCell>{loan.processor ?? "—"}</TableCell>
-                          <TableCell>{loan.underwriter ?? "—"}</TableCell>
-                          <TableCell>{loan.closer ?? "—"}</TableCell>
+                          <TableCell className="text-right">{loan.fico_score != null ? String(loan.fico_score) : "-"}</TableCell>
+                          <TableCell className="text-right">{loan.ltv_ratio != null ? String(loan.ltv_ratio) : "-"}</TableCell>
+                          <TableCell className="text-right">{loan.be_dti_ratio != null ? String(loan.be_dti_ratio) : "-"}</TableCell>
+                          <TableCell>{loan.loan_officer ?? "-"}</TableCell>
+                          <TableCell>{loan.processor ?? "-"}</TableCell>
+                          <TableCell>{loan.underwriter ?? "-"}</TableCell>
+                          <TableCell>{loan.closer ?? "-"}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>

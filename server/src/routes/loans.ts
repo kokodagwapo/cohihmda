@@ -7275,6 +7275,43 @@ router.get(
 );
 
 /**
+ * GET /api/loans/market-rates/treasury-10y
+ * Returns 10-Year Treasury (FRED DGS10) observations for a date range.
+ * Query: observation_start=YYYY-MM-DD (e.g. 1/1 start year), observation_end=YYYY-MM-DD (e.g. 12/31 end year).
+ * On-demand FRED call; no DB storage.
+ */
+router.get(
+  "/market-rates/treasury-10y",
+  authenticateToken,
+  async (req: AuthRequest, res) => {
+    try {
+      const observationStart = req.query.observation_start as string | undefined;
+      const observationEnd = req.query.observation_end as string | undefined;
+      if (!observationStart || !observationEnd) {
+        return res.status(400).json({
+          error: "observation_start and observation_end query params required (YYYY-MM-DD)",
+        });
+      }
+      const { fetchFredSeriesObservations, FRED_SERIES_DGS10 } =
+        await import("../services/dashboard/marketRateService.js");
+      const observations = await fetchFredSeriesObservations(
+        FRED_SERIES_DGS10,
+        observationStart,
+        observationEnd
+      );
+      return res.json({
+        observations: observations.map((o) => ({ date: o.date, yield: o.value })),
+      });
+    } catch (error: any) {
+      logError("Error fetching treasury 10y rates", error);
+      return res.status(500).json({
+        error: error.message || "Failed to fetch 10-Year Treasury rates",
+      });
+    }
+  },
+);
+
+/**
  * GET /api/loans/:loanId/recommendations
  * Get AI-powered recommendations for a specific loan (on-demand)
  * Uses loan signal data to generate actionable recommendations via GPT

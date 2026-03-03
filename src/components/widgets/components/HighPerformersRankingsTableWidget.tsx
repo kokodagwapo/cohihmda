@@ -51,7 +51,8 @@ function formatPct(n: number): string {
 }
 
 function escapeCsvCell(val: string | number | null | undefined): string {
-  const s = String(val ?? '');
+  const raw = String(val ?? '');
+  const s = raw.replace(/\u2014|\u2013/g, '-'); // Use ASCII hyphen for CSV/Excel compatibility
   if (/[",\r\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
   return s;
 }
@@ -126,7 +127,7 @@ export function HighPerformersRankingsTableWidget({
         'Totals',
         totals.units,
         formatVolume(totals.volume),
-        '—',
+        '-',
         formatPct(totals.pctGovt),
         formatPct(totals.pctConv),
         formatPct(totals.pctRefi),
