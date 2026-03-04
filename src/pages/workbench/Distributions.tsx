@@ -464,6 +464,7 @@ function DistributionScheduleDialog({
   const [scheduleTime, setScheduleTime] = useState("08:00");
   const [recipientListId, setRecipientListId] = useState("");
   const [recipientEmails, setRecipientEmails] = useState("");
+  const [autoInviteDirectEmails, setAutoInviteDirectEmails] = useState(true);
 
   const { data: schedule } = useQuery({
     queryKey: ["distributions", "schedule", scheduleId, tenantId],
@@ -482,6 +483,9 @@ function DistributionScheduleDialog({
       setScheduleTime(schedule.schedule_time?.slice(0, 5) ?? "08:00");
       setRecipientListId(schedule.recipient_list_id ?? "");
       setRecipientEmails((schedule.recipient_emails ?? []).join(", "));
+      setAutoInviteDirectEmails(
+        schedule.content_config?.auto_invite_external !== false,
+      );
     } else {
       setName("");
       setDescription("");
@@ -491,6 +495,7 @@ function DistributionScheduleDialog({
       setScheduleTime("08:00");
       setRecipientListId("");
       setRecipientEmails("");
+      setAutoInviteDirectEmails(true);
     }
   }, [open, scheduleId, schedule]);
 
@@ -504,7 +509,7 @@ function DistributionScheduleDialog({
       description: description.trim() || undefined,
       content_type: contentType,
       content_id: contentId || undefined,
-      content_config: {},
+      content_config: { auto_invite_external: autoInviteDirectEmails },
       frequency,
       schedule_time: scheduleTime,
       timezone: "America/New_York",
@@ -628,6 +633,14 @@ function DistributionScheduleDialog({
               onChange={(e) => setRecipientEmails(e.target.value)}
               placeholder="a@example.com, b@example.com"
             />
+            <label className="mt-2 flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={autoInviteDirectEmails}
+                onChange={(e) => setAutoInviteDirectEmails(e.target.checked)}
+              />
+              Auto-invite direct emails that are not existing users
+            </label>
           </div>
         </div>
         <DialogFooter>
@@ -675,6 +688,7 @@ function HistoryDialog({
                 <TableHead>Sent at</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Recipients</TableHead>
+                <TableHead>Invite status</TableHead>
                 <TableHead>Duration</TableHead>
               </TableRow>
             </TableHeader>
@@ -697,6 +711,11 @@ function HistoryDialog({
                   </TableCell>
                   <TableCell>
                     {h.successful_count ?? 0}/{h.recipients_count ?? 0}
+                  </TableCell>
+                  <TableCell>
+                    {h.content_snapshot?.invite_status
+                      ? `${h.content_snapshot.invite_status.invitedCount ?? 0} invited, ${h.content_snapshot.invite_status.inviteFailedCount ?? 0} failed`
+                      : "—"}
                   </TableCell>
                   <TableCell>
                     {h.duration_ms != null ? `${h.duration_ms}ms` : "—"}

@@ -7,10 +7,11 @@
 import type { Pool } from 'pg';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
+import { pool as managementPool } from '../config/managementDatabase.js';
 import { loadEmailTemplate, replacePlaceholders } from './emailTemplateLoader.js';
 import {
   sendEmail,
-  sendUserInvitationEmail,
+  sendPasswordResetEmail,
 } from './emailService.js';
 import { logEmailSend } from './emailAuditLogger.js';
 import { resolveContent, type ScheduleRow } from './distributionContentResolver.js';
@@ -27,6 +28,13 @@ export interface SendDistributionResult {
   recipientsCount: number;
   successfulCount: number;
   failedRecipients: Array<{ email: string; error: string }>;
+  inviteStatus?: {
+    autoInviteEnabled: boolean;
+    invitedCount: number;
+    inviteFailedCount: number;
+    invitedRecipients: string[];
+    inviteFailedRecipients: Array<{ email: string; error: string }>;
+  };
   durationMs: number;
   errorMessage?: string;
   link?: string;
@@ -46,11 +54,16 @@ export async function resolveRecipientEmails(
   schedule: ScheduleRow
 ): Promise<ResolvedRecipients> {
   const emails: string[] = [];
-  let autoInvite = false;
+  const inlineEmails = Array.isArray(schedule.recipient_emails)
+    ? schedule.recipient_emails.filter((e: string) => e && e.includes('@'))
+    : [];
+  let autoInvite = inlineEmails.length > 0
+    ? (schedule.content_config?.auto_invite_external !== false)
+    : false;
   let autoInviteGroupId: string | null = null;
 
-  if (schedule.recipient_emails?.length) {
-    emails.push(...schedule.recipient_emails.filter((e: string) => e && e.includes('@')));
+  if (inlineEmails.length > 0) {
+    emails.push(...inlineEmails);
   }
 
   if (schedule.recipient_list_id) {
@@ -82,7 +95,7 @@ export async function resolveRecipientEmails(
           if (u.email) emails.push(u.email);
         }
       }
-      autoInvite = row.auto_invite === true;
+      autoInvite = row.auto_invite === true || autoInvite;
       autoInviteGroupId = row.auto_invite_group_id || null;
     }
   }
@@ -98,11 +111,22 @@ async function ensureRecipientUsers(
   tenantPool: Pool,
   recipientEmails: string[],
   autoInvite: boolean,
-  autoInviteGroupId: string | null
-): Promise<{ userIdsByEmail: Map<string, string> }> {
+  autoInviteGroupId: string | null,
+  tenantId: string
+): Promise<{
+  userIdsByEmail: Map<string, string>;
+  deliverableEmails: string[];
+  failedRecipients: Array<{ email: string; error: string }>;
+  invitedRecipients: string[];
+  inviteFailedRecipients: Array<{ email: string; error: string }>;
+}> {
   const userIdsByEmail = new Map<string, string>();
+  const deliverableEmails: string[] = [];
+  const failedRecipients: Array<{ email: string; error: string }> = [];
+  const invitedRecipients: string[] = [];
+  const inviteFailedRecipients: Array<{ email: string; error: string }> = [];
   if (recipientEmails.length === 0) {
-    return { userIdsByEmail };
+    return { userIdsByEmail, deliverableEmails, failedRecipients, invitedRecipients, inviteFailedRecipients };
   }
 
   const existingUsers = await tenantPool.query(
@@ -111,48 +135,79 @@ async function ensureRecipientUsers(
   );
   for (const row of existingUsers.rows) {
     userIdsByEmail.set(row.email, row.id);
+    deliverableEmails.push(row.email);
   }
 
   if (!autoInvite) {
-    return { userIdsByEmail };
+    for (const email of recipientEmails) {
+      const lowerEmail = email.toLowerCase();
+      if (!userIdsByEmail.has(lowerEmail)) {
+        failedRecipients.push({
+          email,
+          error: 'Recipient is not an existing user and auto-invite is disabled',
+        });
+      }
+    }
+    return {
+      userIdsByEmail,
+      deliverableEmails: [...new Set(deliverableEmails)],
+      failedRecipients,
+      invitedRecipients,
+      inviteFailedRecipients,
+    };
   }
-
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-  const tenantName = process.env.TENANT_NAME || 'your organization';
 
   for (const email of recipientEmails) {
     const lowerEmail = email.toLowerCase();
-    if (userIdsByEmail.has(lowerEmail)) continue;
-
-    const rawPassword = crypto.randomBytes(24).toString('hex');
-    const hashedPassword = await bcrypt.hash(rawPassword, 10);
-    const insertResult = await tenantPool.query(
-      `INSERT INTO public.users (email, encrypted_password, full_name, role, is_active, loan_access_mode, access_mode)
-       VALUES ($1, $2, $3, $4, true, 'full_access', 'canvas_only')
-       ON CONFLICT (email) DO UPDATE SET updated_at = NOW()
-       RETURNING id, email`,
-      [email, hashedPassword, null, 'viewer']
-    );
-
-    const userId = insertResult.rows[0]?.id;
-    if (!userId) continue;
-    userIdsByEmail.set(lowerEmail, userId);
-
-    if (autoInviteGroupId) {
-      await tenantPool.query(
-        `INSERT INTO public.user_group_memberships (group_id, user_id)
-         VALUES ($1, $2)
-         ON CONFLICT (group_id, user_id) DO NOTHING`,
-        [autoInviteGroupId, userId]
-      );
+    if (userIdsByEmail.has(lowerEmail)) {
+      continue;
     }
 
-    const inviteToken = crypto.randomBytes(32).toString('hex');
-    const inviteUrl = `${frontendUrl}/accept-invite?token=${inviteToken}&email=${encodeURIComponent(email)}`;
-    await sendUserInvitationEmail(email, inviteUrl, tenantName, 'Coheus Distribution');
+    try {
+      const rawPassword = crypto.randomBytes(24).toString('hex');
+      const hashedPassword = await bcrypt.hash(rawPassword, 10);
+      const insertResult = await tenantPool.query(
+        `INSERT INTO public.users (email, encrypted_password, full_name, role, is_active, loan_access_mode, access_mode)
+         VALUES ($1, $2, $3, $4, true, 'full_access', 'canvas_only')
+         ON CONFLICT (email) DO UPDATE SET updated_at = NOW()
+         RETURNING id, email`,
+        [email, hashedPassword, null, 'viewer']
+      );
+
+      const userId = insertResult.rows[0]?.id;
+      if (!userId) {
+        failedRecipients.push({ email, error: 'User provisioning returned no user id' });
+        continue;
+      }
+      userIdsByEmail.set(lowerEmail, userId);
+      deliverableEmails.push(lowerEmail);
+
+      if (autoInviteGroupId) {
+        await tenantPool.query(
+          `INSERT INTO public.user_group_memberships (group_id, user_id)
+           VALUES ($1, $2)
+           ON CONFLICT (group_id, user_id) DO NOTHING`,
+          [autoInviteGroupId, userId]
+        );
+      }
+
+      const resetUrl = await createPasswordResetUrlForInvite(email, tenantId);
+      await sendPasswordResetEmail(email, resetUrl);
+      invitedRecipients.push(email);
+    } catch (err: any) {
+      const failure = { email, error: err?.message || 'Failed to auto-invite recipient' };
+      failedRecipients.push(failure);
+      inviteFailedRecipients.push(failure);
+    }
   }
 
-  return { userIdsByEmail };
+  return {
+    userIdsByEmail,
+    deliverableEmails: [...new Set(deliverableEmails.map((e) => e.toLowerCase()))],
+    failedRecipients,
+    invitedRecipients: [...new Set(invitedRecipients.map((e) => e.toLowerCase()))],
+    inviteFailedRecipients,
+  };
 }
 
 async function shareCanvasWithRecipients(
@@ -211,12 +266,20 @@ export async function sendDistribution(
     const appContent = await resolveContent(tenantPool, schedule, { userFilter });
     const absoluteLink = buildAbsoluteLink(appContent.link);
 
-    const { userIdsByEmail } = await ensureRecipientUsers(
+    const {
+      userIdsByEmail,
+      deliverableEmails,
+      failedRecipients: provisioningFailures,
+      invitedRecipients,
+      inviteFailedRecipients,
+    } = await ensureRecipientUsers(
       tenantPool,
       resolvedRecipients.emails,
       resolvedRecipients.autoInvite,
-      resolvedRecipients.autoInviteGroupId
+      resolvedRecipients.autoInviteGroupId,
+      tenantId
     );
+    failedRecipients.push(...provisioningFailures);
 
     await shareCanvasWithRecipients(tenantPool, schedule, userIdsByEmail);
 
@@ -239,7 +302,7 @@ export async function sendDistribution(
 
     const subject = `${schedule.name} – Coheus`;
 
-    for (const to of resolvedRecipients.emails) {
+    for (const to of deliverableEmails) {
       try {
         const html = template
           ? replacePlaceholders(template, { ...basePlaceholders })
@@ -250,6 +313,7 @@ export async function sendDistribution(
           subject,
           html,
           text: `${basePlaceholders.BODY_TEXT} ${absoluteLink}`,
+          strict: true,
           emailType: 'distribution',
           containsPii: false,
           tenantId,
@@ -278,6 +342,13 @@ export async function sendDistribution(
       recipientsCount: resolvedRecipients.emails.length,
       successfulCount,
       failedRecipients,
+      inviteStatus: {
+        autoInviteEnabled: resolvedRecipients.autoInvite,
+        invitedCount: invitedRecipients.length,
+        inviteFailedCount: inviteFailedRecipients.length,
+        invitedRecipients,
+        inviteFailedRecipients,
+      },
       durationMs: Date.now() - start,
       link: absoluteLink,
     };
@@ -293,6 +364,30 @@ export async function sendDistribution(
   }
 }
 
+async function createPasswordResetUrlForInvite(email: string, tenantId: string): Promise<string> {
+  const token = crypto.randomBytes(32).toString('hex');
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+  let tenantSlug: string | null = null;
+  try {
+    const tenantResult = await managementPool.query(
+      `SELECT slug FROM coheus_tenants WHERE id = $1 LIMIT 1`,
+      [tenantId]
+    );
+    tenantSlug = tenantResult.rows[0]?.slug ?? null;
+  } catch {
+    tenantSlug = null;
+  }
+
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  await managementPool.query(
+    `INSERT INTO password_reset_tokens (email, token_hash, tenant_slug, expires_at)
+     VALUES ($1, $2, $3, $4)`,
+    [email, tokenHash, tenantSlug, expiresAt]
+  );
+  const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:5173').split(',')[0].trim();
+  return `${frontendUrl}/reset-password?token=${token}`;
+}
+
 /**
  * Persist send result to distribution_send_log
  */
@@ -303,6 +398,10 @@ export async function logDistributionSend(
   contentSnapshot: Record<string, any>,
   exportFormat: string
 ): Promise<void> {
+  const mergedSnapshot = {
+    ...contentSnapshot,
+    invite_status: result.inviteStatus ?? null,
+  };
   await tenantPool.query(
     `INSERT INTO public.distribution_send_log
      (schedule_id, status, recipients_count, successful_count, failed_recipients, content_snapshot, export_format, error_message, duration_ms)
@@ -313,7 +412,7 @@ export async function logDistributionSend(
       result.recipientsCount,
       result.successfulCount,
       JSON.stringify(result.failedRecipients),
-      JSON.stringify(contentSnapshot),
+      JSON.stringify(mergedSnapshot),
       exportFormat,
       result.errorMessage ?? null,
       result.durationMs,
