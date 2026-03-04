@@ -163,6 +163,7 @@ async function ensureRecipientUsers(
       continue;
     }
 
+    let userId: string | undefined;
     try {
       const rawPassword = crypto.randomBytes(24).toString('hex');
       const hashedPassword = await bcrypt.hash(rawPassword, 10);
@@ -174,7 +175,7 @@ async function ensureRecipientUsers(
         [email, hashedPassword, null, 'viewer']
       );
 
-      const userId = insertResult.rows[0]?.id;
+      userId = insertResult.rows[0]?.id;
       if (!userId) {
         failedRecipients.push({ email, error: 'User provisioning returned no user id' });
         continue;
@@ -190,14 +191,20 @@ async function ensureRecipientUsers(
           [autoInviteGroupId, userId]
         );
       }
+    } catch (err: any) {
+      failedRecipients.push({ email, error: err?.message || 'Failed to provision user' });
+      continue;
+    }
 
+    try {
       const resetUrl = await createPasswordResetUrlForInvite(email, tenantId);
-      await sendPasswordResetEmail(email, resetUrl);
+      await sendPasswordResetEmail(email, resetUrl, undefined, { strict: true });
       invitedRecipients.push(email);
     } catch (err: any) {
-      const failure = { email, error: err?.message || 'Failed to auto-invite recipient' };
-      failedRecipients.push(failure);
-      inviteFailedRecipients.push(failure);
+      inviteFailedRecipients.push({
+        email,
+        error: err?.message || 'Failed to send invite email',
+      });
     }
   }
 
