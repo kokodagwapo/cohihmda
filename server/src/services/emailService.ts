@@ -738,6 +738,7 @@ export async function sendPasswordResetEmail(
   email: string,
   resetUrl: string,
   userName?: string,
+  options?: { strict?: boolean },
 ): Promise<void> {
   const displayName = userName || email.split("@")[0];
 
@@ -813,6 +814,7 @@ If you didn't request this password reset, you can safely ignore this email.
     subject: "Reset Your Cohi Password",
     html,
     text,
+    strict: options?.strict ?? false,
     emailType: "password_reset",
     containsPii: false,
   });
