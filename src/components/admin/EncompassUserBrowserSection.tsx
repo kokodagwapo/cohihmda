@@ -57,6 +57,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAdminTenant } from "@/contexts/AdminTenantContext";
+import { api } from "@/lib/api";
 
 interface EncompassUser {
   id: string;
@@ -168,17 +169,9 @@ export function EncompassUserBrowserSection({
         params.append("tenant_id", selectedTenantId);
       }
 
-      const response = await fetch(`/api/admin/encompass-users?${params}`, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to fetch users");
-      }
-
-      const data = await response.json();
+      const data = await api.request<{ users?: EncompassUser[]; total?: number }>(
+        `/api/admin/encompass-users?${params.toString()}`
+      );
       setUsers(data.users || []);
       setTotalUsers(data.total || 0);
     } catch (error: any) {
@@ -206,19 +199,10 @@ export function EncompassUserBrowserSection({
         params.append("tenant_id", selectedTenantId);
       }
       
-      const response = await fetch(
-        `/api/admin/encompass-users/sync-history?${params}`,
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
-          },
-        },
+      const data = await api.request<{ history?: SyncHistory[] }>(
+        `/api/admin/encompass-users/sync-history?${params.toString()}`
       );
-
-      if (response.ok) {
-        const data = await response.json();
-        setSyncHistory(data.history || []);
-      }
+      setSyncHistory(data.history || []);
     } catch (error) {
       // Non-critical, silently fail
     }
@@ -231,17 +215,10 @@ export function EncompassUserBrowserSection({
       return;
     }
     try {
-      const token = localStorage.getItem("auth_token");
-      const res = await fetch(
-        `/api/groups?tenant_id=${encodeURIComponent(selectedTenantId)}`,
-        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+      const data = await api.request<{ groups?: GroupOption[] }>(
+        `/api/groups?tenant_id=${encodeURIComponent(selectedTenantId)}`
       );
-      if (res.ok) {
-        const data = await res.json();
-        setGroups(data?.groups ?? []);
-      } else {
-        setGroups([]);
-      }
+      setGroups(data?.groups ?? []);
     } catch {
       setGroups([]);
     }
@@ -270,20 +247,14 @@ export function EncompassUserBrowserSection({
         body.tenant_id = selectedTenantId;
       }
       
-      const response = await fetch("/api/admin/encompass-users/sync", {
+      const data = await api.request<{
+        users_fetched: number;
+        users_added: number;
+        users_updated: number;
+      }>("/api/admin/encompass-users/sync", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
-        },
         body: JSON.stringify(body),
       });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Sync failed");
-      }
 
       toast({
         title: "Sync Complete",
@@ -338,23 +309,13 @@ export function EncompassUserBrowserSection({
         requestBody.tenant_id = selectedTenantId;
       }
 
-      const response = await fetch(
+      const data = await api.request<{ invite_sent?: boolean }>(
         `/api/admin/encompass-users/${inviteUser.encompass_user_id}/invite`,
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
-          },
           body: JSON.stringify(requestBody),
         },
       );
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Invite failed");
-      }
 
       toast({
         title: "User Invited",
@@ -402,20 +363,13 @@ export function EncompassUserBrowserSection({
         body.tenant_id = selectedTenantId;
       }
       
-      const response = await fetch("/api/admin/encompass-users/bulk-invite", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
-        },
-        body: JSON.stringify(body),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Bulk invite failed");
-      }
+      const data = await api.request<{ success_count: number; failed_count: number }>(
+        "/api/admin/encompass-users/bulk-invite",
+        {
+          method: "POST",
+          body: JSON.stringify(body),
+        }
+      );
 
       toast({
         title: "Bulk Invite Complete",

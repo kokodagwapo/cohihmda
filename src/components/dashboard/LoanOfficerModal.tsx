@@ -12,6 +12,7 @@ import { LoanCardContent, type LoanCardContentLoan } from "./LoanCardContent";
 import { LoanDrilldownModal } from "./LoanDrilldownModal";
 import { ExportMenu } from "@/components/common/ExportMenu";
 import type { ExportData } from "@/utils/exportUtils";
+import { api } from "@/lib/api";
 
 interface OfficerData {
   name: string;
@@ -115,12 +116,9 @@ export const LoanOfficerModal: React.FC<LoanOfficerModalProps> = ({
     try {
       const params = new URLSearchParams({ name: officerName });
       if (selectedTenantId) params.set("tenant_id", selectedTenantId);
-      const response = await fetch(
+      const response = await api.fetchWithAuth(
         `/api/loans/officer-details?${params.toString()}`,
         {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
-          },
         },
       );
       if (response.ok) {

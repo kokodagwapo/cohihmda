@@ -53,8 +53,7 @@ export function useFinancialModelingBaseline(
 
   useEffect(() => {
     const fetchBaseline = async () => {
-      const token = localStorage.getItem("auth_token");
-      if (!token) {
+      if (!api.hasToken()) {
         setData(null);
         setLoading(false);
         return;

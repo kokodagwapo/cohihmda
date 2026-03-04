@@ -127,6 +127,41 @@ export const OPERATIONS_ACTOR_CONFIGS: Record<string, ActorConfig> = {
 };
 
 /**
+ * Load Operations Scorecard actor config from tenant DB.
+ * Falls back to OPERATIONS_ACTOR_CONFIGS when no override exists.
+ */
+export async function loadOpsActorConfig(
+  tenantPool: pg.Pool,
+  actorType: string,
+): Promise<ActorConfig> {
+  const defaultConfig = OPERATIONS_ACTOR_CONFIGS[actorType];
+  if (!defaultConfig) {
+    throw new Error(`Unknown operations actor type: ${actorType}`);
+  }
+  try {
+    const result = await tenantPool.query(
+      `SELECT output_date_field, turn_time_start_field, turn_time_end_field
+       FROM public.operational_scorecard_config
+       WHERE actor_type = $1 AND is_active = true
+       LIMIT 1`,
+      [actorType],
+    );
+    if (result.rows.length === 0) {
+      return defaultConfig;
+    }
+    const row = result.rows[0];
+    return {
+      actorColumn: actorType,
+      outputDateField: row.output_date_field,
+      turnTimeStartField: row.turn_time_start_field,
+      turnTimeEndField: row.turn_time_end_field,
+    };
+  } catch {
+    return defaultConfig;
+  }
+}
+
+/**
  * Sales Scorecard actor configurations.
  */
 export const SALES_ACTOR_CONFIGS: Record<

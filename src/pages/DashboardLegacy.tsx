@@ -365,8 +365,7 @@ const DashboardLegacy = () => {
 
     const fetchBriefingContext = async () => {
       // Check if user has a valid token before making API calls
-      const token = localStorage.getItem("auth_token");
-      if (!token) {
+      if (!api.hasToken()) {
         // No token - set empty context, briefing will still work
         setBriefingContext({
           dialogues: [],
@@ -1130,8 +1129,7 @@ const DashboardLegacy = () => {
   }, [isAuthenticated]);
   const loadDashboardData = async () => {
     // Check if user has a valid token before making API call
-    const token = localStorage.getItem("auth_token");
-    if (!token) {
+    if (!api.hasToken()) {
       // No token - skip API call
       return;
     }

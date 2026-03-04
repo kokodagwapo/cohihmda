@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Phone, PhoneOff, Mic, MicOff, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useToast } from '@/hooks/use-toast';
-import { api, getApiUrl } from '@/lib/api';
+import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 
 interface AletheiaV2AssistantProps {
@@ -178,7 +178,7 @@ When answering questions, be specific, reference the architecture details, and h
       // Remove protocol from backend URL and use appropriate WebSocket protocol
       const urlWithoutProtocol = backendUrl.replace(/^https?:\/\//, '');
       const wsProtocol = getWebSocketProtocol(backendUrl);
-      const token = localStorage.getItem('auth_token') || '';
+      const token = api.getToken() || '';
       const wsUrl = `${wsProtocol}${urlWithoutProtocol}/ws/aletheia?token=${encodeURIComponent(token)}&context=v2`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;

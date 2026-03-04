@@ -134,8 +134,9 @@ async function processDistributionSchedule(
         content_type: schedule.content_type,
         content_id: schedule.content_id,
         name: schedule.name,
+        link: result.link ?? null,
       },
-      result.exportFormat || 'unknown'
+      'link'
     );
 
     const nextRun = computeNextRunAt(

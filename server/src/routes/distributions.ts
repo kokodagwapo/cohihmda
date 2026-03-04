@@ -35,7 +35,7 @@ router.get(
       const { tenantPool } = getTenantContext(req);
       const result = await tenantPool.query(
         `SELECT id, name, description, created_by, user_ids, external_emails,
-                role_filter, is_dynamic, created_at, updated_at
+                role_filter, is_dynamic, auto_invite, auto_invite_group_id, created_at, updated_at
          FROM public.distribution_recipient_lists
          ORDER BY name ASC`
       );
@@ -66,15 +66,17 @@ router.post(
         external_emails = [],
         role_filter = [],
         is_dynamic = false,
+        auto_invite = false,
+        auto_invite_group_id = null,
       } = req.body ?? {};
       if (!name || typeof name !== 'string') {
         return res.status(400).json({ error: 'name is required' });
       }
       const result = await tenantPool.query(
         `INSERT INTO public.distribution_recipient_lists
-         (name, description, created_by, user_ids, external_emails, role_filter, is_dynamic, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-         RETURNING id, name, description, created_by, user_ids, external_emails, role_filter, is_dynamic, created_at, updated_at`,
+         (name, description, created_by, user_ids, external_emails, role_filter, is_dynamic, auto_invite, auto_invite_group_id, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+         RETURNING id, name, description, created_by, user_ids, external_emails, role_filter, is_dynamic, auto_invite, auto_invite_group_id, created_at, updated_at`,
         [
           name.trim(),
           description?.trim() ?? null,
@@ -83,6 +85,8 @@ router.post(
           Array.isArray(external_emails) ? external_emails : [],
           Array.isArray(role_filter) ? role_filter : [],
           Boolean(is_dynamic),
+          Boolean(auto_invite),
+          auto_invite_group_id ?? null,
         ]
       );
       res.status(201).json(result.rows[0]);
@@ -113,6 +117,8 @@ router.put(
         external_emails,
         role_filter,
         is_dynamic,
+        auto_invite,
+        auto_invite_group_id,
       } = req.body ?? {};
       const result = await tenantPool.query(
         `UPDATE public.distribution_recipient_lists
@@ -122,9 +128,11 @@ router.put(
              external_emails = COALESCE($5, external_emails),
              role_filter = COALESCE($6, role_filter),
              is_dynamic = COALESCE($7, is_dynamic),
+             auto_invite = COALESCE($8, auto_invite),
+             auto_invite_group_id = COALESCE($9, auto_invite_group_id),
              updated_at = NOW()
          WHERE id = $1
-         RETURNING id, name, description, created_by, user_ids, external_emails, role_filter, is_dynamic, created_at, updated_at`,
+         RETURNING id, name, description, created_by, user_ids, external_emails, role_filter, is_dynamic, auto_invite, auto_invite_group_id, created_at, updated_at`,
         [
           id,
           name !== undefined ? (typeof name === 'string' ? name.trim() : null) : null,
@@ -133,6 +141,8 @@ router.put(
           external_emails !== undefined && Array.isArray(external_emails) ? external_emails : undefined,
           role_filter !== undefined && Array.isArray(role_filter) ? role_filter : undefined,
           is_dynamic !== undefined ? Boolean(is_dynamic) : undefined,
+          auto_invite !== undefined ? Boolean(auto_invite) : undefined,
+          auto_invite_group_id !== undefined ? (auto_invite_group_id ?? null) : undefined,
         ]
       );
       if (result.rows.length === 0) {
@@ -254,6 +264,11 @@ router.post(
         recipient_list_id,
         recipient_emails = [],
       } = req.body ?? {};
+      const sanitizedContentConfig =
+        typeof content_config === 'object' && content_config != null ? { ...content_config } : {};
+      if ('exportFormat' in sanitizedContentConfig) {
+        delete (sanitizedContentConfig as Record<string, unknown>).exportFormat;
+      }
       if (!name || typeof name !== 'string') {
         return res.status(400).json({ error: 'name is required' });
       }
@@ -283,7 +298,7 @@ router.post(
           req.userId,
           content_type,
           content_id ?? null,
-          typeof content_config === 'object' ? content_config : {},
+          sanitizedContentConfig,
           frequency,
           scheduleTime,
           schedule_day != null ? schedule_day : null,
@@ -364,8 +379,12 @@ router.put(
             values.push(body[f]);
             idx++;
           } else if (f === 'content_config' && typeof body[f] === 'object') {
+            const sanitizedContentConfig = body[f] && typeof body[f] === 'object' ? { ...body[f] } : {};
+            if ('exportFormat' in sanitizedContentConfig) {
+              delete (sanitizedContentConfig as Record<string, unknown>).exportFormat;
+            }
             setClause.push(`content_config = $${idx}`);
-            values.push(body[f]);
+            values.push(sanitizedContentConfig);
             idx++;
           } else if (['content_id', 'recipient_list_id', 'schedule_day'].includes(f)) {
             setClause.push(`${f} = $${idx}`);
@@ -512,8 +531,8 @@ router.post(
         tenantPool,
         id,
         result,
-        { content_type: schedule.content_type, content_id: schedule.content_id, name: schedule.name },
-        result.exportFormat ?? 'unknown'
+        { content_type: schedule.content_type, content_id: schedule.content_id, name: schedule.name, link: result.link ?? null },
+        'link'
       );
       res.json({
         message: 'Send completed',
@@ -523,6 +542,7 @@ router.post(
         successful_count: result.successfulCount,
         failed_recipients: result.failedRecipients,
         duration_ms: result.durationMs,
+        link: result.link ?? null,
       });
     } catch (error: any) {
       console.error('[Distributions] Error triggering send:', error.message);

@@ -3,7 +3,7 @@
  * Does not start listeners; AnalyticsContext wires page view, click, time-on-page, form.
  */
 
-import { getApiUrl } from "@/lib/api";
+import { api, getApiUrl } from "@/lib/api";
 
 const SESSION_STORAGE_KEY = "cohi_analytics_session_id";
 const FLUSH_INTERVAL_MS = 5000;
@@ -216,16 +216,14 @@ export function trackEvent(name: string, metadata?: Record<string, unknown>): vo
 }
 
 function sendBatch(events: AnalyticsEventBase[]): void {
-  const base = getApiUrl();
-  const url = base ? `${base}/api/analytics/events` : "/api/analytics/events";
-  const token = typeof localStorage !== "undefined" ? localStorage.getItem("auth_token") : null;
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
   const body = JSON.stringify({ events });
   if (typeof fetch === "undefined") return;
-  fetch(url, { method: "POST", headers, body })
+  api
+    .fetchWithAuth("/api/analytics/events", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+    })
     .then((res) => {
       if (!res.ok) console.warn("[Analytics] flush failed", res.status);
     })
@@ -263,7 +261,7 @@ function setupBeforeUnload(): void {
     if (buffer.length > 0) {
       const base = getApiUrl();
       const fullUrl = base ? `${base}/api/analytics/events` : "/api/analytics/events";
-      const token = localStorage.getItem("auth_token");
+      const token = api.getToken();
       const body = JSON.stringify({ events: buffer });
       buffer = [];
       fetch(fullUrl, {

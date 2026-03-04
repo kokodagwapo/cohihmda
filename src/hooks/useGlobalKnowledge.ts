@@ -283,15 +283,9 @@ export function useGlobalKnowledge() {
         if (metadata.source_url)
           formData.append("source_url", metadata.source_url);
 
-        // Get auth token from localStorage
-        const token = localStorage.getItem("auth_token");
-
-        const response = await fetch("/api/admin/global-knowledge/upload", {
+        const response = await api.fetchWithAuth("/api/admin/global-knowledge/upload", {
           method: "POST",
           body: formData,
-          headers: {
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
         });
 
         if (!response.ok) {

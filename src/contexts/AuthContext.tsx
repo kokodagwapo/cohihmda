@@ -112,6 +112,25 @@ export function AuthProvider({ children }: AuthProviderProps) {
     localStorage.getItem(IMPERSONATION_KEY)
   );
 
+  const clearAuthState = useCallback(() => {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
+    localStorage.removeItem(IMPERSONATION_KEY);
+    localStorage.removeItem('cognito_access_token');
+
+    // Clear API client state (token and cache)
+    api.clearToken();
+    api.setUserRole(null);
+
+    // Clear React state
+    setUser(null);
+    setImpersonatingTenant(null);
+    setTenants([]);
+    setError(null);
+    setIsLoading(false);
+    enforcePlatformOnly(undefined);
+  }, []);
+
   // Check authentication status on mount
   useEffect(() => {
     const initAuth = async () => {
@@ -131,18 +150,26 @@ export function AuthProvider({ children }: AuthProviderProps) {
         }
       } catch (err) {
         // Token is invalid or expired
-        api.clearToken();
-        localStorage.removeItem(AUTH_TOKEN_KEY);
-        setUser(null);
-        api.setUserRole(null);
-        enforcePlatformOnly(undefined);
+        clearAuthState();
       } finally {
         setIsLoading(false);
       }
     };
 
     initAuth();
-  }, []);
+  }, [clearAuthState]);
+
+  // Keep AuthContext state in sync with API-level token expiry/logout handling.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleAuthExpired = () => {
+      clearAuthState();
+    };
+    window.addEventListener('cohi:auth-expired', handleAuthExpired);
+    return () => {
+      window.removeEventListener('cohi:auth-expired', handleAuthExpired);
+    };
+  }, [clearAuthState]);
 
   /**
    * Load available tenants for login dropdown
@@ -281,25 +308,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // Ignore errors during logout - we still want to clear local state
       console.warn('[Auth] Error during signout API call:', err);
     } finally {
-      localStorage.removeItem(AUTH_TOKEN_KEY);
-      localStorage.removeItem(REFRESH_TOKEN_KEY);
-      localStorage.removeItem(IMPERSONATION_KEY);
-      localStorage.removeItem('cognito_access_token');
-      
-      // Clear API client state (token and cache)
-      api.clearToken();
-      api.setUserRole(null);
-      
-      // Clear React state
-      setUser(null);
-      setImpersonatingTenant(null);
-      setTenants([]);
-      setError(null);
-      setIsLoading(false);
-      
+      clearAuthState();
       console.log('[Auth] Logout complete - all state cleared');
     }
-  }, []);
+  }, [clearAuthState]);
 
   /**
    * Refresh user data from server
