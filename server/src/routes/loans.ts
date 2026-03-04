@@ -58,7 +58,7 @@ import {
   formatDateForSQL,
   formatMonthKey,
   assignTTSTier,
-  OPERATIONS_ACTOR_CONFIGS,
+  loadOpsActorConfig,
   SALES_ACTOR_CONFIGS,
   REVENUE_SQL_EXPRESSION,
   buildDimensionFilterWhereClause,
@@ -4941,8 +4941,8 @@ router.get(
         });
       }
 
-      // Use shared actor configuration
-      const config = OPERATIONS_ACTOR_CONFIGS[actorType];
+      // Use shared actor configuration (tenant override or defaults)
+      const config = await loadOpsActorConfig(tenantPool, actorType);
 
       // isActorMissing is now imported from shared utilities (uses 'strict' mode for operations)
 

@@ -30,8 +30,7 @@ export const useFunnelData = (
   useEffect(() => {
     const fetchFunnelData = async () => {
       // Check if user has a valid token before making API call
-      const token = localStorage.getItem('auth_token');
-      if (!token) {
+      if (!api.hasToken()) {
         // No token - set data to null and stop loading
         console.log('[useFunnelData] No token, skipping fetch');
         setFunnelData(null);

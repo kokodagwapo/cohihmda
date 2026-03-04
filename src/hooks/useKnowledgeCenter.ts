@@ -178,15 +178,9 @@ export function useKnowledgeCenter(tenantId?: string) {
           ? `/api/knowledge-center/documents/upload?tenant_id=${tenantId}`
           : "/api/knowledge-center/documents/upload";
 
-        // Get auth token from localStorage
-        const token = localStorage.getItem("auth_token");
-
-        const response = await fetch(url, {
+        const response = await api.fetchWithAuth(url, {
           method: "POST",
           body: formData,
-          headers: {
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
         });
 
         if (!response.ok) {

@@ -15,6 +15,13 @@ import {
 } from "../config/defaultEncompassFieldMappings.js";
 import { coheusAliasToColumnName } from "./encompassFieldMapper.js";
 
+/** Trigger date field from XML OperationalScorecards section */
+export interface ParsedTriggerDateField {
+  name: string;
+  defaultFieldId: string;
+  selectedFieldId: string;
+}
+
 /**
  * Build a set of all core column names derived from the default field mappings.
  * This is used to prevent the import from creating additional fields that would
@@ -63,6 +70,8 @@ export interface ImportAnalysis {
   additionalFields: AdditionalFieldToImport[];
   matchingFields: number;
   warnings: string[];
+  /** Parsed OperationalScorecards trigger date fields (for tenant trigger date config) */
+  operationalScorecards?: ParsedTriggerDateField[];
 }
 
 export interface ImportResult {
@@ -90,6 +99,7 @@ export function parseLegacyXml(xmlContent: string): {
     isDate: boolean;
   }>;
   milestones: Array<{ name: string; fieldId: string; isCustom: boolean }>;
+  operationalScorecards: ParsedTriggerDateField[];
 } {
   const result = {
     clientInfo: { id: "", name: "" },
@@ -106,6 +116,7 @@ export function parseLegacyXml(xmlContent: string): {
       fieldId: string;
       isCustom: boolean;
     }>,
+    operationalScorecards: [] as ParsedTriggerDateField[],
   };
 
   // Extract ClientInfo
@@ -179,6 +190,23 @@ export function parseLegacyXml(xmlContent: string): {
     }
   }
 
+  // Extract OperationalScorecards TriggerDateField entries
+  const opsMatch = xmlContent.match(
+    /<OperationalScorecards>([\s\S]*?)<\/OperationalScorecards>/
+  );
+  if (opsMatch) {
+    const triggerRegex =
+      /<TriggerDateField\s+Name="([^"]+)"\s+DefaultFieldId="([^"]*)"\s+SelectedFieldId="([^"]*)"[^/]*\/>/g;
+    let match;
+    while ((match = triggerRegex.exec(opsMatch[1])) !== null) {
+      result.operationalScorecards.push({
+        name: match[1],
+        defaultFieldId: match[2] || "",
+        selectedFieldId: match[3] || "",
+      });
+    }
+  }
+
   return result;
 }
 
@@ -212,6 +240,49 @@ function fieldIdsMatch(id1: string, id2: string): boolean {
 
   return norm1.toLowerCase() === norm2.toLowerCase();
 }
+
+/**
+ * Build a map from normalized Encompass field ID to loans table column name
+ * using the default Coheus alias -> field ID mappings, plus fallbacks for
+ * common IDs that appear in tenant XMLs but may not have a display-name mapping.
+ */
+function buildFieldIdToColumnMap(): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const [alias, fieldId] of Object.entries(DEFAULT_ENCOMPASS_FIELD_MAPPINGS)) {
+    if (!fieldId || fieldId === "dates" || fieldId === "team") continue;
+    const normalized = normalizeFieldId(fieldId);
+    const column = coheusAliasToColumnName(alias);
+    map.set(normalized.toLowerCase(), column);
+  }
+  const fallbacks: Array<[string, string]> = [
+    ["fields.1997", "funding_date"],
+    ["fields.748", "closing_date"],
+    ["fields.2305", "ctc_date"],
+    ["fields.log.ms.date.approval", "submitted_to_underwriting_date"],
+    ["fields.log.ms.date.processing", "processing_date"],
+    ["fields.log.ms.date.sent to processing", "submitted_to_processing_date"],
+    ["fields.log.ms.date.send to processing", "submitted_to_processing_date"],
+    ["fields.log.ms.date.submittal", "submitted_to_underwriting_date"],
+  ];
+  for (const [key, column] of fallbacks) {
+    if (!map.has(key)) map.set(key, column);
+  }
+  return map;
+}
+
+/** Milestone keys used to derive operations actor config from trigger dates */
+const TRIGGER_NAME_TO_MILESTONE: Record<string, "processing" | "underwriting" | "closing" | "funding"> = {
+  "Processing Date": "processing",
+  "Sent to Processing": "processing",
+  "Sent to Processing Date": "processing",
+  "Underwriting Date": "underwriting",
+  "Sent to Underwriting": "underwriting",
+  "Sent to Underwriting Date": "underwriting",
+  "Closing Date": "closing",
+  "Sent to Closing": "closing",
+  "Sent to Closing Date": "closing",
+  "End Date to indicate Loan Closed/Funded": "funding",
+};
 
 /**
  * Infer data type from alias name
@@ -308,6 +379,10 @@ export function analyzeImport(
     additionalFields: [],
     matchingFields: 0,
     warnings: [],
+    operationalScorecards:
+      parsed.operationalScorecards?.length > 0
+        ? parsed.operationalScorecards
+        : undefined,
   };
 
   const processedAliases = new Set<string>();
@@ -768,6 +843,91 @@ export async function executeImport(
         );
       } finally {
         client.release();
+      }
+    }
+  }
+
+  // 3. Import operational scorecard trigger dates (tenant-level config)
+  if (analysis.operationalScorecards && analysis.operationalScorecards.length > 0) {
+    const fieldIdToColumn = buildFieldIdToColumnMap();
+    const milestoneColumns: Record<string, string> = {};
+
+    for (const trigger of analysis.operationalScorecards) {
+      const milestone = TRIGGER_NAME_TO_MILESTONE[trigger.name];
+      if (!milestone) continue;
+      const effectiveFieldId =
+        trigger.selectedFieldId?.trim() || trigger.defaultFieldId?.trim();
+      if (!effectiveFieldId) continue;
+      const normalized = normalizeFieldId(effectiveFieldId).toLowerCase();
+      const column = fieldIdToColumn.get(normalized);
+      if (column) {
+        milestoneColumns[milestone] = column;
+      }
+    }
+
+    const processing = milestoneColumns.processing;
+    const underwriting = milestoneColumns.underwriting;
+    const closing = milestoneColumns.closing;
+    const funding = milestoneColumns.funding;
+
+    if (processing && underwriting && closing && funding) {
+      try {
+        const configs: Array<{
+          actor_type: string;
+          output_date_field: string;
+          turn_time_start_field: string;
+          turn_time_end_field: string;
+        }> = [
+          {
+            actor_type: "processor",
+            output_date_field: underwriting,
+            turn_time_start_field: processing || underwriting,
+            turn_time_end_field: underwriting,
+          },
+          {
+            actor_type: "underwriter",
+            output_date_field: closing,
+            turn_time_start_field: underwriting,
+            turn_time_end_field: closing,
+          },
+          {
+            actor_type: "closer",
+            output_date_field: funding,
+            turn_time_start_field: closing,
+            turn_time_end_field: funding,
+          },
+        ];
+        for (const c of configs) {
+          await tenantPool.query(
+            `
+            INSERT INTO public.operational_scorecard_config (actor_type, output_date_field, turn_time_start_field, turn_time_end_field, is_active, updated_at)
+            VALUES ($1, $2, $3, $4, true, NOW())
+            ON CONFLICT (actor_type) DO UPDATE SET
+              output_date_field = EXCLUDED.output_date_field,
+              turn_time_start_field = EXCLUDED.turn_time_start_field,
+              turn_time_end_field = EXCLUDED.turn_time_end_field,
+              is_active = true,
+              updated_at = NOW()
+            `,
+            [
+              c.actor_type,
+              c.output_date_field,
+              c.turn_time_start_field,
+              c.turn_time_end_field,
+            ]
+          );
+        }
+        console.log(
+          "[LegacyImport] Updated operational_scorecard_config from TriggerDateField definitions"
+        );
+      } catch (error: any) {
+        console.error(
+          "[LegacyImport] Operational scorecard config import error:",
+          error.message
+        );
+        result.errors.push(
+          `Operational scorecard config: ${error.message}`
+        );
       }
     }
   }

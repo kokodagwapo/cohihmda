@@ -171,6 +171,12 @@ export default function Distributions() {
     return new Date(lastSent).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
   };
 
+  const getContentLink = (schedule: any) => {
+    if (schedule?.content_type === 'canvas' && schedule?.content_id) return `/my-dashboard/${schedule.content_id}`;
+    if (schedule?.content_type === 'insight_digest') return '/insights';
+    return '/my-dashboard';
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50/90 via-white to-sky-50/40 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950/80">
       <Navigation />
@@ -191,10 +197,10 @@ export default function Distributions() {
                     <IconBadge icon={Mail} variant="violet" size="xl" rounded="2xl" />
                     <div>
                       <h1 className="text-2xl sm:text-3xl font-semibold text-slate-900 dark:text-slate-100 tracking-tight">
-                        Report distribution
+                        Content distribution
                       </h1>
                       <p className="mt-1.5 text-[15px] text-slate-600 dark:text-slate-400 max-w-xl">
-                        Schedule reports, canvases, and insight digests to be emailed to users.
+                        Schedule secure link-based delivery for canvases, reports, and insight digests.
                       </p>
                       <Link
                         to="/my-dashboard"
@@ -246,6 +252,14 @@ export default function Distributions() {
                               {s.content_id && (
                                 <span className="text-slate-500 text-xs ml-1">({s.content_id.slice(0, 8)}…)</span>
                               )}
+                              <div className="mt-1">
+                                <Link
+                                  to={getContentLink(s)}
+                                  className="text-xs text-violet-600 hover:text-violet-700"
+                                >
+                                  Open content
+                                </Link>
+                              </div>
                             </TableCell>
                             <TableCell>
                               {FREQUENCIES.find((f) => f.value === s.frequency)?.label ?? s.frequency} at{' '}
@@ -434,8 +448,8 @@ function DistributionScheduleDialog({
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Weekly executive report" />
           </div>
           <div>
-            <Label>Description (optional)</Label>
-            <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Brief description" />
+            <Label>Email summary (optional)</Label>
+            <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Brief summary shown in the email" />
           </div>
           <div>
             <Label>Content type</Label>
@@ -615,6 +629,11 @@ function RecipientListSection({ lists, onRefresh, tenantId }: { lists: any[]; on
     },
   });
 
+  const { data: groupsData } = useQuery({
+    queryKey: ['groups', tenantId],
+    queryFn: () => api.request<{ groups: any[] }>(`/api/groups${tenantQs}`),
+  });
+
   const createListMutation = useMutation({
     mutationFn: (data: Record<string, unknown>) => api.createDistributionRecipientList(data, tenantId),
     onSuccess: () => {
@@ -712,6 +731,7 @@ function RecipientListSection({ lists, onRefresh, tenantId }: { lists: any[]; on
         listId={editingListId}
         initialList={editingListId ? lists.find((l: any) => l.id === editingListId) : undefined}
         tenantUsers={tenantUsers ?? []}
+        groups={groupsData?.groups ?? []}
         onSave={(data) => {
           if (editingListId) updateListMutation.mutate({ id: editingListId, data });
           else createListMutation.mutate(data);
@@ -728,6 +748,7 @@ function RecipientListDialog({
   listId,
   initialList,
   tenantUsers,
+  groups,
   onSave,
   saving,
 }: {
@@ -736,6 +757,7 @@ function RecipientListDialog({
   listId: string | null;
   initialList?: any;
   tenantUsers: any[];
+  groups: any[];
   onSave: (data: Record<string, unknown>) => void;
   saving: boolean;
 }) {
@@ -745,6 +767,8 @@ function RecipientListDialog({
   const [externalEmails, setExternalEmails] = useState('');
   const [roleFilter, setRoleFilter] = useState<string[]>([]);
   const [isDynamic, setIsDynamic] = useState(false);
+  const [autoInvite, setAutoInvite] = useState(false);
+  const [autoInviteGroupId, setAutoInviteGroupId] = useState('');
 
   const list = listId ? initialList : undefined;
 
@@ -757,6 +781,8 @@ function RecipientListDialog({
       setExternalEmails((list.external_emails ?? []).join(', '));
       setRoleFilter(list.role_filter ?? []);
       setIsDynamic(!!list.is_dynamic);
+      setAutoInvite(!!list.auto_invite);
+      setAutoInviteGroupId(list.auto_invite_group_id ?? '');
     } else {
       setName('');
       setDescription('');
@@ -764,6 +790,8 @@ function RecipientListDialog({
       setExternalEmails('');
       setRoleFilter([]);
       setIsDynamic(false);
+      setAutoInvite(false);
+      setAutoInviteGroupId('');
     }
   }, [open, listId, list]);
 
@@ -776,6 +804,8 @@ function RecipientListDialog({
       external_emails: emails,
       role_filter: roleFilter,
       is_dynamic: isDynamic,
+      auto_invite: autoInvite,
+      auto_invite_group_id: autoInvite && autoInviteGroupId ? autoInviteGroupId : null,
     });
   };
 
@@ -844,6 +874,36 @@ function RecipientListDialog({
               onChange={(e) => setExternalEmails(e.target.value)}
               placeholder="a@example.com, b@example.com"
             />
+          </div>
+          <div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={autoInvite}
+                onChange={(e) => setAutoInvite(e.target.checked)}
+              />
+              Auto-invite external emails as canvas-only users
+            </label>
+          </div>
+          <div>
+            <Label>Add auto-invited users to group (optional)</Label>
+            <Select
+              value={autoInviteGroupId || '__none__'}
+              onValueChange={(v) => setAutoInviteGroupId(v === '__none__' ? '' : v)}
+              disabled={!autoInvite}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="None" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">None</SelectItem>
+                {groups.map((g: any) => (
+                  <SelectItem key={g.id} value={g.id}>
+                    {g.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
         <DialogFooter>

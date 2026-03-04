@@ -3,7 +3,7 @@
  * Sampling controlled by VITE_REPLAY_SAMPLE_RATE (0-1); dev defaults to 1.
  */
 
-import { getApiUrl } from "@/lib/api";
+import { api } from "@/lib/api";
 import { getSessionIdPublic, getIdentity } from "./analyticsService";
 
 const CHUNK_INTERVAL_MS = 10000; // 10 seconds
@@ -30,9 +30,6 @@ async function sendReplayChunk(): Promise<void> {
   const identity = getIdentity();
   if (!identity) return;
   const sessionId = getSessionIdPublic();
-  const url = getApiUrl();
-  const fullUrl = url ? `${url}/api/analytics/replay` : "/api/analytics/replay";
-  const token = typeof localStorage !== "undefined" ? localStorage.getItem("auth_token") : null;
   const payload = {
     sessionId,
     chunkIndex,
@@ -41,11 +38,10 @@ async function sendReplayChunk(): Promise<void> {
   eventBuffer = [];
   chunkIndex += 1;
   try {
-    const res = await fetch(fullUrl, {
+    const res = await api.fetchWithAuth("/api/analytics/replay", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify(payload),
     });

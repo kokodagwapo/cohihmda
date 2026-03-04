@@ -58,8 +58,7 @@ import { ActiveTourRunner } from "@/components/tutorial/ActiveTourRunner";
 import SharedWithMe from "./pages/workbench/SharedWithMe";
 import TeamFolders from "./pages/workbench/TeamFolders";
 import Favorites from "./pages/workbench/Favorites";
-// Hidden for now
-// import Distributions from "./pages/workbench/Distributions";
+import Distributions from "./pages/workbench/Distributions";
 // Research Lab
 import ResearchAnalyst from "./pages/ResearchAnalyst";
 // Help Center
@@ -179,8 +178,7 @@ const App = () => (
               <Route path="/workbench/shared" element={<SharedWithMe />} />
               <Route path="/workbench/team-folders" element={<TeamFolders />} />
               <Route path="/workbench/favorites" element={<Favorites />} />
-              {/* Distributions page hidden for now; redirect so bookmarks don't 404 */}
-              <Route path="/workbench/distributions" element={<Navigate to="/my-dashboard" replace />} />
+              <Route path="/workbench/distributions" element={<Distributions />} />
               
               {/* Research Lab */}
               <Route path="/research" element={<ResearchAnalyst />} />

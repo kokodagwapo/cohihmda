@@ -40,6 +40,7 @@ import {
   Target,
   Trash2,
   Plus,
+  CalendarClock,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -52,6 +53,13 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export interface StaffingUnitTargetsState {
   processor: number;
@@ -60,10 +68,18 @@ export interface StaffingUnitTargetsState {
   other: number;
 }
 
+export interface OpsActorConfigState {
+  outputDateField: string;
+  turnTimeStartField: string;
+  turnTimeEndField: string;
+}
+
 interface ScoringWeightsTabProps {
   weights: Record<string, any[]>;
   complexityComponents: Record<string, any[]>;
   staffingUnitTargets?: StaffingUnitTargetsState | null;
+  opsActorConfig?: Record<string, OpsActorConfigState> | null;
+  availableDateColumns?: string[];
   onRefresh: () => void;
 }
 
@@ -145,16 +161,30 @@ const DEFAULT_STAFFING_TARGETS: StaffingUnitTargetsState = {
   other: 85,
 };
 
+const OPS_ACTOR_TYPES = ["processor", "underwriter", "closer"] as const;
+const OPS_ACTOR_LABELS: Record<(typeof OPS_ACTOR_TYPES)[number], string> = {
+  processor: "Processor",
+  underwriter: "Underwriter",
+  closer: "Closer",
+};
+
 export function ScoringWeightsTab({
   weights,
   complexityComponents,
   staffingUnitTargets,
+  opsActorConfig,
+  availableDateColumns = [],
   onRefresh,
 }: ScoringWeightsTabProps) {
   const { toast } = useToast();
   const { isTenantAdmin, selectedTenantId } = useAdminTenant();
   const [activeTab, setActiveTab] = useState("sales");
   const [saving, setSaving] = useState(false);
+  const [triggerDatesDraft, setTriggerDatesDraft] = useState<Record<
+    string,
+    OpsActorConfigState
+  > | null>(null);
+  const [savingTriggerDates, setSavingTriggerDates] = useState(false);
   const [editedWeights, setEditedWeights] = useState<
     Record<string, Record<string, number>>
   >({});
@@ -180,6 +210,14 @@ export function ScoringWeightsTab({
   useEffect(() => {
     if (staffingUnitTargets) setUnitTargetsDraft(staffingUnitTargets);
   }, [staffingUnitTargets]);
+
+  useEffect(() => {
+    if (opsActorConfig && Object.keys(opsActorConfig).length > 0) {
+      setTriggerDatesDraft(opsActorConfig);
+    } else {
+      setTriggerDatesDraft(null);
+    }
+  }, [opsActorConfig]);
 
   // Default weights when no database configuration exists
   const DEFAULT_WEIGHTS: Record<string, Record<string, number>> = {
@@ -999,6 +1037,185 @@ export function ScoringWeightsTab({
     }
   };
 
+  const handleSaveTriggerDates = async () => {
+    if (!triggerDatesDraft) return;
+    setSavingTriggerDates(true);
+    try {
+      const tenantParam =
+        !isTenantAdmin && selectedTenantId
+          ? `?tenant_id=${selectedTenantId}`
+          : "";
+      await api.request(
+        `/api/tenant-config/operations-actor-config${tenantParam}`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            configs: OPS_ACTOR_TYPES.map((actor_type) => ({
+              actor_type,
+              output_date_field: triggerDatesDraft[actor_type]?.outputDateField ?? "",
+              turn_time_start_field: triggerDatesDraft[actor_type]?.turnTimeStartField ?? "",
+              turn_time_end_field: triggerDatesDraft[actor_type]?.turnTimeEndField ?? "",
+            })),
+          }),
+        }
+      );
+      toast({ title: "Saved", description: "Operations trigger dates updated." });
+      onRefresh();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to save trigger dates",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingTriggerDates(false);
+    }
+  };
+
+  const renderTriggerDatesTab = () => {
+    const config = triggerDatesDraft ?? opsActorConfig ?? {};
+    const columns = availableDateColumns.length > 0 ? availableDateColumns : [
+      "submitted_to_underwriting_date",
+      "closing_date",
+      "funding_date",
+      "approval_date",
+      "processing_date",
+      "submitted_to_processing_date",
+      "ctc_date",
+      "application_date",
+    ];
+    return (
+      <div className="space-y-6">
+        <p className="text-sm text-slate-600 dark:text-slate-400 font-light">
+          Configure which date columns define each actor&apos;s output and turn
+          time for the Operations Scorecard. Leave as defaults unless your
+          milestone fields differ.
+        </p>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="font-medium">Actor</TableHead>
+                <TableHead className="font-medium">Output Date Field</TableHead>
+                <TableHead className="font-medium">Turn Time Start</TableHead>
+                <TableHead className="font-medium">Turn Time End</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {OPS_ACTOR_TYPES.map((actorType) => (
+                <TableRow key={actorType}>
+                  <TableCell className="font-medium">
+                    {OPS_ACTOR_LABELS[actorType]}
+                  </TableCell>
+                  <TableCell>
+                    <Select
+                      value={config[actorType]?.outputDateField ?? ""}
+                      onValueChange={(value) => {
+                        setTriggerDatesDraft((prev) => ({
+                          ...prev,
+                          [actorType]: {
+                            ...(prev?.[actorType] ?? {
+                              outputDateField: "",
+                              turnTimeStartField: "",
+                              turnTimeEndField: "",
+                            }),
+                            outputDateField: value,
+                          },
+                        }));
+                      }}
+                    >
+                      <SelectTrigger className="w-full min-w-[200px]">
+                        <SelectValue placeholder="Select column" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {columns.map((col) => (
+                          <SelectItem key={col} value={col}>
+                            {col}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </TableCell>
+                  <TableCell>
+                    <Select
+                      value={config[actorType]?.turnTimeStartField ?? ""}
+                      onValueChange={(value) => {
+                        setTriggerDatesDraft((prev) => ({
+                          ...prev,
+                          [actorType]: {
+                            ...(prev?.[actorType] ?? {
+                              outputDateField: "",
+                              turnTimeStartField: "",
+                              turnTimeEndField: "",
+                            }),
+                            turnTimeStartField: value,
+                          },
+                        }));
+                      }}
+                    >
+                      <SelectTrigger className="w-full min-w-[200px]">
+                        <SelectValue placeholder="Select column" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {columns.map((col) => (
+                          <SelectItem key={col} value={col}>
+                            {col}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </TableCell>
+                  <TableCell>
+                    <Select
+                      value={config[actorType]?.turnTimeEndField ?? ""}
+                      onValueChange={(value) => {
+                        setTriggerDatesDraft((prev) => ({
+                          ...prev,
+                          [actorType]: {
+                            ...(prev?.[actorType] ?? {
+                              outputDateField: "",
+                              turnTimeStartField: "",
+                              turnTimeEndField: "",
+                            }),
+                            turnTimeEndField: value,
+                          },
+                        }));
+                      }}
+                    >
+                      <SelectTrigger className="w-full min-w-[200px]">
+                        <SelectValue placeholder="Select column" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {columns.map((col) => (
+                          <SelectItem key={col} value={col}>
+                            {col}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+        <div className="flex justify-end">
+          <Button
+            onClick={handleSaveTriggerDates}
+            disabled={savingTriggerDates}
+            className="font-light"
+          >
+            {savingTriggerDates && (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            )}
+            <Save className="h-4 w-4 mr-2" />
+            Save Trigger Dates
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
   const renderUnitTargetsTab = () => {
     const roles: (keyof StaffingUnitTargetsState)[] = [
       "processor",
@@ -1068,7 +1285,7 @@ export function ScoringWeightsTab({
       </CardHeader>
       <CardContent>
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-4 mb-6">
+          <TabsList className="grid w-full grid-cols-5 mb-6">
             <TabsTrigger value="sales" className="font-light">
               <TrendingUp className="h-4 w-4 mr-2" />
               Sales Scorecard
@@ -1080,6 +1297,10 @@ export function ScoringWeightsTab({
             <TabsTrigger value="complexity" className="font-light">
               <BarChart3 className="h-4 w-4 mr-2" />
               Loan Complexity
+            </TabsTrigger>
+            <TabsTrigger value="trigger-dates" className="font-light">
+              <CalendarClock className="h-4 w-4 mr-2" />
+              Trigger Dates
             </TabsTrigger>
             <TabsTrigger value="unit-targets" className="font-light">
               <Target className="h-4 w-4 mr-2" />
@@ -1097,6 +1318,10 @@ export function ScoringWeightsTab({
 
           <TabsContent value="complexity">
             {renderComplexityComponents()}
+          </TabsContent>
+
+          <TabsContent value="trigger-dates">
+            {renderTriggerDatesTab()}
           </TabsContent>
 
           <TabsContent value="unit-targets">

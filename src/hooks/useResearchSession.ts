@@ -154,15 +154,12 @@ export function useResearchSession(tenantId?: string | null) {
   // ── SSE stream reader ──
   const readSSEStream = useCallback(
     async (url: string, method: string = "GET", body?: string) => {
-      const token = localStorage.getItem("auth_token");
-      const baseUrl = import.meta.env.DEV ? "" : (import.meta.env.VITE_API_URL || "");
       const controller = new AbortController();
       abortRef.current = controller;
 
-      const response = await fetch(`${baseUrl}${url}`, {
+      const response = await api.fetchWithAuth(url, {
         method,
         headers: {
-          Authorization: `Bearer ${token}`,
           Accept: "text/event-stream",
           ...(body ? { "Content-Type": "application/json" } : {}),
         },

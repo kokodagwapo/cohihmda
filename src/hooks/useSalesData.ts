@@ -46,8 +46,7 @@ export const useSalesData = (
   useEffect(() => {
     const fetchCompanyOverview = async () => {
       // Check if user has a valid token before making API call
-      const token = localStorage.getItem("auth_token");
-      if (!token) {
+      if (!api.hasToken()) {
         // No token - set data to null and stop loading
         setCompanyOverviewData(null);
         setLoading(false);

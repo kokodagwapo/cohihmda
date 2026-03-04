@@ -42,8 +42,7 @@ export const useDashboardStats = (
     }
     
     // Check if user has a valid token before making API call
-    const token = localStorage.getItem('auth_token');
-    if (!token) {
+    if (!api.hasToken()) {
       // No token - set data to null and stop loading
       setStatsData(null);
       setStatsLoading(false);
@@ -92,8 +91,7 @@ export const useDashboardStats = (
   // Fetch funnel data
   const fetchFunnelData = async () => {
     // Check if user has a valid token before making API call
-    const token = localStorage.getItem('auth_token');
-    if (!token) {
+    if (!api.hasToken()) {
       // No token - set data to null and stop loading
       setFunnelData(null);
       setFunnelLoading(false);

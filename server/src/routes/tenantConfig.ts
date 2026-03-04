@@ -13,7 +13,10 @@ import {
   getTenantContext,
 } from "../middleware/tenantContext.js";
 import { logInfo, logError, logDebug } from "../services/logger.js";
-import { clearTenantRevenueExpressionCache } from "../utils/scorecard-utils.js";
+import {
+  clearTenantRevenueExpressionCache,
+  loadOpsActorConfig,
+} from "../utils/scorecard-utils.js";
 import {
   getStaffingUnitTargets,
   type StaffingUnitTargets,
@@ -1657,6 +1660,139 @@ router.put(
         scorecardType: req.params.scorecardType,
       });
       res.status(500).json({ error: "Failed to update scoring weights" });
+    }
+  }
+);
+
+// ============================================
+// OPERATIONS SCORECARD ACTOR CONFIG (trigger dates)
+// ============================================
+
+const OPS_ACTOR_TYPES = ["processor", "underwriter", "closer"] as const;
+
+/**
+ * GET /api/tenant-config/operations-actor-config
+ * Returns effective Operations Scorecard trigger date config (DB overrides or defaults)
+ */
+router.get(
+  "/operations-actor-config",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { tenantPool } = getTenantContext(req);
+      const configs: Record<string, { actorColumn: string; outputDateField: string; turnTimeStartField: string; turnTimeEndField: string }> = {};
+      for (const actorType of OPS_ACTOR_TYPES) {
+        const config = await loadOpsActorConfig(tenantPool, actorType);
+        configs[actorType] = config;
+      }
+      res.json({ configs });
+    } catch (error: any) {
+      logError("Error fetching operations actor config", error, {
+        userId: req.userId,
+      });
+      res.status(500).json({
+        error: "Failed to fetch operations actor config",
+      });
+    }
+  }
+);
+
+const operationsActorConfigItemSchema = z.object({
+  actor_type: z.enum(["processor", "underwriter", "closer"]),
+  output_date_field: z.string().min(1).max(100),
+  turn_time_start_field: z.string().min(1).max(100),
+  turn_time_end_field: z.string().min(1).max(100),
+});
+
+/**
+ * PUT /api/tenant-config/operations-actor-config
+ * Upsert Operations Scorecard trigger date config per actor type
+ */
+router.put(
+  "/operations-actor-config",
+  authenticateToken,
+  attachTenantContext,
+  requireRole("tenant_admin", "super_admin"),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { tenantPool } = getTenantContext(req);
+      const schema = z.object({
+        configs: z.array(operationsActorConfigItemSchema),
+      });
+      const { configs } = schema.parse(req.body);
+      for (const c of configs) {
+        await tenantPool.query(
+          `
+          INSERT INTO public.operational_scorecard_config (actor_type, output_date_field, turn_time_start_field, turn_time_end_field, is_active, updated_at)
+          VALUES ($1, $2, $3, $4, true, NOW())
+          ON CONFLICT (actor_type) DO UPDATE SET
+            output_date_field = EXCLUDED.output_date_field,
+            turn_time_start_field = EXCLUDED.turn_time_start_field,
+            turn_time_end_field = EXCLUDED.turn_time_end_field,
+            is_active = true,
+            updated_at = NOW()
+          `,
+          [
+            c.actor_type,
+            c.output_date_field,
+            c.turn_time_start_field,
+            c.turn_time_end_field,
+          ]
+        );
+      }
+      const result: Record<string, any> = {};
+      for (const actorType of OPS_ACTOR_TYPES) {
+        result[actorType] = await loadOpsActorConfig(tenantPool, actorType);
+      }
+      logInfo("Operations actor config updated", { userId: req.userId });
+      res.json({ configs: result });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res
+          .status(400)
+          .json({ error: "Invalid payload", details: error.errors });
+      }
+      logError("Error updating operations actor config", error, {
+        userId: req.userId,
+      });
+      res.status(500).json({
+        error: "Failed to update operations actor config",
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/tenant-config/available-date-columns
+ * Returns date/timestamp columns from the loans table for trigger date dropdowns
+ */
+router.get(
+  "/available-date-columns",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { tenantPool } = getTenantContext(req);
+      const result = await tenantPool.query(
+        `
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'loans'
+          AND data_type IN ('date', 'timestamp with time zone', 'timestamp without time zone')
+        ORDER BY ordinal_position
+        `
+      );
+      res.json({
+        columns: result.rows.map((r: { column_name: string }) => r.column_name),
+      });
+    } catch (error: any) {
+      logError("Error fetching available date columns", error, {
+        userId: req.userId,
+      });
+      res.status(500).json({
+        error: "Failed to fetch available date columns",
+      });
     }
   }
 );

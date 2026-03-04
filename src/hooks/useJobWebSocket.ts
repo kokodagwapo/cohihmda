@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from "react";
-import { getWebSocketUrl, getWebSocketProtocol } from "@/lib/api";
+import { api, getWebSocketUrl, getWebSocketProtocol } from "@/lib/api";
 
 export type JobMessage = {
   type: "job:progress" | "job:complete" | "job:error";
@@ -19,7 +19,7 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let refCount = 0;
 
 function getWsUrl(): string {
-  const token = localStorage.getItem("auth_token") || "test-token";
+  const token = api.getToken() || "test-token";
   try {
     const backendUrl = getWebSocketUrl();
     const urlWithoutProtocol = backendUrl.replace(/^https?:\/\//, "");
