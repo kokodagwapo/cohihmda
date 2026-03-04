@@ -4278,7 +4278,7 @@ router.get(
  *
  * Weights: Units = 70%, Turn Time = 15%, Loan Complexity = 15%
  *
- * Each actor type uses different milestone dates (see OPERATIONS_ACTOR_CONFIGS in scorecard-utils.ts):
+ * Each actor type uses different milestone dates (see loadOpsActorConfig / operational_scorecard_config):
  * - Processor: output = submitted_to_underwriting_date
  * - Underwriter: output = closing_date
  * - Closer: output = funding_date
@@ -4320,8 +4320,8 @@ router.get(
       };
       const monthsBack = monthsMap[dateRange] || 3;
 
-      // Use shared actor configuration
-      const config = OPERATIONS_ACTOR_CONFIGS[actorType];
+      // Use shared actor configuration (tenant override or defaults)
+      const config = await loadOpsActorConfig(tenantPool, actorType);
 
       // isActorMissing is now imported from shared utilities (uses 'strict' mode for operations)
 
