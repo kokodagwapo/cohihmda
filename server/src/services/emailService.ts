@@ -37,6 +37,8 @@ interface EmailOptions {
   subject: string;
   html: string;
   text?: string;
+  /** When true, throw if provider send fails instead of silently returning undefined. */
+  strict?: boolean;
   /** For audit log; when set, a row is written to email_send_log. */
   emailType?: string;
   containsPii?: boolean;
@@ -94,16 +96,20 @@ export async function sendEmail(options: EmailOptions): Promise<string | undefin
         await withRetry(() => sendViaResend(options));
         return undefined;
       default:
-        console.warn(
-          `Unknown email provider: ${emailProvider}. Email not sent.`,
-        );
+        const providerErr = new Error(`Unknown email provider: ${emailProvider}`);
+        if (options.strict) {
+          throw providerErr;
+        }
+        console.warn(`${providerErr.message}. Email not sent.`);
         console.log("Email would be sent:", options);
         return undefined;
     }
   } catch (error: unknown) {
     console.error("Error sending email after retries:", error);
-    // Don't throw - email failures shouldn't break the flow
-    // Log for manual retry
+    if (options.strict) {
+      throw error;
+    }
+    // Non-strict mode preserves legacy behavior.
     return undefined;
   }
 }
@@ -880,6 +886,7 @@ This invitation expires in 7 days.
     subject: `You're invited to join ${tenantName} on Cohi`,
     html,
     text,
+    strict: true,
     emailType: "user_invitation",
     containsPii: false,
   });

@@ -541,6 +541,7 @@ router.post(
         recipients_count: result.recipientsCount,
         successful_count: result.successfulCount,
         failed_recipients: result.failedRecipients,
+        invite_status: result.inviteStatus ?? null,
         duration_ms: result.durationMs,
         link: result.link ?? null,
       });
