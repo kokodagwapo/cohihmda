@@ -1394,6 +1394,66 @@ export class ApiClient {
   async deleteDistributionRecipientList(id: string, tenantId?: string | null) {
     return this.request<void>(`/api/distributions/recipient-lists/${id}${this._distTq(tenantId)}`, { method: "DELETE" });
   }
+
+  // Fallout alert distribution
+  private _falloutTq(tenantId?: string | null): string {
+    return tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+  }
+
+  async getFalloutAlertConfig(tenantId?: string | null) {
+    return this.request<{ config: Record<string, unknown> }>(`/api/fallout-alerts/config${this._falloutTq(tenantId)}`);
+  }
+
+  async updateFalloutAlertConfig(
+    data: {
+      enabled?: boolean;
+      min_risk_score?: number;
+      frequency?: "realtime" | "daily_digest" | "weekly_digest";
+      include_risk_levels?: string[];
+      custom_message?: string | null;
+      notify_managers?: boolean;
+      target_encompass_user_ids?: string[];
+      manager_user_ids?: string[];
+    },
+    tenantId?: string | null,
+  ) {
+    return this.request<{ config: Record<string, unknown> }>(`/api/fallout-alerts/config${this._falloutTq(tenantId)}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async sendFalloutAlertsNow(tenantId?: string | null) {
+    return this.request<{
+      message: string;
+      alertBatchId: string;
+      recipientsCount: number;
+      sentCount: number;
+      failedRecipients: Array<{ email: string; error: string }>;
+      skippedLoansCount: number;
+    }>(`/api/fallout-alerts/send-now${this._falloutTq(tenantId)}`, {
+      method: "POST",
+    });
+  }
+
+  async getFalloutAlertResponses(limit = 50, tenantId?: string | null) {
+    const tenantParam = tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request<{ responses: any[] }>(
+      `/api/fallout-alerts/responses?limit=${Math.max(1, Math.min(200, limit))}${tenantParam}`,
+    );
+  }
+
+  async getFalloutAlertRecipientOptions(tenantId?: string | null) {
+    return this.request<{
+      loanOfficers: Array<{
+        encompass_user_id: string;
+        display_name: string;
+        email: string;
+        active_loan_count: number;
+      }>;
+      managers: Array<{ id: string; display_name: string; email: string; role: string }>;
+    }>(`/api/fallout-alerts/recipient-options${this._falloutTq(tenantId)}`);
+  }
 }
 
 export const api = new ApiClient();

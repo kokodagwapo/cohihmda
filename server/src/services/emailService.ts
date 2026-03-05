@@ -5,6 +5,7 @@
  */
 
 import { logEmailSend } from "./emailAuditLogger.js";
+import { assertNoLocalhostInProduction } from "../utils/frontendUrl.js";
 
 const SES_CONFIGURATION_SET = process.env.SES_CONFIGURATION_SET || "my-first-configuration-set";
 
@@ -58,6 +59,8 @@ export interface DailyBriefEmailOptions {
   containsPii?: boolean;
   userId?: string | null;
   tenantId?: string | null;
+  /** When true, provider failures are rethrown to caller. */
+  strict?: boolean;
 }
 
 export interface EmailAttachment {
@@ -84,6 +87,16 @@ export interface SendEmailWithAttachmentOptions {
  */
 export async function sendEmail(options: EmailOptions): Promise<string | undefined> {
   const emailProvider = process.env.EMAIL_PROVIDER || "ses"; // ses, sendgrid, resend
+
+  const localhostLinkMatch = options.html.match(/href=["']https?:\/\/localhost[^"']*/i);
+  if (localhostLinkMatch) {
+    try {
+      assertNoLocalhostInProduction(localhostLinkMatch[0], "sendEmail");
+    } catch (guardError) {
+      if (options.strict) throw guardError;
+      console.warn(`⚠️ Email to ${options.to} contains localhost link: ${localhostLinkMatch[0]}`);
+    }
+  }
 
   try {
     switch (emailProvider) {
@@ -293,6 +306,9 @@ async function sendDailyBriefWithUnsubscribe(options: DailyBriefEmailOptions): P
     }
   } catch (error: unknown) {
     console.error("Error sending daily brief with unsubscribe after retries:", error);
+    if (options.strict) {
+      throw error;
+    }
   }
 }
 
