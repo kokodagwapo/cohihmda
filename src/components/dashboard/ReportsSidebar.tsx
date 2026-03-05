@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, Zap, BarChart3, Target, Trophy, X, Sun, FileText, LayoutGrid, TrendingUp, LayoutDashboard, Filter, ArrowLeftRight, Shield, ClipboardList, Calculator, LineChart, Pin, PinOff, FlaskConical, GripVertical } from 'lucide-react';
+import { ChevronDown, Zap, BarChart3, Target, Trophy, X, Sun, FileText, LayoutGrid, TrendingUp, LayoutDashboard, Filter, ArrowLeftRight, Shield, ClipboardList, Calculator, LineChart, Pin, PinOff, FlaskConical, GripVertical, Lock, Layers } from 'lucide-react';
 import { getReportById, ReportData, allReports } from '@/data/reportSimulations';
 import { useTheme } from '@/components/theme-provider';
 import {
@@ -232,6 +232,8 @@ const TOPTIERING_CHILDREN = [
   { type: 'route' as const, id: 'topTieringComparison', label: 'TopTiering Comparison', icon: ArrowLeftRight, path: '/performance/toptiering-comparison', subsectionKey: 'topTiering' as SubsectionKey },
   { type: 'route' as const, id: 'creditRiskManagement', label: 'Credit Risk Management', icon: Shield, path: '/credit-risk-management', subsectionKey: 'topTiering' as SubsectionKey },
   { type: 'route' as const, id: 'companyScorecard', label: 'Company Scorecard', icon: ClipboardList, path: '/company-scorecard', subsectionKey: 'topTiering' as SubsectionKey },
+  { type: 'route' as const, id: 'lockStratification', label: 'Lock Stratification', icon: Lock, path: '/lock-stratification', subsectionKey: 'topTiering' as SubsectionKey },
+  { type: 'route' as const, id: 'loanComplexity', label: 'Loan Complexity', icon: Layers, path: '/loan-complexity', subsectionKey: 'topTiering' as SubsectionKey },
   { type: 'subheader' as const, label: 'Sales', subsectionKey: 'sales' as SubsectionKey },
   { type: 'route' as const, id: 'salesScorecard', label: 'Scorecard', icon: Target, path: '/sales-scorecard', subsectionKey: 'sales' as SubsectionKey },
   { type: 'route' as const, id: 'salesTrends', label: 'Trends', icon: TrendingUp, path: '/sales-trends', subsectionKey: 'sales' as SubsectionKey },
@@ -280,6 +282,8 @@ const navIconColorByItemId: Record<string, string> = {
   topTieringComparison: 'blue',
   creditRiskManagement: 'emerald',
   companyScorecard: 'indigo',
+  lockStratification: 'blue',
+  loanComplexity: 'indigo',
   workflowConversion: 'blue',
   highPerformers: 'amber',
   loanDetail: 'blue',
