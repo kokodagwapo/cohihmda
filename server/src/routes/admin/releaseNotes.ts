@@ -57,6 +57,10 @@ type UpsertEntryInput = {
   sortOrder?: number;
 };
 
+function isNonNull<T>(value: T | null): value is T {
+  return value !== null;
+}
+
 function normalizeEntries(raw: unknown): UpsertEntryInput[] {
   if (!Array.isArray(raw)) return [];
   const validCategories = new Set(["feature", "improvement", "fix"]);
@@ -80,7 +84,7 @@ function normalizeEntries(raw: unknown): UpsertEntryInput[] {
           typeof item.sortOrder === "number" ? item.sortOrder : Number(idx),
       };
     })
-    .filter((entry): entry is UpsertEntryInput => entry !== null);
+    .filter(isNonNull);
 }
 
 async function getEntriesByNoteId(noteId: string): Promise<EntryRow[]> {
