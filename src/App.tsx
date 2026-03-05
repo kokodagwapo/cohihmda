@@ -64,6 +64,7 @@ import Favorites from "./pages/workbench/Favorites";
 import ResearchAnalyst from "./pages/ResearchAnalyst";
 // Help Center
 import HelpCenter from "./pages/HelpCenter";
+import DataChat from "./pages/DataChat";
 import { CanvasOnlyLayout } from "@/components/layout/CanvasOnlyLayout";
 
 const queryClient = new QueryClient();
@@ -184,6 +185,11 @@ const App = () => (
               
               {/* Research Lab */}
               <Route path="/research" element={<ResearchAnalyst />} />
+              <Route path="/data-chat" element={
+                <ProtectedRoute>
+                  <DataChat />
+                </ProtectedRoute>
+              } />
               
               {/* Top Tiering routes – Loan Funnel page hidden; redirect so bookmarks don't 404 */}
               <Route path="/loan-funnel" element={<Navigate to="/insights" replace />} />
