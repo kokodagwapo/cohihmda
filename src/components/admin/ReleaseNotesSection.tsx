@@ -302,6 +302,8 @@ export function ReleaseNotesSection() {
           description: string;
           category: ReleaseNoteCategory;
         }>;
+        warning?: string | null;
+        aiGrounded?: boolean;
       }>("/api/admin/release-notes/generate-draft", { method: "POST", body: "{}" });
       const generated = (result.entries || []).map((entry, idx) => ({
         ...entry,
@@ -314,7 +316,9 @@ export function ReleaseNotesSection() {
         title: "Draft generated",
         description:
           generated.length > 0
-            ? "AI draft populated. Review before publishing."
+            ? result.aiGrounded === false
+              ? result.warning || "Commit-based draft generated. Review before publishing."
+              : "AI draft populated. Review before publishing."
             : "No qualifying commits found for the selected range.",
       });
     } catch (error: any) {
@@ -346,18 +350,18 @@ export function ReleaseNotesSection() {
     }
   };
 
-  const sendEmail = async (id: string) => {
-    if (!window.confirm("Send this release note email now?")) return;
+  const sendEmail = async (id: string, resend = false) => {
+    if (!window.confirm(resend ? "Resend this release note email now?" : "Send this release note email now?")) return;
     try {
       const result = await api.request<{
         result?: { attempted: number; sent: number; failed: number };
       }>(`/api/admin/release-notes/${id}/send-email`, {
         method: "POST",
-        body: "{}",
+        body: JSON.stringify({ forceResend: resend }),
       });
       const stats = result.result;
       toast({
-        title: "Email send complete",
+        title: resend ? "Email resend complete" : "Email send complete",
         description: stats
           ? `Attempted ${stats.attempted}, sent ${stats.sent}, failed ${stats.failed}.`
           : "Release note email sent.",
@@ -476,11 +480,10 @@ export function ReleaseNotesSection() {
                           <Button
                             variant="outline"
                             size="sm"
-                            disabled={!!item.email_sent_at}
-                            onClick={() => void sendEmail(item.id)}
+                            onClick={() => void sendEmail(item.id, !!item.email_sent_at)}
                           >
                             <Send className="h-3.5 w-3.5 mr-1" />
-                            Send Email
+                            {item.email_sent_at ? "Resend Email" : "Send Email"}
                           </Button>
                         )}
                       </TableCell>
