@@ -142,19 +142,27 @@ function PivotCells({
   loanTypes,
   purposes,
   isDark,
-  showNonActiveOutcomeColumns,
+  showOriginated,
+  showDenied,
+  showWithdrawn,
 }: {
   row: PivotRowMetrics;
   loanTypes: string[];
   purposes: string[];
   isDark: boolean;
-  showNonActiveOutcomeColumns: boolean;
+  showOriginated: boolean;
+  showDenied: boolean;
+  showWithdrawn: boolean;
 }) {
   const cellClass = "px-2 py-2 text-right whitespace-nowrap text-slate-700 dark:text-slate-300";
+  const waComplexityStyle = getComplexityCellStyle(row.waComplexity);
   return (
     <>
       <td className={cellClass}>{row.units.toLocaleString()}</td>
-      <td className={cellClass}>
+      <td
+        className={cellClass}
+        style={waComplexityStyle ?? undefined}
+      >
         {row.waComplexity != null ? row.waComplexity.toFixed(1) : "—"}
       </td>
       <td className={cellClass}>
@@ -171,13 +179,9 @@ function PivotCells({
         </td>
       ))}
       <td className={cellClass}>{formatPct(row.pctLocked)}</td>
-      {showNonActiveOutcomeColumns && (
-        <>
-          <td className={cellClass}>{formatPct(row.pctOriginated)}</td>
-          <td className={cellClass}>{formatPct(row.pctDenied)}</td>
-          <td className={cellClass}>{formatPct(row.pctWithdrawn)}</td>
-        </>
-      )}
+      {showOriginated && <td className={cellClass}>{formatPct(row.pctOriginated)}</td>}
+      {showDenied && <td className={cellClass}>{formatPct(row.pctDenied)}</td>}
+      {showWithdrawn && <td className={cellClass}>{formatPct(row.pctWithdrawn)}</td>}
     </>
   );
 }
@@ -246,6 +250,7 @@ export function LoanComplexityView({
   const [sortColumnId, setSortColumnId] = useState<keyof LoanComplexityGroupLoanRow | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [pivotExpanded, setPivotExpanded] = useState<string | null>(null);
+  const pivotSelectionRef = React.useRef(false);
 
   const dateRange = periodSelection.dateRange;
 
@@ -349,8 +354,31 @@ export function LoanComplexityView({
       ? ACTOR_TYPE_OPTIONS.find((o) => o.value === actorType)?.label ?? "Actor"
       : GROUP_BY_OPTIONS.find((o) => o.value === groupBy)?.label ?? "group";
 
+  /** Map pivot dimension key to (groupBy, actorType) for loan detail table. */
+  const handlePivotRowClick = useCallback(
+    (dimension: string, groupName: string) => {
+      const dim = dimension as LoanComplexityGroupBy;
+      if (dim === "branch") {
+        pivotSelectionRef.current = true;
+        setGroupBy("branch");
+        setActorType("loan_officer");
+        setSelectedGroupName(groupName);
+      } else {
+        pivotSelectionRef.current = true;
+        setGroupBy("actors");
+        setActorType(dim);
+        setSelectedGroupName(groupName);
+      }
+    },
+    []
+  );
+
   // Clear selected bar when period or group-by changes so the table doesn’t show stale data
   useEffect(() => {
+    if (pivotSelectionRef.current) {
+      pivotSelectionRef.current = false;
+      return;
+    }
     setSelectedGroupName(null);
   }, [groupBy, actorType, dateRange.start, dateRange.end, currentLoanStatusFilter]);
 
@@ -529,6 +557,21 @@ export function LoanComplexityView({
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
             Units, weighted average complexity, time in motion, and outcome mix by dimension. Expand a row to see individuals.
           </p>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-2 text-xs text-slate-600 dark:text-slate-400">
+            <span className="font-medium">WA Complexity:</span>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: "#a8ccf0" }} aria-hidden />
+              &lt; 101
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: "#2f85da" }} aria-hidden />
+              101–115
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: "#174d82" }} aria-hidden />
+              &gt; 115
+            </span>
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           {pivotLoading ? (
@@ -573,11 +616,13 @@ export function LoanComplexityView({
                     <th className="text-right font-medium text-slate-600 dark:text-slate-400 px-2 py-2 whitespace-nowrap">
                       % Locked
                     </th>
-                    {currentLoanStatusFilter !== "Active Loan" && (
+                    {currentLoanStatusFilter === "Non-active" && (
+                      <th className="text-right font-medium text-slate-600 dark:text-slate-400 px-2 py-2 whitespace-nowrap">
+                        % Originated
+                      </th>
+                    )}
+                    {(currentLoanStatusFilter === "Non-active" || currentLoanStatusFilter === "Fallout") && (
                       <>
-                        <th className="text-right font-medium text-slate-600 dark:text-slate-400 px-2 py-2 whitespace-nowrap">
-                          % Originated
-                        </th>
                         <th className="text-right font-medium text-slate-600 dark:text-slate-400 px-2 py-2 whitespace-nowrap">
                           % Denied
                         </th>
@@ -608,20 +653,57 @@ export function LoanComplexityView({
                             {dim.label}
                           </span>
                         </td>
-                        <PivotCells row={dim.total} loanTypes={pivotData.loanTypes} purposes={pivotData.purposes} isDark={isDark} showNonActiveOutcomeColumns={currentLoanStatusFilter !== "Active Loan"} />
+                        <PivotCells
+                          row={dim.total}
+                          loanTypes={pivotData.loanTypes}
+                          purposes={pivotData.purposes}
+                          isDark={isDark}
+                          showOriginated={currentLoanStatusFilter === "Non-active"}
+                          showDenied={currentLoanStatusFilter === "Non-active" || currentLoanStatusFilter === "Fallout"}
+                          showWithdrawn={currentLoanStatusFilter === "Non-active" || currentLoanStatusFilter === "Fallout"}
+                        />
                       </tr>
                       {pivotExpanded === dim.label &&
-                        dim.rows.map((row) => (
+                        dim.rows.map((row) => {
+                          const isSelected =
+                            selectedGroupName === row.groupName &&
+                            (dim.dimension === "branch" ? groupBy === "branch" : groupBy === "actors" && actorType === dim.dimension);
+                          return (
                           <tr
                             key={row.groupName}
-                            className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50/30 dark:hover:bg-slate-800/20"
+                            role="button"
+                            tabIndex={0}
+                            className={cn(
+                              "border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50/50 dark:hover:bg-slate-800/30 cursor-pointer",
+                              isSelected && (isDark ? "bg-sky-900/30" : "bg-sky-50")
+                            )}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handlePivotRowClick(dim.dimension, row.groupName);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handlePivotRowClick(dim.dimension, row.groupName);
+                              }
+                            }}
                           >
                             <td className="pl-10 pr-3 py-1.5 text-slate-600 dark:text-slate-400 whitespace-nowrap">
                               {row.groupName}
                             </td>
-                            <PivotCells row={row} loanTypes={pivotData.loanTypes} purposes={pivotData.purposes} isDark={isDark} showNonActiveOutcomeColumns={currentLoanStatusFilter !== "Active Loan"} />
+                            <PivotCells
+                              row={row}
+                              loanTypes={pivotData.loanTypes}
+                              purposes={pivotData.purposes}
+                              isDark={isDark}
+                              showOriginated={currentLoanStatusFilter === "Non-active"}
+                              showDenied={currentLoanStatusFilter === "Non-active" || currentLoanStatusFilter === "Fallout"}
+                              showWithdrawn={currentLoanStatusFilter === "Non-active" || currentLoanStatusFilter === "Fallout"}
+                            />
                           </tr>
-                        ))}
+                          );
+                        })}
                     </React.Fragment>
                   ))}
                 </tbody>
