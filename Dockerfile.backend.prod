@@ -4,10 +4,12 @@ FROM node:20-alpine AS builder
 ARG GIT_COMMIT=unknown
 ARG GIT_BRANCH=unknown
 ARG BUILD_ENV=production
+ARG RELEASE_NOTES_COMMITS_B64=
 
 # Set git info for version script (but NOT NODE_ENV yet -- npm ci needs dev deps)
 ENV GIT_COMMIT=$GIT_COMMIT
 ENV GIT_BRANCH=$GIT_BRANCH
+ENV RELEASE_NOTES_COMMITS_B64=$RELEASE_NOTES_COMMITS_B64
 
 WORKDIR /app/server
 
@@ -26,6 +28,8 @@ RUN npm run build
 FROM node:20-alpine
 
 ENV NODE_ENV=production
+ARG RELEASE_NOTES_COMMITS_B64=
+ENV RELEASE_NOTES_COMMITS_B64=$RELEASE_NOTES_COMMITS_B64
 
 WORKDIR /app/server
 
