@@ -12,13 +12,12 @@ import { resolveFrontendUrl } from "../utils/frontendUrl.js";
 const router = Router();
 const getErrorMessage = (error: unknown, fallback: string): string =>
   error instanceof Error ? error.message : fallback;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const requireFalloutAlertAdmin = requireRole(
   "tenant_admin",
   "super_admin",
   "platform_admin",
-  "admin",
-  "manager",
 );
 
 router.get(
@@ -104,7 +103,7 @@ router.get(
   async (req: AuthRequest, res) => {
     try {
       const { tenantPool } = getTenantContext(req);
-      const [loanOfficersResult, activeLoanCountsResult, managersResult] = await Promise.all([
+      const [loanOfficersResult, activeLoanCountsResult, managersResult, branchesResult] = await Promise.all([
         tenantPool.query(
           `SELECT DISTINCT
              encompass_user_id,
@@ -128,10 +127,17 @@ router.get(
         tenantPool.query(
           `SELECT id, COALESCE(full_name, email) AS display_name, email, role
            FROM public.users
-           WHERE role IN ('manager', 'admin', 'tenant_admin')
+           WHERE role = 'tenant_admin'
              AND email IS NOT NULL
              AND is_active = true
            ORDER BY display_name ASC`,
+        ),
+        tenantPool.query(
+          `SELECT DISTINCT branch
+           FROM public.loans
+           WHERE branch IS NOT NULL
+             AND TRIM(branch) <> ''
+           ORDER BY branch ASC`,
         ),
       ]);
       const activeCountById = new Map<string, number>();
@@ -164,6 +170,7 @@ router.get(
       res.json({
         loanOfficers,
         managers: managersResult.rows,
+        branches: (branchesResult.rows as Array<{ branch: string }>).map((row) => row.branch),
       });
     } catch (error: unknown) {
       res.status(500).json({ error: getErrorMessage(error, "Failed to load recipient options") });
@@ -186,14 +193,45 @@ router.post(
           message: "Save fallout alert settings before sending alerts.",
         });
       }
+      const testRecipientEmailsRaw: string[] = Array.isArray(req.body?.test_recipient_emails)
+        ? req.body.test_recipient_emails.filter((value: unknown) => typeof value === "string")
+        : [];
+      const testRecipientEmails: string[] = Array.from(
+        new Set(
+          testRecipientEmailsRaw
+            .map((email: string) => email.trim().toLowerCase())
+            .filter((email: string) => email.length > 0),
+        ),
+      );
+      const invalidTestEmail = testRecipientEmails.find((email: string) => !EMAIL_REGEX.test(email));
+      if (invalidTestEmail) {
+        return res.status(400).json({
+          error: "Invalid test recipient email",
+          message: `Invalid email address: ${invalidTestEmail}`,
+        });
+      }
+
       const hasLoTargets =
         Array.isArray(config.target_encompass_user_ids) &&
         config.target_encompass_user_ids.length > 0;
       const managerNotificationsEnabled = Boolean(config.notify_managers);
-      if (!hasLoTargets && !managerNotificationsEnabled) {
+      const sendManagerCards = Boolean(req.body?.send_manager_cards);
+      const managerCardBranchFilters = Array.isArray(req.body?.manager_card_branch_filters)
+        ? req.body.manager_card_branch_filters
+            .filter((value: unknown) => typeof value === "string")
+            .map((value: string) => value.trim())
+            .filter((value: string) => value.length > 0)
+        : [];
+      const managerCardScopeToTargetLos =
+        typeof req.body?.manager_card_scope_to_target_los === "boolean"
+          ? req.body.manager_card_scope_to_target_los
+          : true;
+      const hasManualTestRecipients = testRecipientEmails.length > 0;
+      if (!hasLoTargets && !managerNotificationsEnabled && !hasManualTestRecipients && !sendManagerCards) {
         return res.status(400).json({
           error: "No recipients selected",
-          message: "Select at least one loan officer or enable manager notifications.",
+          message:
+            "Select at least one loan officer, enable manager notifications, enable manager cards, or add test recipient emails.",
         });
       }
 
@@ -205,6 +243,12 @@ router.post(
         tenantSlug: tenantContext.tenantInfo.slug,
         appBaseUrl,
         config,
+        testRecipientEmails,
+        managerCardDelivery: {
+          enabled: sendManagerCards,
+          branchFilters: managerCardBranchFilters,
+          scopeToTargetLos: managerCardScopeToTargetLos,
+        },
       });
 
       res.json({

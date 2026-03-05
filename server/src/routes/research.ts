@@ -436,7 +436,7 @@ router.put(
     const { visibility, shared_with_user_ids: sharedWithUserIds } = req.body || {};
     const { tenantPool } = getTenantContext(req);
 
-    const GLOBAL_VISIBILITY_ROLES = ['super_admin', 'platform_admin', 'tenant_admin', 'admin'];
+    const GLOBAL_VISIBILITY_ROLES = ['super_admin', 'platform_admin', 'tenant_admin'];
     let validVisibility: string = ["shared", "global"].includes(visibility) ? visibility : "private";
 
     if (validVisibility === "global" && !GLOBAL_VISIBILITY_ROLES.includes(req.userRole || "")) {

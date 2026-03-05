@@ -165,7 +165,7 @@ export const getWebSocketUrl = (): string => {
 
 const API_URL = getApiUrl();
 
-const PLATFORM_STAFF_ROLES = new Set(["super_admin", "platform_admin", "support", "admin"]);
+const PLATFORM_STAFF_ROLES = new Set(["super_admin", "platform_admin", "support"]);
 
 export class ApiClient {
   private baseUrl: string;
@@ -1423,7 +1423,15 @@ export class ApiClient {
     });
   }
 
-  async sendFalloutAlertsNow(tenantId?: string | null) {
+  async sendFalloutAlertsNow(
+    tenantId?: string | null,
+    payload?: {
+      test_recipient_emails?: string[];
+      send_manager_cards?: boolean;
+      manager_card_branch_filters?: string[];
+      manager_card_scope_to_target_los?: boolean;
+    },
+  ) {
     return this.request<{
       message: string;
       alertBatchId: string;
@@ -1431,8 +1439,26 @@ export class ApiClient {
       sentCount: number;
       failedRecipients: Array<{ email: string; error: string }>;
       skippedLoansCount: number;
+      highRiskLoanCount: number;
+      testRecipients: {
+        attempted: number;
+        sent: number;
+        failed: Array<{ email: string; error: string }>;
+      };
+      managerNotifications: {
+        attempted: number;
+        sent: number;
+        failed: Array<{ email: string; error: string }>;
+      };
+      managerCardNotifications: {
+        attempted: number;
+        sent: number;
+        failed: Array<{ email: string; error: string }>;
+        loanCount: number;
+      };
     }>(`/api/fallout-alerts/send-now${this._falloutTq(tenantId)}`, {
       method: "POST",
+      body: JSON.stringify(payload || {}),
     });
   }
 
@@ -1452,6 +1478,7 @@ export class ApiClient {
         active_loan_count: number;
       }>;
       managers: Array<{ id: string; display_name: string; email: string; role: string }>;
+      branches: string[];
     }>(`/api/fallout-alerts/recipient-options${this._falloutTq(tenantId)}`);
   }
 }

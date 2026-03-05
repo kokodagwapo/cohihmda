@@ -19,7 +19,7 @@ import {
 const router = Router();
 
 /** Roles allowed to set visibility = 'global' */
-const GLOBAL_VISIBILITY_ROLES = ['super_admin', 'platform_admin', 'tenant_admin', 'admin'];
+const GLOBAL_VISIBILITY_ROLES = ['super_admin', 'platform_admin', 'tenant_admin'];
 
 /**
  * Resolve permission for a user on a canvas: 'owner' | 'editor' | 'viewer'.

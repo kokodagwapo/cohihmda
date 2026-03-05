@@ -87,7 +87,7 @@ export async function resolveRecipientEmails(
           if (u.email) emails.push(u.email);
         }
       }
-      if (row.is_dynamic && Array.isArray(row.role_filter) && row.role_filter.length > 0) {
+      if (Array.isArray(row.role_filter) && row.role_filter.length > 0) {
         const byRole = await tenantPool.query(
           `SELECT email FROM public.users WHERE role = ANY($1) AND COALESCE(is_active, true) = true`,
           [row.role_filter]

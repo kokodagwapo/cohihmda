@@ -5032,7 +5032,6 @@ Structure it as a narrative-first executive briefing:
                       "super_admin",
                       "platform_admin",
                       "tenant_admin",
-                      "admin",
                     ] as const
                   ).includes(user?.role as any) && (
                     <button

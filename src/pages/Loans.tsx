@@ -283,7 +283,7 @@ export default function Loans() {
         const userData = await api.getCurrentUser();
         setIsAuthenticated(true);
         const role = userData.user?.role || userData.role;
-        setIsAdmin(role === 'super_admin' || role === 'admin' || role === 'tenant_admin');
+        setIsAdmin(role === 'super_admin' || role === 'tenant_admin');
       } catch {
         navigate('/login');
       }

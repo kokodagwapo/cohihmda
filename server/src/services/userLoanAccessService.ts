@@ -86,7 +86,7 @@ export interface LoanAccessContext {
 }
 
 // Roles that have full loan access
-const FULL_ACCESS_ROLES = ["tenant_admin", "admin", "super_admin", "platform_admin"];
+const FULL_ACCESS_ROLES = ["tenant_admin", "super_admin", "platform_admin"];
 
 // Roles with no direct loan access (aggregate metrics only)
 const NO_LOAN_ACCESS_ROLES = ["viewer"];

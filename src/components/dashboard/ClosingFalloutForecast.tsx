@@ -117,6 +117,16 @@ interface FalloutRecipientManager {
   role: string;
 }
 
+const parseManualTestEmails = (rawInput: string): string[] =>
+  Array.from(
+    new Set(
+      rawInput
+        .split(/[\n,;]+/)
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  );
+
 const normalizeRawStatus = (raw: unknown): string =>
   (raw ?? "").toString().trim().toUpperCase();
 
@@ -978,8 +988,6 @@ export const ClosingFalloutForecast = ({
   const isPlatformAdmin = user?.role === "super_admin" || user?.role === "platform_admin";
   const canManageFalloutAlerts = [
     "tenant_admin",
-    "admin",
-    "manager",
     "super_admin",
     "platform_admin",
   ].includes(user?.role || "");
@@ -1132,9 +1140,14 @@ export const ClosingFalloutForecast = ({
   const [falloutAlertResponses, setFalloutAlertResponses] = useState<FalloutAlertResponseRow[]>([]);
   const [falloutLoanOfficerOptions, setFalloutLoanOfficerOptions] = useState<FalloutRecipientLoanOfficer[]>([]);
   const [falloutManagerOptions, setFalloutManagerOptions] = useState<FalloutRecipientManager[]>([]);
+  const [falloutBranchOptions, setFalloutBranchOptions] = useState<string[]>([]);
   const [distributionPanelExpanded, setDistributionPanelExpanded] = useState(false);
   const [loSearchTerm, setLoSearchTerm] = useState("");
   const [loSortMode, setLoSortMode] = useState<"active_desc" | "name_asc">("active_desc");
+  const [manualTestRecipientsInput, setManualTestRecipientsInput] = useState("");
+  const [sendManagerCards, setSendManagerCards] = useState(false);
+  const [managerCardScopeToSelectedLos, setManagerCardScopeToSelectedLos] = useState(true);
+  const [managerCardBranchFilters, setManagerCardBranchFilters] = useState<string[]>([]);
   const [alertsConfigLoading, setAlertsConfigLoading] = useState(false);
   const [alertsConfigSaving, setAlertsConfigSaving] = useState(false);
   const [alertsSending, setAlertsSending] = useState(false);
@@ -3466,6 +3479,11 @@ export const ClosingFalloutForecast = ({
           ? optionsResult.managers
           : [],
       );
+      setFalloutBranchOptions(
+        Array.isArray(optionsResult?.branches)
+          ? optionsResult.branches.filter((value: unknown): value is string => typeof value === "string")
+          : [],
+      );
     } catch (error: unknown) {
       setAlertsMessage(error instanceof Error ? error.message : "Failed to load fallout alert settings.");
     } finally {
@@ -3500,17 +3518,38 @@ export const ClosingFalloutForecast = ({
     try {
       setAlertsSending(true);
       setAlertsMessage(null);
-      const result = await api.sendFalloutAlertsNow(selectedTenantId || undefined);
-      setAlertsMessage(
-        `Sent ${result.sentCount}/${result.recipientsCount} fallout alert emails (${result.skippedLoansCount} loans skipped: no LO email match).`,
-      );
+      const manualRecipients = parseManualTestEmails(manualTestRecipientsInput);
+      const result = await api.sendFalloutAlertsNow(selectedTenantId || undefined, {
+        test_recipient_emails: manualRecipients,
+        send_manager_cards: sendManagerCards,
+        manager_card_branch_filters: managerCardBranchFilters,
+        manager_card_scope_to_target_los: managerCardScopeToSelectedLos,
+      });
+      const baseMessage = `Sent ${result.sentCount}/${result.recipientsCount} fallout alert emails (${result.skippedLoansCount} loans skipped: no LO email match).`;
+      const managerCardsMsg = result.managerCardNotifications.attempted > 0 || sendManagerCards
+        ? ` Manager cards: ${result.managerCardNotifications.sent}/${result.managerCardNotifications.attempted} (loans scoped: ${result.managerCardNotifications.loanCount}).`
+        : "";
+      if (result.testRecipients.attempted > 0) {
+        setAlertsMessage(
+          `${baseMessage} Test recipients: ${result.testRecipients.sent}/${result.testRecipients.attempted}.${managerCardsMsg}`,
+        );
+      } else {
+        setAlertsMessage(`${baseMessage}${managerCardsMsg}`);
+      }
       await loadFalloutAlertAdminData();
     } catch (error: unknown) {
       setAlertsMessage(error instanceof Error ? error.message : "Failed to send fallout alerts.");
     } finally {
       setAlertsSending(false);
     }
-  }, [selectedTenantId, loadFalloutAlertAdminData]);
+  }, [
+    selectedTenantId,
+    loadFalloutAlertAdminData,
+    manualTestRecipientsInput,
+    sendManagerCards,
+    managerCardBranchFilters,
+    managerCardScopeToSelectedLos,
+  ]);
 
   const visibleLoanOfficerOptions = useMemo(() => {
     const query = loSearchTerm.trim().toLowerCase();
@@ -3536,7 +3575,12 @@ export const ClosingFalloutForecast = ({
     });
   }, [falloutLoanOfficerOptions, loSearchTerm, loSortMode, falloutAlertConfig.target_encompass_user_ids]);
   const selectedLoCount = falloutAlertConfig.target_encompass_user_ids.length;
-  const canSendFalloutAlerts = selectedLoCount > 0 || falloutAlertConfig.notify_managers;
+  const manualTestRecipientCount = parseManualTestEmails(manualTestRecipientsInput).length;
+  const canSendFalloutAlerts =
+    selectedLoCount > 0 ||
+    falloutAlertConfig.notify_managers ||
+    sendManagerCards ||
+    manualTestRecipientCount > 0;
 
   return (
     <TooltipProvider>
@@ -3633,7 +3677,7 @@ export const ClosingFalloutForecast = ({
                           className="text-xs"
                           title={
                             !canSendFalloutAlerts
-                              ? "Select at least one LO or enable manager notifications"
+                              ? "Select at least one LO, enable manager notifications, or add test recipient emails"
                               : undefined
                           }
                         >
@@ -3846,6 +3890,77 @@ export const ClosingFalloutForecast = ({
                             ))}
                           </div>
                         </div>
+                      </div>
+
+                      <div className="mt-3 rounded-md border border-slate-200 dark:border-slate-700 p-3">
+                        <div className="flex items-center justify-between gap-3 mb-2">
+                          <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                            Manager Card Delivery (Send Now)
+                          </p>
+                          <Switch
+                            checked={sendManagerCards}
+                            onCheckedChange={setSendManagerCards}
+                          />
+                        </div>
+                        <p className="text-[11px] text-slate-500 mb-2">
+                          Send managers a separate email with loan cards in addition to the summary report.
+                        </p>
+                        {sendManagerCards && (
+                          <>
+                            <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 mb-2">
+                              <input
+                                type="checkbox"
+                                checked={managerCardScopeToSelectedLos}
+                                onChange={(e) => setManagerCardScopeToSelectedLos(e.target.checked)}
+                              />
+                              Scope cards to selected target LOs
+                            </label>
+                            <p className="text-[11px] text-slate-500 mb-1">
+                              Optional branch filter
+                            </p>
+                            <div className="max-h-24 overflow-auto rounded border border-slate-200 dark:border-slate-700 p-2 space-y-1">
+                              {falloutBranchOptions.length === 0 ? (
+                                <p className="text-[11px] text-slate-500">No branches found.</p>
+                              ) : (
+                                falloutBranchOptions.map((branch) => (
+                                  <label key={branch} className="flex items-center gap-2 text-xs">
+                                    <input
+                                      type="checkbox"
+                                      checked={managerCardBranchFilters.includes(branch)}
+                                      onChange={(e) =>
+                                        setManagerCardBranchFilters((prev) =>
+                                          e.target.checked
+                                            ? Array.from(new Set([...prev, branch]))
+                                            : prev.filter((value) => value !== branch),
+                                        )
+                                      }
+                                    />
+                                    <span>{branch}</span>
+                                  </label>
+                                ))
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+
+                      <div className="mt-3 rounded-md border border-slate-200 dark:border-slate-700 p-3">
+                        <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
+                          Manual Test Recipients
+                        </p>
+                        <p className="text-[11px] text-slate-500 mb-2">
+                          Send test loan cards to specific emails without selecting any LOs.
+                        </p>
+                        <Textarea
+                          rows={2}
+                          value={manualTestRecipientsInput}
+                          onChange={(e) => setManualTestRecipientsInput(e.target.value)}
+                          placeholder="name@company.com, qa@company.com"
+                          className="text-xs"
+                        />
+                        <p className="mt-1 text-[11px] text-slate-500">
+                          Parsed test recipients: {manualTestRecipientCount}
+                        </p>
                       </div>
 
                       <div className="mt-3">

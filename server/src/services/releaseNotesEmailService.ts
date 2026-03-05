@@ -126,6 +126,9 @@ async function buildEmailHtml(
     });
   }
 
+  console.warn(
+    "[ReleaseNotesEmail] release-notes.html template missing; using fallback HTML.",
+  );
   return `<!DOCTYPE html>
 <html><body>
   <h1>Cohi Release Notes - ${escapeHtml(note.version)}</h1>

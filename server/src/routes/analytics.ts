@@ -29,7 +29,7 @@ import {
 
 const router = Router();
 
-const requireAnalyticsAdmin = requireRole("super_admin", "platform_admin", "tenant_admin", "admin");
+const requireAnalyticsAdmin = requireRole("super_admin", "platform_admin", "tenant_admin");
 
 /** Resolve tenant ID for analytics: JWT tenant for tenant users, or query param for platform admins. */
 async function resolveAnalyticsTenantId(req: AuthRequest): Promise<string | null> {
