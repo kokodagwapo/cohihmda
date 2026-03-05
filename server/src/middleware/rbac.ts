@@ -57,8 +57,7 @@ export async function checkPermission(
     if (role === 'super_admin') return true;
 
     // Fallback: If permissions table doesn't exist, use role-based defaults
-    // Admin role (mapped to super_admin) has all permissions
-    if (role === 'admin' || role === 'super_admin') return true;
+    if (role === 'super_admin') return true;
     
     // Tenant admin has most permissions except super admin only features
     if (role === 'tenant_admin') {
@@ -145,7 +144,6 @@ async function getUserRoleAndTenant(userId: string): Promise<{ role: string; ten
       `SELECT 
          CASE 
            WHEN u.role = 'super_admin' THEN 'super_admin'
-           WHEN u.role = 'admin' THEN 'super_admin'
            WHEN u.role = 'tenant_admin' THEN 'tenant_admin'
            WHEN u.role = 'user' THEN 'user'
            WHEN u.role = 'viewer' THEN 'viewer'
@@ -271,7 +269,7 @@ export function requireRole(...allowedRoles: string[]) {
   };
 }
 
-const PLATFORM_STAFF_ROLES = new Set(["super_admin", "platform_admin", "support", "admin"]);
+const PLATFORM_STAFF_ROLES = new Set(["super_admin", "platform_admin", "support"]);
 const ADMIN_ROLES = new Set([...PLATFORM_STAFF_ROLES, "tenant_admin"]);
 
 /**

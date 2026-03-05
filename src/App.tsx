@@ -49,6 +49,8 @@ import LockStratification from "./pages/LockStratification";
 import PipelineAnalysisDashboard from "./pages/PipelineAnalysisDashboard";
 import LoanComplexity from "./pages/LoanComplexity";
 import Actors from "./pages/Actors";
+import FalloutForecast from "./pages/FalloutForecast";
+import FalloutLoanDetail from "./pages/FalloutLoanDetail";
 import { KnowledgeBaseEditor } from "./components/admin/KnowledgeBaseEditor";
 import { GlobalCohiChat } from "./components/cohi/GlobalCohiChat";
 import { CohiDemoExperience } from "./components/demo/CohiDemoExperience";
@@ -188,6 +190,8 @@ const App = () => (
               <Route path="/loan-funnel" element={<Navigate to="/insights" replace />} />
               <Route path="/workflow-conversion" element={<WorkflowConversion />} />
               <Route path="/loan-detail" element={<LoanDetail />} />
+              <Route path="/fallout-forecast" element={<FalloutForecast />} />
+              <Route path="/fallout-forecast/loan/:loanId" element={<FalloutLoanDetail />} />
               <Route path="/pricing-dashboard" element={<PricingDashboard />} />
               <Route path="/lock-stratification" element={<LockStratification />} />
               <Route path="/pipeline-analysis" element={<PipelineAnalysisDashboard />} />

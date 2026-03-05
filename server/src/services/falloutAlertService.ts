@@ -26,6 +26,7 @@ export interface FalloutAlertConfig {
 interface RiskLoanRow {
   loan_id: string;
   loan_number: string | null;
+  branch: string | null;
   loan_amount: number | null;
   loan_officer: string | null;
   loan_officer_id: string | null;
@@ -62,10 +63,21 @@ export interface SendFalloutAlertsResult {
   failedRecipients: Array<{ email: string; error: string }>;
   skippedLoansCount: number;
   highRiskLoanCount: number;
+  testRecipients: {
+    attempted: number;
+    sent: number;
+    failed: Array<{ email: string; error: string }>;
+  };
   managerNotifications: {
     attempted: number;
     sent: number;
     failed: Array<{ email: string; error: string }>;
+  };
+  managerCardNotifications: {
+    attempted: number;
+    sent: number;
+    failed: Array<{ email: string; error: string }>;
+    loanCount: number;
   };
 }
 
@@ -188,6 +200,7 @@ export async function getHighRiskLoansForAlerts(
       SELECT
         l.loan_id,
         l.loan_number,
+        l.branch,
         l.loan_amount,
         l.loan_officer,
         l.loan_officer_id,
@@ -214,6 +227,7 @@ export async function getHighRiskLoansForAlerts(
     SELECT
       loan_id,
       loan_number,
+      branch,
       loan_amount,
       loan_officer,
       loan_officer_id,
@@ -344,6 +358,7 @@ function buildLoanRowsHtml(
   appBaseUrl: string,
   tenantSlug: string,
 ): string {
+  const appBase = appBaseUrl.replace(/\/+$/, "");
   return recipient.loans
     .map((loan) => {
       const token = tokenByLoanId.get(loan.loanId);
@@ -351,6 +366,7 @@ function buildLoanRowsHtml(
       const gotItUrl = buildActionUrl(appBaseUrl, tenantSlug, token, "acknowledged");
       const workingUrl = buildActionUrl(appBaseUrl, tenantSlug, token, "working_on_it");
       const helpUrl = buildActionUrl(appBaseUrl, tenantSlug, token, "need_help");
+      const loanDetailUrl = `${appBase}/fallout-forecast/loan/${encodeURIComponent(loan.loanId)}`;
       const reasons = loan.riskReasons.slice(0, 3).join(", ") || "Risk factors not specified";
       return `
       <div class="loan-card">
@@ -369,9 +385,64 @@ function buildLoanRowsHtml(
           <a href="${workingUrl}" class="btn btn-working">Working on it</a>
           <a href="${helpUrl}" class="btn btn-help">Need help</a>
         </div>
+        <div style="margin-top:10px;">
+          <a href="${loanDetailUrl}" style="font-size:13px;color:#2563eb;text-decoration:none;font-weight:500;">Open full loan coaching view</a>
+        </div>
       </div>`;
     })
     .join("");
+}
+
+function buildManagerLoanCardsHtml({
+  loans,
+  appBaseUrl,
+}: {
+  loans: RiskLoanRow[];
+  appBaseUrl: string;
+}): string {
+  const appBase = appBaseUrl.replace(/\/+$/, "");
+  if (loans.length === 0) {
+    return `<p style="color:#64748b;font-size:13px;">No high-risk loans matched your selected manager card filters.</p>`;
+  }
+
+  const cards = loans
+    .slice(0, 60)
+    .map((loan) => {
+      const loanDetailUrl = `${appBase}/fallout-forecast/loan/${encodeURIComponent(loan.loan_id)}`;
+      const reasons = Array.isArray(loan.risk_factors)
+        ? loan.risk_factors.slice(0, 3).join(", ")
+        : "Risk factors not specified";
+      return `
+        <div style="border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;margin:0 0 10px;">
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
+            <a href="${loanDetailUrl}" style="font-weight:700;color:#2563eb;text-decoration:none;">
+              Loan #${loan.loan_number || loan.loan_id}
+            </a>
+            <span style="font-size:11px;padding:2px 8px;border-radius:9999px;background:#fee2e2;color:#991b1b;font-weight:600;">
+              ${loan.risk_level} (${loan.risk_score})
+            </span>
+          </div>
+          <div style="font-size:12px;color:#334155;margin-top:6px;">
+            <span><strong>LO:</strong> ${loan.loan_officer || "—"}</span>
+            <span style="margin-left:10px;"><strong>Branch:</strong> ${loan.branch || "—"}</span>
+            <span style="margin-left:10px;"><strong>Amount:</strong> ${toCurrency(loan.loan_amount)}</span>
+          </div>
+          <div style="font-size:12px;color:#64748b;margin-top:6px;">
+            ${reasons}
+          </div>
+        </div>`;
+    })
+    .join("");
+
+  const dashboardUrl = `${appBase}/fallout-forecast`;
+  return `
+    <p style="font-size:14px;color:#475569;">Actionable fallout cards for your selected scope are below.</p>
+    ${cards}
+    <div style="text-align:center;margin-top:14px;">
+      <a href="${dashboardUrl}" style="display:inline-block;padding:10px 20px;background:#3b82f6;color:#fff;text-decoration:none;border-radius:6px;font-size:13px;font-weight:600;">
+        Open Full Fallout Report
+      </a>
+    </div>`;
 }
 
 function buildManagerSummaryHtml({
@@ -393,7 +464,7 @@ function buildManagerSummaryHtml({
   includeLevels: string[];
   appBaseUrl: string;
 }): string {
-  const dashboardUrl = `${appBaseUrl.replace(/\/+$/, "")}/dashboard`;
+  const dashboardUrl = `${appBaseUrl.replace(/\/+$/, "")}/fallout-forecast`;
 
   if (highRiskLoans.length === 0) {
     return `
@@ -421,7 +492,7 @@ function buildManagerSummaryHtml({
   };
 
   const loanUrl = (loanId: string) =>
-    `${appBaseUrl.replace(/\/+$/, "")}/loan/${encodeURIComponent(loanId)}`;
+    `${appBaseUrl.replace(/\/+$/, "")}/fallout-forecast/loan/${encodeURIComponent(loanId)}`;
 
   const MAX_LOANS_SHOWN = 50;
   const loansToShow = highRiskLoans.slice(0, MAX_LOANS_SHOWN);
@@ -489,6 +560,8 @@ export async function sendFalloutAlerts({
   tenantSlug,
   appBaseUrl,
   config,
+  testRecipientEmails,
+  managerCardDelivery,
 }: {
   tenantPool: Pool;
   tenantId: string;
@@ -503,17 +576,62 @@ export async function sendFalloutAlerts({
     | "target_encompass_user_ids"
     | "manager_user_ids"
   >;
+  testRecipientEmails?: string[];
+  managerCardDelivery?: {
+    enabled?: boolean;
+    branchFilters?: string[];
+    scopeToTargetLos?: boolean;
+  };
 }): Promise<SendFalloutAlertsResult> {
   const highRiskLoans = await getHighRiskLoansForAlerts(tenantPool, config);
-  const { recipients, skippedLoansCount } = await resolveLoanOfficerEmails(
+  const { recipients: resolvedRecipients, skippedLoansCount } = await resolveLoanOfficerEmails(
     tenantPool,
     highRiskLoans,
     config.target_encompass_user_ids,
+  );
+  const manualTestRecipients = Array.from(
+    new Set(
+      (Array.isArray(testRecipientEmails) ? testRecipientEmails : [])
+        .map((email) => email.trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  ).map<ResolvedRecipient>((email, index) => ({
+    encompassUserId: `manual-test-${index + 1}`,
+    email,
+    fullName: null,
+    loans: highRiskLoans.map((loan) => ({
+      loanId: loan.loan_id,
+      loanNumber: loan.loan_number || loan.loan_id,
+      loanOfficerName: loan.loan_officer || "Loan Officer",
+      amount: loan.loan_amount,
+      riskScore: loan.risk_score,
+      riskLevel: loan.risk_level,
+      predictedOutcome: loan.predicted_outcome,
+      estimatedClosingDate: loan.estimated_closing_date,
+      riskReasons: Array.isArray(loan.risk_factors) ? loan.risk_factors : [],
+    })),
+  }));
+  const loRecipientEmailSet = new Set(
+    resolvedRecipients.map((recipient) => recipient.email.trim().toLowerCase()),
+  );
+  const recipients = [
+    ...resolvedRecipients,
+    ...manualTestRecipients.filter(
+      (recipient) => !loRecipientEmailSet.has(recipient.email.trim().toLowerCase()),
+    ),
+  ];
+  const manualTestRecipientSet = new Set(
+    manualTestRecipients.map((recipient) => recipient.email.trim().toLowerCase()),
   );
   const alertBatchId = crypto.randomUUID();
   const failedRecipients: Array<{ email: string; error: string }> = [];
   const template = (await loadEmailTemplate("fallout-alert.html")) ?? null;
   let sentCount = 0;
+  const testRecipients = {
+    attempted: manualTestRecipients.length,
+    sent: 0,
+    failed: [] as Array<{ email: string; error: string }>,
+  };
 
   for (const recipient of recipients) {
     const tokenByLoanId = new Map<string, string>();
@@ -553,6 +671,9 @@ export async function sendFalloutAlerts({
         strict: true,
       });
       sentCount += 1;
+      if (manualTestRecipientSet.has(recipient.email.trim().toLowerCase())) {
+        testRecipients.sent += 1;
+      }
       console.log(`✅ Fallout alert sent to ${recipient.email} (${recipient.loans.length} loans)`);
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "Failed to send fallout alert email";
@@ -561,10 +682,22 @@ export async function sendFalloutAlerts({
         email: recipient.email,
         error: msg,
       });
+      if (manualTestRecipientSet.has(recipient.email.trim().toLowerCase())) {
+        testRecipients.failed.push({
+          email: recipient.email,
+          error: msg,
+        });
+      }
     }
   }
 
   const managerNotifications = { attempted: 0, sent: 0, failed: [] as Array<{ email: string; error: string }> };
+  const managerCardNotifications = {
+    attempted: 0,
+    sent: 0,
+    failed: [] as Array<{ email: string; error: string }>,
+    loanCount: 0,
+  };
 
   if (config.notify_managers) {
     const selectedManagerIds = Array.isArray(config.manager_user_ids)
@@ -579,7 +712,7 @@ export async function sendFalloutAlerts({
              AND is_active = true`
         : `SELECT id, email, COALESCE(full_name, email) AS full_name
            FROM public.users
-           WHERE role IN ('manager', 'admin', 'tenant_admin')
+           WHERE role = 'tenant_admin'
              AND email IS NOT NULL
              AND is_active = true`;
     const managerParams = selectedManagerIds.length > 0 ? [selectedManagerIds] : [];
@@ -645,7 +778,7 @@ export async function sendFalloutAlerts({
               ${summaryBody}
             </div>
             <div style="background:#f8fafc;padding:16px 30px;text-align:center;color:#64748b;font-size:12px;border-top:1px solid #e2e8f0;">
-              Coheus &bull; Closing Fallout Intelligence &bull; <a href="${appBaseUrl.replace(/\/+$/, "")}/dashboard" style="color:#3b82f6;text-decoration:none;">Open Dashboard</a>
+              Coheus &bull; Closing Fallout Intelligence &bull; <a href="${appBaseUrl.replace(/\/+$/, "")}/fallout-forecast" style="color:#3b82f6;text-decoration:none;">Open Dashboard</a>
             </div>
           </div>
         </body>
@@ -671,6 +804,93 @@ export async function sendFalloutAlerts({
     }
   }
 
+  if (managerCardDelivery?.enabled) {
+    const selectedManagerIds = Array.isArray(config.manager_user_ids)
+      ? config.manager_user_ids.filter(Boolean)
+      : [];
+    const managerQuery =
+      selectedManagerIds.length > 0
+        ? `SELECT id, email, COALESCE(full_name, email) AS full_name
+           FROM public.users
+           WHERE id = ANY($1::uuid[])
+             AND email IS NOT NULL
+             AND is_active = true`
+        : `SELECT id, email, COALESCE(full_name, email) AS full_name
+           FROM public.users
+           WHERE role = 'tenant_admin'
+             AND email IS NOT NULL
+             AND is_active = true`;
+    const managerParams = selectedManagerIds.length > 0 ? [selectedManagerIds] : [];
+    const managers = await tenantPool.query<{ id: string; email: string; full_name: string | null }>(
+      managerQuery,
+      managerParams,
+    );
+    managerCardNotifications.attempted = managers.rows.length;
+
+    const branchFilterSet = new Set(
+      (Array.isArray(managerCardDelivery.branchFilters) ? managerCardDelivery.branchFilters : [])
+        .map((value) => value.trim())
+        .filter(Boolean),
+    );
+    const targetSet = new Set(
+      Array.isArray(config.target_encompass_user_ids) ? config.target_encompass_user_ids.filter(Boolean) : [],
+    );
+    const scopeToTargetLos = managerCardDelivery.scopeToTargetLos !== false;
+    const scopedLoans = highRiskLoans.filter((loan) => {
+      if (scopeToTargetLos && targetSet.size > 0) {
+        if (!loan.loan_officer_id || !targetSet.has(loan.loan_officer_id)) return false;
+      }
+      if (branchFilterSet.size > 0) {
+        const branch = (loan.branch || "").trim();
+        if (!branch || !branchFilterSet.has(branch)) return false;
+      }
+      return true;
+    });
+    managerCardNotifications.loanCount = scopedLoans.length;
+    const cardsHtml = buildManagerLoanCardsHtml({ loans: scopedLoans, appBaseUrl });
+
+    for (const manager of managers.rows) {
+      const greeting = manager.full_name || "Manager";
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="UTF-8"></head>
+        <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#334155;margin:0;padding:0;background:#f1f5f9;">
+          <div style="max-width:720px;margin:24px auto;background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e2e8f0;">
+            <div style="background:linear-gradient(135deg,#1e3a5f 0%,#2563eb 100%);color:white;padding:22px 24px;">
+              <h1 style="margin:0;font-weight:600;font-size:20px;">Coheus Fallout Cards</h1>
+              <p style="margin:6px 0 0;opacity:0.9;font-size:13px;">
+                Scoped cards for selected loan officer and branch filters.
+              </p>
+            </div>
+            <div style="padding:20px 24px;">
+              <p style="margin-top:0;">Hi ${greeting},</p>
+              ${cardsHtml}
+            </div>
+          </div>
+        </body>
+        </html>`;
+
+      try {
+        await sendEmail({
+          to: manager.email,
+          subject: scopedLoans.length > 0
+            ? `Coheus Fallout Cards — ${scopedLoans.length} High-Risk Loans`
+            : "Coheus Fallout Cards — No Matching Loans",
+          html,
+          emailType: "fallout_alert_manager_summary",
+          containsPii: true,
+          tenantId,
+          strict: true,
+        });
+        managerCardNotifications.sent += 1;
+      } catch (mgrErr: unknown) {
+        const msg = mgrErr instanceof Error ? mgrErr.message : "Failed to send manager cards";
+        managerCardNotifications.failed.push({ email: manager.email, error: msg });
+      }
+    }
+  }
+
   return {
     alertBatchId,
     recipientsCount: recipients.length,
@@ -678,7 +898,9 @@ export async function sendFalloutAlerts({
     failedRecipients,
     skippedLoansCount,
     highRiskLoanCount: highRiskLoans.length,
+    testRecipients,
     managerNotifications,
+    managerCardNotifications,
   };
 }
 

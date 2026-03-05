@@ -2,7 +2,7 @@
 /**
  * Seed Default Users for All Roles
  * 
- * This script creates default users for all roles (admin, user, viewer)
+ * This script creates default users for all roles (tenant_admin, user, viewer)
  * using secure credentials from environment variables.
  * 
  * Usage:
@@ -86,12 +86,12 @@ function generateSecurePassword(length = 24) {
  */
 const userConfigs = [
   {
-    role: 'admin',
+    role: 'tenant_admin',
     email: process.env.ADMIN_EMAIL || `admin-${Date.now()}@coheus.local`,
     password: process.env.ADMIN_PASSWORD,
     fullName: 'Admin User',
     tenantName: 'Admin Tenant',
-    required: true, // Admin is required
+    required: true, // Tenant admin is required
   },
   {
     role: 'user',

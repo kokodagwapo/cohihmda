@@ -147,16 +147,25 @@ export default function Distributions() {
     mutationFn: (id: string) => api.deleteDistributionSchedule(id, tenantId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["distributions"] });
-      toast({ title: "Schedule deactivated" });
+      toast({ title: "Schedule deleted" });
     },
     onError: (e: Error) => {
       toast({
-        title: "Failed to deactivate",
+        title: "Failed to delete",
         description: e.message,
         variant: "destructive",
       });
     },
   });
+
+  const confirmDelete = useCallback(
+    (id: string, name: string) => {
+      if (window.confirm(`Permanently delete "${name}"? This will also remove all send history and cannot be undone.`)) {
+        deleteMutation.mutate(id);
+      }
+    },
+    [deleteMutation],
+  );
 
   const sendNowMutation = useMutation({
     mutationFn: (id: string) => api.sendDistributionNow(id, tenantId),
@@ -375,9 +384,9 @@ export default function Distributions() {
                                   variant="ghost"
                                   size="icon"
                                   className="h-8 w-8 text-red-600 hover:text-red-700"
-                                  onClick={() => deleteMutation.mutate(s.id)}
+                                  onClick={() => confirmDelete(s.id, s.name)}
                                   disabled={deleteMutation.isPending}
-                                  title="Deactivate"
+                                  title="Delete"
                                 >
                                   <Trash2 className="h-4 w-4" />
                                 </Button>
@@ -737,8 +746,6 @@ const ROLES = [
   { value: "tenant_admin", label: "Admin" },
   { value: "user", label: "User" },
   { value: "viewer", label: "Viewer" },
-  { value: "loan_officer", label: "Loan Officer" },
-  { value: "processor", label: "Processor" },
 ];
 
 function RecipientListSection({
@@ -953,7 +960,6 @@ function RecipientListDialog({
   const [userIds, setUserIds] = useState<string[]>([]);
   const [externalEmails, setExternalEmails] = useState("");
   const [roleFilter, setRoleFilter] = useState<string[]>([]);
-  const [isDynamic, setIsDynamic] = useState(false);
   const [autoInvite, setAutoInvite] = useState(false);
   const [autoInviteGroupId, setAutoInviteGroupId] = useState("");
 
@@ -967,7 +973,6 @@ function RecipientListDialog({
       setUserIds(list.user_ids ?? []);
       setExternalEmails((list.external_emails ?? []).join(", "));
       setRoleFilter(list.role_filter ?? []);
-      setIsDynamic(!!list.is_dynamic);
       setAutoInvite(!!list.auto_invite);
       setAutoInviteGroupId(list.auto_invite_group_id ?? "");
     } else {
@@ -976,7 +981,6 @@ function RecipientListDialog({
       setUserIds([]);
       setExternalEmails("");
       setRoleFilter([]);
-      setIsDynamic(false);
       setAutoInvite(false);
       setAutoInviteGroupId("");
     }
@@ -993,7 +997,7 @@ function RecipientListDialog({
       user_ids: userIds,
       external_emails: emails,
       role_filter: roleFilter,
-      is_dynamic: isDynamic,
+      is_dynamic: roleFilter.length > 0,
       auto_invite: autoInvite,
       auto_invite_group_id:
         autoInvite && autoInviteGroupId ? autoInviteGroupId : null,
@@ -1061,7 +1065,10 @@ function RecipientListDialog({
             </div>
           </div>
           <div>
-            <Label>Include by role (dynamic at send time)</Label>
+            <Label>Include by role</Label>
+            <p className="text-xs text-slate-500 mb-1.5">
+              All active users with the selected roles will be included each time a distribution is sent.
+            </p>
             <div className="flex flex-wrap gap-2">
               {ROLES.map((r) => (
                 <label
@@ -1077,14 +1084,6 @@ function RecipientListDialog({
                 </label>
               ))}
             </div>
-            <label className="flex items-center gap-2 mt-2 text-sm">
-              <input
-                type="checkbox"
-                checked={isDynamic}
-                onChange={(e) => setIsDynamic(e.target.checked)}
-              />
-              Resolve roles at send time
-            </label>
           </div>
           <div>
             <Label>External emails (comma-separated)</Label>

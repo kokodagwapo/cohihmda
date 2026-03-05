@@ -190,7 +190,6 @@ const dashboardSectionsConfig = [
   { id: 'industryNews' as SectionId, label: 'Mortgage News', icon: FileText, color: 'text-blue-500', section: 'main' },
   { id: 'leaderboard' as SectionId, label: 'Leaderboard', icon: Trophy, color: 'text-amber-500', section: 'dashboards' },
   { id: 'executiveDashboard' as SectionId, label: 'Business Overview', icon: Target, color: 'text-blue-500', section: 'dashboards' },
-  { id: 'closingFalloutForecast' as SectionId, label: 'Closing & Fallout Forecast', icon: BarChart3, color: 'text-indigo-500', section: 'dashboards' },
 ];
 
 // Default section order - matches actual display order on /insights page
@@ -199,7 +198,6 @@ export const defaultSectionOrder: SectionId[] = [
   'industryNews',
   'leaderboard',
   'executiveDashboard',
-  'closingFalloutForecast',
 ];
 
 // Nav menu structure mirroring top Navigation (keep sidemenu icons: Sun, FileText, Trophy, Target, BarChart3 for sections)
@@ -212,7 +210,6 @@ const INSIGHTS_CHILDREN = [
 const DASHBOARD_FLOATING_ITEMS: { id: SectionId; label: string; icon: typeof Trophy; color: string }[] = [
   { id: 'leaderboard', label: 'Leaderboard', icon: Trophy, color: 'text-amber-500' },
   { id: 'executiveDashboard', label: 'Business Overview', icon: Target, color: 'text-blue-500' },
-  { id: 'closingFalloutForecast', label: 'Closing & Fallout Forecast', icon: BarChart3, color: 'text-indigo-500' },
 ];
 
 type SubsectionKey = 'dashboard' | 'topTiering' | 'sales' | 'operations' | 'financialModeling';
@@ -221,7 +218,6 @@ const DASHBOARD_CHILDREN = [
   { type: 'subheader' as const, label: 'Dashboard', subsectionKey: 'dashboard' as SubsectionKey },
   { type: 'section' as const, id: 'leaderboard' as SectionId, label: 'Leaderboard', icon: Trophy, color: 'text-amber-500', subsectionKey: 'dashboard' as SubsectionKey },
   { type: 'section' as const, id: 'executiveDashboard' as SectionId, label: 'Business Overview', icon: Target, color: 'text-blue-500', subsectionKey: 'dashboard' as SubsectionKey },
-  { type: 'section' as const, id: 'closingFalloutForecast' as SectionId, label: 'Closing & Fallout Forecast', icon: BarChart3, color: 'text-indigo-500', subsectionKey: 'dashboard' as SubsectionKey },
 ];
 
 // Submenus under Toptiering main menu (Core Analytics, Sales, Operations, Financial Modeling)
@@ -234,6 +230,7 @@ const TOPTIERING_CHILDREN = [
   { type: 'route' as const, id: 'companyScorecard', label: 'Company Scorecard', icon: ClipboardList, path: '/company-scorecard', subsectionKey: 'topTiering' as SubsectionKey },
   { type: 'route' as const, id: 'lockStratification', label: 'Lock Stratification', icon: Lock, path: '/lock-stratification', subsectionKey: 'topTiering' as SubsectionKey },
   { type: 'route' as const, id: 'loanComplexity', label: 'Loan Complexity', icon: Layers, path: '/loan-complexity', subsectionKey: 'topTiering' as SubsectionKey },
+  { type: 'route' as const, id: 'falloutForecastPage', label: 'Fallout Report', icon: BarChart3, path: '/fallout-forecast', subsectionKey: 'topTiering' as SubsectionKey },
   { type: 'subheader' as const, label: 'Sales', subsectionKey: 'sales' as SubsectionKey },
   { type: 'route' as const, id: 'salesScorecard', label: 'Scorecard', icon: Target, path: '/sales-scorecard', subsectionKey: 'sales' as SubsectionKey },
   { type: 'route' as const, id: 'salesTrends', label: 'Trends', icon: TrendingUp, path: '/sales-trends', subsectionKey: 'sales' as SubsectionKey },
@@ -284,6 +281,7 @@ const navIconColorByItemId: Record<string, string> = {
   companyScorecard: 'indigo',
   lockStratification: 'blue',
   loanComplexity: 'indigo',
+  falloutForecastPage: 'indigo',
   workflowConversion: 'blue',
   highPerformers: 'amber',
   loanDetail: 'blue',

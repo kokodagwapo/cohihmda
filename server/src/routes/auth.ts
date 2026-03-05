@@ -45,11 +45,8 @@ interface TenantUser {
   full_name: string | null;
   role:
     | "tenant_admin"
-    | "admin"
     | "user"
-    | "viewer"
-    | "loan_officer"
-    | "processor";
+    | "viewer";
   is_active: boolean;
   tenant_id: string;
   tenant_name: string;

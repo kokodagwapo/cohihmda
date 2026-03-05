@@ -1,7 +1,7 @@
 /**
  * Report Distribution API Routes
  * CRUD for distribution_schedules and distribution_recipient_lists (tenant DB).
- * Authorization: tenant_admin, super_admin, platform_admin, admin.
+ * Authorization: tenant_admin, super_admin, platform_admin.
  */
 import { Router } from 'express';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
@@ -16,8 +16,7 @@ const router = Router();
 const requireDistributionsAdmin = requireRole(
   'tenant_admin',
   'super_admin',
-  'platform_admin',
-  'admin'
+  'platform_admin'
 );
 
 // ---------------------------------------------------------------------------
@@ -428,7 +427,7 @@ router.put(
   }
 );
 
-/** DELETE /:id — Deactivate schedule (soft delete: set is_active = false) */
+/** DELETE /:id — Permanently delete schedule and its send history */
 router.delete(
   '/:id',
   authenticateToken,
@@ -438,9 +437,12 @@ router.delete(
     try {
       const { tenantPool } = getTenantContext(req);
       const { id } = req.params;
+      await tenantPool.query(
+        `DELETE FROM public.distribution_send_log WHERE schedule_id = $1`,
+        [id]
+      );
       const result = await tenantPool.query(
-        `UPDATE public.distribution_schedules SET is_active = false, updated_at = NOW()
-         WHERE id = $1 RETURNING id`,
+        `DELETE FROM public.distribution_schedules WHERE id = $1 RETURNING id`,
         [id]
       );
       if (result.rows.length === 0) {
@@ -448,9 +450,9 @@ router.delete(
       }
       res.status(204).send();
     } catch (error: any) {
-      console.error('[Distributions] Error deactivating schedule:', error.message);
+      console.error('[Distributions] Error deleting schedule:', error.message);
       res.status(500).json({
-        error: 'Failed to deactivate distribution schedule',
+        error: 'Failed to delete distribution schedule',
         message: error.message,
       });
     }

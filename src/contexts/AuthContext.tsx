@@ -12,22 +12,16 @@ import { enforcePlatformOnly } from '@/stores/tenantStore';
  * 
  * Tenant roles (stored in tenant DBs):
  * - tenant_admin: Client admin with access to their organization's settings
- * - admin: Organization admin (legacy, same as tenant_admin)
  * - user: Regular user with standard access
  * - viewer: Read-only access
- * - loan_officer: Loan officer with specific permissions
- * - processor: Loan processor with specific permissions
  */
 export type UserRole = 
   | 'super_admin' 
   | 'platform_admin' 
   | 'support'
   | 'tenant_admin' 
-  | 'admin' 
   | 'user' 
-  | 'viewer' 
-  | 'loan_officer' 
-  | 'processor';
+  | 'viewer';
 
 /**
  * User object returned from the API
@@ -366,7 +360,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
    * Check if user is a tenant admin
    */
   const isTenantAdmin = useCallback((): boolean => {
-    return user?.role === 'tenant_admin' || user?.role === 'admin';
+    return user?.role === 'tenant_admin';
   }, [user]);
 
   /**

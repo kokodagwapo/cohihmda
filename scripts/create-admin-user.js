@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * Create Admin User
+ * Create Tenant Admin User
  * 
- * This script creates an admin user using credentials from environment variables.
+ * This script creates a tenant admin user using credentials from environment variables.
  * 
  * ⚠️  DEPRECATED: Use scripts/seed-default-users.js instead
  *     The new seed script supports all user roles and better security.
@@ -108,7 +108,7 @@ async function createAdminUser() {
       `INSERT INTO public.users (email, password_hash, full_name, role, is_active)
        VALUES ($1, $2, $3, $4, true)
        RETURNING id, email, role`,
-      [ADMIN_EMAIL, passwordHash, 'Admin User', 'admin']
+      [ADMIN_EMAIL, passwordHash, 'Admin User', 'tenant_admin']
     );
 
     const userId = userResult.rows[0].id;
@@ -150,7 +150,7 @@ async function createAdminUser() {
     console.log('✅ Admin user created successfully!\n');
     console.log('📧 Email:', ADMIN_EMAIL);
     console.log('👤 User ID:', userId);
-    console.log('👥 Role: admin');
+    console.log('👥 Role: tenant_admin');
     console.log('🏢 Tenant ID:', tenantId);
     console.log('\n🔒 Password was set from ADMIN_PASSWORD environment variable');
     console.log('\n💡 TIP: For creating multiple role users, use:');

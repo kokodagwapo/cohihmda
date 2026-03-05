@@ -1,6 +1,6 @@
 // Dashboard main insights page
-import { useEffect, useState, useMemo, useRef, useCallback } from "react";
-import { useNavigate, Link, useSearchParams } from "react-router-dom";
+import { useEffect, useState, useMemo } from "react";
+import { useNavigate, Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import {
   Card,
@@ -155,7 +155,6 @@ import { ExecutiveDashboard } from "@/components/dashboard/ExecutiveDashboard";
 import { AletheiaPromptsCard } from "@/components/dashboard/AletheiaPromptsCard";
 import { LeaderBoardSection } from "@/components/dashboard/LeaderBoardSection";
 import { LoanFunnelView } from "@/components/views/LoanFunnelView";
-import { ClosingFalloutForecast } from "@/components/dashboard/ClosingFalloutForecast";
 import { TopTieringModal } from "@/components/dashboard/modals/TopTieringModal";
 import { TrendsModal } from "@/components/dashboard/modals/TrendsModal";
 import { ForecastingModal } from "@/components/dashboard/modals/ForecastingModal";
@@ -177,7 +176,6 @@ import { useTenantStore } from "@/stores/tenantStore";
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
   // Use AuthContext for proper authentication (not useEdit)
   const {
@@ -209,26 +207,6 @@ const Dashboard = () => {
   // Tenant selection from global store (shared with Navigation header)
   const { selectedTenantId, setSelectedTenantId } = useTenantStore();
 
-  const openLoanId = searchParams.get("loan");
-  const closingFalloutSectionRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (openLoanId && closingFalloutSectionRef.current) {
-      setTimeout(() => {
-        closingFalloutSectionRef.current?.scrollIntoView({
-          behavior: "smooth",
-          block: "start",
-        });
-      }, 300);
-    }
-  }, [openLoanId]);
-
-  const handleLoanIdHandled = useCallback(() => {
-    const newParams = new URLSearchParams(searchParams);
-    newParams.delete("loan");
-    const newSearch = newParams.toString();
-    setSearchParams(newSearch ? `?${newSearch}` : "", { replace: true });
-  }, [searchParams, setSearchParams]);
 
   // Track user ID to detect user changes and reset state
   // Initialize with current user ID to avoid resetting on first mount
@@ -1344,8 +1322,7 @@ const Dashboard = () => {
 
               {/* Dashboards Section */}
               {(dashboardVisibility.leaderboard ||
-                dashboardVisibility.executiveDashboard ||
-                dashboardVisibility.closingFalloutForecast) && (
+                dashboardVisibility.executiveDashboard) && (
                 <div className="section-dashboards mt-12 sm:mt-16 w-full min-w-0 max-w-full">
                   <h2 className="text-2xl font-semibold mb-6 text-slate-900 dark:text-white">
                     Dashboards
@@ -1377,22 +1354,6 @@ const Dashboard = () => {
                     </div>
                   )}
 
-                  {/* Closing & Fallout Forecast */}
-                  {dashboardVisibility.closingFalloutForecast && (
-                    <div
-                      ref={closingFalloutSectionRef}
-                      id="closingFalloutForecast"
-                      className="section-closing-fallout-forecast min-w-0 max-w-full overflow-hidden"
-                    >
-                      <ClosingFalloutForecast
-                        dateFilter={dateFilter}
-                        selectedTenantId={selectedTenantId}
-                        selectedChannel={selectedChannel}
-                        openLoanId={openLoanId || undefined}
-                        onOpenLoanIdHandled={handleLoanIdHandled}
-                      />
-                    </div>
-                  )}
                 </div>
               )}
             </div>

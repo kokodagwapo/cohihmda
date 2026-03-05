@@ -154,6 +154,12 @@ const topTieringMenuGroups = {
         icon: FileText,
         iconColor: "blue" as const,
       },
+      {
+        id: "falloutForecastPage",
+        label: "Fallout Report",
+        icon: BarChart3,
+        iconColor: "indigo" as const,
+      },
     ],
   },
   performance: {
@@ -270,6 +276,7 @@ const routeMap: Record<string, string> = {
   pipelineAnalysis: "/pipeline-analysis",
   loanComplexity: "/loan-complexity",
   loanDetail: "/loan-detail",
+  falloutForecastPage: "/fallout-forecast",
   pricingDashboard: "/pricing-dashboard",
   lockStratification: "/lock-stratification",
   highPerformers: "/high-performers",
@@ -516,6 +523,7 @@ export function Navigation(
       "/pipeline-analysis",
       "/loan-complexity",
       "/loan-detail",
+      "/fallout-forecast",
       "/pricing-dashboard",
       "/lock-stratification",
       "/high-performers",
@@ -1056,18 +1064,18 @@ export function Navigation(
                                 iconColor: "blue" as const,
                               },
                               {
-                                id: "closingFalloutForecast",
-                                label: "Closing & Fallout Forecast",
-                                icon: BarChart3,
-                                hash: "#section-closingFalloutForecast",
-                                iconColor: "indigo" as const,
-                              },
-                              {
                                 id: "myWorkbench",
                                 label: "My Workbench",
                                 icon: Grid3X3,
                                 route: "/my-dashboard",
                                 iconColor: "violet" as const,
+                              },
+                              {
+                                id: "falloutForecastPage",
+                                label: "Fallout Report",
+                                icon: BarChart3,
+                                route: "/fallout-forecast",
+                                iconColor: "indigo" as const,
                               },
                             ].map((item) => {
                               const Icon = item.icon;
