@@ -155,6 +155,17 @@ get_stack_parameters() {
         fi
         result+="{\"ParameterKey\":\"$key\",\"UsePreviousValue\":true}"
     done
+    # Optional explicit parameter overrides from pipeline variables.
+    # This ensures newly added parameters can be set without manual stack editing.
+    if [ -n "${OPENAI_API_KEY_SECRET_ARN:-}" ]; then
+        if [ "$first" = true ]; then
+            first=false
+        else
+            result+=","
+        fi
+        result+="{\"ParameterKey\":\"OpenAIApiKeySecretArn\",\"ParameterValue\":\"${OPENAI_API_KEY_SECRET_ARN}\"}"
+    fi
+
     result+="]"
     echo "$result"
 }

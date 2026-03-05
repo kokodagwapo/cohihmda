@@ -115,6 +115,14 @@ if ($FRED_API_KEY) {
     Write-Status "FRED API key not configured - market rate sync will be disabled" "Yellow"
 }
 
+# OpenAI API key secret for server-side AI features (optional)
+if ($OPENAI_API_KEY_SECRET_ARN) {
+    Write-Status "OpenAI API key secret configured"
+    $params += "ParameterKey=OpenAIApiKeySecretArn,ParameterValue=$OPENAI_API_KEY_SECRET_ARN"
+} else {
+    Write-Status "OpenAI API key secret not configured - release notes AI draft will fall back in deployed env" "Yellow"
+}
+
 # ============================================================================
 # PHASE 1: Deploy CloudFormation with DesiredCount=0 (creates ECR, no tasks)
 # ============================================================================

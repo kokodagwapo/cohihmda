@@ -109,6 +109,10 @@ if ($ENVIRONMENT -eq "prod") {
 # FRED API Key (mortgage market rates)
 $FRED_API_KEY = "58a508e93dc99372365ad789baa41e75"
 
+# Optional: Secrets Manager ARN that stores {"api_key":"sk-..."} for backend OpenAI usage.
+# Leave blank to disable OpenAI API key injection into ECS task definition.
+$OPENAI_API_KEY_SECRET_ARN = ""
+
 # Frontend S3 Bucket (environment-scoped to avoid collisions)
 $FRONTEND_BUCKET = "$PROJECT_NAME-$ENVIRONMENT-frontend-$AWS_ACCOUNT_ID"
 
