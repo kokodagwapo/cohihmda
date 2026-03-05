@@ -1,3 +1,5 @@
+// Marko Petrovic - 03/05/2026
+
 import { Router, Response } from "express";
 import { promisify } from "util";
 import { exec as execCb } from "child_process";
@@ -179,7 +181,9 @@ router.post(
       const title = String(req.body?.title || "").trim();
       const entries = normalizeEntries(req.body?.entries);
       if (!version || !title) {
-        return res.status(400).json({ error: "Version and title are required" });
+        return res
+          .status(400)
+          .json({ error: "Version and title are required" });
       }
 
       await client.query("BEGIN");
@@ -232,7 +236,9 @@ router.put(
       const title = String(req.body?.title || "").trim();
       const entries = normalizeEntries(req.body?.entries);
       if (!version || !title) {
-        return res.status(400).json({ error: "Version and title are required" });
+        return res
+          .status(400)
+          .json({ error: "Version and title are required" });
       }
 
       const checkResult = await client.query(
@@ -374,7 +380,9 @@ router.post(
       if (note.is_draft) {
         return res
           .status(400)
-          .json({ error: "Release note must be published before sending email" });
+          .json({
+            error: "Release note must be published before sending email",
+          });
       }
       if (note.email_sent_at) {
         return res
@@ -428,7 +436,10 @@ function buildFallbackDraftFromCommits(commits: string[]): Array<{
   });
 }
 
-function parseCommitLinesFromEnvSince(sinceIso: string, encoded?: string): string[] {
+function parseCommitLinesFromEnvSince(
+  sinceIso: string,
+  encoded?: string,
+): string[] {
   const raw = String(encoded || "").trim();
   if (!raw) return [];
 
@@ -454,7 +465,11 @@ function parseCommitLinesFromEnvSince(sinceIso: string, encoded?: string): strin
       const subject = match[3]?.trim();
       if (!commitDate || !sha || !subject) return null;
       const commitMs = Date.parse(commitDate);
-      if (Number.isFinite(sinceMs) && Number.isFinite(commitMs) && commitMs < sinceMs) {
+      if (
+        Number.isFinite(sinceMs) &&
+        Number.isFinite(commitMs) &&
+        commitMs < sinceMs
+      ) {
         return null;
       }
       return `${sha} ${subject}`;
@@ -551,7 +566,9 @@ Rules:
 Commits:
 ${commitLines.join("\n")}`;
 
-        const messages: OpenAIChatMessage[] = [{ role: "user", content: prompt }];
+        const messages: OpenAIChatMessage[] = [
+          { role: "user", content: prompt },
+        ];
         const aiRaw = await callOpenAI(messages, apiKey, {
           temperature: 0.2,
           jsonMode: true,
@@ -566,10 +583,17 @@ ${commitLines.join("\n")}`;
         };
         const aiEntries = normalizeEntries(parsed.entries);
         if (aiEntries.length > 0) {
-          return res.json({ entries: aiEntries, since, commitsCount: commitLines.length });
+          return res.json({
+            entries: aiEntries,
+            since,
+            commitsCount: commitLines.length,
+          });
         }
       } catch (error: any) {
-        console.warn("[ReleaseNotesAdmin] AI draft fallback used:", error.message);
+        console.warn(
+          "[ReleaseNotesAdmin] AI draft fallback used:",
+          error.message,
+        );
       }
 
       return res.json({
