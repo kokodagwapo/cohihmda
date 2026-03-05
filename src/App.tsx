@@ -44,9 +44,10 @@ import HighPerformers from "./pages/HighPerformers";
 import CreditRiskManagement from "./pages/CreditRiskManagement";
 import LoanDetail from "./pages/LoanDetail";
 import WorkflowConversion from "./pages/WorkflowConversion";
-// Hidden for now – needs work
-// import PricingDashboard from "./pages/PricingDashboard";
+import PricingDashboard from "./pages/PricingDashboard";
+import LockStratification from "./pages/LockStratification";
 import PipelineAnalysisDashboard from "./pages/PipelineAnalysisDashboard";
+import LoanComplexity from "./pages/LoanComplexity";
 import Actors from "./pages/Actors";
 import { KnowledgeBaseEditor } from "./components/admin/KnowledgeBaseEditor";
 import { GlobalCohiChat } from "./components/cohi/GlobalCohiChat";
@@ -189,9 +190,10 @@ const App = () => (
               <Route path="/loan-funnel" element={<Navigate to="/insights" replace />} />
               <Route path="/workflow-conversion" element={<WorkflowConversion />} />
               <Route path="/loan-detail" element={<LoanDetail />} />
-              {/* Pricing Dashboard hidden for now – needs work; redirect so bookmarks don't 404 */}
-              <Route path="/pricing-dashboard" element={<Navigate to="/insights" replace />} />
+              <Route path="/pricing-dashboard" element={<PricingDashboard />} />
+              <Route path="/lock-stratification" element={<LockStratification />} />
               <Route path="/pipeline-analysis" element={<PipelineAnalysisDashboard />} />
+              <Route path="/loan-complexity" element={<LoanComplexity />} />
               <Route path="/credit-risk-management" element={<CreditRiskManagement />} />
                 <Route path="/company-scorecard" element={<CompanyScorecard />} />
               <Route path="/high-performers" element={<HighPerformers />} />
