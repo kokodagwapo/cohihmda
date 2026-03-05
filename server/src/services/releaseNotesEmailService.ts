@@ -274,6 +274,7 @@ export async function sendReleaseNotesEmail(
         emailType: "release_notes",
         containsPii: false,
         userId: recipient.userId,
+        strict: true,
       });
       sent += 1;
     } catch (error) {

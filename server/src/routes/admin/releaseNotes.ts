@@ -400,6 +400,29 @@ router.post(
       const payload = toReleaseNoteEmailPayload(note, entries);
       const sendResult = await sendReleaseNotesEmail(payload);
 
+      if (sendResult.attempted === 0) {
+        return res.status(400).json({
+          error:
+            "No eligible recipients found. Check active users and release notes email preferences.",
+          result: sendResult,
+        });
+      }
+
+      if (sendResult.sent === 0) {
+        return res.status(502).json({
+          error: "Release note email send failed for all recipients.",
+          result: sendResult,
+        });
+      }
+
+      if (sendResult.failed > 0) {
+        return res.status(502).json({
+          error:
+            "Release note email was only partially delivered. Resolve failures and resend.",
+          result: sendResult,
+        });
+      }
+
       await managementPool.query(
         `UPDATE release_notes
          SET email_sent_at = NOW(), updated_at = NOW()

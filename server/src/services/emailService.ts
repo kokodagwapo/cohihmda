@@ -59,6 +59,8 @@ export interface DailyBriefEmailOptions {
   containsPii?: boolean;
   userId?: string | null;
   tenantId?: string | null;
+  /** When true, provider failures are rethrown to caller. */
+  strict?: boolean;
 }
 
 export interface EmailAttachment {
@@ -304,6 +306,9 @@ async function sendDailyBriefWithUnsubscribe(options: DailyBriefEmailOptions): P
     }
   } catch (error: unknown) {
     console.error("Error sending daily brief with unsubscribe after retries:", error);
+    if (options.strict) {
+      throw error;
+    }
   }
 }
 
