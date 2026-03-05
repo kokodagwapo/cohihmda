@@ -34,14 +34,10 @@ import { api } from '@/lib/api';
 
 /** Authenticated POST returning a Blob (for binary PPTX/PDF downloads). */
 async function fetchBlob(endpoint: string, body: object): Promise<Blob> {
-  const token = localStorage.getItem('auth_token');
-  const baseUrl = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:3001' : '');
-  const url = baseUrl ? `${baseUrl}${endpoint}` : endpoint;
-  const res = await fetch(url, {
+  const res = await api.fetchWithAuth(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(body),
   });
@@ -1187,18 +1183,15 @@ export function ReportBuilder({
           <FileText className="h-3.5 w-3.5" />
           PDF
         </Button>
-        {/* Distributions page hidden for now */}
-        {false && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5 text-xs"
-            onClick={() => navigate('/workbench/distributions')}
-          >
-            <Mail className="h-3.5 w-3.5" />
-            Schedule distribution
-          </Button>
-        )}
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5 text-xs"
+          onClick={() => navigate('/workbench/distributions')}
+        >
+          <Mail className="h-3.5 w-3.5" />
+          Schedule distribution
+        </Button>
       </div>
 
       {/* Main content */}

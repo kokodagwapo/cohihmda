@@ -187,10 +187,32 @@ async function getOpenAIKey(tenantId?: string): Promise<string> {
     }
   }
 
-  const envKey = process.env.OPENAI_API_KEY;
-  if (envKey) {
-    console.log("[CohiChat] Using environment OpenAI API key");
-    return envKey;
+  const envKeyRaw = process.env.OPENAI_API_KEY;
+  if (envKeyRaw) {
+    const envKeyTrimmed = envKeyRaw.trim();
+    if (envKeyTrimmed) {
+      // Accept either a plain API key string or a JSON secret payload.
+      // This avoids environment-specific breakage when Secrets Manager stores JSON.
+      let resolvedEnvKey = envKeyTrimmed;
+      if (envKeyTrimmed.startsWith("{")) {
+        try {
+          const parsed = JSON.parse(envKeyTrimmed) as {
+            api_key?: string;
+            apiKey?: string;
+            OPENAI_API_KEY?: string;
+          };
+          const fromJson =
+            parsed.api_key || parsed.apiKey || parsed.OPENAI_API_KEY || "";
+          if (fromJson.trim()) {
+            resolvedEnvKey = fromJson.trim();
+          }
+        } catch {
+          // Keep raw value if it's not valid JSON.
+        }
+      }
+      console.log("[CohiChat] Using environment OpenAI API key");
+      return resolvedEnvKey;
+    }
   }
 
   throw new Error(

@@ -1,6 +1,17 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+// Marko Petrovic
+// Distributions page
+// This page allows users to create and manage distribution schedules for canvases, reports, and insight digests.
+// It also allows users to create and manage recipient lists.
+// It also allows users to view the history of sent distributions.
+// It also allows users to send distributions now.
+// It also allows users to edit and deactivate distributions.
+// It also allows users to create and manage recipient lists.
+// It also allows users to view the history of sent distributions.
+// It also allows users to send distributions now.
+
+import { useState, useCallback, useEffect, useMemo } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import {
   Mail,
   Plus,
@@ -12,12 +23,12 @@ import {
   Calendar,
   Users,
   FileText,
-} from 'lucide-react';
-import { Navigation } from '@/components/layout/Navigation';
-import { WorkbenchTopBar } from '@/components/workbench/WorkbenchTopBar';
-import { WorkbenchSidebar } from '@/components/workbench/WorkbenchSidebar';
-import { IconBadge } from '@/components/workbench/IconBadge';
-import { Button } from '@/components/ui/button';
+} from "lucide-react";
+import { Navigation } from "@/components/layout/Navigation";
+import { WorkbenchTopBar } from "@/components/workbench/WorkbenchTopBar";
+import { WorkbenchSidebar } from "@/components/workbench/WorkbenchSidebar";
+import { IconBadge } from "@/components/workbench/IconBadge";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -25,41 +36,41 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table';
+} from "@/components/ui/table";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogFooter,
-} from '@/components/ui/dialog';
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { useToast } from '@/hooks/use-toast';
-import { useAuth } from '@/contexts/AuthContext';
-import { useTenantStore } from '@/stores/tenantStore';
-import { api } from '@/lib/api';
+} from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
+import { useTenantStore } from "@/stores/tenantStore";
+import { api } from "@/lib/api";
 
 const CONTENT_TYPES = [
-  { value: 'report', label: 'Report' },
-  { value: 'canvas', label: 'Canvas / Workbench' },
-  { value: 'insight_digest', label: 'Insight Digest' },
-  { value: 'dashboard', label: 'Dashboard (coming soon)' },
+  { value: "report", label: "Report" },
+  { value: "canvas", label: "Canvas / Workbench" },
+  { value: "insight_digest", label: "Insight Digest" },
+  { value: "dashboard", label: "Dashboard (coming soon)" },
 ] as const;
 
 const FREQUENCIES = [
-  { value: 'daily', label: 'Daily' },
-  { value: 'weekly', label: 'Weekly' },
-  { value: 'biweekly', label: 'Every 2 weeks' },
-  { value: 'monthly', label: 'Monthly' },
-  { value: 'one_time', label: 'One time' },
+  { value: "daily", label: "Daily" },
+  { value: "weekly", label: "Weekly" },
+  { value: "biweekly", label: "Every 2 weeks" },
+  { value: "monthly", label: "Monthly" },
+  { value: "one_time", label: "One time" },
 ] as const;
 
 export default function Distributions() {
@@ -74,37 +85,44 @@ export default function Distributions() {
   const { selectedTenantId } = useTenantStore();
   const tenantId = selectedTenantId || user?.tenant_id || null;
   const tenantQs = useMemo(
-    () => (tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : ''),
+    () => (tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : ""),
     [tenantId],
   );
 
   const { data: listData, isLoading } = useQuery({
-    queryKey: ['distributions', 'schedules', tenantId],
+    queryKey: ["distributions", "schedules", tenantId],
     queryFn: () => api.getDistributionSchedules({ limit: 100, tenantId }),
   });
 
   const { data: recipientLists } = useQuery({
-    queryKey: ['distributions', 'recipient-lists', tenantId],
+    queryKey: ["distributions", "recipient-lists", tenantId],
     queryFn: () => api.getDistributionRecipientLists(tenantId),
   });
 
   const { data: canvases } = useQuery({
-    queryKey: ['workbench', 'canvases', tenantId],
+    queryKey: ["workbench", "canvases", tenantId],
     queryFn: async () => {
-      const res = await api.request<{ canvases: any[] }>(`/api/workbench/canvases${tenantQs}`);
+      const res = await api.request<{ canvases: any[] }>(
+        `/api/workbench/canvases${tenantQs}`,
+      );
       return res?.canvases ?? [];
     },
   });
 
   const createMutation = useMutation({
-    mutationFn: (data: Record<string, unknown>) => api.createDistributionSchedule(data, tenantId),
+    mutationFn: (data: Record<string, unknown>) =>
+      api.createDistributionSchedule(data, tenantId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['distributions'] });
+      queryClient.invalidateQueries({ queryKey: ["distributions"] });
       setCreateOpen(false);
-      toast({ title: 'Schedule created' });
+      toast({ title: "Schedule created" });
     },
     onError: (e: Error) => {
-      toast({ title: 'Failed to create schedule', description: e.message, variant: 'destructive' });
+      toast({
+        title: "Failed to create schedule",
+        description: e.message,
+        variant: "destructive",
+      });
     },
   });
 
@@ -112,37 +130,49 @@ export default function Distributions() {
     mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) =>
       api.updateDistributionSchedule(id, data, tenantId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['distributions'] });
+      queryClient.invalidateQueries({ queryKey: ["distributions"] });
       setEditingId(null);
-      toast({ title: 'Schedule updated' });
+      toast({ title: "Schedule updated" });
     },
     onError: (e: Error) => {
-      toast({ title: 'Failed to update schedule', description: e.message, variant: 'destructive' });
+      toast({
+        title: "Failed to update schedule",
+        description: e.message,
+        variant: "destructive",
+      });
     },
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.deleteDistributionSchedule(id, tenantId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['distributions'] });
-      toast({ title: 'Schedule deactivated' });
+      queryClient.invalidateQueries({ queryKey: ["distributions"] });
+      toast({ title: "Schedule deactivated" });
     },
     onError: (e: Error) => {
-      toast({ title: 'Failed to deactivate', description: e.message, variant: 'destructive' });
+      toast({
+        title: "Failed to deactivate",
+        description: e.message,
+        variant: "destructive",
+      });
     },
   });
 
   const sendNowMutation = useMutation({
     mutationFn: (id: string) => api.sendDistributionNow(id, tenantId),
     onSuccess: (data: any) => {
-      queryClient.invalidateQueries({ queryKey: ['distributions'] });
+      queryClient.invalidateQueries({ queryKey: ["distributions"] });
       toast({
-        title: 'Send completed',
+        title: "Send completed",
         description: `${data?.successful_count ?? 0}/${data?.recipients_count ?? 0} recipients`,
       });
     },
     onError: (e: Error) => {
-      toast({ title: 'Send failed', description: e.message, variant: 'destructive' });
+      toast({
+        title: "Send failed",
+        description: e.message,
+        variant: "destructive",
+      });
     },
   });
 
@@ -157,18 +187,31 @@ export default function Distributions() {
         createMutation.mutate(data);
       }
     },
-    [editingId, updateMutation, createMutation]
+    [editingId, updateMutation, createMutation],
   );
 
   const formatNextRun = (nextRun: string | null) => {
-    if (!nextRun) return '—';
+    if (!nextRun) return "—";
     const d = new Date(nextRun);
-    return d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
+    return d.toLocaleString(undefined, {
+      dateStyle: "short",
+      timeStyle: "short",
+    });
   };
 
   const formatLastSent = (lastSent: string | null) => {
-    if (!lastSent) return '—';
-    return new Date(lastSent).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
+    if (!lastSent) return "—";
+    return new Date(lastSent).toLocaleString(undefined, {
+      dateStyle: "short",
+      timeStyle: "short",
+    });
+  };
+
+  const getContentLink = (schedule: any) => {
+    if (schedule?.content_type === "canvas" && schedule?.content_id)
+      return `/my-dashboard/${schedule.content_id}`;
+    if (schedule?.content_type === "insight_digest") return "/insights";
+    return "/my-dashboard";
   };
 
   return (
@@ -188,13 +231,19 @@ export default function Distributions() {
               <div className="max-w-[1600px] mx-auto">
                 <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                   <div className="flex items-start gap-4">
-                    <IconBadge icon={Mail} variant="violet" size="xl" rounded="2xl" />
+                    <IconBadge
+                      icon={Mail}
+                      variant="violet"
+                      size="xl"
+                      rounded="2xl"
+                    />
                     <div>
                       <h1 className="text-2xl sm:text-3xl font-semibold text-slate-900 dark:text-slate-100 tracking-tight">
-                        Report distribution
+                        Content distribution
                       </h1>
                       <p className="mt-1.5 text-[15px] text-slate-600 dark:text-slate-400 max-w-xl">
-                        Schedule reports, canvases, and insight digests to be emailed to users.
+                        Schedule secure link-based delivery for canvases,
+                        reports, and insight digests.
                       </p>
                       <Link
                         to="/my-dashboard"
@@ -205,21 +254,35 @@ export default function Distributions() {
                       </Link>
                     </div>
                   </div>
-                  <Button onClick={() => setCreateOpen(true)} className="shrink-0">
+                  <Button
+                    onClick={() => setCreateOpen(true)}
+                    className="shrink-0"
+                  >
                     <Plus className="h-4 w-4 mr-2" />
                     New schedule
                   </Button>
                 </div>
 
-                <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-200 mb-3">Schedules</h2>
+                <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-200 mb-3">
+                  Schedules
+                </h2>
                 <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/70 overflow-hidden">
                   {isLoading ? (
-                    <div className="p-8 text-center text-slate-500">Loading…</div>
+                    <div className="p-8 text-center text-slate-500">
+                      Loading…
+                    </div>
                   ) : schedules.length === 0 ? (
                     <div className="p-8 text-center text-slate-500">
-                      <p className="font-medium">No distribution schedules yet</p>
-                      <p className="mt-1 text-sm">Create one to start sending reports on a schedule.</p>
-                      <Button className="mt-4" onClick={() => setCreateOpen(true)}>
+                      <p className="font-medium">
+                        No distribution schedules yet
+                      </p>
+                      <p className="mt-1 text-sm">
+                        Create one to start sending reports on a schedule.
+                      </p>
+                      <Button
+                        className="mt-4"
+                        onClick={() => setCreateOpen(true)}
+                      >
                         <Plus className="h-4 w-4 mr-2" />
                         Create schedule
                       </Button>
@@ -240,22 +303,44 @@ export default function Distributions() {
                       <TableBody>
                         {schedules.map((s: any) => (
                           <TableRow key={s.id}>
-                            <TableCell className="font-medium">{s.name}</TableCell>
+                            <TableCell className="font-medium">
+                              {s.name}
+                            </TableCell>
                             <TableCell>
-                              <span className="capitalize">{s.content_type?.replace('_', ' ')}</span>
+                              <span className="capitalize">
+                                {s.content_type?.replace("_", " ")}
+                              </span>
                               {s.content_id && (
-                                <span className="text-slate-500 text-xs ml-1">({s.content_id.slice(0, 8)}…)</span>
+                                <span className="text-slate-500 text-xs ml-1">
+                                  ({s.content_id.slice(0, 8)}…)
+                                </span>
                               )}
+                              <div className="mt-1">
+                                <Link
+                                  to={getContentLink(s)}
+                                  className="text-xs text-violet-600 hover:text-violet-700"
+                                >
+                                  Open content
+                                </Link>
+                              </div>
                             </TableCell>
                             <TableCell>
-                              {FREQUENCIES.find((f) => f.value === s.frequency)?.label ?? s.frequency} at{' '}
-                              {s.schedule_time ?? '08:00'}
+                              {FREQUENCIES.find((f) => f.value === s.frequency)
+                                ?.label ?? s.frequency}{" "}
+                              at {s.schedule_time ?? "08:00"}
                             </TableCell>
                             <TableCell>
-                              {s.recipient_list_name ?? (s.recipient_emails?.length ? `${s.recipient_emails.length} emails` : '—')}
+                              {s.recipient_list_name ??
+                                (s.recipient_emails?.length
+                                  ? `${s.recipient_emails.length} emails`
+                                  : "—")}
                             </TableCell>
-                            <TableCell>{formatNextRun(s.next_run_at)}</TableCell>
-                            <TableCell>{formatLastSent(s.last_sent_at)}</TableCell>
+                            <TableCell>
+                              {formatNextRun(s.next_run_at)}
+                            </TableCell>
+                            <TableCell>
+                              {formatLastSent(s.last_sent_at)}
+                            </TableCell>
                             <TableCell>
                               <div className="flex items-center gap-1">
                                 <Button
@@ -305,10 +390,16 @@ export default function Distributions() {
                   )}
                 </div>
 
-                <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-200 mt-10 mb-3">Recipient lists</h2>
+                <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-200 mt-10 mb-3">
+                  Recipient lists
+                </h2>
                 <RecipientListSection
                   lists={recipientLists?.lists ?? []}
-                  onRefresh={() => queryClient.invalidateQueries({ queryKey: ['distributions', 'recipient-lists'] })}
+                  onRefresh={() =>
+                    queryClient.invalidateQueries({
+                      queryKey: ["distributions", "recipient-lists"],
+                    })
+                  }
                   tenantId={tenantId}
                 />
               </div>
@@ -365,17 +456,18 @@ function DistributionScheduleDialog({
   saving: boolean;
   tenantId: string | null;
 }) {
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [contentType, setContentType] = useState<string>('canvas');
-  const [contentId, setContentId] = useState('');
-  const [frequency, setFrequency] = useState('weekly');
-  const [scheduleTime, setScheduleTime] = useState('08:00');
-  const [recipientListId, setRecipientListId] = useState('');
-  const [recipientEmails, setRecipientEmails] = useState('');
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [contentType, setContentType] = useState<string>("canvas");
+  const [contentId, setContentId] = useState("");
+  const [frequency, setFrequency] = useState("weekly");
+  const [scheduleTime, setScheduleTime] = useState("08:00");
+  const [recipientListId, setRecipientListId] = useState("");
+  const [recipientEmails, setRecipientEmails] = useState("");
+  const [autoInviteDirectEmails, setAutoInviteDirectEmails] = useState(true);
 
   const { data: schedule } = useQuery({
-    queryKey: ['distributions', 'schedule', scheduleId, tenantId],
+    queryKey: ["distributions", "schedule", scheduleId, tenantId],
     queryFn: () => api.getDistributionSchedule(scheduleId!, tenantId),
     enabled: !!scheduleId && open,
   });
@@ -383,23 +475,27 @@ function DistributionScheduleDialog({
   useEffect(() => {
     if (!open) return;
     if (schedule && scheduleId) {
-      setName(schedule.name ?? '');
-      setDescription(schedule.description ?? '');
-      setContentType(schedule.content_type ?? 'canvas');
-      setContentId(schedule.content_id ?? '');
-      setFrequency(schedule.frequency ?? 'weekly');
-      setScheduleTime(schedule.schedule_time?.slice(0, 5) ?? '08:00');
-      setRecipientListId(schedule.recipient_list_id ?? '');
-      setRecipientEmails((schedule.recipient_emails ?? []).join(', '));
+      setName(schedule.name ?? "");
+      setDescription(schedule.description ?? "");
+      setContentType(schedule.content_type ?? "canvas");
+      setContentId(schedule.content_id ?? "");
+      setFrequency(schedule.frequency ?? "weekly");
+      setScheduleTime(schedule.schedule_time?.slice(0, 5) ?? "08:00");
+      setRecipientListId(schedule.recipient_list_id ?? "");
+      setRecipientEmails((schedule.recipient_emails ?? []).join(", "));
+      setAutoInviteDirectEmails(
+        schedule.content_config?.auto_invite_external !== false,
+      );
     } else {
-      setName('');
-      setDescription('');
-      setContentType('canvas');
-      setContentId('');
-      setFrequency('weekly');
-      setScheduleTime('08:00');
-      setRecipientListId('');
-      setRecipientEmails('');
+      setName("");
+      setDescription("");
+      setContentType("canvas");
+      setContentId("");
+      setFrequency("weekly");
+      setScheduleTime("08:00");
+      setRecipientListId("");
+      setRecipientEmails("");
+      setAutoInviteDirectEmails(true);
     }
   }, [open, scheduleId, schedule]);
 
@@ -407,16 +503,16 @@ function DistributionScheduleDialog({
     const emails = recipientEmails
       .split(/[,;\s]+/)
       .map((e) => e.trim())
-      .filter((e) => e.includes('@'));
+      .filter((e) => e.includes("@"));
     onSave({
-      name: name.trim() || 'Untitled schedule',
+      name: name.trim() || "Untitled schedule",
       description: description.trim() || undefined,
       content_type: contentType,
       content_id: contentId || undefined,
-      content_config: {},
+      content_config: { auto_invite_external: autoInviteDirectEmails },
       frequency,
       schedule_time: scheduleTime,
-      timezone: 'America/New_York',
+      timezone: "America/New_York",
       recipient_list_id: recipientListId || undefined,
       recipient_emails: emails,
     });
@@ -426,16 +522,26 @@ function DistributionScheduleDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>{scheduleId ? 'Edit schedule' : 'New distribution schedule'}</DialogTitle>
+          <DialogTitle>
+            {scheduleId ? "Edit schedule" : "New distribution schedule"}
+          </DialogTitle>
         </DialogHeader>
         <div className="grid gap-4 py-4">
           <div>
             <Label>Name</Label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Weekly executive report" />
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Weekly executive report"
+            />
           </div>
           <div>
-            <Label>Description (optional)</Label>
-            <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Brief description" />
+            <Label>Email summary (optional)</Label>
+            <Input
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Brief summary shown in the email"
+            />
           </div>
           <div>
             <Label>Content type</Label>
@@ -452,19 +558,26 @@ function DistributionScheduleDialog({
               </SelectContent>
             </Select>
           </div>
-          {(contentType === 'canvas' || contentType === 'report') && (
+          {(contentType === "canvas" || contentType === "report") && (
             <div>
-              <Label>{contentType === 'canvas' ? 'Canvas' : 'Report template'}</Label>
-              <Select value={contentId || undefined} onValueChange={setContentId}>
+              <Label>
+                {contentType === "canvas" ? "Canvas" : "Report template"}
+              </Label>
+              <Select
+                value={contentId || undefined}
+                onValueChange={setContentId}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select…" />
                 </SelectTrigger>
                 <SelectContent>
-                  {canvases.filter((c: any) => c.id).map((c: any) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.title || 'Untitled'}
-                    </SelectItem>
-                  ))}
+                  {canvases
+                    .filter((c: any) => c.id)
+                    .map((c: any) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.title || "Untitled"}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             </div>
@@ -494,7 +607,12 @@ function DistributionScheduleDialog({
           </div>
           <div>
             <Label>Recipient list</Label>
-            <Select value={recipientListId || '__none__'} onValueChange={(v) => setRecipientListId(v === '__none__' ? '' : v)}>
+            <Select
+              value={recipientListId || "__none__"}
+              onValueChange={(v) =>
+                setRecipientListId(v === "__none__" ? "" : v)
+              }
+            >
               <SelectTrigger>
                 <SelectValue placeholder="Optional" />
               </SelectTrigger>
@@ -515,6 +633,14 @@ function DistributionScheduleDialog({
               onChange={(e) => setRecipientEmails(e.target.value)}
               placeholder="a@example.com, b@example.com"
             />
+            <label className="mt-2 flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={autoInviteDirectEmails}
+                onChange={(e) => setAutoInviteDirectEmails(e.target.checked)}
+              />
+              Auto-invite direct emails that are not existing users
+            </label>
           </div>
         </div>
         <DialogFooter>
@@ -522,7 +648,7 @@ function DistributionScheduleDialog({
             Cancel
           </Button>
           <Button onClick={handleSubmit} disabled={saving}>
-            {scheduleId ? 'Update' : 'Create'}
+            {scheduleId ? "Update" : "Create"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -530,9 +656,17 @@ function DistributionScheduleDialog({
   );
 }
 
-function HistoryDialog({ scheduleId, onClose, tenantId }: { scheduleId: string; onClose: () => void; tenantId: string | null }) {
+function HistoryDialog({
+  scheduleId,
+  onClose,
+  tenantId,
+}: {
+  scheduleId: string;
+  onClose: () => void;
+  tenantId: string | null;
+}) {
   const { data, isLoading } = useQuery({
-    queryKey: ['distributions', 'history', scheduleId, tenantId],
+    queryKey: ["distributions", "history", scheduleId, tenantId],
     queryFn: () => api.getDistributionHistory(scheduleId, 30, tenantId),
   });
   const history = data?.history ?? [];
@@ -554,6 +688,7 @@ function HistoryDialog({ scheduleId, onClose, tenantId }: { scheduleId: string; 
                 <TableHead>Sent at</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Recipients</TableHead>
+                <TableHead>Invite status</TableHead>
                 <TableHead>Duration</TableHead>
               </TableRow>
             </TableHeader>
@@ -564,11 +699,11 @@ function HistoryDialog({ scheduleId, onClose, tenantId }: { scheduleId: string; 
                   <TableCell>
                     <span
                       className={
-                        h.status === 'success'
-                          ? 'text-green-600'
-                          : h.status === 'partial_failure'
-                            ? 'text-amber-600'
-                            : 'text-red-600'
+                        h.status === "success"
+                          ? "text-green-600"
+                          : h.status === "partial_failure"
+                            ? "text-amber-600"
+                            : "text-red-600"
                       }
                     >
                       {h.status}
@@ -577,7 +712,14 @@ function HistoryDialog({ scheduleId, onClose, tenantId }: { scheduleId: string; 
                   <TableCell>
                     {h.successful_count ?? 0}/{h.recipients_count ?? 0}
                   </TableCell>
-                  <TableCell>{h.duration_ms != null ? `${h.duration_ms}ms` : '—'}</TableCell>
+                  <TableCell>
+                    {h.content_snapshot?.invite_status
+                      ? `${h.content_snapshot.invite_status.invitedCount ?? 0} invited, ${h.content_snapshot.invite_status.inviteFailedCount ?? 0} failed`
+                      : "—"}
+                  </TableCell>
+                  <TableCell>
+                    {h.duration_ms != null ? `${h.duration_ms}ms` : "—"}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -592,40 +734,60 @@ function HistoryDialog({ scheduleId, onClose, tenantId }: { scheduleId: string; 
 }
 
 const ROLES = [
-  { value: 'tenant_admin', label: 'Admin' },
-  { value: 'user', label: 'User' },
-  { value: 'viewer', label: 'Viewer' },
-  { value: 'loan_officer', label: 'Loan Officer' },
-  { value: 'processor', label: 'Processor' },
+  { value: "tenant_admin", label: "Admin" },
+  { value: "user", label: "User" },
+  { value: "viewer", label: "Viewer" },
+  { value: "loan_officer", label: "Loan Officer" },
+  { value: "processor", label: "Processor" },
 ];
 
-function RecipientListSection({ lists, onRefresh, tenantId }: { lists: any[]; onRefresh: () => void; tenantId: string | null }) {
+function RecipientListSection({
+  lists,
+  onRefresh,
+  tenantId,
+}: {
+  lists: any[];
+  onRefresh: () => void;
+  tenantId: string | null;
+}) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingListId, setEditingListId] = useState<string | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const tenantQs = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : '';
+  const tenantQs = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
 
   const { data: tenantUsers } = useQuery({
-    queryKey: ['workbench', 'tenant-users', tenantId],
+    queryKey: ["workbench", "tenant-users", tenantId],
     queryFn: async () => {
-      const res = await api.request<{ users: any[] }>(`/api/workbench/canvases/tenant-users${tenantQs}`);
+      const res = await api.request<{ users: any[] }>(
+        `/api/workbench/canvases/tenant-users${tenantQs}`,
+      );
       return res?.users ?? [];
     },
   });
 
+  const { data: groupsData } = useQuery({
+    queryKey: ["groups", tenantId],
+    queryFn: () => api.request<{ groups: any[] }>(`/api/groups${tenantQs}`),
+  });
+
   const createListMutation = useMutation({
-    mutationFn: (data: Record<string, unknown>) => api.createDistributionRecipientList(data, tenantId),
+    mutationFn: (data: Record<string, unknown>) =>
+      api.createDistributionRecipientList(data, tenantId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['distributions'] });
+      queryClient.invalidateQueries({ queryKey: ["distributions"] });
       setDialogOpen(false);
       setEditingListId(null);
       onRefresh();
-      toast({ title: 'Recipient list created' });
+      toast({ title: "Recipient list created" });
     },
     onError: (e: Error) => {
-      toast({ title: 'Failed to create list', description: e.message, variant: 'destructive' });
+      toast({
+        title: "Failed to create list",
+        description: e.message,
+        variant: "destructive",
+      });
     },
   });
 
@@ -633,26 +795,35 @@ function RecipientListSection({ lists, onRefresh, tenantId }: { lists: any[]; on
     mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) =>
       api.updateDistributionRecipientList(id, data, tenantId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['distributions'] });
+      queryClient.invalidateQueries({ queryKey: ["distributions"] });
       setDialogOpen(false);
       setEditingListId(null);
       onRefresh();
-      toast({ title: 'Recipient list updated' });
+      toast({ title: "Recipient list updated" });
     },
     onError: (e: Error) => {
-      toast({ title: 'Failed to update list', description: e.message, variant: 'destructive' });
+      toast({
+        title: "Failed to update list",
+        description: e.message,
+        variant: "destructive",
+      });
     },
   });
 
   const deleteListMutation = useMutation({
-    mutationFn: (id: string) => api.deleteDistributionRecipientList(id, tenantId),
+    mutationFn: (id: string) =>
+      api.deleteDistributionRecipientList(id, tenantId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['distributions'] });
+      queryClient.invalidateQueries({ queryKey: ["distributions"] });
       onRefresh();
-      toast({ title: 'Recipient list deleted' });
+      toast({ title: "Recipient list deleted" });
     },
     onError: (e: Error) => {
-      toast({ title: 'Failed to delete list', description: e.message, variant: 'destructive' });
+      toast({
+        title: "Failed to delete list",
+        description: e.message,
+        variant: "destructive",
+      });
     },
   });
 
@@ -663,13 +834,21 @@ function RecipientListSection({ lists, onRefresh, tenantId }: { lists: any[]; on
           <p className="text-sm text-slate-600 dark:text-slate-400">
             Reusable groups of recipients for distribution schedules.
           </p>
-          <Button size="sm" onClick={() => { setEditingListId(null); setDialogOpen(true); }}>
+          <Button
+            size="sm"
+            onClick={() => {
+              setEditingListId(null);
+              setDialogOpen(true);
+            }}
+          >
             <Plus className="h-4 w-4 mr-2" />
             New list
           </Button>
         </div>
         {lists.length === 0 ? (
-          <div className="p-6 text-center text-slate-500 text-sm">No recipient lists yet. Create one to use in schedules.</div>
+          <div className="p-6 text-center text-slate-500 text-sm">
+            No recipient lists yet. Create one to use in schedules.
+          </div>
         ) : (
           <Table>
             <TableHeader>
@@ -684,18 +863,40 @@ function RecipientListSection({ lists, onRefresh, tenantId }: { lists: any[]; on
               {lists.map((l: any) => (
                 <TableRow key={l.id}>
                   <TableCell className="font-medium">{l.name}</TableCell>
-                  <TableCell className="text-slate-600 dark:text-slate-400">{l.description || '—'}</TableCell>
-                  <TableCell>
-                    {l.user_ids?.length ? `${l.user_ids.length} users` : ''}
-                    {l.role_filter?.length ? ` ${l.role_filter.length} roles` : ''}
-                    {l.external_emails?.length ? ` ${l.external_emails.length} external` : ''}
-                    {!l.user_ids?.length && !l.role_filter?.length && !l.external_emails?.length && '—'}
+                  <TableCell className="text-slate-600 dark:text-slate-400">
+                    {l.description || "—"}
                   </TableCell>
                   <TableCell>
-                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setEditingListId(l.id); setDialogOpen(true); }}>
+                    {l.user_ids?.length ? `${l.user_ids.length} users` : ""}
+                    {l.role_filter?.length
+                      ? ` ${l.role_filter.length} roles`
+                      : ""}
+                    {l.external_emails?.length
+                      ? ` ${l.external_emails.length} external`
+                      : ""}
+                    {!l.user_ids?.length &&
+                      !l.role_filter?.length &&
+                      !l.external_emails?.length &&
+                      "—"}
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => {
+                        setEditingListId(l.id);
+                        setDialogOpen(true);
+                      }}
+                    >
                       <Pencil className="h-4 w-4" />
                     </Button>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-red-600" onClick={() => deleteListMutation.mutate(l.id)}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-red-600"
+                      onClick={() => deleteListMutation.mutate(l.id)}
+                    >
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </TableCell>
@@ -710,10 +911,16 @@ function RecipientListSection({ lists, onRefresh, tenantId }: { lists: any[]; on
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         listId={editingListId}
-        initialList={editingListId ? lists.find((l: any) => l.id === editingListId) : undefined}
+        initialList={
+          editingListId
+            ? lists.find((l: any) => l.id === editingListId)
+            : undefined
+        }
         tenantUsers={tenantUsers ?? []}
+        groups={groupsData?.groups ?? []}
         onSave={(data) => {
-          if (editingListId) updateListMutation.mutate({ id: editingListId, data });
+          if (editingListId)
+            updateListMutation.mutate({ id: editingListId, data });
           else createListMutation.mutate(data);
         }}
         saving={createListMutation.isPending || updateListMutation.isPending}
@@ -728,6 +935,7 @@ function RecipientListDialog({
   listId,
   initialList,
   tenantUsers,
+  groups,
   onSave,
   saving,
 }: {
@@ -736,93 +944,130 @@ function RecipientListDialog({
   listId: string | null;
   initialList?: any;
   tenantUsers: any[];
+  groups: any[];
   onSave: (data: Record<string, unknown>) => void;
   saving: boolean;
 }) {
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
   const [userIds, setUserIds] = useState<string[]>([]);
-  const [externalEmails, setExternalEmails] = useState('');
+  const [externalEmails, setExternalEmails] = useState("");
   const [roleFilter, setRoleFilter] = useState<string[]>([]);
   const [isDynamic, setIsDynamic] = useState(false);
+  const [autoInvite, setAutoInvite] = useState(false);
+  const [autoInviteGroupId, setAutoInviteGroupId] = useState("");
 
   const list = listId ? initialList : undefined;
 
   useEffect(() => {
     if (!open) return;
     if (list) {
-      setName(list.name ?? '');
-      setDescription(list.description ?? '');
+      setName(list.name ?? "");
+      setDescription(list.description ?? "");
       setUserIds(list.user_ids ?? []);
-      setExternalEmails((list.external_emails ?? []).join(', '));
+      setExternalEmails((list.external_emails ?? []).join(", "));
       setRoleFilter(list.role_filter ?? []);
       setIsDynamic(!!list.is_dynamic);
+      setAutoInvite(!!list.auto_invite);
+      setAutoInviteGroupId(list.auto_invite_group_id ?? "");
     } else {
-      setName('');
-      setDescription('');
+      setName("");
+      setDescription("");
       setUserIds([]);
-      setExternalEmails('');
+      setExternalEmails("");
       setRoleFilter([]);
       setIsDynamic(false);
+      setAutoInvite(false);
+      setAutoInviteGroupId("");
     }
   }, [open, listId, list]);
 
   const handleSubmit = () => {
-    const emails = externalEmails.split(/[,;\s]+/).map((e) => e.trim()).filter((e) => e.includes('@'));
+    const emails = externalEmails
+      .split(/[,;\s]+/)
+      .map((e) => e.trim())
+      .filter((e) => e.includes("@"));
     onSave({
-      name: name.trim() || 'Unnamed list',
+      name: name.trim() || "Unnamed list",
       description: description.trim() || undefined,
       user_ids: userIds,
       external_emails: emails,
       role_filter: roleFilter,
       is_dynamic: isDynamic,
+      auto_invite: autoInvite,
+      auto_invite_group_id:
+        autoInvite && autoInviteGroupId ? autoInviteGroupId : null,
     });
   };
 
   const toggleUser = (id: string) => {
-    setUserIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+    setUserIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
   };
 
   const toggleRole = (role: string) => {
-    setRoleFilter((prev) => (prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]));
+    setRoleFilter((prev) =>
+      prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role],
+    );
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{listId ? 'Edit recipient list' : 'New recipient list'}</DialogTitle>
+          <DialogTitle>
+            {listId ? "Edit recipient list" : "New recipient list"}
+          </DialogTitle>
         </DialogHeader>
         <div className="grid gap-4 py-4">
           <div>
             <Label>Name</Label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Executive team" />
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Executive team"
+            />
           </div>
           <div>
             <Label>Description (optional)</Label>
-            <Input value={description} onChange={(e) => setDescription(e.target.value)} />
+            <Input
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
           </div>
           <div>
             <Label>Include users (select)</Label>
             <div className="border rounded-md p-2 max-h-40 overflow-y-auto space-y-1">
               {tenantUsers.slice(0, 100).map((u: any) => (
-                <label key={u.id} className="flex items-center gap-2 cursor-pointer text-sm">
+                <label
+                  key={u.id}
+                  className="flex items-center gap-2 cursor-pointer text-sm"
+                >
                   <input
                     type="checkbox"
                     checked={userIds.includes(u.id)}
                     onChange={() => toggleUser(u.id)}
                   />
-                  <span>{u.full_name || u.email} {u.email && u.full_name ? `(${u.email})` : ''}</span>
+                  <span>
+                    {u.full_name || u.email}{" "}
+                    {u.email && u.full_name ? `(${u.email})` : ""}
+                  </span>
                 </label>
               ))}
-              {tenantUsers.length === 0 && <p className="text-slate-500 text-sm">No users found.</p>}
+              {tenantUsers.length === 0 && (
+                <p className="text-slate-500 text-sm">No users found.</p>
+              )}
             </div>
           </div>
           <div>
             <Label>Include by role (dynamic at send time)</Label>
             <div className="flex flex-wrap gap-2">
               {ROLES.map((r) => (
-                <label key={r.value} className="flex items-center gap-1 cursor-pointer text-sm">
+                <label
+                  key={r.value}
+                  className="flex items-center gap-1 cursor-pointer text-sm"
+                >
                   <input
                     type="checkbox"
                     checked={roleFilter.includes(r.value)}
@@ -833,7 +1078,11 @@ function RecipientListDialog({
               ))}
             </div>
             <label className="flex items-center gap-2 mt-2 text-sm">
-              <input type="checkbox" checked={isDynamic} onChange={(e) => setIsDynamic(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={isDynamic}
+                onChange={(e) => setIsDynamic(e.target.checked)}
+              />
               Resolve roles at send time
             </label>
           </div>
@@ -845,10 +1094,46 @@ function RecipientListDialog({
               placeholder="a@example.com, b@example.com"
             />
           </div>
+          <div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={autoInvite}
+                onChange={(e) => setAutoInvite(e.target.checked)}
+              />
+              Auto-invite external emails as canvas-only users
+            </label>
+          </div>
+          <div>
+            <Label>Add auto-invited users to group (optional)</Label>
+            <Select
+              value={autoInviteGroupId || "__none__"}
+              onValueChange={(v) =>
+                setAutoInviteGroupId(v === "__none__" ? "" : v)
+              }
+              disabled={!autoInvite}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="None" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">None</SelectItem>
+                {groups.map((g: any) => (
+                  <SelectItem key={g.id} value={g.id}>
+                    {g.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={saving}>{listId ? 'Update' : 'Create'}</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button onClick={handleSubmit} disabled={saving}>
+            {listId ? "Update" : "Create"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

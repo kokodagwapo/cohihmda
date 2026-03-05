@@ -175,12 +175,27 @@ build_docker_image() {
     echo "Git Branch: $GIT_BRANCH"
     echo "Build Env: $BUILD_ENV"
     echo ""
+
+    # Build a CI commit payload for release-note draft generation in deployed environments.
+    # Format per line: <commit_iso_date>|<sha>|<subject>
+    # This avoids requiring .git history at runtime in ECS containers.
+    RELEASE_NOTES_COMMITS_B64=""
+    if command -v git >/dev/null 2>&1; then
+        RELEASE_NOTES_COMMITS_B64="$(git log --no-merges -n 400 --pretty=format:'%cI|%h|%s' 2>/dev/null | base64 | tr -d '\n' || true)"
+    fi
+    if [ -n "$RELEASE_NOTES_COMMITS_B64" ]; then
+        echo "Release-notes commit payload generated from CI history."
+    else
+        echo "Release-notes commit payload unavailable; runtime fallback will apply."
+    fi
+    echo ""
     
     # Build the image with git info as build args
     docker build \
         --build-arg GIT_COMMIT="$GIT_COMMIT" \
         --build-arg GIT_BRANCH="$GIT_BRANCH" \
         --build-arg BUILD_ENV="$BUILD_ENV" \
+        --build-arg RELEASE_NOTES_COMMITS_B64="$RELEASE_NOTES_COMMITS_B64" \
         -t "$ECR_REPOSITORY_URI:$IMAGE_TAG" \
         -t "$ECR_REPOSITORY_URI:latest" \
         -f Dockerfile.backend.prod \

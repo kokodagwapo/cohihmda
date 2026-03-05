@@ -31,6 +31,7 @@ import aiPromptsRoutes from "./admin/aiPrompts.js";
 import platformSettingsRoutes from "./admin/platformSettings.js";
 import tenantConfigExportRoutes from "./admin/tenantConfigExport.js";
 import insightFeedbackRoutes from "./admin/insightFeedback.js";
+import releaseNotesAdminRoutes from "./admin/releaseNotes.js";
 import knowledgeCenterRoutes from "./knowledgeCenter.js";
 import workbenchRoutes from "./workbench.js";
 import groupsRoutes from "./groups.js";
@@ -42,6 +43,7 @@ import onboardingRoutes from "./onboarding.js";
 import jobsRoutes from "./jobs.js";
 import helpContentRoutes from "./helpContent.js";
 import analyticsRoutes from "./analytics.js";
+import releaseNotesRoutes from "./releaseNotes.js";
 import { pool, resetPool } from "../config/database.js";
 import { setupMockLosApi } from "../services/mockLosApi.js";
 import { getVersionInfo } from "../services/versionService.js";
@@ -143,6 +145,7 @@ export function setupRoutes(app: Express) {
   app.use("/api/admin/platform-settings", platformSettingsRoutes);
   app.use("/api/admin/tenant-config-transfer", tenantConfigExportRoutes);
   app.use("/api/admin/insight-feedback", insightFeedbackRoutes);
+  app.use("/api/admin/release-notes", releaseNotesAdminRoutes);
   app.use("/api/knowledge-center", knowledgeCenterRoutes);
   app.use("/api/workbench/canvases", workbenchRoutes); // Workbench canvas CRUD (tenant DB)
   app.use("/api/groups", groupsRoutes); // User groups for canvas sharing (tenant DB)
@@ -154,6 +157,7 @@ export function setupRoutes(app: Express) {
   app.use("/api/jobs", jobsRoutes); // Async job status polling
   app.use("/api/help", helpContentRoutes); // Help content RAG seeding
   app.use("/api/analytics", analyticsRoutes); // User behavior analytics (ingestion + reporting)
+  app.use("/api/release-notes", releaseNotesRoutes); // Published release notes (management DB)
 
   // Health check handler (shared by both /health and /api/health)
   const healthCheckHandler = async (req: any, res: any) => {

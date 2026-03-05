@@ -679,8 +679,7 @@ export const IndustryNewsCard = () => {
   // Fetch news from API
   const fetchNews = async () => {
     // Check if user has a valid token before making API call
-    const token = localStorage.getItem("auth_token");
-    if (!token) {
+    if (!api.hasToken()) {
       // No token - use default news feed without making API call
       setNewsFeed(getDefaultNewsFeed());
       setNewsLoading(false);

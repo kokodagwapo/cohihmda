@@ -26,6 +26,7 @@ import { GlobalKnowledgeLibrary } from "@/components/admin/GlobalKnowledgeLibrar
 import { KnowledgeCenterSection } from "@/components/admin/KnowledgeCenterSection";
 import { AIPromptManager } from "@/components/admin/AIPromptManager";
 import { InsightFeedbackSection } from "@/components/admin/InsightFeedbackSection";
+import { ReleaseNotesSection } from "@/components/admin/ReleaseNotesSection";
 import { PlatformSettingsSection } from "@/components/admin/PlatformSettingsSection";
 import { SyncManagementSection } from "@/components/admin/SyncManagementSection";
 import { AnalyticsSection } from "@/components/admin/AnalyticsSection";
@@ -254,6 +255,7 @@ export const Admin = () => {
       { id: "dev-tools", label: "Developer Tools" },
       { id: "ai-prompts", label: "AI Prompts" },
       { id: "insight-feedback", label: "Insight Feedback" },
+      { id: "release-notes", label: "Release Notes" },
       { id: "platform-settings", label: "Platform Settings" },
       { id: "analytics", label: "User Analytics" },
     ];
@@ -547,6 +549,11 @@ export const Admin = () => {
                 >
                   <InsightFeedbackSection />
                 </motion.div>
+              )}
+
+              {/* Release Notes Section (Platform Admin) */}
+              {activeSection === "release-notes" && isPlatform && (
+                <ReleaseNotesSection />
               )}
 
               {/* Platform Settings Section (Platform Admin) */}

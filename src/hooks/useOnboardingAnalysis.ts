@@ -7,6 +7,7 @@
  */
 
 import { useState, useCallback, useRef } from "react";
+import { api } from "@/lib/api";
 
 // ============================================================================
 // Types
@@ -99,15 +100,9 @@ async function readSSEStream(
   onEvent: (event: any) => void,
   signal: AbortSignal
 ): Promise<void> {
-  const token = localStorage.getItem("auth_token");
-  const baseUrl = import.meta.env.DEV
-    ? ""
-    : (import.meta.env.VITE_API_URL || "");
-
-  const response = await fetch(`${baseUrl}${url}`, {
+  const response = await api.fetchWithAuth(url, {
     method,
     headers: {
-      Authorization: `Bearer ${token}`,
       Accept: "text/event-stream",
       ...(body ? { "Content-Type": "application/json" } : {}),
     },

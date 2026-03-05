@@ -529,7 +529,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     loadSession,
     deleteSession,
     renameSession,
-  } = useCohiChat({ tenantId });
+  } = useCohiChat({ tenantId, enabled: isOpen });
 
   const [showHistory, setShowHistory] = useState(false);
 
