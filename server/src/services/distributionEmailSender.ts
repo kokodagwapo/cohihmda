@@ -11,10 +11,11 @@ import { pool as managementPool } from '../config/managementDatabase.js';
 import { loadEmailTemplate, replacePlaceholders } from './emailTemplateLoader.js';
 import {
   sendEmail,
-  sendPasswordResetEmail,
+  sendUserInvitationEmail,
 } from './emailService.js';
 import { logEmailSend } from './emailAuditLogger.js';
 import { resolveContent, type ScheduleRow } from './distributionContentResolver.js';
+import { resolveFrontendUrl } from '../utils/frontendUrl.js';
 
 export interface SendDistributionOptions {
   tenantId: string;
@@ -197,13 +198,14 @@ async function ensureRecipientUsers(
     }
 
     try {
-      const resetUrl = await createPasswordResetUrlForInvite(email, tenantId);
-      await sendPasswordResetEmail(email, resetUrl, undefined, { strict: true });
+      const setupUrl = await createAccountSetupUrlForInvite(email, tenantId);
+      const tenantName = process.env.TENANT_NAME || "your organization";
+      await sendUserInvitationEmail(email, setupUrl, tenantName);
       invitedRecipients.push(email);
-    } catch (err: any) {
+    } catch (err: unknown) {
       inviteFailedRecipients.push({
         email,
-        error: err?.message || 'Failed to send invite email',
+        error: err instanceof Error ? err.message : 'Failed to send invite email',
       });
     }
   }
@@ -371,7 +373,7 @@ export async function sendDistribution(
   }
 }
 
-async function createPasswordResetUrlForInvite(email: string, tenantId: string): Promise<string> {
+async function createAccountSetupUrlForInvite(email: string, tenantId: string): Promise<string> {
   const token = crypto.randomBytes(32).toString('hex');
   const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
   let tenantSlug: string | null = null;
@@ -391,7 +393,7 @@ async function createPasswordResetUrlForInvite(email: string, tenantId: string):
      VALUES ($1, $2, $3, $4)`,
     [email, tokenHash, tenantSlug, expiresAt]
   );
-  const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:5173').split(',')[0].trim();
+  const frontendUrl = resolveFrontendUrl();
   return `${frontendUrl}/reset-password?token=${token}`;
 }
 
@@ -428,9 +430,9 @@ export async function logDistributionSend(
 }
 
 function buildAbsoluteLink(relativeOrAbsoluteLink: string): string {
-  if (!relativeOrAbsoluteLink) return process.env.FRONTEND_URL || 'http://localhost:5173';
+  if (!relativeOrAbsoluteLink) return resolveFrontendUrl();
   if (/^https?:\/\//i.test(relativeOrAbsoluteLink)) return relativeOrAbsoluteLink;
-  const base = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
+  const base = resolveFrontendUrl().replace(/\/+$/, '');
   const path = relativeOrAbsoluteLink.startsWith('/') ? relativeOrAbsoluteLink : `/${relativeOrAbsoluteLink}`;
   return `${base}${path}`;
 }

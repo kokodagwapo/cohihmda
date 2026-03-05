@@ -1119,11 +1119,8 @@ router.post("/password-reset/request", authLimiter, async (req, res) => {
       return res.status(500).json({ error: "Internal server error" });
     }
 
-    const frontendUrl = (
-      process.env.FRONTEND_URL || "http://localhost:5173"
-    )
-      .split(",")[0]
-      .trim();
+    const { resolveFrontendUrl } = await import("../utils/frontendUrl.js");
+    const frontendUrl = resolveFrontendUrl();
     const resetUrl = `${frontendUrl}/reset-password?token=${token}`;
 
     try {
