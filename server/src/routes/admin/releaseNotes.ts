@@ -366,6 +366,7 @@ router.post(
   async (req: AuthRequest, res: Response) => {
     try {
       const id = req.params.id;
+      const forceResend = Boolean(req.body?.forceResend);
       const noteResult = await managementPool.query(
         `SELECT id, version, title, is_draft, published_at, email_sent_at, created_by, created_at, updated_at
          FROM release_notes
@@ -384,10 +385,13 @@ router.post(
             error: "Release note must be published before sending email",
           });
       }
-      if (note.email_sent_at) {
+      if (note.email_sent_at && !forceResend) {
         return res
           .status(400)
-          .json({ error: "Release note email has already been sent" });
+          .json({
+            error:
+              "Release note email has already been sent. Set forceResend=true to send again.",
+          });
       }
 
       const entries = await getEntriesByNoteId(note.id);
@@ -444,19 +448,74 @@ function buildFallbackDraftFromCommits(commits: string[]): Array<{
   category: ReleaseNoteCategory;
 }> {
   return commits.slice(0, 8).map((line) => {
+    const subject = line.replace(/^[a-f0-9]{7,}\s+/i, "").trim();
     const normalized = line.toLowerCase();
     const category: ReleaseNoteCategory = normalized.includes("fix")
       ? "fix"
       : normalized.includes("feat") || normalized.includes("add")
         ? "feature"
         : "improvement";
-    const title = line.replace(/^[a-f0-9]{7,}\s+/i, "").slice(0, 90);
+    const title = subject.slice(0, 90);
     return {
       title,
-      description: "Improvements and updates included in this release.",
+      description: `From commit: ${subject.slice(0, 180)}`,
       category,
     };
   });
+}
+
+type CommitInfo = { sha: string; subject: string };
+
+function parseCommitInfo(commitLines: string[]): CommitInfo[] {
+  return commitLines
+    .map((line) => {
+      const match = line.match(/^([a-f0-9]{7,})\s+(.+)$/i);
+      if (!match) return null;
+      const sha = match[1].toLowerCase();
+      const subject = match[2].trim();
+      if (!sha || !subject) return null;
+      return { sha, subject };
+    })
+    .filter((value): value is CommitInfo => value !== null);
+}
+
+function normalizeAiGroundedEntries(
+  raw: unknown,
+  commitMap: Map<string, CommitInfo>,
+): UpsertEntryInput[] {
+  if (!Array.isArray(raw)) return [];
+  const validCategories = new Set(["feature", "improvement", "fix"]);
+
+  const normalized = raw
+    .map((entry, idx) => {
+      const item = (entry || {}) as Record<string, unknown>;
+      const sourceCommit = String(item.sourceCommit || "").trim().toLowerCase();
+      const evidence = String(item.evidence || "").trim().toLowerCase();
+      const commit = commitMap.get(sourceCommit);
+      if (!commit) return null;
+      if (!evidence || !commit.subject.toLowerCase().includes(evidence)) return null;
+
+      const title = String(item.title || "").trim();
+      const description = String(item.description || "").trim();
+      if (!title || !description) return null;
+
+      const categoryRaw = String(item.category || "").toLowerCase();
+      const category = validCategories.has(categoryRaw)
+        ? (categoryRaw as ReleaseNoteCategory)
+        : "improvement";
+
+      return {
+        title,
+        description,
+        category,
+        link: null,
+        linkLabel: null,
+        sortOrder: typeof item.sortOrder === "number" ? item.sortOrder : Number(idx),
+      };
+    })
+    .filter(isNonNull);
+
+  return normalizeEntries(normalized);
 }
 
 function parseCommitLinesFromEnvSince(
@@ -567,6 +626,8 @@ router.post(
       }
 
       const fallbackEntries = buildFallbackDraftFromCommits(commitLines);
+      const commitInfo = parseCommitInfo(commitLines);
+      const commitMap = new Map(commitInfo.map((item) => [item.sha, item]));
 
       try {
         const apiKey = await getOpenAIKey();
@@ -575,13 +636,23 @@ router.post(
 Return ONLY strict JSON in this shape:
 {
   "entries": [
-    { "title": "string", "description": "string", "category": "feature|improvement|fix" }
+    {
+      "title": "string",
+      "description": "string",
+      "category": "feature|improvement|fix",
+      "sourceCommit": "commit sha from list below",
+      "evidence": "exact short phrase copied from the commit subject"
+    }
   ]
 }
 
 Rules:
 - Use concise, customer-safe language.
 - Exclude internal/devops/infrastructure-only items.
+- Do NOT invent features, behavior, or outcomes that are not explicitly present in commits.
+- Every entry MUST map to one commit from the list via sourceCommit.
+- evidence MUST be an exact phrase copied from that commit subject.
+- If uncertain, omit the entry.
 - Keep each title under 90 chars.
 - Keep each description under 220 chars.
 - Max 12 entries.
@@ -593,7 +664,7 @@ ${commitLines.join("\n")}`;
           { role: "user", content: prompt },
         ];
         const aiRaw = await callOpenAI(messages, apiKey, {
-          temperature: 0.2,
+          temperature: 0,
           jsonMode: true,
           maxTokens: 1800,
         });
@@ -602,14 +673,17 @@ ${commitLines.join("\n")}`;
             title?: string;
             description?: string;
             category?: string;
+            sourceCommit?: string;
+            evidence?: string;
           }>;
         };
-        const aiEntries = normalizeEntries(parsed.entries);
+        const aiEntries = normalizeAiGroundedEntries(parsed.entries, commitMap);
         if (aiEntries.length > 0) {
           return res.json({
             entries: aiEntries,
             since,
             commitsCount: commitLines.length,
+            aiGrounded: true,
           });
         }
       } catch (error: any) {
@@ -623,6 +697,9 @@ ${commitLines.join("\n")}`;
         entries: fallbackEntries,
         since,
         commitsCount: commitLines.length,
+        aiGrounded: false,
+        warning:
+          "AI draft did not meet grounding checks. Returned commit-based fallback instead.",
       });
     } catch (error: any) {
       console.error("[ReleaseNotesAdmin] generate-draft error:", error);
