@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; color: #1e293b; background: #f8fafc; }
+    .wrap { max-width: 700px; margin: 0 auto; padding: 24px; }
+    .card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; }
+    h1 { font-size: 22px; margin: 0 0 8px; color: #0f172a; }
+    .meta { font-size: 13px; color: #64748b; margin-bottom: 16px; }
+    .copy { font-size: 14px; line-height: 1.5; color: #334155; margin: 8px 0; }
+    .loan-card { border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; margin: 14px 0; background: #f8fafc; }
+    .loan-header { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .pill { font-size: 12px; background: #fee2e2; color: #991b1b; border-radius: 999px; padding: 4px 10px; font-weight: 600; }
+    .loan-meta { font-size: 12px; color: #475569; display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 8px; }
+    .loan-reason { font-size: 13px; color: #334155; margin-bottom: 10px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .btn { text-decoration: none; color: #fff !important; padding: 8px 12px; border-radius: 8px; font-size: 12px; font-weight: 600; display: inline-block; }
+    .btn-ok { background: #0f766e; }
+    .btn-working { background: #1d4ed8; }
+    .btn-help { background: #b91c1c; }
+    .foot { font-size: 11px; color: #94a3b8; margin-top: 14px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Fallout Risk Alert</h1>
+      <p class="meta">{{ALERT_DATE}}</p>
+      <p class="copy">Hi {{RECIPIENT_NAME}},</p>
+      <p class="copy">You have <strong>{{LOAN_COUNT}}</strong> loan(s) currently flagged as elevated fallout risk.</p>
+      <p class="copy">{{CUSTOM_MESSAGE}}</p>
+      <div>{{LOANS_HTML}}</div>
+      <p class="foot">These links expire in 7 days. Powered by Cohi.</p>
+    </div>
+  </div>
+</body>
+</html>

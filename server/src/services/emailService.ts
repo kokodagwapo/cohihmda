@@ -5,6 +5,7 @@
  */
 
 import { logEmailSend } from "./emailAuditLogger.js";
+import { assertNoLocalhostInProduction } from "../utils/frontendUrl.js";
 
 const SES_CONFIGURATION_SET = process.env.SES_CONFIGURATION_SET || "my-first-configuration-set";
 
@@ -84,6 +85,16 @@ export interface SendEmailWithAttachmentOptions {
  */
 export async function sendEmail(options: EmailOptions): Promise<string | undefined> {
   const emailProvider = process.env.EMAIL_PROVIDER || "ses"; // ses, sendgrid, resend
+
+  const localhostLinkMatch = options.html.match(/href=["']https?:\/\/localhost[^"']*/i);
+  if (localhostLinkMatch) {
+    try {
+      assertNoLocalhostInProduction(localhostLinkMatch[0], "sendEmail");
+    } catch (guardError) {
+      if (options.strict) throw guardError;
+      console.warn(`⚠️ Email to ${options.to} contains localhost link: ${localhostLinkMatch[0]}`);
+    }
+  }
 
   try {
     switch (emailProvider) {

@@ -102,14 +102,10 @@ interface SsoState {
   timestamp: number;
 }
 
-/**
- * Get the primary frontend URL for SSO redirects
- * FRONTEND_URL may contain comma-separated values for CORS, but we need just the first one
- */
+import { resolveFrontendUrl } from "../../utils/frontendUrl.js";
+
 function getPrimaryFrontendUrl(): string {
-  const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5000";
-  // Handle comma-separated URLs (take the first one)
-  return frontendUrl.split(",")[0].trim();
+  return resolveFrontendUrl();
 }
 
 /**
