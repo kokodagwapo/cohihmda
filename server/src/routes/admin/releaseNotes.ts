@@ -428,6 +428,40 @@ function buildFallbackDraftFromCommits(commits: string[]): Array<{
   });
 }
 
+function parseCommitLinesFromEnvSince(sinceIso: string, encoded?: string): string[] {
+  const raw = String(encoded || "").trim();
+  if (!raw) return [];
+
+  let decoded = "";
+  try {
+    decoded = Buffer.from(raw, "base64").toString("utf8");
+  } catch {
+    return [];
+  }
+
+  if (!decoded.trim()) return [];
+
+  const sinceMs = Date.parse(sinceIso);
+  return decoded
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const match = line.match(/^([^|]+)\|([a-f0-9]+)\|(.*)$/i);
+      if (!match) return null;
+      const commitDate = match[1]?.trim();
+      const sha = match[2]?.trim();
+      const subject = match[3]?.trim();
+      if (!commitDate || !sha || !subject) return null;
+      const commitMs = Date.parse(commitDate);
+      if (Number.isFinite(sinceMs) && Number.isFinite(commitMs) && commitMs < sinceMs) {
+        return null;
+      }
+      return `${sha} ${subject}`;
+    })
+    .filter((line): line is string => Boolean(line));
+}
+
 router.post(
   "/generate-draft",
   authenticateToken,
@@ -453,22 +487,45 @@ router.post(
       }
 
       let commitLines: string[] = [];
+      let gitUnavailableReason: string | null = null;
       if (commitsInput) {
         commitLines = commitsInput
           .split("\n")
           .map((line) => line.trim())
           .filter(Boolean);
       } else {
-        const command = `git log --oneline --no-merges --since="${since}"`;
-        const { stdout } = await exec(command, { cwd: repoRoot });
-        commitLines = stdout
-          .split("\n")
-          .map((line) => line.trim())
-          .filter(Boolean);
+        commitLines = parseCommitLinesFromEnvSince(
+          since,
+          process.env.RELEASE_NOTES_COMMITS_B64,
+        );
+
+        try {
+          if (commitLines.length === 0) {
+            const command = `git log --oneline --no-merges --since="${since}"`;
+            const { stdout } = await exec(command, { cwd: repoRoot });
+            commitLines = stdout
+              .split("\n")
+              .map((line) => line.trim())
+              .filter(Boolean);
+          }
+        } catch (error: any) {
+          gitUnavailableReason = error?.message || "git log unavailable";
+          console.warn(
+            "[ReleaseNotesAdmin] git log unavailable in this environment; waiting for manual commits input",
+            gitUnavailableReason,
+          );
+        }
       }
 
       if (commitLines.length === 0) {
-        return res.json({ entries: [], since, commitsCount: 0 });
+        return res.json({
+          entries: [],
+          since,
+          commitsCount: 0,
+          warning: gitUnavailableReason
+            ? "Unable to read git history in this environment. Provide commit messages manually or ensure CI commit payload is configured."
+            : null,
+        });
       }
 
       const fallbackEntries = buildFallbackDraftFromCommits(commitLines);
