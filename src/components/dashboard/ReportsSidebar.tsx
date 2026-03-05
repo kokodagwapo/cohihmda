@@ -934,12 +934,22 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                     <Icon size={18} style={{ color: colorMap[it.color]?.text || '#64748b' }} />
                   </div>
                   <span style={{ fontSize: 13, fontWeight: 500, color: isDarkMode ? '#e2e8f0' : '#1a1d29', flex: 1 }}>{it.label}</span>
-                  <button
+                  <div
+                    role="switch"
+                    aria-checked={isActive}
+                    tabIndex={0}
                     onClick={(e) => { e.stopPropagation(); handleToggleSection(it.id); }}
-                    style={{ flexShrink: 0, width: 32, height: 20, borderRadius: 9999, backgroundColor: isActive ? '#10b981' : (isDarkMode ? '#475569' : '#cbd5e1'), border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 2, justifyContent: isActive ? 'flex-end' : 'flex-start' }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleToggleSection(it.id);
+                      }
+                    }}
+                    style={{ flexShrink: 0, width: 32, height: 20, borderRadius: 9999, backgroundColor: isActive ? '#10b981' : (isDarkMode ? '#475569' : '#cbd5e1'), cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 2, justifyContent: isActive ? 'flex-end' : 'flex-start' }}
                   >
                     <div style={{ width: 16, height: 16, borderRadius: '50%', backgroundColor: 'white', boxShadow: '0 1px 2px rgba(0,0,0,0.1)' }} />
-                  </button>
+                  </div>
                 </button>
               );
             })}
@@ -997,13 +1007,22 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                           <Icon className="h-4 w-4" style={{ color: colorMap[it.color]?.text || '#64748b' }} />
                         </div>
                         <span className="flex-1 text-left truncate">{it.label}</span>
-                        <button
-                          type="button"
+                        <div
+                          role="switch"
+                          aria-checked={isActive}
+                          tabIndex={0}
                           onClick={(e) => { e.stopPropagation(); handleToggleSection(it.id); }}
-                          className={cn("shrink-0 w-8 h-5 rounded-full flex items-center p-0.5 transition-colors", isActive ? "bg-emerald-500 justify-end" : (isDarkMode ? "bg-slate-600 justify-start" : "bg-slate-300 justify-start"))}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleToggleSection(it.id);
+                            }
+                          }}
+                          className={cn("shrink-0 w-8 h-5 rounded-full flex items-center p-0.5 transition-colors cursor-pointer", isActive ? "bg-emerald-500 justify-end" : (isDarkMode ? "bg-slate-600 justify-start" : "bg-slate-300 justify-start"))}
                         >
                           <span className="w-4 h-4 rounded-full bg-white shadow-sm" />
-                        </button>
+                        </div>
                       </button>
                     );
                   })}

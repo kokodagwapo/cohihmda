@@ -166,6 +166,12 @@ export const learningPaths: LearningPath[] = [
             type: "article",
             link: "/help/workbench/generating-reports",
           },
+          {
+            id: "exec-w3-5",
+            title: "Read: Distributing Canvases and Content",
+            type: "article",
+            link: "/help/workbench/distributing-content",
+          },
         ],
       },
       {
@@ -323,6 +329,12 @@ export const learningPaths: LearningPath[] = [
             title: "Read: Generating Reports (PPTX/PDF)",
             type: "article",
             link: "/help/workbench/generating-reports",
+          },
+          {
+            id: "mgr-w4-3b",
+            title: "Read: Distributing Canvases and Content",
+            type: "article",
+            link: "/help/workbench/distributing-content",
           },
           {
             id: "mgr-w4-4",

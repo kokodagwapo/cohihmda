@@ -61,7 +61,22 @@ export const whatsNewEntries: WhatsNewEntry[] = [
   },
 ];
 
-export function getUnseenEntries(lastSeenDate: string | null): WhatsNewEntry[] {
-  if (!lastSeenDate) return whatsNewEntries;
-  return whatsNewEntries.filter(e => new Date(e.date) > new Date(lastSeenDate));
+export function mergeWhatsNewEntries(
+  apiEntries: WhatsNewEntry[],
+  fallbackEntries: WhatsNewEntry[] = whatsNewEntries,
+): WhatsNewEntry[] {
+  const merged = new Map<string, WhatsNewEntry>();
+  for (const entry of fallbackEntries) merged.set(entry.id, entry);
+  for (const entry of apiEntries) merged.set(entry.id, entry);
+  return Array.from(merged.values()).sort(
+    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+  );
+}
+
+export function getUnseenEntries(
+  lastSeenDate: string | null,
+  entries: WhatsNewEntry[] = whatsNewEntries,
+): WhatsNewEntry[] {
+  if (!lastSeenDate) return entries;
+  return entries.filter(e => new Date(e.date) > new Date(lastSeenDate));
 }

@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      body {
+        margin: 0;
+        padding: 24px;
+        background: #f6f8fb;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        color: #0f172a;
+      }
+      .container {
+        max-width: 680px;
+        margin: 0 auto;
+      }
+      .card {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 16px;
+        overflow: hidden;
+      }
+      .header {
+        padding: 24px;
+        background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%);
+        color: #ffffff;
+      }
+      .header h1 {
+        margin: 0;
+        font-size: 24px;
+        font-weight: 500;
+      }
+      .header p {
+        margin: 8px 0 0;
+        font-size: 14px;
+        opacity: 0.95;
+      }
+      .content {
+        padding: 24px;
+      }
+      .entry-group {
+        margin-bottom: 20px;
+      }
+      .entry-group-title {
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #475569;
+        margin-bottom: 10px;
+        font-weight: 700;
+      }
+      .entry-card {
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 14px;
+        margin-bottom: 10px;
+        background: #f8fafc;
+      }
+      .entry-title {
+        font-size: 15px;
+        font-weight: 600;
+        margin-bottom: 6px;
+      }
+      .entry-description {
+        font-size: 14px;
+        color: #334155;
+        line-height: 1.45;
+      }
+      .entry-link {
+        display: inline-block;
+        margin-top: 10px;
+        font-size: 13px;
+        color: #2563eb;
+        text-decoration: none;
+        font-weight: 600;
+      }
+      .footer {
+        padding: 16px 24px 24px;
+        font-size: 12px;
+        color: #64748b;
+      }
+      .footer a {
+        color: #2563eb;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="card">
+        <div class="header">
+          <h1>Cohi Release Notes - {{VERSION}}</h1>
+          <p>{{TITLE}}</p>
+        </div>
+        <div class="content">{{ENTRIES_HTML}}</div>
+        <div class="footer">
+          You are receiving this because release note emails are enabled for your account.
+          <a href="{{UNSUBSCRIBE_URL}}">Unsubscribe</a>.
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
