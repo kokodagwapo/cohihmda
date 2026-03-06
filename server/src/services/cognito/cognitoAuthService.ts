@@ -20,6 +20,7 @@ import {
   ChangePasswordCommand,
   InitiateAuthCommand,
   DescribeUserPoolCommand,
+  GetUserPoolMfaConfigCommand,
   type AuthenticationResultType,
   type ChallengeNameType,
 } from "@aws-sdk/client-cognito-identity-provider";
@@ -88,18 +89,40 @@ function getEnabledMfasFromDescribeUserPool(userPool: unknown): string[] {
 export async function assertMfaConfigurationReady(): Promise<void> {
   if (!isCognitoAuthEnabled()) return;
 
-  const response = await getClient().send(
-    new DescribeUserPoolCommand({
-      UserPoolId: getCognitoUserPoolId(),
-    }),
-  );
+  let mfaConfiguration = "OFF";
+  let hasTotp = false;
+  let hasEmailOtp = false;
+  let enabledMfas: string[] = [];
 
-  const userPool = response.UserPool;
-  const mfaConfiguration = userPool?.MfaConfiguration || "OFF";
-  const enabledMfas = getEnabledMfasFromDescribeUserPool(userPool);
+  // Preferred source: dedicated MFA config API (returns software/email MFA config directly).
+  try {
+    const mfaConfig = await getClient().send(
+      new GetUserPoolMfaConfigCommand({
+        UserPoolId: getCognitoUserPoolId(),
+      }),
+    );
 
-  const hasTotp = enabledMfas.includes("SOFTWARE_TOKEN_MFA");
-  const hasEmailOtp = enabledMfas.includes("EMAIL_OTP");
+    mfaConfiguration = mfaConfig.MfaConfiguration || "OFF";
+    hasTotp = !!mfaConfig.SoftwareTokenMfaConfiguration?.Enabled;
+    hasEmailOtp = !!(
+      mfaConfig.EmailMfaConfiguration?.Message &&
+      mfaConfig.EmailMfaConfiguration?.Subject
+    );
+    if (hasTotp) enabledMfas.push("SOFTWARE_TOKEN_MFA");
+    if (hasEmailOtp) enabledMfas.push("EMAIL_OTP");
+  } catch {
+    // Backward compatibility fallback for older permissions/deployments.
+    const response = await getClient().send(
+      new DescribeUserPoolCommand({
+        UserPoolId: getCognitoUserPoolId(),
+      }),
+    );
+    const userPool = response.UserPool;
+    mfaConfiguration = userPool?.MfaConfiguration || "OFF";
+    enabledMfas = getEnabledMfasFromDescribeUserPool(userPool);
+    hasTotp = enabledMfas.includes("SOFTWARE_TOKEN_MFA");
+    hasEmailOtp = enabledMfas.includes("EMAIL_OTP");
+  }
 
   if (mfaConfiguration === "OFF") {
     throw new Error(

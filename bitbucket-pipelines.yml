@@ -19,6 +19,7 @@
 #   - ECS_SERVICE                  - ECS service name
 #   - VITE_API_URL                 - Backend API URL for frontend build
 #   - CF_STACK_BACKEND             - CloudFormation stack name (e.g., coheus-dev-backend)
+#   - COGNITO_PASSWORD_AUTH        - Set to "true" (Cognito-only password auth policy)
 # ============================================================================
 
 image: node:20
@@ -262,12 +263,20 @@ pipelines:
       - parallel:
           - step: *build-frontend
           - step: *build-backend
+      - parallel:
+          - step: *test-frontend
+          - step: *test-backend
+          - step: *test-backend-integration
       - step: *deploy-dev
 
     main:
       - parallel:
           - step: *build-frontend
           - step: *build-backend
+      - parallel:
+          - step: *test-frontend
+          - step: *test-backend
+          - step: *test-backend-integration
       - step: *deploy-prod
 
   # Pull request validation (only for PRs targeting dev or main)
