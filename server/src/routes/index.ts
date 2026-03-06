@@ -51,6 +51,7 @@ import { setupMockLosApi } from "../services/mockLosApi.js";
 import { getVersionInfo } from "../services/versionService.js";
 import { globalTenantContext } from "../middleware/tenantContext.js";
 import { getJwtSecret } from "../middleware/auth.js";
+import { isCanvasOnlyRequestAllowed } from "../middleware/rbac.js";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 
@@ -82,24 +83,7 @@ export function setupRoutes(app: Express) {
       if (decoded.access_mode === "canvas_only") {
         const path = req.originalUrl || req.url || "";
         const method = (req.method || "GET").toUpperCase();
-        const allowedPrefixes = [
-          "/api/auth",
-          "/api/workbench/canvases",
-          "/api/loans",
-          "/api/metrics",
-          "/api/dashboard",
-          "/api/pipeline-analysis",
-          "/api/scorecard",
-          "/api/toptiering",
-          "/api/predictions",
-          "/api/fallout",
-          "/api/pricing-dashboard",
-        ];
-        const pathAllowed = allowedPrefixes.some((prefix) =>
-          path.startsWith(prefix),
-        );
-        const methodAllowed = method === "GET" || method === "POST";
-        if (!pathAllowed || !methodAllowed) {
+        if (!isCanvasOnlyRequestAllowed(path, method)) {
           return res.status(403).json({
             error: "Forbidden",
             message: "Canvas-only users cannot access this resource.",

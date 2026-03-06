@@ -44,6 +44,58 @@ export interface RBACRequest extends AuthRequest {
   userTenantId?: string;
 }
 
+type CanvasOnlyRule = {
+  prefix: string;
+  methods: ReadonlySet<string>;
+};
+
+const CANVAS_ONLY_RULES: CanvasOnlyRule[] = [
+  { prefix: '/api/auth', methods: new Set(['GET', 'POST']) },
+  { prefix: '/api/workbench/canvases', methods: new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']) },
+  { prefix: '/api/loans', methods: new Set(['GET', 'POST']) },
+  { prefix: '/api/metrics', methods: new Set(['GET', 'POST']) },
+  { prefix: '/api/dashboard', methods: new Set(['GET', 'POST']) },
+  { prefix: '/api/pipeline-analysis', methods: new Set(['GET', 'POST']) },
+  { prefix: '/api/scorecard', methods: new Set(['GET', 'POST']) },
+  { prefix: '/api/toptiering', methods: new Set(['GET', 'POST']) },
+  { prefix: '/api/predictions', methods: new Set(['GET', 'POST']) },
+  { prefix: '/api/fallout', methods: new Set(['GET', 'POST']) },
+  { prefix: '/api/pricing-dashboard', methods: new Set(['GET', 'POST']) },
+];
+
+const CANVAS_ONLY_BLOCKED_MUTATIONS: Array<{ method: string; prefix: string }> = [
+  // Explicit side-effect endpoints that canvas-only users should never invoke.
+  { method: 'POST', prefix: '/api/loans/sync-market-rates' },
+  { method: 'POST', prefix: '/api/loans/email-card' },
+];
+
+function normalizeRequestPath(rawPath: string): string {
+  const pathWithoutQuery = rawPath.split('?')[0] || '/';
+  return pathWithoutQuery.endsWith('/') && pathWithoutQuery.length > 1
+    ? pathWithoutQuery.slice(0, -1)
+    : pathWithoutQuery;
+}
+
+export function isCanvasOnlyRequestAllowed(path: string, method: string): boolean {
+  const normalizedPath = normalizeRequestPath(path || '');
+  const normalizedMethod = (method || 'GET').toUpperCase();
+
+  const isBlocked = CANVAS_ONLY_BLOCKED_MUTATIONS.some(
+    (entry) =>
+      entry.method === normalizedMethod &&
+      (normalizedPath === entry.prefix || normalizedPath.startsWith(`${entry.prefix}/`)),
+  );
+  if (isBlocked) return false;
+
+  const matchingRule = CANVAS_ONLY_RULES.find(
+    (rule) =>
+      normalizedPath === rule.prefix || normalizedPath.startsWith(`${rule.prefix}/`),
+  );
+  if (!matchingRule) return false;
+
+  return matchingRule.methods.has(normalizedMethod);
+}
+
 /**
  * Check if user has permission for resource/action
  */
@@ -402,7 +454,8 @@ export function enforceTenantIsolation() {
 
 /**
  * Middleware: block canvas_only users from non-canvas routes.
- * Allow only /api/auth and /api/workbench/canvases. Must run after authenticateToken.
+ * Allowed routes and methods are defined in isCanvasOnlyRequestAllowed().
+ * Must run after authenticateToken.
  */
 export function requireFullAccess() {
   return async (req: RBACRequest, res: Response, next: NextFunction) => {
@@ -415,8 +468,8 @@ export function requireFullAccess() {
         return next();
       }
       const path = req.originalUrl || req.url || '';
-      const allowed = path.startsWith('/api/auth') || path.startsWith('/api/workbench/canvases');
-      if (allowed) {
+      const method = (req.method || 'GET').toUpperCase();
+      if (isCanvasOnlyRequestAllowed(path, method)) {
         return next();
       }
       return res.status(403).json({

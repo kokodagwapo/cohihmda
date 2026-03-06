@@ -1,17 +1,17 @@
 import type { RefObject } from 'react';
 import { PanelLeft } from 'lucide-react';
-import { ExportMenu } from '@/components/common/ExportMenu';
+import { ExportShareMenu } from '@/components/common/ExportShareMenu';
 import type { ExportData } from '@/utils/exportUtils';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
-import { useTopTieringLayout } from '@/components/layout/TopTieringLayout';
 
 export interface TopTieringTopBarProps {
   title?: string;
   onOpenSidebar?: () => void;
   className?: string;
   exportTargetRef?: RefObject<HTMLElement>;
+  shareTargetType?: string;
 }
 
 export function TopTieringTopBar({
@@ -19,10 +19,9 @@ export function TopTieringTopBar({
   onOpenSidebar,
   className,
   exportTargetRef,
+  shareTargetType = 'toptiering-page',
 }: TopTieringTopBarProps) {
   const isMobile = useIsMobile();
-  const layoutContext = useTopTieringLayout();
-  const openSidebar = onOpenSidebar ?? layoutContext?.openMobileMenu;
   const getExportData = (): ExportData => ({
     title,
     tables: [],
@@ -35,12 +34,12 @@ export function TopTieringTopBar({
         className
       )}
     >
-      {isMobile && openSidebar && (
+      {isMobile && onOpenSidebar && (
         <Button
           variant="ghost"
           size="icon"
           className="h-9 w-9 shrink-0 rounded-xl hover:bg-violet-100/80 dark:hover:bg-violet-900/30 transition-colors"
-          onClick={openSidebar}
+          onClick={onOpenSidebar}
           aria-label="Open menu"
         >
           <PanelLeft className="h-5 w-5 text-violet-600 dark:text-violet-400" />
@@ -51,10 +50,11 @@ export function TopTieringTopBar({
       </h1>
       <div className="ml-auto">
         {exportTargetRef && (
-          <ExportMenu
+          <ExportShareMenu
             title={title}
             targetRef={exportTargetRef}
             getExportData={getExportData}
+            shareTarget={{ type: shareTargetType, label: title }}
           />
         )}
       </div>

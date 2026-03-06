@@ -3932,25 +3932,28 @@ Structure it as a narrative-first executive briefing:
                         Add widget or template
                       </TooltipContent>
                     </Tooltip>
-                    <DropdownMenuContent align="start" className="w-[620px]">
-                      <div className="grid grid-cols-[160px_1fr] gap-3 px-2 py-2">
-                        <div className="space-y-1.5">
+                    <DropdownMenuContent
+                      align="start"
+                      className="w-[620px] p-0 overflow-hidden border-0 shadow-lg"
+                    >
+                      <div className="grid grid-cols-[160px_1fr] gap-0">
+                        <div className="space-y-0.5 p-2.5 bg-gradient-to-b from-slate-50/90 to-slate-100/60 dark:from-slate-800/40 dark:to-slate-900/50 rounded-l-lg border-r border-slate-200/60 dark:border-slate-700/50">
                           {DASHBOARD_SECTION_GROUPS.map((group) => (
                             <button
                               key={group.label}
                               type="button"
                               onClick={() => setActiveAddGroup(group.label)}
-                              className={`w-full text-left rounded-lg px-2 py-2 text-xs font-semibold uppercase tracking-wider transition-colors ${
+                              className={`w-full text-left rounded-lg px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider transition-all duration-200 ${
                                 activeAddGroup === group.label
-                                  ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900"
-                                  : "text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/60"
+                                  ? "bg-violet-100 text-violet-700 shadow-sm dark:bg-violet-500/20 dark:text-violet-300"
+                                  : "text-slate-500 dark:text-slate-400 hover:bg-violet-50/80 dark:hover:bg-violet-500/10 hover:text-slate-700 dark:hover:text-slate-300"
                               }`}
                             >
                               {group.label}
                             </button>
                           ))}
                         </div>
-                        <div className="rounded-xl border border-slate-200/70 dark:border-slate-700/70 bg-slate-50/70 dark:bg-slate-900/40 p-2.5">
+                        <div className="rounded-r-lg bg-gradient-to-br from-rose-50/50 via-white to-violet-50/50 dark:from-slate-900/60 dark:via-slate-900/40 dark:to-indigo-950/30 p-3 border border-l-0 border-slate-200/50 dark:border-slate-700/50 flex flex-col">
                           <div className="grid grid-cols-2 gap-2">
                             {(
                               DASHBOARD_SECTION_GROUPS.find(
@@ -3967,10 +3970,10 @@ Structure it as a narrative-first executive briefing:
                                       section.title,
                                     )
                                   }
-                                  className="gap-2 rounded-lg px-2 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-white/70 dark:hover:bg-slate-800/70"
+                                  className="gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-white/90 dark:hover:bg-slate-800/60 hover:shadow-sm border border-transparent hover:border-rose-200/60 dark:hover:border-violet-500/30 transition-all duration-200"
                                 >
                                   <Icon
-                                    className={`h-4 w-4 ${section.iconClass ?? "text-slate-500"}`}
+                                    className={`h-4 w-4 shrink-0 ${section.iconClass ?? "text-slate-500"}`}
                                   />
                                   <span className="truncate">
                                     {section.title}
@@ -3979,13 +3982,22 @@ Structure it as a narrative-first executive briefing:
                               );
                             })}
                           </div>
+                          <div className="mt-2.5 pt-2.5 border-t border-slate-200/60 dark:border-slate-600/50">
+                            <DropdownMenuItem
+                              onClick={addTextBlock}
+                              className="gap-2.5 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-white/90 dark:hover:bg-slate-800/60 hover:text-slate-800 dark:hover:text-slate-100 border-0 focus:bg-white/90 dark:focus:bg-slate-800/60 focus:text-slate-800 dark:focus:text-slate-100 cursor-pointer"
+                            >
+                              <StickyNote className="h-4 w-4 shrink-0 text-amber-500/80 dark:text-amber-400/80" />
+                              <span>Text block</span>
+                            </DropdownMenuItem>
+                          </div>
                         </div>
                       </div>
-                      <div className="h-px bg-slate-200/70 dark:bg-slate-700/60 my-2" />
-                      <DropdownMenuLabel className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 px-3">
+                      <div className="hidden h-px bg-slate-200/70 dark:bg-slate-700/60 my-2" />
+                      <DropdownMenuLabel className="hidden text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 px-3">
                         Templates
                       </DropdownMenuLabel>
-                      <div className="grid grid-cols-2 gap-2 px-2 py-2">
+                      <div className="hidden grid grid-cols-2 gap-2 px-2 py-2">
                         {CANVAS_TEMPLATES.map((t) => {
                           const Icon = t.icon;
                           return (
@@ -4009,14 +4021,6 @@ Structure it as a narrative-first executive briefing:
                           );
                         })}
                       </div>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        onClick={addTextBlock}
-                        className="gap-2"
-                      >
-                        <StickyNote className="h-4 w-4" />
-                        Text block
-                      </DropdownMenuItem>
                     </DropdownMenuContent>
                       </DropdownMenu>
                     </>

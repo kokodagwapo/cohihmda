@@ -19,7 +19,6 @@ import { cn } from "@/lib/utils";
 import {
   Banknote,
   Brain,
-  Bug,
   ChevronDown,
   FolderKanban,
   Gauge,
@@ -40,7 +39,6 @@ import {
   TrendingUp,
   ClipboardList,
 } from "lucide-react";
-import { useDebugMode } from "@/contexts/DebugModeContext";
 
 type UserMenuProps = {
   isAuthenticated: boolean;
@@ -107,7 +105,6 @@ export function UserMenu({
   isAdmin = false,
 }: UserMenuProps) {
   const { theme, setTheme } = useTheme();
-  const { isDebugMode, toggleDebugMode, canDebug } = useDebugMode();
 
   const roleLabel = deriveRoleLabel(currentUser, isAdminPage);
   const email = String(currentUser?.email ?? "").trim();
@@ -248,23 +245,6 @@ export function UserMenu({
             >
               <ShieldCheck className="mr-2 h-4 w-4" />
               Admin
-            </DropdownMenuItem>
-          )}
-          {canDebug && (
-            <DropdownMenuItem
-              onClick={(e) => { e.preventDefault(); toggleDebugMode(); }}
-              className="h-10 rounded-md px-2"
-            >
-              <Bug className={cn("mr-2 h-4 w-4", isDebugMode && "text-amber-500")} />
-              Debug Mode
-              <span className={cn(
-                "ml-auto text-[10px] font-semibold px-1.5 py-0.5 rounded-full",
-                isDebugMode
-                  ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
-                  : "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
-              )}>
-                {isDebugMode ? "ON" : "OFF"}
-              </span>
             </DropdownMenuItem>
           )}
         </DropdownMenuGroup>
