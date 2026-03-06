@@ -470,9 +470,15 @@ export async function logDistributionSend(
 
 function buildAbsoluteLink(relativeOrAbsoluteLink: string): string {
   if (!relativeOrAbsoluteLink) return resolveFrontendUrl();
-  if (/^https?:\/\//i.test(relativeOrAbsoluteLink)) return relativeOrAbsoluteLink;
+  let link = relativeOrAbsoluteLink;
+  // Strip any localhost origin so we always use the real FRONTEND_URL
+  const localhostMatch = link.match(/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/.*)?$/i);
+  if (localhostMatch) {
+    link = localhostMatch[3] || '/';
+  }
+  if (/^https?:\/\//i.test(link)) return link;
   const base = resolveFrontendUrl().replace(/\/+$/, '');
-  const path = relativeOrAbsoluteLink.startsWith('/') ? relativeOrAbsoluteLink : `/${relativeOrAbsoluteLink}`;
+  const path = link.startsWith('/') ? link : `/${link}`;
   return `${base}${path}`;
 }
 

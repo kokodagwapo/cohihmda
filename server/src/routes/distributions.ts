@@ -560,6 +560,26 @@ router.post(
         { content_type: schedule.content_type, content_id: schedule.content_id, name: schedule.name, link: result.link ?? null },
         'link'
       );
+
+      // After a manual send, recalculate next_run_at so the scheduler
+      // doesn't double-fire for the same period.
+      const fullSchedule = await tenantPool.query(
+        'SELECT frequency, schedule_time, schedule_day, timezone FROM public.distribution_schedules WHERE id = $1',
+        [id]
+      );
+      if (fullSchedule.rows.length > 0) {
+        const s = fullSchedule.rows[0];
+        const nextRunAt = s.frequency !== 'one_time'
+          ? computeNextRunAt(s.frequency, s.schedule_time || '08:00', s.schedule_day, s.timezone || 'America/New_York')
+          : null;
+        await tenantPool.query(
+          `UPDATE public.distribution_schedules
+           SET last_sent_at = NOW(), next_run_at = $2, updated_at = NOW()
+           WHERE id = $1`,
+          [id, nextRunAt]
+        );
+      }
+
       res.json({
         message: 'Send completed',
         schedule_id: id,
