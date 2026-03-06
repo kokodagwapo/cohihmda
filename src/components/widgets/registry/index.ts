@@ -31,6 +31,7 @@ import { salesScorecardOverviewWidgets } from './salesScorecardOverviewWidgets';
 
 // Lock Stratification – import embed component once to avoid circular or chunk issues
 import { LockStratificationEmbed } from '../components/LockStratificationEmbed';
+import { loanComplexityWidgets } from './loanComplexityWidgets';
 
 const lockStratificationWidgets: WidgetDefinition[] = [
   { id: 'lock-stratification-kpis', name: 'Lock Stratification KPIs', description: 'Volume, units, average balance, avg days active, WAC, WA FICO, WA LTV, WA DTI', category: 'kpi', group: 'Lock Stratification', dataSource: 'lock-stratification', dataSelector: () => ({ ready: true }), defaultSize: { w: 24, h: 12 }, minSize: { w: 16, h: 8 }, config: { variant: 'kpis' }, component: LockStratificationEmbed as ComponentType<unknown> },
@@ -68,6 +69,7 @@ const allWidgets: WidgetDefinition[] = [
   ...pipelineAnalysisWidgets,
   ...salesScorecardOverviewWidgets,
   ...lockStratificationWidgets,
+  ...loanComplexityWidgets,
 ];
 
 // ---------------------------------------------------------------------------

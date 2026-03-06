@@ -28,7 +28,8 @@ export type SectionType =
   | 'pricing-dashboard'
   | 'pipeline-analysis'
   | 'sales-scorecard-overview'
-  | 'lock-stratification';
+  | 'lock-stratification'
+  | 'loan-complexity';
 
 /**
  * A dynamic (user-added) filter dimension.
@@ -142,6 +143,16 @@ export interface SectionFilters {
   lockStratMilestoneGroupBy?: string;
   /** Lock Stratification: pull-through period (30, 60, 90, 120, ytd) */
   lockStratPullThroughPeriod?: string;
+  /** Loan Complexity: group by (actors = by actor type, branch, current_loan_status) */
+  loanComplexityGroupBy?: 'actors' | 'branch' | 'current_loan_status';
+  /** Loan Complexity: when groupBy is actors, which actor dimension (loan_officer, processor, etc.) */
+  loanComplexityActorType?: 'loan_officer' | 'processor' | 'underwriter' | 'closer';
+  /** Loan Complexity: current loan status filter ("All", "Fallout", "Non-active", or specific status) */
+  loanComplexityCurrentStatus?: string;
+  /** Loan Complexity: selected bar/pivot row names to filter the loan detail table (empty = show all loans in period). Persists across period/group/status changes. */
+  loanComplexitySelectedGroupNames?: string[];
+  /** Loan Complexity: cross-dimension selection (dimension + groupName). When set, used instead of loanComplexitySelectedGroupNames for the loans API. */
+  loanComplexitySelectedGroups?: { dimension: string; groupName: string }[];
   /** User-added dynamic filters (column = value conditions) */
   dynamicFilters?: DynamicFilterEntry[];
 }
@@ -301,6 +312,22 @@ export const useWidgetSectionStore = create<WidgetSectionState>((set, get) => ({
           lockStratMeasure: 'volume',
           lockStratMilestoneGroupBy: 'current_milestone',
           lockStratPullThroughPeriod: '60',
+        };
+      } else if (sectionType === 'loan-complexity') {
+        const now = new Date();
+        const start = new Date(now.getFullYear(), now.getMonth(), 1);
+        const range = {
+          start: start.toISOString().slice(0, 10),
+          end: now.toISOString().slice(0, 10),
+        };
+        filters = {
+          ...base,
+          periodSelection: { type: 'preset' as const, preset: 'mtd' as const, dateRange: range },
+          dateRange: range,
+          loanComplexityGroupBy: 'actors',
+          loanComplexityActorType: 'loan_officer',
+          loanComplexityCurrentStatus: 'All',
+          loanComplexitySelectedGroupNames: [],
         };
       }
       return {

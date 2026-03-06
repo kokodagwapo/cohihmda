@@ -34,6 +34,24 @@ export interface LoanComplexityGroupLoansOptions extends LoanComplexityDashboard
   groupName: string;
 }
 
+/** Options for fetching loans for multiple groups (e.g. multiple selected individuals). */
+export interface LoanComplexityGroupLoansMultiOptions extends LoanComplexityDashboardOptions {
+  /** Multiple group values; loans matching any are returned. */
+  groupNames: string[];
+}
+
+/** One filter: (dimension column = groupName). Used for cross-dimension selection (e.g. one loan officer + one underwriter). */
+export interface LoanComplexityGroupFilter {
+  groupBy: LoanComplexityGroupBy;
+  groupName: string;
+}
+
+/** Options for fetching loans matching any of several (dimension, name) pairs (OR across dimensions). */
+export interface LoanComplexityGroupLoansCrossDimensionOptions
+  extends Omit<LoanComplexityDashboardOptions, "groupBy"> {
+  groupFilters: LoanComplexityGroupFilter[];
+}
+
 export interface LoanComplexityBar {
   groupName: string;
   avgComplexity: number;
@@ -69,6 +87,11 @@ export interface LoanComplexityGroupLoanRow {
   occupancy_type: string | null;
   borr_self_employed: boolean | string | null;
   complexity_score: number | null;
+  branch: string | null;
+  loan_officer: string | null;
+  underwriter: string | null;
+  processor: string | null;
+  closer: string | null;
 }
 
 const GROUP_BY_COLUMN: Record<LoanComplexityGroupBy, string> = {
@@ -273,7 +296,8 @@ export async function getLoanComplexityGroupLoans(
            l.application_date::text AS application_date,
            l.current_loan_status, l.current_milestone,
            l.ltv_ratio, l.be_dti_ratio, l.fico_score,
-           l.occupancy_type, l.borr_self_employed
+           l.occupancy_type, l.borr_self_employed,
+           l.branch, l.loan_officer, l.underwriter, l.processor, l.closer
     FROM public.loans l
     WHERE ${whereSql}
     ORDER BY l.application_date DESC NULLS LAST, l.loan_number ASC NULLS LAST
@@ -311,6 +335,338 @@ export async function getLoanComplexityGroupLoans(
       occupancy_type: r.occupancy_type != null ? String(r.occupancy_type) : null,
       borr_self_employed: r.borr_self_employed,
       complexity_score: complexity.totalScore,
+      branch: r.branch != null ? String(r.branch) : null,
+      loan_officer: r.loan_officer != null ? String(r.loan_officer) : null,
+      underwriter: r.underwriter != null ? String(r.underwriter) : null,
+      processor: r.processor != null ? String(r.processor) : null,
+      closer: r.closer != null ? String(r.closer) : null,
+    };
+  });
+
+  return rows;
+}
+
+/**
+ * Returns loan rows for multiple groups (groupBy column IN (groupNames)).
+ * Same filters as getLoanComplexityGroupLoans; use when multiple individuals/groups are selected.
+ */
+export async function getLoanComplexityGroupLoansMulti(
+  tenantPool: pg.Pool,
+  options: LoanComplexityGroupLoansMultiOptions
+): Promise<LoanComplexityGroupLoanRow[]> {
+  const {
+    startDate,
+    endDate,
+    groupBy,
+    groupNames,
+    channelGroup,
+    accessClause = "",
+    accessParams = [],
+    dimensionFilterClause = "",
+  } = options;
+
+  const trimmed = groupNames.map((n) => n.trim()).filter((n) => n.length > 0);
+  if (trimmed.length === 0) {
+    return getLoanComplexityLoansInPeriod(tenantPool, {
+      startDate,
+      endDate,
+      channelGroup,
+      accessClause,
+      accessParams,
+      dimensionFilterClause,
+    });
+  }
+
+  const conditions: string[] = [
+    "l.application_date IS NOT NULL",
+    "l.application_date::date >= $1::date",
+    "l.application_date::date <= $2::date",
+  ];
+  const params: unknown[] = [startDate, endDate];
+
+  const channelWhere = buildChannelWhereClause(channelGroup, "l");
+  if (channelWhere) {
+    conditions.push(channelWhere.replace(/^AND\s+/i, "").trim());
+  }
+  if (accessClause) {
+    conditions.push(accessClause.replace(/^AND\s+/i, "").trim());
+    params.push(...accessParams);
+  }
+
+  const groupByExpr = groupBySelect(groupBy, "l");
+  const placeholders = trimmed.map((_, i) => `$${params.length + 1 + i}`).join(", ");
+  conditions.push(`${groupByExpr} IN (${placeholders})`);
+  params.push(...trimmed.map((n) => n || "Unknown"));
+
+  const whereSql =
+    conditions.join(" AND ") +
+    (dimensionFilterClause ? ` ${dimensionFilterClause}` : "");
+
+  const loansQuery = `
+    SELECT l.loan_id,
+           COALESCE(l.loan_number, l.loan_id::text) AS loan_number,
+           l.loan_amount, l.loan_type, l.loan_program, l.loan_purpose,
+           l.application_date::text AS application_date,
+           l.current_loan_status, l.current_milestone,
+           l.ltv_ratio, l.be_dti_ratio, l.fico_score,
+           l.occupancy_type, l.borr_self_employed,
+           l.branch, l.loan_officer, l.underwriter, l.processor, l.closer
+    FROM public.loans l
+    WHERE ${whereSql}
+    ORDER BY l.application_date DESC NULLS LAST, l.loan_number ASC NULLS LAST
+  `;
+  const result = await tenantPool.query(loansQuery, params);
+
+  const complexityService = new LoanComplexityService(tenantPool);
+  await complexityService.loadCustomWeights();
+
+  const rows: LoanComplexityGroupLoanRow[] = result.rows.map((r) => {
+    const loanData = {
+      loan_type: r.loan_type,
+      loan_purpose: r.loan_purpose,
+      loan_amount: r.loan_amount != null ? parseFloat(r.loan_amount) : null,
+      fico_score: r.fico_score != null ? parseInt(r.fico_score, 10) : null,
+      ltv_ratio: r.ltv_ratio != null ? parseFloat(r.ltv_ratio) : null,
+      be_dti_ratio: r.be_dti_ratio != null ? parseFloat(r.be_dti_ratio) : null,
+      occupancy_type: r.occupancy_type,
+      borr_self_employed: r.borr_self_employed,
+    };
+    const complexity = complexityService.calculateComplexity(loanData);
+    return {
+      loan_id: String(r.loan_id),
+      loan_number: r.loan_number != null ? String(r.loan_number) : null,
+      loan_amount: r.loan_amount != null ? parseFloat(r.loan_amount) : null,
+      loan_type: r.loan_type != null ? String(r.loan_type) : null,
+      loan_program: r.loan_program != null ? String(r.loan_program) : null,
+      loan_purpose: r.loan_purpose != null ? String(r.loan_purpose) : null,
+      application_date: r.application_date != null ? String(r.application_date) : null,
+      current_loan_status: r.current_loan_status != null ? String(r.current_loan_status) : null,
+      current_milestone: r.current_milestone != null ? String(r.current_milestone) : null,
+      ltv_ratio: r.ltv_ratio != null ? parseFloat(r.ltv_ratio) : null,
+      be_dti_ratio: r.be_dti_ratio != null ? parseFloat(r.be_dti_ratio) : null,
+      fico_score: r.fico_score != null ? parseInt(r.fico_score, 10) : null,
+      occupancy_type: r.occupancy_type != null ? String(r.occupancy_type) : null,
+      borr_self_employed: r.borr_self_employed,
+      complexity_score: complexity.totalScore,
+      branch: r.branch != null ? String(r.branch) : null,
+      loan_officer: r.loan_officer != null ? String(r.loan_officer) : null,
+      underwriter: r.underwriter != null ? String(r.underwriter) : null,
+      processor: r.processor != null ? String(r.processor) : null,
+      closer: r.closer != null ? String(r.closer) : null,
+    };
+  });
+
+  return rows;
+}
+
+/**
+ * Returns loan rows for cross-dimension selection: (expr1 = name1 OR expr2 = name2 OR ...).
+ * Use when user selects e.g. one underwriter from pivot and one loan officer from chart.
+ */
+export async function getLoanComplexityGroupLoansCrossDimension(
+  tenantPool: pg.Pool,
+  options: LoanComplexityGroupLoansCrossDimensionOptions
+): Promise<LoanComplexityGroupLoanRow[]> {
+  const {
+    startDate,
+    endDate,
+    groupFilters,
+    channelGroup,
+    accessClause = "",
+    accessParams = [],
+    dimensionFilterClause = "",
+  } = options;
+
+  const trimmed = groupFilters
+    .map((f) => ({ groupBy: f.groupBy, groupName: (f.groupName || "").trim() || "Unknown" }))
+    .filter((f) => f.groupName.length > 0);
+  if (trimmed.length === 0) {
+    return getLoanComplexityLoansInPeriod(tenantPool, {
+      startDate,
+      endDate,
+      channelGroup,
+      accessClause,
+      accessParams,
+      dimensionFilterClause,
+    });
+  }
+
+  const conditions: string[] = [
+    "l.application_date IS NOT NULL",
+    "l.application_date::date >= $1::date",
+    "l.application_date::date <= $2::date",
+  ];
+  const params: unknown[] = [startDate, endDate];
+
+  const channelWhere = buildChannelWhereClause(channelGroup, "l");
+  if (channelWhere) {
+    conditions.push(channelWhere.replace(/^AND\s+/i, "").trim());
+  }
+  if (accessClause) {
+    conditions.push(accessClause.replace(/^AND\s+/i, "").trim());
+    params.push(...accessParams);
+  }
+
+  const orParts = trimmed.map((f, i) => {
+    const expr = groupBySelect(f.groupBy, "l");
+    return `${expr} = $${params.length + 1 + i}`;
+  });
+  trimmed.forEach((f) => params.push(f.groupName));
+  conditions.push(`(${orParts.join(" OR ")})`);
+
+  const whereSql =
+    conditions.join(" AND ") +
+    (dimensionFilterClause ? ` ${dimensionFilterClause}` : "");
+
+  const loansQuery = `
+    SELECT l.loan_id,
+           COALESCE(l.loan_number, l.loan_id::text) AS loan_number,
+           l.loan_amount, l.loan_type, l.loan_program, l.loan_purpose,
+           l.application_date::text AS application_date,
+           l.current_loan_status, l.current_milestone,
+           l.ltv_ratio, l.be_dti_ratio, l.fico_score,
+           l.occupancy_type, l.borr_self_employed,
+           l.branch, l.loan_officer, l.underwriter, l.processor, l.closer
+    FROM public.loans l
+    WHERE ${whereSql}
+    ORDER BY l.application_date DESC NULLS LAST, l.loan_number ASC NULLS LAST
+  `;
+  const result = await tenantPool.query(loansQuery, params);
+
+  const complexityService = new LoanComplexityService(tenantPool);
+  await complexityService.loadCustomWeights();
+
+  const rows: LoanComplexityGroupLoanRow[] = result.rows.map((r) => {
+    const loanData = {
+      loan_type: r.loan_type,
+      loan_purpose: r.loan_purpose,
+      loan_amount: r.loan_amount != null ? parseFloat(r.loan_amount) : null,
+      fico_score: r.fico_score != null ? parseInt(r.fico_score, 10) : null,
+      ltv_ratio: r.ltv_ratio != null ? parseFloat(r.ltv_ratio) : null,
+      be_dti_ratio: r.be_dti_ratio != null ? parseFloat(r.be_dti_ratio) : null,
+      occupancy_type: r.occupancy_type,
+      borr_self_employed: r.borr_self_employed,
+    };
+    const complexity = complexityService.calculateComplexity(loanData);
+    return {
+      loan_id: String(r.loan_id),
+      loan_number: r.loan_number != null ? String(r.loan_number) : null,
+      loan_amount: r.loan_amount != null ? parseFloat(r.loan_amount) : null,
+      loan_type: r.loan_type != null ? String(r.loan_type) : null,
+      loan_program: r.loan_program != null ? String(r.loan_program) : null,
+      loan_purpose: r.loan_purpose != null ? String(r.loan_purpose) : null,
+      application_date: r.application_date != null ? String(r.application_date) : null,
+      current_loan_status: r.current_loan_status != null ? String(r.current_loan_status) : null,
+      current_milestone: r.current_milestone != null ? String(r.current_milestone) : null,
+      ltv_ratio: r.ltv_ratio != null ? parseFloat(r.ltv_ratio) : null,
+      be_dti_ratio: r.be_dti_ratio != null ? parseFloat(r.be_dti_ratio) : null,
+      fico_score: r.fico_score != null ? parseInt(r.fico_score, 10) : null,
+      occupancy_type: r.occupancy_type != null ? String(r.occupancy_type) : null,
+      borr_self_employed: r.borr_self_employed,
+      complexity_score: complexity.totalScore,
+      branch: r.branch != null ? String(r.branch) : null,
+      loan_officer: r.loan_officer != null ? String(r.loan_officer) : null,
+      underwriter: r.underwriter != null ? String(r.underwriter) : null,
+      processor: r.processor != null ? String(r.processor) : null,
+      closer: r.closer != null ? String(r.closer) : null,
+    };
+  });
+
+  return rows;
+}
+
+/** Options for fetching all loans in period (no group filter). Same filters as dashboard. */
+export interface LoanComplexityLoansInPeriodOptions
+  extends Omit<LoanComplexityGroupLoansOptions, "groupBy" | "groupName"> {}
+
+/**
+ * Returns all loan rows in the period (no group filter). Same filters as dashboard.
+ * Used by workbench when the loan detail table is shown unfiltered.
+ */
+export async function getLoanComplexityLoansInPeriod(
+  tenantPool: pg.Pool,
+  options: LoanComplexityLoansInPeriodOptions
+): Promise<LoanComplexityGroupLoanRow[]> {
+  const {
+    startDate,
+    endDate,
+    channelGroup,
+    accessClause = "",
+    accessParams = [],
+    dimensionFilterClause = "",
+  } = options;
+
+  const conditions: string[] = [
+    "l.application_date IS NOT NULL",
+    "l.application_date::date >= $1::date",
+    "l.application_date::date <= $2::date",
+  ];
+  const params: unknown[] = [startDate, endDate];
+
+  const channelWhere = buildChannelWhereClause(channelGroup, "l");
+  if (channelWhere) {
+    conditions.push(channelWhere.replace(/^AND\s+/i, "").trim());
+  }
+  if (accessClause) {
+    conditions.push(accessClause.replace(/^AND\s+/i, "").trim());
+    params.push(...accessParams);
+  }
+
+  const whereSql =
+    conditions.join(" AND ") +
+    (dimensionFilterClause ? ` ${dimensionFilterClause}` : "");
+
+  const loansQuery = `
+    SELECT l.loan_id,
+           COALESCE(l.loan_number, l.loan_id::text) AS loan_number,
+           l.loan_amount, l.loan_type, l.loan_program, l.loan_purpose,
+           l.application_date::text AS application_date,
+           l.current_loan_status, l.current_milestone,
+           l.ltv_ratio, l.be_dti_ratio, l.fico_score,
+           l.occupancy_type, l.borr_self_employed,
+           l.branch, l.loan_officer, l.underwriter, l.processor, l.closer
+    FROM public.loans l
+    WHERE ${whereSql}
+    ORDER BY l.application_date DESC NULLS LAST, l.loan_number ASC NULLS LAST
+  `;
+  const result = await tenantPool.query(loansQuery, params);
+
+  const complexityService = new LoanComplexityService(tenantPool);
+  await complexityService.loadCustomWeights();
+
+  const rows: LoanComplexityGroupLoanRow[] = result.rows.map((r) => {
+    const loanData = {
+      loan_type: r.loan_type,
+      loan_purpose: r.loan_purpose,
+      loan_amount: r.loan_amount != null ? parseFloat(r.loan_amount) : null,
+      fico_score: r.fico_score != null ? parseInt(r.fico_score, 10) : null,
+      ltv_ratio: r.ltv_ratio != null ? parseFloat(r.ltv_ratio) : null,
+      be_dti_ratio: r.be_dti_ratio != null ? parseFloat(r.be_dti_ratio) : null,
+      occupancy_type: r.occupancy_type,
+      borr_self_employed: r.borr_self_employed,
+    };
+    const complexity = complexityService.calculateComplexity(loanData);
+    return {
+      loan_id: String(r.loan_id),
+      loan_number: r.loan_number != null ? String(r.loan_number) : null,
+      loan_amount: r.loan_amount != null ? parseFloat(r.loan_amount) : null,
+      loan_type: r.loan_type != null ? String(r.loan_type) : null,
+      loan_program: r.loan_program != null ? String(r.loan_program) : null,
+      loan_purpose: r.loan_purpose != null ? String(r.loan_purpose) : null,
+      application_date: r.application_date != null ? String(r.application_date) : null,
+      current_loan_status: r.current_loan_status != null ? String(r.current_loan_status) : null,
+      current_milestone: r.current_milestone != null ? String(r.current_milestone) : null,
+      ltv_ratio: r.ltv_ratio != null ? parseFloat(r.ltv_ratio) : null,
+      be_dti_ratio: r.be_dti_ratio != null ? parseFloat(r.be_dti_ratio) : null,
+      fico_score: r.fico_score != null ? parseInt(r.fico_score, 10) : null,
+      occupancy_type: r.occupancy_type != null ? String(r.occupancy_type) : null,
+      borr_self_employed: r.borr_self_employed,
+      complexity_score: complexity.totalScore,
+      branch: r.branch != null ? String(r.branch) : null,
+      loan_officer: r.loan_officer != null ? String(r.loan_officer) : null,
+      underwriter: r.underwriter != null ? String(r.underwriter) : null,
+      processor: r.processor != null ? String(r.processor) : null,
+      closer: r.closer != null ? String(r.closer) : null,
     };
   });
 
@@ -416,6 +772,7 @@ export interface PivotRowMetrics {
   pctByType: Record<string, number>;
   pctByPurpose: Record<string, number>;
   pctLocked: number;
+  pctActive: number;
   pctOriginated: number;
   pctDenied: number;
   pctWithdrawn: number;
@@ -621,6 +978,7 @@ export async function getLoanComplexityPivotData(
       pctByPurpose[p] = agg.units > 0 ? Math.round((n / agg.units) * 1000) / 10 : 0;
     }
     const pctLocked = agg.units > 0 ? Math.round((agg.locked / agg.units) * 1000) / 10 : 0;
+    const pctActive = agg.units > 0 ? Math.round(((agg.units - agg.nonActive) / agg.units) * 1000) / 10 : 0;
     const denom = agg.nonActive > 0 ? agg.nonActive : 1;
     const pctOriginated = Math.round((agg.originated / denom) * 1000) / 10;
     const pctDenied = Math.round((agg.denied / denom) * 1000) / 10;
@@ -633,6 +991,7 @@ export async function getLoanComplexityPivotData(
       pctByType,
       pctByPurpose,
       pctLocked,
+      pctActive,
       pctOriginated,
       pctDenied,
       pctWithdrawn,

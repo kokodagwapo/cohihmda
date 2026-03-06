@@ -44,7 +44,7 @@ import {
 } from "recharts";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/components/theme-provider";
-import { Loader2, Download, ChevronDown, ArrowUp, ArrowDown, ChevronRight } from "lucide-react";
+import { Loader2, Download, ChevronDown, ArrowUp, ArrowDown, ChevronRight, X } from "lucide-react";
 
 const PERIOD_PRESETS: PeriodPreset[] = [
   "mtd",
@@ -80,6 +80,7 @@ const ACTOR_TYPE_OPTIONS: { value: LoanComplexityGroupBy; label: string }[] = [
 const LOAN_DETAIL_COLUMNS: { key: keyof LoanComplexityGroupLoanRow; label: string }[] = [
   { key: "loan_number", label: "Loan number" },
   { key: "loan_amount", label: "Volume" },
+  { key: "complexity_score", label: "Complexity" },
   { key: "loan_type", label: "Loan Type" },
   { key: "loan_purpose", label: "Loan Purpose" },
   { key: "application_date", label: "Application date" },
@@ -90,7 +91,11 @@ const LOAN_DETAIL_COLUMNS: { key: keyof LoanComplexityGroupLoanRow; label: strin
   { key: "fico_score", label: "FICO" },
   { key: "occupancy_type", label: "Occupancy Type" },
   { key: "borr_self_employed", label: "Self-employed" },
-  { key: "complexity_score", label: "Complexity" },
+  { key: "branch", label: "Branch" },
+  { key: "loan_officer", label: "Loan Officer" },
+  { key: "underwriter", label: "Underwriter" },
+  { key: "processor", label: "Processor" },
+  { key: "closer", label: "Closer" },
 ];
 
 function formatCell(value: unknown): string {
@@ -142,6 +147,7 @@ function PivotCells({
   loanTypes,
   purposes,
   isDark,
+  showActive,
   showOriginated,
   showDenied,
   showWithdrawn,
@@ -150,6 +156,7 @@ function PivotCells({
   loanTypes: string[];
   purposes: string[];
   isDark: boolean;
+  showActive: boolean;
   showOriginated: boolean;
   showDenied: boolean;
   showWithdrawn: boolean;
@@ -179,6 +186,7 @@ function PivotCells({
         </td>
       ))}
       <td className={cellClass}>{formatPct(row.pctLocked)}</td>
+      {showActive && <td className={cellClass}>{formatPct(row.pctActive)}</td>}
       {showOriginated && <td className={cellClass}>{formatPct(row.pctOriginated)}</td>}
       {showDenied && <td className={cellClass}>{formatPct(row.pctDenied)}</td>}
       {showWithdrawn && <td className={cellClass}>{formatPct(row.pctWithdrawn)}</td>}
@@ -241,7 +249,7 @@ export function LoanComplexityView({
   });
   const [groupBy, setGroupBy] = useState<"actors" | "branch" | "current_loan_status">("actors");
   const [actorType, setActorType] = useState<LoanComplexityGroupBy>("loan_officer");
-  const [selectedGroupName, setSelectedGroupName] = useState<string | null>(null);
+  const [selectedGroups, setSelectedGroups] = useState<{ dimension: LoanComplexityGroupBy; groupName: string }[]>([]);
   const [currentLoanStatusFilter, setCurrentLoanStatusFilter] = useState<string>("All");
   const [statusOptions, setStatusOptions] = useState<{ statuses: string[]; hasFallout: boolean }>({
     statuses: [],
@@ -250,7 +258,6 @@ export function LoanComplexityView({
   const [sortColumnId, setSortColumnId] = useState<keyof LoanComplexityGroupLoanRow | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [pivotExpanded, setPivotExpanded] = useState<string | null>(null);
-  const pivotSelectionRef = React.useRef(false);
 
   const dateRange = periodSelection.dateRange;
 
@@ -323,8 +330,7 @@ export function LoanComplexityView({
   const { loans, loading: loansLoading, error: loansError } = useLoanComplexityGroupLoans({
     startDate: dateRange.start,
     endDate: dateRange.end,
-    groupBy: effectiveGroupBy,
-    groupName: selectedGroupName,
+    groupFilters: selectedGroups.map((g) => ({ groupBy: g.dimension, groupName: g.groupName })),
     selectedTenantId,
     channelGroup: selectedChannel,
     currentLoanStatus: currentLoanStatusFilter === "All" ? null : currentLoanStatusFilter,
@@ -354,41 +360,23 @@ export function LoanComplexityView({
       ? ACTOR_TYPE_OPTIONS.find((o) => o.value === actorType)?.label ?? "Actor"
       : GROUP_BY_OPTIONS.find((o) => o.value === groupBy)?.label ?? "group";
 
-  /** Map pivot dimension key to (groupBy, actorType) for loan detail table. */
-  const handlePivotRowClick = useCallback(
-    (dimension: string, groupName: string) => {
-      const dim = dimension as LoanComplexityGroupBy;
-      if (dim === "branch") {
-        pivotSelectionRef.current = true;
-        setGroupBy("branch");
-        setActorType("loan_officer");
-        setSelectedGroupName(groupName);
-      } else {
-        pivotSelectionRef.current = true;
-        setGroupBy("actors");
-        setActorType(dim);
-        setSelectedGroupName(groupName);
-      }
-    },
-    []
-  );
-
-  // Clear selected bar when period or group-by changes so the table doesn’t show stale data
-  useEffect(() => {
-    if (pivotSelectionRef.current) {
-      pivotSelectionRef.current = false;
-      return;
-    }
-    setSelectedGroupName(null);
-  }, [groupBy, actorType, dateRange.start, dateRange.end, currentLoanStatusFilter]);
+  /** Toggle pivot row or bar selection (multi-select, cross-dimension). */
+  const handleSelectGroup = useCallback((dimension: LoanComplexityGroupBy, groupName: string) => {
+    const key = `${dimension}:${groupName}`;
+    setSelectedGroups((prev) =>
+      prev.some((g) => `${g.dimension}:${g.groupName}` === key)
+        ? prev.filter((g) => `${g.dimension}:${g.groupName}` !== key)
+        : [...prev, { dimension, groupName }]
+    );
+  }, []);
 
   const dateStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const fileBase = useMemo(
     () =>
-      selectedGroupName
-        ? `loan-complexity-${groupBy}-${toSafeFileName(selectedGroupName)}-${dateStr}`
+      selectedGroups.length > 0
+        ? `loan-complexity-${selectedGroups.map((g) => toSafeFileName(g.groupName)).join("-")}-${dateStr}`.slice(0, 80)
         : "loan-complexity-details",
-    [selectedGroupName, groupBy, dateStr]
+    [selectedGroups, dateStr]
   );
 
   const exportCsv = useCallback(() => {
@@ -533,6 +521,37 @@ export function LoanComplexityView({
           </Select>
         </div>
       </div>
+      {selectedGroups.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 w-full min-w-0">
+          <span
+            className="inline-flex flex-wrap items-center gap-x-1 gap-y-1 px-2 py-1.5 rounded text-xs font-medium text-white max-w-full min-w-0 break-words whitespace-normal"
+            style={{ backgroundColor: "#52b852" }}
+          >
+            {(() => {
+              const dimLabel = (d: string) =>
+                ACTOR_TYPE_OPTIONS.find((o) => o.value === d)?.label ??
+                GROUP_BY_OPTIONS.find((o) => o.value === d)?.label ??
+                d;
+              const byDim = selectedGroups.reduce<Record<string, string[]>>((acc, g) => {
+                if (!acc[g.dimension]) acc[g.dimension] = [];
+                acc[g.dimension].push(g.groupName);
+                return acc;
+              }, {});
+              return Object.entries(byDim)
+                .map(([dim, names]) => `${dimLabel(dim)}: ${names.join(" and ")}`)
+                .join(", ");
+            })()}
+            <button
+              type="button"
+              className="ml-0.5 rounded hover:bg-white/20 p-0.5 shrink-0"
+              onClick={() => setSelectedGroups([])}
+              aria-label="Clear selection"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </span>
+        </div>
+      )}
 
       {displayError && (
         <p className="text-sm text-red-600 dark:text-red-400">{displayError}</p>
@@ -616,12 +635,17 @@ export function LoanComplexityView({
                     <th className="text-right font-medium text-slate-600 dark:text-slate-400 px-2 py-2 whitespace-nowrap">
                       % Locked
                     </th>
-                    {currentLoanStatusFilter === "Non-active" && (
+                    {currentLoanStatusFilter === "All" && (
+                      <th className="text-right font-medium text-slate-600 dark:text-slate-400 px-2 py-2 whitespace-nowrap">
+                        % Active
+                      </th>
+                    )}
+                    {(currentLoanStatusFilter === "All" || currentLoanStatusFilter === "Non-active") && (
                       <th className="text-right font-medium text-slate-600 dark:text-slate-400 px-2 py-2 whitespace-nowrap">
                         % Originated
                       </th>
                     )}
-                    {(currentLoanStatusFilter === "Non-active" || currentLoanStatusFilter === "Fallout") && (
+                    {(currentLoanStatusFilter === "All" || currentLoanStatusFilter === "Non-active" || currentLoanStatusFilter === "Fallout") && (
                       <>
                         <th className="text-right font-medium text-slate-600 dark:text-slate-400 px-2 py-2 whitespace-nowrap">
                           % Denied
@@ -658,16 +682,17 @@ export function LoanComplexityView({
                           loanTypes={pivotData.loanTypes}
                           purposes={pivotData.purposes}
                           isDark={isDark}
-                          showOriginated={currentLoanStatusFilter === "Non-active"}
-                          showDenied={currentLoanStatusFilter === "Non-active" || currentLoanStatusFilter === "Fallout"}
-                          showWithdrawn={currentLoanStatusFilter === "Non-active" || currentLoanStatusFilter === "Fallout"}
+                          showActive={currentLoanStatusFilter === "All"}
+                          showOriginated={currentLoanStatusFilter === "All" || currentLoanStatusFilter === "Non-active"}
+                          showDenied={currentLoanStatusFilter === "All" || currentLoanStatusFilter === "Non-active" || currentLoanStatusFilter === "Fallout"}
+                          showWithdrawn={currentLoanStatusFilter === "All" || currentLoanStatusFilter === "Non-active" || currentLoanStatusFilter === "Fallout"}
                         />
                       </tr>
                       {pivotExpanded === dim.label &&
                         dim.rows.map((row) => {
-                          const isSelected =
-                            selectedGroupName === row.groupName &&
-                            (dim.dimension === "branch" ? groupBy === "branch" : groupBy === "actors" && actorType === dim.dimension);
+                          const isSelected = selectedGroups.some(
+                            (g) => g.dimension === dim.dimension && g.groupName === row.groupName
+                          );
                           return (
                           <tr
                             key={row.groupName}
@@ -675,21 +700,21 @@ export function LoanComplexityView({
                             tabIndex={0}
                             className={cn(
                               "border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50/50 dark:hover:bg-slate-800/30 cursor-pointer",
-                              isSelected && (isDark ? "bg-sky-900/30" : "bg-sky-50")
+                              isSelected && "bg-[#52b852]/20 dark:bg-[#52b852]/25"
                             )}
                             onClick={(e) => {
                               e.stopPropagation();
-                              handlePivotRowClick(dim.dimension, row.groupName);
+                              handleSelectGroup(dim.dimension as LoanComplexityGroupBy, row.groupName);
                             }}
                             onKeyDown={(e) => {
                               if (e.key === "Enter" || e.key === " ") {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                handlePivotRowClick(dim.dimension, row.groupName);
+                                handleSelectGroup(dim.dimension as LoanComplexityGroupBy, row.groupName);
                               }
                             }}
                           >
-                            <td className="pl-10 pr-3 py-1.5 text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                            <td className={cn("pl-10 pr-3 py-1.5 whitespace-nowrap", isSelected ? "text-[#2d7a2d] dark:text-[#6bcf6b] font-medium" : "text-slate-600 dark:text-slate-400")}>
                               {row.groupName}
                             </td>
                             <PivotCells
@@ -697,9 +722,10 @@ export function LoanComplexityView({
                               loanTypes={pivotData.loanTypes}
                               purposes={pivotData.purposes}
                               isDark={isDark}
-                              showOriginated={currentLoanStatusFilter === "Non-active"}
-                              showDenied={currentLoanStatusFilter === "Non-active" || currentLoanStatusFilter === "Fallout"}
-                              showWithdrawn={currentLoanStatusFilter === "Non-active" || currentLoanStatusFilter === "Fallout"}
+                              showActive={currentLoanStatusFilter === "All"}
+                              showOriginated={currentLoanStatusFilter === "All" || currentLoanStatusFilter === "Non-active"}
+                              showDenied={currentLoanStatusFilter === "All" || currentLoanStatusFilter === "Non-active" || currentLoanStatusFilter === "Fallout"}
+                              showWithdrawn={currentLoanStatusFilter === "All" || currentLoanStatusFilter === "Non-active" || currentLoanStatusFilter === "Fallout"}
                             />
                           </tr>
                           );
@@ -732,7 +758,7 @@ export function LoanComplexityView({
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
             Loans with application date in selected period. Complexity uses admin scoring weights (baseline 100).
             {" "}
-            Click on a {groupByLabel} to see their loan details.
+            Click a bar or pivot row to select or deselect; the loan table filters to selected individuals.
           </p>
         </CardHeader>
         <CardContent className="pb-4">
@@ -821,19 +847,43 @@ export function LoanComplexityView({
                 <Bar
                   dataKey="avgComplexity"
                   radius={[4, 4, 0, 0]}
-                  cursor="pointer"
-                  onClick={(data: { groupName?: string }) => {
-                    if (data?.groupName != null) setSelectedGroupName(data.groupName);
+                  isAnimationActive={false}
+                  minPointSize={8}
+                  shape={(props: { x?: number; y?: number; width?: number; height?: number; payload?: { groupName?: string; avgComplexity?: number }; groupName?: string; avgComplexity?: number; [key: string]: unknown }) => {
+                    const { x = 0, y = 0, width = 0, height = 0, payload, groupName: gn, avgComplexity: ac } = props;
+                    const groupName = payload?.groupName ?? gn;
+                    const avgComplexity = payload?.avgComplexity ?? ac;
+                    if (groupName == null) return null;
+                    const isSelected = selectedGroups.some(
+                      (g) => g.dimension === effectiveGroupBy && g.groupName === groupName
+                    );
+                    const fill = isSelected ? "#52b852" : complexityColorScale(avgComplexity ?? 0);
+                    return (
+                      <g
+                        onClick={() => handleSelectGroup(effectiveGroupBy, groupName)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            handleSelectGroup(effectiveGroupBy, groupName);
+                          }
+                        }}
+                        role="button"
+                        tabIndex={0}
+                        style={{ cursor: "pointer" }}
+                      >
+                        <rect
+                          x={x}
+                          y={y}
+                          width={Math.max(width, 4)}
+                          height={Math.max(height ?? 0, 4)}
+                          fill={fill}
+                          rx={4}
+                          ry={4}
+                        />
+                      </g>
+                    );
                   }}
-                >
-                  {bars.map((entry, idx) => (
-                    <Cell
-                      key={idx}
-                      fill={complexityColorScale(entry.avgComplexity)}
-                      onClick={() => setSelectedGroupName(entry.groupName)}
-                    />
-                  ))}
-                </Bar>
+                />
               </BarChart>
             </ResponsiveContainer>
             </>
@@ -841,10 +891,10 @@ export function LoanComplexityView({
         </CardContent>
       </Card>
 
-      {/* Inline loan detail table for selected bar */}
-      {selectedGroupName != null && (
-        <Card
-          className={cn(
+      {/* Loan detail table – always visible; shows all loans in period or filtered by selected individuals */}
+      <Card
+        data-loan-details-table
+        className={cn(
             "rounded-xl border overflow-hidden",
             isDark ? "border-slate-700 bg-slate-800/50" : "border-slate-200/60 bg-white"
           )}
@@ -858,7 +908,11 @@ export function LoanComplexityView({
                     isDark ? "text-white" : "text-slate-900"
                   )}
                 >
-                  Loan details — {selectedGroupName}
+                  {selectedGroups.length > 0
+                    ? selectedGroups.length === 1
+                      ? `Loan details — ${selectedGroups[0].groupName}`
+                      : `Loan details — ${selectedGroups.length} selected`
+                    : "Loan Details"}
                 </CardTitle>
                 {!loansLoading && !loansError && (
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
@@ -982,7 +1036,7 @@ export function LoanComplexityView({
             )}
           </CardContent>
         </Card>
-      )}
+
     </div>
   );
 }

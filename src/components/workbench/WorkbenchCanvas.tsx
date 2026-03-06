@@ -717,6 +717,14 @@ const SECTION_TO_WIDGETS: Record<
       "lock-stratification-milestone-pivot",
     ],
   },
+  loanComplexity: {
+    sectionType: "loan-complexity",
+    widgetIds: [
+      "loan-complexity-pivot",
+      "loan-complexity-chart",
+      "loan-complexity-table",
+    ],
+  },
 };
 
 /**
