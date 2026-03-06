@@ -2504,7 +2504,35 @@ export function WidgetGroup({
               <>
                 <PricingFilterSelect label="Locked" value={filters.lockStratLocked ?? 'all_active'} options={LOCK_STRAT_LOCKED_OPTIONS} onChange={(v) => updateFilters(groupId, { lockStratLocked: v as 'active_locked' | 'active_not_locked' | 'all_active' })} />
                 <PricingFilterSelect label="Measure" value={filters.lockStratMeasure ?? 'volume'} options={LOCK_STRAT_MEASURE_OPTIONS} onChange={(v) => updateFilters(groupId, { lockStratMeasure: v as 'volume' | 'units' | 'wac' | 'wa_fico' })} />
+
+                {/* Dynamic (user-added) filters */}
+                {(filters.dynamicFilters || []).map((df) => (
+                  <DynamicDimensionFilter
+                    key={df.column}
+                    entry={df}
+                    tenantId={tenantIdForEdit}
+                    onChange={(value) => updateDynamicFilter(groupId, df.column, value)}
+                    onRemove={() => removeDynamicFilter(groupId, df.column)}
+                  />
+                ))}
+
+                {/* Divider before add-filter */}
                 <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+
+                {/* Add filter dimension button */}
+                <AddFilterPicker
+                  groupId={groupId}
+                  existingColumns={[
+                    ...(SECTION_BUILTIN_FILTER_COLUMNS[sectionType] ?? []),
+                    ...(filters.dynamicFilters || []).map((f) => f.column),
+                  ]}
+                  onAdd={(col, label) => addDynamicFilter(groupId, { column: col, label, value: 'all' })}
+                />
+
+                {/* Divider before presets */}
+                <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+
+                {/* Filter preset bookmarks */}
                 <GroupFilterBookmarkButton filters={filters} onApplyPreset={handleApplyGroupPreset} />
               </>
             ) : (
