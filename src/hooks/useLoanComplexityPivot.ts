@@ -15,6 +15,7 @@ export interface PivotRowMetrics {
   pctByType: Record<string, number>;
   pctByPurpose: Record<string, number>;
   pctLocked: number;
+  pctActive: number;
   pctOriginated: number;
   pctDenied: number;
   pctWithdrawn: number;
@@ -39,6 +40,8 @@ export interface UseLoanComplexityPivotParams {
   selectedTenantId?: string | null;
   channelGroup?: string | null;
   currentLoanStatus?: string | null;
+  /** When false, skips fetch. */
+  enabled?: boolean;
 }
 
 export function useLoanComplexityPivot({
@@ -47,6 +50,7 @@ export function useLoanComplexityPivot({
   selectedTenantId,
   channelGroup,
   currentLoanStatus,
+  enabled = true,
 }: UseLoanComplexityPivotParams): {
   data: LoanComplexityPivotData | null;
   loading: boolean;
@@ -58,6 +62,12 @@ export function useLoanComplexityPivot({
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
+    if (enabled === false) {
+      setLoading(false);
+      setError(null);
+      setData(null);
+      return;
+    }
     try {
       setLoading(true);
       setError(null);
@@ -81,7 +91,7 @@ export function useLoanComplexityPivot({
     } finally {
       setLoading(false);
     }
-  }, [startDate, endDate, selectedTenantId, channelGroup, currentLoanStatus]);
+  }, [startDate, endDate, selectedTenantId, channelGroup, currentLoanStatus, enabled]);
 
   useEffect(() => {
     fetchData();

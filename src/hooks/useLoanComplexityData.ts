@@ -32,6 +32,8 @@ export interface UseLoanComplexityDataParams {
   channelGroup?: string | null;
   /** When set, filter to loans with this current_loan_status (e.g. "Active Loan"). "All" or empty = no filter. */
   currentLoanStatus?: string | null;
+  /** When false, skips fetch (e.g. when no loan-complexity section on canvas). */
+  enabled?: boolean;
 }
 
 export function useLoanComplexityData({
@@ -41,6 +43,7 @@ export function useLoanComplexityData({
   selectedTenantId,
   channelGroup,
   currentLoanStatus,
+  enabled = true,
 }: UseLoanComplexityDataParams): {
   data: LoanComplexityDashboardData | null;
   loading: boolean;
@@ -52,6 +55,12 @@ export function useLoanComplexityData({
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
+    if (enabled === false) {
+      setLoading(false);
+      setError(null);
+      setData(null);
+      return;
+    }
     try {
       setLoading(true);
       setError(null);
@@ -76,7 +85,7 @@ export function useLoanComplexityData({
     } finally {
       setLoading(false);
     }
-  }, [startDate, endDate, groupBy, selectedTenantId, channelGroup, currentLoanStatus]);
+  }, [startDate, endDate, groupBy, selectedTenantId, channelGroup, currentLoanStatus, enabled]);
 
   useEffect(() => {
     fetchData();

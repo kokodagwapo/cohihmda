@@ -45,6 +45,11 @@ import {
 } from '@/hooks/usePipelineAnalysisData';
 import type { DataSourceId } from '../registry/types';
 import { buildPricingReportColumns, buildPricingDetailColumns } from '@/lib/pricingDashboardColumns';
+import { useLoanComplexityData } from '@/hooks/useLoanComplexityData';
+import type { LoanComplexityGroupBy } from '@/hooks/useLoanComplexityData';
+import { useLoanComplexityPivot } from '@/hooks/useLoanComplexityPivot';
+import { useLoanComplexityGroupLoans } from '@/hooks/useLoanComplexityGroupLoans';
+import { useLoanComplexityStatusOptions } from '@/hooks/useLoanComplexityStatusOptions';
 
 /** Build dimension filter array from section dynamicFilters (for APIs that accept them).
  *  @param exclude – column names already handled natively by the hook (e.g. branch, loan_officer). */
@@ -230,6 +235,14 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
   const actorsFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'actors'), [sections, scopedFilters]);
   const pdFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'pricing-dashboard'), [sections, scopedFilters]);
   const paFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'pipeline-analysis'), [sections, scopedFilters]);
+  const lcFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'loan-complexity'), [sections, scopedFilters]);
+
+  const hasLoanComplexitySection = useMemo(
+    () =>
+      scopedFilters?.sectionType === 'loan-complexity' ||
+      Object.values(sections).some((s) => s.sectionType === 'loan-complexity'),
+    [scopedFilters?.sectionType, sections],
+  );
 
   // ---- Hook calls with dynamic filter values ----
 
@@ -555,6 +568,92 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     paFilters?.pipelineAnalysisPctMetric,
   ]);
 
+  // Loan Complexity: date range, effective groupBy (actors -> actorType), current status, selected group
+  const lcDateRange = useMemo(() => {
+    const range = lcFilters?.periodSelection?.dateRange ?? lcFilters?.dateRange;
+    if (range?.start && range?.end) return { start: range.start, end: range.end };
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    return { start: start.toISOString().slice(0, 10), end: now.toISOString().slice(0, 10) };
+  }, [lcFilters?.periodSelection?.dateRange, lcFilters?.dateRange]);
+  const lcEffectiveGroupBy = useMemo((): LoanComplexityGroupBy => {
+    const groupBy = lcFilters?.loanComplexityGroupBy ?? 'actors';
+    const actorType = (lcFilters?.loanComplexityActorType ?? 'loan_officer') as LoanComplexityGroupBy;
+    return groupBy === 'actors' ? actorType : (groupBy as LoanComplexityGroupBy);
+  }, [lcFilters?.loanComplexityGroupBy, lcFilters?.loanComplexityActorType]);
+  const lcCurrentStatus = useMemo(() => {
+    const s = lcFilters?.loanComplexityCurrentStatus ?? 'All';
+    return s === 'All' || !s?.trim() ? null : s.trim();
+  }, [lcFilters?.loanComplexityCurrentStatus]);
+  const lcGroupFilters = useMemo((): { groupBy: LoanComplexityGroupBy; groupName: string }[] => {
+    const groups = lcFilters?.loanComplexitySelectedGroups;
+    if (groups && groups.length > 0) {
+      return groups.map((g) => ({ groupBy: g.dimension as LoanComplexityGroupBy, groupName: g.groupName }));
+    }
+    const names = lcFilters?.loanComplexitySelectedGroupNames ?? [];
+    if (names.length === 0) return [];
+    const groupBy = lcEffectiveGroupBy;
+    return names.map((groupName) => ({ groupBy, groupName }));
+  }, [lcFilters?.loanComplexitySelectedGroups, lcFilters?.loanComplexitySelectedGroupNames, lcEffectiveGroupBy]);
+
+  const lcBars = useLoanComplexityData({
+    startDate: lcDateRange.start,
+    endDate: lcDateRange.end,
+    groupBy: lcEffectiveGroupBy,
+    selectedTenantId: effectiveTenantId,
+    channelGroup: selectedChannel,
+    currentLoanStatus: lcCurrentStatus,
+    enabled: hasLoanComplexitySection,
+  });
+  const lcPivot = useLoanComplexityPivot({
+    startDate: lcDateRange.start,
+    endDate: lcDateRange.end,
+    selectedTenantId: effectiveTenantId,
+    channelGroup: selectedChannel,
+    currentLoanStatus: lcCurrentStatus,
+    enabled: hasLoanComplexitySection,
+  });
+  const lcLoans = useLoanComplexityGroupLoans({
+    startDate: lcDateRange.start,
+    endDate: lcDateRange.end,
+    groupFilters: lcGroupFilters,
+    selectedTenantId: effectiveTenantId,
+    channelGroup: selectedChannel,
+    currentLoanStatus: lcCurrentStatus,
+    enabled: hasLoanComplexitySection,
+  });
+  const lcStatusOptions = useLoanComplexityStatusOptions({
+    startDate: lcDateRange.start,
+    endDate: lcDateRange.end,
+    selectedTenantId: effectiveTenantId,
+    channelGroup: selectedChannel,
+    enabled: hasLoanComplexitySection,
+  });
+
+  const loanComplexitySource = useMemo(() => ({
+    data: {
+      pivot: lcPivot.data,
+      bars: lcBars.data?.bars ?? [],
+      loans: lcLoans.loans,
+      statusOptions: lcStatusOptions.data,
+    },
+    loading: lcBars.loading || lcPivot.loading || lcLoans.loading || lcStatusOptions.loading,
+    error: lcBars.error || lcPivot.error || lcLoans.error || lcStatusOptions.error,
+  }), [
+    lcPivot.data,
+    lcBars.data?.bars,
+    lcLoans.loans,
+    lcStatusOptions.data,
+    lcBars.loading,
+    lcPivot.loading,
+    lcLoans.loading,
+    lcStatusOptions.loading,
+    lcBars.error,
+    lcPivot.error,
+    lcLoans.error,
+    lcStatusOptions.error,
+  ]);
+
   // Build lookup
   const sourceMap = useMemo<Record<string, SourceResult>>(() => ({
     'company-scorecard': {
@@ -675,6 +774,11 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
       loading: pipelineAnalysisSource.loading,
       error: pipelineAnalysisSource.error,
     },
+    'loan-complexity': {
+      data: loanComplexitySource.data,
+      loading: loanComplexitySource.loading,
+      error: loanComplexitySource.error,
+    },
   }), [
     companyScorecard.data, companyScorecard.loading, companyScorecard.error,
     creditRisk.data, creditRisk.loading, creditRisk.error,
@@ -694,6 +798,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     paFilters?.pipelineAnalysisYearRange,
     paFilters?.pipelineAnalysisViewMode,
     paFilters?.pipelineAnalysisPctMetric,
+    loanComplexitySource,
   ]);
 
   const contextValue = useMemo<WidgetDataContextValue>(

@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useTheme } from "@/components/theme-provider";
+import { useWidgetSectionStore } from "@/stores/widgetSectionStore";
 import {
   useLockStratificationData,
   type LockStratFilters,
@@ -171,35 +172,67 @@ function saveFilters(f: PersistedFilters): void {
 
 // ── Component Props ──
 
+export type LockStratificationVariant =
+  | "full"
+  | "kpis"
+  | "interest-rates"
+  | "days-to-expiration"
+  | "pull-through"
+  | "milestone-bar"
+  | "milestone-pivot";
+
 export interface LockStratificationViewProps {
   tenantId?: string | null;
   selectedChannel?: string | null;
+  /** When true, view is embedded in workbench (e.g. filter bar is in group header). */
+  embeddedInWorkbench?: boolean;
+  /** Section/group ID to read filters from widgetSectionStore. When set, locked/measure/milestoneGroupBy/pullThroughPeriod come from store. */
+  groupId?: string | null;
+  /** When set, only render this section (for workbench widgets). */
+  variant?: LockStratificationVariant;
+  /** When embedded in workbench, the widget cell height in pixels so content can fill it. */
+  embedHeight?: number;
+  /** When embedded in workbench, the widget cell width in pixels. */
+  embedWidth?: number;
 }
 
 export function LockStratificationView({
   tenantId,
   selectedChannel,
+  embeddedInWorkbench = false,
+  groupId = null,
+  variant = "full",
+  embedHeight,
+  embedWidth,
 }: LockStratificationViewProps) {
   const { theme } = useTheme();
   const isDark = theme === "dark";
+  const getFilters = useWidgetSectionStore((s) => s.getFilters);
+  const updateFilters = useWidgetSectionStore((s) => s.updateFilters);
 
   const saved = useMemo(() => loadFilters(), []);
+  const groupFilters = groupId ? getFilters(groupId) : null;
 
-  const [locked, setLocked] = useState<LockedFilter>(saved.locked ?? "all_active");
-  const [measure, setMeasure] = useState<MeasureFilter>(saved.measure ?? "volume");
-  const [milestoneGroupBy, setMilestoneGroupBy] = useState<MilestoneGroupBy>(() => {
+  const [localLocked, setLocalLocked] = useState<LockedFilter>(saved.locked ?? "all_active");
+  const [localMeasure, setLocalMeasure] = useState<MeasureFilter>(saved.measure ?? "volume");
+  const [localMilestoneGroupBy, setLocalMilestoneGroupBy] = useState<MilestoneGroupBy>(() => {
     const v = saved.milestoneGroupBy;
     if (v && MILESTONE_GROUP_OPTIONS.some((o) => o.value === v)) return v;
     return "current_milestone";
   });
   const [milestoneView, setMilestoneView] = useState<"bar" | "pivot">(saved.milestoneView ?? "bar");
-  const [pullThroughPeriod, setPullThroughPeriod] = useState<PullThroughPeriod>(saved.pullThroughPeriod ?? "60");
+  const [localPullThroughPeriod, setLocalPullThroughPeriod] = useState<PullThroughPeriod>(saved.pullThroughPeriod ?? "60");
   const [expandedPivotRows, setExpandedPivotRows] = useState<Set<string>>(new Set());
   const [interestRateDrill, setInterestRateDrill] = useState<InterestRateDrill>(() => ({ level: 0 }));
 
+  const locked = (groupFilters?.lockStratLocked as LockedFilter) ?? localLocked;
+  const measure = (groupFilters?.lockStratMeasure as MeasureFilter) ?? localMeasure;
+  const milestoneGroupBy = (groupFilters?.lockStratMilestoneGroupBy as MilestoneGroupBy) ?? localMilestoneGroupBy;
+  const pullThroughPeriod = (groupFilters?.lockStratPullThroughPeriod as PullThroughPeriod) ?? localPullThroughPeriod;
+
   useEffect(() => {
-    saveFilters({ locked, measure, milestoneGroupBy, milestoneView, pullThroughPeriod });
-  }, [locked, measure, milestoneGroupBy, milestoneView, pullThroughPeriod]);
+    if (!groupId) saveFilters({ locked: localLocked, measure: localMeasure, milestoneGroupBy: localMilestoneGroupBy, milestoneView, pullThroughPeriod: localPullThroughPeriod });
+  }, [groupId, localLocked, localMeasure, localMilestoneGroupBy, milestoneView, localPullThroughPeriod]);
 
   const filters: LockStratFilters = useMemo(() => ({ locked, measure }), [locked, measure]);
 
@@ -268,6 +301,7 @@ export function LockStratificationView({
       : null;
 
   // ── Milestone bar chart data transform (flat rows, one bar per bucket) ──
+  // When group_by is current_milestone, use pivot rows so chart shows same milestones as pivot (dashboard parity).
   const milestoneBarData = useMemo(() => {
     const groupMap = new Map<string, Map<string, number>>();
     for (const row of milestoneChart) {
@@ -277,27 +311,42 @@ export function LockStratificationView({
         );
         if (matchIdx === -1) continue;
       }
-      if (!groupMap.has(row.group)) groupMap.set(row.group, new Map());
-      const g = groupMap.get(row.group)!;
+      const key = row.group;
+      if (!groupMap.has(key)) groupMap.set(key, new Map());
+      const g = groupMap.get(key)!;
       g.set(row.expirationBucket, (g.get(row.expirationBucket) || 0) + row.value);
     }
 
-    const orderedGroups = milestoneGroupBy === "current_milestone"
-      ? MILESTONE_ORDER.filter((m) =>
-          [...groupMap.keys()].some((k) => k.toLowerCase() === m.toLowerCase())
-        ).map((m) => [...groupMap.keys()].find((k) => k.toLowerCase() === m.toLowerCase())!)
-      : [...groupMap.keys()];
+    let orderedGroups: string[];
+    if (milestoneGroupBy === "current_milestone") {
+      const fromPivot = milestonePivot.rows
+        .filter((r) => MILESTONE_ORDER.some((m) => m.toLowerCase() === r.group.toLowerCase()))
+        .sort((a, b) => {
+          const aIdx = MILESTONE_ORDER.findIndex((m) => m.toLowerCase() === a.group.toLowerCase());
+          const bIdx = MILESTONE_ORDER.findIndex((m) => m.toLowerCase() === b.group.toLowerCase());
+          return aIdx - bIdx;
+        })
+        .map((r) => r.group);
+      const fromChart = MILESTONE_ORDER.filter((m) =>
+        [...groupMap.keys()].some((k) => k.toLowerCase() === m.toLowerCase())
+      ).map((m) => [...groupMap.keys()].find((k) => k.toLowerCase() === m.toLowerCase())!);
+      orderedGroups = fromPivot.length > 0 ? fromPivot : fromChart;
+    } else {
+      orderedGroups = [...groupMap.keys()];
+    }
 
     const flat: { compositeKey: string; group: string; bucket: string; value: number; bucketIdx: number; isFirstInGroup: boolean }[] = [];
     for (const group of orderedGroups) {
-      const bucketMap = groupMap.get(group);
-      if (!bucketMap) continue;
-      const sorted = [...bucketMap.entries()].sort((a, b) => {
-        const aIdx = EXPIRATION_BUCKETS.indexOf(a[0]);
-        const bIdx = EXPIRATION_BUCKETS.indexOf(b[0]);
-        return (aIdx === -1 ? 99 : aIdx) - (bIdx === -1 ? 99 : bIdx);
-      });
-      sorted.forEach(([bucket, value], i) => {
+      const canonicalKey = [...groupMap.keys()].find((k) => k.toLowerCase() === group.toLowerCase());
+      const bucketMap = (canonicalKey ? groupMap.get(canonicalKey) : null) ?? new Map<string, number>();
+      const bucketsToShow = bucketMap.size > 0
+        ? [...bucketMap.entries()].sort((a, b) => {
+            const aIdx = EXPIRATION_BUCKETS.indexOf(a[0]);
+            const bIdx = EXPIRATION_BUCKETS.indexOf(b[0]);
+            return (aIdx === -1 ? 99 : aIdx) - (bIdx === -1 ? 99 : bIdx);
+          })
+        : EXPIRATION_BUCKETS.map((b) => [b, 0] as [string, number]);
+      bucketsToShow.forEach(([bucket, value], i) => {
         flat.push({
           compositeKey: `${group}||${bucket}`,
           group,
@@ -309,7 +358,7 @@ export function LockStratificationView({
       });
     }
     return flat;
-  }, [milestoneChart, milestoneGroupBy]);
+  }, [milestoneChart, milestoneGroupBy, milestonePivot.rows]);
 
   // ── Pivot rows filtered/sorted for current_milestone ──
   const sortedPivotRows = useMemo(() => {
@@ -384,6 +433,9 @@ export function LockStratificationView({
   const borderRow = isDark ? "border-slate-700" : "border-slate-100";
   const textTd = isDark ? "text-slate-200" : "text-slate-900";
 
+  /** When embedded in workbench, we use flex layout so content fills the widget (no fixed height). */
+  const isEmbedded = typeof embedHeight === "number";
+
   // ── KPI Card helper ──
   const kpiCard = (
     label: string,
@@ -430,14 +482,375 @@ export function LockStratificationView({
   );
 
   return (
-    <div className="space-y-4">
-      {/* ── Filters ── */}
+    <div
+      className={variant !== "full" ? "flex flex-col min-h-0 overflow-hidden" : "space-y-4"}
+      style={isEmbedded && variant !== "full" ? { height: embedHeight } : undefined}
+    >
+      {displayError && (
+        <p className="text-sm text-red-600 dark:text-red-400">{displayError}</p>
+      )}
+
+      {/* Single-variant rendering for workbench widgets */}
+      {variant === "kpis" && (
+        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
+          {loading && !kpis ? (
+            [...Array(8)].map((_, i) => (
+              <Card key={i} className={cn("rounded-xl border", isDark ? "border-slate-700 bg-slate-800/50" : "border-slate-200/60 bg-white")}>
+                <CardContent className="pt-6 flex items-center justify-center h-20">
+                  <Loader2 className="h-6 w-6 animate-spin text-sky-500" />
+                </CardContent>
+              </Card>
+            ))
+          ) : (
+            <>
+              {kpiCard(`${labelPrefix} Volume`, kpis ? formatCurrency(kpis.volume) : "—", "volume", "blue", "from-blue-900/20 via-slate-800/70 to-slate-800/70", "from-blue-50 via-white to-white", "bg-blue-300", "bg-blue-500")}
+              {kpiCard(`${labelPrefix} Units`, kpis ? formatNum(kpis.units) : "—", "units", "purple", "from-purple-900/20 via-slate-800/70 to-slate-800/70", "from-purple-50 via-white to-white", "bg-purple-300", "bg-purple-500")}
+              {kpiCard("Average Balance", kpis ? formatCurrency(kpis.avgBalance) : "—", "avgBalance", "amber", "from-amber-900/20 via-slate-800/70 to-slate-800/70", "from-amber-50 via-white to-white", "bg-amber-300", "bg-amber-500")}
+              {kpiCard("Avg Days Active", kpis ? formatNum(kpis.avgDaysActive) : "—", "avgDaysActive", "emerald", "from-emerald-900/20 via-slate-800/70 to-slate-800/70", "from-emerald-50 via-white to-white", "bg-emerald-300", "bg-emerald-500")}
+              {kpiCard("WAC", kpis ? formatNum(kpis.wac, 3) : "—", "wac", "sky", "from-sky-900/20 via-slate-800/70 to-slate-800/70", "from-sky-50 via-white to-white", "bg-sky-300", "bg-sky-500")}
+              {kpiCard("WA FICO", kpis ? formatNum(kpis.waFico) : "—", "waFico", "indigo", "from-indigo-900/20 via-slate-800/70 to-slate-800/70", "from-indigo-50 via-white to-white", "bg-indigo-300", "bg-indigo-500")}
+              {kpiCard("WA LTV", kpis ? `${formatNum(kpis.waLtv, 1)}` : "—", "waLtv", "teal", "from-teal-900/20 via-slate-800/70 to-slate-800/70", "from-teal-50 via-white to-white", "bg-teal-300", "bg-teal-500")}
+              {kpiCard("WA DTI", kpis ? formatNum(kpis.waDti, 1) : "—", "waDti", "rose", "from-rose-900/20 via-slate-800/70 to-slate-800/70", "from-rose-50 via-white to-white", "bg-rose-300", "bg-rose-500")}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Interest Rates widget (single-variant) */}
+      {variant === "interest-rates" && (
+        <Card className={cn("flex flex-col flex-1 min-h-0 rounded-xl border overflow-hidden", isDark ? "border-slate-700 bg-slate-800/50" : "border-slate-200/60 bg-white")}>
+          <CardHeader className="pb-2 shrink-0">
+            <CardTitle className={cn("text-base font-semibold", isDark ? "text-white" : "text-slate-900")}>Interest Rates</CardTitle>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Drill down from 1.00 increments --&gt; 0.125 increments --&gt; Rate</p>
+          </CardHeader>
+          <CardContent
+            className="pb-4 flex-1 min-h-0 relative"
+          >
+            {loading ? (
+              <div className="flex justify-center py-12"><Loader2 className="h-8 w-8 animate-spin text-sky-500" /></div>
+            ) : interestRates.length === 0 ? (
+              <p className="text-sm text-slate-500 py-8 text-center">No data available</p>
+            ) : (
+              <div className="absolute inset-0 pt-0 px-6 pb-4">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={interestRates} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#334155" : "#e2e8f0"} />
+                    <XAxis type="number" tick={{ fontSize: 11, fill: isDark ? "#94a3b8" : "#64748b" }} label={{ value: MEASURE_OPTIONS.find((o) => o.value === measure)?.label, position: "insideBottom", offset: -2, fontSize: 11, fill: isDark ? "#94a3b8" : "#64748b" }} />
+                    <YAxis dataKey="bucket" type="category" tick={{ fontSize: 10, fill: isDark ? "#94a3b8" : "#64748b" }} width={100} />
+                    <RechartsTooltip contentStyle={{ backgroundColor: isDark ? "#1e293b" : "#ffffff", border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`, borderRadius: "8px", fontSize: 12 }} formatter={(value: number) => [measure === "volume" ? formatCurrency(value) : formatNum(value, measure === "wac" ? 3 : 0), MEASURE_OPTIONS.find((o) => o.value === measure)?.label]} />
+                    <Bar dataKey="value" radius={[0, 4, 4, 0]} onClick={handleInterestRateBarClick} cursor="pointer">
+                      {interestRates.map((entry, idx) => (<Cell key={idx} fill={rateColorScale(entry.value)} />))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Days to Lock Expiration widget (single-variant) */}
+      {variant === "days-to-expiration" && (
+        <Card className={cn("flex flex-col flex-1 min-h-0 rounded-xl border overflow-hidden", isDark ? "border-slate-700 bg-slate-800/50" : "border-slate-200/60 bg-white")}>
+          <CardHeader className="pb-2 shrink-0">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className={cn("text-base font-semibold", isDark ? "text-white" : "text-slate-900")}>Days to Lock Expiration</CardTitle>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{labelPrefix} Loans</p>
+              </div>
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={handleExportDaysToExpiration} disabled={daysToExpiration.length === 0}>
+                <Download className="h-4 w-4" />
+                Export CSV
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent
+            className="pb-4 flex-1 min-h-0 flex flex-col"
+          >
+            {loading ? (
+              <div className="flex justify-center py-12"><Loader2 className="h-8 w-8 animate-spin text-sky-500" /></div>
+            ) : daysToExpiration.length === 0 ? (
+              <p className="text-sm text-slate-500 py-8 text-center">No data available</p>
+            ) : (
+              <div className="flex-1 min-h-0 overflow-auto overflow-x-auto">
+                <table className="w-full border-collapse text-sm">
+                  <thead>
+                    <tr className={cn("border-b", borderTh, bgTh)}>
+                      <th className="py-2.5 px-4 text-left font-semibold">Time Range</th>
+                      <th className="py-2.5 px-4 text-right font-semibold">Units</th>
+                      <th className="py-2.5 px-4 text-right font-semibold">Volume</th>
+                      <th className="py-2.5 px-4 text-right font-semibold">WAC</th>
+                      <th className="py-2.5 px-4 text-right font-semibold">Avg Days Active</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(() => {
+                      const totals = daysToExpiration.reduce(
+                        (acc, r) => ({ units: acc.units + r.units, volume: acc.volume + r.volume }),
+                        { units: 0, volume: 0 }
+                      );
+                      return (
+                        <tr className={cn("border-b font-semibold", borderRow, isDark ? "bg-slate-800/70" : "bg-slate-100/90")}>
+                          <td className="py-2 px-4">Total</td>
+                          <td className="py-2 px-4 text-right">{formatNum(totals.units)}</td>
+                          <td className="py-2 px-4 text-right">{formatCurrency(totals.volume)}</td>
+                          <td className="py-2 px-4 text-right"></td>
+                          <td className="py-2 px-4 text-right"></td>
+                        </tr>
+                      );
+                    })()}
+                    {daysToExpiration.map((row) => (
+                      <tr key={row.bucket} className={cn("border-b", borderRow, row.bucket === "Expired" && (isDark ? "bg-red-900/40" : "bg-red-100"))}>
+                        <td className={cn("py-2 px-4", row.bucket === "Expired" ? (isDark ? "text-red-300 font-semibold" : "text-red-800 font-semibold") : textTd)}>{row.bucket}</td>
+                        <td className={cn("py-2 px-4 text-right", row.bucket === "Expired" ? (isDark ? "text-red-300" : "text-red-800") : textTd)}>{formatNum(row.units)}</td>
+                        <td className={cn("py-2 px-4 text-right", row.bucket === "Expired" ? (isDark ? "text-red-300" : "text-red-800") : textTd)}>{formatCurrency(row.volume)}</td>
+                        <td className={cn("py-2 px-4 text-right", row.bucket === "Expired" ? (isDark ? "text-red-300" : "text-red-800") : textTd)}>{row.wac.toFixed(3)}</td>
+                        <td className={cn("py-2 px-4 text-right", row.bucket === "Expired" ? (isDark ? "text-red-300" : "text-red-800") : textTd)}>{Math.round(row.avgDaysActive)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Pull Through widget (single-variant) */}
+      {variant === "pull-through" && (
+        <Card className={cn("flex flex-col flex-1 min-h-0 rounded-xl border overflow-hidden", isDark ? "border-slate-700 bg-slate-800/50" : "border-slate-200/60 bg-white")}>
+          <CardHeader className="pb-2 shrink-0">
+            <CardTitle className={cn("text-base font-semibold", isDark ? "text-white" : "text-slate-900")}>Pull Through | Locked to Final Disposition</CardTitle>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Run Retroactively | Rolling {pullThroughPeriod === "ytd" ? "Year to Date" : `${pullThroughPeriod} Days`}</p>
+            <div className="flex flex-wrap gap-1 pt-2">
+              {PULL_THROUGH_PERIODS.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => (groupId ? updateFilters(groupId, { lockStratPullThroughPeriod: opt.value }) : setLocalPullThroughPeriod(opt.value))}
+                  className={cn(
+                    "px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
+                    pullThroughPeriod === opt.value ? "bg-emerald-600 text-white" : isDark ? "bg-slate-700/50 text-slate-300 hover:bg-slate-700" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  )}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </CardHeader>
+          <CardContent
+            className="pb-4 flex-1 min-h-0 overflow-auto flex flex-col"
+          >
+            {loading ? (
+              <div className="flex justify-center py-12"><Loader2 className="h-8 w-8 animate-spin text-sky-500" /></div>
+            ) : !pullThrough ? (
+              <p className="text-sm text-slate-500 py-8 text-center">No data available</p>
+            ) : (
+              <div className={cn("space-y-4", isEmbedded && "flex flex-col flex-1 min-h-0")}>
+                <div className="grid grid-cols-3 gap-4 shrink-0">
+                  <div className={cn("rounded-lg p-3", isDark ? "bg-slate-700/50" : "bg-slate-50")}>
+                    <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Locked AND Originate</p>
+                    <p className={cn("text-xl font-bold", isDark ? "text-emerald-400" : "text-emerald-600")}>{pullThrough.originatedPct.toFixed(1)}%</p>
+                  </div>
+                  <div className={cn("rounded-lg p-3", isDark ? "bg-slate-700/50" : "bg-slate-50")}>
+                    <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Locked AND Withdrew</p>
+                    <p className={cn("text-xl font-bold", isDark ? "text-amber-400" : "text-amber-600")}>{pullThrough.withdrawnPct.toFixed(1)}%</p>
+                  </div>
+                  <div className={cn("rounded-lg p-3", isDark ? "bg-slate-700/50" : "bg-slate-50")}>
+                    <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Locked AND Denied</p>
+                    <p className={cn("text-xl font-bold", isDark ? "text-rose-400" : "text-rose-600")}>{pullThrough.deniedPct.toFixed(1)}%</p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-4 text-xs shrink-0">
+                  <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-emerald-500" />Locked AND Originate</span>
+                  <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-amber-500" />Locked AND Withdrew</span>
+                  <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-rose-500" />Locked AND Denied</span>
+                </div>
+                {pullThrough.bars.length === 0 ? (
+                  <p className="text-sm text-slate-500 py-8 text-center">No historical data available</p>
+                ) : (
+                  <div className={isEmbedded ? "flex-1 min-h-[200px] w-full" : undefined}>
+                    <ResponsiveContainer width="100%" height={isEmbedded ? "100%" : 320}>
+                    <BarChart data={pullThrough.bars} margin={{ top: 10, right: 30, left: 20, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#334155" : "#e2e8f0"} />
+                      <XAxis dataKey="month" tick={{ fontSize: 11, fill: isDark ? "#94a3b8" : "#64748b" }} />
+                      <YAxis tick={{ fontSize: 11, fill: isDark ? "#94a3b8" : "#64748b" }} />
+                      <RechartsTooltip contentStyle={{ backgroundColor: isDark ? "#1e293b" : "#ffffff", border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`, borderRadius: "8px", fontSize: 12 }} />
+                      <Bar dataKey="lockedOriginated" name="Locked AND Originate" fill="#10b981" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="lockedWithdrawn" name="Locked AND Withdrew" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="lockedDenied" name="Locked AND Denied" fill="#f43f5e" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Active Loans by [group] – Bar chart widget (single-variant) */}
+      {variant === "milestone-bar" && (
+        <Card className={cn("flex flex-col flex-1 min-h-0 rounded-xl border overflow-hidden", isDark ? "border-slate-700 bg-slate-800/50" : "border-slate-200/60 bg-white")}>
+          <CardHeader className="pb-2 shrink-0">
+            <CardTitle className={cn("text-base font-semibold", isDark ? "text-white" : "text-slate-900")}>
+              {labelPrefix} Loans by {MILESTONE_GROUP_OPTIONS.find((o) => o.value === milestoneGroupBy)?.label}
+            </CardTitle>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Displaying Days until Lock Expires</p>
+            <div className="flex flex-wrap gap-1">
+              {MILESTONE_GROUP_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => { (groupId ? updateFilters(groupId, { lockStratMilestoneGroupBy: opt.value }) : setLocalMilestoneGroupBy(opt.value)); setExpandedPivotRows(new Set()); }}
+                  className={cn(
+                    "px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
+                    milestoneGroupBy === opt.value ? (isDark ? "bg-slate-600 text-white" : "bg-slate-700 text-white") : isDark ? "bg-slate-700/50 text-slate-300 hover:bg-slate-700" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  )}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </CardHeader>
+          <CardContent
+            className="pb-4 flex-1 flex flex-col min-h-0 overflow-hidden"
+          >
+            {loading ? (
+              <div className="flex justify-center py-12"><Loader2 className="h-8 w-8 animate-spin text-sky-500" /></div>
+            ) : milestoneBarData.length === 0 ? (
+              <p className="text-sm text-slate-500 py-8 text-center">No data available</p>
+            ) : (
+              <div className="flex-1 min-h-0 overflow-auto">
+                <div style={{ minHeight: Math.max(280, milestoneBarData.length * 24 + 60) }}>
+                  <ResponsiveContainer width="100%" height={Math.max(280, milestoneBarData.length * 24 + 60)}>
+                  <BarChart data={milestoneBarData} layout="vertical" margin={{ top: 8, right: 30, left: 10, bottom: 8 }} barCategoryGap={10}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#334155" : "#e2e8f0"} />
+                    <XAxis type="number" tick={{ fontSize: 12, fill: isDark ? "#94a3b8" : "#64748b" }} tickFormatter={(v: number) => measure === "volume" ? `${(v / 1_000_000).toFixed(1)}M` : formatNum(v, 0)} label={{ value: measure === "volume" ? "Volume" : measure === "units" ? "Units" : measure === "wac" ? "WAC" : "WA FICO", position: "insideBottom", offset: -2, fontSize: 12, fill: isDark ? "#94a3b8" : "#64748b" }} />
+                    <YAxis dataKey="compositeKey" type="category" width={240} tick={(props: Record<string, unknown>) => {
+                      const { x, y, payload } = props as { x: number; y: number; payload: { value: string } };
+                      const key = payload?.value ?? "";
+                      const parts = key.split("||");
+                      const row = milestoneBarData.find((r) => r.compositeKey === key);
+                      const groupLabel = row?.isFirstInGroup ? parts[0] : "";
+                      const bucketLabel = parts[1] || "";
+                      return (
+                        <g transform={`translate(${x},${y})`}>
+                          {groupLabel && (
+                            <foreignObject x={-240} y={-18} width={130} height={36}>
+                              <div xmlns="http://www.w3.org/1999/xhtml" style={{ fontSize: 13, fontWeight: 600, color: isDark ? "#e2e8f0" : "#334155", lineHeight: "1.25", textAlign: "left", overflow: "hidden", wordWrap: "break-word" }}>{groupLabel}</div>
+                            </foreignObject>
+                          )}
+                          <text x={-5} y={0} dy={4} textAnchor="end" fontSize={10} fill={isDark ? "#94a3b8" : "#64748b"}>{bucketLabel}</text>
+                        </g>
+                      );
+                    }} />
+                    <RechartsTooltip contentStyle={{ backgroundColor: isDark ? "#1e293b" : "#ffffff", border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`, borderRadius: "8px", fontSize: 12 }} labelFormatter={(label: string) => { const parts = String(label).split("||"); return `${parts[0]} — ${parts[1] || ""}`; }} formatter={(value: number) => [measure === "volume" ? formatCurrency(value) : formatNum(value, measure === "wac" ? 3 : 0), measure === "volume" ? "Volume" : measure === "units" ? "Units" : measure === "wac" ? "WAC" : "WA FICO"]} />
+                    <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                      {milestoneBarData.map((entry) => (
+                        <Cell key={entry.compositeKey} fill={entry.bucketIdx >= 0 ? BUCKET_COLORS[entry.bucketIdx] : (isDark ? "#475569" : "#94a3b8")} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Active Loans by [group] – Pivot table widget (single-variant) */}
+      {variant === "milestone-pivot" && (
+        <Card className={cn("flex flex-col flex-1 min-h-0 rounded-xl border overflow-hidden", isDark ? "border-slate-700 bg-slate-800/50" : "border-slate-200/60 bg-white")}>
+          <CardHeader className="pb-2 shrink-0">
+            <CardTitle className={cn("text-base font-semibold", isDark ? "text-white" : "text-slate-900")}>
+              {labelPrefix} Loans by {MILESTONE_GROUP_OPTIONS.find((o) => o.value === milestoneGroupBy)?.label}
+            </CardTitle>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Displaying Days until Lock Expires</p>
+            <div className="flex flex-wrap gap-1">
+              {MILESTONE_GROUP_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => (groupId ? updateFilters(groupId, { lockStratMilestoneGroupBy: opt.value }) : setLocalMilestoneGroupBy(opt.value))}
+                  className={cn(
+                    "px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
+                    milestoneGroupBy === opt.value ? (isDark ? "bg-slate-600 text-white" : "bg-slate-700 text-white") : isDark ? "bg-slate-700/50 text-slate-300 hover:bg-slate-700" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  )}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex justify-end pt-2">
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={handleExportPivot} disabled={sortedPivotRows.length === 0}>
+                <Download className="h-4 w-4" />
+                Export CSV
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent
+            className="pb-4 flex-1 min-h-0 overflow-auto flex flex-col"
+          >
+            {loading ? (
+              <div className="flex justify-center py-12"><Loader2 className="h-8 w-8 animate-spin text-sky-500" /></div>
+            ) : (
+              <div className={isEmbedded ? "flex-1 min-h-0 overflow-auto overflow-x-auto" : "overflow-x-auto"}>
+                <table className="w-full border-collapse text-sm">
+                  <thead>
+                    <tr className={cn("border-b", borderTh, bgTh)}>
+                      <th className="py-2.5 px-4 text-left font-semibold">{MILESTONE_GROUP_OPTIONS.find((o) => o.value === milestoneGroupBy)?.label}</th>
+                      <th className="py-2.5 px-4 text-right font-semibold">Active Locked Units</th>
+                      <th className="py-2.5 px-4 text-right font-semibold">Active Locked Volume</th>
+                      <th className="py-2.5 px-4 text-right font-semibold">Active Locked %</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className={cn("border-b font-semibold", borderRow, isDark ? "bg-slate-800/70" : "bg-slate-100/90")}>
+                      <td className="py-2 px-4">Total</td>
+                      <td className="py-2 px-4 text-right">{formatNum(milestonePivot.totals.units)}</td>
+                      <td className="py-2 px-4 text-right">{formatCurrency(milestonePivot.totals.volume)}</td>
+                      <td className="py-2 px-4 text-right">100.0%</td>
+                    </tr>
+                    {sortedPivotRows.map((row) => (
+                      <React.Fragment key={row.group}>
+                        <tr className={cn("border-b cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50", borderRow)} onClick={() => togglePivotRow(row.group)}>
+                          <td className="py-2 px-4 font-medium">
+                            <span className="inline-flex items-center gap-1">
+                              <ChevronRight className={cn("h-4 w-4 transition-transform", expandedPivotRows.has(row.group) && "rotate-90")} />
+                              {row.group}
+                            </span>
+                          </td>
+                          <td className={cn("py-2 px-4 text-right", textTd)}>{formatNum(row.units)}</td>
+                          <td className={cn("py-2 px-4 text-right", textTd)}>{formatCurrency(row.volume)}</td>
+                          <td className={cn("py-2 px-4 text-right", textTd)}>{row.pct.toFixed(1)}%</td>
+                        </tr>
+                        {expandedPivotRows.has(row.group) && row.children.map((child) => (
+                          <tr key={`${row.group}-${child.bucket}`} className={cn("border-b", borderRow, isDark ? "bg-slate-800/30" : "bg-slate-50/50")}>
+                            <td className="py-1.5 px-4 pl-10 text-slate-500 dark:text-slate-400 text-xs">{child.bucket}</td>
+                            <td className={cn("py-1.5 px-4 text-right text-xs", "text-blue-600 dark:text-blue-400")}>{formatNum(child.units)}</td>
+                            <td className={cn("py-1.5 px-4 text-right text-xs", textTd)}>{formatCurrency(child.volume)}</td>
+                            <td className={cn("py-1.5 px-4 text-right text-xs", textTd)}>{child.pct.toFixed(1)}%</td>
+                          </tr>
+                        ))}
+                      </React.Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {variant === "full" && (
+    <>
+      {/* ── Filters ── (only when standalone, not when groupId/embedded) */}
+      {!groupId && (
       <Card className={cn("rounded-xl border", isDark ? "border-slate-700 bg-slate-800/50" : "border-slate-200/60 bg-white")}>
         <CardContent className="pt-5 pb-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-slate-500 dark:text-slate-400">Locked?</label>
-            <Select value={locked} onValueChange={(v) => setLocked(v as LockedFilter)}>
+            <Select value={locked} onValueChange={(v) => (groupId ? updateFilters(groupId, { lockStratLocked: v as LockedFilter }) : setLocalLocked(v as LockedFilter))}>
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
@@ -450,7 +863,7 @@ export function LockStratificationView({
           </div>
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-slate-500 dark:text-slate-400">Select Measure</label>
-            <Select value={measure} onValueChange={(v) => setMeasure(v as MeasureFilter)}>
+            <Select value={measure} onValueChange={(v) => (groupId ? updateFilters(groupId, { lockStratMeasure: v as MeasureFilter }) : setLocalMeasure(v as MeasureFilter))}>
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
@@ -480,6 +893,7 @@ export function LockStratificationView({
           )}
         </CardContent>
       </Card>
+      )}
 
       {/* ── KPIs ── */}
       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
@@ -656,7 +1070,7 @@ export function LockStratificationView({
               {PULL_THROUGH_PERIODS.map((opt) => (
                 <button
                   key={opt.value}
-                  onClick={() => setPullThroughPeriod(opt.value)}
+                  onClick={() => (groupId ? updateFilters(groupId, { lockStratPullThroughPeriod: opt.value }) : setLocalPullThroughPeriod(opt.value))}
                   className={cn(
                     "px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
                     pullThroughPeriod === opt.value
@@ -747,7 +1161,7 @@ export function LockStratificationView({
                 {MILESTONE_GROUP_OPTIONS.map((opt) => (
                   <button
                     key={opt.value}
-                    onClick={() => { setMilestoneGroupBy(opt.value); setExpandedPivotRows(new Set()); }}
+                    onClick={() => { (groupId ? updateFilters(groupId, { lockStratMilestoneGroupBy: opt.value }) : setLocalMilestoneGroupBy(opt.value)); setExpandedPivotRows(new Set()); }}
                     className={cn(
                       "px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
                       milestoneGroupBy === opt.value
@@ -798,8 +1212,8 @@ export function LockStratificationView({
               milestoneBarData.length === 0 ? (
                 <p className="text-sm text-slate-500 py-8 text-center">No data available</p>
               ) : (
-                <div className="flex-1 min-h-[280px]">
-                  <ResponsiveContainer width="100%" height="100%">
+                <div style={{ minHeight: Math.max(280, milestoneBarData.length * 24 + 60) }}>
+                  <ResponsiveContainer width="100%" height={Math.max(280, milestoneBarData.length * 24 + 60)}>
                     <BarChart data={milestoneBarData} layout="vertical" margin={{ top: 8, right: 30, left: 10, bottom: 8 }} barCategoryGap={10}>
                       <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#334155" : "#e2e8f0"} />
                       <XAxis
@@ -925,6 +1339,7 @@ export function LockStratificationView({
         </Card>
       </div>
 
+      </>)}
     </div>
   );
 }
