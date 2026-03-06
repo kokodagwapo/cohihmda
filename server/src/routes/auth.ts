@@ -421,7 +421,7 @@ router.post("/signin", authLimiter, async (req, res) => {
       useCognito: cognitoAuth.isCognitoAuthEnabled(),
     });
 
-    // --- Cognito auth path ---
+    // --- Cognito auth path (single source of truth for all users when enabled) ---
     if (cognitoAuth.isCognitoAuthEnabled()) {
       try {
         const result = await cognitoAuth.signIn(email, password);
@@ -1078,8 +1078,9 @@ router.post("/password-reset/request", authLimiter, async (req, res) => {
     logInfo("[Auth] Password reset requested", { email, tenantSlug });
 
     const successMsg =
-      "If an account exists with this email, you will receive a password reset code.";
+      "If an account exists with this email, you will receive password reset instructions.";
 
+    // Single auth path: always use Cognito when enabled (all users are in Cognito)
     if (cognitoAuth.isCognitoAuthEnabled()) {
       await cognitoAuth.forgotPassword(email);
       return res.json({

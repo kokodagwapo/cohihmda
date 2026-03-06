@@ -261,7 +261,10 @@ async function getInfrastructureUrls(awsAccountId: string, stackId: string): Pro
 }
 
 /**
- * Create admin user in tenant's database
+ * Create admin user in tenant's database.
+ * When Cognito is enabled, the user is also created in Cognito with
+ * a permanent password (no invite email — the password is returned
+ * for external delivery as part of the provisioning output).
  */
 async function createLenderAdmin(
   tenantId: string,
@@ -271,19 +274,40 @@ async function createLenderAdmin(
   try {
     const password = generateSecurePassword(16);
     const bcrypt = await import('bcryptjs');
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const crypto = await import('crypto');
+    const cognitoAuth = await import('./cognito/cognitoAuthService.js');
 
-    // Create user
+    let cognitoSub: string | null = null;
+
+    if (cognitoAuth.isCognitoAuthEnabled()) {
+      try {
+        const result = await cognitoAuth.createUser(email, password, lenderName, false);
+        cognitoSub = result.cognitoSub;
+      } catch (cognitoErr: any) {
+        if (cognitoErr.code === 'USER_EXISTS') {
+          try {
+            const existing = await cognitoAuth.getUser(email);
+            cognitoSub = existing.cognitoSub;
+          } catch { cognitoSub = null; }
+        } else {
+          throw cognitoErr;
+        }
+      }
+    }
+
+    const hashedPassword = cognitoAuth.isCognitoAuthEnabled()
+      ? crypto.randomBytes(32).toString('hex')
+      : await bcrypt.hash(password, 10);
+
     const userResult = await pool.query(
-      `INSERT INTO public.users (email, password_hash, role, is_active, created_at)
-       VALUES ($1, $2, $3, true, NOW())
+      `INSERT INTO public.users (email, password_hash, role, is_active, created_at, cognito_sub)
+       VALUES ($1, $2, $3, true, NOW(), $4)
        RETURNING id, email`,
-      [email, hashedPassword, 'tenant_admin']
+      [email, hashedPassword, 'tenant_admin', cognitoSub]
     );
 
     const userId = userResult.rows[0].id;
 
-    // Create profile
     await pool.query(
       `INSERT INTO public.profiles (user_id, full_name, tenant_id, created_at)
        VALUES ($1, $2, $3, NOW())
@@ -292,11 +316,11 @@ async function createLenderAdmin(
       [userId, lenderName, tenantId]
     );
 
-    console.log(`✅ Admin user created for tenant ${tenantId}`);
+    console.log(`Admin user created for tenant ${tenantId}${cognitoSub ? ' (Cognito linked)' : ''}`);
 
     return {
       username: email,
-      password: password, // Return plain password - will be sent via email
+      password: password,
     };
   } catch (error: any) {
     console.error('Error creating admin user:', error);

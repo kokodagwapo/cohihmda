@@ -1321,23 +1321,19 @@ const Dashboard = () => {
               )}
 
               {/* Dashboards Section */}
-              {(dashboardVisibility.leaderboard ||
-                dashboardVisibility.executiveDashboard) && (
-                <div className="section-dashboards mt-12 sm:mt-16 w-full min-w-0 max-w-full">
+              <div className="section-dashboards mt-12 sm:mt-16 w-full min-w-0 max-w-full">
                   <h2 className="text-2xl font-semibold mb-6 text-slate-900 dark:text-white">
                     Dashboards
                   </h2>
 
                   {/* Leaderboard - First under Dashboards heading */}
-                  {dashboardVisibility.leaderboard && (
-                    <div id="leaderboard" className="section-leaderboard mb-8">
-                      <LeaderBoardSection
-                        dateFilter={dateFilter}
-                        selectedTenantId={selectedTenantId}
-                        selectedChannel={selectedChannel}
-                      />
-                    </div>
-                  )}
+                  <div id="leaderboard" className="section-leaderboard mb-8">
+                    <LeaderBoardSection
+                      dateFilter={dateFilter}
+                      selectedTenantId={selectedTenantId}
+                      selectedChannel={selectedChannel}
+                    />
+                  </div>
 
                   {/* Business Overview */}
                   {dashboardVisibility.executiveDashboard && (
@@ -1355,7 +1351,6 @@ const Dashboard = () => {
                   )}
 
                 </div>
-              )}
             </div>
           )}
         </div>
