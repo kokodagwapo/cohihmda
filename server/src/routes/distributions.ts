@@ -406,6 +406,30 @@ router.put(
         }
         return res.json(existing.rows[0]);
       }
+
+      // Recalculate next_run_at when any scheduling field changes
+      const scheduleFieldsChanged = ['frequency', 'schedule_time', 'schedule_day', 'timezone']
+        .some((f) => body[f] !== undefined);
+      if (scheduleFieldsChanged) {
+        const current = await tenantPool.query(
+          'SELECT frequency, schedule_time, schedule_day, timezone FROM public.distribution_schedules WHERE id = $1',
+          [id]
+        );
+        if (current.rows.length > 0) {
+          const row = current.rows[0];
+          const freq = body.frequency ?? row.frequency;
+          const time = body.schedule_time ?? row.schedule_time ?? '08:00';
+          const day = body.schedule_day !== undefined ? body.schedule_day : row.schedule_day;
+          const tz = body.timezone ?? row.timezone ?? 'America/New_York';
+          const nextRunAt = freq !== 'one_time'
+            ? computeNextRunAt(freq, typeof time === 'string' ? time : '08:00', day, tz)
+            : null;
+          setClause.push(`next_run_at = $${idx}`);
+          values.push(nextRunAt);
+          idx++;
+        }
+      }
+
       setClause.push('updated_at = NOW()');
       const result = await tenantPool.query(
         `UPDATE public.distribution_schedules SET ${setClause.join(', ')}

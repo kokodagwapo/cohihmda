@@ -73,6 +73,32 @@ const FREQUENCIES = [
   { value: "one_time", label: "One time" },
 ] as const;
 
+const COMMON_TIMEZONES = [
+  { value: "America/New_York", label: "Eastern (ET)" },
+  { value: "America/Chicago", label: "Central (CT)" },
+  { value: "America/Denver", label: "Mountain (MT)" },
+  { value: "America/Los_Angeles", label: "Pacific (PT)" },
+  { value: "America/Anchorage", label: "Alaska (AKT)" },
+  { value: "Pacific/Honolulu", label: "Hawaii (HT)" },
+  { value: "America/Phoenix", label: "Arizona (MST)" },
+  { value: "UTC", label: "UTC" },
+] as const;
+
+function detectBrowserTimezone(): string {
+  try {
+    const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (COMMON_TIMEZONES.some((tz) => tz.value === detected)) return detected;
+    return detected || "America/New_York";
+  } catch {
+    return "America/New_York";
+  }
+}
+
+function formatTzLabel(tzValue: string): string {
+  const found = COMMON_TIMEZONES.find((tz) => tz.value === tzValue);
+  return found ? found.label : tzValue;
+}
+
 export default function Distributions() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -199,21 +225,20 @@ export default function Distributions() {
     [editingId, updateMutation, createMutation],
   );
 
-  const formatNextRun = (nextRun: string | null) => {
-    if (!nextRun) return "—";
-    const d = new Date(nextRun);
-    return d.toLocaleString(undefined, {
-      dateStyle: "short",
-      timeStyle: "short",
-    });
-  };
-
-  const formatLastSent = (lastSent: string | null) => {
-    if (!lastSent) return "—";
-    return new Date(lastSent).toLocaleString(undefined, {
-      dateStyle: "short",
-      timeStyle: "short",
-    });
+  const formatInTz = (isoStr: string | null, tz?: string) => {
+    if (!isoStr) return "—";
+    try {
+      return new Date(isoStr).toLocaleString(undefined, {
+        timeZone: tz || undefined,
+        dateStyle: "short",
+        timeStyle: "short",
+      });
+    } catch {
+      return new Date(isoStr).toLocaleString(undefined, {
+        dateStyle: "short",
+        timeStyle: "short",
+      });
+    }
   };
 
   const getContentLink = (schedule: any) => {
@@ -336,7 +361,10 @@ export default function Distributions() {
                             <TableCell>
                               {FREQUENCIES.find((f) => f.value === s.frequency)
                                 ?.label ?? s.frequency}{" "}
-                              at {s.schedule_time ?? "08:00"}
+                              at {s.schedule_time?.slice(0, 5) ?? "08:00"}
+                              <span className="block text-xs text-slate-500">
+                                {formatTzLabel(s.timezone || "America/New_York")}
+                              </span>
                             </TableCell>
                             <TableCell>
                               {s.recipient_list_name ??
@@ -345,10 +373,10 @@ export default function Distributions() {
                                   : "—")}
                             </TableCell>
                             <TableCell>
-                              {formatNextRun(s.next_run_at)}
+                              {formatInTz(s.next_run_at, s.timezone)}
                             </TableCell>
                             <TableCell>
-                              {formatLastSent(s.last_sent_at)}
+                              {formatInTz(s.last_sent_at, s.timezone)}
                             </TableCell>
                             <TableCell>
                               <div className="flex items-center gap-1">
@@ -471,6 +499,7 @@ function DistributionScheduleDialog({
   const [contentId, setContentId] = useState("");
   const [frequency, setFrequency] = useState("weekly");
   const [scheduleTime, setScheduleTime] = useState("08:00");
+  const [timezone, setTimezone] = useState(detectBrowserTimezone);
   const [recipientListId, setRecipientListId] = useState("");
   const [recipientEmails, setRecipientEmails] = useState("");
   const [autoInviteDirectEmails, setAutoInviteDirectEmails] = useState(true);
@@ -490,6 +519,7 @@ function DistributionScheduleDialog({
       setContentId(schedule.content_id ?? "");
       setFrequency(schedule.frequency ?? "weekly");
       setScheduleTime(schedule.schedule_time?.slice(0, 5) ?? "08:00");
+      setTimezone(schedule.timezone || detectBrowserTimezone());
       setRecipientListId(schedule.recipient_list_id ?? "");
       setRecipientEmails((schedule.recipient_emails ?? []).join(", "));
       setAutoInviteDirectEmails(
@@ -502,6 +532,7 @@ function DistributionScheduleDialog({
       setContentId("");
       setFrequency("weekly");
       setScheduleTime("08:00");
+      setTimezone(detectBrowserTimezone());
       setRecipientListId("");
       setRecipientEmails("");
       setAutoInviteDirectEmails(true);
@@ -521,7 +552,7 @@ function DistributionScheduleDialog({
       content_config: { auto_invite_external: autoInviteDirectEmails },
       frequency,
       schedule_time: scheduleTime,
-      timezone: "America/New_York",
+      timezone,
       recipient_list_id: recipientListId || undefined,
       recipient_emails: emails,
     });
@@ -606,13 +637,30 @@ function DistributionScheduleDialog({
               </SelectContent>
             </Select>
           </div>
-          <div>
-            <Label>Time (HH:MM)</Label>
-            <Input
-              type="time"
-              value={scheduleTime}
-              onChange={(e) => setScheduleTime(e.target.value)}
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Time</Label>
+              <Input
+                type="time"
+                value={scheduleTime}
+                onChange={(e) => setScheduleTime(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label>Timezone</Label>
+              <Select value={timezone} onValueChange={setTimezone}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {COMMON_TIMEZONES.map((tz) => (
+                    <SelectItem key={tz.value} value={tz.value}>
+                      {tz.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <div>
             <Label>Recipient list</Label>
@@ -704,7 +752,7 @@ function HistoryDialog({
             <TableBody>
               {history.map((h: any) => (
                 <TableRow key={h.id}>
-                  <TableCell>{new Date(h.sent_at).toLocaleString()}</TableCell>
+                  <TableCell>{new Date(h.sent_at).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}</TableCell>
                   <TableCell>
                     <span
                       className={
