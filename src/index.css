@@ -431,3 +431,9 @@ All colors MUST be HSL.
     box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4) !important;
   }
 }
+
+/* Loan Details table/card: ensure no pseudo-elements inject parentheses or other content */
+[data-loan-details-table]::before,
+[data-loan-details-table]::after {
+  content: none !important;
+}

@@ -29,6 +29,9 @@ import {
 import {
   getLoanComplexityDashboardData,
   getLoanComplexityGroupLoans,
+  getLoanComplexityGroupLoansMulti,
+  getLoanComplexityGroupLoansCrossDimension,
+  getLoanComplexityLoansInPeriod,
   getLoanComplexityStatusOptions,
   getLoanComplexityPivotData,
   type LoanComplexityGroupBy,
@@ -1313,7 +1316,8 @@ router.get(
 
 /**
  * GET /api/dashboard/loan-complexity/loans
- * Loan rows for a single group (bar click): same filters as loan-complexity + groupName.
+ * Loan rows: when groupBy and groupName(s) are provided, returns loans for those groups; otherwise returns all loans in period (same filters).
+ * Multi-select: either (1) one groupBy + multiple groupName for same dimension, or (2) repeated groupBy+groupName pairs for cross-dimension (OR across dimensions).
  */
 router.get(
   "/loan-complexity/loans",
@@ -1321,11 +1325,22 @@ router.get(
   attachTenantContext,
   async (req: AuthRequest, res) => {
     try {
+      const rawQuery = req.query as Record<string, unknown>;
+      const groupByRaw = rawQuery.groupBy;
+      const groupNameRaw = rawQuery.groupName;
+      const groupByArray = Array.isArray(groupByRaw)
+        ? (groupByRaw as string[]).map((s) => String(s).trim()).filter(Boolean)
+        : typeof groupByRaw === "string" && groupByRaw.trim()
+          ? [groupByRaw.trim()]
+          : [];
+      const groupNamesArray = Array.isArray(groupNameRaw)
+        ? (groupNameRaw as string[]).map((s) => String(s).trim()).filter(Boolean)
+        : typeof groupNameRaw === "string" && groupNameRaw.trim()
+          ? [groupNameRaw.trim()]
+          : [];
       const querySchema = z.object({
         startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
         endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-        groupBy: z.enum(["loan_officer", "processor", "underwriter", "closer", "branch", "current_loan_status"]),
-        groupName: z.string().min(1).transform((s) => s.trim()),
         channel_group: z.string().optional(),
         tenant_id: z.string().uuid().optional(),
       });
@@ -1333,26 +1348,57 @@ router.get(
       if (!parsed.success) {
         return res.status(400).json({ error: "Invalid request", details: parsed.error.errors });
       }
-      const { startDate, endDate, groupBy, groupName, channel_group, tenant_id } = parsed.data;
+      const { startDate, endDate, channel_group, tenant_id } = parsed.data;
       const tenantContext = getTenantContext(req);
       const accessCtx = await getLoanAccessContext(req, tenantContext.tenantPool);
       if (accessCtx.hasNoAccess) {
         return res.json({ loans: [] });
       }
       const { accessClause, accessParams } = accessCtx.buildWhereClause("l", 3);
-      const dimensionFilterClause = buildLoanComplexityDimensionFilterClause(
-        req.query as Record<string, unknown>
-      );
-      const loans = await getLoanComplexityGroupLoans(tenantContext.tenantPool, {
+      const dimensionFilterClause = buildLoanComplexityDimensionFilterClause(rawQuery);
+      const baseOptions = {
         startDate,
         endDate,
-        groupBy: groupBy as LoanComplexityGroupBy,
-        groupName,
         channelGroup: channel_group || undefined,
         accessClause: accessClause ? ` ${accessClause.trim()}` : undefined,
         accessParams: accessParams.length > 0 ? accessParams : undefined,
         dimensionFilterClause: dimensionFilterClause || undefined,
-      });
+      };
+      const groupByEnum = z.enum(["loan_officer", "processor", "underwriter", "closer", "branch", "current_loan_status"]);
+      let loans;
+      if (groupByArray.length === groupNamesArray.length && groupByArray.length > 0) {
+        const validPairs = groupByArray
+          .map((g, i) => ({ groupBy: groupByEnum.safeParse(g), groupName: groupNamesArray[i] }))
+          .filter((p): p is { groupBy: z.SafeParseSuccess<LoanComplexityGroupBy>; groupName: string } => p.groupBy.success);
+        if (validPairs.length === groupByArray.length) {
+          loans = await getLoanComplexityGroupLoansCrossDimension(tenantContext.tenantPool, {
+            ...baseOptions,
+            groupFilters: validPairs.map((p) => ({ groupBy: p.groupBy.data, groupName: p.groupName })),
+          });
+        } else {
+          loans = await getLoanComplexityLoansInPeriod(tenantContext.tenantPool, baseOptions);
+        }
+      } else if (groupByArray.length === 1 && groupNamesArray.length > 0) {
+        const singleGroupBy = groupByEnum.safeParse(groupByArray[0]);
+        if (singleGroupBy.success) {
+          loans =
+            groupNamesArray.length === 1
+              ? await getLoanComplexityGroupLoans(tenantContext.tenantPool, {
+                  ...baseOptions,
+                  groupBy: singleGroupBy.data,
+                  groupName: groupNamesArray[0],
+                })
+              : await getLoanComplexityGroupLoansMulti(tenantContext.tenantPool, {
+                  ...baseOptions,
+                  groupBy: singleGroupBy.data,
+                  groupNames: groupNamesArray,
+                });
+        } else {
+          loans = await getLoanComplexityLoansInPeriod(tenantContext.tenantPool, baseOptions);
+        }
+      } else {
+        loans = await getLoanComplexityLoansInPeriod(tenantContext.tenantPool, baseOptions);
+      }
       res.json({ loans });
     } catch (error: unknown) {
       console.error("Error fetching loan complexity group loans:", error);

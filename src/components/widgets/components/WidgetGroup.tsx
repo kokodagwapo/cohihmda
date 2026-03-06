@@ -94,6 +94,8 @@ import { useFilterOptions } from '@/hooks/useFilterOptions';
 import { useCanvasDataStore } from '@/stores/canvasDataStore';
 import { useFilterPresetStore, type FilterPreset } from '@/stores/filterPresetStore';
 import { usePipelineAnalysisRange, usePipelineAnalysisFilterOptions, usePipelineAnalysisConfig } from '@/hooks/usePipelineAnalysisData';
+import { useLoanComplexityStatusOptions } from '@/hooks/useLoanComplexityStatusOptions';
+import { useChannelStore } from '@/stores/channelStore';
 import { api } from '@/lib/api';
 import type { GroupWidgetItem, WidgetFilterState } from '@/components/workbench/canvas/types';
 import type { DateFilter, DimensionFilter } from '@/hooks/useCohiWidgetData';
@@ -242,6 +244,8 @@ const SECTION_FILTER_CONFIG: Partial<Record<SectionType, SectionFilterField[]>> 
   'actors': [],
   'pricing-dashboard': [],
   'pipeline-analysis': [],
+  'lock-stratification': [],
+  'loan-complexity': [],
 };
 
 /**
@@ -259,6 +263,7 @@ const SECTION_BUILTIN_FILTER_COLUMNS: Partial<Record<SectionType, string[]>> = {
   'pipeline-analysis': ['loan_type', 'loan_purpose', 'branch'],
   'pricing-dashboard': ['current_loan_status'],
   'sales-scorecard-overview': ['branch', 'loan_officer'],
+  'loan-complexity': ['current_loan_status'],
 };
 
 const HIGH_PERFORMERS_DATE_TYPE_OPTIONS: { value: 'funding_date' | 'closing_date' | 'application_date'; label: string }[] = [
@@ -299,6 +304,33 @@ const PRICING_LOCK_STATUS_OPTIONS = [
   { value: 'locked', label: 'Active Locked' },
   { value: 'not_locked', label: 'Active Not Locked' },
   { value: 'total', label: 'Active Total' },
+];
+
+const LOCK_STRAT_LOCKED_OPTIONS = [
+  { value: 'active_locked', label: 'Active Locked' },
+  { value: 'active_not_locked', label: 'Active NOT Locked' },
+  { value: 'all_active', label: 'All Active Loans' },
+];
+const LOCK_STRAT_MEASURE_OPTIONS = [
+  { value: 'volume', label: 'Volume' },
+  { value: 'units', label: 'Units' },
+  { value: 'wac', label: 'WAC' },
+  { value: 'wa_fico', label: 'WA FICO' },
+];
+const LOCK_STRAT_MILESTONE_GROUP_OPTIONS = [
+  { value: 'current_milestone', label: 'Current Milestone' },
+  { value: 'investor', label: 'Investor' },
+  { value: 'branch', label: 'Branch' },
+  { value: 'broker_lender', label: 'Broker Lender' },
+  { value: 'lo', label: 'Loan Officer' },
+  { value: 'ae', label: 'Account Executive' },
+];
+const LOCK_STRAT_PULL_THROUGH_OPTIONS = [
+  { value: '30', label: '30 Days' },
+  { value: '60', label: '60 Days' },
+  { value: '90', label: '90 Days' },
+  { value: '120', label: '120 Days' },
+  { value: 'ytd', label: 'Year to Date' },
 ];
 
 /** Compact dropdown for pricing dashboard filters in WidgetGroup */
@@ -644,6 +676,8 @@ const SECTION_COLORS: Record<SectionType, { border: string; bg: string; accent: 
   'pricing-dashboard':   { border: 'border-emerald-400/50', bg: 'bg-emerald-50/50 dark:bg-emerald-950/20', accent: 'text-emerald-600 dark:text-emerald-400', dot: 'bg-emerald-500' },
   'pipeline-analysis':   { border: 'border-sky-400/50', bg: 'bg-sky-50/50 dark:bg-sky-950/20', accent: 'text-sky-600 dark:text-sky-400', dot: 'bg-sky-500' },
   'sales-scorecard-overview': { border: 'border-violet-400/50', bg: 'bg-violet-50/50 dark:bg-violet-950/20', accent: 'text-violet-600 dark:text-violet-400', dot: 'bg-violet-500' },
+  'lock-stratification': { border: 'border-blue-400/50', bg: 'bg-blue-50/50 dark:bg-blue-950/20', accent: 'text-blue-600 dark:text-blue-400', dot: 'bg-blue-500' },
+  'loan-complexity': { border: 'border-indigo-400/50', bg: 'bg-indigo-50/50 dark:bg-indigo-950/20', accent: 'text-indigo-600 dark:text-indigo-400', dot: 'bg-indigo-500' },
 };
 
 /**
@@ -700,7 +734,22 @@ function getGridSizeForItem(item: GroupWidgetItem): GridSize {
   if (item.kind === 'registry' && item.defId === 'sales-scorecard-overview-table') {
     return { w: 36, h: 20, minW: 24, minH: 12 };
   }
-  // High Performers: 2x2 grid (two columns of 18 units each)
+  if (item.kind === 'registry' && item.defId.startsWith('lock-stratification-')) {
+    if (item.defId === 'lock-stratification-kpis') return { w: 24, h: 10, minW: 16, minH: 6 };
+    if (item.defId === 'lock-stratification-interest-rates') return { w: 24, h: 28, minW: 18, minH: 20 };
+    if (item.defId === 'lock-stratification-days-to-expiration') return { w: 24, h: 22, minW: 18, minH: 14 };
+    if (item.defId === 'lock-stratification-pull-through') return { w: 24, h: 26, minW: 18, minH: 18 };
+    if (item.defId === 'lock-stratification-milestone-bar') return { w: 24, h: 30, minW: 18, minH: 22 };
+    if (item.defId === 'lock-stratification-milestone-pivot') return { w: 24, h: 26, minW: 18, minH: 18 };
+    return { w: 20, h: 22, minW: 12, minH: 14 };
+  }
+  if (item.kind === 'registry' && item.defId.startsWith('loan-complexity-')) {
+    if (item.defId === 'loan-complexity-pivot') return { w: 24, h: 26, minW: 18, minH: 18 };
+    if (item.defId === 'loan-complexity-chart') return { w: 24, h: 28, minW: 18, minH: 20 };
+    if (item.defId === 'loan-complexity-table') return { w: 24, h: 24, minW: 18, minH: 16 };
+    return { w: 24, h: 24, minW: 18, minH: 16 };
+  }
+  // High Performers: 2x2 grid
   if (item.kind === 'registry' && item.defId.startsWith('high-performers-')) {
     return { w: 18, h: 16, minW: 12, minH: 8 };
   }
@@ -1186,6 +1235,39 @@ function GridCellRegistryWidget({
   const isWorkflowConversion = defId === 'workflow-conversion-embed';
   const isSalesScorecardOverview = defId === 'sales-scorecard-overview-chart' || defId === 'sales-scorecard-overview-table';
   const salesScorecardOverviewConfig = isSalesScorecardOverview ? { groupId } : {};
+  const isLockStratification = defId?.startsWith('lock-stratification-');
+  const lockStratificationConfig = isLockStratification ? { groupId, variant: definition.config?.variant } : {};
+  const isLoanComplexity = defId?.startsWith('loan-complexity-');
+  const lcGroupBy = filters.loanComplexityGroupBy ?? 'actors';
+  const lcActorType = (filters.loanComplexityActorType ?? 'loan_officer') as 'loan_officer' | 'processor' | 'underwriter' | 'closer';
+  const lcEffectiveGroupBy = lcGroupBy === 'actors' ? lcActorType : lcGroupBy;
+  const loanComplexityConfig = isLoanComplexity
+    ? {
+        groupId,
+        variant: definition.config?.variant,
+        effectiveGroupBy: lcEffectiveGroupBy,
+        currentLoanStatus: filters.loanComplexityCurrentStatus ?? 'All',
+        selectedGroups: (filters.loanComplexitySelectedGroups ?? []).length > 0
+          ? filters.loanComplexitySelectedGroups!
+          : (filters.loanComplexitySelectedGroupNames ?? []).map((groupName) => ({ dimension: lcEffectiveGroupBy, groupName })),
+        onSelectGroup: (payload: { dimension: string; groupName: string } | null) => {
+          if (!payload) {
+            updateFilters(groupId, { loanComplexitySelectedGroups: [], loanComplexitySelectedGroupNames: [] });
+            return;
+          }
+          const { dimension, groupName } = payload;
+          const current = (filters.loanComplexitySelectedGroups ?? []).length > 0
+            ? filters.loanComplexitySelectedGroups!
+            : (filters.loanComplexitySelectedGroupNames ?? []).map((g) => ({ dimension: lcEffectiveGroupBy, groupName: g }));
+          const key = `${dimension}:${groupName}`;
+          const next = current.some((g) => `${g.dimension}:${g.groupName}` === key)
+            ? current.filter((g) => `${g.dimension}:${g.groupName}` !== key)
+            : [...current, { dimension, groupName }];
+          updateFilters(groupId, { loanComplexitySelectedGroups: next, loanComplexitySelectedGroupNames: [] });
+        },
+      }
+    : {};
+
   const workflowConfig = isWorkflowConversion
     ? {
         groupId,
@@ -1228,6 +1310,8 @@ function GridCellRegistryWidget({
     ...pricingConfig,
     ...workflowConfig,
     ...salesScorecardOverviewConfig,
+    ...lockStratificationConfig,
+    ...loanComplexityConfig,
   };
 
   return (
@@ -1465,10 +1549,16 @@ export function WidgetGroup({
     if (savedFiltersProp && !filtersRestoredRef.current) {
       filtersRestoredRef.current = true;
       // Loan-detail always defaults to "All" (no date filter); don't restore periodSelection/dateRange
-      const toRestore =
+      let toRestore: Partial<SectionFilters> =
         sectionType === 'loan-detail'
           ? { ...savedFiltersProp, periodSelection: undefined, dateRange: undefined }
           : savedFiltersProp;
+      // Migrate old loan-complexity single selection to array
+      if (sectionType === 'loan-complexity' && (toRestore as Record<string, unknown>).loanComplexitySelectedGroupName != null && !Array.isArray((toRestore as Record<string, unknown>).loanComplexitySelectedGroupNames)) {
+        const name = (toRestore as Record<string, unknown>).loanComplexitySelectedGroupName as string;
+        toRestore = { ...toRestore, loanComplexitySelectedGroupNames: name ? [name] : [] };
+        delete (toRestore as Record<string, unknown>).loanComplexitySelectedGroupName;
+      }
       updateFilters(groupId, toRestore);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1596,9 +1686,22 @@ export function WidgetGroup({
     if (sectionType === 'pricing-dashboard') {
       if (filters.pricingDashboardColumns && filters.pricingDashboardColumns.length > 0) toSave.pricingDashboardColumns = filters.pricingDashboardColumns;
     }
+    if (sectionType === 'lock-stratification') {
+      if (filters.lockStratLocked && filters.lockStratLocked !== 'all_active') toSave.lockStratLocked = filters.lockStratLocked;
+      if (filters.lockStratMeasure && filters.lockStratMeasure !== 'volume') toSave.lockStratMeasure = filters.lockStratMeasure;
+      if (filters.lockStratMilestoneGroupBy && filters.lockStratMilestoneGroupBy !== 'current_milestone') toSave.lockStratMilestoneGroupBy = filters.lockStratMilestoneGroupBy;
+      if (filters.lockStratPullThroughPeriod && filters.lockStratPullThroughPeriod !== '60') toSave.lockStratPullThroughPeriod = filters.lockStratPullThroughPeriod;
+    }
+    if (sectionType === 'loan-complexity') {
+      if (filters.loanComplexityGroupBy && filters.loanComplexityGroupBy !== 'actors') toSave.loanComplexityGroupBy = filters.loanComplexityGroupBy;
+      if (filters.loanComplexityActorType && filters.loanComplexityActorType !== 'loan_officer') toSave.loanComplexityActorType = filters.loanComplexityActorType;
+      if (filters.loanComplexityCurrentStatus && filters.loanComplexityCurrentStatus !== 'All') toSave.loanComplexityCurrentStatus = filters.loanComplexityCurrentStatus;
+      if (filters.loanComplexitySelectedGroups && filters.loanComplexitySelectedGroups.length > 0) toSave.loanComplexitySelectedGroups = filters.loanComplexitySelectedGroups;
+      else if (filters.loanComplexitySelectedGroupNames && filters.loanComplexitySelectedGroupNames.length > 0) toSave.loanComplexitySelectedGroupNames = filters.loanComplexitySelectedGroupNames;
+    }
     patchPayload({ savedFilters: Object.keys(toSave).length > 0 ? toSave : undefined });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sectionType, filters.year, filters.dateRange, filters.periodSelection, filters.dateField, filters.applicationType, filters.actorType, filters.branch, filters.loanOfficer, filters.dynamicFilters, filters.workflowPeriodSelection, filters.workflowCalculationType, filters.workflowGrouping, filters.workflowSegments, filters.pipelineAnalysisYearRange, filters.pipelineAnalysisStartDateField, filters.pipelineAnalysisViewMode, filters.pipelineAnalysisPctMetric, filters.pipelineAnalysisSnapshotDay, filters.pipelineAnalysisLoanTypes, filters.pipelineAnalysisLoanPurposes, filters.pipelineAnalysisBranches, filters.salesScorecardOverviewMeasure, filters.salesScorecardOverviewTimeMeasure, filters.salesScorecardOverviewMilestoneColumns, filters.pricingDashboardColumns]);
+  }, [sectionType, filters.year, filters.dateRange, filters.periodSelection, filters.dateField, filters.applicationType, filters.actorType, filters.branch, filters.loanOfficer, filters.dynamicFilters, filters.workflowPeriodSelection, filters.workflowCalculationType, filters.workflowGrouping, filters.workflowSegments, filters.pipelineAnalysisYearRange, filters.pipelineAnalysisStartDateField, filters.pipelineAnalysisViewMode, filters.pipelineAnalysisPctMetric, filters.pipelineAnalysisSnapshotDay, filters.pipelineAnalysisLoanTypes, filters.pipelineAnalysisLoanPurposes, filters.pipelineAnalysisBranches, filters.salesScorecardOverviewMeasure, filters.salesScorecardOverviewTimeMeasure, filters.salesScorecardOverviewMilestoneColumns, filters.pricingDashboardColumns, filters.lockStratLocked, filters.lockStratMeasure, filters.lockStratMilestoneGroupBy, filters.lockStratPullThroughPeriod, filters.loanComplexityGroupBy, filters.loanComplexityActorType, filters.loanComplexityCurrentStatus, filters.loanComplexitySelectedGroups, filters.loanComplexitySelectedGroupNames]);
 
   // ─── Grid layout ───
   const contentWidth = Math.max(width - 24, MIN_GRID_WIDTH);
@@ -1870,10 +1973,32 @@ export function WidgetGroup({
         return { presets: ['mtd', 'last-month', 'qtd', 'last-quarter', 'ytd', 'last-year'], showYears: false };
       case 'sales-scorecard-overview':
         return { presets: ['mtd', 'last-month', 'qtd', 'last-quarter', 'ytd', 'last-year'], showYears: false };
+      case 'lock-stratification':
+        return { presets: ['mtd', 'last-month', 'qtd', 'ytd', 'last-year'], showYears: false };
+      case 'loan-complexity':
+        return { presets: ['mtd', 'last-month', 'qtd', 'last-quarter', 'ytd', 'last-year'], showYears: false };
       default:
         return {}; // default behavior: rolling-13, rolling-12 + year buttons
     }
   }, [sectionType]);
+
+  const lcDateRangeForStatus = useMemo(() => {
+    if (sectionType !== 'loan-complexity') return { start: '', end: '' };
+    const range = filters.periodSelection?.dateRange ?? filters.dateRange;
+    if (range?.start && range?.end) return { start: range.start, end: range.end };
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    return { start: start.toISOString().slice(0, 10), end: now.toISOString().slice(0, 10) };
+  }, [sectionType, filters.periodSelection?.dateRange, filters.dateRange]);
+
+  const { selectedChannel } = useChannelStore();
+  const lcStatusOptionsResult = useLoanComplexityStatusOptions({
+    startDate: lcDateRangeForStatus.start,
+    endDate: lcDateRangeForStatus.end,
+    selectedTenantId: selectedTenantId ?? null,
+    channelGroup: selectedChannel ?? null,
+    enabled: sectionType === 'loan-complexity' && !!lcDateRangeForStatus.start && !!lcDateRangeForStatus.end,
+  });
 
   const update = useCallback(
     (partial: Partial<SectionFilters>) => updateFilters(groupId, partial),
@@ -2451,9 +2576,168 @@ export function WidgetGroup({
                   onApplyPreset={handleApplyGroupPreset}
                 />
               </>
+            ) : sectionType === 'lock-stratification' ? (
+              <>
+                <PricingFilterSelect label="Locked" value={filters.lockStratLocked ?? 'all_active'} options={LOCK_STRAT_LOCKED_OPTIONS} onChange={(v) => updateFilters(groupId, { lockStratLocked: v as 'active_locked' | 'active_not_locked' | 'all_active' })} />
+                <PricingFilterSelect label="Measure" value={filters.lockStratMeasure ?? 'volume'} options={LOCK_STRAT_MEASURE_OPTIONS} onChange={(v) => updateFilters(groupId, { lockStratMeasure: v as 'volume' | 'units' | 'wac' | 'wa_fico' })} />
+
+                {/* Dynamic (user-added) filters */}
+                {(filters.dynamicFilters || []).map((df) => (
+                  <DynamicDimensionFilter
+                    key={df.column}
+                    entry={df}
+                    tenantId={tenantIdForEdit}
+                    onChange={(value) => updateDynamicFilter(groupId, df.column, value)}
+                    onRemove={() => removeDynamicFilter(groupId, df.column)}
+                  />
+                ))}
+
+                {/* Divider before add-filter */}
+                <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+
+                {/* Add filter dimension button */}
+                <AddFilterPicker
+                  groupId={groupId}
+                  existingColumns={[
+                    ...(SECTION_BUILTIN_FILTER_COLUMNS[sectionType] ?? []),
+                    ...(filters.dynamicFilters || []).map((f) => f.column),
+                  ]}
+                  onAdd={(col, label) => addDynamicFilter(groupId, { column: col, label, value: 'all' })}
+                />
+
+                {/* Divider before presets */}
+                <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+
+                {/* Filter preset bookmarks */}
+                <GroupFilterBookmarkButton filters={filters} onApplyPreset={handleApplyGroupPreset} />
+              </>
+            ) : sectionType === 'loan-complexity' ? (
+              <>
+                <div className="flex flex-col gap-1.5 w-full min-w-0">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mr-0.5">Period</span>
+                    <DatePeriodPicker
+                      year={filters.year}
+                      onYearChange={handleYearChange}
+                      onDateRangeChange={handleDateRangeChange}
+                      onPeriodChange={handlePeriodChange}
+                      presets={sectionPresetConfig.presets}
+                      showYears={sectionPresetConfig.showYears}
+                      size="sm"
+                      showLabel={false}
+                      yearsToShow={4}
+                      defaultPreset="mtd"
+                      periodSelectionFromStore={filters.periodSelection}
+                    />
+                    <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mr-0.5">Group by</span>
+                    <div className="flex rounded-lg border border-slate-200 dark:border-slate-700 p-0.5 bg-slate-100/50 dark:bg-slate-800/50">
+                      {(['actors', 'branch', 'current_loan_status'] as const).map((opt) => {
+                        const selected = (filters.loanComplexityGroupBy ?? 'actors') === opt;
+                        return (
+                          <Button
+                            key={opt}
+                            variant="ghost"
+                            size="sm"
+                            className={cn(
+                              '!h-7 !py-0 !min-h-0 px-2.5 text-xs',
+                              selected ? 'bg-white dark:bg-slate-900 shadow-sm border border-slate-200 dark:border-slate-600 text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200/50 dark:hover:bg-slate-700/50'
+                            )}
+                            onClick={() => updateFilters(groupId, { loanComplexityGroupBy: opt })}
+                          >
+                            {opt === 'actors' ? 'Actors' : opt === 'branch' ? 'Branch' : 'Current Loan Status'}
+                          </Button>
+                        );
+                      })}
+                    </div>
+                    {(filters.loanComplexityGroupBy ?? 'actors') === 'actors' && (
+                      <>
+                        <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mr-0.5">Actor type</span>
+                        <Select
+                          value={filters.loanComplexityActorType ?? 'loan_officer'}
+                          onValueChange={(v) => updateFilters(groupId, { loanComplexityActorType: v as 'loan_officer' | 'processor' | 'underwriter' | 'closer' })}
+                        >
+                          <SelectTrigger className="h-7 w-[140px] text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {[
+                              { value: 'loan_officer', label: 'Loan Officer' },
+                              { value: 'processor', label: 'Processor' },
+                              { value: 'underwriter', label: 'Underwriter' },
+                              { value: 'closer', label: 'Closer' },
+                            ].map((o) => (
+                              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </>
+                    )}
+                    <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mr-0.5">Current loan status</span>
+                    <Select
+                      value={filters.loanComplexityCurrentStatus ?? 'All'}
+                      onValueChange={(v) => updateFilters(groupId, { loanComplexityCurrentStatus: v })}
+                    >
+                      <SelectTrigger className="h-7 w-[160px] text-xs">
+                        <SelectValue placeholder="All" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="All">All</SelectItem>
+                        <SelectItem value="Active Loan">Active Loan</SelectItem>
+                        <SelectItem value="Non-active">Non-active</SelectItem>
+                        {(lcStatusOptionsResult.data?.statuses ?? []).filter((s) => s !== 'Active Loan').map((status) => (
+                          <SelectItem key={status} value={status}>{status}</SelectItem>
+                        ))}
+                        {lcStatusOptionsResult.data?.hasFallout && <SelectItem value="Fallout">Fallout</SelectItem>}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {(() => {
+                    const groups = (filters.loanComplexitySelectedGroups ?? []).length > 0
+                      ? filters.loanComplexitySelectedGroups!
+                      : (filters.loanComplexitySelectedGroupNames ?? []).map((groupName) => ({
+                          dimension: (filters.loanComplexityGroupBy ?? 'actors') === 'actors' ? (filters.loanComplexityActorType ?? 'loan_officer') : (filters.loanComplexityGroupBy === 'branch' ? 'branch' : 'current_loan_status'),
+                          groupName,
+                        }));
+                    return (
+                      <div className="min-h-[32px] flex flex-wrap items-center gap-2 w-full min-w-0">
+                        {groups.length > 0 ? (
+                        <span
+                          className="inline-flex flex-wrap items-center gap-x-1 gap-y-1 px-2 py-1.5 rounded text-xs font-medium text-white max-w-full min-w-0 break-words whitespace-normal"
+                          style={{ backgroundColor: '#52b852' }}
+                        >
+                          {(() => {
+                            const dimLabel = (d: string) => {
+                              const key = (d ?? '').toLowerCase();
+                              return key === 'loan_officer' ? 'Loan Officer' : key === 'processor' ? 'Processor' : key === 'underwriter' ? 'Underwriter' : key === 'closer' ? 'Closer' : key === 'branch' ? 'Branch' : key === 'current_loan_status' ? 'Current Loan Status' : d || 'Status';
+                            };
+                            // Group by dimension, then format as "Type: Name1 and Name2" per type, joined by ", "
+                            const byDim = groups.reduce<Record<string, string[]>>((acc, g) => {
+                              if (!acc[g.dimension]) acc[g.dimension] = [];
+                              acc[g.dimension].push(g.groupName);
+                              return acc;
+                            }, {});
+                            return Object.entries(byDim)
+                              .map(([dim, names]) => `${dimLabel(dim)}: ${names.join(' and ')}`)
+                              .join(', ');
+                          })()}
+                          <button
+                            type="button"
+                            className="ml-0.5 rounded hover:bg-white/20 p-0.5 shrink-0"
+                            onClick={() => updateFilters(groupId, { loanComplexitySelectedGroups: [], loanComplexitySelectedGroupNames: [] })}
+                            aria-label="Clear selection"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                        ) : null}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </>
             ) : (
               <>
-            <DatePeriodPicker
+                <DatePeriodPicker
               year={filters.year}
               onYearChange={handleYearChange}
               onDateRangeChange={handleDateRangeChange}

@@ -30,27 +30,40 @@ export interface LoanComplexityGroupLoanRow {
   occupancy_type: string | null;
   borr_self_employed: boolean | string | null;
   complexity_score: number | null;
+  branch: string | null;
+  loan_officer: string | null;
+  underwriter: string | null;
+  processor: string | null;
+  closer: string | null;
 }
 
 export interface UseLoanComplexityGroupLoansParams {
   startDate: string;
   endDate: string;
-  groupBy: LoanComplexityGroupBy;
-  groupName: string | null;
+  /** When groupFilters is non-empty, used for cross-dimension (each pair = one groupBy + groupName). When empty, fetches all loans in period. */
+  groupFilters: { groupBy: LoanComplexityGroupBy; groupName: string }[];
+  /** @deprecated Use groupFilters. When groupFilters is empty, single-dimension multi-select: one groupBy + multiple groupNames. */
+  groupBy?: LoanComplexityGroupBy;
+  /** @deprecated Use groupFilters. */
+  groupNames?: string[];
   selectedTenantId?: string | null;
   channelGroup?: string | null;
   /** When set, filter to loans with this current_loan_status. "All" or empty = no filter. */
   currentLoanStatus?: string | null;
+  /** When false, skips fetch. */
+  enabled?: boolean;
 }
 
 export function useLoanComplexityGroupLoans({
   startDate,
   endDate,
+  groupFilters = [],
   groupBy,
-  groupName,
+  groupNames = [],
   selectedTenantId,
   channelGroup,
   currentLoanStatus,
+  enabled = true,
 }: UseLoanComplexityGroupLoansParams): {
   loans: LoanComplexityGroupLoanRow[];
   loading: boolean;
@@ -62,10 +75,10 @@ export function useLoanComplexityGroupLoans({
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
-    if (!groupName || !groupName.trim()) {
-      setLoans([]);
+    if (enabled === false) {
       setLoading(false);
       setError(null);
+      setLoans([]);
       return;
     }
     try {
@@ -74,8 +87,18 @@ export function useLoanComplexityGroupLoans({
       const params = new URLSearchParams();
       params.set("startDate", startDate);
       params.set("endDate", endDate);
-      params.set("groupBy", groupBy);
-      params.set("groupName", groupName.trim());
+      if (groupFilters.length > 0) {
+        groupFilters.forEach((f) => {
+          params.append("groupBy", f.groupBy);
+          params.append("groupName", f.groupName);
+        });
+      } else if (groupBy && groupNames.length > 0) {
+        const trimmed = groupNames.map((n) => n.trim()).filter(Boolean);
+        if (trimmed.length > 0) {
+          params.set("groupBy", groupBy);
+          trimmed.forEach((name) => params.append("groupName", name));
+        }
+      }
       if (selectedTenantId) params.set("tenant_id", selectedTenantId);
       if (channelGroup && channelGroup !== "All") params.set("channel_group", channelGroup);
       if (currentLoanStatus && currentLoanStatus.trim() && currentLoanStatus !== "All") {
@@ -93,7 +116,7 @@ export function useLoanComplexityGroupLoans({
     } finally {
       setLoading(false);
     }
-  }, [startDate, endDate, groupBy, groupName, selectedTenantId, channelGroup, currentLoanStatus]);
+  }, [startDate, endDate, groupFilters, groupBy, groupNames, selectedTenantId, channelGroup, currentLoanStatus, enabled]);
 
   useEffect(() => {
     fetchData();

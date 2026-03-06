@@ -56,6 +56,7 @@ const sectionIdToRegistryGroup: Record<string, string> = {
   actors: "Actors",
   pricingDashboard: "Pricing Dashboard",
   pipelineAnalysis: "Pipeline Analysis",
+  lockStratification: "Lock Stratification",
 };
 
 // ---------------------------------------------------------------------------
