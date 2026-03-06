@@ -28,6 +28,14 @@ export const SSOCallback = () => {
 
     const handleCallback = async () => {
       let processingKey: string | null = null;
+      const waitForAuthToken = async (timeoutMs = 5000): Promise<boolean> => {
+        const start = Date.now();
+        while (Date.now() - start < timeoutMs) {
+          if (localStorage.getItem('auth_token')) return true;
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        return false;
+      };
       try {
         // Get authorization code and state from URL
         const code = searchParams.get('code');
@@ -40,7 +48,27 @@ export const SSOCallback = () => {
         if (code) {
           processingKey = `sso_callback:${code}`;
           const existing = sessionStorage.getItem(processingKey);
-          if (existing === 'in_progress' || existing === 'done') {
+          if (existing === 'done') {
+            setState('success');
+            setTimeout(() => {
+              navigate('/insights', { replace: true });
+            }, 300);
+            return;
+          }
+          if (existing === 'in_progress') {
+            const tokenReady = await waitForAuthToken(4000);
+            if (tokenReady) {
+              sessionStorage.setItem(processingKey, 'done');
+              setState('success');
+              setTimeout(() => {
+                navigate('/insights', { replace: true });
+              }, 300);
+              return;
+            }
+            // Stale marker (previous attempt did not complete), take ownership and retry.
+            sessionStorage.removeItem(processingKey);
+          }
+          if (sessionStorage.getItem(processingKey) === 'in_progress') {
             return;
           }
           sessionStorage.setItem(processingKey, 'in_progress');
