@@ -1,8 +1,10 @@
 #!/bin/bash
 # ============================================================================
-# Backend ECS Deployment Script for Bitbucket Pipelines
+# Backend Deployment Script for Bitbucket Pipelines
 # ============================================================================
-# Builds Docker image, pushes to ECR, and updates ECS service
+# Builds Docker image, pushes to ECR, and updates backend CloudFormation stack
+# with an immutable image tag (ContainerImageTag), so task definitions are
+# always managed by IaC and environment drift is avoided.
 #
 # Authentication: Uses AWS OIDC (credentials set up by pipeline before this script)
 #
@@ -10,8 +12,8 @@
 #   - AWS_ROLE_ARN             - IAM role ARN for OIDC (repository variable)
 #   - AWS_REGION               - AWS region (repository variable, e.g., us-east-2)
 #   - ECR_REPOSITORY_URI       - Full ECR repository URI (e.g., 123456789.dkr.ecr.us-east-2.amazonaws.com/repo)
-#   - ECS_CLUSTER              - ECS cluster name
-#   - ECS_SERVICE              - ECS service name
+#   - CF_STACK_BACKEND         - CloudFormation stack name (e.g., coheus-dev-backend)
+#   - COGNITO_PASSWORD_AUTH    - Must be "true" (enforces Cognito-only password auth)
 #
 # OIDC Environment (set by pipeline setup-oidc script):
 #   - AWS_WEB_IDENTITY_TOKEN_FILE - Path to OIDC token
@@ -21,7 +23,7 @@
 set -euo pipefail
 
 echo "========================================="
-echo "Backend ECS Deployment Script"
+echo "Backend Deployment Script (CloudFormation-managed ECS)"
 echo "========================================="
 echo ""
 
@@ -52,12 +54,8 @@ validate_env_vars() {
         missing_vars+=("ECR_REPOSITORY_URI")
     fi
     
-    if [ -z "${ECS_CLUSTER:-}" ]; then
-        missing_vars+=("ECS_CLUSTER")
-    fi
-    
-    if [ -z "${ECS_SERVICE:-}" ]; then
-        missing_vars+=("ECS_SERVICE")
+    if [ -z "${CF_STACK_BACKEND:-}" ]; then
+        missing_vars+=("CF_STACK_BACKEND")
     fi
     
     if [ ${#missing_vars[@]} -gt 0 ]; then
@@ -76,6 +74,24 @@ validate_env_vars() {
     else
         echo "Authentication: Static credentials"
     fi
+}
+
+# ============================================================================
+# Enforce Cognito-only Password Auth Policy
+# ============================================================================
+validate_auth_configuration() {
+    local auth_mode="${COGNITO_PASSWORD_AUTH:-}"
+    if [ -z "$auth_mode" ]; then
+        echo "ERROR: COGNITO_PASSWORD_AUTH deployment variable is not set."
+        echo "Set it to 'true' for all deployed environments."
+        exit 1
+    fi
+    if [ "$auth_mode" != "true" ]; then
+        echo "ERROR: COGNITO_PASSWORD_AUTH must be 'true'. Current value: '$auth_mode'"
+        echo "Refusing deploy because local DB password fallback is disallowed."
+        exit 1
+    fi
+    echo "Auth policy validated: COGNITO_PASSWORD_AUTH=true"
 }
 
 # ============================================================================
@@ -240,100 +256,257 @@ push_to_ecr() {
 }
 
 # ============================================================================
-# Verify ECS Resources Exist
+# Verify Backend Stack Exists
 # ============================================================================
-verify_ecs_resources() {
+verify_backend_stack() {
     echo ""
-    echo "Verifying ECS resources..."
-    
-    # Check if cluster exists
-    CLUSTER_STATUS=$(aws ecs describe-clusters \
-        --clusters "$ECS_CLUSTER" \
-        --region "$AWS_DEFAULT_REGION" \
-        --query 'clusters[0].status' \
-        --output text 2>/dev/null || echo "NOT_FOUND")
-    
-    if [ "$CLUSTER_STATUS" == "NOT_FOUND" ] || [ "$CLUSTER_STATUS" == "None" ]; then
-        echo "ERROR: ECS cluster '$ECS_CLUSTER' not found."
+    echo "Verifying backend CloudFormation stack..."
+
+    if ! aws cloudformation describe-stacks \
+        --stack-name "$CF_STACK_BACKEND" \
+        --region "$AWS_DEFAULT_REGION" > /dev/null 2>&1; then
+        echo "ERROR: Backend stack '$CF_STACK_BACKEND' not found."
         exit 1
     fi
-    echo "ECS cluster '$ECS_CLUSTER' found (status: $CLUSTER_STATUS)"
-    
-    # Check if service exists
-    SERVICE_STATUS=$(aws ecs describe-services \
-        --cluster "$ECS_CLUSTER" \
-        --services "$ECS_SERVICE" \
+
+    STACK_STATUS=$(aws cloudformation describe-stacks \
+        --stack-name "$CF_STACK_BACKEND" \
         --region "$AWS_DEFAULT_REGION" \
-        --query 'services[0].status' \
-        --output text 2>/dev/null || echo "NOT_FOUND")
-    
-    if [ "$SERVICE_STATUS" == "NOT_FOUND" ] || [ "$SERVICE_STATUS" == "None" ]; then
-        echo "ERROR: ECS service '$ECS_SERVICE' not found in cluster '$ECS_CLUSTER'."
+        --query 'Stacks[0].StackStatus' \
+        --output text)
+
+    if [[ ! "$STACK_STATUS" =~ ^(CREATE_COMPLETE|UPDATE_COMPLETE|UPDATE_ROLLBACK_COMPLETE)$ ]]; then
+        echo "ERROR: Backend stack '$CF_STACK_BACKEND' is not in a stable state: $STACK_STATUS"
         exit 1
     fi
-    echo "ECS service '$ECS_SERVICE' found (status: $SERVICE_STATUS)"
+    echo "Backend stack '$CF_STACK_BACKEND' found (status: $STACK_STATUS)"
 }
 
 # ============================================================================
-# Update ECS Service
+# Build parameter list from existing stack values
 # ============================================================================
-update_ecs_service() {
+get_stack_parameters() {
+    local stack_name=$1
+
+    local param_keys
+    param_keys=$(aws cloudformation describe-stacks \
+        --stack-name "$stack_name" \
+        --region "$AWS_DEFAULT_REGION" \
+        --query 'Stacks[0].Parameters[*].ParameterKey' \
+        --output text 2>/dev/null) || { echo "[]"; return; }
+
+    local result="["
+    local first=true
+    for key in $param_keys; do
+        if [ "$first" = true ]; then
+            first=false
+        else
+            result+=","
+        fi
+        result+="{\"ParameterKey\":\"$key\",\"UsePreviousValue\":true}"
+    done
+
+    # Immutable image tag override - this is the key deploy input.
+    if [ "$first" = true ]; then
+        first=false
+    else
+        result+=","
+    fi
+    result+="{\"ParameterKey\":\"ContainerImageTag\",\"ParameterValue\":\"${IMAGE_TAG}\"}"
+
+    # Auth policy override (defense in depth)
+    result+=",{\"ParameterKey\":\"CognitoPasswordAuth\",\"ParameterValue\":\"${COGNITO_PASSWORD_AUTH}\"}"
+
+    # Optional explicit parameter override
+    if [ -n "${OPENAI_API_KEY_SECRET_ARN:-}" ]; then
+        result+=",{\"ParameterKey\":\"OpenAIApiKeySecretArn\",\"ParameterValue\":\"${OPENAI_API_KEY_SECRET_ARN}\"}"
+    fi
+
+    result+="]"
+    echo "$result"
+}
+
+# ============================================================================
+# Deploy backend stack with immutable image tag
+# ============================================================================
+deploy_backend_stack() {
     echo ""
     echo "========================================="
-    echo "Updating ECS service..."
+    echo "Deploying backend stack with image tag"
     echo "========================================="
-    echo "Cluster: $ECS_CLUSTER"
-    echo "Service: $ECS_SERVICE"
+    echo "Stack: $CF_STACK_BACKEND"
+    echo "ContainerImageTag: $IMAGE_TAG"
     echo ""
-    
-    # Force new deployment
-    aws ecs update-service \
-        --cluster "$ECS_CLUSTER" \
-        --service "$ECS_SERVICE" \
-        --force-new-deployment \
+
+    local change_set_name="backend-image-${BITBUCKET_BUILD_NUMBER:-manual}-$(date +%Y%m%d%H%M%S)"
+
+    aws cloudformation create-change-set \
+        --stack-name "$CF_STACK_BACKEND" \
+        --change-set-name "$change_set_name" \
+        --template-body file://infrastructure/cloudformation/coheus_ecs_fargate_stack.yaml \
+        --no-use-previous-template \
+        --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+        --parameters "$(get_stack_parameters "$CF_STACK_BACKEND")" \
         --region "$AWS_DEFAULT_REGION" \
         --output json > /dev/null
-    
-    if [ $? -eq 0 ]; then
-        echo "ECS service update initiated."
-    else
-        echo "ERROR: Failed to update ECS service."
+
+    aws cloudformation wait change-set-create-complete \
+        --stack-name "$CF_STACK_BACKEND" \
+        --change-set-name "$change_set_name" \
+        --region "$AWS_DEFAULT_REGION" 2>/dev/null || true
+
+    CHANGE_SET_STATUS=$(aws cloudformation describe-change-set \
+        --stack-name "$CF_STACK_BACKEND" \
+        --change-set-name "$change_set_name" \
+        --region "$AWS_DEFAULT_REGION" \
+        --query 'Status' \
+        --output text)
+
+    if [ "$CHANGE_SET_STATUS" == "FAILED" ]; then
+        CHANGE_SET_REASON=$(aws cloudformation describe-change-set \
+            --stack-name "$CF_STACK_BACKEND" \
+            --change-set-name "$change_set_name" \
+            --region "$AWS_DEFAULT_REGION" \
+            --query 'StatusReason' \
+            --output text)
+        if [[ "$CHANGE_SET_REASON" == *"didn't contain changes"* ]] || [[ "$CHANGE_SET_REASON" == *"No updates"* ]]; then
+            echo "No backend stack changes detected."
+            aws cloudformation delete-change-set \
+                --stack-name "$CF_STACK_BACKEND" \
+                --change-set-name "$change_set_name" \
+                --region "$AWS_DEFAULT_REGION" || true
+            return 0
+        fi
+        echo "ERROR: Failed to create change set: $CHANGE_SET_REASON"
         exit 1
     fi
-}
 
-# ============================================================================
-# Wait for ECS Service Stability (optional)
-# ============================================================================
-wait_for_service_stability() {
-    echo ""
-    echo "========================================="
-    echo "Waiting for ECS service to stabilize..."
-    echo "========================================="
-    echo "This may take a few minutes..."
-    echo ""
-    
-    # Wait for service to become stable (max 10 minutes)
-    if aws ecs wait services-stable \
-        --cluster "$ECS_CLUSTER" \
-        --services "$ECS_SERVICE" \
-        --region "$AWS_DEFAULT_REGION" 2>/dev/null; then
-        echo "ECS service is now stable."
+    aws cloudformation execute-change-set \
+        --stack-name "$CF_STACK_BACKEND" \
+        --change-set-name "$change_set_name" \
+        --region "$AWS_DEFAULT_REGION"
+
+    if aws cloudformation wait stack-update-complete \
+        --stack-name "$CF_STACK_BACKEND" \
+        --region "$AWS_DEFAULT_REGION"; then
+        echo "Backend stack update completed."
     else
-        echo "ERROR: Timed out waiting for service stability."
-        echo "Deployment did not reach a healthy steady state."
-        
-        # Get current service status
-        echo ""
-        echo "Current service status:"
-        aws ecs describe-services \
-            --cluster "$ECS_CLUSTER" \
-            --services "$ECS_SERVICE" \
+        echo "ERROR: Backend stack update failed."
+        aws cloudformation describe-stack-events \
+            --stack-name "$CF_STACK_BACKEND" \
             --region "$AWS_DEFAULT_REGION" \
-            --query 'services[0].{Status:status,DesiredCount:desiredCount,RunningCount:runningCount,PendingCount:pendingCount}' \
+            --query 'StackEvents[0:12].{Time:Timestamp,Status:ResourceStatus,Resource:LogicalResourceId,Reason:ResourceStatusReason}' \
             --output table
         exit 1
     fi
+}
+
+# ============================================================================
+# Post-deploy runtime verification (fail closed)
+# ============================================================================
+verify_runtime_configuration() {
+    echo ""
+    echo "========================================="
+    echo "Post-deploy Runtime Verification"
+    echo "========================================="
+
+    local cluster_name
+    local service_name
+    cluster_name=$(aws cloudformation describe-stacks \
+        --stack-name "$CF_STACK_BACKEND" \
+        --region "$AWS_DEFAULT_REGION" \
+        --query "Stacks[0].Outputs[?OutputKey=='ECSClusterName'].OutputValue | [0]" \
+        --output text)
+    service_name=$(aws cloudformation describe-stacks \
+        --stack-name "$CF_STACK_BACKEND" \
+        --region "$AWS_DEFAULT_REGION" \
+        --query "Stacks[0].Outputs[?OutputKey=='ECSServiceName'].OutputValue | [0]" \
+        --output text)
+
+    if [ -z "$cluster_name" ] || [ "$cluster_name" = "None" ] || [ -z "$service_name" ] || [ "$service_name" = "None" ]; then
+        echo "ERROR: Unable to resolve ECS cluster/service outputs from stack."
+        exit 1
+    fi
+
+    local service_task_def desired_count running_count primary_rollout
+    service_task_def=$(aws ecs describe-services \
+        --cluster "$cluster_name" \
+        --services "$service_name" \
+        --region "$AWS_DEFAULT_REGION" \
+        --query "services[0].taskDefinition" \
+        --output text)
+    desired_count=$(aws ecs describe-services \
+        --cluster "$cluster_name" \
+        --services "$service_name" \
+        --region "$AWS_DEFAULT_REGION" \
+        --query "services[0].desiredCount" \
+        --output text)
+    running_count=$(aws ecs describe-services \
+        --cluster "$cluster_name" \
+        --services "$service_name" \
+        --region "$AWS_DEFAULT_REGION" \
+        --query "services[0].runningCount" \
+        --output text)
+    primary_rollout=$(aws ecs describe-services \
+        --cluster "$cluster_name" \
+        --services "$service_name" \
+        --region "$AWS_DEFAULT_REGION" \
+        --query "services[0].deployments[?status=='PRIMARY'].rolloutState | [0]" \
+        --output text)
+
+    if [ "$primary_rollout" != "COMPLETED" ]; then
+        echo "ERROR: ECS primary deployment rollout state is '$primary_rollout' (expected COMPLETED)."
+        exit 1
+    fi
+    if [ "$desired_count" != "$running_count" ]; then
+        echo "ERROR: ECS running count ($running_count) does not match desired count ($desired_count)."
+        exit 1
+    fi
+
+    local expected_task_def
+    expected_task_def=$(aws cloudformation describe-stack-resource \
+        --stack-name "$CF_STACK_BACKEND" \
+        --logical-resource-id ECSTaskDefinition \
+        --region "$AWS_DEFAULT_REGION" \
+        --query "StackResourceDetail.PhysicalResourceId" \
+        --output text)
+
+    if [ -n "$expected_task_def" ] && [ "$expected_task_def" != "None" ] && [ "$service_task_def" != "$expected_task_def" ]; then
+        echo "ERROR: Service task definition does not match stack task definition."
+        echo "Expected: $expected_task_def"
+        echo "Actual:   $service_task_def"
+        exit 1
+    fi
+
+    local deployed_image auth_mode
+    deployed_image=$(aws ecs describe-task-definition \
+        --task-definition "$service_task_def" \
+        --region "$AWS_DEFAULT_REGION" \
+        --query "taskDefinition.containerDefinitions[0].image" \
+        --output text)
+    auth_mode=$(aws ecs describe-task-definition \
+        --task-definition "$service_task_def" \
+        --region "$AWS_DEFAULT_REGION" \
+        --query "taskDefinition.containerDefinitions[0].environment[?name=='COGNITO_PASSWORD_AUTH'].value | [0]" \
+        --output text)
+
+    if [[ "$deployed_image" != *":$IMAGE_TAG" ]]; then
+        echo "ERROR: Deployed task definition image tag does not match expected IMAGE_TAG."
+        echo "Expected suffix: :$IMAGE_TAG"
+        echo "Actual image:    $deployed_image"
+        exit 1
+    fi
+
+    if [ "$auth_mode" != "true" ]; then
+        echo "ERROR: COGNITO_PASSWORD_AUTH in deployed task definition is '$auth_mode' (expected true)."
+        exit 1
+    fi
+
+    echo "Runtime verification passed:"
+    echo "  - Service: $cluster_name / $service_name"
+    echo "  - Task definition: $service_task_def"
+    echo "  - Image tag: $IMAGE_TAG"
+    echo "  - COGNITO_PASSWORD_AUTH=true"
 }
 
 # ============================================================================
@@ -342,12 +515,11 @@ wait_for_service_stability() {
 display_summary() {
     echo ""
     echo "========================================="
-    echo "Backend Deployment Complete!"
+echo "Backend Deployment Complete (CloudFormation-managed)"
     echo "========================================="
     echo ""
     echo "Image: $ECR_REPOSITORY_URI:$IMAGE_TAG"
-    echo "Cluster: $ECS_CLUSTER"
-    echo "Service: $ECS_SERVICE"
+echo "Backend stack: $CF_STACK_BACKEND"
     echo "Region: $AWS_DEFAULT_REGION"
     echo ""
     echo "Deployment Environment: ${BITBUCKET_DEPLOYMENT_ENVIRONMENT:-unknown}"
@@ -355,13 +527,11 @@ display_summary() {
     echo "Branch: ${BITBUCKET_BRANCH:-unknown}"
     echo ""
     
-    # Get final service status
-    echo "Current Service Status:"
-    aws ecs describe-services \
-        --cluster "$ECS_CLUSTER" \
-        --services "$ECS_SERVICE" \
+    echo "Current backend stack status:"
+    aws cloudformation describe-stacks \
+        --stack-name "$CF_STACK_BACKEND" \
         --region "$AWS_DEFAULT_REGION" \
-        --query 'services[0].{Status:status,DesiredCount:desiredCount,RunningCount:runningCount,PendingCount:pendingCount,Deployments:length(deployments)}' \
+        --query 'Stacks[0].{Status:StackStatus,LastUpdated:LastUpdatedTime}' \
         --output table
     echo ""
 }
@@ -377,14 +547,15 @@ main() {
     echo ""
     
     validate_env_vars
+    validate_auth_configuration
     install_aws_cli
     verify_aws_credentials
-    verify_ecs_resources
+    verify_backend_stack
     login_to_ecr
     build_docker_image
     push_to_ecr
-    update_ecs_service
-    wait_for_service_stability
+    deploy_backend_stack
+    verify_runtime_configuration
     display_summary
 }
 

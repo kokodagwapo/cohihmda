@@ -6,6 +6,10 @@
 import { pool } from "../config/database.js";
 import { logError, logInfo, logWarn } from "./logger.js";
 
+function shouldSkipAuditWrites(): boolean {
+  return process.env.NODE_ENV === "test" || process.env.SKIP_DB === "true";
+}
+
 export interface AuditLogEntry {
   // Who
   userId?: string;
@@ -37,6 +41,7 @@ export interface AuditLogEntry {
  * Log an audit event
  */
 export async function auditLog(entry: AuditLogEntry): Promise<void> {
+  if (shouldSkipAuditWrites()) return;
   try {
     await pool.query(
       `INSERT INTO public.audit_logs (
@@ -100,6 +105,7 @@ export async function logDataAccess(params: {
   metadata?: Record<string, any>;
   isPlatformAdmin?: boolean;
 }): Promise<void> {
+  if (shouldSkipAuditWrites()) return;
   const metadata = params.isPlatformAdmin
     ? JSON.stringify({
         ...(params.metadata || {}),
@@ -177,6 +183,7 @@ export async function logFailedLogin(params: {
     | "user_inactive";
   metadata?: Record<string, any>;
 }): Promise<void> {
+  if (shouldSkipAuditWrites()) return;
   try {
     await pool.query(
       `INSERT INTO public.failed_login_attempts (
@@ -206,6 +213,7 @@ export async function createSession(params: {
   userAgent?: string;
   expiresAt: Date;
 }): Promise<string> {
+  if (shouldSkipAuditWrites()) return "session-skipped";
   try {
     const result = await pool.query(
       `INSERT INTO public.user_sessions (
@@ -236,6 +244,7 @@ export async function createSession(params: {
  * Update session activity
  */
 export async function updateSessionActivity(tokenHash: string): Promise<void> {
+  if (shouldSkipAuditWrites()) return;
   try {
     await pool.query(
       "UPDATE public.user_sessions SET last_activity_at = NOW() WHERE token_hash = $1 AND is_active = true",
@@ -255,6 +264,7 @@ export async function endSession(
   tokenHash: string,
   reason: "manual" | "timeout" | "forced" | "token_expired"
 ): Promise<void> {
+  if (shouldSkipAuditWrites()) return;
   try {
     await pool.query(
       `UPDATE public.user_sessions 
@@ -274,6 +284,7 @@ export async function getRecentFailedLogins(
   email: string,
   withinMinutes: number = 15
 ): Promise<number> {
+  if (shouldSkipAuditWrites()) return 0;
   try {
     const result = await pool.query(
       `SELECT COUNT(*) as count 
@@ -303,6 +314,7 @@ export async function getAuditLogs(params: {
   limit?: number;
   offset?: number;
 }): Promise<any[]> {
+  if (shouldSkipAuditWrites()) return [];
   try {
     let query = "SELECT * FROM public.audit_logs WHERE 1=1";
     const values: any[] = [];
@@ -373,6 +385,7 @@ export async function getDataAccessLogs(params: {
   endDate?: Date;
   limit?: number;
 }): Promise<any[]> {
+  if (shouldSkipAuditWrites()) return [];
   try {
     let query = "SELECT * FROM public.data_access_logs WHERE 1=1";
     const values: any[] = [];
@@ -430,6 +443,7 @@ export async function getDataAccessLogs(params: {
  * Clean up old logs (run periodically)
  */
 export async function cleanupOldLogs(): Promise<void> {
+  if (shouldSkipAuditWrites()) return;
   try {
     // Clean up audit logs older than 2 years
     await pool.query("SELECT cleanup_old_audit_logs()");
