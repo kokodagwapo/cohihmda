@@ -961,7 +961,7 @@ export default function ResearchAnalyst() {
               sharedWithUserIds={shareDialogSharedIds}
               onVisibilityChange={setShareDialogVisibility}
               onSharedWithUserIdsChange={setShareDialogSharedIds}
-              allowGlobal={['super_admin', 'platform_admin', 'tenant_admin', 'admin'].includes(user?.role || '')}
+              allowGlobal={['super_admin', 'platform_admin', 'tenant_admin'].includes(user?.role || '')}
             />
             <Button
               className="w-full"

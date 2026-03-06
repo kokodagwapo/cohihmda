@@ -5,6 +5,7 @@ import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import { requirePlatformStaff } from '../middleware/rbac.js';
 import { z } from 'zod';
 import Stripe from 'stripe';
+import { resolveFrontendUrl } from '../utils/frontendUrl.js';
 
 const router = Router();
 
@@ -291,8 +292,8 @@ router.post('/checkout', authenticateToken, async (req: AuthRequest, res) => {
         },
       ],
       mode: 'subscription',
-      success_url: successUrl || `${process.env.FRONTEND_URL || 'http://localhost:8081'}/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: cancelUrl || `${process.env.FRONTEND_URL || 'http://localhost:8081'}/subscription/cancel`,
+      success_url: successUrl || `${resolveFrontendUrl()}/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: cancelUrl || `${resolveFrontendUrl()}/subscription/cancel`,
       metadata: {
         tenant_id: tenantId,
         plan_id: planId,
@@ -393,8 +394,8 @@ router.post('/checkout/public', async (req, res) => {
         },
       ],
       mode: 'subscription',
-      success_url: successUrl || `${process.env.FRONTEND_URL || 'http://localhost:8081'}/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: cancelUrl || `${process.env.FRONTEND_URL || 'http://localhost:8081'}`,
+      success_url: successUrl || `${resolveFrontendUrl()}/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: cancelUrl || `${resolveFrontendUrl()}`,
       metadata: {
         plan_id: planId,
         deployment_type: deploymentType,

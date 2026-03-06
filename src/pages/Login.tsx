@@ -10,8 +10,10 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Loader2, LogIn, CheckCircle2, XCircle, KeyRound, ArrowLeft, ArrowRight, ShieldCheck } from 'lucide-react';
 import { CoheusLogo } from '@/components/ui/CoheusLogo';
 import { MFAChallenge } from '@/components/auth/MFAChallenge';
+import { MFAMethodSelect } from '@/components/auth/MFAMethodSelect';
+import { InputOTP, InputOTPGroup, InputOTPSlot, InputOTPSeparator } from '@/components/ui/input-otp';
 
-type LoginStep = 'email' | 'password' | 'new-password' | 'mfa' | 'mfa-setup' | 'sso-redirect';
+type LoginStep = 'email' | 'password' | 'new-password' | 'mfa' | 'mfa-method-select' | 'mfa-setup' | 'sso-redirect';
 
 export const Login = () => {
   const navigate = useNavigate();
@@ -23,9 +25,14 @@ export const Login = () => {
   const [loading, setLoading] = useState(false);
   const [serverStatus, setServerStatus] = useState<'checking' | 'online' | 'offline' | 'not-configured'>('checking');
   const [mfaSession, setMfaSession] = useState<string | null>(null);
+  const [mfaChallengeName, setMfaChallengeName] = useState<'SOFTWARE_TOKEN_MFA' | 'EMAIL_OTP' | 'SMS_MFA'>('SOFTWARE_TOKEN_MFA');
   const [challengeSession, setChallengeSession] = useState<string | null>(null);
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [cognitoAccessToken, setCognitoAccessToken] = useState<string | null>(null);
+  const [mfaSetupSecret, setMfaSetupSecret] = useState('');
+  const [mfaSetupQrUri, setMfaSetupQrUri] = useState('');
+  const [mfaSetupCode, setMfaSetupCode] = useState('');
   
   // Two-step login flow
   const [step, setStep] = useState<LoginStep>('email');
@@ -39,6 +46,7 @@ export const Login = () => {
   }>({ available: false, allowPassword: true });
 
   const passwordRef = useRef<HTMLInputElement>(null);
+
 
   // Redirect if already authenticated
   useEffect(() => {
@@ -212,7 +220,7 @@ export const Login = () => {
 
     try {
       setServerStatus('checking');
-      await login(email.trim(), password);
+      await login(email.trim(), password, ssoInfo.tenantSlug);
       setServerStatus('online');
 
       toast({ title: 'Welcome!', description: 'Successfully signed in' });
@@ -224,6 +232,7 @@ export const Login = () => {
       if (error.mfaRequired) {
         setServerStatus('online');
         setMfaSession(error.session);
+        setMfaChallengeName(error.challengeName || 'SOFTWARE_TOKEN_MFA');
         setStep('mfa');
         return;
       }
@@ -233,6 +242,17 @@ export const Login = () => {
         setServerStatus('online');
         setChallengeSession(error.session);
         setStep('new-password');
+        return;
+      }
+
+      if (error.mfaSetupRequired) {
+        setServerStatus('online');
+        setChallengeSession(error.session || null);
+        setCognitoAccessToken(error.cognitoAccessToken || null);
+        if (error.cognitoAccessToken) {
+          localStorage.setItem('cognito_access_token', error.cognitoAccessToken);
+        }
+        setStep('mfa-method-select');
         return;
       }
 
@@ -270,7 +290,12 @@ export const Login = () => {
     setNewPassword('');
     setConfirmNewPassword('');
     setMfaSession(null);
+    setMfaChallengeName('SOFTWARE_TOKEN_MFA');
     setChallengeSession(null);
+    setCognitoAccessToken(null);
+    setMfaSetupSecret('');
+    setMfaSetupQrUri('');
+    setMfaSetupCode('');
     setSsoInfo({ available: false, allowPassword: true });
   };
 
@@ -287,57 +312,39 @@ export const Login = () => {
         cognitoAccessToken?: string;
         mfaRequired?: boolean;
         mfaSetupRequired?: boolean;
-        mfaSetupRecommended?: boolean;
         challengeName?: string;
         session?: string;
+        email?: string;
       }>('/api/auth/new-password', {
         method: 'POST',
         body: JSON.stringify({
           email: email.trim(),
           session: challengeSession,
           newPassword,
+          tenantSlug: ssoInfo.tenantSlug,
         }),
       });
 
       // After password change, Cognito may require MFA setup
       if (response.mfaSetupRequired || response.challengeName === 'MFA_SETUP') {
         setChallengeSession(response.session || null);
-        setStep('mfa-setup');
-        toast({ title: 'Password Updated', description: 'Now set up two-factor authentication.' });
+        setCognitoAccessToken(response.cognitoAccessToken || null);
+        if (response.cognitoAccessToken) {
+          localStorage.setItem('cognito_access_token', response.cognitoAccessToken);
+        }
+        setStep('mfa-method-select');
+        toast({ title: 'Password Updated', description: 'MFA setup is required to continue.' });
         return;
       }
 
       // Or MFA verification if already enrolled
       if (response.mfaRequired) {
         setMfaSession(response.session || null);
+        setMfaChallengeName((response.challengeName as 'SOFTWARE_TOKEN_MFA' | 'EMAIL_OTP' | 'SMS_MFA') || 'SOFTWARE_TOKEN_MFA');
         setStep('mfa');
         toast({ title: 'Password Updated', description: 'Enter your MFA code to continue.' });
         return;
       }
-
-      // Fully authenticated
-      if (response.token) {
-        localStorage.setItem('auth_token', response.token);
-        api.setToken(response.token);
-        if (response.refreshToken) {
-          localStorage.setItem('refresh_token', response.refreshToken);
-        }
-      }
-      if (response.cognitoAccessToken) {
-        localStorage.setItem('cognito_access_token', response.cognitoAccessToken);
-      }
-
-      // With OPTIONAL MFA, Cognito authenticates but MFA may not be set up yet.
-      // Prompt the user to set up MFA on first login.
-      if (response.mfaSetupRecommended) {
-        setStep('mfa-setup');
-        toast({ title: 'Password Updated', description: 'Set up two-factor authentication to secure your account.' });
-        return;
-      }
-
-      toast({ title: 'Welcome!', description: 'Password set successfully. You are now signed in.' });
-      const returnTo = new URLSearchParams(window.location.search).get('returnTo') || '/insights';
-      navigate(returnTo);
     } catch (error: any) {
       toast({
         title: 'Error',
@@ -353,16 +360,114 @@ export const Login = () => {
     if (!mfaSession) return;
     setLoading(true);
     try {
-      await completeMfaLogin(email.trim(), mfaSession, code);
+      await completeMfaLogin(email.trim(), mfaSession, code, ssoInfo.tenantSlug, mfaChallengeName);
       toast({ title: 'Welcome!', description: 'Successfully signed in' });
       const returnTo = new URLSearchParams(window.location.search).get('returnTo') || '/insights';
       navigate(returnTo);
-    } catch (err: any) {
-      throw err;
     } finally {
       setLoading(false);
     }
-  }, [mfaSession, email, completeMfaLogin, navigate, toast]);
+  }, [mfaSession, email, completeMfaLogin, navigate, toast, ssoInfo.tenantSlug, mfaChallengeName]);
+
+  const handleChooseEmailMfa = useCallback(async () => {
+    setLoading(true);
+    try {
+      await api.request('/api/auth/mfa/email/setup', {
+        method: 'POST',
+        body: JSON.stringify({
+          cognitoAccessToken: cognitoAccessToken || localStorage.getItem('cognito_access_token') || undefined,
+        }),
+      });
+
+      await login(email.trim(), newPassword || password, ssoInfo.tenantSlug);
+      toast({ title: 'Email MFA enabled', description: 'Enter the email code from Cognito to continue.' });
+    } catch (error: any) {
+      if (error?.mfaRequired) {
+        setMfaSession(error.session);
+        setMfaChallengeName(error.challengeName || 'EMAIL_OTP');
+        setStep('mfa');
+        return;
+      }
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to enable email MFA',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [email, cognitoAccessToken, ssoInfo.tenantSlug, toast, login, newPassword, password]);
+
+  const handleChooseAuthenticatorMfa = useCallback(async () => {
+    const accessToken = cognitoAccessToken || localStorage.getItem('cognito_access_token');
+    if (!accessToken) {
+      toast({
+        title: 'Missing session',
+        description: 'Please sign in again to continue MFA setup.',
+        variant: 'destructive',
+      });
+      setStep('password');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await api.request<{ secret: string; qrCodeUri: string }>('/api/auth/mfa/setup', {
+        method: 'POST',
+        body: JSON.stringify({ cognitoAccessToken: accessToken }),
+      });
+      setMfaSetupSecret(response.secret);
+      setMfaSetupQrUri(response.qrCodeUri);
+      setStep('mfa-setup');
+    } catch (error: any) {
+      toast({
+        title: 'MFA Setup Failed',
+        description: error.message || 'Could not start authenticator setup',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [cognitoAccessToken, toast]);
+
+  const handleVerifyAuthenticatorSetup = useCallback(async () => {
+    if (mfaSetupCode.length !== 6) return;
+    const accessToken = cognitoAccessToken || localStorage.getItem('cognito_access_token');
+    if (!accessToken) return;
+
+    setLoading(true);
+    try {
+      await api.request('/api/auth/mfa/setup/confirm', {
+        method: 'POST',
+        body: JSON.stringify({
+          cognitoAccessToken: accessToken,
+          code: mfaSetupCode,
+          tenantSlug: ssoInfo.tenantSlug,
+        }),
+      });
+
+      // Re-authenticate to complete sign in after mandatory setup.
+      await login(email.trim(), newPassword || password, ssoInfo.tenantSlug);
+      toast({ title: 'Welcome!', description: 'MFA enabled and sign-in completed.' });
+      const returnTo = new URLSearchParams(window.location.search).get('returnTo') || '/insights';
+      navigate(returnTo);
+    } catch (error: any) {
+      if (error?.mfaRequired) {
+        setMfaSession(error.session);
+        setMfaChallengeName(error.challengeName || 'SOFTWARE_TOKEN_MFA');
+        setStep('mfa');
+        return;
+      }
+      toast({
+        title: 'Verification Failed',
+        description: error.message || 'Invalid code. Please try again.',
+        variant: 'destructive',
+      });
+      setMfaSetupCode('');
+    } finally {
+      setLoading(false);
+    }
+  }, [mfaSetupCode, cognitoAccessToken, ssoInfo.tenantSlug, login, email, newPassword, password, toast, navigate]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-4">
@@ -377,7 +482,8 @@ export const Login = () => {
             {step === 'password' && 'Enter your password to continue'}
             {step === 'new-password' && 'Please set a new password to continue'}
             {step === 'mfa' && 'Verify your identity'}
-            {step === 'mfa-setup' && 'Set up two-factor authentication'}
+            {step === 'mfa-method-select' && 'Choose your MFA method'}
+            {step === 'mfa-setup' && 'Set up your authenticator app'}
             {step === 'sso-redirect' && 'Redirecting to your organization\'s login...'}
           </CardDescription>
         </CardHeader>
@@ -576,39 +682,92 @@ export const Login = () => {
             </form>
           )}
 
-          {/* ── MFA Setup (after first password change) */}
+          {/* ── MFA Method selection (mandatory) */}
+          {step === 'mfa-method-select' && (
+            <MFAMethodSelect
+              loading={loading}
+              onChooseAuthenticator={() => void handleChooseAuthenticatorMfa()}
+              onChooseEmail={() => void handleChooseEmailMfa()}
+            />
+          )}
+
+          {/* ── Authenticator setup */}
           {step === 'mfa-setup' && (
             <div className="space-y-6">
-              <div className="flex flex-col items-center space-y-3">
-                <div className="h-12 w-12 rounded-full bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center">
-                  <ShieldCheck className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Step 1: Scan this QR code</p>
+                <p className="text-xs text-muted-foreground">
+                  Use Google Authenticator, Authy, 1Password, or another TOTP app.
+                </p>
+              </div>
+
+              <div className="flex flex-col items-center space-y-4">
+                <div className="p-4 bg-white rounded-xl border shadow-sm">
+                  <img
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(mfaSetupQrUri)}`}
+                    alt="MFA QR Code"
+                    width={200}
+                    height={200}
+                    className="rounded"
+                  />
                 </div>
-                <div className="text-center space-y-2">
-                  <p className="font-medium text-sm">Secure your account</p>
-                  <p className="text-sm text-muted-foreground">
-                    We recommend setting up two-factor authentication (MFA) using an authenticator app. This adds an extra layer of security to your account.
-                  </p>
+                <p className="text-xs text-muted-foreground">
+                  Can&apos;t scan? Use this setup key: <code className="font-mono">{mfaSetupSecret}</code>
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Step 2: Enter a 6-digit code from your app</p>
+                <div className="flex justify-center">
+                  <InputOTP
+                    maxLength={6}
+                    value={mfaSetupCode}
+                    onChange={setMfaSetupCode}
+                    disabled={loading}
+                  >
+                    <InputOTPGroup>
+                      <InputOTPSlot index={0} />
+                      <InputOTPSlot index={1} />
+                      <InputOTPSlot index={2} />
+                    </InputOTPGroup>
+                    <InputOTPSeparator />
+                    <InputOTPGroup>
+                      <InputOTPSlot index={3} />
+                      <InputOTPSlot index={4} />
+                      <InputOTPSlot index={5} />
+                    </InputOTPGroup>
+                  </InputOTP>
                 </div>
               </div>
-              <Button
-                className="w-full"
-                onClick={() => {
-                  navigate('/settings?tab=account&setup-mfa=true');
-                }}
-              >
-                <ShieldCheck className="mr-2 h-4 w-4" />
-                Set Up MFA Now
-              </Button>
-              <Button
-                variant="ghost"
-                className="w-full text-muted-foreground"
-                onClick={() => {
-                  const returnTo = new URLSearchParams(window.location.search).get('returnTo') || '/insights';
-                  navigate(returnTo);
-                }}
-              >
-                Skip for Now
-              </Button>
+
+              <div className="space-y-3">
+                <Button
+                  className="w-full"
+                  onClick={() => void handleVerifyAuthenticatorSetup()}
+                  disabled={loading || mfaSetupCode.length !== 6}
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Verifying...
+                    </>
+                  ) : (
+                    <>
+                      <ShieldCheck className="mr-2 h-4 w-4" />
+                      Verify & Continue
+                    </>
+                  )}
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="w-full"
+                  onClick={() => setStep('mfa-method-select')}
+                  disabled={loading}
+                >
+                  <ArrowLeft className="mr-2 h-4 w-4" />
+                  Choose another method
+                </Button>
+              </div>
             </div>
           )}
 
@@ -617,6 +776,7 @@ export const Login = () => {
             <MFAChallenge
               email={email}
               session={mfaSession}
+              challengeName={mfaChallengeName}
               onVerify={handleMfaVerify}
               onBack={handleBack}
               loading={loading}

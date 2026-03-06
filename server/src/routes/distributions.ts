@@ -1,7 +1,7 @@
 /**
  * Report Distribution API Routes
  * CRUD for distribution_schedules and distribution_recipient_lists (tenant DB).
- * Authorization: tenant_admin, super_admin, platform_admin, admin.
+ * Authorization: tenant_admin, super_admin, platform_admin.
  */
 import { Router } from 'express';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
@@ -16,8 +16,7 @@ const router = Router();
 const requireDistributionsAdmin = requireRole(
   'tenant_admin',
   'super_admin',
-  'platform_admin',
-  'admin'
+  'platform_admin'
 );
 
 // ---------------------------------------------------------------------------
@@ -407,6 +406,30 @@ router.put(
         }
         return res.json(existing.rows[0]);
       }
+
+      // Recalculate next_run_at when any scheduling field changes
+      const scheduleFieldsChanged = ['frequency', 'schedule_time', 'schedule_day', 'timezone']
+        .some((f) => body[f] !== undefined);
+      if (scheduleFieldsChanged) {
+        const current = await tenantPool.query(
+          'SELECT frequency, schedule_time, schedule_day, timezone FROM public.distribution_schedules WHERE id = $1',
+          [id]
+        );
+        if (current.rows.length > 0) {
+          const row = current.rows[0];
+          const freq = body.frequency ?? row.frequency;
+          const time = body.schedule_time ?? row.schedule_time ?? '08:00';
+          const day = body.schedule_day !== undefined ? body.schedule_day : row.schedule_day;
+          const tz = body.timezone ?? row.timezone ?? 'America/New_York';
+          const nextRunAt = freq !== 'one_time'
+            ? computeNextRunAt(freq, typeof time === 'string' ? time : '08:00', day, tz)
+            : null;
+          setClause.push(`next_run_at = $${idx}`);
+          values.push(nextRunAt);
+          idx++;
+        }
+      }
+
       setClause.push('updated_at = NOW()');
       const result = await tenantPool.query(
         `UPDATE public.distribution_schedules SET ${setClause.join(', ')}
@@ -428,7 +451,7 @@ router.put(
   }
 );
 
-/** DELETE /:id — Deactivate schedule (soft delete: set is_active = false) */
+/** DELETE /:id — Permanently delete schedule and its send history */
 router.delete(
   '/:id',
   authenticateToken,
@@ -438,9 +461,12 @@ router.delete(
     try {
       const { tenantPool } = getTenantContext(req);
       const { id } = req.params;
+      await tenantPool.query(
+        `DELETE FROM public.distribution_send_log WHERE schedule_id = $1`,
+        [id]
+      );
       const result = await tenantPool.query(
-        `UPDATE public.distribution_schedules SET is_active = false, updated_at = NOW()
-         WHERE id = $1 RETURNING id`,
+        `DELETE FROM public.distribution_schedules WHERE id = $1 RETURNING id`,
         [id]
       );
       if (result.rows.length === 0) {
@@ -448,9 +474,9 @@ router.delete(
       }
       res.status(204).send();
     } catch (error: any) {
-      console.error('[Distributions] Error deactivating schedule:', error.message);
+      console.error('[Distributions] Error deleting schedule:', error.message);
       res.status(500).json({
-        error: 'Failed to deactivate distribution schedule',
+        error: 'Failed to delete distribution schedule',
         message: error.message,
       });
     }
@@ -534,6 +560,26 @@ router.post(
         { content_type: schedule.content_type, content_id: schedule.content_id, name: schedule.name, link: result.link ?? null },
         'link'
       );
+
+      // After a manual send, recalculate next_run_at so the scheduler
+      // doesn't double-fire for the same period.
+      const fullSchedule = await tenantPool.query(
+        'SELECT frequency, schedule_time, schedule_day, timezone FROM public.distribution_schedules WHERE id = $1',
+        [id]
+      );
+      if (fullSchedule.rows.length > 0) {
+        const s = fullSchedule.rows[0];
+        const nextRunAt = s.frequency !== 'one_time'
+          ? computeNextRunAt(s.frequency, s.schedule_time || '08:00', s.schedule_day, s.timezone || 'America/New_York')
+          : null;
+        await tenantPool.query(
+          `UPDATE public.distribution_schedules
+           SET last_sent_at = NOW(), next_run_at = $2, updated_at = NOW()
+           WHERE id = $1`,
+          [id, nextRunAt]
+        );
+      }
+
       res.json({
         message: 'Send completed',
         schedule_id: id,

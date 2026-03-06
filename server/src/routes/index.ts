@@ -44,11 +44,14 @@ import jobsRoutes from "./jobs.js";
 import helpContentRoutes from "./helpContent.js";
 import analyticsRoutes from "./analytics.js";
 import releaseNotesRoutes from "./releaseNotes.js";
+import falloutAlertsRoutes from "./falloutAlerts.js";
+import falloutResponseRoutes from "./falloutResponse.js";
 import { pool, resetPool } from "../config/database.js";
 import { setupMockLosApi } from "../services/mockLosApi.js";
 import { getVersionInfo } from "../services/versionService.js";
 import { globalTenantContext } from "../middleware/tenantContext.js";
 import { getJwtSecret } from "../middleware/auth.js";
+import { isCanvasOnlyRequestAllowed } from "../middleware/rbac.js";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 
@@ -80,24 +83,7 @@ export function setupRoutes(app: Express) {
       if (decoded.access_mode === "canvas_only") {
         const path = req.originalUrl || req.url || "";
         const method = (req.method || "GET").toUpperCase();
-        const allowedPrefixes = [
-          "/api/auth",
-          "/api/workbench/canvases",
-          "/api/loans",
-          "/api/metrics",
-          "/api/dashboard",
-          "/api/pipeline-analysis",
-          "/api/scorecard",
-          "/api/toptiering",
-          "/api/predictions",
-          "/api/fallout",
-          "/api/pricing-dashboard",
-        ];
-        const pathAllowed = allowedPrefixes.some((prefix) =>
-          path.startsWith(prefix),
-        );
-        const methodAllowed = method === "GET" || method === "POST";
-        if (!pathAllowed || !methodAllowed) {
+        if (!isCanvasOnlyRequestAllowed(path, method)) {
           return res.status(403).json({
             error: "Forbidden",
             message: "Canvas-only users cannot access this resource.",
@@ -158,6 +144,8 @@ export function setupRoutes(app: Express) {
   app.use("/api/help", helpContentRoutes); // Help content RAG seeding
   app.use("/api/analytics", analyticsRoutes); // User behavior analytics (ingestion + reporting)
   app.use("/api/release-notes", releaseNotesRoutes); // Published release notes (management DB)
+  app.use("/api/fallout-alerts", falloutAlertsRoutes); // Fallout alert config + send + response tracking
+  app.use("/api/fallout-response", falloutResponseRoutes); // Public one-time fallout response links
 
   // Health check handler (shared by both /health and /api/health)
   const healthCheckHandler = async (req: any, res: any) => {

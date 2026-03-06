@@ -14,6 +14,7 @@ export default function ForgotPassword() {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [useCognitoFlow, setUseCognitoFlow] = useState(false);
   const apiUrl = getApiUrl();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -43,14 +44,19 @@ export default function ForgotPassword() {
       }
 
       const data = await response.json().catch(() => ({}));
-      // If Cognito-based, redirect to reset page with email param (code-based flow)
       if (data.useCognito) {
+        setUseCognitoFlow(true);
         sessionStorage.setItem('reset_email', email.trim());
+      } else {
+        setUseCognitoFlow(false);
+        sessionStorage.removeItem('reset_email');
       }
 
       setSubmitted(true);
-    } catch (error: any) {
-      // Always show success message to avoid revealing if account exists
+    } catch {
+      // Always show success to avoid revealing if account exists
+      setUseCognitoFlow(false);
+      sessionStorage.removeItem('reset_email');
       setSubmitted(true);
     } finally {
       setLoading(false);
@@ -69,8 +75,8 @@ export default function ForgotPassword() {
           </CardTitle>
           <CardDescription className="text-base">
             {submitted
-              ? 'If an account exists with that email, we sent a password reset link.'
-              : 'Enter your email address and we\'ll send you a link to reset your password.'}
+              ? 'If an account exists with that email, you will receive reset instructions.'
+              : 'Enter your email address to reset your password.'}
           </CardDescription>
         </CardHeader>
 
@@ -82,18 +88,29 @@ export default function ForgotPassword() {
               </div>
               <div className="text-center space-y-2">
                 <p className="text-sm text-muted-foreground">
-                  We sent a verification code to <span className="font-medium text-foreground">{email}</span>.
-                  The code will expire in 1 hour.
+                  {useCognitoFlow ? (
+                    <>
+                      We sent a verification code to <span className="font-medium text-foreground">{email}</span>.
+                      Enter it on the next screen to set a new password.
+                    </>
+                  ) : (
+                    <>
+                      If an account exists for <span className="font-medium text-foreground">{email}</span>,
+                      a password reset link has been sent.
+                    </>
+                  )}
                 </p>
                 <p className="text-xs text-muted-foreground">
                   Didn't receive an email? Check your spam folder or try again.
                 </p>
-                <Link to={`/reset-password?email=${encodeURIComponent(email)}`} className="w-full">
-                  <Button className="w-full">
-                    <KeyRound className="mr-2 h-4 w-4" />
-                    Enter Reset Code
-                  </Button>
-                </Link>
+                {useCognitoFlow && (
+                  <Link to={`/reset-password?email=${encodeURIComponent(email)}`} className="w-full">
+                    <Button className="w-full">
+                      <KeyRound className="mr-2 h-4 w-4" />
+                      Enter Reset Code
+                    </Button>
+                  </Link>
+                )}
               </div>
               <div className="flex flex-col gap-2 w-full">
                 <Button
@@ -138,7 +155,7 @@ export default function ForgotPassword() {
                 ) : (
                   <>
                     <Mail className="mr-2 h-4 w-4" />
-                    Send Reset Link
+                    Reset Password
                   </>
                 )}
               </Button>

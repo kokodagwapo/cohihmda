@@ -127,7 +127,7 @@ async function initTenantSchema(pool: pg.Pool): Promise<void> {
       email TEXT NOT NULL UNIQUE,
       encrypted_password TEXT NOT NULL,
       full_name TEXT,
-      role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('tenant_admin', 'admin', 'user', 'viewer', 'loan_officer', 'processor')),
+      role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('tenant_admin', 'user', 'viewer')),
       is_active BOOLEAN NOT NULL DEFAULT true,
       last_login_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -218,11 +218,11 @@ async function seedTenantUsers(pool: pg.Pool): Promise<void> {
   const userPasswordHash = await bcrypt.hash(TEST_USER_PASSWORD, 10);
   await pool.query(`
     INSERT INTO users (email, encrypted_password, full_name, role, is_active)
-    VALUES ($1, $2, $3, 'loan_officer', true)
+    VALUES ($1, $2, $3, 'user', true)
     ON CONFLICT (email) DO UPDATE SET
       encrypted_password = EXCLUDED.encrypted_password,
       full_name = EXCLUDED.full_name,
-      role = 'loan_officer',
+      role = 'user',
       updated_at = NOW()
     RETURNING id
   `, [TEST_USER_EMAIL, userPasswordHash, TEST_USER_NAME]);
@@ -293,7 +293,7 @@ async function main() {
     console.log(`REGULAR USER (${TEST_TENANT_NAME})`);
     console.log(`  Email:    ${TEST_USER_EMAIL}`);
     console.log(`  Password: ${TEST_USER_PASSWORD}`);
-    console.log(`  Role:     loan_officer`);
+    console.log(`  Role:     user`);
     console.log('═══════════════════════════════════════════════════════════');
 
   } catch (error: any) {

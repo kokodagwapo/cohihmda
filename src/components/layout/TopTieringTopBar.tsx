@@ -5,7 +5,6 @@ import type { ExportData } from '@/utils/exportUtils';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
-import { useTopTieringLayout } from '@/components/layout/TopTieringLayout';
 
 export interface TopTieringTopBarProps {
   title?: string;
@@ -21,8 +20,6 @@ export function TopTieringTopBar({
   exportTargetRef,
 }: TopTieringTopBarProps) {
   const isMobile = useIsMobile();
-  const layoutContext = useTopTieringLayout();
-  const openSidebar = onOpenSidebar ?? layoutContext?.openMobileMenu;
   const getExportData = (): ExportData => ({
     title,
     tables: [],
@@ -35,12 +32,12 @@ export function TopTieringTopBar({
         className
       )}
     >
-      {isMobile && openSidebar && (
+      {isMobile && onOpenSidebar && (
         <Button
           variant="ghost"
           size="icon"
           className="h-9 w-9 shrink-0 rounded-xl hover:bg-violet-100/80 dark:hover:bg-violet-900/30 transition-colors"
-          onClick={openSidebar}
+          onClick={onOpenSidebar}
           aria-label="Open menu"
         >
           <PanelLeft className="h-5 w-5 text-violet-600 dark:text-violet-400" />

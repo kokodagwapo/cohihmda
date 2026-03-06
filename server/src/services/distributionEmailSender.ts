@@ -11,10 +11,13 @@ import { pool as managementPool } from '../config/managementDatabase.js';
 import { loadEmailTemplate, replacePlaceholders } from './emailTemplateLoader.js';
 import {
   sendEmail,
-  sendPasswordResetEmail,
+  sendUserInvitationEmail,
 } from './emailService.js';
 import { logEmailSend } from './emailAuditLogger.js';
 import { resolveContent, type ScheduleRow } from './distributionContentResolver.js';
+import { resolveFrontendUrl } from '../utils/frontendUrl.js';
+import * as cognitoAuth from './cognito/cognitoAuthService.js';
+import { logInfo, logWarn } from './logger.js';
 
 export interface SendDistributionOptions {
   tenantId: string;
@@ -86,7 +89,7 @@ export async function resolveRecipientEmails(
           if (u.email) emails.push(u.email);
         }
       }
-      if (row.is_dynamic && Array.isArray(row.role_filter) && row.role_filter.length > 0) {
+      if (Array.isArray(row.role_filter) && row.role_filter.length > 0) {
         const byRole = await tenantPool.query(
           `SELECT email FROM public.users WHERE role = ANY($1) AND COALESCE(is_active, true) = true`,
           [row.role_filter]
@@ -157,6 +160,8 @@ async function ensureRecipientUsers(
     };
   }
 
+  const useCognito = cognitoAuth.isCognitoAuthEnabled();
+
   for (const email of recipientEmails) {
     const lowerEmail = email.toLowerCase();
     if (userIdsByEmail.has(lowerEmail)) {
@@ -164,15 +169,41 @@ async function ensureRecipientUsers(
     }
 
     let userId: string | undefined;
+    let cognitoSub: string | null = null;
+
     try {
-      const rawPassword = crypto.randomBytes(24).toString('hex');
-      const hashedPassword = await bcrypt.hash(rawPassword, 10);
+      // When Cognito is enabled, create the user in Cognito first so they get a
+      // proper invite email with a temporary password (single auth path).
+      if (useCognito) {
+        try {
+          const cognitoResult = await cognitoAuth.createUser(email, undefined, undefined, true);
+          cognitoSub = cognitoResult.cognitoSub;
+        } catch (cognitoErr: any) {
+          if (cognitoErr.code === 'USER_EXISTS') {
+            // User exists in Cognito but not in tenant DB — link them
+            try {
+              const existingCognitoUser = await cognitoAuth.getUser(email);
+              cognitoSub = existingCognitoUser.cognitoSub;
+            } catch {
+              cognitoSub = null;
+            }
+            logInfo('[DistributionInvite] Cognito user already exists, linking to tenant DB', { email });
+          } else {
+            throw cognitoErr;
+          }
+        }
+      }
+
+      const placeholderPassword = useCognito
+        ? crypto.randomBytes(32).toString('hex')
+        : await bcrypt.hash(crypto.randomBytes(24).toString('hex'), 10);
+
       const insertResult = await tenantPool.query(
-        `INSERT INTO public.users (email, encrypted_password, full_name, role, is_active, loan_access_mode, access_mode)
-         VALUES ($1, $2, $3, $4, true, 'full_access', 'canvas_only')
-         ON CONFLICT (email) DO UPDATE SET updated_at = NOW()
+        `INSERT INTO public.users (email, encrypted_password, full_name, role, is_active, loan_access_mode, access_mode, cognito_sub)
+         VALUES ($1, $2, $3, $4, true, 'full_access', 'canvas_only', $5)
+         ON CONFLICT (email) DO UPDATE SET cognito_sub = COALESCE(EXCLUDED.cognito_sub, users.cognito_sub), updated_at = NOW()
          RETURNING id, email`,
-        [email, hashedPassword, null, 'viewer']
+        [email, placeholderPassword, null, 'viewer', cognitoSub]
       );
 
       userId = insertResult.rows[0]?.id;
@@ -191,20 +222,30 @@ async function ensureRecipientUsers(
           [autoInviteGroupId, userId]
         );
       }
+
+      // Cognito handles the invite email (temporary password) automatically.
+      // Only send our custom invite email for non-Cognito (local dev) environments.
+      if (useCognito) {
+        logInfo('[DistributionInvite] User created via Cognito invite', { email, cognitoSub });
+        invitedRecipients.push(email);
+      }
     } catch (err: any) {
       failedRecipients.push({ email, error: err?.message || 'Failed to provision user' });
       continue;
     }
 
-    try {
-      const resetUrl = await createPasswordResetUrlForInvite(email, tenantId);
-      await sendPasswordResetEmail(email, resetUrl, undefined, { strict: true });
-      invitedRecipients.push(email);
-    } catch (err: any) {
-      inviteFailedRecipients.push({
-        email,
-        error: err?.message || 'Failed to send invite email',
-      });
+    if (!useCognito) {
+      try {
+        const setupUrl = await createAccountSetupUrlForInvite(email, tenantId);
+        const tenantName = process.env.TENANT_NAME || "your organization";
+        await sendUserInvitationEmail(email, setupUrl, tenantName);
+        invitedRecipients.push(email);
+      } catch (err: unknown) {
+        inviteFailedRecipients.push({
+          email,
+          error: err instanceof Error ? err.message : 'Failed to send invite email',
+        });
+      }
     }
   }
 
@@ -371,7 +412,7 @@ export async function sendDistribution(
   }
 }
 
-async function createPasswordResetUrlForInvite(email: string, tenantId: string): Promise<string> {
+async function createAccountSetupUrlForInvite(email: string, tenantId: string): Promise<string> {
   const token = crypto.randomBytes(32).toString('hex');
   const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
   let tenantSlug: string | null = null;
@@ -391,7 +432,7 @@ async function createPasswordResetUrlForInvite(email: string, tenantId: string):
      VALUES ($1, $2, $3, $4)`,
     [email, tokenHash, tenantSlug, expiresAt]
   );
-  const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:5173').split(',')[0].trim();
+  const frontendUrl = resolveFrontendUrl();
   return `${frontendUrl}/reset-password?token=${token}`;
 }
 
@@ -428,10 +469,16 @@ export async function logDistributionSend(
 }
 
 function buildAbsoluteLink(relativeOrAbsoluteLink: string): string {
-  if (!relativeOrAbsoluteLink) return process.env.FRONTEND_URL || 'http://localhost:5173';
-  if (/^https?:\/\//i.test(relativeOrAbsoluteLink)) return relativeOrAbsoluteLink;
-  const base = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
-  const path = relativeOrAbsoluteLink.startsWith('/') ? relativeOrAbsoluteLink : `/${relativeOrAbsoluteLink}`;
+  if (!relativeOrAbsoluteLink) return resolveFrontendUrl();
+  let link = relativeOrAbsoluteLink;
+  // Strip any localhost origin so we always use the real FRONTEND_URL
+  const localhostMatch = link.match(/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/.*)?$/i);
+  if (localhostMatch) {
+    link = localhostMatch[3] || '/';
+  }
+  if (/^https?:\/\//i.test(link)) return link;
+  const base = resolveFrontendUrl().replace(/\/+$/, '');
+  const path = link.startsWith('/') ? link : `/${link}`;
   return `${base}${path}`;
 }
 

@@ -229,8 +229,13 @@ export function handleDatabaseError(
     return true;
   }
 
-  // Check for missing table/database errors
-  if (error?.message?.includes("does not exist") || error?.code === "42P01") {
+  // Check for missing relation/table errors only (avoid matching unrelated "function ... does not exist")
+  const errorMessage = String(error?.message || "").toLowerCase();
+  const missingRelationError =
+    error?.code === "42P01" ||
+    /relation\s+["'`]?[\w.]+["'`]?\s+does not exist/.test(errorMessage) ||
+    /table\s+["'`]?[\w.]+["'`]?\s+does not exist/.test(errorMessage);
+  if (missingRelationError) {
     console.error("Database table missing:", error);
     res.status(503).json({
       error:
@@ -326,7 +331,7 @@ async function runMigrations() {
         email TEXT NOT NULL UNIQUE,
         encrypted_password TEXT NOT NULL,
         full_name TEXT,
-        role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user', 'viewer', 'super_admin', 'tenant_admin', 'loan_officer', 'processor')),
+        role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('tenant_admin', 'user', 'viewer')),
         tenant_id UUID REFERENCES public.tenants(id) ON DELETE SET NULL,
         is_active BOOLEAN NOT NULL DEFAULT true,
         last_login_at TIMESTAMPTZ,
@@ -349,7 +354,7 @@ async function runMigrations() {
           AND column_name = 'role'
         ) THEN
           ALTER TABLE public.users ADD COLUMN role TEXT NOT NULL DEFAULT 'user';
-          ALTER TABLE public.users ADD CONSTRAINT users_role_check CHECK (role IN ('admin', 'user', 'viewer', 'super_admin', 'tenant_admin', 'loan_officer', 'processor'));
+          ALTER TABLE public.users ADD CONSTRAINT users_role_check CHECK (role IN ('tenant_admin', 'user', 'viewer'));
         END IF;
         
         -- Update existing role constraint if it exists to allow all roles
@@ -360,7 +365,7 @@ async function runMigrations() {
           AND constraint_name = 'users_role_check'
         ) THEN
           ALTER TABLE public.users DROP CONSTRAINT IF EXISTS users_role_check;
-          ALTER TABLE public.users ADD CONSTRAINT users_role_check CHECK (role IN ('admin', 'user', 'viewer', 'super_admin', 'tenant_admin', 'loan_officer', 'processor'));
+          ALTER TABLE public.users ADD CONSTRAINT users_role_check CHECK (role IN ('tenant_admin', 'user', 'viewer'));
         END IF;
         
         -- Add tenant_id column if it doesn't exist
@@ -478,7 +483,7 @@ async function runMigrations() {
         
         -- Add updated constraint with all valid roles
         ALTER TABLE public.users ADD CONSTRAINT users_role_check 
-          CHECK (role IN ('admin', 'user', 'viewer', 'super_admin', 'tenant_admin', 'loan_officer', 'processor'));
+          CHECK (role IN ('tenant_admin', 'user', 'viewer'));
       END $$;
     `,
       )
