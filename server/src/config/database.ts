@@ -229,8 +229,13 @@ export function handleDatabaseError(
     return true;
   }
 
-  // Check for missing table/database errors
-  if (error?.message?.includes("does not exist") || error?.code === "42P01") {
+  // Check for missing relation/table errors only (avoid matching unrelated "function ... does not exist")
+  const errorMessage = String(error?.message || "").toLowerCase();
+  const missingRelationError =
+    error?.code === "42P01" ||
+    /relation\s+["'`]?[\w.]+["'`]?\s+does not exist/.test(errorMessage) ||
+    /table\s+["'`]?[\w.]+["'`]?\s+does not exist/.test(errorMessage);
+  if (missingRelationError) {
     console.error("Database table missing:", error);
     res.status(503).json({
       error:
