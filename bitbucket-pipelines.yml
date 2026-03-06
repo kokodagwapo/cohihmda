@@ -15,8 +15,6 @@
 #   - S3_BUCKET                    - Frontend S3 bucket name
 #   - CLOUDFRONT_DISTRIBUTION_ID   - For cache invalidation
 #   - ECR_REPOSITORY_URI           - ECR repository for backend images
-#   - ECS_CLUSTER                  - ECS cluster name
-#   - ECS_SERVICE                  - ECS service name
 #   - VITE_API_URL                 - Backend API URL for frontend build
 #   - CF_STACK_BACKEND             - CloudFormation stack name (e.g., coheus-dev-backend)
 #   - COGNITO_PASSWORD_AUTH        - Set to "true" (Cognito-only password auth policy)
