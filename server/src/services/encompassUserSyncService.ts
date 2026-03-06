@@ -9,6 +9,7 @@ import crypto from "crypto";
 import { EncompassApiService, EncompassUser } from "./encompassApiService.js";
 import { logError, logInfo, logDebug, logWarn } from "./logger.js";
 import { sendUserInvitationEmail } from "./emailService.js";
+import * as cognitoAuth from "./cognito/cognitoAuthService.js";
 
 const { Pool } = pg;
 
@@ -445,38 +446,82 @@ export class EncompassUserSyncService {
         };
       }
 
-      // Create new Cohi user
+      // Create new Cohi user — use Cognito as single auth source when enabled
+      const useCognito = cognitoAuth.isCognitoAuthEnabled();
       let hashedPassword: string;
-      let inviteToken: string | undefined;
+      let cognitoSub: string | null = null;
+      const fullName = encompassUser.full_name ||
+        `${encompassUser.first_name || ""} ${encompassUser.last_name || ""}`.trim();
 
-      if (invite_method === "manual" && password) {
+      if (useCognito && invite_method !== "manual") {
+        // Cognito handles invite email (temp password) or SSO-only user
+        const sendInvite = invite_method === "email";
+        try {
+          const cognitoResult = await cognitoAuth.createUser(
+            encompassUser.email,
+            undefined,
+            fullName || undefined,
+            sendInvite,
+          );
+          cognitoSub = cognitoResult.cognitoSub;
+        } catch (cognitoErr: any) {
+          if (cognitoErr.code === 'USER_EXISTS') {
+            try {
+              const existing = await cognitoAuth.getUser(encompassUser.email);
+              cognitoSub = existing.cognitoSub;
+            } catch { cognitoSub = null; }
+            logInfo("[EncompassUserSync] Cognito user already exists, linking", { email: encompassUser.email });
+          } else {
+            throw cognitoErr;
+          }
+        }
+        hashedPassword = crypto.randomBytes(32).toString("hex");
+      } else if (useCognito && invite_method === "manual" && password) {
+        // Manual password + Cognito: create with permanent password, no invite email
+        try {
+          const cognitoResult = await cognitoAuth.createUser(
+            encompassUser.email,
+            password,
+            fullName || undefined,
+            false,
+          );
+          cognitoSub = cognitoResult.cognitoSub;
+        } catch (cognitoErr: any) {
+          if (cognitoErr.code === 'USER_EXISTS') {
+            try {
+              const existing = await cognitoAuth.getUser(encompassUser.email);
+              cognitoSub = existing.cognitoSub;
+            } catch { cognitoSub = null; }
+          } else {
+            throw cognitoErr;
+          }
+        }
+        hashedPassword = await bcrypt.hash(password, 12);
+      } else if (invite_method === "manual" && password) {
         hashedPassword = await bcrypt.hash(password, 12);
       } else if (invite_method === "sso_only") {
-        // Random password for SSO-only users (not usable)
         hashedPassword = crypto.randomBytes(32).toString("hex");
       } else {
-        // Generate invite token and temporary password
-        inviteToken = crypto.randomBytes(32).toString("hex");
-        hashedPassword = crypto.randomBytes(32).toString("hex"); // Temp, user must set
+        hashedPassword = crypto.randomBytes(32).toString("hex");
       }
 
       const newUserResult = await this.tenantPool.query(
         `
         INSERT INTO users 
           (email, encrypted_password, full_name, role, is_active, 
-           encompass_user_id, los_connection_id, access_mode, loan_access_mode)
-        VALUES ($1, $2, $3, $4, true, $5, $6, $7, 'full_access')
+           encompass_user_id, los_connection_id, access_mode, loan_access_mode, cognito_sub)
+        VALUES ($1, $2, $3, $4, true, $5, $6, $7, 'full_access', $8)
         RETURNING id
       `,
         [
           encompassUser.email,
           hashedPassword,
-          encompassUser.full_name ||
-            `${encompassUser.first_name || ""} ${encompassUser.last_name || ""}`.trim(),
+          fullName,
           role,
           encompassUser.encompass_user_id,
           losConnectionId,
           access_mode,
+          cognitoSub,
         ],
       );
 
@@ -495,15 +540,23 @@ export class EncompassUserSyncService {
         [newUserId, encompassUser.id],
       );
 
-      // Send invitation email if email invite method
+      // When Cognito is enabled, the invite email is handled by Cognito's AdminCreateUser.
+      // Only fall back to our custom email for non-Cognito (local dev) environments.
       let inviteSent = false;
-      if (invite_method === "email" && inviteToken) {
+      if (useCognito && invite_method === "email") {
+        inviteSent = true;
+        logInfo("[EncompassUserSync] User created via Cognito invite", {
+          email: encompassUser.email,
+          userId: newUserId,
+          cognitoSub,
+        });
+      } else if (!useCognito && invite_method === "email") {
         try {
           const { resolveFrontendUrl } = await import("../utils/frontendUrl.js");
           const frontendUrl = resolveFrontendUrl();
+          const inviteToken = crypto.randomBytes(32).toString("hex");
           const inviteUrl = `${frontendUrl}/accept-invite?token=${inviteToken}&email=${encodeURIComponent(encompassUser.email)}`;
 
-          // Get tenant name
           const tenantName = process.env.TENANT_NAME || "your organization";
 
           await sendUserInvitationEmail(
