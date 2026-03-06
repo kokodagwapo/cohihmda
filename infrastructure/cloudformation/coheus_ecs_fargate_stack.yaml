@@ -888,10 +888,20 @@ Resources:
               Value: coheus_management
             - Name: DB_SSL
               Value: "true"
+            - Name: FRONTEND_URL
+              Value: !Ref FrontendUrl
             - Name: KMS_KEY_ID
               Value: !Ref EncryptionKey
             - Name: AWS_REGION
               Value: !Ref AWS::Region
+            # Email / SES - keep worker env in parity with API container since
+            # worker runs the distribution scheduler and sends scheduled emails.
+            - Name: AWS_SES_REGION
+              Value: !Ref AWS::Region
+            - Name: EMAIL_FROM_ADDRESS
+              Value: !Ref EmailFromAddress
+            - Name: SES_CONFIGURATION_SET
+              Value: my-first-configuration-set
             - Name: JWT_SECRET
               Value: !Ref JwtSecret
             - Name: COGNITO_USER_POOL_ID
