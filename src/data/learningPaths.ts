@@ -166,6 +166,12 @@ export const learningPaths: LearningPath[] = [
             type: "article",
             link: "/help/workbench/generating-reports",
           },
+          {
+            id: "exec-w3-5",
+            title: "Read: Distributing Canvases and Content",
+            type: "article",
+            link: "/help/workbench/distributing-content",
+          },
         ],
       },
       {
@@ -323,6 +329,12 @@ export const learningPaths: LearningPath[] = [
             title: "Read: Generating Reports (PPTX/PDF)",
             type: "article",
             link: "/help/workbench/generating-reports",
+          },
+          {
+            id: "mgr-w4-3b",
+            title: "Read: Distributing Canvases and Content",
+            type: "article",
+            link: "/help/workbench/distributing-content",
           },
           {
             id: "mgr-w4-4",
@@ -621,11 +633,8 @@ export function getLearningPathForRole(role: string): LearningPath | undefined {
     super_admin: "IT Admin / Tenant Admin",
     platform_admin: "IT Admin / Tenant Admin",
     tenant_admin: "IT Admin / Tenant Admin",
-    admin: "IT Admin / Tenant Admin",
     user: "Branch Manager / VP of Sales",
     viewer: "Executive / C-Suite",
-    loan_officer: "Loan Officer",
-    processor: "Operations / Processing",
   };
   const targetRole = roleMap[role] || "Executive / C-Suite";
   return learningPaths.find((p) => p.role === targetRole);

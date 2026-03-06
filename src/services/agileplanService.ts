@@ -85,7 +85,7 @@ class AgilePlanService {
       throw new Error('No API URL configured');
     }
 
-    const token = localStorage.getItem('auth_token');
+    const token = api.getToken();
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
       ...options.headers,
@@ -440,7 +440,7 @@ class AgilePlanService {
         // Remove protocol from backend URL and use appropriate WebSocket protocol
         const urlWithoutProtocol = backendUrl.replace(/^https?:\/\//, '');
         const wsProtocol = getWebSocketProtocol(backendUrl);
-        const token = localStorage.getItem('auth_token') || '';
+        const token = api.getToken() || '';
         const wsUrl = `${wsProtocol}${urlWithoutProtocol}/ws/agileplan?token=${encodeURIComponent(token)}`;
         
         const ws = new WebSocket(wsUrl);

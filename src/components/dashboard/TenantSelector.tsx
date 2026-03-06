@@ -48,8 +48,7 @@ export const TenantSelector = ({
 
         const isPlatform =
           userData.user?.role === "super_admin" ||
-          userData.user?.role === "platform_admin" ||
-          userData.user?.role === "admin";
+          userData.user?.role === "platform_admin";
         if (isPlatform) {
           loadTenants();
         }
@@ -65,7 +64,6 @@ export const TenantSelector = ({
   const isPlatform =
     currentUserRole === "super_admin" ||
     currentUserRole === "platform_admin" ||
-    currentUserRole === "admin" ||
     userRole === "super_admin" ||
     userRole === "platform_admin";
 

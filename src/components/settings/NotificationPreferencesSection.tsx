@@ -31,9 +31,14 @@ export interface EmailPreferencesAlerts {
   trackedMetricBreach: boolean;
 }
 
+export interface EmailPreferencesReleaseNotes {
+  enabled: boolean;
+}
+
 export interface EmailPreferences {
   dailyBrief: EmailPreferencesDailyBrief;
   alerts: EmailPreferencesAlerts;
+  releaseNotes: EmailPreferencesReleaseNotes;
   unsubscribeToken: string | null;
 }
 
@@ -58,6 +63,9 @@ const DEFAULT_EMAIL_PREFS: EmailPreferences = {
     criticalInsights: false,
     researchComplete: false,
     trackedMetricBreach: false,
+  },
+  releaseNotes: {
+    enabled: true,
   },
   unsubscribeToken: null,
 };
@@ -143,6 +151,10 @@ export function NotificationPreferencesSection() {
           ...DEFAULT_EMAIL_PREFS.alerts,
           ...data.alerts,
         },
+        releaseNotes: {
+          ...DEFAULT_EMAIL_PREFS.releaseNotes,
+          ...data.releaseNotes,
+        },
       };
       setPrefs(merged);
       setSavedPrefs(merged);
@@ -170,7 +182,8 @@ export function NotificationPreferencesSection() {
       prefs.dailyBrief.deliveryHour !== savedPrefs.dailyBrief.deliveryHour ||
       prefs.dailyBrief.email !== savedPrefs.dailyBrief.email ||
       !sectionsEqual(prefs.dailyBrief.sections, savedPrefs.dailyBrief.sections) ||
-      !arrayEqual(prefs.dailyBrief.newsSourceFilter, savedPrefs.dailyBrief.newsSourceFilter);
+      !arrayEqual(prefs.dailyBrief.newsSourceFilter, savedPrefs.dailyBrief.newsSourceFilter) ||
+      prefs.releaseNotes.enabled !== savedPrefs.releaseNotes.enabled;
     setHasChanges(changed);
   }, [prefs, savedPrefs]);
 
@@ -405,6 +418,37 @@ export function NotificationPreferencesSection() {
               ))}
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Card 4: Release Notes */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Mail className="h-5 w-5" />
+            Product Release Notes
+          </CardTitle>
+          <CardDescription>
+            Receive release note emails when new platform updates are published.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="release-notes-enabled">Email me product release notes</Label>
+            <Switch
+              id="release-notes-enabled"
+              checked={prefs.releaseNotes.enabled}
+              onCheckedChange={(checked) =>
+                setPrefs((p) => ({
+                  ...p,
+                  releaseNotes: { ...p.releaseNotes, enabled: checked },
+                }))
+              }
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            These updates are separate from Daily Brief settings and can be unsubscribed independently.
+          </p>
         </CardContent>
       </Card>
 

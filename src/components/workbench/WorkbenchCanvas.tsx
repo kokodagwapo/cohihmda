@@ -130,16 +130,10 @@ const WORKBENCH_COHI_HIDDEN = true;
  * api.request() always parses JSON, so we use fetch directly for binary responses.
  */
 async function fetchBlob(endpoint: string, body: object): Promise<Blob> {
-  const token = localStorage.getItem("auth_token");
-  const baseUrl =
-    import.meta.env.VITE_API_URL ||
-    (import.meta.env.DEV ? "http://localhost:3001" : "");
-  const url = baseUrl ? `${baseUrl}${endpoint}` : endpoint;
-  const res = await fetch(url, {
+  const res = await api.fetchWithAuth(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(body),
   });
@@ -3744,8 +3738,7 @@ Structure it as a narrative-first executive briefing:
                       <TooltipContent side="bottom">Share</TooltipContent>
                     </Tooltip>
                   )}
-                  {/* Distributions page hidden for now – entire Schedule distribution button removed */}
-                  {false && (
+                  {isOwner && (
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button
@@ -3768,6 +3761,8 @@ Structure it as a narrative-first executive briefing:
                       </TooltipContent>
                     </Tooltip>
                   )}
+                  {canEdit && (
+                    <>
                   <input
                     ref={backgroundImageInputRef}
                     type="file"
@@ -3913,6 +3908,8 @@ Structure it as a narrative-first executive briefing:
               <TooltipContent side="bottom">Create dashboard from image</TooltipContent>
             </Tooltip>
             */}
+                    </>
+                  )}
                   {canEdit && (
                     <>
                       <div className="w-px h-5 bg-slate-200 dark:bg-slate-600 shrink-0 mx-0.5" />
@@ -4115,33 +4112,37 @@ Structure it as a narrative-first executive briefing:
               </DropdownMenuContent>
             </DropdownMenu>
             */}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-8 w-8 shrink-0"
-                        onClick={addRichTextBlock}
-                      >
-                        <Type className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">Rich text</TooltipContent>
-                  </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-8 w-8 shrink-0 text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
-                        onClick={() => setClearConfirmOpen(true)}
-                        disabled={!hasItems || !isOwner}
-                      >
-                        <Eraser className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">Clear canvas</TooltipContent>
-                  </Tooltip>
+                  {canEdit && (
+                    <>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-8 w-8 shrink-0"
+                            onClick={addRichTextBlock}
+                          >
+                            <Type className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">Rich text</TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-8 w-8 shrink-0 text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
+                            onClick={() => setClearConfirmOpen(true)}
+                            disabled={!hasItems}
+                          >
+                            <Eraser className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">Clear canvas</TooltipContent>
+                      </Tooltip>
+                    </>
+                  )}
                 </>
               )}
               {/* --- End canvas-only tools --- */}
@@ -5035,7 +5036,6 @@ Structure it as a narrative-first executive briefing:
                       "super_admin",
                       "platform_admin",
                       "tenant_admin",
-                      "admin",
                     ] as const
                   ).includes(user?.role as any) && (
                     <button

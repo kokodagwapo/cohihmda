@@ -24,6 +24,7 @@ export type AdminSection =
   | "knowledge-center" // Tenant knowledge center
   | "ai-prompts" // AI prompt configuration (platform admin)
   | "insight-feedback" // Insight feedback review & training (platform admin)
+  | "release-notes" // Release notes editor and distribution (platform admin)
   | "sync-management" // Cross-tenant sync schedule management (platform admin)
   | "platform-settings" // Platform API keys and settings (platform admin)
   | "analytics"; // User behavior analytics (page views, sessions, funnels, replays)

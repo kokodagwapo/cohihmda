@@ -205,6 +205,9 @@ const DEFAULT_EMAIL_PREFERENCES = {
     researchComplete: false,
     trackedMetricBreach: false,
   },
+  releaseNotes: {
+    enabled: true,
+  },
   unsubscribeToken: null as string | null,
 };
 
@@ -245,6 +248,10 @@ router.get('/email-preferences', authenticateToken, async (req: AuthRequest, res
         alerts: {
           ...DEFAULT_EMAIL_PREFERENCES.alerts,
           ...(typeof (emailPrefs as any).alerts === 'object' ? (emailPrefs as any).alerts : {}),
+        },
+        releaseNotes: {
+          ...DEFAULT_EMAIL_PREFERENCES.releaseNotes,
+          ...(typeof (emailPrefs as any).releaseNotes === 'object' ? (emailPrefs as any).releaseNotes : {}),
         },
       };
       if (!merged.dailyBrief.email && userEmail) merged.dailyBrief.email = userEmail;
@@ -290,6 +297,7 @@ router.put('/email-preferences', authenticateToken, async (req: AuthRequest, res
 
     const body = req.body as Record<string, unknown>;
     const dailyBrief = body?.dailyBrief as Record<string, unknown> | undefined;
+    const releaseNotes = body?.releaseNotes as Record<string, unknown> | undefined;
     const email = String((dailyBrief?.email ?? userEmail) || '').trim();
     if (!email || !email.includes('@')) {
       return res.status(400).json({ error: 'A valid email is required for the daily brief' });
@@ -305,7 +313,9 @@ router.put('/email-preferences', authenticateToken, async (req: AuthRequest, res
     );
     const current = (existing.rows[0]?.preference_value as Record<string, unknown>) || {};
     let unsubscribeToken = (current as any).unsubscribeToken as string | null;
-    const enabling = Boolean(dailyBrief?.enabled) && !(current as any).dailyBrief?.enabled;
+    const enablingDailyBrief = Boolean(dailyBrief?.enabled) && !(current as any).dailyBrief?.enabled;
+    const enablingReleaseNotes = Boolean(releaseNotes?.enabled) && !(current as any).releaseNotes?.enabled;
+    const enabling = enablingDailyBrief || enablingReleaseNotes;
     if (enabling && !unsubscribeToken) {
       unsubscribeToken = crypto.randomUUID();
     }
@@ -325,6 +335,10 @@ router.put('/email-preferences', authenticateToken, async (req: AuthRequest, res
       alerts: {
         ...DEFAULT_EMAIL_PREFERENCES.alerts,
         ...(typeof body?.alerts === 'object' ? body.alerts : {}),
+      },
+      releaseNotes: {
+        ...DEFAULT_EMAIL_PREFERENCES.releaseNotes,
+        ...(typeof releaseNotes === 'object' ? releaseNotes : {}),
       },
       unsubscribeToken: unsubscribeToken ?? (current as any).unsubscribeToken ?? null,
     };

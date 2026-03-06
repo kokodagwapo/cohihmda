@@ -1,18 +1,57 @@
 import { Button } from "@/components/ui/button";
 import { CoheusLogo } from "@/components/ui/CoheusLogo";
-import { ThemeIconToggle } from "@/components/theme-icon-toggle";
 import { UserMenu } from "@/components/layout/UserMenu";
 import { useAuth } from "@/contexts/AuthContext";
-import { Menu, X, TrendingUp, LayoutGrid, LayoutPanelLeft, ChevronDown, Zap, Newspaper, Trophy, Target, BarChart3, Filter, ClipboardList, ArrowLeftRight, Users, Settings, Calculator, LineChart, Shield, Building2, Grid3X3 } from "lucide-react";
+import {
+  Menu,
+  X,
+  TrendingUp,
+  LayoutGrid,
+  LayoutPanelLeft,
+  ChevronDown,
+  Zap,
+  Newspaper,
+  Trophy,
+  Target,
+  BarChart3,
+  Filter,
+  ClipboardList,
+  ArrowLeftRight,
+  Users,
+  Settings,
+  Calculator,
+  LineChart,
+  Shield,
+  Building2,
+  Grid3X3,
+  FlaskConical,
+  FileText,
+  HelpCircle,
+  DollarSign,
+  Pin,
+  PinOff,
+  Lock,
+  Layers,
+} from "lucide-react";
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { ChannelSelector } from "@/components/dashboard/ChannelSelector";
 import { TenantSelector } from "@/components/dashboard/TenantSelector";
 import { useChannelStore } from "@/stores/channelStore";
 import { useTenantStore } from "@/stores/tenantStore";
+import { usePinnedDashboardsStore, type PinnedItem } from "@/stores/pinnedDashboardsStore";
+import { WhatsNewButton } from "@/components/tutorial/WhatsNewButton";
+import { SidebarRouteSearch } from "@/components/dashboard/SidebarRouteSearch";
+import { getSidebarSearchTargets } from "@/data/sidebarSearchTargets";
 
 export interface NavigationProps {
   onMenuToggle?: () => void;
@@ -22,102 +61,264 @@ export interface NavigationProps {
 
 // Dashboard section configuration (matching ReportsSidebar)
 const dashboardSectionsConfig = [
-  { id: 'aletheiaInsights', label: 'Cohi Daily Briefings', icon: Zap },
-  { id: 'industryNews', label: 'Mortgage News', icon: Newspaper },
-  { id: 'leaderboard', label: 'Leaderboard', icon: Trophy },
-  { id: 'executiveDashboard', label: 'Business Overview', icon: Target },
-  { id: 'closingFalloutForecast', label: 'Closing & Fallout Forecast', icon: BarChart3 },
+  { id: "aletheiaInsights", label: "Cohi Daily Briefings", icon: Zap },
+  { id: "industryNews", label: "Mortgage News", icon: Newspaper },
+  { id: "leaderboard", label: "Leaderboard", icon: Trophy },
+  { id: "executiveDashboard", label: "Business Overview", icon: Target },
+  {
+    id: "closingFalloutForecast",
+    label: "Closing & Fallout Forecast",
+    icon: BarChart3,
+  },
 ];
 
 // Insights top nav dropdown: only Cohi Daily Briefings + Mortgage News (Leaderboard, Business Overview, Closing & Fallout hidden)
 const insightsMenuConfig = dashboardSectionsConfig.filter(
-  (s) => s.id === 'aletheiaInsights' || s.id === 'industryNews'
+  (s) => s.id === "aletheiaInsights" || s.id === "industryNews",
 );
 
 // Reorganized Top Tiering menu structure with better grouping (iconColor matches sidemenu)
 const topTieringMenuGroups = {
   coreAnalytics: {
-    label: 'TopTiering',
+    label: "TopTiering",
     items: [
-      { id: 'loanFunnel', label: 'Loan Funnel', icon: Filter, iconColor: 'blue' as const },
-      { id: 'topTieringComparison', label: 'TopTiering Comparison', icon: ArrowLeftRight, iconColor: 'blue' as const },
-      { id: 'creditRiskManagement', label: 'Credit Risk Management', icon: Shield, iconColor: 'emerald' as const },
-      { id: 'companyScorecard', label: 'Company Scorecard', icon: ClipboardList, iconColor: 'indigo' as const },
-    ]
+      /*       {
+        id: "loanFunnel",
+        label: "Loan Funnel",
+        icon: Filter,
+        iconColor: "blue" as const,
+      }, */
+      {
+        id: "topTieringComparison",
+        label: "TopTiering Comparison",
+        icon: ArrowLeftRight,
+        iconColor: "blue" as const,
+      },
+      {
+        id: "creditRiskManagement",
+        label: "Credit Risk Management",
+        icon: Shield,
+        iconColor: "emerald" as const,
+      },
+      {
+        id: "companyScorecard",
+        label: "Company Scorecard",
+        icon: ClipboardList,
+        iconColor: "indigo" as const,
+      },
+      {
+        id: "pricingDashboard",
+        label: "Pricing Dashboard",
+        icon: DollarSign,
+        iconColor: "emerald" as const,
+      },
+      {
+        id: "lockStratification",
+        label: "Lock Stratification",
+        icon: Lock,
+        iconColor: "blue" as const,
+      },
+      {
+        id: "workflowConversion",
+        label: "Workflow Conversion",
+        icon: BarChart3,
+        iconColor: "blue" as const,
+      },
+      {
+        id: "pipelineAnalysis",
+        label: "Pipeline Analysis",
+        icon: LineChart,
+        iconColor: "emerald" as const,
+      },
+      {
+        id: "loanComplexity",
+        label: "Loan Complexity",
+        icon: Layers,
+        iconColor: "indigo" as const,
+      },
+      {
+        id: "highPerformers",
+        label: "High Performers",
+        icon: Trophy,
+        iconColor: "amber" as const,
+      },
+      {
+        id: "actors",
+        label: "Actors",
+        icon: Users,
+        iconColor: "blue" as const,
+      },
+      {
+        id: "loanDetail",
+        label: "Loan Detail",
+        icon: FileText,
+        iconColor: "blue" as const,
+      },
+      {
+        id: "falloutForecastPage",
+        label: "Fallout Report",
+        icon: BarChart3,
+        iconColor: "indigo" as const,
+      },
+    ],
   },
   performance: {
-    label: 'Financial Modeling',
+    label: "Financial Modeling",
     items: [
-      { id: 'financialModeling', label: 'Financial Modeling Sandbox', icon: Calculator, iconColor: 'blue' as const },
-    ]
+      {
+        id: "financialModeling",
+        label: "Financial Modeling Sandbox",
+        icon: Calculator,
+        iconColor: "blue" as const,
+      },
+    ],
   },
   sales: {
-    label: 'Sales',
+    label: "Sales",
     icon: Users,
     items: [
-      { id: 'salesScorecard', label: 'Scorecard', icon: Target, iconColor: 'blue' as const },
-      { id: 'salesTrends', label: 'Trends', icon: TrendingUp, iconColor: 'emerald' as const },
-    ]
+      {
+        id: "salesScorecard",
+        label: "Sales Scorecard",
+        icon: Target,
+        iconColor: "blue" as const,
+      },
+      {
+        id: "salesScorecardOverview",
+        label: "Sales Scorecard Overview",
+        icon: BarChart3,
+        iconColor: "blue" as const,
+      },
+      {
+        id: "salesTrends",
+        label: "Sales Trends",
+        icon: TrendingUp,
+        iconColor: "emerald" as const,
+      },
+    ],
   },
   operations: {
-    label: 'Operations',
+    label: "Operations",
     icon: Settings,
     items: [
-      { id: 'operationsScorecard', label: 'Scorecard', icon: Target, iconColor: 'blue' as const },
-      { id: 'operationsTrends', label: 'Trends', icon: LineChart, iconColor: 'indigo' as const },
-    ]
+      {
+        id: "operationsScorecard",
+        label: "Operations Scorecard",
+        icon: Target,
+        iconColor: "blue" as const,
+      },
+      {
+        id: "operationsTrends",
+        label: "Operations Trends",
+        icon: LineChart,
+        iconColor: "indigo" as const,
+      },
+    ],
   },
 };
 
 // Icon colors matching sidemenu – bg tint + icon color
 const iconStyleMap: Record<string, { bg: string; icon: string }> = {
-  amber: { bg: 'bg-amber-500/10 dark:bg-amber-500/20', icon: 'text-amber-500 dark:text-amber-400' },
-  blue: { bg: 'bg-blue-500/10 dark:bg-blue-500/20', icon: 'text-blue-500 dark:text-blue-400' },
-  indigo: { bg: 'bg-indigo-500/10 dark:bg-indigo-500/20', icon: 'text-indigo-500 dark:text-indigo-400' },
-  emerald: { bg: 'bg-emerald-500/10 dark:bg-emerald-500/20', icon: 'text-emerald-500 dark:text-emerald-400' },
+  amber: {
+    bg: "bg-amber-500/10 dark:bg-amber-500/20",
+    icon: "text-amber-500 dark:text-amber-400",
+  },
+  violet: {
+    bg: "bg-violet-500/10 dark:bg-violet-500/20",
+    icon: "text-violet-500 dark:text-violet-400",
+  },
+  blue: {
+    bg: "bg-blue-500/10 dark:bg-blue-500/20",
+    icon: "text-blue-500 dark:text-blue-400",
+  },
+  indigo: {
+    bg: "bg-indigo-500/10 dark:bg-indigo-500/20",
+    icon: "text-indigo-500 dark:text-indigo-400",
+  },
+  emerald: {
+    bg: "bg-emerald-500/10 dark:bg-emerald-500/20",
+    icon: "text-emerald-500 dark:text-emerald-400",
+  },
 };
 
 // Tailwind class constants for nav pills and dropdown items
-const topNavPillBase = "relative flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-colors duration-200 group border";
-const topNavPillActive = "text-slate-900 dark:text-slate-100 bg-white/90 dark:bg-slate-900/70 border-slate-200/80 dark:border-slate-700/80 shadow-sm";
-const topNavPillDefault = "text-slate-700 dark:text-slate-300 bg-slate-50/80 dark:bg-slate-800/40 border-slate-200/60 dark:border-slate-700/60 hover:bg-slate-100/80 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-slate-100";
+const topNavPillBase =
+  "relative flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-colors duration-200 group border";
+const topNavPillActive =
+  "text-slate-900 dark:text-slate-100 bg-white/90 dark:bg-slate-900/70 border-slate-200/80 dark:border-slate-700/80 shadow-sm";
+const topNavPillDefault =
+  "text-slate-700 dark:text-slate-300 bg-slate-50/80 dark:bg-slate-800/40 border-slate-200/60 dark:border-slate-700/60 hover:bg-slate-100/80 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-slate-100";
 
-const dropdownItemBase = "flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 border group relative overflow-hidden";
-const dropdownItemActive = "text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-700/80 shadow-sm";
-const dropdownItemFocus = "text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 border-slate-200/80 dark:border-slate-700/80";
-const dropdownItemDefault = "text-slate-700 dark:text-slate-300 bg-slate-50/80 dark:bg-slate-800/40 border-transparent hover:bg-slate-100/80 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-slate-100 hover:border-slate-200/80 dark:hover:border-slate-700/80";
+const dropdownItemBase =
+  "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group relative overflow-hidden";
+const dropdownItemActive =
+  "text-slate-900 dark:text-slate-100 bg-slate-100/90 dark:bg-slate-800/80 shadow-sm";
+const dropdownItemFocus =
+  "text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-slate-800";
+const dropdownItemDefault =
+  "text-slate-700 dark:text-slate-300 bg-transparent hover:bg-slate-100/80 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-100";
+
+// Minimal variant for Dashboards submenu (compact)
+const compactItemBase =
+  "flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm font-medium transition-colors duration-150 group";
+const compactItemActive =
+  "text-slate-900 dark:text-slate-100 bg-slate-100/80 dark:bg-slate-800/70";
+const compactItemDefault =
+  "text-slate-600 dark:text-slate-400 bg-transparent hover:bg-slate-100/70 dark:hover:bg-slate-800/40 hover:text-slate-900 dark:hover:text-slate-100";
 
 // Route mapping for navigation
 const routeMap: Record<string, string> = {
-  'loanFunnel': '/loan-funnel',
-  'creditRiskManagement': '/credit-risk-management',
-  'companyScorecard': '/company-scorecard',
-  'topTieringComparison': '/performance/toptiering-comparison',
-  'salesScorecard': '/sales-scorecard',
-  'salesTrends': '/sales-trends',
-  'operationsScorecard': '/performance/operation-scorecard',
-  'operationsTrends': '/performance/operation-scorecard-trends',
-  'financialModeling': '/performance/financial-modeling-sandbox',
+  // loanFunnel: "/loan-funnel", // hidden – page references removed
+  creditRiskManagement: "/credit-risk-management",
+  companyScorecard: "/company-scorecard",
+  topTieringComparison: "/performance/toptiering-comparison",
+  workflowConversion: "/workflow-conversion",
+  pipelineAnalysis: "/pipeline-analysis",
+  loanComplexity: "/loan-complexity",
+  loanDetail: "/loan-detail",
+  falloutForecastPage: "/fallout-forecast",
+  pricingDashboard: "/pricing-dashboard",
+  lockStratification: "/lock-stratification",
+  highPerformers: "/high-performers",
+  actors: "/actors",
+  salesScorecard: "/sales-scorecard",
+  salesScorecardOverview: "/sales-scorecard-overview",
+  salesTrends: "/sales-trends",
+  operationsScorecard: "/performance/operation-scorecard",
+  operationsTrends: "/performance/operation-scorecard-trends",
+  financialModeling: "/performance/financial-modeling-sandbox",
 };
 
-export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: NavigationProps = {} as NavigationProps) {
+export function Navigation(
+  {
+    onMenuToggle,
+    menuOpen,
+    onSectionClick,
+  }: NavigationProps = {} as NavigationProps,
+) {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, isAuthenticated, isAdmin, logout } = useAuth();
   const [displayName, setDisplayName] = useState<string | null>(null);
-  
+
   // Global channel selection from store
   const { selectedChannel, setSelectedChannel } = useChannelStore();
-  
+
   // Global tenant selection from store (for super_admin viewing other tenants)
   const { selectedTenantId, setSelectedTenantId } = useTenantStore();
-  
+
+  // Pinned dashboards (pin from top nav, appear in sidebar)
+  const { pinned, togglePinned, isPinned } = usePinnedDashboardsStore();
+
   // Check if user is a platform admin (can view other tenants)
-  const isPlatformAdmin = user?.role === 'super_admin' || user?.role === 'platform_admin';
-  
-  const isDashboard = location.pathname === '/insights';
-  const isWorkbench = location.pathname === '/my-dashboard' || location.pathname.startsWith('/workbench');
-  const isAdminPage = location.pathname.startsWith('/admin');
+  const isPlatformAdmin =
+    user?.role === "super_admin" || user?.role === "platform_admin";
+
+  const isDashboard = location.pathname === "/insights";
+  const isWorkbench =
+    location.pathname === "/my-dashboard" ||
+    location.pathname.startsWith("/workbench");
+  const isAdminPage = location.pathname.startsWith("/admin");
 
   // Dropdown state
   const [insightsOpen, setInsightsOpen] = useState(false);
@@ -130,9 +331,8 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
   const allPagesRef = useRef<HTMLDivElement>(null);
   const insightsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const topTieringTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const topTieringAutoCloseRef = useRef<NodeJS.Timeout | null>(null);
   const allPagesTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  
+
   // Keyboard navigation state
   const [focusedIndex, setFocusedIndex] = useState<number>(-1);
   const insightsMenuRef = useRef<HTMLDivElement>(null);
@@ -145,7 +345,9 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
       setDisplayName(first || null);
     } else if (user?.email) {
       const emailPrefix = String(user.email).split("@")[0] ?? "";
-      const capitalizedName = emailPrefix ? emailPrefix.charAt(0).toUpperCase() + emailPrefix.slice(1) : "";
+      const capitalizedName = emailPrefix
+        ? emailPrefix.charAt(0).toUpperCase() + emailPrefix.slice(1)
+        : "";
       setDisplayName(capitalizedName || null);
     } else {
       setDisplayName(null);
@@ -155,104 +357,118 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
   // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (insightsRef.current && !insightsRef.current.contains(event.target as Node)) {
+      if (
+        insightsRef.current &&
+        !insightsRef.current.contains(event.target as Node)
+      ) {
         setInsightsOpen(false);
         setFocusedIndex(-1);
       }
-      if (topTieringRef.current && !topTieringRef.current.contains(event.target as Node)) {
+      if (
+        topTieringRef.current &&
+        !topTieringRef.current.contains(event.target as Node)
+      ) {
         setTopTieringOpen(false);
         setFocusedIndex(-1);
       }
-      if (allPagesRef.current && !allPagesRef.current.contains(event.target as Node)) {
+      if (
+        allPagesRef.current &&
+        !allPagesRef.current.contains(event.target as Node)
+      ) {
         setAllPagesOpen(false);
       }
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   // Keyboard navigation handler
-  const handleKeyDown = useCallback((e: React.KeyboardEvent, menuType: 'insights' | 'toptiering') => {
-    if (menuType === 'insights' && !insightsOpen) return;
-    if (menuType === 'toptiering' && !topTieringOpen) return;
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent, menuType: "insights" | "toptiering") => {
+      if (menuType === "insights" && !insightsOpen) return;
+      if (menuType === "toptiering" && !topTieringOpen) return;
 
-    const items = menuType === 'insights' 
-      ? insightsMenuConfig 
-      : Object.values(topTieringMenuGroups).flatMap(group => 
-          group.items.map(item => ({ ...item, groupId: group.label }))
-        );
+      const items =
+        menuType === "insights"
+          ? insightsMenuConfig
+          : Object.values(topTieringMenuGroups).flatMap((group) =>
+              group.items.map((item) => ({ ...item, groupId: group.label })),
+            );
 
-    switch (e.key) {
-      case 'ArrowDown':
-        e.preventDefault();
-        setFocusedIndex(prev => (prev < items.length - 1 ? prev + 1 : 0));
-        break;
-      case 'ArrowUp':
-        e.preventDefault();
-        setFocusedIndex(prev => (prev > 0 ? prev - 1 : items.length - 1));
-        break;
-      case 'Enter':
-      case ' ':
-        e.preventDefault();
-        if (focusedIndex >= 0 && focusedIndex < items.length) {
-          const item = items[focusedIndex];
-          if (menuType === 'insights') {
-            scrollToSection(item.id);
-          } else {
-            handleTopTieringClick(item.id);
+      switch (e.key) {
+        case "ArrowDown":
+          e.preventDefault();
+          setFocusedIndex((prev) => (prev < items.length - 1 ? prev + 1 : 0));
+          break;
+        case "ArrowUp":
+          e.preventDefault();
+          setFocusedIndex((prev) => (prev > 0 ? prev - 1 : items.length - 1));
+          break;
+        case "Enter":
+        case " ":
+          e.preventDefault();
+          if (focusedIndex >= 0 && focusedIndex < items.length) {
+            const item = items[focusedIndex];
+            if (menuType === "insights") {
+              scrollToSection(item.id);
+            } else {
+              handleTopTieringClick(item.id);
+            }
           }
-        }
-        break;
-      case 'Escape':
-        e.preventDefault();
-        if (menuType === 'insights') {
-          setInsightsOpen(false);
-        } else {
-          setTopTieringOpen(false);
-        }
-        setFocusedIndex(-1);
-        break;
-    }
-  }, [insightsOpen, topTieringOpen, focusedIndex]);
+          break;
+        case "Escape":
+          e.preventDefault();
+          if (menuType === "insights") {
+            setInsightsOpen(false);
+          } else {
+            setTopTieringOpen(false);
+          }
+          setFocusedIndex(-1);
+          break;
+      }
+    },
+    [insightsOpen, topTieringOpen, focusedIndex],
+  );
 
   const handleLogout = async () => {
     await logout();
-    
+
     // Redirect to admin login if logging out from admin page
     if (isAdminPage) {
-      navigate('/login?returnTo=/admin');
+      navigate("/login?returnTo=/admin");
     } else {
-      navigate('/');
+      navigate("/");
     }
   };
 
   // Map section IDs to actual HTML element IDs
   const getSectionElementId = (sectionId: string): string => {
     const sectionIdMap: Record<string, string> = {
-      'aletheiaInsights': 'aletheiaInsights',
-      'industryNews': 'industryNews',
-      'leaderboard': 'leaderboard',
-      'executiveDashboard': 'executiveDashboard',
-      'closingFalloutForecast': 'closingFalloutForecast',
+      aletheiaInsights: "aletheiaInsights",
+      industryNews: "industryNews",
+      leaderboard: "leaderboard",
+      executiveDashboard: "executiveDashboard",
+      closingFalloutForecast: "closingFalloutForecast",
     };
     return sectionIdMap[sectionId] || `section-${sectionId}`;
   };
 
   const scrollToSection = (sectionId: string) => {
     const elementId = getSectionElementId(sectionId);
-    
-    if (location.pathname !== '/insights') {
-      navigate('/insights');
+
+    if (location.pathname !== "/insights") {
+      navigate("/insights");
       setTimeout(() => {
         const scrollToElement = () => {
           const element = document.getElementById(elementId);
           if (element) {
             const headerOffset = 80;
             const elementPosition = element.getBoundingClientRect().top;
-            const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
+            const offsetPosition =
+              elementPosition + window.pageYOffset - headerOffset;
             window.scrollTo({
               top: offsetPosition,
-              behavior: 'smooth'
+              behavior: "smooth",
             });
           } else {
             setTimeout(scrollToElement, 100);
@@ -265,14 +481,15 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
       if (element) {
         const headerOffset = 80;
         const elementPosition = element.getBoundingClientRect().top;
-        const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
+        const offsetPosition =
+          elementPosition + window.pageYOffset - headerOffset;
         window.scrollTo({
           top: offsetPosition,
-          behavior: 'smooth'
+          behavior: "smooth",
         });
       }
     }
-    
+
     if (onSectionClick) {
       onSectionClick(sectionId);
     }
@@ -284,52 +501,65 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
   const handleTopTieringClick = (itemId: string, customRoute?: string) => {
     setTopTieringOpen(false);
     setFocusedIndex(-1);
-    
+
     const route = customRoute || routeMap[itemId];
     if (route) {
       navigate(route);
     }
   };
 
-  const isInsightsPage = location.pathname === '/insights';
+  const isInsightsPage = location.pathname === "/insights";
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
 
   const isActive = (path: string) => location.pathname === path;
-  
+
   // Check if current page is a TopTiering page
   const isTopTieringPage = useMemo(() => {
     const topTieringRoutes = [
-      '/loan-funnel',
-      '/credit-risk-management',
-      '/company-scorecard',
-      '/performance/toptiering-comparison',
-      '/sales-scorecard',
-      '/sales-trends',
-      '/performance/operation-scorecard',
-      '/performance/operation-scorecard-trends',
-      '/performance/financial-modeling-sandbox',
+      "/credit-risk-management",
+      "/company-scorecard",
+      "/performance/toptiering-comparison",
+      "/workflow-conversion",
+      "/pipeline-analysis",
+      "/loan-complexity",
+      "/loan-detail",
+      "/fallout-forecast",
+      "/pricing-dashboard",
+      "/lock-stratification",
+      "/high-performers",
+      "/sales-scorecard",
+      "/sales-scorecard-overview",
+      "/sales-trends",
+      "/performance/operation-scorecard",
+      "/performance/operation-scorecard-trends",
+      "/performance/financial-modeling-sandbox",
     ];
-    return topTieringRoutes.some(route => location.pathname === route || location.pathname.startsWith(route));
+    return topTieringRoutes.some(
+      (route) =>
+        location.pathname === route || location.pathname.startsWith(route),
+    );
   }, [location.pathname]);
 
   // Get current page label for mobile
   const getCurrentPageLabel = () => {
-    if (isInsightsPage) return 'Insights';
+    if (isInsightsPage) return "Insights";
     if (isTopTieringPage) {
       const currentRoute = location.pathname;
-      const entry = Object.entries(routeMap).find(([_, route]) => route === currentRoute);
+      const entry = Object.entries(routeMap).find(
+        ([_, route]) => route === currentRoute,
+      );
       if (entry) {
         const [itemId] = entry;
         for (const group of Object.values(topTieringMenuGroups)) {
-          const item = group.items.find(i => i.id === itemId);
+          const item = group.items.find((i) => i.id === itemId);
           if (item) return item.label;
         }
       }
-      return 'Top Tiering';
+      return "Top Tiering";
     }
-    if (location.pathname === '/my-dashboard') return 'My Workbench';
-    if (location.pathname === '/cohi-chat') return 'Cohi Chat';
-    return 'Navigation';
+    if (location.pathname === "/my-dashboard") return "My Workbench";
+    if (location.pathname === "/cohi-chat") return "Cohi Chat";
+    return "Navigation";
   };
 
   // Render mobile menu content
@@ -341,7 +571,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
           Navigation
         </SheetTitle>
       </SheetHeader>
-      
+
       <div className="flex-1 overflow-y-auto px-4 py-6 space-y-6">
         {/* Tenant Selector - Mobile (collapsible section) */}
         {isPlatformAdmin && (
@@ -366,7 +596,8 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
           <div className="space-y-1">
             {insightsMenuConfig.map((section) => {
               const Icon = section.icon;
-              const isSectionActive = isInsightsPage && location.hash === `#section-${section.id}`;
+              const isSectionActive =
+                isInsightsPage && location.hash === `#section-${section.id}`;
               return (
                 <button
                   key={section.id}
@@ -378,7 +609,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                     "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
                     isSectionActive
                       ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                      : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                      : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800",
                   )}
                 >
                   <Icon className="w-4 h-4 flex-shrink-0" />
@@ -405,7 +636,8 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                 {topTieringMenuGroups.coreAnalytics.items.map((item) => {
                   const Icon = item.icon;
                   const itemRoute = routeMap[item.id];
-                  const isItemActive = itemRoute && location.pathname === itemRoute;
+                  const isItemActive =
+                    itemRoute && location.pathname === itemRoute;
                   return (
                     <button
                       key={item.id}
@@ -417,7 +649,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                         "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
                         isItemActive
                           ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                          : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                          : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800",
                       )}
                     >
                       <Icon className="w-4 h-4 flex-shrink-0" />
@@ -437,7 +669,8 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                 {topTieringMenuGroups.performance.items.map((item) => {
                   const Icon = item.icon;
                   const itemRoute = routeMap[item.id];
-                  const isItemActive = itemRoute && location.pathname === itemRoute;
+                  const isItemActive =
+                    itemRoute && location.pathname === itemRoute;
                   return (
                     <button
                       key={item.id}
@@ -449,7 +682,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                         "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
                         isItemActive
                           ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                          : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                          : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800",
                       )}
                     >
                       <Icon className="w-4 h-4 flex-shrink-0" />
@@ -470,7 +703,8 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                 {topTieringMenuGroups.sales.items.map((item) => {
                   const Icon = item.icon;
                   const itemRoute = routeMap[item.id];
-                  const isItemActive = itemRoute && location.pathname === itemRoute;
+                  const isItemActive =
+                    itemRoute && location.pathname === itemRoute;
                   return (
                     <button
                       key={item.id}
@@ -482,7 +716,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                         "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
                         isItemActive
                           ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                          : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                          : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800",
                       )}
                     >
                       <Icon className="w-4 h-4 flex-shrink-0" />
@@ -503,7 +737,8 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                 {topTieringMenuGroups.operations.items.map((item) => {
                   const Icon = item.icon;
                   const itemRoute = routeMap[item.id];
-                  const isItemActive = itemRoute && location.pathname === itemRoute;
+                  const isItemActive =
+                    itemRoute && location.pathname === itemRoute;
                   return (
                     <button
                       key={item.id}
@@ -515,7 +750,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                         "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
                         isItemActive
                           ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                          : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                          : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800",
                       )}
                     >
                       <Icon className="w-4 h-4 flex-shrink-0" />
@@ -532,28 +767,48 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
         <div>
           <button
             onClick={() => {
-              navigate('/my-dashboard');
+              navigate("/my-dashboard");
               setMobileMenuOpen(false);
             }}
             className={cn(
               "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
-              isActive('/my-dashboard')
+              isActive("/my-dashboard")
                 ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800",
             )}
+            data-track="nav_workbench"
           >
             <LayoutPanelLeft className="w-4 h-4 flex-shrink-0" />
             <span>My Workbench</span>
           </button>
         </div>
 
+        {/* Research Lab */}
+        <div>
+          <button
+            data-track="nav_research"
+            onClick={() => {
+              navigate("/research");
+              setMobileMenuOpen(false);
+            }}
+            className={cn(
+              "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
+              isActive("/research")
+                ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800",
+            )}
+          >
+            <FlaskConical className="w-4 h-4 flex-shrink-0" />
+            <span>Research Lab</span>
+          </button>
+        </div>
       </div>
     </div>
   );
 
   return (
-    <nav 
-      className="fixed top-0 left-0 right-0 z-50 border-b border-slate-200/50 bg-white/80 backdrop-blur-xl dark:border-slate-800/50 dark:bg-slate-950/70"
+    <nav
+      className="fixed top-0 left-0 right-0 z-50 border-b border-slate-200/50 bg-white/80 backdrop-blur-xl dark:border-slate-800/50 dark:bg-slate-950/70 shadow-[0_8px_32px_rgba(15,23,42,0.08)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.24)]"
       role="navigation"
       aria-label="Main navigation"
     >
@@ -563,6 +818,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
           <div className="flex items-center min-w-0">
             <Link
               to="/"
+              data-track="nav_home"
               className="flex items-center gap-2 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background hover:opacity-90 transition-opacity"
               aria-label="Go to home page"
             >
@@ -574,48 +830,59 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
           {isAuthenticated && (
             <div className="hidden lg:flex flex-1 justify-center items-center gap-2">
               {/* Insights Dropdown */}
-              <div 
+              <div
                 ref={insightsRef}
                 className="relative"
                 onMouseEnter={() => {
-                  if (insightsTimeoutRef.current) clearTimeout(insightsTimeoutRef.current);
+                  if (insightsTimeoutRef.current)
+                    clearTimeout(insightsTimeoutRef.current);
                   setInsightsOpen(true);
                 }}
                 onMouseLeave={() => {
-                  insightsTimeoutRef.current = setTimeout(() => setInsightsOpen(false), 150);
+                  insightsTimeoutRef.current = setTimeout(
+                    () => setInsightsOpen(false),
+                    150,
+                  );
                 }}
               >
                 <button
+                  data-track="nav_insights"
                   onClick={() => {
                     if (!isInsightsPage) {
-                      navigate('/insights');
+                      navigate("/insights");
                     } else {
                       setInsightsOpen(!insightsOpen);
                     }
                   }}
-                  onKeyDown={(e) => handleKeyDown(e, 'insights')}
+                  onKeyDown={(e) => handleKeyDown(e, "insights")}
                   aria-haspopup="true"
                   aria-expanded={insightsOpen}
                   aria-label="Insights menu"
                   className={cn(
                     topNavPillBase,
-                    (insightsOpen || isInsightsPage) ? topNavPillActive : topNavPillDefault
+                    insightsOpen || isInsightsPage
+                      ? topNavPillActive
+                      : topNavPillDefault,
                   )}
                 >
-                  <LayoutGrid className={cn(
-                    "w-4 h-4 transition-colors duration-200",
-                    (insightsOpen || isInsightsPage) 
-                      ? "text-slate-900 dark:text-slate-100" 
-                      : "text-slate-500 dark:text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200"
-                  )} />
+                  <LayoutGrid
+                    className={cn(
+                      "w-4 h-4 transition-colors duration-200",
+                      insightsOpen || isInsightsPage
+                        ? "text-slate-900 dark:text-slate-100"
+                        : "text-slate-500 dark:text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200",
+                    )}
+                  />
                   <span>Insights</span>
-                  <ChevronDown className={cn(
-                    "w-3.5 h-3.5 transition-all duration-200",
-                    insightsOpen && "rotate-180",
-                    (insightsOpen || isInsightsPage) 
-                      ? "text-slate-900 dark:text-slate-100" 
-                      : "text-slate-400 dark:text-slate-500 group-hover:text-slate-700 dark:group-hover:text-slate-200"
-                  )} />
+                  <ChevronDown
+                    className={cn(
+                      "w-3.5 h-3.5 transition-all duration-200",
+                      insightsOpen && "rotate-180",
+                      insightsOpen || isInsightsPage
+                        ? "text-slate-900 dark:text-slate-100"
+                        : "text-slate-400 dark:text-slate-500 group-hover:text-slate-700 dark:group-hover:text-slate-200",
+                    )}
+                  />
                 </button>
 
                 <AnimatePresence>
@@ -633,21 +900,24 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                       <div className="p-4 bg-gradient-to-br from-slate-50/50 to-white dark:from-slate-800/50 dark:to-slate-900 border-b border-slate-100 dark:border-slate-800">
                         <div className="px-2 py-1 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                           Dashboard Sections
-              </div>
-              </div>
+                        </div>
+                      </div>
                       <div className="p-4">
                         <div className="flex flex-col gap-2">
                           {insightsMenuConfig.map((section, index) => {
                             const Icon = section.icon;
                             const style =
-                              section.id === 'aletheiaInsights'
+                              section.id === "aletheiaInsights"
                                 ? iconStyleMap.indigo
                                 : iconStyleMap.amber;
-                            const isSectionActive = isInsightsPage && location.hash === `#section-${section.id}`;
+                            const isSectionActive =
+                              isInsightsPage &&
+                              location.hash === `#section-${section.id}`;
                             const isFocused = focusedIndex === index;
                             return (
                               <button
                                 key={section.id}
+                                data-track={`nav_section_${section.id}`}
                                 onClick={() => scrollToSection(section.id)}
                                 onFocus={() => setFocusedIndex(index)}
                                 className={cn(
@@ -655,89 +925,95 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                                   isSectionActive
                                     ? dropdownItemActive
                                     : isFocused
-                                    ? dropdownItemFocus
-                                    : dropdownItemDefault
+                                      ? dropdownItemFocus
+                                      : dropdownItemDefault,
                                 )}
                                 role="menuitem"
                               >
-                                <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-all duration-300", style.bg, isSectionActive && "ring-1 ring-slate-200/60 dark:ring-slate-700/60")}>
-                                  <Icon className={cn("w-4 h-4 transition-all duration-300", style.icon, isSectionActive && "scale-110")} />
+                                <div
+                                  className={cn(
+                                    "w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-all duration-300",
+                                    style.bg,
+                                    isSectionActive &&
+                                      "ring-1 ring-slate-200/60 dark:ring-slate-700/60",
+                                  )}
+                                >
+                                  <Icon
+                                    className={cn(
+                                      "w-4 h-4 transition-all duration-300",
+                                      style.icon,
+                                      isSectionActive && "scale-110",
+                                    )}
+                                  />
                                 </div>
-                                <span className="whitespace-nowrap text-left">{section.label}</span>
+                                <span className="whitespace-nowrap text-left">
+                                  {section.label}
+                                </span>
                               </button>
                             );
                           })}
-              </div>
-            </div>
+                        </div>
+                      </div>
                     </motion.div>
                   )}
                 </AnimatePresence>
-                </div>
-                
+              </div>
+
               {/* Top Tiering Dropdown */}
-              <div 
+              <div
                 ref={topTieringRef}
                 className="relative"
                 onMouseEnter={() => {
-                  if (topTieringTimeoutRef.current) clearTimeout(topTieringTimeoutRef.current);
-                  if (topTieringAutoCloseRef.current) clearTimeout(topTieringAutoCloseRef.current);
+                  if (topTieringTimeoutRef.current)
+                    clearTimeout(topTieringTimeoutRef.current);
                   setTopTieringSubOpen(true);
                   setTopTieringOpen(true);
-                  topTieringAutoCloseRef.current = setTimeout(() => {
-                    topTieringAutoCloseRef.current = null;
-                    setTopTieringOpen(false);
-                  }, 6000);
                 }}
                 onMouseLeave={() => {
-                  if (topTieringAutoCloseRef.current) clearTimeout(topTieringAutoCloseRef.current);
-                  topTieringAutoCloseRef.current = null;
-                  topTieringTimeoutRef.current = setTimeout(() => setTopTieringOpen(false), 150);
+                  topTieringTimeoutRef.current = setTimeout(
+                    () => setTopTieringOpen(false),
+                    150,
+                  );
                 }}
               >
                 <button
                   onClick={() => {
                     if (!isTopTieringPage) {
-                      navigate('/loan-funnel');
+                      navigate("/performance/toptiering-comparison");
                     } else {
-                      const next = !topTieringOpen;
-                      if (next) {
-                        if (topTieringAutoCloseRef.current) clearTimeout(topTieringAutoCloseRef.current);
-                        setTopTieringSubOpen(true);
-                        setTopTieringOpen(true);
-                        topTieringAutoCloseRef.current = setTimeout(() => {
-                          topTieringAutoCloseRef.current = null;
-                          setTopTieringOpen(false);
-                        }, 6000);
-                      } else {
-                        if (topTieringAutoCloseRef.current) clearTimeout(topTieringAutoCloseRef.current);
-                        topTieringAutoCloseRef.current = null;
-                        setTopTieringOpen(false);
-                      }
+                      setTopTieringSubOpen(true);
+                      setTopTieringOpen(!topTieringOpen);
                     }
                   }}
-                  onKeyDown={(e) => handleKeyDown(e, 'toptiering')}
+                  onKeyDown={(e) => handleKeyDown(e, "toptiering")}
                   aria-haspopup="true"
                   aria-expanded={topTieringOpen}
-                  aria-label="Dashboard menu"
+                  aria-label="Dashboards menu"
                   className={cn(
                     topNavPillBase,
-                    (topTieringOpen || isTopTieringPage) ? topNavPillActive : topNavPillDefault
+                    topTieringOpen || isTopTieringPage
+                      ? topNavPillActive
+                      : topNavPillDefault,
                   )}
                 >
-                  <TrendingUp className={cn(
-                    "w-4 h-4 transition-colors duration-200",
-                    (topTieringOpen || isTopTieringPage) 
-                      ? "text-slate-900 dark:text-slate-100" 
-                      : "text-slate-500 dark:text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200"
-                  )} />
-                  <span>Dashboard</span>
-                  <ChevronDown className={cn(
-                    "w-3.5 h-3.5 transition-all duration-200",
-                    topTieringOpen && "rotate-180",
-                    (topTieringOpen || isTopTieringPage) 
-                      ? "text-slate-900 dark:text-slate-100" 
-                      : "text-slate-400 dark:text-slate-500 group-hover:text-slate-700 dark:group-hover:text-slate-200"
-                  )} />
+                  <TrendingUp
+                    className={cn(
+                      "w-4 h-4 transition-colors duration-200",
+                      topTieringOpen || isTopTieringPage
+                        ? "text-slate-900 dark:text-slate-100"
+                        : "text-slate-500 dark:text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200",
+                    )}
+                  />
+                  <span>Dashboards</span>
+                  <ChevronDown
+                    className={cn(
+                      "w-3.5 h-3.5 transition-all duration-200",
+                      topTieringOpen && "rotate-180",
+                      topTieringOpen || isTopTieringPage
+                        ? "text-slate-900 dark:text-slate-100"
+                        : "text-slate-400 dark:text-slate-500 group-hover:text-slate-700 dark:group-hover:text-slate-200",
+                    )}
+                  />
                 </button>
 
                 <AnimatePresence>
@@ -748,30 +1024,81 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: 8, scale: 0.95 }}
                       transition={{ duration: 0.15 }}
-                      className="absolute top-full left-0 mt-2 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200/80 dark:border-slate-700/80 overflow-hidden z-50 min-w-[280px] sm:min-w-[360px] lg:min-w-[480px] backdrop-blur-sm"
+                      className="absolute top-full left-0 pt-1.5 bg-transparent z-50 w-[min(98vw,1280px)] max-h-[calc(100vh-6rem)] flex flex-col"
                       role="menu"
-                      aria-label="Dashboard submenu"
+                      aria-label="Dashboards submenu"
                     >
-                      <div className="p-5 space-y-5">
+                      <div className="flex-1 min-h-0 flex flex-col rounded-2xl shadow-[0_25px_50px_-12px_rgba(0,0,0,0.15)] dark:shadow-[0_25px_50px_-12px_rgba(0,0,0,0.4)] border border-slate-200/60 dark:border-slate-700/60 overflow-hidden bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl">
+                      <div className="h-0.5 bg-gradient-to-r from-blue-500 via-indigo-500 to-violet-500 opacity-60 shrink-0" aria-hidden />
+                      <div className="p-4 overflow-y-auto scrollbar-hide flex-1 min-h-0">
+                        <div
+                          className={cn(
+                            "grid gap-x-2 gap-y-3",
+                            topTieringSubOpen
+                              ? "grid-cols-2 sm:grid-cols-3 lg:[grid-template-columns:1fr_1.1fr_1.2fr]"
+                              : "grid-cols-2",
+                          )}
+                        >
                         {/* Dashboard - main category */}
                         <div>
-                          <div className="px-2 py-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-                            <div className="w-1 h-4 bg-gradient-to-b from-blue-500 to-indigo-500 rounded-full" />
-                            Dashboard
+                          <div className="px-1 py-1.5 mb-2 flex items-center gap-1.5">
+                            <div className="w-0.5 h-4 rounded-full bg-gradient-to-b from-blue-500 via-indigo-500 to-violet-500 opacity-70" />
+                            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                              Dashboards
+                            </span>
                           </div>
-                          <div className="grid grid-cols-2 gap-3">
+                          <div className="grid grid-cols-1 gap-1">
                             {[
-                              { id: 'leaderboard', label: 'Leaderboard', icon: Trophy, hash: '#section-leaderboard', iconColor: 'amber' as const },
-                              { id: 'executiveDashboard', label: 'Business Overview', icon: Target, hash: '#section-executiveDashboard', iconColor: 'blue' as const },
-                              { id: 'closingFalloutForecast', label: 'Closing & Fallout Forecast', icon: BarChart3, hash: '#section-closingFalloutForecast', iconColor: 'indigo' as const },
+                              {
+                                id: "leaderboard",
+                                label: "Leaderboard",
+                                icon: Trophy,
+                                hash: "#section-leaderboard",
+                                iconColor: "amber" as const,
+                              },
+                              {
+                                id: "executiveDashboard",
+                                label: "Business Overview",
+                                icon: Target,
+                                hash: "#section-executiveDashboard",
+                                iconColor: "blue" as const,
+                              },
+                              {
+                                id: "myWorkbench",
+                                label: "My Workbench",
+                                icon: Grid3X3,
+                                route: "/my-dashboard",
+                                iconColor: "violet" as const,
+                              },
+                              {
+                                id: "falloutForecastPage",
+                                label: "Fallout Report",
+                                icon: BarChart3,
+                                route: "/fallout-forecast",
+                                iconColor: "indigo" as const,
+                              },
                             ].map((item) => {
                               const Icon = item.icon;
-                              const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
-                              const itemRoute = (item as { route?: string }).route ?? (item.hash ? `/insights${item.hash}` : routeMap[item.id]);
+                              const style =
+                                iconStyleMap[item.iconColor] ||
+                                iconStyleMap.blue;
+                              const itemRoute =
+                                (item as { route?: string }).route ??
+                                (item.hash
+                                  ? `/insights${item.hash}`
+                                  : routeMap[item.id]);
                               const isItemActive = itemRoute
-                                ? location.pathname === itemRoute.split('#')[0] &&
-                                  (itemRoute.includes('#') ? location.hash === `#section-${item.id}` : true)
+                                ? location.pathname ===
+                                    itemRoute.split("#")[0] &&
+                                  (itemRoute.includes("#")
+                                    ? location.hash === `#section-${item.id}`
+                                    : true)
                                 : false;
+                              const pinItem: PinnedItem = {
+                                type: "section",
+                                id: item.id as PinnedItem["id"],
+                              };
+                              const pinned = isPinned(pinItem);
                               return (
                                 <button
                                   key={item.id}
@@ -779,179 +1106,417 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                                     if (item.hash) {
                                       scrollToSection(item.id);
                                     } else {
-                                      handleTopTieringClick(item.id, (item as { route?: string }).route);
+                                      handleTopTieringClick(
+                                        item.id,
+                                        (item as { route?: string }).route,
+                                      );
                                     }
                                   }}
                                   className={cn(
-                                    dropdownItemBase,
-                                    isItemActive ? dropdownItemActive : dropdownItemDefault
+                                    compactItemBase,
+                                    isItemActive
+                                      ? compactItemActive
+                                      : compactItemDefault,
                                   )}
                                   role="menuitem"
                                 >
-                                  <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 transition-all duration-300", style.bg, isItemActive && "ring-1 ring-emerald-400/50")}>
-                                    <Icon className={cn("w-4 h-4", style.icon, isItemActive && "scale-110")} />
+                                  <div
+                                    className={cn(
+                                      "w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors",
+                                      style.bg,
+                                      isItemActive &&
+                                        "ring-1 ring-emerald-400/50",
+                                    )}
+                                  >
+                                    <Icon
+                                      className={cn(
+                                        "w-3.5 h-3.5",
+                                        style.icon,
+                                        isItemActive && "scale-110",
+                                      )}
+                                    />
                                   </div>
-                                  <span className="whitespace-nowrap text-left">{item.label}</span>
+                                  <div className="flex items-center gap-1 flex-1 min-w-0">
+                                    <span className="truncate text-left">
+                                      {item.label}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        togglePinned(pinItem);
+                                      }}
+                                      className="shrink-0 ml-6 p-0.5 rounded hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
+                                      title={pinned ? "Unpin from sidebar" : "Pin to sidebar"}
+                                      aria-label={pinned ? "Unpin" : "Pin to sidebar"}
+                                    >
+                                      {pinned ? (
+                                        <PinOff className="w-3 h-3 text-amber-500" />
+                                      ) : (
+                                        <Pin className="w-3 h-3 text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300" />
+                                      )}
+                                    </button>
+                                  </div>
                                 </button>
                               );
                             })}
                           </div>
                         </div>
 
-                        {/* Top Tiering Submenu */}
-                        <div>
-                          <button
-                            type="button"
-                            onClick={() => setTopTieringSubOpen((prev) => !prev)}
-                            className={cn(
-                              dropdownItemBase,
-                              topTieringSubOpen ? dropdownItemActive : dropdownItemDefault,
-                              "w-full justify-between"
-                            )}
-                          >
-                            <span className="flex items-center gap-2.5">
-                              <ArrowLeftRight className="w-4 h-4 text-blue-500 dark:text-blue-400" />
-                              Top Tiering
-                            </span>
-                            <ChevronDown className={cn("w-4 h-4 transition-transform", topTieringSubOpen && "rotate-180")} />
-                          </button>
-
-                          {topTieringSubOpen && (
-                            <div className="mt-3 space-y-5">
-                              <div>
-                                <div className="px-2 py-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-                                  <div className="w-1 h-4 bg-gradient-to-b from-blue-500 to-indigo-500 rounded-full" />
+                        {/* Top Tiering: expand button or 4 columns when expanded */}
+                        {topTieringSubOpen ? (
+                          <>
+                            {/* Core Analytics column */}
+                            <div>
+                              <div className="px-1 py-1.5 mb-2 flex items-center gap-1.5">
+                                <div className="w-0.5 h-4 rounded-full bg-gradient-to-b from-blue-500 via-indigo-500 to-violet-500 opacity-70" />
+                                <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                                   Core Analytics
-                                </div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                  {topTieringMenuGroups.coreAnalytics.items.map((item) => {
-                                    const Icon = item.icon;
-                                    const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
-                                    const itemRoute = routeMap[item.id];
-                                    const isItemActive = itemRoute && location.pathname === itemRoute;
-                                    return (
-                                      <button
-                                        key={item.id}
-                                        onClick={() => handleTopTieringClick(item.id)}
-                                        className={cn(
-                                          dropdownItemBase,
-                                          isItemActive ? dropdownItemActive : dropdownItemDefault
-                                        )}
-                                        role="menuitem"
-                                      >
-                                        <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 transition-all duration-300", style.bg, isItemActive && "ring-1 ring-emerald-400/50")}>
-                                          <Icon className={cn("w-4 h-4", style.icon, isItemActive && "scale-110")} />
-                                        </div>
-                                        <span className="whitespace-nowrap text-left">{item.label}</span>
-                                      </button>
-                                    );
-                                  })}
-                                </div>
+                                </span>
                               </div>
-
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-slate-200/80 dark:border-slate-700/80">
-                                <div>
-                                  <div className="flex items-center gap-2 mb-3 px-2">
-                                    <Users className="w-4 h-4 text-blue-500 dark:text-blue-400" />
-                                    <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                                      Sales
-                                    </div>
-                                  </div>
-                                  <div className="space-y-1.5">
-                                    {topTieringMenuGroups.sales.items.map((item) => {
+                              <div className="space-y-1">
+                                  {topTieringMenuGroups.coreAnalytics.items.map(
+                                    (item) => {
                                       const Icon = item.icon;
-                                      const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
+                                      const style =
+                                        iconStyleMap[item.iconColor] ||
+                                        iconStyleMap.blue;
                                       const itemRoute = routeMap[item.id];
-                                      const isItemActive = itemRoute && location.pathname === itemRoute;
+                                      const isItemActive =
+                                        itemRoute &&
+                                        location.pathname === itemRoute;
+                                      const pinItem: PinnedItem = {
+                                        type: "route",
+                                        id: item.id,
+                                        path: itemRoute || "",
+                                        label: item.label,
+                                      };
+                                      const pinned = isPinned(pinItem);
                                       return (
                                         <button
                                           key={item.id}
-                                          onClick={() => handleTopTieringClick(item.id)}
+                                          onClick={() =>
+                                            handleTopTieringClick(item.id)
+                                          }
                                           className={cn(
-                                            dropdownItemBase,
-                                            isItemActive ? dropdownItemActive : dropdownItemDefault
+                                            compactItemBase,
+                                            isItemActive
+                                              ? compactItemActive
+                                              : compactItemDefault,
                                           )}
                                           role="menuitem"
                                         >
-                                          <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-all duration-300", style.bg, isItemActive && "ring-1 ring-emerald-400/50")}>
-                                            <Icon className={cn("w-3.5 h-3.5", style.icon, isItemActive && "scale-110")} />
+                                          <div
+                                            className={cn(
+                                              "w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors",
+                                              style.bg,
+                                              isItemActive &&
+                                                "ring-1 ring-emerald-400/50",
+                                            )}
+                                          >
+                                            <Icon
+                                              className={cn(
+                                                "w-3.5 h-3.5",
+                                                style.icon,
+                                                isItemActive && "scale-110",
+                                              )}
+                                            />
                                           </div>
-                                          <span className="whitespace-nowrap">{item.label}</span>
+                                          <div className="flex items-center gap-1 flex-1 min-w-0">
+                                            <span className="truncate text-left">
+                                              {item.label}
+                                            </span>
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                togglePinned(pinItem);
+                                              }}
+                                              className="shrink-0 ml-6 p-0.5 rounded hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
+                                            title={pinned ? "Unpin from sidebar" : "Pin to sidebar"}
+                                            aria-label={pinned ? "Unpin" : "Pin to sidebar"}
+                                          >
+                                            {pinned ? (
+                                              <PinOff className="w-3 h-3 text-amber-500" />
+                                            ) : (
+                                              <Pin className="w-3 h-3 text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300" />
+                                            )}
+                                          </button>
+                                          </div>
                                         </button>
                                       );
-                                    })}
-                                  </div>
-                                </div>
-
-                                <div>
-                                  <div className="flex items-center gap-2 mb-3 px-2">
-                                    <Settings className="w-4 h-4 text-blue-500 dark:text-blue-400" />
-                                    <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                                      Operations
-                                    </div>
-                                  </div>
-                                  <div className="space-y-1.5">
-                                    {topTieringMenuGroups.operations.items.map((item) => {
-                                      const Icon = item.icon;
-                                      const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
-                                      const itemRoute = routeMap[item.id];
-                                      const isItemActive = itemRoute && location.pathname === itemRoute;
-                                      return (
-                                        <button
-                                          key={item.id}
-                                          onClick={() => handleTopTieringClick(item.id)}
-                                          className={cn(
-                                            dropdownItemBase,
-                                            isItemActive ? dropdownItemActive : dropdownItemDefault
-                                          )}
-                                          role="menuitem"
-                                        >
-                                          <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-all duration-300", style.bg, isItemActive && "ring-1 ring-emerald-400/50")}>
-                                            <Icon className={cn("w-3.5 h-3.5", style.icon, isItemActive && "scale-110")} />
-                                          </div>
-                                          <span className="whitespace-nowrap">{item.label}</span>
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              </div>
-
-                              <div className="pt-3 border-t border-slate-200/80 dark:border-slate-700/80">
-                                <div className="flex items-center gap-2 mb-3 px-2">
-                                  <Calculator className="w-4 h-4 text-blue-500 dark:text-blue-400" />
-                                  <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                                    Financial Modeling
-                                  </div>
-                                </div>
-                                <div className="space-y-1.5">
-                                  {topTieringMenuGroups.performance.items.map((item) => {
-                                    const Icon = item.icon;
-                                    const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
-                                    const itemRoute = routeMap[item.id];
-                                    const isItemActive = itemRoute && location.pathname === itemRoute;
-                                    return (
-                                      <button
-                                        key={item.id}
-                                        onClick={() => handleTopTieringClick(item.id)}
-                                        className={cn(
-                                          dropdownItemBase,
-                                          isItemActive ? dropdownItemActive : dropdownItemDefault
-                                        )}
-                                        role="menuitem"
-                                      >
-                                        <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-all duration-300", style.bg, isItemActive && "ring-1 ring-emerald-400/50")}>
-                                          <Icon className={cn("w-3.5 h-3.5", style.icon, isItemActive && "scale-110")} />
-                                        </div>
-                                        <span className="whitespace-nowrap">{item.label}</span>
-                                      </button>
-                                    );
-                                  })}
-                                </div>
+                                    },
+                                  )}
                               </div>
                             </div>
-                          )}
+
+                            {/* Sales + Operations column (Operations below Sales, Financial Modeling below Operations) */}
+                            <div>
+                              <div className="px-1 py-1.5 mb-2 flex items-center gap-1.5">
+                                <div className="w-0.5 h-4 rounded-full bg-gradient-to-b from-blue-500 via-indigo-500 to-violet-500 opacity-70" />
+                                <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                                  Sales
+                                </span>
+                              </div>
+                                  <div className="space-y-1">
+                                    {topTieringMenuGroups.sales.items.map(
+                                      (item) => {
+                                        const Icon = item.icon;
+                                        const style =
+                                          iconStyleMap[item.iconColor] ||
+                                          iconStyleMap.blue;
+                                        const itemRoute = routeMap[item.id];
+                                        const isItemActive =
+                                          itemRoute &&
+                                          location.pathname === itemRoute;
+                                        const pinItem: PinnedItem = {
+                                          type: "route",
+                                          id: item.id,
+                                          path: itemRoute || "",
+                                          label: item.label,
+                                        };
+                                        const pinned = isPinned(pinItem);
+                                        return (
+                                          <button
+                                            key={item.id}
+                                            onClick={() =>
+                                              handleTopTieringClick(item.id)
+                                            }
+                                            className={cn(
+                                            compactItemBase,
+                                            isItemActive
+                                              ? compactItemActive
+                                              : compactItemDefault,
+                                            )}
+                                            role="menuitem"
+                                          >
+                                            <div
+                                              className={cn(
+                                                "w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors",
+                                                style.bg,
+                                                isItemActive &&
+                                                  "ring-1 ring-emerald-400/50",
+                                              )}
+                                            >
+                                              <Icon
+                                                className={cn(
+                                                  "w-3.5 h-3.5",
+                                                  style.icon,
+                                                  isItemActive && "scale-110",
+                                                )}
+                                              />
+                                            </div>
+                                            <div className="flex items-center gap-1 flex-1 min-w-0">
+                                              <span className="truncate text-left">
+                                                {item.label}
+                                              </span>
+                                              <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  togglePinned(pinItem);
+                                                }}
+                                                className="shrink-0 ml-6 p-0.5 rounded hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
+                                              title={pinned ? "Unpin from sidebar" : "Pin to sidebar"}
+                                              aria-label={pinned ? "Unpin" : "Pin to sidebar"}
+                                            >
+                                              {pinned ? (
+                                                <PinOff className="w-3 h-3 text-amber-500" />
+                                              ) : (
+                                                <Pin className="w-3 h-3 text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300" />
+                                              )}
+                                            </button>
+                                            </div>
+                                          </button>
+                                        );
+                                      },
+                                    )}
+                              </div>
+                              <div className="px-1 py-1.5 mt-3 mb-1.5 flex items-center gap-1.5">
+                                <div className="w-0.5 h-4 rounded-full bg-gradient-to-b from-blue-500 via-indigo-500 to-violet-500 opacity-70" />
+                                <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                                  Operations
+                                </span>
+                              </div>
+                                  <div className="space-y-1">
+                                    {topTieringMenuGroups.operations.items.map(
+                                      (item) => {
+                                        const Icon = item.icon;
+                                        const style =
+                                          iconStyleMap[item.iconColor] ||
+                                          iconStyleMap.blue;
+                                        const itemRoute = routeMap[item.id];
+                                        const isItemActive =
+                                          itemRoute &&
+                                          location.pathname === itemRoute;
+                                        const pinItem: PinnedItem = {
+                                          type: "route",
+                                          id: item.id,
+                                          path: itemRoute || "",
+                                          label: item.label,
+                                        };
+                                        const pinned = isPinned(pinItem);
+                                        return (
+                                          <button
+                                            key={item.id}
+                                            onClick={() =>
+                                              handleTopTieringClick(item.id)
+                                            }
+                                            className={cn(
+                                            compactItemBase,
+                                            isItemActive
+                                              ? compactItemActive
+                                              : compactItemDefault,
+                                            )}
+                                            role="menuitem"
+                                          >
+                                            <div
+                                              className={cn(
+                                                "w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors",
+                                                style.bg,
+                                                isItemActive &&
+                                                  "ring-1 ring-emerald-400/50",
+                                              )}
+                                            >
+                                              <Icon
+                                                className={cn(
+                                                  "w-3.5 h-3.5",
+                                                  style.icon,
+                                                  isItemActive && "scale-110",
+                                                )}
+                                              />
+                                            </div>
+                                            <div className="flex items-center gap-1 flex-1 min-w-0">
+                                              <span className="truncate text-left">
+                                                {item.label}
+                                              </span>
+                                              <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  togglePinned(pinItem);
+                                                }}
+                                                className="shrink-0 ml-6 p-0.5 rounded hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
+                                              title={pinned ? "Unpin from sidebar" : "Pin to sidebar"}
+                                              aria-label={pinned ? "Unpin" : "Pin to sidebar"}
+                                            >
+                                              {pinned ? (
+                                                <PinOff className="w-3 h-3 text-amber-500" />
+                                              ) : (
+                                                <Pin className="w-3 h-3 text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300" />
+                                              )}
+                                            </button>
+                                            </div>
+                                          </button>
+                                        );
+                                      },
+                                    )}
+                              </div>
+                              <div className="px-1 py-1.5 mt-3 mb-1.5 flex items-center gap-1.5">
+                                <div className="w-0.5 h-4 rounded-full bg-gradient-to-b from-blue-500 via-indigo-500 to-violet-500 opacity-70" />
+                                <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                                  Financial Modeling
+                                </span>
+                              </div>
+                              <div className="space-y-1">
+                                {topTieringMenuGroups.performance.items.map(
+                                  (item) => {
+                                    const Icon = item.icon;
+                                    const style =
+                                      iconStyleMap[item.iconColor] ||
+                                      iconStyleMap.blue;
+                                    const itemRoute = routeMap[item.id];
+                                    const isItemActive =
+                                      itemRoute &&
+                                      location.pathname === itemRoute;
+                                    const pinItem: PinnedItem = {
+                                      type: "route",
+                                      id: item.id,
+                                      path: itemRoute || "",
+                                      label: item.label,
+                                    };
+                                    const pinned = isPinned(pinItem);
+                                    return (
+                                      <button
+                                        key={item.id}
+                                        onClick={() =>
+                                          handleTopTieringClick(item.id)
+                                        }
+                                        className={cn(
+                                            compactItemBase,
+                                            isItemActive
+                                              ? compactItemActive
+                                              : compactItemDefault,
+                                        )}
+                                        role="menuitem"
+                                      >
+                                        <div
+                                          className={cn(
+                                            "w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors",
+                                            style.bg,
+                                            isItemActive &&
+                                              "ring-1 ring-emerald-400/50",
+                                          )}
+                                        >
+                                          <Icon
+                                            className={cn(
+                                              "w-3.5 h-3.5",
+                                              style.icon,
+                                              isItemActive && "scale-110",
+                                            )}
+                                          />
+                                        </div>
+                                        <div className="flex items-center gap-1 flex-1 min-w-0">
+                                          <span className="truncate text-left">
+                                            {item.label}
+                                          </span>
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              togglePinned(pinItem);
+                                            }}
+                                            className="shrink-0 ml-6 p-0.5 rounded hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
+                                            title={pinned ? "Unpin from sidebar" : "Pin to sidebar"}
+                                            aria-label={pinned ? "Unpin" : "Pin to sidebar"}
+                                          >
+                                            {pinned ? (
+                                              <PinOff className="w-3 h-3 text-amber-500" />
+                                            ) : (
+                                              <Pin className="w-3 h-3 text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300" />
+                                            )}
+                                          </button>
+                                        </div>
+                                      </button>
+                                    );
+                                  },
+                                )}
+                              </div>
+                            </div>
+                          </>
+                        ) : (
+                          <div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setTopTieringSubOpen((prev) => !prev)
+                              }
+                              className={cn(
+                                dropdownItemBase,
+                                dropdownItemDefault,
+                                "w-full justify-between",
+                              )}
+                            >
+                              <span className="flex items-center gap-2.5">
+                                <ArrowLeftRight className="w-4 h-4 text-blue-500 dark:text-blue-400" />
+                                Top Tiering
+                              </span>
+                              <ChevronDown className="w-4 h-4 transition-transform" />
+                            </button>
+                          </div>
+                        )}
                         </div>
+                      </div>
                       </div>
                     </motion.div>
                   )}
@@ -961,24 +1526,10 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
               {/* Divider */}
               <div className="h-6 w-px bg-slate-200 dark:bg-slate-700" />
 
-              {/* My Workbench - Direct Navigation */}
-              <button
-                onClick={() => navigate('/my-dashboard')}
-                className={cn(
-                  topNavPillBase,
-                  isActive('/my-dashboard') ? topNavPillActive : topNavPillDefault
-                )}
-                aria-label="My Workbench"
-              >
-                <Grid3X3 className={cn(
-                  "w-4 h-4 transition-colors duration-200",
-                  isActive('/my-dashboard')
-                    ? "text-slate-900 dark:text-slate-100"
-                    : "text-slate-500 dark:text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200"
-                )} />
-                <span>My Workbench</span>
-              </button>
-
+              {/* Search Dashboards - replaces My Workbench & Research Lab pills */}
+              <div className="w-[220px] min-w-[180px] max-w-[280px]">
+                <SidebarRouteSearch targets={getSidebarSearchTargets()} collapsed={false} />
+              </div>
             </div>
           )}
 
@@ -988,8 +1539,8 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
             {isAuthenticated && (
               <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
                 <SheetTrigger asChild>
-                  <Button 
-                    variant="ghost" 
+                  <Button
+                    variant="ghost"
                     size="icon"
                     className="lg:hidden h-9 w-9 rounded-lg"
                     aria-label="Open navigation menu"
@@ -1012,15 +1563,22 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
               </div>
             )}
 
-            {/* Tenant + Channel selectors - nav-style pill (visible for admins) */}
+            {/* Tenant + Channel selectors - nav-style pill */}
             {isAuthenticated && !isAdminPage && (
               <div className="hidden lg:flex items-center gap-2 rounded-lg border border-slate-200/50 dark:border-slate-700/50 bg-slate-50/80 dark:bg-slate-800/50 px-2 py-1.5">
-                <TenantSelector
-                  selectedTenantId={selectedTenantId}
-                  onTenantChange={setSelectedTenantId}
-                  compact={true}
-                />
-                <div className="h-6 w-px bg-slate-200 dark:bg-slate-600" aria-hidden />
+                {isPlatformAdmin && (
+                  <>
+                    <TenantSelector
+                      selectedTenantId={selectedTenantId}
+                      onTenantChange={setSelectedTenantId}
+                      compact={true}
+                    />
+                    <div
+                      className="h-6 w-px bg-slate-200 dark:bg-slate-600"
+                      aria-hidden
+                    />
+                  </>
+                )}
                 <ChannelSelector
                   selectedChannel={selectedChannel}
                   onChannelChange={setSelectedChannel}
@@ -1031,12 +1589,29 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
               </div>
             )}
 
-            {/* Divider before theme + user (matches center nav) */}
+            {/* Help & What's New */}
             {isAuthenticated && (
-              <div className="h-6 w-px bg-slate-200 dark:bg-slate-700 hidden lg:block" aria-hidden />
+              <div className="hidden lg:flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 rounded-lg"
+                  onClick={() => navigate("/help")}
+                  aria-label="Help center"
+                >
+                  <HelpCircle className="h-4 w-4" />
+                </Button>
+                <WhatsNewButton />
+              </div>
             )}
 
-            <ThemeIconToggle />
+            {/* Divider before theme + user (matches center nav) */}
+            {isAuthenticated && (
+              <div
+                className="h-6 w-px bg-slate-200 dark:bg-slate-700 hidden lg:block"
+                aria-hidden
+              />
+            )}
 
             {isAuthenticated ? (
               <UserMenu
@@ -1053,7 +1628,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => navigate('/login')}
+                onClick={() => navigate("/login")}
                 className="text-[13px] font-medium tracking-wide px-3 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-lg transition-colors"
               >
                 Sign In

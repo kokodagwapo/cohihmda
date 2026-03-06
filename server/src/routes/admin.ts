@@ -87,8 +87,6 @@ const createUserSchema = z.object({
     .enum([
       "super_admin",
       "tenant_admin",
-      "loan_officer",
-      "processor",
       "viewer",
       "user",
     ])
@@ -105,8 +103,6 @@ const updateUserSchema = z.object({
     .enum([
       "super_admin",
       "tenant_admin",
-      "loan_officer",
-      "processor",
       "viewer",
       "user",
     ])
@@ -415,7 +411,7 @@ router.post(
     // Prevent privilege escalation: non-platform staff cannot assign elevated roles
     const PLATFORM_ONLY_ROLES = new Set(["super_admin", "platform_admin", "support", "tenant_admin"]);
     const callerRole = req.userRole || "user";
-    const isPlatformStaff = ["super_admin", "platform_admin", "support", "admin"].includes(callerRole);
+    const isPlatformStaff = ["super_admin", "platform_admin", "support"].includes(callerRole);
     if (!isPlatformStaff && PLATFORM_ONLY_ROLES.has(validated.role)) {
       return res.status(403).json({
         error: "Forbidden",
@@ -1065,11 +1061,8 @@ router.post(
         role: z
           .enum([
             "tenant_admin",
-            "admin",
             "user",
             "viewer",
-            "loan_officer",
-            "processor",
           ])
           .default("user"),
       access_mode: z.enum(["full", "canvas_only"]).optional(),
@@ -1219,11 +1212,8 @@ router.put(
         role: z
           .enum([
             "tenant_admin",
-            "admin",
             "user",
             "viewer",
-            "loan_officer",
-            "processor",
           ])
           .optional(),
       is_active: z.boolean().optional(),
@@ -1536,7 +1526,7 @@ router.get(
 router.get(
   "/encompass-users",
   authenticateToken,
-  requireRole("super_admin", "platform_admin", "tenant_admin", "admin"),
+  requireRole("super_admin", "platform_admin", "tenant_admin"),
   async (req: AuthRequest, res) => {
     try {
       const {
@@ -1599,7 +1589,7 @@ router.get(
 router.post(
   "/encompass-users/sync",
   authenticateToken,
-  requireRole("super_admin", "platform_admin", "tenant_admin", "admin"),
+  requireRole("super_admin", "platform_admin", "tenant_admin"),
   async (req: AuthRequest, res) => {
     try {
       const { los_connection_id, tenant_id } = req.body;
@@ -1658,7 +1648,7 @@ router.post(
 router.post(
   "/encompass-users/:encompassUserId/invite",
   authenticateToken,
-  requireRole("super_admin", "platform_admin", "tenant_admin", "admin"),
+  requireRole("super_admin", "platform_admin", "tenant_admin"),
   async (req: AuthRequest, res) => {
     try {
       const encompassUserId = req.params.encompassUserId as string;
@@ -1747,7 +1737,7 @@ router.post(
 router.post(
   "/encompass-users/bulk-invite",
   authenticateToken,
-  requireRole("super_admin", "platform_admin", "tenant_admin", "admin"),
+  requireRole("super_admin", "platform_admin", "tenant_admin"),
   async (req: AuthRequest, res) => {
     try {
       const {
@@ -1834,7 +1824,7 @@ router.post(
 router.post(
   "/users/:userId/link-encompass",
   authenticateToken,
-  requireRole("super_admin", "platform_admin", "tenant_admin", "admin"),
+  requireRole("super_admin", "platform_admin", "tenant_admin"),
   async (req: AuthRequest, res) => {
     try {
       const userId = req.params.userId as string;
@@ -1916,7 +1906,7 @@ router.post(
 router.post(
   "/users/:userId/unlink-encompass",
   authenticateToken,
-  requireRole("super_admin", "platform_admin", "tenant_admin", "admin"),
+  requireRole("super_admin", "platform_admin", "tenant_admin"),
   async (req: AuthRequest, res) => {
     try {
       const userId = req.params.userId as string;
@@ -1972,7 +1962,7 @@ router.post(
 router.get(
   "/encompass-users/sync-history",
   authenticateToken,
-  requireRole("super_admin", "platform_admin", "tenant_admin", "admin"),
+  requireRole("super_admin", "platform_admin", "tenant_admin"),
   async (req: AuthRequest, res) => {
     try {
       const { los_connection_id, limit, tenant_id } = req.query;
@@ -2024,7 +2014,7 @@ router.get(
 router.post(
   "/users/:userId/sync-loan-access",
   authenticateToken,
-  requireRole("super_admin", "platform_admin", "tenant_admin", "admin"),
+  requireRole("super_admin", "platform_admin", "tenant_admin"),
   async (req: AuthRequest, res) => {
     try {
       const userId = req.params.userId as string;
@@ -2082,7 +2072,7 @@ router.post(
 router.get(
   "/users/:userId/loan-access-history",
   authenticateToken,
-  requireRole("super_admin", "platform_admin", "tenant_admin", "admin"),
+  requireRole("super_admin", "platform_admin", "tenant_admin"),
   async (req: AuthRequest, res) => {
     try {
       const userId = req.params.userId as string;
@@ -2129,7 +2119,7 @@ router.get(
 router.get(
   "/users/:userId/loan-access-debug",
   authenticateToken,
-  requireRole("super_admin", "platform_admin", "tenant_admin", "admin"),
+  requireRole("super_admin", "platform_admin", "tenant_admin"),
   async (req: AuthRequest, res) => {
     try {
       const userId = req.params.userId as string;
@@ -2249,7 +2239,7 @@ router.get(
 router.post(
   "/encompass-users/sync-all-loan-access",
   authenticateToken,
-  requireRole("super_admin", "platform_admin", "tenant_admin", "admin"),
+  requireRole("super_admin", "platform_admin", "tenant_admin"),
   async (req: AuthRequest, res) => {
     try {
       const { los_connection_id } = req.body;

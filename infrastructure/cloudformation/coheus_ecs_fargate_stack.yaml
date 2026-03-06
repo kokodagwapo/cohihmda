@@ -228,12 +228,18 @@ Parameters:
     Default: ""
     Description: FRED API key for fetching mortgage market rates (optional)
 
+  OpenAIApiKeySecretArn:
+    Type: String
+    Default: ""
+    Description: Optional Secrets Manager ARN whose SecretString is the raw OpenAI API key
+
 Conditions:
   CreateNewVPC: !Equals [!Ref NetworkMode, "new"]
   IsDevEnvironment: !Equals [!Ref Environment, "dev"]
   HasCertificate: !Not [!Equals [!Ref CertificateArn, ""]]
   HasAlertEmail: !Not [!Equals [!Ref AlertEmail, ""]]
   HasCognito: !Not [!Equals [!Ref CognitoUserPoolId, ""]]
+  HasOpenAISecret: !Not [!Equals [!Ref OpenAIApiKeySecretArn, ""]]
   WorkerDesiredCountNonZero: !Not [!Equals [!Ref WorkerDesiredCount, 0]]
 
 Rules:
@@ -657,6 +663,7 @@ Resources:
                 Resource:
                   - !Ref AuroraSecretArn
                   - !Ref JWTSecret
+                  - !If [HasOpenAISecret, !Ref OpenAIApiKeySecretArn, !Ref AWS::NoValue]
               - Effect: Allow
                 Action:
                   - kms:Decrypt
@@ -689,6 +696,7 @@ Resources:
                 Resource:
                   - !Ref AuroraSecretArn
                   - !Ref JWTSecret
+                  - !If [HasOpenAISecret, !Ref OpenAIApiKeySecretArn, !Ref AWS::NoValue]
               - Effect: Allow
                 Action:
                   - kms:Decrypt
@@ -710,6 +718,13 @@ Resources:
                   - logs:DescribeLogStreams
                   - logs:PutLogEvents
                 Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ses:SendEmail
+                  - ses:SendRawEmail
+                Resource:
+                  - !Sub "arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*"
+                  - !Sub "arn:aws:ses:${AWS::Region}:${AWS::AccountId}:configuration-set/*"
               - !If
                 - HasCognito
                 - Effect: Allow
@@ -811,6 +826,11 @@ Resources:
               ValueFrom: !Sub "${AuroraSecretArn}:username::"
             - Name: DB_PASSWORD
               ValueFrom: !Sub "${AuroraSecretArn}:password::"
+            - !If
+              - HasOpenAISecret
+              - Name: OPENAI_API_KEY
+                ValueFrom: !Ref OpenAIApiKeySecretArn
+              - !Ref AWS::NoValue
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -891,6 +911,11 @@ Resources:
               ValueFrom: !Sub "${AuroraSecretArn}:username::"
             - Name: DB_PASSWORD
               ValueFrom: !Sub "${AuroraSecretArn}:password::"
+            - !If
+              - HasOpenAISecret
+              - Name: OPENAI_API_KEY
+                ValueFrom: !Ref OpenAIApiKeySecretArn
+              - !Ref AWS::NoValue
           LogConfiguration:
             LogDriver: awslogs
             Options:

@@ -118,8 +118,7 @@ export const useTopTieringComparisonData = (
   useEffect(() => {
     const fetchTopTieringData = async () => {
       // Check if user has a valid token before making API call
-      const token = localStorage.getItem("auth_token");
-      if (!token) {
+      if (!api.hasToken()) {
         setData(null);
         setLoading(false);
         return;

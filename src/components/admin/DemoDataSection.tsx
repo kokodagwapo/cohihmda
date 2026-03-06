@@ -274,14 +274,8 @@ export function DemoDataSection({ onUploadSuccess }: DemoDataSectionProps) {
 
   const handleDownloadTemplate = async (type: 'business-overview' | 'top-tiering' | 'leaderboard' | 'combined') => {
     try {
-      const token = localStorage.getItem('auth_token');
-      const { getApiUrl } = await import('@/lib/api');
-      const apiUrl = getApiUrl();
-      const response = await fetch(`${apiUrl}/api/dashboard/csv/template?type=${type}`, {
+      const response = await api.fetchWithAuth(`/api/dashboard/csv/template?type=${type}`, {
         method: 'GET',
-        headers: token ? {
-          'Authorization': `Bearer ${token}`,
-        } : {},
         credentials: 'include',
       });
 

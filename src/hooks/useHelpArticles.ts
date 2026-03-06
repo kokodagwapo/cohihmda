@@ -6,10 +6,7 @@ import {
   type HelpArticle,
   type HelpCategory,
 } from '@/data/helpArticles';
-
-function getAuthToken(): string | null {
-  return localStorage.getItem('auth_token');
-}
+import { api } from '@/lib/api';
 
 interface ArticleOverride {
   article_id: string;
@@ -44,16 +41,12 @@ export function useHelpArticles(): UseHelpArticlesReturn {
 
   useEffect(() => {
     if (!canEdit) return;
-    const token = getAuthToken();
-    if (!token) return;
+    if (!api.hasToken()) return;
 
     let cancelled = false;
     setLoading(true);
 
-    fetch('/api/help/overrides', {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(res => res.ok ? res.json() : Promise.reject(new Error('Failed to fetch')))
+    api.request<{ overrides?: ArticleOverride[] }>('/api/help/overrides')
       .then(data => {
         if (cancelled) return;
         const map = new Map<string, ArticleOverride>();
@@ -117,19 +110,13 @@ export function useHelpArticles(): UseHelpArticlesReturn {
 
   const saveOverride = useCallback(
     async (articleId: string, data: { title?: string; summary?: string; content?: string }) => {
-      const token = getAuthToken();
-      if (!token) return;
+      if (!api.hasToken()) return;
       setSaving(true);
       try {
-        const res = await fetch(`/api/help/overrides/${articleId}`, {
+        await api.request(`/api/help/overrides/${articleId}`, {
           method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
           body: JSON.stringify(data),
         });
-        if (!res.ok) throw new Error('Failed to save');
 
         setOverrides(prev => {
           const next = new Map(prev);
@@ -152,15 +139,12 @@ export function useHelpArticles(): UseHelpArticlesReturn {
 
   const revertOverride = useCallback(
     async (articleId: string) => {
-      const token = getAuthToken();
-      if (!token) return;
+      if (!api.hasToken()) return;
       setSaving(true);
       try {
-        const res = await fetch(`/api/help/overrides/${articleId}`, {
+        await api.request(`/api/help/overrides/${articleId}`, {
           method: 'DELETE',
-          headers: { Authorization: `Bearer ${token}` },
         });
-        if (!res.ok) throw new Error('Failed to revert');
 
         setOverrides(prev => {
           const next = new Map(prev);

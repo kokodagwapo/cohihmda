@@ -376,8 +376,7 @@ export const useAletheiaData = (
       setInsightsError(null);
 
       // Check if user has a valid token before making API call
-      const token = localStorage.getItem("auth_token");
-      if (!token) {
+      if (!api.hasToken()) {
         setAllInsights([]);
         setMetadata({ usedLLM: false, generatedAt: new Date().toISOString() });
         setInsightsError("Not authenticated");
@@ -432,8 +431,7 @@ export const useAletheiaData = (
   // Fetch funnel data for briefing context
   useEffect(() => {
     const fetchFunnelData = async () => {
-      const token = localStorage.getItem("auth_token");
-      if (!token) return;
+      if (!api.hasToken()) return;
 
       try {
         const tenantParam = selectedTenantId

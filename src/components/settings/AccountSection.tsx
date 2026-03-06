@@ -24,7 +24,7 @@ function decodeJwtPayload(token: string): Record<string, any> | null {
 
 /** Check if the current session was authenticated via SSO */
 function isAuthViaSso(): boolean {
-  const token = localStorage.getItem('auth_token');
+  const token = api.getToken();
   if (!token) return false;
   const payload = decodeJwtPayload(token);
   return payload?.authMethod === 'cognito_sso';

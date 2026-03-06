@@ -1,17 +1,24 @@
 import { useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { useTutorial } from '@/contexts/TutorialContext';
-import { getUnseenEntries } from '@/data/whatsNew';
+import { getUnseenEntries, mergeWhatsNewEntries, whatsNewEntries } from '@/data/whatsNew';
+import { useReleaseNotes } from '@/hooks/useReleaseNotes';
 import { WhatsNewModal } from './WhatsNewModal';
 import { Bell } from 'lucide-react';
 
 export function WhatsNewButton() {
   const [open, setOpen] = useState(false);
   const { prefs } = useTutorial();
+  const { whatsNewEntries: releaseNoteEntries } = useReleaseNotes();
+
+  const mergedEntries = useMemo(
+    () => mergeWhatsNewEntries(releaseNoteEntries, whatsNewEntries),
+    [releaseNoteEntries],
+  );
 
   const unseenCount = useMemo(
-    () => getUnseenEntries(prefs.whats_new_last_seen).length,
-    [prefs.whats_new_last_seen]
+    () => getUnseenEntries(prefs.whats_new_last_seen, mergedEntries).length,
+    [prefs.whats_new_last_seen, mergedEntries]
   );
 
   return (
@@ -30,7 +37,7 @@ export function WhatsNewButton() {
           </span>
         )}
       </Button>
-      <WhatsNewModal open={open} onOpenChange={setOpen} />
+      <WhatsNewModal open={open} onOpenChange={setOpen} entries={mergedEntries} />
     </>
   );
 }

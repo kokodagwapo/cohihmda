@@ -481,6 +481,15 @@ You can build entire dashboards through conversation:
    - **Share with team** — Make it available to everyone in your organization
    - **Generate link** — Create a shareable URL
 
+## Distribution-Based Sharing
+If you send a canvas using **Content distribution**, recipients are shared onto the canvas automatically with **viewer** permission.
+
+- Learn more: **Distributing Canvases and Content**
+- Learn more: **Managing Recipient Lists**
+- Learn more: **Auto-Inviting External Recipients**
+
+This is useful for recurring updates where admins need to send the latest canvas to a fixed audience.
+
 ## Team Folders
 Organize shared dashboards into folders:
 1. Go to **Workbench > Team Folders** from the sidebar
@@ -493,7 +502,12 @@ Star any canvas to add it to your Favorites for quick access.
 ## Permissions
 - **View** — Others can see the dashboard but not modify
 - **Edit** — Others can make changes (careful with this!)
-- Canvas owners always retain full control`,
+- Canvas owners always retain full control
+
+## Canvas-Only Recipients
+Some recipients are provisioned as **canvas-only** users. They get a slim, read-only experience focused on shared canvases and do not have full platform access.
+
+See: **Viewing Shared Canvases (Canvas-Only Users)**`,
   },
   {
     id: "wb-reports",
@@ -523,13 +537,175 @@ Ask the AI assistant: "Generate a report on our Q1 pipeline performance." The AI
 
 ## Export Formats
 - **PowerPoint (PPTX)** — Editable presentation with charts and data
-- **PDF** — Fixed-format document for distribution
+- **PDF** — Fixed-format document for offline sharing or archival
 
 ## Tips
 - Use the AI to generate a first draft, then refine manually
 - Include KPI summaries at the beginning of reports
 - Add context slides with text blocks explaining key findings
-- Reports reflect your current filters and time range selections`,
+- Reports reflect your current filters and time range selections
+
+## Important: Distribution Uses Links
+Content distribution sends **secure links**, not PDF/PPTX attachments. If you want recurring delivery, create a schedule in **Workbench > Distributions**.
+
+See: **Distributing Canvases and Content**`,
+  },
+  {
+    id: "wb-distributions",
+    slug: "distributing-content",
+    title: "Distributing Canvases and Content",
+    category: "Workbench",
+    categorySlug: "workbench",
+    summary: "Schedule secure, link-based delivery for canvases and other content.",
+    content: `# Distributing Canvases and Content
+
+## What Distributions Do
+Distributions let admins schedule recurring delivery of:
+- **Canvases**
+- **Reports**
+- **Insight Digests**
+
+Delivery is link-based. Recipients get an email with a summary and a **View in Coheus** link.
+
+## Create a Schedule
+1. Go to **Workbench > Distributions**
+2. Click **Create Schedule**
+3. Enter a name and optional email summary
+4. Choose content type and content item
+5. Set frequency and send time
+6. Choose a recipient list and/or enter direct emails
+7. Save the schedule
+
+## Direct Emails vs Recipient Lists
+- **Direct emails** are quick for one-off or ad-hoc recipients.
+- **Recipient lists** are better for reusable audiences and role-based delivery.
+
+You can combine both in one schedule.
+
+## Send Now vs Scheduled Runs
+- **Send now** runs immediately and records a history row.
+- Scheduled runs execute automatically based on your frequency/time settings.
+
+## Send History
+Open **History** on a schedule to review:
+- Status (success, partial failure, failed)
+- Recipients delivered
+- Invite status (invited vs invite failed)
+- Run duration
+
+## Manage Existing Schedules
+- **Edit** to update content, recipients, or timing
+- **Deactivate** to stop future runs
+- Re-enable or duplicate as needed for new campaigns`,
+  },
+  {
+    id: "wb-recipient-lists",
+    slug: "recipient-lists",
+    title: "Managing Recipient Lists",
+    category: "Workbench",
+    categorySlug: "workbench",
+    summary: "Build reusable recipient groups for content distribution.",
+    content: `# Managing Recipient Lists
+
+## Why Use Recipient Lists
+Recipient lists reduce manual entry and keep recurring distributions consistent.
+
+## Create a Recipient List
+1. Go to **Workbench > Distributions**
+2. In **Recipient lists**, click **Create Recipient List**
+3. Add a name and optional description
+4. Add recipients from one or more sources
+
+## Recipient Sources
+- **Specific users**: pick users directly
+- **Role-based users**: include users by role
+- **External emails**: paste comma/semicolon-separated addresses
+
+## Dynamic Role Resolution
+If **Resolve roles at send time** is enabled, membership is recalculated each run using current user roles.
+
+## Auto-Invite External Emails
+Enable auto-invite to provision unknown external emails as canvas-only users. Optionally add auto-invited users to a selected group.
+
+## Maintenance Tips
+- Review lists monthly for stale recipients
+- Keep naming clear (for example: "Weekly Executive Distribution")
+- Prefer lists over long direct-email strings for recurring schedules`,
+  },
+  {
+    id: "wb-auto-invite",
+    slug: "auto-inviting-external-recipients",
+    title: "Auto-Inviting External Recipients",
+    category: "Workbench",
+    categorySlug: "workbench",
+    summary: "Provision external recipients as canvas-only users during distribution.",
+    content: `# Auto-Inviting External Recipients
+
+## What Auto-Invite Does
+When enabled, unknown recipient emails are automatically provisioned as:
+- **viewer** role
+- **canvas_only** access mode
+
+This allows external recipients to access shared canvases securely without giving full platform access.
+
+## Where to Enable It
+- **Recipient list level**: Auto-invite external emails in that list
+- **Schedule level**: Auto-invite direct emails entered on the schedule
+
+## First-Time Recipient Flow
+1. Distribution run detects an unknown email
+2. User account is created as canvas-only
+3. A password reset/set email is sent
+4. Recipient sets password and signs in
+5. Recipient opens the shared canvas link
+
+## Invite Status in History
+History shows:
+- **Invited count**
+- **Invite failed count**
+
+Use this to verify onboarding outcomes after each run.
+
+## Troubleshooting
+- If invite failed, check send history and mail provider health
+- If reset link expired, send another distribution or use forgot password
+- If recipient can sign in but sees nothing, verify canvas share entries and recipient email accuracy`,
+  },
+  {
+    id: "wb-canvas-viewer",
+    slug: "viewing-shared-canvases",
+    title: "Viewing Shared Canvases (Canvas-Only Users)",
+    category: "Workbench",
+    categorySlug: "workbench",
+    summary: "What recipients see when they are invited as canvas-only users.",
+    content: `# Viewing Shared Canvases (Canvas-Only Users)
+
+## Canvas-Only Access
+Canvas-only users are intended for shared-canvas consumption. They do not have full analytics/admin navigation.
+
+## What Viewers Can Do
+- Open shared canvases
+- Navigate between canvases shared with them
+- Bookmark useful canvases
+
+## What Viewers Cannot Do
+- Edit canvas content
+- Add widgets, rich text, or background changes
+- Clear canvases
+- Schedule distributions
+- Access unrelated admin/analytics areas
+
+## Reading Shared Content
+The shared canvas opens in a read-only mode. If your organization updates the canvas, viewers see the latest content from the same link.
+
+## Common Issues
+### I cannot see any canvases
+- Confirm the exact email matches the shared recipient email
+- Ask an admin to verify your canvas share was created
+
+### My link does not work
+- Sign in first, then open the link again
+- If this is a first login, complete password setup before opening the canvas link`,
   },
 
   // ─── Research Lab ──────────────────────────────────────────────────
@@ -1166,6 +1342,15 @@ Use the **Start Tour** button below to walk through each section in the Admin si
 - **Loan Officer** — Access to assigned loans and personal metrics
 - **Processor** — Access to assigned files and processing features
 
+## Access Modes
+Users can also have an access mode:
+- **full** — Full platform experience
+- **canvas_only** — Restricted experience for viewing shared canvases
+
+Auto-invited external distribution recipients are typically created as:
+- Role: **Viewer**
+- Access mode: **canvas_only**
+
 ## Custom Roles
 Create custom roles with specific permissions:
 1. Go to **Admin > Roles**
@@ -1177,7 +1362,52 @@ Create custom roles with specific permissions:
 ## Managing Access
 - **Deactivate** users who leave the organization
 - **Change roles** as responsibilities evolve
-- **Monitor login activity** to ensure security`,
+- **Monitor login activity** to ensure security
+
+## Managing Auto-Invited Users
+- Filter users by role/access to review canvas-only recipients
+- Move them into groups if needed for access governance
+- Deactivate accounts that should no longer receive shared canvases
+
+See also: **Distribution Administration**`,
+  },
+  {
+    id: "adm-distributions",
+    slug: "distribution-administration",
+    title: "Distribution Administration",
+    category: "Admin",
+    categorySlug: "admin",
+    summary: "Admin responsibilities for distribution schedules, recipients, and failures.",
+    adminOnly: true,
+    content: `# Distribution Administration
+
+## Who Can Manage Distributions
+Distribution setup is intended for tenant and platform admins.
+
+## Operational Checklist
+- Keep recipient lists current
+- Prefer recipient lists for recurring schedules
+- Use direct emails for temporary recipients only
+- Validate run history after major list/schedule changes
+
+## Monitoring Send History
+For each run, review:
+- Delivery status
+- Successful vs failed recipients
+- Invite status (invited vs invite failed)
+- Duration and recurring failure patterns
+
+## Managing Auto-Invited Recipients
+Auto-invited users are created with restricted canvas-only access. Admins should:
+- Confirm users are assigned to the correct groups
+- Deactivate users when external access is no longer needed
+- Audit access periodically for least-privilege compliance
+
+## Troubleshooting Failures
+- Check recipient validity and duplicates
+- Confirm email provider health and permissions
+- Re-run using **Send now** after resolving issues
+- Document recurring issues for platform support`,
   },
   {
     id: "adm-los",

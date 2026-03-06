@@ -94,11 +94,8 @@ const ROLE_CONFIG: Record<string, { label: string; color: string; icon: typeof S
   platform_admin: { label: 'Platform Admin', color: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400', icon: Shield },
   support: { label: 'Support', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400', icon: Shield },
   tenant_admin: { label: 'Tenant Admin', color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400', icon: Building2 },
-  admin: { label: 'Admin', color: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400', icon: Shield },
   user: { label: 'User', color: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300', icon: Users },
   viewer: { label: 'Viewer', color: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400', icon: Eye },
-  loan_officer: { label: 'Loan Officer', color: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400', icon: Users },
-  processor: { label: 'Processor', color: 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400', icon: Users },
 };
 
 export function UserManagementSection() {
@@ -951,8 +948,6 @@ export function UserManagementSection() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="tenant_admin">Tenant Admin</SelectItem>
-                  <SelectItem value="loan_officer">Loan Officer</SelectItem>
-                  <SelectItem value="processor">Processor</SelectItem>
                   <SelectItem value="user">User</SelectItem>
                   <SelectItem value="viewer">Viewer</SelectItem>
                 </SelectContent>
@@ -1048,8 +1043,6 @@ export function UserManagementSection() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="tenant_admin">Tenant Admin</SelectItem>
-                  <SelectItem value="loan_officer">Loan Officer</SelectItem>
-                  <SelectItem value="processor">Processor</SelectItem>
                   <SelectItem value="user">User</SelectItem>
                   <SelectItem value="viewer">Viewer</SelectItem>
                 </SelectContent>

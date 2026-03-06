@@ -32,6 +32,7 @@ import {
   Calculator,
   ArrowLeftRight,
   Folder,
+  Megaphone,
 } from "lucide-react";
 import type { AdminSection, AdminMode } from "@/hooks/admin/useAdminState";
 
@@ -157,6 +158,16 @@ const allAdminSections: AdminSectionDef[] = [
     color: "text-emerald-300 dark:text-emerald-400/70",
     allowedRoles: ["super_admin", "platform_admin"],
     category: "Developer",
+    mode: "platform",
+  },
+  {
+    id: "release-notes" as AdminSection,
+    label: "Release Notes",
+    icon: Megaphone,
+    description: "Compose and distribute product release notes",
+    color: "text-indigo-300 dark:text-indigo-400/70",
+    allowedRoles: ["super_admin", "platform_admin"],
+    category: "Global Content",
     mode: "platform",
   },
   {

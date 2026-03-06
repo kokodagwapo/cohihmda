@@ -88,6 +88,11 @@ export function TenantConfigSection({ section }: TenantConfigSectionProps) {
     closer: number;
     other: number;
   } | null>(null);
+  const [opsActorConfig, setOpsActorConfig] = useState<Record<
+    string,
+    { outputDateField: string; turnTimeStartField: string; turnTimeEndField: string }
+  > | null>(null);
+  const [availableDateColumns, setAvailableDateColumns] = useState<string[]>([]);
   const [losConnections, setLosConnections] = useState<any[]>([]);
 
   const needsLos = section === "mapping" || section === "transfer";
@@ -131,7 +136,13 @@ export function TenantConfigSection({ section }: TenantConfigSectionProps) {
             underwriter: number;
             closer: number;
             other: number;
-          }>(`/api/tenant-config/staffing-unit-targets${tenantParam}`)
+          }>(`/api/tenant-config/staffing-unit-targets${tenantParam}`),
+          api.request<{ configs: Record<string, { outputDateField: string; turnTimeStartField: string; turnTimeEndField: string }> }>(
+            `/api/tenant-config/operations-actor-config${tenantParam}`
+          ),
+          api.request<{ columns: string[] }>(
+            `/api/tenant-config/available-date-columns${tenantParam}`
+          )
         );
       }
 
@@ -142,19 +153,29 @@ export function TenantConfigSection({ section }: TenantConfigSectionProps) {
         setLosConnections(losRes?.connections || []);
       }
       if (needsScoring) {
-        const [salesWeightsRes, opsWeightsRes, complexityRes, staffingTargetsRes] =
-          results.slice(idx) as [
-            { weights: Record<string, any[]> },
-            { weights: Record<string, any[]> },
-            { components: Record<string, any[]> },
-            { processor: number; underwriter: number; closer: number; other: number },
-          ];
+        const [
+          salesWeightsRes,
+          opsWeightsRes,
+          complexityRes,
+          staffingTargetsRes,
+          opsActorConfigRes,
+          availableDateColumnsRes,
+        ] = results.slice(idx) as [
+          { weights: Record<string, any[]> },
+          { weights: Record<string, any[]> },
+          { components: Record<string, any[]> },
+          { processor: number; underwriter: number; closer: number; other: number },
+          { configs: Record<string, { outputDateField: string; turnTimeStartField: string; turnTimeEndField: string }> },
+          { columns: string[] },
+        ];
         setScoringWeights({
           sales: salesWeightsRes?.weights?.default || [],
           operations: opsWeightsRes?.weights?.default || [],
         });
         setComplexityComponents(complexityRes?.components || {});
         setStaffingUnitTargets(staffingTargetsRes ?? null);
+        setOpsActorConfig(opsActorConfigRes?.configs ?? null);
+        setAvailableDateColumns(availableDateColumnsRes?.columns ?? []);
       }
       setInitialLoadDone(true);
     } catch (error: any) {
@@ -270,6 +291,8 @@ export function TenantConfigSection({ section }: TenantConfigSectionProps) {
                   weights={scoringWeights}
                   complexityComponents={complexityComponents}
                   staffingUnitTargets={staffingUnitTargets}
+                  opsActorConfig={opsActorConfig}
+                  availableDateColumns={availableDateColumns}
                   onRefresh={loadData}
                 />
               )}

@@ -58,7 +58,7 @@ import {
   formatDateForSQL,
   formatMonthKey,
   assignTTSTier,
-  OPERATIONS_ACTOR_CONFIGS,
+  loadOpsActorConfig,
   SALES_ACTOR_CONFIGS,
   REVENUE_SQL_EXPRESSION,
   buildDimensionFilterWhereClause,
@@ -4278,7 +4278,7 @@ router.get(
  *
  * Weights: Units = 70%, Turn Time = 15%, Loan Complexity = 15%
  *
- * Each actor type uses different milestone dates (see OPERATIONS_ACTOR_CONFIGS in scorecard-utils.ts):
+ * Each actor type uses different milestone dates (see loadOpsActorConfig / operational_scorecard_config):
  * - Processor: output = submitted_to_underwriting_date
  * - Underwriter: output = closing_date
  * - Closer: output = funding_date
@@ -4320,8 +4320,8 @@ router.get(
       };
       const monthsBack = monthsMap[dateRange] || 3;
 
-      // Use shared actor configuration
-      const config = OPERATIONS_ACTOR_CONFIGS[actorType];
+      // Use shared actor configuration (tenant override or defaults)
+      const config = await loadOpsActorConfig(tenantPool, actorType);
 
       // isActorMissing is now imported from shared utilities (uses 'strict' mode for operations)
 
@@ -4941,8 +4941,8 @@ router.get(
         });
       }
 
-      // Use shared actor configuration
-      const config = OPERATIONS_ACTOR_CONFIGS[actorType];
+      // Use shared actor configuration (tenant override or defaults)
+      const config = await loadOpsActorConfig(tenantPool, actorType);
 
       // isActorMissing is now imported from shared utilities (uses 'strict' mode for operations)
 
@@ -7750,6 +7750,89 @@ router.get(
       res.status(500).json({ error: error.message || "Failed to fetch officer details" });
     }
   }
+);
+
+/**
+ * GET /api/loans/:loanId
+ * Returns a single loan with latest prediction payload.
+ */
+router.get(
+  "/:loanId",
+  authenticateToken,
+  attachTenantContext,
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantPool = getTenantContext(req).tenantPool;
+      const { loanId } = req.params;
+      if (!loanId) {
+        return res.status(400).json({ error: "Loan ID is required" });
+      }
+
+      const params: unknown[] = [loanId];
+      let accessSql = "";
+      if (req.userId) {
+        const accessFilter = await getUserLoanAccessFilter(req.userId, tenantPool, {
+          loanTableAlias: "l",
+          startParamIndex: 2,
+        });
+        if (accessFilter?.sql === "FALSE") {
+          return res.status(404).json({ error: "Loan not found" });
+        }
+        if (accessFilter?.sql) {
+          accessSql = ` AND (${accessFilter.sql})`;
+          params.push(...accessFilter.params);
+        }
+      }
+
+      const result = await tenantPool.query(
+        `WITH latest_prediction AS (
+           SELECT DISTINCT ON (lp.loan_id)
+             lp.loan_id,
+             lp.predicted_outcome,
+             lp.confidence,
+             lp.confidence_score,
+             lp.risk_factors,
+             lp.reasoning,
+             lp.bucket,
+             lp.loan_data,
+             lp.reason_codes,
+             lp.created_at AS prediction_created_at
+           FROM public.loan_predictions lp
+           WHERE lp.loan_id = $1
+           ORDER BY lp.loan_id, lp.created_at DESC
+         )
+         SELECT
+           l.*,
+           p.predicted_outcome,
+           p.confidence,
+           p.confidence_score,
+           p.risk_factors,
+           p.reasoning,
+           p.bucket,
+           p.loan_data,
+           p.reason_codes,
+           p.prediction_created_at
+         FROM public.loans l
+         LEFT JOIN latest_prediction p ON p.loan_id = l.loan_id
+         WHERE l.loan_id = $1
+           AND (l.is_archived IS DISTINCT FROM TRUE)
+           ${accessSql}
+         LIMIT 1`,
+        params,
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Loan not found" });
+      }
+
+      return res.json({ loan: result.rows[0] });
+    } catch (error: any) {
+      logError("Error fetching loan by id", error, { userId: req.userId, loanId: req.params.loanId });
+      if (handleDatabaseError(error, res, "Failed to fetch loan")) return;
+      return res.status(500).json({ error: "Failed to fetch loan" });
+    }
+  },
 );
 
 export default router;

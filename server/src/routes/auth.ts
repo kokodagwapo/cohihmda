@@ -45,11 +45,8 @@ interface TenantUser {
   full_name: string | null;
   role:
     | "tenant_admin"
-    | "admin"
     | "user"
-    | "viewer"
-    | "loan_officer"
-    | "processor";
+    | "viewer";
   is_active: boolean;
   tenant_id: string;
   tenant_name: string;
@@ -424,7 +421,7 @@ router.post("/signin", authLimiter, async (req, res) => {
       useCognito: cognitoAuth.isCognitoAuthEnabled(),
     });
 
-    // --- Cognito auth path ---
+    // --- Cognito auth path (single source of truth for all users when enabled) ---
     if (cognitoAuth.isCognitoAuthEnabled()) {
       try {
         const result = await cognitoAuth.signIn(email, password);
@@ -1081,8 +1078,9 @@ router.post("/password-reset/request", authLimiter, async (req, res) => {
     logInfo("[Auth] Password reset requested", { email, tenantSlug });
 
     const successMsg =
-      "If an account exists with this email, you will receive a password reset code.";
+      "If an account exists with this email, you will receive password reset instructions.";
 
+    // Single auth path: always use Cognito when enabled (all users are in Cognito)
     if (cognitoAuth.isCognitoAuthEnabled()) {
       await cognitoAuth.forgotPassword(email);
       return res.json({
@@ -1119,11 +1117,8 @@ router.post("/password-reset/request", authLimiter, async (req, res) => {
       return res.status(500).json({ error: "Internal server error" });
     }
 
-    const frontendUrl = (
-      process.env.FRONTEND_URL || "http://localhost:5173"
-    )
-      .split(",")[0]
-      .trim();
+    const { resolveFrontendUrl } = await import("../utils/frontendUrl.js");
+    const frontendUrl = resolveFrontendUrl();
     const resetUrl = `${frontendUrl}/reset-password?token=${token}`;
 
     try {

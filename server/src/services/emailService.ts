@@ -5,6 +5,7 @@
  */
 
 import { logEmailSend } from "./emailAuditLogger.js";
+import { assertNoLocalhostInProduction } from "../utils/frontendUrl.js";
 
 const SES_CONFIGURATION_SET = process.env.SES_CONFIGURATION_SET || "my-first-configuration-set";
 
@@ -37,6 +38,8 @@ interface EmailOptions {
   subject: string;
   html: string;
   text?: string;
+  /** When true, throw if provider send fails instead of silently returning undefined. */
+  strict?: boolean;
   /** For audit log; when set, a row is written to email_send_log. */
   emailType?: string;
   containsPii?: boolean;
@@ -56,6 +59,8 @@ export interface DailyBriefEmailOptions {
   containsPii?: boolean;
   userId?: string | null;
   tenantId?: string | null;
+  /** When true, provider failures are rethrown to caller. */
+  strict?: boolean;
 }
 
 export interface EmailAttachment {
@@ -83,6 +88,16 @@ export interface SendEmailWithAttachmentOptions {
 export async function sendEmail(options: EmailOptions): Promise<string | undefined> {
   const emailProvider = process.env.EMAIL_PROVIDER || "ses"; // ses, sendgrid, resend
 
+  const localhostLinkMatch = options.html.match(/href=["']https?:\/\/localhost[^"']*/i);
+  if (localhostLinkMatch) {
+    try {
+      assertNoLocalhostInProduction(localhostLinkMatch[0], "sendEmail");
+    } catch (guardError) {
+      if (options.strict) throw guardError;
+      console.warn(`⚠️ Email to ${options.to} contains localhost link: ${localhostLinkMatch[0]}`);
+    }
+  }
+
   try {
     switch (emailProvider) {
       case "ses":
@@ -94,16 +109,20 @@ export async function sendEmail(options: EmailOptions): Promise<string | undefin
         await withRetry(() => sendViaResend(options));
         return undefined;
       default:
-        console.warn(
-          `Unknown email provider: ${emailProvider}. Email not sent.`,
-        );
+        const providerErr = new Error(`Unknown email provider: ${emailProvider}`);
+        if (options.strict) {
+          throw providerErr;
+        }
+        console.warn(`${providerErr.message}. Email not sent.`);
         console.log("Email would be sent:", options);
         return undefined;
     }
   } catch (error: unknown) {
     console.error("Error sending email after retries:", error);
-    // Don't throw - email failures shouldn't break the flow
-    // Log for manual retry
+    if (options.strict) {
+      throw error;
+    }
+    // Non-strict mode preserves legacy behavior.
     return undefined;
   }
 }
@@ -287,6 +306,9 @@ async function sendDailyBriefWithUnsubscribe(options: DailyBriefEmailOptions): P
     }
   } catch (error: unknown) {
     console.error("Error sending daily brief with unsubscribe after retries:", error);
+    if (options.strict) {
+      throw error;
+    }
   }
 }
 
@@ -732,6 +754,7 @@ export async function sendPasswordResetEmail(
   email: string,
   resetUrl: string,
   userName?: string,
+  options?: { strict?: boolean },
 ): Promise<void> {
   const displayName = userName || email.split("@")[0];
 
@@ -807,6 +830,7 @@ If you didn't request this password reset, you can safely ignore this email.
     subject: "Reset Your Cohi Password",
     html,
     text,
+    strict: options?.strict ?? false,
     emailType: "password_reset",
     containsPii: false,
   });
@@ -880,6 +904,7 @@ This invitation expires in 7 days.
     subject: `You're invited to join ${tenantName} on Cohi`,
     html,
     text,
+    strict: true,
     emailType: "user_invitation",
     containsPii: false,
   });
