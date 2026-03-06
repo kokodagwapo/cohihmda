@@ -24,8 +24,80 @@ async function getActiveTenants(): Promise<Array<{ id: string; slug: string }>> 
 }
 
 /**
+ * Convert a wall-clock time (HH:MM) in a given IANA timezone to a UTC Date
+ * on or after `referenceDate`.
+ *
+ * Uses Intl.DateTimeFormat to resolve timezone offsets without external
+ * dependencies — works in Node 18+.
+ */
+function wallClockToUtc(
+  hours: number,
+  minutes: number,
+  timezone: string,
+  referenceDate: Date
+): Date {
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+
+  const parts = Object.fromEntries(
+    fmt.formatToParts(referenceDate).map((p) => [p.type, p.value])
+  );
+
+  const year = parseInt(parts.year, 10);
+  const month = parseInt(parts.month, 10) - 1;
+  const day = parseInt(parts.day, 10);
+
+  const localTargetStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`;
+
+  const refParts2 = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: 'UTC',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).formatToParts(referenceDate).map((p) => [p.type, p.value])
+  );
+  const refUtcMs = Date.UTC(
+    parseInt(refParts2.year, 10),
+    parseInt(refParts2.month, 10) - 1,
+    parseInt(refParts2.day, 10),
+    parseInt(refParts2.hour, 10),
+    parseInt(refParts2.minute, 10),
+    parseInt(refParts2.second, 10)
+  );
+
+  const localRefStr = `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`;
+  const localRefMs = Date.UTC(
+    parseInt(parts.year, 10),
+    parseInt(parts.month, 10) - 1,
+    parseInt(parts.day, 10),
+    parseInt(parts.hour, 10),
+    parseInt(parts.minute, 10),
+    parseInt(parts.second, 10)
+  );
+
+  const tzOffsetMs = refUtcMs - localRefMs;
+
+  const localTargetMs = Date.UTC(year, month, day, hours, minutes, 0);
+  return new Date(localTargetMs + tzOffsetMs);
+}
+
+/**
  * Compute next run time from frequency, schedule_time, schedule_day, timezone.
- * Exported for use when creating/updating schedules (set initial next_run_at).
+ * schedule_time is wall-clock time in the given IANA timezone (e.g. "07:35" in "America/New_York").
+ * The returned Date is UTC (TIMESTAMPTZ-compatible).
  */
 export function computeNextRunAt(
   frequency: string,
@@ -35,55 +107,80 @@ export function computeNextRunAt(
 ): Date | null {
   try {
     const [hours, minutes] = scheduleTime.split(':').map((s) => parseInt(s, 10) || 0);
+    const tz = timezone || 'America/New_York';
     const now = new Date();
 
     if (frequency === 'one_time') {
       return null;
     }
 
-    const next = new Date(now);
-
     if (frequency === 'daily') {
-      next.setUTCHours(hours, minutes, 0, 0);
+      let next = wallClockToUtc(hours, minutes, tz, now);
       if (next.getTime() <= now.getTime()) {
-        next.setUTCDate(next.getUTCDate() + 1);
+        const tomorrow = new Date(now.getTime() + 86_400_000);
+        next = wallClockToUtc(hours, minutes, tz, tomorrow);
       }
       return next;
     }
 
     if (frequency === 'weekly' && scheduleDay != null) {
       const targetDow = Math.max(0, Math.min(6, scheduleDay));
-      next.setUTCHours(hours, minutes, 0, 0);
-      const currentDow = next.getUTCDay();
-      let daysToAdd = targetDow - currentDow;
-      if (daysToAdd < 0) daysToAdd += 7;
-      if (daysToAdd === 0 && next.getTime() <= now.getTime()) daysToAdd = 7;
-      next.setUTCDate(next.getUTCDate() + daysToAdd);
-      return next;
+      for (let offset = 0; offset <= 7; offset++) {
+        const candidate = new Date(now.getTime() + offset * 86_400_000);
+        const candidateUtc = wallClockToUtc(hours, minutes, tz, candidate);
+        const localFmt = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' });
+        const dayParts = Object.fromEntries(
+          localFmt.formatToParts(candidate).map((p) => [p.type, p.value])
+        );
+        const dayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+        const candidateDow = dayMap[dayParts.weekday] ?? candidate.getUTCDay();
+
+        if (candidateDow === targetDow && candidateUtc.getTime() > now.getTime()) {
+          return candidateUtc;
+        }
+      }
+      const fallback = new Date(now.getTime() + 7 * 86_400_000);
+      return wallClockToUtc(hours, minutes, tz, fallback);
     }
 
     if (frequency === 'biweekly') {
-      next.setUTCHours(hours, minutes, 0, 0);
-      next.setUTCDate(next.getUTCDate() + 14);
-      return next;
+      const twoWeeksOut = new Date(now.getTime() + 14 * 86_400_000);
+      return wallClockToUtc(hours, minutes, tz, twoWeeksOut);
     }
 
     if (frequency === 'monthly' && scheduleDay != null) {
       const dayOfMonth = Math.max(1, Math.min(31, scheduleDay));
-      next.setUTCDate(1);
-      next.setUTCMonth(next.getUTCMonth() + 1);
-      const maxDay = new Date(next.getUTCFullYear(), next.getUTCMonth(), 0).getDate();
-      next.setUTCDate(Math.min(dayOfMonth, maxDay));
-      next.setUTCHours(hours, minutes, 0, 0);
-      if (next.getTime() <= now.getTime()) {
-        next.setUTCMonth(next.getUTCMonth() + 1);
-        const maxDay2 = new Date(next.getUTCFullYear(), next.getUTCMonth(), 0).getDate();
-        next.setUTCDate(Math.min(dayOfMonth, maxDay2));
+      const fmt = new Intl.DateTimeFormat('en-US', {
+        timeZone: tz,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      });
+      const nowParts = Object.fromEntries(
+        fmt.formatToParts(now).map((p) => [p.type, p.value])
+      );
+      let year = parseInt(nowParts.year, 10);
+      let month = parseInt(nowParts.month, 10) - 1;
+
+      const tryDate = (y: number, m: number) => {
+        const maxDay = new Date(y, m + 1, 0).getDate();
+        const d = Math.min(dayOfMonth, maxDay);
+        const ref = new Date(Date.UTC(y, m, d));
+        return wallClockToUtc(hours, minutes, tz, ref);
+      };
+
+      let candidate = tryDate(year, month);
+      if (candidate.getTime() <= now.getTime()) {
+        month++;
+        if (month > 11) { month = 0; year++; }
+        candidate = tryDate(year, month);
       }
-      return next;
+      return candidate;
     }
 
-    return next;
+    // Fallback: next day
+    const tomorrow = new Date(now.getTime() + 86_400_000);
+    return wallClockToUtc(hours, minutes, tz, tomorrow);
   } catch {
     return null;
   }
