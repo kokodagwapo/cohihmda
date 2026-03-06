@@ -429,10 +429,19 @@ router.post("/signin", authLimiter, async (req, res) => {
         if (!result.authenticated && result.challengeName) {
           if (
             result.challengeName === "SOFTWARE_TOKEN_MFA" ||
-            result.challengeName === "MFA_SETUP"
+            result.challengeName === "EMAIL_OTP" ||
+            result.challengeName === "SMS_MFA"
           ) {
             return res.json({
               mfaRequired: true,
+              challengeName: result.challengeName,
+              session: result.session,
+              email,
+            });
+          }
+          if (result.challengeName === "MFA_SETUP") {
+            return res.json({
+              mfaSetupRequired: true,
               challengeName: result.challengeName,
               session: result.session,
               email,
@@ -456,6 +465,32 @@ router.post("/signin", authLimiter, async (req, res) => {
           return res
             .status(401)
             .json({ error: "User not found in application" });
+        }
+
+        // Hardened enforcement: never issue an app token until Cognito MFA is enabled.
+        // This prevents bypass when pool MFA is OPTIONAL and user has not enrolled yet.
+        try {
+          const userMfa = await cognitoAuth.getUser(email);
+          if (!userMfa.mfaEnabled) {
+            return res.status(403).json({
+              mfaSetupRequired: true,
+              email,
+              cognitoAccessToken: result.accessToken,
+            });
+          }
+        } catch (mfaStatusError: unknown) {
+          logWarn("[Auth] Failed to evaluate Cognito MFA status, failing closed", {
+            email,
+            error:
+              mfaStatusError instanceof Error
+                ? mfaStatusError.message
+                : String(mfaStatusError),
+          });
+          return res.status(403).json({
+            mfaSetupRequired: true,
+            email,
+            cognitoAccessToken: result.accessToken,
+          });
         }
 
         // Store cognito_sub if not already linked
@@ -611,12 +646,11 @@ router.post("/signin", authLimiter, async (req, res) => {
  */
 router.post("/new-password", authLimiter, async (req, res) => {
   try {
-    const { email, session, newPassword, tenantSlug } = z
+    const { email, session, newPassword } = z
       .object({
         email: z.string().email(),
         session: z.string().min(1),
         newPassword: z.string().min(10, "Password must be at least 10 characters"),
-        tenantSlug: z.string().optional(),
       })
       .parse(req.body);
 
@@ -637,34 +671,12 @@ router.post("/new-password", authLimiter, async (req, res) => {
       });
     }
 
-    // Fully authenticated
-    const found = await findUserByEmail(email, tenantSlug);
-    if (!found) {
-      return res.status(401).json({ error: "User not found in application" });
-    }
-
-    if (result.cognitoSub) {
-      await linkCognitoSub(found.user, found.isSuperAdmin, result.cognitoSub).catch(() => {});
-    }
-
-    const { token } = await issueAppToken(found.user, found.isSuperAdmin, req);
-
-    // With OPTIONAL MFA, Cognito won't challenge for setup.
-    // Check if user has MFA configured and recommend setup if not.
-    let mfaSetupRecommended = false;
-    try {
-      const userInfo = await cognitoAuth.getUser(email);
-      if (!userInfo.mfaEnabled) {
-        mfaSetupRecommended = true;
-      }
-    } catch {}
-
+    // Password is updated. Enforce mandatory MFA setup before issuing app JWT.
     return res.json({
-      user: buildUserResponse(found.user, found.isSuperAdmin),
-      token,
       refreshToken: result.refreshToken,
       cognitoAccessToken: result.accessToken,
-      mfaSetupRecommended,
+      mfaSetupRequired: true,
+      email,
     });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
@@ -680,11 +692,14 @@ router.post("/new-password", authLimiter, async (req, res) => {
  */
 router.post("/mfa/verify", authLimiter, async (req, res) => {
   try {
-    const { email, session, code, tenantSlug } = z
+    const { email, session, code, challengeName, tenantSlug } = z
       .object({
         email: z.string().email(),
         session: z.string().min(1),
         code: z.string().length(6),
+        challengeName: z
+          .enum(["SOFTWARE_TOKEN_MFA", "EMAIL_OTP", "SMS_MFA"])
+          .optional(),
         tenantSlug: z.string().optional(),
       })
       .parse(req.body);
@@ -693,6 +708,7 @@ router.post("/mfa/verify", authLimiter, async (req, res) => {
       email,
       session,
       code,
+      challengeName || "SOFTWARE_TOKEN_MFA",
     );
 
     if (!result.authenticated) {

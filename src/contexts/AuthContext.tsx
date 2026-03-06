@@ -65,7 +65,13 @@ interface AuthContextType {
   
   // Actions
   login: (email: string, password: string, tenantSlug?: string) => Promise<void>;
-  completeMfaLogin: (email: string, session: string, code: string, tenantSlug?: string) => Promise<void>;
+  completeMfaLogin: (
+    email: string,
+    session: string,
+    code: string,
+    tenantSlug?: string,
+    challengeName?: 'SOFTWARE_TOKEN_MFA' | 'EMAIL_OTP' | 'SMS_MFA',
+  ) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   clearError: () => void;
@@ -192,7 +198,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
         user?: AuthUser;
         token?: string;
         refreshToken?: string;
+        cognitoAccessToken?: string;
         mfaRequired?: boolean;
+        mfaSetupRequired?: boolean;
         challengeName?: string;
         session?: string;
         email?: string;
@@ -221,6 +229,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
         throw pwError;
       }
 
+      if (response.mfaSetupRequired) {
+        const setupError = Object.assign(new Error('MFA_SETUP_REQUIRED'), {
+          mfaSetupRequired: true,
+          challengeName: response.challengeName,
+          session: response.session,
+          email: response.email || email,
+          cognitoAccessToken: response.cognitoAccessToken,
+        });
+        throw setupError;
+      }
+
       if (response.token) {
         localStorage.setItem(AUTH_TOKEN_KEY, response.token);
         api.setToken(response.token);
@@ -228,8 +247,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (response.refreshToken) {
         localStorage.setItem(REFRESH_TOKEN_KEY, response.refreshToken);
       }
-      if ((response as any).cognitoAccessToken) {
-        localStorage.setItem('cognito_access_token', (response as any).cognitoAccessToken);
+      if (response.cognitoAccessToken) {
+        localStorage.setItem('cognito_access_token', response.cognitoAccessToken);
       }
       
       if (response.user) {
@@ -238,7 +257,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         enforcePlatformOnly(response.user.role, response.user.tenant_id);
       }
     } catch (err: any) {
-      if (err.mfaRequired || err.newPasswordRequired) {
+      if (err.mfaRequired || err.newPasswordRequired || err.mfaSetupRequired) {
         throw err;
       }
       const message = err.message || 'Login failed';
@@ -252,7 +271,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
   /**
    * Complete login after MFA challenge verification
    */
-  const completeMfaLogin = useCallback(async (email: string, session: string, code: string, tenantSlug?: string) => {
+  const completeMfaLogin = useCallback(async (
+    email: string,
+    session: string,
+    code: string,
+    tenantSlug?: string,
+    challengeName: 'SOFTWARE_TOKEN_MFA' | 'EMAIL_OTP' | 'SMS_MFA' = 'SOFTWARE_TOKEN_MFA',
+  ) => {
     setIsLoading(true);
     setError(null);
 
@@ -264,7 +289,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         cognitoAccessToken?: string;
       }>('/api/auth/mfa/verify', {
         method: 'POST',
-        body: JSON.stringify({ email, session, code, tenantSlug }),
+        body: JSON.stringify({ email, session, code, tenantSlug, challengeName }),
       });
 
       if (response.token) {

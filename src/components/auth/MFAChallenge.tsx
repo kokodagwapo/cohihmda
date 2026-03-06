@@ -6,12 +6,20 @@ import { Loader2, ShieldCheck, ArrowLeft } from 'lucide-react';
 interface MFAChallengeProps {
   email: string;
   session: string;
+  challengeName?: 'SOFTWARE_TOKEN_MFA' | 'EMAIL_OTP' | 'SMS_MFA';
   onVerify: (code: string) => Promise<void>;
   onBack: () => void;
   loading?: boolean;
 }
 
-export function MFAChallenge({ email, session, onVerify, onBack, loading = false }: MFAChallengeProps) {
+export function MFAChallenge({
+  email,
+  session,
+  challengeName = 'SOFTWARE_TOKEN_MFA',
+  onVerify,
+  onBack,
+  loading = false,
+}: MFAChallengeProps) {
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -53,7 +61,11 @@ export function MFAChallenge({ email, session, onVerify, onBack, loading = false
         <div className="text-center">
           <h3 className="text-lg font-semibold">Two-Factor Authentication</h3>
           <p className="text-sm text-muted-foreground mt-1">
-            Enter the 6-digit code from your authenticator app
+            {challengeName === 'EMAIL_OTP'
+              ? 'Enter the 6-digit code sent to your email'
+              : challengeName === 'SMS_MFA'
+                ? 'Enter the 6-digit code sent to your phone'
+                : 'Enter the 6-digit code from your authenticator app'}
           </p>
         </div>
       </div>

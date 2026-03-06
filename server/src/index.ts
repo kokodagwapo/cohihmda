@@ -14,6 +14,10 @@ import {
 } from "./middleware/sentry.js";
 import { apiLimiter } from "./middleware/rateLimiter.js";
 import { devLogger, prodLogger } from "./middleware/logger.js";
+import {
+  assertMfaConfigurationReady,
+  isCognitoAuthEnabled,
+} from "./services/cognito/cognitoAuthService.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -239,12 +243,20 @@ const validateEnvironment = () => {
 };
 
 // Initialize database (optional for local dev voice testing)
-const startServer = () => {
+const startServer = async () => {
   // Validate environment variables
   const envValid = validateEnvironment();
   if (!envValid) {
     console.error(
       "⚠️  Continuing with invalid environment - authentication will fail",
+    );
+  }
+
+  // Fail fast if Cognito password auth is enabled but MFA pool config is unsafe.
+  if (isCognitoAuthEnabled() && process.env.COGNITO_PASSWORD_AUTH === "true") {
+    await assertMfaConfigurationReady();
+    console.log(
+      "✅ Cognito MFA preflight passed (EMAIL_OTP + SOFTWARE_TOKEN_MFA enabled)",
     );
   }
 
@@ -383,7 +395,10 @@ async function startWorker() {
 }
 
 if (SKIP_DB) {
-  startServer();
+  startServer().catch((error) => {
+    console.error("❌ Server startup preflight failed:", error);
+    process.exit(1);
+  });
 } else {
   initDatabase()
     .then(async () => {
@@ -392,7 +407,7 @@ if (SKIP_DB) {
         return;
       }
 
-      startServer();
+      await startServer();
 
       // Start schedulers only when not in api-only mode (unset = legacy: API + schedulers in one process)
       if (NODE_ENV !== "test" && PROCESS_MODE !== "api") {
@@ -457,6 +472,9 @@ if (SKIP_DB) {
         "⚠️ Starting server without database (some features may be unavailable)",
       );
       // Don't exit - start server anyway so health check and basic routes work
-      startServer();
+      startServer().catch((startupError) => {
+        console.error("❌ Server startup preflight failed:", startupError);
+        process.exit(1);
+      });
     });
 }
