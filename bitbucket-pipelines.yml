@@ -38,6 +38,12 @@ definitions:
   services:
     docker:
       memory: 3072
+    postgres:
+      image: postgres:15
+      variables:
+        POSTGRES_DB: coheus_test
+        POSTGRES_USER: postgres
+        POSTGRES_PASSWORD: postgres
 
   scripts:
     setup-oidc: &setup-oidc |
@@ -72,6 +78,30 @@ definitions:
         script:
           - cd server && npm ci && npm run build
           - echo "Build validation passed (Docker build in deploy step compiles from source)"
+
+    - step: &test-frontend
+        name: Test Frontend
+        caches:
+          - npm
+        script:
+          - npm ci
+          - npm run test:run
+
+    - step: &test-backend
+        name: Test Backend
+        caches:
+          - server-npm
+        script:
+          - cd server && npm ci && npm run test:run
+
+    - step: &test-backend-integration
+        name: Test Backend RBAC Integration
+        caches:
+          - server-npm
+        services:
+          - postgres
+        script:
+          - cd server && npm ci && npm run test:integration
 
     # Deploy steps with automatic change detection
     - step: &deploy-dev
@@ -246,10 +276,18 @@ pipelines:
       - parallel:
           - step: *build-frontend
           - step: *build-backend
+      - parallel:
+          - step: *test-frontend
+          - step: *test-backend
+          - step: *test-backend-integration
     main:
       - parallel:
           - step: *build-frontend
           - step: *build-backend
+      - parallel:
+          - step: *test-frontend
+          - step: *test-backend
+          - step: *test-backend-integration
 
   # Custom pipelines for individual deployments
   custom:
