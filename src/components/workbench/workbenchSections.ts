@@ -20,6 +20,7 @@ import {
   GitBranch,
   Users,
   DollarSign,
+  Lock,
 } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
@@ -85,6 +86,7 @@ export const DASHBOARD_SECTION_GROUPS: { label: string; items: DashboardSectionI
       { id: 'operationsTrends', title: 'Operations Trends', icon: LineChart, iconClass: 'text-blue-500' },
       { id: 'pricingDashboard', title: 'Pricing Dashboard', icon: DollarSign, iconClass: 'text-emerald-500' },
       { id: 'pipelineAnalysis', title: 'Pipeline Analysis', icon: LineChart, iconClass: 'text-sky-500' },
+      { id: 'lockStratification', title: 'Lock Stratification', icon: Lock, iconClass: 'text-blue-500' },
     ],
   },
 ];

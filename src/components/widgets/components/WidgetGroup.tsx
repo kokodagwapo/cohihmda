@@ -242,6 +242,7 @@ const SECTION_FILTER_CONFIG: Partial<Record<SectionType, SectionFilterField[]>> 
   'actors': [],
   'pricing-dashboard': [],
   'pipeline-analysis': [],
+  'lock-stratification': [],
 };
 
 /**
@@ -299,6 +300,33 @@ const PRICING_LOCK_STATUS_OPTIONS = [
   { value: 'locked', label: 'Active Locked' },
   { value: 'not_locked', label: 'Active Not Locked' },
   { value: 'total', label: 'Active Total' },
+];
+
+const LOCK_STRAT_LOCKED_OPTIONS = [
+  { value: 'active_locked', label: 'Active Locked' },
+  { value: 'active_not_locked', label: 'Active NOT Locked' },
+  { value: 'all_active', label: 'All Active Loans' },
+];
+const LOCK_STRAT_MEASURE_OPTIONS = [
+  { value: 'volume', label: 'Volume' },
+  { value: 'units', label: 'Units' },
+  { value: 'wac', label: 'WAC' },
+  { value: 'wa_fico', label: 'WA FICO' },
+];
+const LOCK_STRAT_MILESTONE_GROUP_OPTIONS = [
+  { value: 'current_milestone', label: 'Current Milestone' },
+  { value: 'investor', label: 'Investor' },
+  { value: 'branch', label: 'Branch' },
+  { value: 'broker_lender', label: 'Broker Lender' },
+  { value: 'lo', label: 'Loan Officer' },
+  { value: 'ae', label: 'Account Executive' },
+];
+const LOCK_STRAT_PULL_THROUGH_OPTIONS = [
+  { value: '30', label: '30 Days' },
+  { value: '60', label: '60 Days' },
+  { value: '90', label: '90 Days' },
+  { value: '120', label: '120 Days' },
+  { value: 'ytd', label: 'Year to Date' },
 ];
 
 /** Compact dropdown for pricing dashboard filters in WidgetGroup */
@@ -644,6 +672,7 @@ const SECTION_COLORS: Record<SectionType, { border: string; bg: string; accent: 
   'pricing-dashboard':   { border: 'border-emerald-400/50', bg: 'bg-emerald-50/50 dark:bg-emerald-950/20', accent: 'text-emerald-600 dark:text-emerald-400', dot: 'bg-emerald-500' },
   'pipeline-analysis':   { border: 'border-sky-400/50', bg: 'bg-sky-50/50 dark:bg-sky-950/20', accent: 'text-sky-600 dark:text-sky-400', dot: 'bg-sky-500' },
   'sales-scorecard-overview': { border: 'border-violet-400/50', bg: 'bg-violet-50/50 dark:bg-violet-950/20', accent: 'text-violet-600 dark:text-violet-400', dot: 'bg-violet-500' },
+  'lock-stratification': { border: 'border-blue-400/50', bg: 'bg-blue-50/50 dark:bg-blue-950/20', accent: 'text-blue-600 dark:text-blue-400', dot: 'bg-blue-500' },
 };
 
 /**
@@ -700,7 +729,16 @@ function getGridSizeForItem(item: GroupWidgetItem): GridSize {
   if (item.kind === 'registry' && item.defId === 'sales-scorecard-overview-table') {
     return { w: 36, h: 20, minW: 24, minH: 12 };
   }
-  // High Performers: 2x2 grid (two columns of 18 units each)
+  if (item.kind === 'registry' && item.defId.startsWith('lock-stratification-')) {
+    if (item.defId === 'lock-stratification-kpis') return { w: 24, h: 10, minW: 16, minH: 6 };
+    if (item.defId === 'lock-stratification-interest-rates') return { w: 24, h: 28, minW: 18, minH: 20 };
+    if (item.defId === 'lock-stratification-days-to-expiration') return { w: 24, h: 22, minW: 18, minH: 14 };
+    if (item.defId === 'lock-stratification-pull-through') return { w: 24, h: 26, minW: 18, minH: 18 };
+    if (item.defId === 'lock-stratification-milestone-bar') return { w: 24, h: 30, minW: 18, minH: 22 };
+    if (item.defId === 'lock-stratification-milestone-pivot') return { w: 24, h: 26, minW: 18, minH: 18 };
+    return { w: 20, h: 22, minW: 12, minH: 14 };
+  }
+  // High Performers: 2x2 grid
   if (item.kind === 'registry' && item.defId.startsWith('high-performers-')) {
     return { w: 18, h: 16, minW: 12, minH: 8 };
   }
@@ -1186,6 +1224,8 @@ function GridCellRegistryWidget({
   const isWorkflowConversion = defId === 'workflow-conversion-embed';
   const isSalesScorecardOverview = defId === 'sales-scorecard-overview-chart' || defId === 'sales-scorecard-overview-table';
   const salesScorecardOverviewConfig = isSalesScorecardOverview ? { groupId } : {};
+  const isLockStratification = defId?.startsWith('lock-stratification-');
+  const lockStratificationConfig = isLockStratification ? { groupId, variant: definition.config?.variant } : {};
   const workflowConfig = isWorkflowConversion
     ? {
         groupId,
@@ -1228,6 +1268,7 @@ function GridCellRegistryWidget({
     ...pricingConfig,
     ...workflowConfig,
     ...salesScorecardOverviewConfig,
+    ...lockStratificationConfig,
   };
 
   return (
@@ -1596,9 +1637,15 @@ export function WidgetGroup({
     if (sectionType === 'pricing-dashboard') {
       if (filters.pricingDashboardColumns && filters.pricingDashboardColumns.length > 0) toSave.pricingDashboardColumns = filters.pricingDashboardColumns;
     }
+    if (sectionType === 'lock-stratification') {
+      if (filters.lockStratLocked && filters.lockStratLocked !== 'all_active') toSave.lockStratLocked = filters.lockStratLocked;
+      if (filters.lockStratMeasure && filters.lockStratMeasure !== 'volume') toSave.lockStratMeasure = filters.lockStratMeasure;
+      if (filters.lockStratMilestoneGroupBy && filters.lockStratMilestoneGroupBy !== 'current_milestone') toSave.lockStratMilestoneGroupBy = filters.lockStratMilestoneGroupBy;
+      if (filters.lockStratPullThroughPeriod && filters.lockStratPullThroughPeriod !== '60') toSave.lockStratPullThroughPeriod = filters.lockStratPullThroughPeriod;
+    }
     patchPayload({ savedFilters: Object.keys(toSave).length > 0 ? toSave : undefined });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sectionType, filters.year, filters.dateRange, filters.periodSelection, filters.dateField, filters.applicationType, filters.actorType, filters.branch, filters.loanOfficer, filters.dynamicFilters, filters.workflowPeriodSelection, filters.workflowCalculationType, filters.workflowGrouping, filters.workflowSegments, filters.pipelineAnalysisYearRange, filters.pipelineAnalysisStartDateField, filters.pipelineAnalysisViewMode, filters.pipelineAnalysisPctMetric, filters.pipelineAnalysisSnapshotDay, filters.pipelineAnalysisLoanTypes, filters.pipelineAnalysisLoanPurposes, filters.pipelineAnalysisBranches, filters.salesScorecardOverviewMeasure, filters.salesScorecardOverviewTimeMeasure, filters.salesScorecardOverviewMilestoneColumns, filters.pricingDashboardColumns]);
+  }, [sectionType, filters.year, filters.dateRange, filters.periodSelection, filters.dateField, filters.applicationType, filters.actorType, filters.branch, filters.loanOfficer, filters.dynamicFilters, filters.workflowPeriodSelection, filters.workflowCalculationType, filters.workflowGrouping, filters.workflowSegments, filters.pipelineAnalysisYearRange, filters.pipelineAnalysisStartDateField, filters.pipelineAnalysisViewMode, filters.pipelineAnalysisPctMetric, filters.pipelineAnalysisSnapshotDay, filters.pipelineAnalysisLoanTypes, filters.pipelineAnalysisLoanPurposes, filters.pipelineAnalysisBranches, filters.salesScorecardOverviewMeasure, filters.salesScorecardOverviewTimeMeasure, filters.salesScorecardOverviewMilestoneColumns, filters.pricingDashboardColumns, filters.lockStratLocked, filters.lockStratMeasure, filters.lockStratMilestoneGroupBy, filters.lockStratPullThroughPeriod]);
 
   // ─── Grid layout ───
   const contentWidth = Math.max(width - 24, MIN_GRID_WIDTH);
@@ -1870,6 +1917,8 @@ export function WidgetGroup({
         return { presets: ['mtd', 'last-month', 'qtd', 'last-quarter', 'ytd', 'last-year'], showYears: false };
       case 'sales-scorecard-overview':
         return { presets: ['mtd', 'last-month', 'qtd', 'last-quarter', 'ytd', 'last-year'], showYears: false };
+      case 'lock-stratification':
+        return { presets: ['mtd', 'last-month', 'qtd', 'ytd', 'last-year'], showYears: false };
       default:
         return {}; // default behavior: rolling-13, rolling-12 + year buttons
     }
@@ -2450,6 +2499,13 @@ export function WidgetGroup({
                   filters={filters}
                   onApplyPreset={handleApplyGroupPreset}
                 />
+              </>
+            ) : sectionType === 'lock-stratification' ? (
+              <>
+                <PricingFilterSelect label="Locked" value={filters.lockStratLocked ?? 'all_active'} options={LOCK_STRAT_LOCKED_OPTIONS} onChange={(v) => updateFilters(groupId, { lockStratLocked: v as 'active_locked' | 'active_not_locked' | 'all_active' })} />
+                <PricingFilterSelect label="Measure" value={filters.lockStratMeasure ?? 'volume'} options={LOCK_STRAT_MEASURE_OPTIONS} onChange={(v) => updateFilters(groupId, { lockStratMeasure: v as 'volume' | 'units' | 'wac' | 'wa_fico' })} />
+                <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+                <GroupFilterBookmarkButton filters={filters} onApplyPreset={handleApplyGroupPreset} />
               </>
             ) : (
               <>

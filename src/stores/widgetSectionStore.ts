@@ -27,7 +27,8 @@ export type SectionType =
   | 'actors'
   | 'pricing-dashboard'
   | 'pipeline-analysis'
-  | 'sales-scorecard-overview';
+  | 'sales-scorecard-overview'
+  | 'lock-stratification';
 
 /**
  * A dynamic (user-added) filter dimension.
@@ -133,6 +134,14 @@ export interface SectionFilters {
   salesScorecardOverviewTimeMeasure?: 'quarterly' | 'monthly' | 'weekly' | 'daily';
   /** Sales Scorecard Overview: milestone date columns to show (e.g. started_date, application_date). Empty = backend default five. */
   salesScorecardOverviewMilestoneColumns?: string[];
+  /** Lock Stratification: locked filter (active_locked, active_not_locked, all_active) */
+  lockStratLocked?: 'active_locked' | 'active_not_locked' | 'all_active';
+  /** Lock Stratification: measure (volume, units, wac, wa_fico) */
+  lockStratMeasure?: 'volume' | 'units' | 'wac' | 'wa_fico';
+  /** Lock Stratification: milestone group-by (current_milestone, investor, branch, etc.) */
+  lockStratMilestoneGroupBy?: string;
+  /** Lock Stratification: pull-through period (30, 60, 90, 120, ytd) */
+  lockStratPullThroughPeriod?: string;
   /** User-added dynamic filters (column = value conditions) */
   dynamicFilters?: DynamicFilterEntry[];
 }
@@ -284,6 +293,14 @@ export const useWidgetSectionStore = create<WidgetSectionState>((set, get) => ({
           dateRange: range,
           salesScorecardOverviewMeasure: 'volume',
           salesScorecardOverviewTimeMeasure: 'monthly',
+        };
+      } else if (sectionType === 'lock-stratification') {
+        filters = {
+          ...base,
+          lockStratLocked: 'all_active',
+          lockStratMeasure: 'volume',
+          lockStratMilestoneGroupBy: 'current_milestone',
+          lockStratPullThroughPeriod: '60',
         };
       }
       return {

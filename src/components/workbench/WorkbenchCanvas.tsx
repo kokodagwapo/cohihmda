@@ -706,6 +706,17 @@ const SECTION_TO_WIDGETS: Record<
     sectionType: "sales-scorecard-overview",
     widgetIds: ["sales-scorecard-overview-chart", "sales-scorecard-overview-table"],
   },
+  lockStratification: {
+    sectionType: "lock-stratification",
+    widgetIds: [
+      "lock-stratification-kpis",
+      "lock-stratification-interest-rates",
+      "lock-stratification-days-to-expiration",
+      "lock-stratification-pull-through",
+      "lock-stratification-milestone-bar",
+      "lock-stratification-milestone-pivot",
+    ],
+  },
 };
 
 /**
