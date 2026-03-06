@@ -49,6 +49,10 @@ async function ensurePlatformUserShadow(
     );
 
     if (existing.rows.length === 0) {
+      // Tenant DB supports only simplified roles; map platform roles safely.
+      const tenantSafeRole =
+        userRole === "tenant_admin" ? "tenant_admin" : "user";
+
       // Check if is_platform_user column exists
       const columnCheck = await tenantPool.query(`
         SELECT EXISTS (
@@ -60,8 +64,17 @@ async function ensurePlatformUserShadow(
       `);
 
       const hasPlatformUserColumn = columnCheck.rows[0]?.exists;
-      const email =
-        userEmail || `platform-${userId.substring(0, 8)}@coheus.internal`;
+      const fallbackEmail = `platform-${userId.substring(0, 8)}@coheus.internal`;
+      const preferredEmail = userEmail?.trim().toLowerCase() || fallbackEmail;
+
+      // Avoid unique(email) collisions with existing tenant users.
+      const emailOwnerResult = await tenantPool.query(
+        "SELECT id FROM public.users WHERE email = $1 LIMIT 1",
+        [preferredEmail]
+      );
+      const emailOwnerId = emailOwnerResult.rows[0]?.id as string | undefined;
+      const safeEmail =
+        emailOwnerId && emailOwnerId !== userId ? fallbackEmail : preferredEmail;
 
       if (hasPlatformUserColumn) {
         // Modern schema with is_platform_user column
@@ -75,7 +88,7 @@ async function ensurePlatformUserShadow(
             is_platform_user = true,
             updated_at = NOW()
         `,
-          [userId, email, userRole]
+          [userId, safeEmail, tenantSafeRole]
         );
       } else {
         // Legacy schema - try with minimal columns
@@ -89,7 +102,7 @@ async function ensurePlatformUserShadow(
             role = EXCLUDED.role,
             updated_at = NOW()
         `,
-          [userId, email, userRole]
+          [userId, safeEmail, tenantSafeRole]
         );
       }
 
