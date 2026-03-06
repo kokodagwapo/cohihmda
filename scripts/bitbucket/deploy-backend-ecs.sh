@@ -320,8 +320,8 @@ wait_for_service_stability() {
         --region "$AWS_DEFAULT_REGION" 2>/dev/null; then
         echo "ECS service is now stable."
     else
-        echo "WARNING: Timed out waiting for service stability."
-        echo "The deployment is still in progress. Check AWS Console for status."
+        echo "ERROR: Timed out waiting for service stability."
+        echo "Deployment did not reach a healthy steady state."
         
         # Get current service status
         echo ""
@@ -332,6 +332,7 @@ wait_for_service_stability() {
             --region "$AWS_DEFAULT_REGION" \
             --query 'services[0].{Status:status,DesiredCount:desiredCount,RunningCount:runningCount,PendingCount:pendingCount}' \
             --output table
+        exit 1
     fi
 }
 

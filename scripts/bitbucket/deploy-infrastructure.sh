@@ -8,6 +8,7 @@
 #   - AWS_ROLE_ARN             - IAM role ARN for OIDC (repository variable)
 #   - AWS_REGION               - AWS region (repository variable, e.g., us-east-2)
 #   - CF_STACK_BACKEND         - CloudFormation stack name for backend (e.g., coheus-dev-backend)
+#   - COGNITO_PASSWORD_AUTH    - Must be "true" (enforces Cognito-only password auth)
 #
 # Optional (defaults shown):
 #   - CF_STACK_WAF_CLOUDFRONT  - WAF/CloudFront stack (e.g., coheus-dev-waf-cloudfront)
@@ -31,6 +32,22 @@ echo ""
 
 # Use AWS_REGION or AWS_DEFAULT_REGION
 export AWS_DEFAULT_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-2}}"
+
+# Enforce Cognito-only password auth policy at deploy time
+validate_auth_configuration() {
+    local auth_mode="${COGNITO_PASSWORD_AUTH:-}"
+    if [ -z "$auth_mode" ]; then
+        echo "ERROR: COGNITO_PASSWORD_AUTH deployment variable is not set."
+        echo "Set it to 'true' for all deployed environments."
+        exit 1
+    fi
+    if [ "$auth_mode" != "true" ]; then
+        echo "ERROR: COGNITO_PASSWORD_AUTH must be 'true'. Current value: '$auth_mode'"
+        echo "Refusing deploy because local DB password fallback is disallowed."
+        exit 1
+    fi
+    echo "Auth policy validated: COGNITO_PASSWORD_AUTH=true"
+}
 
 # ============================================================================
 # Install AWS CLI
@@ -164,6 +181,14 @@ get_stack_parameters() {
             result+=","
         fi
         result+="{\"ParameterKey\":\"OpenAIApiKeySecretArn\",\"ParameterValue\":\"${OPENAI_API_KEY_SECRET_ARN}\"}"
+    fi
+    if [ -n "${COGNITO_PASSWORD_AUTH:-}" ]; then
+        if [ "$first" = true ]; then
+            first=false
+        else
+            result+=","
+        fi
+        result+="{\"ParameterKey\":\"CognitoPasswordAuth\",\"ParameterValue\":\"${COGNITO_PASSWORD_AUTH}\"}"
     fi
 
     result+="]"
@@ -669,6 +694,7 @@ display_summary() {
 main() {
     install_aws_cli
     verify_aws_credentials
+    validate_auth_configuration
     validate_templates
     deploy_backend_stack
     deploy_waf_cloudfront_stack

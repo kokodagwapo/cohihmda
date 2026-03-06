@@ -180,7 +180,12 @@ app.use((req, res, next) => {
 
 // Validate required environment variables at startup
 const validateEnvironment = () => {
-  const requiredVars = ["JWT_SECRET"];
+  const requiredVars = [
+    "JWT_SECRET",
+    "COGNITO_USER_POOL_ID",
+    "COGNITO_CLIENT_ID",
+    "COGNITO_REGION",
+  ];
   const missing: string[] = [];
   const warnings: string[] = [];
 
@@ -239,6 +244,13 @@ const validateEnvironment = () => {
     return false;
   }
 
+  if (process.env.COGNITO_PASSWORD_AUTH !== "true") {
+    console.error(
+      "❌ COGNITO_PASSWORD_AUTH must be set to 'true'. Local DB password auth is disabled by policy.",
+    );
+    return false;
+  }
+
   return true;
 };
 
@@ -252,13 +264,16 @@ const startServer = async () => {
     );
   }
 
-  // Fail fast if Cognito password auth is enabled but MFA pool config is unsafe.
-  if (isCognitoAuthEnabled() && process.env.COGNITO_PASSWORD_AUTH === "true") {
-    await assertMfaConfigurationReady();
-    console.log(
-      "✅ Cognito MFA preflight passed (EMAIL_OTP + SOFTWARE_TOKEN_MFA enabled)",
+  // Fail fast if Cognito auth isn't enabled or pool MFA config is unsafe.
+  if (!isCognitoAuthEnabled()) {
+    throw new Error(
+      "Cognito password auth must be enabled. Refusing to start without COGNITO_PASSWORD_AUTH=true and Cognito config.",
     );
   }
+  await assertMfaConfigurationReady();
+  console.log(
+    "✅ Cognito MFA preflight passed (EMAIL_OTP + SOFTWARE_TOKEN_MFA enabled)",
+  );
 
   // Setup routes
   setupRoutes(app);
