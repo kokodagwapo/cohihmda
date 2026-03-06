@@ -164,6 +164,49 @@ async function getEligibleRecipients(): Promise<ReleaseNotesRecipient[]> {
     { userId: string; email: string; fullName: string | null }
   >();
 
+  const addRecipient = (recipient: {
+    userId: string;
+    email: string;
+    fullName: string | null;
+  }) => {
+    const normalizedEmail = recipient.email.trim().toLowerCase();
+    if (!normalizedEmail || !normalizedEmail.includes("@")) return;
+    if (!recipientsByEmail.has(normalizedEmail)) {
+      recipientsByEmail.set(normalizedEmail, {
+        userId: recipient.userId,
+        email: recipient.email.trim(),
+        fullName: recipient.fullName,
+      });
+    }
+  };
+
+  // Include active platform staff users from management DB.
+  // These users can exist outside tenant-specific user tables.
+  try {
+    const platformUsersResult = await managementPool.query(
+      `SELECT id, email, full_name
+       FROM coheus_users
+       WHERE is_active = true
+         AND email IS NOT NULL
+         AND role IN ('super_admin', 'platform_admin', 'support', 'admin')`,
+    );
+    for (const user of platformUsersResult.rows as Array<{
+      id: string;
+      email: string;
+      full_name: string | null;
+    }>) {
+      addRecipient({
+        userId: user.id,
+        email: user.email,
+        fullName: user.full_name ?? null,
+      });
+    }
+  } catch (error) {
+    console.warn("[ReleaseNotesEmail] Skipping platform recipient lookup:", {
+      error: (error as Error).message,
+    });
+  }
+
   for (const row of tenantResult.rows as Array<{ id: string }>) {
     try {
       const tenantPool = await tenantDbManager.getTenantPool(row.id);
@@ -179,15 +222,11 @@ async function getEligibleRecipients(): Promise<ReleaseNotesRecipient[]> {
         email: string;
         full_name: string | null;
       }>) {
-        const normalizedEmail = user.email.trim().toLowerCase();
-        if (!normalizedEmail || !normalizedEmail.includes("@")) continue;
-        if (!recipientsByEmail.has(normalizedEmail)) {
-          recipientsByEmail.set(normalizedEmail, {
-            userId: user.id,
-            email: user.email.trim(),
-            fullName: user.full_name ?? null,
-          });
-        }
+        addRecipient({
+          userId: user.id,
+          email: user.email,
+          fullName: user.full_name ?? null,
+        });
       }
     } catch (error) {
       console.warn("[ReleaseNotesEmail] Skipping tenant recipient lookup:", {
