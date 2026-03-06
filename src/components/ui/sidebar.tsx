@@ -1,7 +1,8 @@
 import * as React from "react";
 import { Slot } from "@radix-ui/react-slot";
 import { VariantProps, cva } from "class-variance-authority";
-import { PanelLeft } from "lucide-react";
+import { Menu, ChevronLeft } from "lucide-react";
+import { useLocation } from "react-router-dom";
 
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
@@ -40,6 +41,11 @@ function useSidebar() {
   return context;
 }
 
+/** Optional sidebar context — returns null when not in SidebarProvider. */
+function useSidebarOptional() {
+  return React.useContext(SidebarContext);
+}
+
 const SidebarProvider = React.forwardRef<
   HTMLDivElement,
   React.ComponentProps<"div"> & {
@@ -50,6 +56,7 @@ const SidebarProvider = React.forwardRef<
 >(({ defaultOpen = true, open: openProp, onOpenChange: setOpenProp, className, style, children, ...props }, ref) => {
   const isMobile = useIsMobile();
   const [openMobile, setOpenMobile] = React.useState(false);
+  const hasAutoHiddenOnce = React.useRef(false);
 
   // This is the internal state of the sidebar.
   // We use openProp and setOpenProp for control from outside the component.
@@ -88,6 +95,18 @@ const SidebarProvider = React.forwardRef<
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [toggleSidebar]);
 
+  // Auto-hide sidebar after 15s on first load of /insights only (desktop). If user expands again, do not auto-hide.
+  const { pathname } = useLocation();
+  const isInsights = pathname === "/insights";
+  React.useEffect(() => {
+    if (!isInsights || isMobile || hasAutoHiddenOnce.current || !open) return;
+    const id = window.setTimeout(() => {
+      setOpen(false);
+      hasAutoHiddenOnce.current = true;
+    }, 15000);
+    return () => window.clearTimeout(id);
+  }, [open, setOpen, isMobile, isInsights]);
+
   // We add a state so that we can do data-state="expanded" or "collapsed".
   // This makes it easier to style the sidebar with Tailwind classes.
   const state = open ? "expanded" : "collapsed";
@@ -116,7 +135,10 @@ const SidebarProvider = React.forwardRef<
               ...style,
             } as React.CSSProperties
           }
-          className={cn("group/sidebar-wrapper flex min-h-svh w-full has-[[data-variant=inset]]:bg-sidebar", className)}
+          className={cn(
+            "group/sidebar-wrapper flex min-h-svh w-full min-w-0 overflow-x-hidden has-[[data-variant=inset]]:bg-sidebar",
+            className,
+          )}
           ref={ref}
           {...props}
         >
@@ -218,7 +240,8 @@ Sidebar.displayName = "Sidebar";
 
 const SidebarTrigger = React.forwardRef<React.ElementRef<typeof Button>, React.ComponentProps<typeof Button>>(
   ({ className, onClick, ...props }, ref) => {
-    const { toggleSidebar } = useSidebar();
+    const { toggleSidebar, state } = useSidebar();
+    const isExpanded = state === "expanded";
 
     return (
       <Button
@@ -226,14 +249,33 @@ const SidebarTrigger = React.forwardRef<React.ElementRef<typeof Button>, React.C
         data-sidebar="trigger"
         variant="ghost"
         size="icon"
-        className={cn("h-7 w-7", className)}
+        className={cn(
+          "h-7 rounded-lg gap-1 transition-colors",
+          "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+          "group-data-[collapsible=icon]:bg-blue-100 group-data-[collapsible=icon]:dark:bg-blue-500/25 group-data-[collapsible=icon]:text-blue-600 group-data-[collapsible=icon]:dark:text-blue-400",
+          isExpanded ? "w-14 px-1.5 justify-start" : "w-7 justify-center group-data-[collapsible=icon]:animate-blink-subtle",
+          className,
+        )}
         onClick={(event) => {
           onClick?.(event);
           toggleSidebar();
         }}
         {...props}
       >
-        <PanelLeft />
+        {isExpanded ? (
+          <>
+            <ChevronLeft
+              className="h-4 w-4 shrink-0 animate-blink-subtle text-sidebar-foreground/90"
+              aria-hidden
+            />
+            <Menu className="h-4 w-4 shrink-0 text-sidebar-foreground" aria-hidden />
+          </>
+        ) : (
+          <Menu
+            className="h-4 w-4 shrink-0 group-data-[collapsible=icon]:animate-blink-subtle text-sidebar-foreground"
+            aria-hidden
+          />
+        )}
         <span className="sr-only">Toggle Sidebar</span>
       </Button>
     );
@@ -274,7 +316,7 @@ const SidebarInset = React.forwardRef<HTMLDivElement, React.ComponentProps<"main
     <main
       ref={ref}
       className={cn(
-        "relative flex min-h-svh flex-1 flex-col bg-background",
+        "relative flex min-h-svh min-h-[100dvh] flex-1 flex-col min-w-0 overflow-x-hidden overflow-y-auto bg-background",
         "peer-data-[variant=inset]:min-h-[calc(100svh-theme(spacing.4))] md:peer-data-[variant=inset]:m-2 md:peer-data-[state=collapsed]:peer-data-[variant=inset]:ml-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow",
         className,
       )}
