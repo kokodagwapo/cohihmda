@@ -26,6 +26,16 @@ import {
   getActorsDashboardData,
   type ActorDimension,
 } from "../../services/dashboard/actorsService.js";
+import {
+  getLoanComplexityDashboardData,
+  getLoanComplexityGroupLoans,
+  getLoanComplexityGroupLoansMulti,
+  getLoanComplexityGroupLoansCrossDimension,
+  getLoanComplexityLoansInPeriod,
+  getLoanComplexityStatusOptions,
+  getLoanComplexityPivotData,
+  type LoanComplexityGroupBy,
+} from "../../services/dashboard/loanComplexityDashboardService.js";
 import { getStaffingUnitTargets } from "../../utils/staffingUnitTargets.js";
 import { buildDimensionFilterWhereClause } from "../../utils/scorecard-utils.js";
 import { deleteInsightById } from "../../services/insights/llmInsightGenerator.js";
@@ -1181,6 +1191,274 @@ router.get(
       res.status(500).json({
         error: "Failed to fetch actors dashboard",
         details: process.env.NODE_ENV === "development" ? error.message : undefined,
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/dashboard/loan-complexity
+ * Loan Complexity dashboard: average complexity per loan officer, branch, or current_loan_status.
+ * Base loan set: application_date in [startDate, endDate], channel/tenant/access.
+ */
+router.get(
+  "/loan-complexity",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const querySchema = z.object({
+        startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        groupBy: z.enum(["loan_officer", "processor", "underwriter", "closer", "branch", "current_loan_status"]),
+        channel_group: z.string().optional(),
+        tenant_id: z.string().uuid().optional(),
+      });
+      const parsed = querySchema.parse(req.query);
+      const tenantContext = getTenantContext(req);
+      const accessCtx = await getLoanAccessContext(req, tenantContext.tenantPool);
+      if (accessCtx.hasNoAccess) {
+        return res.json({ bars: [] });
+      }
+      const { accessClause, accessParams } = accessCtx.buildWhereClause("l", 3);
+      const dimensionFilterClause = buildLoanComplexityDimensionFilterClause(
+        req.query as Record<string, unknown>
+      );
+      const result = await getLoanComplexityDashboardData(tenantContext.tenantPool, {
+        startDate: parsed.startDate,
+        endDate: parsed.endDate,
+        groupBy: parsed.groupBy as LoanComplexityGroupBy,
+        channelGroup: parsed.channel_group || undefined,
+        accessClause: accessClause ? ` ${accessClause.trim()}` : undefined,
+        accessParams: accessParams.length > 0 ? accessParams : undefined,
+        dimensionFilterClause: dimensionFilterClause || undefined,
+      });
+      res.json(result);
+    } catch (error: unknown) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid request", details: error.errors });
+      }
+      console.error("Error fetching loan complexity dashboard:", error);
+      if (handleDatabaseError(error, res, "Failed to fetch loan complexity dashboard")) return;
+      res.status(500).json({
+        error: "Failed to fetch loan complexity dashboard",
+        details: process.env.NODE_ENV === "development" && error instanceof Error ? error.message : undefined,
+      });
+    }
+  }
+);
+
+/** Build dimension filter clause for loan-complexity; when current_loan_status=Fallout use OR of Application Denied | Application Withdrawn; when Non-active exclude Active Loan. */
+function buildLoanComplexityDimensionFilterClause(query: Record<string, unknown>): string {
+  const currentStatus = query.current_loan_status;
+  const statusStr = typeof currentStatus === "string" ? currentStatus.trim() : "";
+  const isFallout = statusStr.toLowerCase() === "fallout";
+  const isNonActive = statusStr.toLowerCase() === "non-active";
+  const skip = new Set<string>(["channel_group", "tenant_id"]);
+  if (isFallout) skip.add("current_loan_status");
+  if (isNonActive) skip.add("current_loan_status");
+  let clause = buildDimensionFilterWhereClause(query, "l", skip);
+  if (isFallout) {
+    clause +=
+      " AND (l.current_loan_status ILIKE 'Application Denied' OR l.current_loan_status ILIKE 'Application Withdrawn')";
+  }
+  if (isNonActive) {
+    clause +=
+      " AND (l.current_loan_status IS NOT NULL AND TRIM(UPPER(l.current_loan_status)) != 'ACTIVE LOAN')";
+  }
+  return clause;
+}
+
+/**
+ * GET /api/dashboard/loan-complexity/status-options
+ * Distinct current_loan_status values for the selected period (for filter dropdown). Includes hasFallout when denied/withdrawn exist.
+ */
+router.get(
+  "/loan-complexity/status-options",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const querySchema = z.object({
+        startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        channel_group: z.string().optional(),
+        tenant_id: z.string().uuid().optional(),
+      });
+      const parsed = querySchema.parse(req.query);
+      const tenantContext = getTenantContext(req);
+      const accessCtx = await getLoanAccessContext(req, tenantContext.tenantPool);
+      if (accessCtx.hasNoAccess) {
+        return res.json({ statuses: [], hasFallout: false });
+      }
+      const { accessClause, accessParams } = accessCtx.buildWhereClause("l", 3);
+      const result = await getLoanComplexityStatusOptions(tenantContext.tenantPool, {
+        startDate: parsed.startDate,
+        endDate: parsed.endDate,
+        channelGroup: parsed.channel_group || undefined,
+        accessClause: accessClause ? ` ${accessClause.trim()}` : undefined,
+        accessParams: accessParams.length > 0 ? accessParams : undefined,
+      });
+      res.json(result);
+    } catch (error: unknown) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid request", details: error.errors });
+      }
+      console.error("Error fetching loan complexity status options:", error);
+      if (handleDatabaseError(error, res, "Failed to fetch loan complexity status options")) return;
+      res.status(500).json({
+        error: "Failed to fetch loan complexity status options",
+        details: process.env.NODE_ENV === "development" && error instanceof Error ? error.message : undefined,
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/dashboard/loan-complexity/loans
+ * Loan rows: when groupBy and groupName(s) are provided, returns loans for those groups; otherwise returns all loans in period (same filters).
+ * Multi-select: either (1) one groupBy + multiple groupName for same dimension, or (2) repeated groupBy+groupName pairs for cross-dimension (OR across dimensions).
+ */
+router.get(
+  "/loan-complexity/loans",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const rawQuery = req.query as Record<string, unknown>;
+      const groupByRaw = rawQuery.groupBy;
+      const groupNameRaw = rawQuery.groupName;
+      const groupByArray = Array.isArray(groupByRaw)
+        ? (groupByRaw as string[]).map((s) => String(s).trim()).filter(Boolean)
+        : typeof groupByRaw === "string" && groupByRaw.trim()
+          ? [groupByRaw.trim()]
+          : [];
+      const groupNamesArray = Array.isArray(groupNameRaw)
+        ? (groupNameRaw as string[]).map((s) => String(s).trim()).filter(Boolean)
+        : typeof groupNameRaw === "string" && groupNameRaw.trim()
+          ? [groupNameRaw.trim()]
+          : [];
+      const querySchema = z.object({
+        startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        channel_group: z.string().optional(),
+        tenant_id: z.string().uuid().optional(),
+      });
+      const parsed = querySchema.safeParse(req.query);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid request", details: parsed.error.errors });
+      }
+      const { startDate, endDate, channel_group, tenant_id } = parsed.data;
+      const tenantContext = getTenantContext(req);
+      const accessCtx = await getLoanAccessContext(req, tenantContext.tenantPool);
+      if (accessCtx.hasNoAccess) {
+        return res.json({ loans: [] });
+      }
+      const { accessClause, accessParams } = accessCtx.buildWhereClause("l", 3);
+      const dimensionFilterClause = buildLoanComplexityDimensionFilterClause(rawQuery);
+      const baseOptions = {
+        startDate,
+        endDate,
+        channelGroup: channel_group || undefined,
+        accessClause: accessClause ? ` ${accessClause.trim()}` : undefined,
+        accessParams: accessParams.length > 0 ? accessParams : undefined,
+        dimensionFilterClause: dimensionFilterClause || undefined,
+      };
+      const groupByEnum = z.enum(["loan_officer", "processor", "underwriter", "closer", "branch", "current_loan_status"]);
+      let loans;
+      if (groupByArray.length === groupNamesArray.length && groupByArray.length > 0) {
+        const validPairs = groupByArray
+          .map((g, i) => ({ groupBy: groupByEnum.safeParse(g), groupName: groupNamesArray[i] }))
+          .filter((p): p is { groupBy: z.SafeParseSuccess<LoanComplexityGroupBy>; groupName: string } => p.groupBy.success);
+        if (validPairs.length === groupByArray.length) {
+          loans = await getLoanComplexityGroupLoansCrossDimension(tenantContext.tenantPool, {
+            ...baseOptions,
+            groupFilters: validPairs.map((p) => ({ groupBy: p.groupBy.data, groupName: p.groupName })),
+          });
+        } else {
+          loans = await getLoanComplexityLoansInPeriod(tenantContext.tenantPool, baseOptions);
+        }
+      } else if (groupByArray.length === 1 && groupNamesArray.length > 0) {
+        const singleGroupBy = groupByEnum.safeParse(groupByArray[0]);
+        if (singleGroupBy.success) {
+          loans =
+            groupNamesArray.length === 1
+              ? await getLoanComplexityGroupLoans(tenantContext.tenantPool, {
+                  ...baseOptions,
+                  groupBy: singleGroupBy.data,
+                  groupName: groupNamesArray[0],
+                })
+              : await getLoanComplexityGroupLoansMulti(tenantContext.tenantPool, {
+                  ...baseOptions,
+                  groupBy: singleGroupBy.data,
+                  groupNames: groupNamesArray,
+                });
+        } else {
+          loans = await getLoanComplexityLoansInPeriod(tenantContext.tenantPool, baseOptions);
+        }
+      } else {
+        loans = await getLoanComplexityLoansInPeriod(tenantContext.tenantPool, baseOptions);
+      }
+      res.json({ loans });
+    } catch (error: unknown) {
+      console.error("Error fetching loan complexity group loans:", error);
+      if (handleDatabaseError(error, res, "Failed to fetch loan complexity group loans")) return;
+      res.status(500).json({
+        error: "Failed to fetch loan complexity group loans",
+        details: process.env.NODE_ENV === "development" && error instanceof Error ? error.message : undefined,
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/dashboard/loan-complexity/pivot
+ * Pivot table: dimensions (Loan Officer, Branch, Underwriter, Processor, Closer) with units, WA complexity, time in motion, % by type/purpose, % locked, % originated/denied/withdrawn (non-active).
+ */
+router.get(
+  "/loan-complexity/pivot",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const querySchema = z.object({
+        startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        channel_group: z.string().optional(),
+        tenant_id: z.string().uuid().optional(),
+      });
+      const parsed = querySchema.parse(req.query);
+      const tenantContext = getTenantContext(req);
+      const accessCtx = await getLoanAccessContext(req, tenantContext.tenantPool);
+      if (accessCtx.hasNoAccess) {
+        return res.json({
+          dimensions: [],
+          loanTypes: [],
+          purposes: [],
+        });
+      }
+      const { accessClause, accessParams } = accessCtx.buildWhereClause("l", 3);
+      const dimensionFilterClause = buildLoanComplexityDimensionFilterClause(
+        req.query as Record<string, unknown>
+      );
+      const result = await getLoanComplexityPivotData(tenantContext.tenantPool, {
+        startDate: parsed.startDate,
+        endDate: parsed.endDate,
+        channelGroup: parsed.channel_group || undefined,
+        accessClause: accessClause ? ` ${accessClause.trim()}` : undefined,
+        accessParams: accessParams.length > 0 ? accessParams : undefined,
+        dimensionFilterClause: dimensionFilterClause || undefined,
+      });
+      res.json(result);
+    } catch (error: unknown) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid request", details: error.errors });
+      }
+      console.error("Error fetching loan complexity pivot:", error);
+      if (handleDatabaseError(error, res, "Failed to fetch loan complexity pivot")) return;
+      res.status(500).json({
+        error: "Failed to fetch loan complexity pivot",
+        details: process.env.NODE_ENV === "development" && error instanceof Error ? error.message : undefined,
       });
     }
   }

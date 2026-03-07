@@ -49,8 +49,16 @@ export function authenticateToken(req: AuthRequest, res: Response, next: NextFun
     req.tenantSlug = decoded.tenantSlug;
     req.userAccessMode = decoded.access_mode || 'full';
     next();
-  } catch (error) {
-    return res.status(403).json({ error: 'Invalid token' });
+  } catch (error: any) {
+    // Authentication failures (expired/invalid/malformed token) should be 401
+    if (
+      error?.name === 'TokenExpiredError' ||
+      error?.name === 'JsonWebTokenError' ||
+      error?.name === 'NotBeforeError'
+    ) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+    return res.status(401).json({ error: 'Unauthorized' });
   }
 }
 

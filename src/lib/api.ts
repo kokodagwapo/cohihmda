@@ -165,7 +165,7 @@ export const getWebSocketUrl = (): string => {
 
 const API_URL = getApiUrl();
 
-const PLATFORM_STAFF_ROLES = new Set(["super_admin", "platform_admin", "support", "admin"]);
+const PLATFORM_STAFF_ROLES = new Set(["super_admin", "platform_admin", "support"]);
 
 export class ApiClient {
   private baseUrl: string;
@@ -176,15 +176,28 @@ export class ApiClient {
   private pendingRequests: Map<string, Promise<any>> = new Map();
   private readonly CACHE_TTL = 30000; // 30 seconds cache
   private refreshPromise: Promise<boolean> | null = null;
+  private readonly AUTH_EVENT_EXPIRED = "cohi:auth-expired";
+  private proactiveRefreshTimeout: ReturnType<typeof setTimeout> | null = null;
+  private expiryLogoutTimeout: ReturnType<typeof setTimeout> | null = null;
+  private lifecycleListenersRegistered = false;
 
   constructor(baseUrl: string = API_URL) {
     this.baseUrl = baseUrl;
     this.token = localStorage.getItem("auth_token");
-    this.scheduleProactiveRefresh();
+    this.registerLifecycleListeners();
+    this.scheduleTokenLifecycle();
   }
 
   setUserRole(role: string | null) {
     this.userRole = role;
+  }
+
+  hasToken(): boolean {
+    return !!this.token;
+  }
+
+  getToken(): string | null {
+    return this.token;
   }
 
   private getHealthUrl(): string {
@@ -196,11 +209,13 @@ export class ApiClient {
   setToken(token: string) {
     this.token = token;
     localStorage.setItem("auth_token", token);
+    this.scheduleTokenLifecycle();
   }
 
   clearToken() {
     this.token = null;
     localStorage.removeItem("auth_token");
+    this.clearLifecycleTimers();
     // Clear all cached data to prevent stale data after logout
     this.clearCache();
   }
@@ -243,7 +258,6 @@ export class ApiClient {
         const data = await response.json();
         if (data.token) {
           this.setToken(data.token);
-          this.scheduleProactiveRefresh();
           return true;
         }
         return false;
@@ -257,20 +271,113 @@ export class ApiClient {
     return this.refreshPromise;
   }
 
+  private isTokenAuthFailure(status: number, errorData: any): boolean {
+    if (status === 401) return true;
+    if (status !== 403) return false;
+    const message = String(errorData?.error || "").toLowerCase();
+    return (
+      message.includes("token") ||
+      message.includes("expired") ||
+      message.includes("unauthorized")
+    );
+  }
+
+  private isAuthRecoveryEligible(endpoint: string): boolean {
+    return !endpoint.includes("/auth/signin") && !endpoint.includes("/auth/refresh");
+  }
+
+  private forceLogoutAndRedirect() {
+    this.clearToken();
+    localStorage.removeItem("refresh_token");
+    localStorage.removeItem("cognito_access_token");
+    localStorage.removeItem("impersonating_tenant");
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent(this.AUTH_EVENT_EXPIRED));
+      if (!window.location.pathname.startsWith("/login")) {
+        window.location.href = "/login";
+      }
+    }
+  }
+
   /**
-   * Decode JWT exp claim and schedule a proactive refresh 5 minutes before expiry.
+   * Decode JWT exp claim from the current token.
    */
-  private scheduleProactiveRefresh() {
-    if (!this.token) return;
+  private getTokenExpiryMs(): number | null {
+    if (!this.token) return null;
     try {
       const payload = JSON.parse(atob(this.token.split(".")[1]));
-      const expiresAt = payload.exp * 1000;
-      const refreshAt = expiresAt - 5 * 60 * 1000;
-      const delay = refreshAt - Date.now();
-      if (delay > 0) {
-        setTimeout(() => this.tryRefreshToken(), delay);
+      return typeof payload.exp === "number" ? payload.exp * 1000 : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private clearLifecycleTimers() {
+    if (this.proactiveRefreshTimeout) {
+      clearTimeout(this.proactiveRefreshTimeout);
+      this.proactiveRefreshTimeout = null;
+    }
+    if (this.expiryLogoutTimeout) {
+      clearTimeout(this.expiryLogoutTimeout);
+      this.expiryLogoutTimeout = null;
+    }
+  }
+
+  /**
+   * Schedule proactive refresh and hard logout at token expiry.
+   */
+  private scheduleTokenLifecycle() {
+    this.clearLifecycleTimers();
+    const expiresAt = this.getTokenExpiryMs();
+    if (!expiresAt) return;
+
+    const logoutDelay = expiresAt - Date.now();
+    if (logoutDelay <= 0) {
+      this.forceLogoutAndRedirect();
+      return;
+    }
+
+    this.expiryLogoutTimeout = setTimeout(() => {
+      this.forceLogoutAndRedirect();
+    }, logoutDelay);
+
+    // Attempt refresh 5 minutes before expiry to keep active sessions alive.
+    const refreshAt = expiresAt - 5 * 60 * 1000;
+    const delay = refreshAt - Date.now();
+    if (delay > 0) {
+      this.proactiveRefreshTimeout = setTimeout(() => {
+        this.tryRefreshToken().catch(() => {
+          // No-op: auth failure path will clear and redirect on next request/expiry.
+        });
+      }, delay);
+    }
+  }
+
+  private registerLifecycleListeners() {
+    if (this.lifecycleListenersRegistered || typeof window === "undefined") return;
+
+    const ensureTokenStillValid = () => {
+      const expiresAt = this.getTokenExpiryMs();
+      if (!expiresAt) return;
+      if (Date.now() >= expiresAt) {
+        this.forceLogoutAndRedirect();
       }
-    } catch {}
+    };
+
+    window.addEventListener("focus", ensureTokenStillValid);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        ensureTokenStillValid();
+      }
+    });
+    window.addEventListener("storage", (event) => {
+      if (event.key === "auth_token") {
+        this.token = event.newValue;
+        this.scheduleTokenLifecycle();
+      }
+    });
+
+    this.lifecycleListenersRegistered = true;
   }
 
   // Get API Gateway URLs from environment
@@ -383,6 +490,56 @@ export class ApiClient {
     return requestPromise;
   }
 
+  async fetchWithAuth(
+    endpoint: string,
+    options: RequestInit = {},
+    retries = 0
+  ): Promise<Response> {
+    // If baseUrl is empty string (CloudFront same-origin), use endpoint directly
+    // Otherwise, prepend baseUrl
+    const url = this.baseUrl ? `${this.baseUrl}${endpoint}` : endpoint;
+    const headers: HeadersInit = {
+      ...options.headers,
+    };
+
+    if (this.token) {
+      headers["Authorization"] = `Bearer ${this.token}`;
+    }
+
+    const response = await fetch(url, {
+      ...options,
+      headers,
+    });
+
+    if (!response.ok) {
+      let errorData: any = {};
+      try {
+        const errorText = await response.clone().text();
+        if (errorText?.trim()) {
+          errorData = JSON.parse(errorText);
+        }
+      } catch {
+        // Ignore parse errors - status-based auth handling is still valid.
+      }
+
+      const shouldRecover =
+        this.isAuthRecoveryEligible(endpoint) &&
+        this.isTokenAuthFailure(response.status, errorData);
+
+      if (shouldRecover) {
+        if (retries === 0) {
+          const refreshed = await this.tryRefreshToken();
+          if (refreshed) {
+            return this.fetchWithAuth(endpoint, options, retries + 1);
+          }
+        }
+        this.forceLogoutAndRedirect();
+      }
+    }
+
+    return response;
+  }
+
   private async executeRequest<T>(
     endpoint: string,
     url: string,
@@ -461,23 +618,19 @@ export class ApiClient {
           );
         }
 
-        // On 401, try refreshing the token once before giving up
-        if (
-          response.status === 401 &&
-          retries === 0 &&
-          !endpoint.includes("/auth/signin") &&
-          !endpoint.includes("/auth/refresh")
-        ) {
-          const refreshed = await this.tryRefreshToken();
-          if (refreshed) {
-            return this.request<T>(endpoint, options, retries + 1);
+        const shouldRecover =
+          this.isAuthRecoveryEligible(endpoint) &&
+          this.isTokenAuthFailure(response.status, errorData);
+
+        // Attempt one token refresh on auth failures, then force logout.
+        if (shouldRecover) {
+          if (retries === 0) {
+            const refreshed = await this.tryRefreshToken();
+            if (refreshed) {
+              return this.request<T>(endpoint, options, retries + 1);
+            }
           }
-          // Refresh failed -- clear everything and redirect to login
-          this.clearToken();
-          localStorage.removeItem("refresh_token");
-          if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
-            window.location.href = "/login";
-          }
+          this.forceLogoutAndRedirect();
         }
 
         throw new Error(errorData.error || "Request failed");
@@ -1240,6 +1393,93 @@ export class ApiClient {
 
   async deleteDistributionRecipientList(id: string, tenantId?: string | null) {
     return this.request<void>(`/api/distributions/recipient-lists/${id}${this._distTq(tenantId)}`, { method: "DELETE" });
+  }
+
+  // Fallout alert distribution
+  private _falloutTq(tenantId?: string | null): string {
+    return tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+  }
+
+  async getFalloutAlertConfig(tenantId?: string | null) {
+    return this.request<{ config: Record<string, unknown> }>(`/api/fallout-alerts/config${this._falloutTq(tenantId)}`);
+  }
+
+  async updateFalloutAlertConfig(
+    data: {
+      enabled?: boolean;
+      min_risk_score?: number;
+      frequency?: "realtime" | "daily_digest" | "weekly_digest";
+      include_risk_levels?: string[];
+      custom_message?: string | null;
+      notify_managers?: boolean;
+      target_encompass_user_ids?: string[];
+      manager_user_ids?: string[];
+    },
+    tenantId?: string | null,
+  ) {
+    return this.request<{ config: Record<string, unknown> }>(`/api/fallout-alerts/config${this._falloutTq(tenantId)}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async sendFalloutAlertsNow(
+    tenantId?: string | null,
+    payload?: {
+      test_recipient_emails?: string[];
+      send_manager_cards?: boolean;
+      manager_card_branch_filters?: string[];
+      manager_card_scope_to_target_los?: boolean;
+    },
+  ) {
+    return this.request<{
+      message: string;
+      alertBatchId: string;
+      recipientsCount: number;
+      sentCount: number;
+      failedRecipients: Array<{ email: string; error: string }>;
+      skippedLoansCount: number;
+      highRiskLoanCount: number;
+      testRecipients: {
+        attempted: number;
+        sent: number;
+        failed: Array<{ email: string; error: string }>;
+      };
+      managerNotifications: {
+        attempted: number;
+        sent: number;
+        failed: Array<{ email: string; error: string }>;
+      };
+      managerCardNotifications: {
+        attempted: number;
+        sent: number;
+        failed: Array<{ email: string; error: string }>;
+        loanCount: number;
+      };
+    }>(`/api/fallout-alerts/send-now${this._falloutTq(tenantId)}`, {
+      method: "POST",
+      body: JSON.stringify(payload || {}),
+    });
+  }
+
+  async getFalloutAlertResponses(limit = 50, tenantId?: string | null) {
+    const tenantParam = tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request<{ responses: any[] }>(
+      `/api/fallout-alerts/responses?limit=${Math.max(1, Math.min(200, limit))}${tenantParam}`,
+    );
+  }
+
+  async getFalloutAlertRecipientOptions(tenantId?: string | null) {
+    return this.request<{
+      loanOfficers: Array<{
+        encompass_user_id: string;
+        display_name: string;
+        email: string;
+        active_loan_count: number;
+      }>;
+      managers: Array<{ id: string; display_name: string; email: string; role: string }>;
+      branches: string[];
+    }>(`/api/fallout-alerts/recipient-options${this._falloutTq(tenantId)}`);
   }
 }
 

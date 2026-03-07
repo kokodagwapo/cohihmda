@@ -529,7 +529,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     loadSession,
     deleteSession,
     renameSession,
-  } = useCohiChat({ tenantId });
+  } = useCohiChat({ tenantId, enabled: isOpen });
 
   const [showHistory, setShowHistory] = useState(false);
 
@@ -1641,7 +1641,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
   return (
     <>
       <div
-        className="fixed inset-0 z-[90] bg-slate-900/10 dark:bg-slate-950/20"
+        className="fixed inset-0 z-[90] bg-slate-900/5 dark:bg-slate-950/30 backdrop-blur-[2px]"
         onClick={onClose}
         aria-hidden="true"
       />
@@ -1651,41 +1651,44 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
         exit={{ x: 500, opacity: 0 }}
         transition={{ type: "spring", damping: 25, stiffness: 300 }}
         className={cn(
-          "fixed flex flex-col border-l border-slate-200/80 dark:border-slate-700/80 shadow-[0_0_60px_-12px_rgba(15,23,42,0.25)] dark:shadow-[0_0_60px_-12px_rgba(0,0,0,0.5)] bg-white/95 dark:bg-slate-900/95 backdrop-blur-2xl",
+          "fixed flex flex-col overflow-hidden",
+          "bg-gradient-to-b from-violet-50/95 via-white/95 to-rose-50/80 dark:from-slate-950/98 dark:via-indigo-950/30 dark:to-slate-950/98 backdrop-blur-xl",
+          "border-l border-violet-200/50 dark:border-indigo-900/50",
+          "shadow-[0_-4px_24px_-4px_rgba(139,92,246,0.06),0_0_1px_rgba(0,0,0,0.02)] dark:shadow-[0_-4px_32px_-4px_rgba(99,102,241,0.12),0_0_1px_rgba(255,255,255,0.04)]",
           isFullscreen || isMobile
             ? "left-0 right-0 top-0 bottom-0 z-[9999] w-full h-full"
-            : "right-0 top-[70px] h-[calc(100%-70px)] z-[100]",
+            : "right-0 top-[70px] h-[calc(100%-70px)] z-[100] rounded-l-2xl",
           !isFullscreen && (isExpanded ? "w-[480px]" : "w-[380px]"),
           className
         )}
       >
-        {/* Header – clean, compact */}
-        <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-slate-200/60 dark:border-slate-700/60 bg-gradient-to-r from-blue-600/95 to-indigo-600/95 backdrop-blur-md">
+        {/* Header – pastel, modern */}
+        <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-violet-100/80 dark:border-indigo-900/60 bg-gradient-to-r from-violet-50/90 to-indigo-50/80 dark:from-indigo-950/50 dark:to-violet-950/40">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
-              <Sparkles className="w-4 h-4 text-white" />
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shrink-0 shadow-lg shadow-violet-500/25 ring-1 ring-white/30">
+              <Sparkles className="w-5 h-5 text-white" strokeWidth={2} />
             </div>
             <div className="min-w-0">
-              <h2 className="text-base sm:text-lg font-semibold text-white tracking-tight truncate">
+              <h2 className="text-[15px] sm:text-base font-semibold text-slate-800 dark:text-white tracking-tight truncate">
                 Cohi Insights
               </h2>
-              <p className="text-[10px] sm:text-xs text-white/80 truncate">
+              <p className="text-[11px] sm:text-xs text-slate-600/90 dark:text-slate-400/90 truncate font-normal">
                 Ask about your pipeline & performance
               </p>
             </div>
             <Badge
               variant="secondary"
-              className="bg-white/25 text-white text-[10px] px-2 py-0 border-0 shrink-0"
+              className="bg-violet-100 dark:bg-violet-500/20 text-violet-700 dark:text-violet-300 text-[10px] px-2.5 py-0.5 border-0 shrink-0 font-medium rounded-full"
             >
               AI
             </Badge>
           </div>
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex items-center gap-1 shrink-0">
             {/* Voice Toggle */}
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 text-white/80 hover:text-white hover:bg-white/20"
+              className="h-8 w-8 rounded-xl text-slate-500 hover:text-violet-700 dark:text-violet-300 hover:bg-violet-100/80 dark:hover:bg-violet-500/20 transition-colors"
               onClick={() => setVoiceEnabled(!voiceEnabled)}
               title={voiceEnabled ? "Disable voice" : "Enable voice"}
             >
@@ -1698,7 +1701,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 text-white/80 hover:text-white hover:bg-white/20"
+              className="h-8 w-8 rounded-xl text-slate-500 hover:text-violet-700 dark:hover:text-violet-300 hover:bg-violet-100/80 dark:hover:bg-violet-500/20 transition-colors"
               onClick={() => setShowHistory(true)}
               title="Chat history"
             >
@@ -1707,7 +1710,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 text-white/80 hover:text-white hover:bg-white/20"
+              className="h-8 w-8 rounded-xl text-slate-500 hover:text-violet-700 dark:hover:text-violet-300 hover:bg-violet-100/80 dark:hover:bg-violet-500/20 transition-colors"
               onClick={newSession}
               title="New conversation"
             >
@@ -1716,7 +1719,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 text-white/80 hover:text-white hover:bg-white/20"
+              className="h-8 w-8 rounded-xl text-slate-500 hover:text-violet-700 dark:hover:text-violet-300 hover:bg-violet-100/80 dark:hover:bg-violet-500/20 transition-colors"
               onClick={() => clearMessages()}
               title="Clear chat"
             >
@@ -1726,7 +1729,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7 text-white/80 hover:text-white hover:bg-white/20"
+                className="h-8 w-8 rounded-xl text-slate-500 hover:text-violet-700 dark:hover:text-violet-300 hover:bg-violet-100/80 dark:hover:bg-violet-500/20 transition-colors"
                 onClick={handleOpenInWorkbench}
                 disabled={isCreatingCanvas}
                 title="Open in Workbench"
@@ -1742,7 +1745,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7 text-white/80 hover:text-white hover:bg-white/20"
+                className="h-8 w-8 rounded-xl text-slate-500 hover:text-violet-700 dark:hover:text-violet-300 hover:bg-violet-100/80 dark:hover:bg-violet-500/20 transition-colors"
                 onClick={() => setIsExpanded(!isExpanded)}
                 title={isExpanded ? "Minimize width" : "Expand width"}
               >
@@ -1756,7 +1759,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 text-white/80 hover:text-white hover:bg-white/20"
+              className="h-8 w-8 rounded-xl text-slate-500 hover:text-violet-700 dark:hover:text-violet-300 hover:bg-violet-100/80 dark:hover:bg-violet-500/20 transition-colors"
               onClick={() => setIsFullscreen(!isFullscreen)}
               title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
             >
@@ -1769,7 +1772,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 text-white/90 hover:text-white hover:bg-white/25"
+              className="h-8 w-8 rounded-xl text-slate-500 hover:text-rose-600 dark:hover:text-rose-300 hover:bg-rose-100/80 dark:hover:bg-rose-500/15 transition-colors"
               onClick={onClose}
               title="Close"
             >

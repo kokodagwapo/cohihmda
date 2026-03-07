@@ -15,10 +15,9 @@
 #   - S3_BUCKET                    - Frontend S3 bucket name
 #   - CLOUDFRONT_DISTRIBUTION_ID   - For cache invalidation
 #   - ECR_REPOSITORY_URI           - ECR repository for backend images
-#   - ECS_CLUSTER                  - ECS cluster name
-#   - ECS_SERVICE                  - ECS service name
 #   - VITE_API_URL                 - Backend API URL for frontend build
 #   - CF_STACK_BACKEND             - CloudFormation stack name (e.g., coheus-dev-backend)
+#   - COGNITO_PASSWORD_AUTH        - Set to "true" (Cognito-only password auth policy)
 # ============================================================================
 
 image: node:20
@@ -26,6 +25,9 @@ image: node:20
 options:
   docker: true
   size: 2x
+
+clone:
+  depth: full
 
 definitions:
   caches:
@@ -35,6 +37,12 @@ definitions:
   services:
     docker:
       memory: 3072
+    postgres:
+      image: postgres:15
+      variables:
+        POSTGRES_DB: coheus_test
+        POSTGRES_USER: postgres
+        POSTGRES_PASSWORD: postgres
 
   scripts:
     setup-oidc: &setup-oidc |
@@ -69,6 +77,30 @@ definitions:
         script:
           - cd server && npm ci && npm run build
           - echo "Build validation passed (Docker build in deploy step compiles from source)"
+
+    - step: &test-frontend
+        name: Test Frontend
+        caches:
+          - npm
+        script:
+          - npm ci
+          - npm run test:run
+
+    - step: &test-backend
+        name: Test Backend
+        caches:
+          - server-npm
+        script:
+          - cd server && npm ci && npm run test:run
+
+    - step: &test-backend-integration
+        name: Test Backend RBAC Integration
+        caches:
+          - server-npm
+        services:
+          - postgres
+        script:
+          - cd server && npm ci && npm run test:integration
 
     # Deploy steps with automatic change detection
     - step: &deploy-dev
@@ -229,12 +261,20 @@ pipelines:
       - parallel:
           - step: *build-frontend
           - step: *build-backend
+      - parallel:
+          - step: *test-frontend
+          - step: *test-backend
+          - step: *test-backend-integration
       - step: *deploy-dev
 
     main:
       - parallel:
           - step: *build-frontend
           - step: *build-backend
+      - parallel:
+          - step: *test-frontend
+          - step: *test-backend
+          - step: *test-backend-integration
       - step: *deploy-prod
 
   # Pull request validation (only for PRs targeting dev or main)
@@ -243,10 +283,18 @@ pipelines:
       - parallel:
           - step: *build-frontend
           - step: *build-backend
+      - parallel:
+          - step: *test-frontend
+          - step: *test-backend
+          - step: *test-backend-integration
     main:
       - parallel:
           - step: *build-frontend
           - step: *build-backend
+      - parallel:
+          - step: *test-frontend
+          - step: *test-backend
+          - step: *test-backend-integration
 
   # Custom pipelines for individual deployments
   custom:

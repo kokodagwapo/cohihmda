@@ -34,7 +34,9 @@ export type DataSourceId =
   | 'actors'
   | 'pricing-dashboard'
   | 'pipeline-analysis'
-  | 'sales-scorecard-overview';
+  | 'sales-scorecard-overview'
+  | 'lock-stratification'
+  | 'loan-complexity';
 
 // ---------------------------------------------------------------------------
 // Widget categories – drives catalog grouping & icon selection

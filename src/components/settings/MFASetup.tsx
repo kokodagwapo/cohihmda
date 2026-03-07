@@ -8,11 +8,11 @@ import { api } from '@/lib/api';
 import {
   Loader2,
   ShieldCheck,
-  ShieldOff,
   QrCode,
   Copy,
   Check,
   AlertTriangle,
+  MailCheck,
 } from 'lucide-react';
 
 type SetupStep = 'idle' | 'loading-qr' | 'scan' | 'verify' | 'done';
@@ -20,6 +20,7 @@ type SetupStep = 'idle' | 'loading-qr' | 'scan' | 'verify' | 'done';
 export function MFASetup() {
   const { toast } = useToast();
   const [mfaEnabled, setMfaEnabled] = useState<boolean | null>(null);
+  const [mfaMethod, setMfaMethod] = useState<'totp' | 'email' | null>(null);
   const [mfaAvailable, setMfaAvailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [setupStep, setSetupStep] = useState<SetupStep>('idle');
@@ -27,7 +28,6 @@ export function MFASetup() {
   const [qrCodeUri, setQrCodeUri] = useState('');
   const [verifyCode, setVerifyCode] = useState('');
   const [verifyLoading, setVerifyLoading] = useState(false);
-  const [disableLoading, setDisableLoading] = useState(false);
   const [copiedSecret, setCopiedSecret] = useState(false);
 
   useEffect(() => {
@@ -36,10 +36,15 @@ export function MFASetup() {
 
   const checkMfaStatus = async () => {
     try {
-      const response = await api.request<{ mfaEnabled: boolean; available: boolean }>(
+      const response = await api.request<{
+        mfaEnabled: boolean;
+        mfaMethod: 'totp' | 'email' | null;
+        available: boolean;
+      }>(
         '/api/auth/mfa/status',
       );
       setMfaEnabled(response.mfaEnabled);
+      setMfaMethod(response.mfaMethod || null);
       setMfaAvailable(response.available);
     } catch {
       setMfaAvailable(false);
@@ -87,6 +92,7 @@ export function MFASetup() {
         body: JSON.stringify({ cognitoAccessToken, code }),
       });
       setMfaEnabled(true);
+      setMfaMethod('totp');
       setSetupStep('done');
       toast({ title: 'MFA Enabled', description: 'Two-factor authentication is now active.' });
     } catch (error: any) {
@@ -101,21 +107,24 @@ export function MFASetup() {
     }
   }, [toast]);
 
-  const handleDisable = async () => {
-    setDisableLoading(true);
+  const startEmailSetup = async () => {
     try {
-      await api.request('/api/auth/mfa', { method: 'DELETE' });
-      setMfaEnabled(false);
-      setSetupStep('idle');
-      toast({ title: 'MFA Disabled', description: 'Two-factor authentication has been disabled.' });
+      await api.request('/api/auth/mfa/email/setup', {
+        method: 'POST',
+        body: JSON.stringify({
+          cognitoAccessToken: localStorage.getItem('cognito_access_token') || undefined,
+        }),
+      });
+      setMfaEnabled(true);
+      setMfaMethod('email');
+      setSetupStep('done');
+      toast({ title: 'Email MFA Enabled', description: 'Email OTP will be required on your next sign-in.' });
     } catch (error: any) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to disable MFA',
+        description: error.message || 'Failed to start email MFA setup',
         variant: 'destructive',
       });
-    } finally {
-      setDisableLoading(false);
     }
   };
 
@@ -150,7 +159,7 @@ export function MFASetup() {
           )}
         </CardTitle>
         <CardDescription>
-          Add an extra layer of security to your account with a TOTP authenticator app.
+          MFA is required for all non-SSO users. You can use an authenticator app or email verification codes.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -162,27 +171,24 @@ export function MFASetup() {
                 <div className="flex items-start gap-3 p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
                   <ShieldCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400 mt-0.5 shrink-0" />
                   <div className="text-sm text-emerald-700 dark:text-emerald-300">
-                    Your account is protected with two-factor authentication.
+                    Your account is protected with MFA.
+                    {mfaMethod ? ` Current method: ${mfaMethod === 'totp' ? 'Authenticator app' : 'Email code'}.` : ''}
                   </div>
                 </div>
-                <Button
-                  variant="outline"
-                  onClick={handleDisable}
-                  disabled={disableLoading}
-                  className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/30"
-                >
-                  {disableLoading ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Disabling...
-                    </>
-                  ) : (
-                    <>
-                      <ShieldOff className="mr-2 h-4 w-4" />
-                      Disable MFA
-                    </>
+                <div className="flex flex-wrap gap-2">
+                  {mfaMethod !== 'totp' && (
+                    <Button variant="outline" onClick={startSetup}>
+                      <QrCode className="mr-2 h-4 w-4" />
+                      Switch to Authenticator App
+                    </Button>
                   )}
-                </Button>
+                  {mfaMethod !== 'email' && (
+                    <Button variant="outline" onClick={startEmailSetup}>
+                      <MailCheck className="mr-2 h-4 w-4" />
+                      Switch to Email Code
+                    </Button>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="space-y-4">
@@ -192,10 +198,16 @@ export function MFASetup() {
                     Your account is not protected with two-factor authentication. We recommend enabling it.
                   </div>
                 </div>
-                <Button onClick={startSetup}>
-                  <ShieldCheck className="mr-2 h-4 w-4" />
-                  Set Up MFA
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button onClick={startSetup}>
+                    <QrCode className="mr-2 h-4 w-4" />
+                    Use Authenticator App
+                  </Button>
+                  <Button variant="outline" onClick={startEmailSetup}>
+                    <MailCheck className="mr-2 h-4 w-4" />
+                    Use Email Code
+                  </Button>
+                </div>
               </div>
             )}
           </div>

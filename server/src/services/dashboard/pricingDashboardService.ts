@@ -173,6 +173,14 @@ function isSumColumn(columnName: string): boolean {
   );
 }
 
+/**
+ * Safely coerce a DB expression to numeric for aggregation.
+ * Handles tenants where numeric-like loan columns are stored as text.
+ */
+function toNumericSql(expr: string): string {
+  return `NULLIF(REGEXP_REPLACE(COALESCE(${expr}::text, ''), '[^0-9.+-]', '', 'g'), '')::double precision`;
+}
+
 function toLocalDateStr(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -397,6 +405,18 @@ export async function getPricingReport(
 
   const isBranchReport = options.isEntityDetail && filters.entityType === "branch";
   const groupByCols = isBranchReport ? `l.${entityCol}` : `l.${entityCol}, l.${actorCol}`;
+  const loanAmountNum = toNumericSql("l.loan_amount");
+  const cdLenderCreditsNum = toNumericSql("l.cd_lender_credits");
+  const paSellAmtNum = toNumericSql("l.pa_sell_amt");
+  const line800BorrowerNum = toNumericSql("l.line_800_total_borrower_paid_amount");
+  const appraisalFeeNum = toNumericSql("l.fee_details_line_804_borrower_amount_appraisal_fee");
+  const line800SellerNum = toNumericSql("l.line_800_total_seller_paid_amount");
+  const feesInterestNum = toNumericSql("l.fees_interest_borr");
+  const expectedIntPymtNum = toNumericSql("l.purchase_adv_expected_int_pymt_from_investor");
+  const paPayout1Num = toNumericSql("l.pa_payout_1");
+  const paPayout2Num = toNumericSql("l.pa_payout_2");
+  const paPayout3Num = toNumericSql("l.pa_payout_3");
+  const lenderCreditsNum = toNumericSql("l.lender_credits");
 
   let dynamicReportCols: { key: string; type: string }[] = [];
   if (options.metricColumns?.length) {
@@ -433,44 +453,44 @@ export async function getPricingReport(
     COALESCE(l.${entityCol}, '') AS entity_name,
     '' AS actor_name,
     COUNT(*)::int AS units,
-    COALESCE(SUM(l.loan_amount), 0)::double precision AS volume,
+    COALESCE(SUM(${loanAmountNum}), 0)::double precision AS volume,
     COALESCE(SUM((${revenueExpr})), 0)::double precision AS loan_pricing_dollars,
-    (CASE WHEN SUM(l.loan_amount) IS NOT NULL AND SUM(l.loan_amount) <> 0
-      THEN (SUM((${revenueExpr})) / NULLIF(SUM(l.loan_amount), 0)) * 100
+    (CASE WHEN SUM(${loanAmountNum}) IS NOT NULL AND SUM(${loanAmountNum}) <> 0
+      THEN (SUM((${revenueExpr})) / NULLIF(SUM(${loanAmountNum}), 0)) * 100
       ELSE NULL END)::double precision AS pricing_margin,
-    COALESCE(SUM(l.cd_lender_credits), 0)::double precision AS cd_lender_credits,
-    COALESCE(SUM(l.pa_sell_amt), 0)::double precision AS purchase_advice_sell_amount,
-    COALESCE(SUM(l.line_800_total_borrower_paid_amount), 0)::double precision AS line_800_total_borrower_paid_amount,
-    COALESCE(SUM(l.fee_details_line_804_borrower_amount_appraisal_fee), 0)::double precision AS fees_appraisal_fee_borr,
-    COALESCE(SUM(l.line_800_total_seller_paid_amount), 0)::double precision AS line_800_total_seller_paid_amount,
-    COALESCE(SUM(l.fees_interest_borr), 0)::double precision AS fees_interest_borr,
-    COALESCE(SUM(l.purchase_adv_expected_int_pymt_from_investor), 0)::double precision AS purchase_adv_expected_int_pymt_from_investor,
-    COALESCE(SUM(l.pa_payout_1), 0)::double precision AS purchase_advice_expctd_payout_1_amt,
-    COALESCE(SUM(l.pa_payout_2), 0)::double precision AS purchase_advice_expctd_payout_2_amt,
-    COALESCE(SUM(l.pa_payout_3), 0)::double precision AS purchase_advice_expctd_payout_3_amt,
-    COALESCE(SUM(l.lender_credits), 0)::double precision AS lender_credits
+    COALESCE(SUM(${cdLenderCreditsNum}), 0)::double precision AS cd_lender_credits,
+    COALESCE(SUM(${paSellAmtNum}), 0)::double precision AS purchase_advice_sell_amount,
+    COALESCE(SUM(${line800BorrowerNum}), 0)::double precision AS line_800_total_borrower_paid_amount,
+    COALESCE(SUM(${appraisalFeeNum}), 0)::double precision AS fees_appraisal_fee_borr,
+    COALESCE(SUM(${line800SellerNum}), 0)::double precision AS line_800_total_seller_paid_amount,
+    COALESCE(SUM(${feesInterestNum}), 0)::double precision AS fees_interest_borr,
+    COALESCE(SUM(${expectedIntPymtNum}), 0)::double precision AS purchase_adv_expected_int_pymt_from_investor,
+    COALESCE(SUM(${paPayout1Num}), 0)::double precision AS purchase_advice_expctd_payout_1_amt,
+    COALESCE(SUM(${paPayout2Num}), 0)::double precision AS purchase_advice_expctd_payout_2_amt,
+    COALESCE(SUM(${paPayout3Num}), 0)::double precision AS purchase_advice_expctd_payout_3_amt,
+    COALESCE(SUM(${lenderCreditsNum}), 0)::double precision AS lender_credits
     ${dynamicSelectSql}
   `
     : `
     COALESCE(l.${entityCol}, '') AS entity_name,
     COALESCE(l.${actorCol}, '') AS actor_name,
     COUNT(*)::int AS units,
-    COALESCE(SUM(l.loan_amount), 0)::double precision AS volume,
+    COALESCE(SUM(${loanAmountNum}), 0)::double precision AS volume,
     COALESCE(SUM((${revenueExpr})), 0)::double precision AS loan_pricing_dollars,
-    (CASE WHEN SUM(l.loan_amount) IS NOT NULL AND SUM(l.loan_amount) <> 0
-      THEN (SUM((${revenueExpr})) / NULLIF(SUM(l.loan_amount), 0)) * 100
+    (CASE WHEN SUM(${loanAmountNum}) IS NOT NULL AND SUM(${loanAmountNum}) <> 0
+      THEN (SUM((${revenueExpr})) / NULLIF(SUM(${loanAmountNum}), 0)) * 100
       ELSE NULL END)::double precision AS pricing_margin,
-    COALESCE(SUM(l.cd_lender_credits), 0)::double precision AS cd_lender_credits,
-    COALESCE(SUM(l.pa_sell_amt), 0)::double precision AS purchase_advice_sell_amount,
-    COALESCE(SUM(l.line_800_total_borrower_paid_amount), 0)::double precision AS line_800_total_borrower_paid_amount,
-    COALESCE(SUM(l.fee_details_line_804_borrower_amount_appraisal_fee), 0)::double precision AS fees_appraisal_fee_borr,
-    COALESCE(SUM(l.line_800_total_seller_paid_amount), 0)::double precision AS line_800_total_seller_paid_amount,
-    COALESCE(SUM(l.fees_interest_borr), 0)::double precision AS fees_interest_borr,
-    COALESCE(SUM(l.purchase_adv_expected_int_pymt_from_investor), 0)::double precision AS purchase_adv_expected_int_pymt_from_investor,
-    COALESCE(SUM(l.pa_payout_1), 0)::double precision AS purchase_advice_expctd_payout_1_amt,
-    COALESCE(SUM(l.pa_payout_2), 0)::double precision AS purchase_advice_expctd_payout_2_amt,
-    COALESCE(SUM(l.pa_payout_3), 0)::double precision AS purchase_advice_expctd_payout_3_amt,
-    COALESCE(SUM(l.lender_credits), 0)::double precision AS lender_credits
+    COALESCE(SUM(${cdLenderCreditsNum}), 0)::double precision AS cd_lender_credits,
+    COALESCE(SUM(${paSellAmtNum}), 0)::double precision AS purchase_advice_sell_amount,
+    COALESCE(SUM(${line800BorrowerNum}), 0)::double precision AS line_800_total_borrower_paid_amount,
+    COALESCE(SUM(${appraisalFeeNum}), 0)::double precision AS fees_appraisal_fee_borr,
+    COALESCE(SUM(${line800SellerNum}), 0)::double precision AS line_800_total_seller_paid_amount,
+    COALESCE(SUM(${feesInterestNum}), 0)::double precision AS fees_interest_borr,
+    COALESCE(SUM(${expectedIntPymtNum}), 0)::double precision AS purchase_adv_expected_int_pymt_from_investor,
+    COALESCE(SUM(${paPayout1Num}), 0)::double precision AS purchase_advice_expctd_payout_1_amt,
+    COALESCE(SUM(${paPayout2Num}), 0)::double precision AS purchase_advice_expctd_payout_2_amt,
+    COALESCE(SUM(${paPayout3Num}), 0)::double precision AS purchase_advice_expctd_payout_3_amt,
+    COALESCE(SUM(${lenderCreditsNum}), 0)::double precision AS lender_credits
     ${dynamicSelectSql}
   `;
 

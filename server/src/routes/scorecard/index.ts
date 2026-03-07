@@ -38,7 +38,7 @@ import {
   getActorColumnForChannel,
   getActorLabelForChannel,
   isTPOChannel,
-  OPERATIONS_ACTOR_CONFIGS,
+  loadOpsActorConfig,
   SALES_ACTOR_CONFIGS,
   REVENUE_SQL_EXPRESSION,
   getTenantRevenueExpression,
@@ -1142,7 +1142,7 @@ router.get(
       };
       const monthsBack = monthsMap[dateRange] || 3;
 
-      const config = OPERATIONS_ACTOR_CONFIGS[actorType];
+      const config = await loadOpsActorConfig(tenantPool, actorType);
       // TTS Weight Configuration - load from database or use defaults
       const weightConfig = await loadOpsWeights(tenantPool);
 

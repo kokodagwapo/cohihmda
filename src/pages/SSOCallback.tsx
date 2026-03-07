@@ -3,7 +3,7 @@
  * Handles the OAuth callback from Cognito after successful authentication
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Loader2, CheckCircle2, XCircle } from 'lucide-react';
@@ -17,18 +17,62 @@ export const SSOCallback = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { setAuthFromToken } = useAuth();
+  const hasHandledRef = useRef(false);
   
   const [state, setState] = useState<CallbackState>('processing');
   const [errorMessage, setErrorMessage] = useState<string>('');
 
   useEffect(() => {
+    if (hasHandledRef.current) return;
+    hasHandledRef.current = true;
+
     const handleCallback = async () => {
+      let processingKey: string | null = null;
+      const waitForAuthToken = async (timeoutMs = 5000): Promise<boolean> => {
+        const start = Date.now();
+        while (Date.now() - start < timeoutMs) {
+          if (localStorage.getItem('auth_token')) return true;
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        return false;
+      };
       try {
         // Get authorization code and state from URL
         const code = searchParams.get('code');
         const stateParam = searchParams.get('state');
         const error = searchParams.get('error');
         const errorDescription = searchParams.get('error_description');
+
+        // Prevent duplicate callback processing (e.g. dev remounts / repeated effect runs).
+        // OAuth codes are single-use, so a second exchange causes a false "failed" state.
+        if (code) {
+          processingKey = `sso_callback:${code}`;
+          const existing = sessionStorage.getItem(processingKey);
+          if (existing === 'done') {
+            setState('success');
+            setTimeout(() => {
+              navigate('/insights', { replace: true });
+            }, 300);
+            return;
+          }
+          if (existing === 'in_progress') {
+            const tokenReady = await waitForAuthToken(4000);
+            if (tokenReady) {
+              sessionStorage.setItem(processingKey, 'done');
+              setState('success');
+              setTimeout(() => {
+                navigate('/insights', { replace: true });
+              }, 300);
+              return;
+            }
+            // Stale marker (previous attempt did not complete), take ownership and retry.
+            sessionStorage.removeItem(processingKey);
+          }
+          if (sessionStorage.getItem(processingKey) === 'in_progress') {
+            return;
+          }
+          sessionStorage.setItem(processingKey, 'in_progress');
+        }
 
         // Handle OAuth errors
         if (error) {
@@ -65,6 +109,9 @@ export const SSOCallback = () => {
           if (setAuthFromToken) {
             setAuthFromToken(data.token, data.user);
           }
+          if (processingKey) {
+            sessionStorage.setItem(processingKey, 'done');
+          }
 
           setState('success');
 
@@ -77,6 +124,9 @@ export const SSOCallback = () => {
           throw new Error('Invalid response from server');
         }
       } catch (err: any) {
+        if (processingKey) {
+          sessionStorage.removeItem(processingKey);
+        }
         console.error('[SSOCallback] Error:', err);
         setState('error');
         setErrorMessage(err.message || 'Authentication failed');

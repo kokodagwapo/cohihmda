@@ -27,16 +27,8 @@ export function CsvActions({ sectionType, onUploadSuccess, className }: CsvActio
   const handleDownloadTemplate = async () => {
     setIsDownloading(true);
     try {
-      // Use fetch directly for blob response, but include auth token
-      const token = localStorage.getItem('auth_token');
-      // Get API URL using shared utility
-      const { getApiUrl } = await import('@/lib/api');
-      const apiUrl = getApiUrl();
-      const response = await fetch(`${apiUrl}/api/dashboard/csv/template?type=${sectionType}`, {
+      const response = await api.fetchWithAuth(`/api/dashboard/csv/template?type=${sectionType}`, {
         method: 'GET',
-        headers: token ? {
-          'Authorization': `Bearer ${token}`,
-        } : {},
         credentials: 'include',
       });
 
@@ -105,19 +97,10 @@ export function CsvActions({ sectionType, onUploadSuccess, className }: CsvActio
         endpoint = '/api/dashboard/import/employees';
       }
 
-      // Use fetch directly for FormData to ensure proper handling
-      const token = localStorage.getItem('auth_token');
-      const { getApiUrl } = await import('@/lib/api');
-      const apiUrl = getApiUrl();
-      const url = apiUrl ? `${apiUrl}${endpoint}` : endpoint;
-      
-      const response = await fetch(url, {
+      const response = await api.fetchWithAuth(endpoint, {
         method: 'POST',
         body: formData,
-        headers: token ? {
-          'Authorization': `Bearer ${token}`,
-          // Don't set Content-Type, let browser set it with boundary for FormData
-        } : {},
+        // Don't set Content-Type, let browser set it with boundary for FormData
         credentials: 'include',
       });
 

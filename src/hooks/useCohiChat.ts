@@ -99,6 +99,7 @@ export interface ChatSession {
 
 export interface UseCohiChatOptions {
   tenantId?: string;
+  enabled?: boolean;
   onError?: (error: Error) => void;
 }
 
@@ -107,7 +108,7 @@ export interface UseCohiChatOptions {
 // ============================================================================
 
 export function useCohiChat(options: UseCohiChatOptions = {}) {
-  const { tenantId, onError } = options;
+  const { tenantId, enabled = true, onError } = options;
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -157,12 +158,19 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     }
   }, [tenantId]);
 
-  // Initialize session on mount
+  // Initialize session when chat is active and tenant context is available.
   useEffect(() => {
+    if (!enabled || sessionId) return;
+
     const initSession = async () => {
       try {
+        const effectiveTenantId = await getEffectiveTenantId();
+        if (!effectiveTenantId) {
+          return;
+        }
+
         const response = await api.request<{ sessionId: string }>(
-          "/api/cohi-chat/new-session",
+          `/api/cohi-chat/new-session?tenant_id=${encodeURIComponent(effectiveTenantId)}`,
           { method: "POST" }
         );
         if (response.sessionId) {
@@ -173,7 +181,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       }
     };
     initSession();
-  }, []);
+  }, [enabled, getEffectiveTenantId, sessionId]);
 
   /**
    * Generate unique message ID
@@ -558,8 +566,14 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
   const newSession = useCallback(async () => {
     clearMessages();
     try {
+      const effectiveTenantId = await getEffectiveTenantId();
+      if (!effectiveTenantId) {
+        setSessionId(null);
+        return;
+      }
+
       const response = await api.request<{ sessionId: string }>(
-        "/api/cohi-chat/new-session",
+        `/api/cohi-chat/new-session?tenant_id=${encodeURIComponent(effectiveTenantId)}`,
         { method: "POST" }
       );
       if (response.sessionId) {
@@ -569,7 +583,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     } catch (error) {
       console.error("[CohiChat] Failed to create new session:", error);
     }
-  }, [clearMessages, fetchSessions]);
+  }, [clearMessages, fetchSessions, getEffectiveTenantId]);
 
   return {
     messages,

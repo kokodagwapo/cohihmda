@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-const PLATFORM_ROLES = new Set(["super_admin", "platform_admin", "support", "admin"]);
+const PLATFORM_ROLES = new Set(["super_admin", "platform_admin", "support"]);
 
 type TenantState = {
   selectedTenantId: string | null;

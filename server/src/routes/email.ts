@@ -15,6 +15,13 @@ const router = Router();
  */
 router.get("/unsubscribe/:token", async (req: Request, res: Response) => {
   try {
+    const typeRaw = req.query.type;
+    const unsubscribeType = String(
+      Array.isArray(typeRaw) ? typeRaw[0] || "" : typeRaw || "",
+    )
+      .trim()
+      .toLowerCase();
+
     const raw = req.params.token;
     const token = (typeof raw === "string" ? raw : Array.isArray(raw) ? raw[0] ?? "" : "").trim();
     if (!token) {
@@ -41,12 +48,22 @@ router.get("/unsubscribe/:token", async (req: Request, res: Response) => {
     const row = result.rows[0] as { user_id: string; preference_value: Record<string, unknown> };
     const current = row.preference_value as Record<string, unknown>;
     const dailyBrief = (current.dailyBrief as Record<string, unknown>) || {};
+    const releaseNotes = (current.releaseNotes as Record<string, unknown>) || {};
+    const updateReleaseNotes = unsubscribeType === "release_notes";
     const updated = {
       ...current,
-      dailyBrief: {
-        ...dailyBrief,
-        enabled: false,
-      },
+      dailyBrief: updateReleaseNotes
+        ? dailyBrief
+        : {
+            ...dailyBrief,
+            enabled: false,
+          },
+      releaseNotes: updateReleaseNotes
+        ? {
+            ...releaseNotes,
+            enabled: false,
+          }
+        : releaseNotes,
     };
 
     await managementPool.query(
@@ -58,7 +75,9 @@ router.get("/unsubscribe/:token", async (req: Request, res: Response) => {
 
     return res.json({
       success: true,
-      message: "You have been unsubscribed from the Cohi Daily Brief.",
+      message: updateReleaseNotes
+        ? "You have been unsubscribed from Cohi release notes emails."
+        : "You have been unsubscribed from the Cohi Daily Brief.",
     });
   } catch (err) {
     console.error("[Email] Unsubscribe error:", err);

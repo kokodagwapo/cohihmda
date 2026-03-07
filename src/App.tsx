@@ -44,10 +44,13 @@ import HighPerformers from "./pages/HighPerformers";
 import CreditRiskManagement from "./pages/CreditRiskManagement";
 import LoanDetail from "./pages/LoanDetail";
 import WorkflowConversion from "./pages/WorkflowConversion";
-// Hidden for now – needs work
-// import PricingDashboard from "./pages/PricingDashboard";
+import PricingDashboard from "./pages/PricingDashboard";
+import LockStratification from "./pages/LockStratification";
 import PipelineAnalysisDashboard from "./pages/PipelineAnalysisDashboard";
+import LoanComplexity from "./pages/LoanComplexity";
 import Actors from "./pages/Actors";
+import FalloutForecast from "./pages/FalloutForecast";
+import FalloutLoanDetail from "./pages/FalloutLoanDetail";
 import { KnowledgeBaseEditor } from "./components/admin/KnowledgeBaseEditor";
 import { GlobalCohiChat } from "./components/cohi/GlobalCohiChat";
 import { CohiDemoExperience } from "./components/demo/CohiDemoExperience";
@@ -58,12 +61,12 @@ import { ActiveTourRunner } from "@/components/tutorial/ActiveTourRunner";
 import SharedWithMe from "./pages/workbench/SharedWithMe";
 import TeamFolders from "./pages/workbench/TeamFolders";
 import Favorites from "./pages/workbench/Favorites";
-// Hidden for now
-// import Distributions from "./pages/workbench/Distributions";
+import Distributions from "./pages/workbench/Distributions";
 // Research Lab
 import ResearchAnalyst from "./pages/ResearchAnalyst";
 // Help Center
 import HelpCenter from "./pages/HelpCenter";
+import DataChat from "./pages/DataChat";
 import { CanvasOnlyLayout } from "@/components/layout/CanvasOnlyLayout";
 
 const queryClient = new QueryClient();
@@ -179,19 +182,26 @@ const App = () => (
               <Route path="/workbench/shared" element={<SharedWithMe />} />
               <Route path="/workbench/team-folders" element={<TeamFolders />} />
               <Route path="/workbench/favorites" element={<Favorites />} />
-              {/* Distributions page hidden for now; redirect so bookmarks don't 404 */}
-              <Route path="/workbench/distributions" element={<Navigate to="/my-dashboard" replace />} />
+              <Route path="/workbench/distributions" element={<Distributions />} />
               
               {/* Research Lab */}
               <Route path="/research" element={<ResearchAnalyst />} />
+              <Route path="/data-chat" element={
+                <ProtectedRoute>
+                  <DataChat />
+                </ProtectedRoute>
+              } />
               
               {/* Top Tiering routes – Loan Funnel page hidden; redirect so bookmarks don't 404 */}
               <Route path="/loan-funnel" element={<Navigate to="/insights" replace />} />
               <Route path="/workflow-conversion" element={<WorkflowConversion />} />
               <Route path="/loan-detail" element={<LoanDetail />} />
-              {/* Pricing Dashboard hidden for now – needs work; redirect so bookmarks don't 404 */}
-              <Route path="/pricing-dashboard" element={<Navigate to="/insights" replace />} />
+              <Route path="/fallout-forecast" element={<FalloutForecast />} />
+              <Route path="/fallout-forecast/loan/:loanId" element={<FalloutLoanDetail />} />
+              <Route path="/pricing-dashboard" element={<PricingDashboard />} />
+              <Route path="/lock-stratification" element={<LockStratification />} />
               <Route path="/pipeline-analysis" element={<PipelineAnalysisDashboard />} />
+              <Route path="/loan-complexity" element={<LoanComplexity />} />
               <Route path="/credit-risk-management" element={<CreditRiskManagement />} />
                 <Route path="/company-scorecard" element={<CompanyScorecard />} />
               <Route path="/high-performers" element={<HighPerformers />} />

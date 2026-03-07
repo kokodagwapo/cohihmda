@@ -81,25 +81,6 @@ const DEFAULT_ROLE_PERMISSIONS: Record<string, Partial<UserPermissions>> = {
     rowFilters: [],
     fieldRestrictions: [],
   },
-  admin: {
-    sectionAccess: ['insights', 'loans', 'leaderboard', 'funnel', 'reports', 'data_quality', 'cohi_chat', 'my_dashboard'],
-    rowFilters: [],
-    fieldRestrictions: [],
-  },
-  loan_officer: {
-    sectionAccess: ['insights', 'loans', 'funnel', 'cohi_chat', 'my_dashboard'],
-    rowFilters: [
-      { field: 'loan_officer', operator: 'is_current_user', dynamicSource: 'user_email' }
-    ],
-    fieldRestrictions: ['branch_price_concession', 'corporate_price_concession', 'net_buy', 'net_sell'],
-  },
-  processor: {
-    sectionAccess: ['insights', 'loans', 'funnel', 'cohi_chat', 'my_dashboard'],
-    rowFilters: [
-      { field: 'processor', operator: 'is_current_user', dynamicSource: 'user_email' }
-    ],
-    fieldRestrictions: ['branch_price_concession', 'corporate_price_concession', 'net_buy', 'net_sell', 'srp_from_investor'],
-  },
   viewer: {
     sectionAccess: ['insights', 'cohi_chat'],
     rowFilters: [],

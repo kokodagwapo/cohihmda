@@ -68,11 +68,11 @@ const TEST_ACCOUNTS = {
     name: "Acme Admin",
     role: "tenant_admin",
   },
-  loanOfficer: {
+  standardUser: {
     email: "user@acme.local",
     password: "user123",
     name: "John Doe",
-    role: "loan_officer",
+    role: "user",
   },
 };
 
@@ -283,8 +283,8 @@ async function seedTenantUsers(tenantPool: pg.Pool): Promise<void> {
   );
   console.log(`  Tenant admin: ${TEST_ACCOUNTS.tenantAdmin.email}`);
 
-  // Seed loan officer
-  const userHash = await bcrypt.hash(TEST_ACCOUNTS.loanOfficer.password, 10);
+  // Seed standard user
+  const userHash = await bcrypt.hash(TEST_ACCOUNTS.standardUser.password, 10);
   await tenantPool.query(
     `
     INSERT INTO users (email, encrypted_password, full_name, role, is_active)
@@ -296,13 +296,13 @@ async function seedTenantUsers(tenantPool: pg.Pool): Promise<void> {
       updated_at = NOW()
   `,
     [
-      TEST_ACCOUNTS.loanOfficer.email,
+      TEST_ACCOUNTS.standardUser.email,
       userHash,
-      TEST_ACCOUNTS.loanOfficer.name,
-      TEST_ACCOUNTS.loanOfficer.role,
+      TEST_ACCOUNTS.standardUser.name,
+      TEST_ACCOUNTS.standardUser.role,
     ]
   );
-  console.log(`  Loan officer: ${TEST_ACCOUNTS.loanOfficer.email}`);
+  console.log(`  User: ${TEST_ACCOUNTS.standardUser.email}`);
 }
 
 // =============================================================================
@@ -338,7 +338,7 @@ WHAT THIS SCRIPT DOES:
     6. Seeds test accounts:
        - Super Admin: superadmin / super123
        - Tenant Admin: admin@acme.local / admin123
-       - Loan Officer: user@acme.local / user123
+       - User: user@acme.local / user123
 
 PREREQUISITES:
     1. PostgreSQL running: docker compose up -d postgres
@@ -483,9 +483,9 @@ PREREQUISITES:
       console.log(`  Email:    ${TEST_ACCOUNTS.tenantAdmin.email}`);
       console.log(`  Password: ${TEST_ACCOUNTS.tenantAdmin.password}`);
       console.log("");
-      console.log(`LOAN OFFICER (${TEST_TENANT_NAME})`);
-      console.log(`  Email:    ${TEST_ACCOUNTS.loanOfficer.email}`);
-      console.log(`  Password: ${TEST_ACCOUNTS.loanOfficer.password}`);
+      console.log(`USER (${TEST_TENANT_NAME})`);
+      console.log(`  Email:    ${TEST_ACCOUNTS.standardUser.email}`);
+      console.log(`  Password: ${TEST_ACCOUNTS.standardUser.password}`);
       console.log(
         "------------------------------------------------------------"
       );

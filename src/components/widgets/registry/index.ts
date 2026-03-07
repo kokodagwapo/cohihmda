@@ -6,6 +6,7 @@
  */
 
 import type { WidgetDefinition } from './types';
+import type { ComponentType } from 'react';
 import { companyScorecardWidgets } from './companyScorecardWidgets';
 import { creditRiskWidgets } from './creditRiskWidgets';
 import { salesScorecardWidgets } from './salesScorecardWidgets';
@@ -27,6 +28,19 @@ import { actorsWidgets } from './actorsWidgets';
 import { pricingDashboardWidgets } from './pricingDashboardWidgets';
 import { pipelineAnalysisWidgets } from './pipelineAnalysisWidgets';
 import { salesScorecardOverviewWidgets } from './salesScorecardOverviewWidgets';
+
+// Lock Stratification – import embed component once to avoid circular or chunk issues
+import { LockStratificationEmbed } from '../components/LockStratificationEmbed';
+import { loanComplexityWidgets } from './loanComplexityWidgets';
+
+const lockStratificationWidgets: WidgetDefinition[] = [
+  { id: 'lock-stratification-kpis', name: 'Lock Stratification KPIs', description: 'Volume, units, average balance, avg days active, WAC, WA FICO, WA LTV, WA DTI', category: 'kpi', group: 'Lock Stratification', dataSource: 'lock-stratification', dataSelector: () => ({ ready: true }), defaultSize: { w: 24, h: 12 }, minSize: { w: 16, h: 8 }, config: { variant: 'kpis' }, component: LockStratificationEmbed as ComponentType<unknown> },
+  { id: 'lock-stratification-interest-rates', name: 'Lock Stratification Interest Rates', description: 'Interest rate distribution bar chart with drill-down', category: 'chart', group: 'Lock Stratification', dataSource: 'lock-stratification', dataSelector: () => ({ ready: true }), defaultSize: { w: 24, h: 28 }, minSize: { w: 18, h: 20 }, config: { variant: 'interest-rates' }, component: LockStratificationEmbed as ComponentType<unknown> },
+  { id: 'lock-stratification-days-to-expiration', name: 'Lock Stratification Days to Expiration', description: 'Table of loans by days to lock expiration', category: 'table', group: 'Lock Stratification', dataSource: 'lock-stratification', dataSelector: () => ({ ready: true }), defaultSize: { w: 24, h: 22 }, minSize: { w: 18, h: 14 }, config: { variant: 'days-to-expiration' }, component: LockStratificationEmbed as ComponentType<unknown> },
+  { id: 'lock-stratification-pull-through', name: 'Lock Stratification Pull Through', description: 'Pull through | Locked to final disposition', category: 'chart', group: 'Lock Stratification', dataSource: 'lock-stratification', dataSelector: () => ({ ready: true }), defaultSize: { w: 24, h: 26 }, minSize: { w: 18, h: 18 }, config: { variant: 'pull-through' }, component: LockStratificationEmbed as ComponentType<unknown> },
+  { id: 'lock-stratification-milestone-bar', name: 'Lock Stratification Active Loans (Bar)', description: 'Active loans by milestone – bar chart', category: 'chart', group: 'Lock Stratification', dataSource: 'lock-stratification', dataSelector: () => ({ ready: true }), defaultSize: { w: 24, h: 30 }, minSize: { w: 18, h: 22 }, config: { variant: 'milestone-bar' }, component: LockStratificationEmbed as ComponentType<unknown> },
+  { id: 'lock-stratification-milestone-pivot', name: 'Lock Stratification Active Loans (Pivot)', description: 'Active loans by milestone – pivot table', category: 'table', group: 'Lock Stratification', dataSource: 'lock-stratification', dataSelector: () => ({ ready: true }), defaultSize: { w: 24, h: 26 }, minSize: { w: 18, h: 18 }, config: { variant: 'milestone-pivot' }, component: LockStratificationEmbed as ComponentType<unknown> },
+];
 
 // ---------------------------------------------------------------------------
 // Aggregate all widgets
@@ -54,6 +68,8 @@ const allWidgets: WidgetDefinition[] = [
   ...pricingDashboardWidgets,
   ...pipelineAnalysisWidgets,
   ...salesScorecardOverviewWidgets,
+  ...lockStratificationWidgets,
+  ...loanComplexityWidgets,
 ];
 
 // ---------------------------------------------------------------------------

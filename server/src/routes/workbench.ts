@@ -19,7 +19,9 @@ import {
 const router = Router();
 
 /** Roles allowed to set visibility = 'global' */
-const GLOBAL_VISIBILITY_ROLES = ['super_admin', 'platform_admin', 'tenant_admin', 'admin'];
+const GLOBAL_VISIBILITY_ROLES = ['super_admin', 'platform_admin', 'tenant_admin'];
+/** Roles that can fully access all canvases within selected tenant */
+const FULL_CANVAS_ACCESS_ROLES = ['super_admin', 'platform_admin'];
 
 /**
  * Resolve permission for a user on a canvas: 'owner' | 'editor' | 'viewer'.
@@ -100,9 +102,24 @@ router.get(
     try {
       const { tenantPool } = getTenantContext(req);
       const userId = req.userId!;
+      const hasFullCanvasAccess = FULL_CANVAS_ACCESS_ROLES.includes(req.userRole || '');
 
-      const result = await tenantPool.query(
-        `SELECT
+      const result = hasFullCanvasAccess
+        ? await tenantPool.query(
+            `SELECT
+           c.id, c.title, c.content, c.favorited, c.shared, c.created_at, c.updated_at,
+           c.visibility, c.shared_with_user_ids,
+           c.user_id,
+           (c.user_id = $1) AS is_owner,
+           u.email AS owner_email,
+           u.full_name AS owner_name
+         FROM public.workbench_canvases c
+         LEFT JOIN public.users u ON u.id = c.user_id
+         ORDER BY c.updated_at DESC`,
+            [userId],
+          )
+        : await tenantPool.query(
+            `SELECT
            c.id, c.title, c.content, c.favorited, c.shared, c.created_at, c.updated_at,
            c.visibility, c.shared_with_user_ids,
            c.user_id,
@@ -121,8 +138,8 @@ router.get(
               ))
             ))
          ORDER BY c.updated_at DESC`,
-        [userId],
-      );
+            [userId],
+          );
 
       // Resolve permission for each canvas (owner vs editor vs viewer from share entries)
       const permRows = await tenantPool.query(
@@ -142,7 +159,11 @@ router.get(
       }
 
       const canvases = result.rows.map((row: any) => {
-        const permission = row.is_owner ? 'owner' : (sharePermMap[row.id] ?? (row.visibility === 'shared' && row.shared_with_user_ids?.length ? 'viewer' : 'viewer'));
+        const permission = hasFullCanvasAccess
+          ? 'owner'
+          : row.is_owner
+            ? 'owner'
+            : (sharePermMap[row.id] ?? (row.visibility === 'shared' && row.shared_with_user_ids?.length ? 'viewer' : 'viewer'));
         return { ...row, permission };
       });
 
@@ -166,9 +187,26 @@ router.get(
       const { tenantPool } = getTenantContext(req);
       const canvasId = req.params.id;
       const userId = req.userId!;
+      const hasFullCanvasAccess = FULL_CANVAS_ACCESS_ROLES.includes(req.userRole || '');
 
-      const result = await tenantPool.query(
-        `SELECT
+      const result = hasFullCanvasAccess
+        ? await tenantPool.query(
+            `SELECT
+           c.id, c.title, c.content, c.favorited, c.shared,
+           c.share_pin, c.share_scope,
+           c.visibility, c.shared_with_user_ids,
+           c.created_at, c.updated_at,
+           c.user_id,
+           (c.user_id = $2) AS is_owner,
+           u.email AS owner_email,
+           u.full_name AS owner_name
+         FROM public.workbench_canvases c
+         LEFT JOIN public.users u ON u.id = c.user_id
+         WHERE c.id = $1`,
+            [canvasId, userId],
+          )
+        : await tenantPool.query(
+            `SELECT
            c.id, c.title, c.content, c.favorited, c.shared,
            c.share_pin, c.share_scope,
            c.visibility, c.shared_with_user_ids,
@@ -191,22 +229,24 @@ router.get(
                ))
              ))
            )`,
-        [canvasId, userId],
-      );
+            [canvasId, userId],
+          );
 
       if (result.rows.length === 0) {
         return res.status(404).json({ error: 'Canvas not found' });
       }
 
       const row = result.rows[0];
-      const permission = await resolveCanvasPermission(
-        tenantPool,
-        canvasId as string,
-        userId,
-        !!row.is_owner,
-      );
+      const permission = hasFullCanvasAccess
+        ? 'owner'
+        : await resolveCanvasPermission(
+            tenantPool,
+            canvasId as string,
+            userId,
+            !!row.is_owner,
+          );
       let shares: Array<{ userId?: string; groupId?: string; permission: string }> = [];
-      if (row.is_owner) {
+      if (row.is_owner || hasFullCanvasAccess) {
         const shareRows = await tenantPool.query(
           `SELECT user_id, group_id, permission FROM public.canvas_share_entries WHERE canvas_id = $1`,
           [canvasId],
@@ -300,6 +340,7 @@ router.put(
       const { title, content } = req.body;
 
       const { tenantPool } = getTenantContext(req);
+      const hasFullCanvasAccess = FULL_CANVAS_ACCESS_ROLES.includes(req.userRole || '');
 
       const canvasRow = await tenantPool.query(
         'SELECT id, user_id FROM public.workbench_canvases WHERE id = $1',
@@ -309,8 +350,10 @@ router.put(
         return res.status(404).json({ error: 'Canvas not found' });
       }
       const isOwner = canvasRow.rows[0].user_id === req.userId;
-      const permission = await resolveCanvasPermission(tenantPool, id as string, req.userId!, isOwner);
-      if (permission === 'viewer') {
+      const permission = hasFullCanvasAccess
+        ? 'owner'
+        : await resolveCanvasPermission(tenantPool, id as string, req.userId!, isOwner);
+      if (!hasFullCanvasAccess && permission === 'viewer') {
         return res.status(403).json({ error: 'Viewers cannot edit this canvas' });
       }
 
@@ -353,11 +396,17 @@ router.delete(
     try {
       const { id } = req.params;
       const { tenantPool } = getTenantContext(req);
+      const hasFullCanvasAccess = FULL_CANVAS_ACCESS_ROLES.includes(req.userRole || '');
 
-      const result = await tenantPool.query(
-        'DELETE FROM public.workbench_canvases WHERE id = $1 AND user_id = $2 RETURNING id',
-        [id, req.userId],
-      );
+      const result = hasFullCanvasAccess
+        ? await tenantPool.query(
+            'DELETE FROM public.workbench_canvases WHERE id = $1 RETURNING id',
+            [id],
+          )
+        : await tenantPool.query(
+            'DELETE FROM public.workbench_canvases WHERE id = $1 AND user_id = $2 RETURNING id',
+            [id, req.userId],
+          );
 
       if (result.rows.length === 0) {
         return res.status(404).json({ error: 'Canvas not found' });
@@ -450,14 +499,24 @@ router.put(
       const { id } = req.params;
       const { visibility, shared_with_user_ids, shares } = req.body;
       const { tenantPool } = getTenantContext(req);
+      const hasFullCanvasAccess = FULL_CANVAS_ACCESS_ROLES.includes(req.userRole || '');
 
       // Ownership check — only owners can change visibility
       const ownership = await tenantPool.query(
         'SELECT id, visibility FROM public.workbench_canvases WHERE id = $1 AND user_id = $2',
         [id, req.userId],
       );
-      if (ownership.rows.length === 0) {
+      if (ownership.rows.length === 0 && !hasFullCanvasAccess) {
         return res.status(404).json({ error: 'Canvas not found or you are not the owner' });
+      }
+      if (ownership.rows.length === 0 && hasFullCanvasAccess) {
+        const exists = await tenantPool.query(
+          'SELECT id FROM public.workbench_canvases WHERE id = $1',
+          [id],
+        );
+        if (exists.rows.length === 0) {
+          return res.status(404).json({ error: 'Canvas not found' });
+        }
       }
 
       // Validate visibility value
@@ -472,48 +531,74 @@ router.put(
 
       const sharedWithLegacy: string[] = Array.isArray(shared_with_user_ids) ? shared_with_user_ids : [];
       const sharesList: Array<{ userId?: string; groupId?: string; permission?: string }> = Array.isArray(shares) ? shares : [];
+      const client = await tenantPool.connect();
+      let resultRows: any[] = [];
+      try {
+        await client.query('BEGIN');
 
-      // Sync canvas_share_entries: replace with new shares when visibility = 'shared'
-      if (visibility === 'shared') {
-        await tenantPool.query('DELETE FROM public.canvas_share_entries WHERE canvas_id = $1', [id]);
-        for (const s of sharesList) {
-          const perm = (s.permission === 'editor' ? 'editor' : 'viewer') as 'viewer' | 'editor';
-          if (s.userId) {
-            await tenantPool.query(
-              `INSERT INTO public.canvas_share_entries (canvas_id, user_id, permission, shared_by)
-               VALUES ($1, $2, $3, $4)`,
-              [id, s.userId, perm, req.userId],
+        // Sync canvas_share_entries: replace with new shares when visibility = 'shared'
+        if (visibility === 'shared') {
+          await client.query('DELETE FROM public.canvas_share_entries WHERE canvas_id = $1', [id]);
+          for (const s of sharesList) {
+            const perm = (s.permission === 'editor' ? 'editor' : 'viewer') as 'viewer' | 'editor';
+            if (s.userId) {
+              await client.query(
+                `INSERT INTO public.canvas_share_entries (canvas_id, user_id, permission, shared_by)
+                 VALUES ($1, $2, $3, $4)`,
+                [id, s.userId, perm, req.userId],
+              );
+            } else if (s.groupId) {
+              await client.query(
+                `INSERT INTO public.canvas_share_entries (canvas_id, group_id, permission, shared_by)
+                 VALUES ($1, $2, $3, $4)`,
+                [id, s.groupId, perm, req.userId],
+              );
+            }
+          }
+          // Legacy: ensure shared_with_user_ids is populated from shares for backward compat
+          const userIdsFromShares = sharesList.filter(s => s.userId).map(s => s.userId);
+          const mergedLegacy = [...new Set([...sharedWithLegacy, ...userIdsFromShares])];
+          if (hasFullCanvasAccess) {
+            await client.query(
+              `UPDATE public.workbench_canvases SET visibility = $1, shared_with_user_ids = $2, updated_at = NOW() WHERE id = $3`,
+              [visibility, mergedLegacy, id],
             );
-          } else if (s.groupId) {
-            await tenantPool.query(
-              `INSERT INTO public.canvas_share_entries (canvas_id, group_id, permission, shared_by)
-               VALUES ($1, $2, $3, $4)`,
-              [id, s.groupId, perm, req.userId],
+          } else {
+            await client.query(
+              `UPDATE public.workbench_canvases SET visibility = $1, shared_with_user_ids = $2, updated_at = NOW() WHERE id = $3 AND user_id = $4`,
+              [visibility, mergedLegacy, id, req.userId],
             );
           }
+        } else {
+          if (hasFullCanvasAccess) {
+            await client.query(
+              `UPDATE public.workbench_canvases SET visibility = $1, shared_with_user_ids = $2, updated_at = NOW() WHERE id = $3`,
+              [visibility, visibility === 'private' ? [] : sharedWithLegacy, id],
+            );
+          } else {
+            await client.query(
+              `UPDATE public.workbench_canvases SET visibility = $1, shared_with_user_ids = $2, updated_at = NOW() WHERE id = $3 AND user_id = $4`,
+              [visibility, visibility === 'private' ? [] : sharedWithLegacy, id, req.userId],
+            );
+          }
+          if (visibility === 'private') {
+            await client.query('DELETE FROM public.canvas_share_entries WHERE canvas_id = $1', [id]);
+          }
         }
-        // Legacy: ensure shared_with_user_ids is populated from shares for backward compat
-        const userIdsFromShares = sharesList.filter(s => s.userId).map(s => s.userId);
-        const mergedLegacy = [...new Set([...sharedWithLegacy, ...userIdsFromShares])];
-        await tenantPool.query(
-          `UPDATE public.workbench_canvases SET visibility = $1, shared_with_user_ids = $2, updated_at = NOW() WHERE id = $3 AND user_id = $4`,
-          [visibility, mergedLegacy, id, req.userId],
-        );
-      } else {
-        await tenantPool.query(
-          `UPDATE public.workbench_canvases SET visibility = $1, shared_with_user_ids = $2, updated_at = NOW() WHERE id = $3 AND user_id = $4`,
-          [visibility, visibility === 'private' ? [] : sharedWithLegacy, id, req.userId],
-        );
-        if (visibility === 'private') {
-          await tenantPool.query('DELETE FROM public.canvas_share_entries WHERE canvas_id = $1', [id]);
-        }
-      }
 
-      const result = await tenantPool.query(
-        `SELECT id, visibility, shared_with_user_ids FROM public.workbench_canvases WHERE id = $1`,
-        [id],
-      );
-      res.json({ success: true, ...result.rows[0] });
+        const result = await client.query(
+          `SELECT id, visibility, shared_with_user_ids FROM public.workbench_canvases WHERE id = $1`,
+          [id],
+        );
+        resultRows = result.rows;
+        await client.query('COMMIT');
+      } catch (txError) {
+        await client.query('ROLLBACK');
+        throw txError;
+      } finally {
+        client.release();
+      }
+      res.json({ success: true, ...resultRows[0] });
     } catch (error: any) {
       console.error('[Workbench] Error updating visibility:', error.message);
       res.status(500).json({ error: 'Failed to update visibility', message: error.message });

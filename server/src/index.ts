@@ -14,6 +14,10 @@ import {
 } from "./middleware/sentry.js";
 import { apiLimiter } from "./middleware/rateLimiter.js";
 import { devLogger, prodLogger } from "./middleware/logger.js";
+import {
+  assertMfaConfigurationReady,
+  isCognitoAuthEnabled,
+} from "./services/cognito/cognitoAuthService.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -176,7 +180,12 @@ app.use((req, res, next) => {
 
 // Validate required environment variables at startup
 const validateEnvironment = () => {
-  const requiredVars = ["JWT_SECRET"];
+  const requiredVars = [
+    "JWT_SECRET",
+    "COGNITO_USER_POOL_ID",
+    "COGNITO_CLIENT_ID",
+    "COGNITO_REGION",
+  ];
   const missing: string[] = [];
   const warnings: string[] = [];
 
@@ -235,11 +244,18 @@ const validateEnvironment = () => {
     return false;
   }
 
+  if (process.env.COGNITO_PASSWORD_AUTH !== "true") {
+    console.error(
+      "❌ COGNITO_PASSWORD_AUTH must be set to 'true'. Local DB password auth is disabled by policy.",
+    );
+    return false;
+  }
+
   return true;
 };
 
 // Initialize database (optional for local dev voice testing)
-const startServer = () => {
+const startServer = async () => {
   // Validate environment variables
   const envValid = validateEnvironment();
   if (!envValid) {
@@ -247,6 +263,17 @@ const startServer = () => {
       "⚠️  Continuing with invalid environment - authentication will fail",
     );
   }
+
+  // Fail fast if Cognito auth isn't enabled or pool MFA config is unsafe.
+  if (!isCognitoAuthEnabled()) {
+    throw new Error(
+      "Cognito password auth must be enabled. Refusing to start without COGNITO_PASSWORD_AUTH=true and Cognito config.",
+    );
+  }
+  await assertMfaConfigurationReady();
+  console.log(
+    "✅ Cognito MFA preflight passed (EMAIL_OTP + SOFTWARE_TOKEN_MFA enabled)",
+  );
 
   // Setup routes
   setupRoutes(app);
@@ -383,7 +410,10 @@ async function startWorker() {
 }
 
 if (SKIP_DB) {
-  startServer();
+  startServer().catch((error) => {
+    console.error("❌ Server startup preflight failed:", error);
+    process.exit(1);
+  });
 } else {
   initDatabase()
     .then(async () => {
@@ -392,7 +422,7 @@ if (SKIP_DB) {
         return;
       }
 
-      startServer();
+      await startServer();
 
       // Start schedulers only when not in api-only mode (unset = legacy: API + schedulers in one process)
       if (NODE_ENV !== "test" && PROCESS_MODE !== "api") {
@@ -457,6 +487,9 @@ if (SKIP_DB) {
         "⚠️ Starting server without database (some features may be unavailable)",
       );
       // Don't exit - start server anyway so health check and basic routes work
-      startServer();
+      startServer().catch((startupError) => {
+        console.error("❌ Server startup preflight failed:", startupError);
+        process.exit(1);
+      });
     });
 }

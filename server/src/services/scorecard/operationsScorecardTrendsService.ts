@@ -12,7 +12,7 @@ import {
   formatDateForSQL,
   buildChannelWhereClause,
   isActorMissing,
-  OPERATIONS_ACTOR_CONFIGS,
+  loadOpsActorConfig,
   assignTiersByCumulativeValue,
   calcLoanComplexity,
   type ActorConfig,
@@ -102,7 +102,7 @@ export async function getOperationsScorecardTrends(
         : actorType === "closer"
           ? targets.closer
           : targets.other;
-  const config: ActorConfig = OPERATIONS_ACTOR_CONFIGS[actorType];
+  const config = await loadOpsActorConfig(tenantPool, actorType);
 
   const vMaxDate = await getVMaxDate(tenantPool);
   const effectiveEndDate = new Date(vMaxDate);

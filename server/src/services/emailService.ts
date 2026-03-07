@@ -5,14 +5,20 @@
  */
 
 import { logEmailSend } from "./emailAuditLogger.js";
+import { assertNoLocalhostInProduction } from "../utils/frontendUrl.js";
 
-const SES_CONFIGURATION_SET = process.env.SES_CONFIGURATION_SET || "my-first-configuration-set";
+const SES_CONFIGURATION_SET = process.env.SES_CONFIGURATION_SET?.trim();
 
 const EMAIL_MAX_RETRIES = 3;
 const EMAIL_RETRY_DELAY_MS = 1000;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isMissingSesConfigurationSetError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error ?? "");
+  return /configuration set .* does not exist/i.test(msg);
 }
 
 async function withRetry<T>(fn: () => Promise<T>, maxAttempts = EMAIL_MAX_RETRIES): Promise<T> {
@@ -37,6 +43,8 @@ interface EmailOptions {
   subject: string;
   html: string;
   text?: string;
+  /** When true, throw if provider send fails instead of silently returning undefined. */
+  strict?: boolean;
   /** For audit log; when set, a row is written to email_send_log. */
   emailType?: string;
   containsPii?: boolean;
@@ -56,6 +64,8 @@ export interface DailyBriefEmailOptions {
   containsPii?: boolean;
   userId?: string | null;
   tenantId?: string | null;
+  /** When true, provider failures are rethrown to caller. */
+  strict?: boolean;
 }
 
 export interface EmailAttachment {
@@ -83,6 +93,16 @@ export interface SendEmailWithAttachmentOptions {
 export async function sendEmail(options: EmailOptions): Promise<string | undefined> {
   const emailProvider = process.env.EMAIL_PROVIDER || "ses"; // ses, sendgrid, resend
 
+  const localhostLinkMatch = options.html.match(/href=["']https?:\/\/localhost[^"']*/i);
+  if (localhostLinkMatch) {
+    try {
+      assertNoLocalhostInProduction(localhostLinkMatch[0], "sendEmail");
+    } catch (guardError) {
+      if (options.strict) throw guardError;
+      console.warn(`⚠️ Email to ${options.to} contains localhost link: ${localhostLinkMatch[0]}`);
+    }
+  }
+
   try {
     switch (emailProvider) {
       case "ses":
@@ -94,16 +114,20 @@ export async function sendEmail(options: EmailOptions): Promise<string | undefin
         await withRetry(() => sendViaResend(options));
         return undefined;
       default:
-        console.warn(
-          `Unknown email provider: ${emailProvider}. Email not sent.`,
-        );
+        const providerErr = new Error(`Unknown email provider: ${emailProvider}`);
+        if (options.strict) {
+          throw providerErr;
+        }
+        console.warn(`${providerErr.message}. Email not sent.`);
         console.log("Email would be sent:", options);
         return undefined;
     }
   } catch (error: unknown) {
     console.error("Error sending email after retries:", error);
-    // Don't throw - email failures shouldn't break the flow
-    // Log for manual retry
+    if (options.strict) {
+      throw error;
+    }
+    // Non-strict mode preserves legacy behavior.
     return undefined;
   }
 }
@@ -187,11 +211,24 @@ async function sendViaSESWithAttachment(
     `--${boundary}--`,
   ].join("\r\n");
 
-  const command = new SendRawEmailCommand({
-    RawMessage: { Data: Buffer.from(rawMessage, "utf-8") },
-    ConfigurationSetName: SES_CONFIGURATION_SET,
-  });
-  const result = await sesClient.send(command);
+  const createCommand = (configurationSetName?: string) =>
+    new SendRawEmailCommand({
+      RawMessage: { Data: Buffer.from(rawMessage, "utf-8") },
+      ConfigurationSetName: configurationSetName,
+    });
+  let result;
+  try {
+    result = await sesClient.send(createCommand(SES_CONFIGURATION_SET));
+  } catch (error: unknown) {
+    if (SES_CONFIGURATION_SET && isMissingSesConfigurationSetError(error)) {
+      console.warn(
+        `[EmailService] Missing SES configuration set "${SES_CONFIGURATION_SET}" for attachment email; retrying without it.`
+      );
+      result = await sesClient.send(createCommand(undefined));
+    } else {
+      throw error;
+    }
+  }
   return result.MessageId ?? undefined;
 }
 
@@ -287,6 +324,9 @@ async function sendDailyBriefWithUnsubscribe(options: DailyBriefEmailOptions): P
     }
   } catch (error: unknown) {
     console.error("Error sending daily brief with unsubscribe after retries:", error);
+    if (options.strict) {
+      throw error;
+    }
   }
 }
 
@@ -327,10 +367,25 @@ async function sendDailyBriefWithUnsubscribeSES(
   ].join("\r\n");
 
   const command = new SendRawEmailCommand({
-    RawMessage: { Data: Buffer.from(rawMessage, "utf-8") },
-    ConfigurationSetName: SES_CONFIGURATION_SET,
+    RawMessage: { Data: Buffer.from(rawMessage, "utf-8") }
   });
-  const result = await sesClient.send(command);
+  let result;
+  try {
+    if (SES_CONFIGURATION_SET) {
+      command.input.ConfigurationSetName = SES_CONFIGURATION_SET;
+    }
+    result = await sesClient.send(command);
+  } catch (error: unknown) {
+    if (SES_CONFIGURATION_SET && isMissingSesConfigurationSetError(error)) {
+      console.warn(
+        `[EmailService] Missing SES configuration set "${SES_CONFIGURATION_SET}" for daily brief; retrying without it.`
+      );
+      delete command.input.ConfigurationSetName;
+      result = await sesClient.send(command);
+    } else {
+      throw error;
+    }
+  }
   console.log(
     `✅ Daily brief sent via SES to ${options.to} (with List-Unsubscribe) MessageId=${result.MessageId ?? "n/a"}`
   );
@@ -388,7 +443,7 @@ async function sendViaSES(options: EmailOptions): Promise<string | undefined> {
     const { SESClient, SendEmailCommand } = await import("@aws-sdk/client-ses");
     const sesClient = new SESClient({ region });
 
-    const command = new SendEmailCommand({
+    const createCommand = (configurationSetName?: string) => new SendEmailCommand({
       Source: from,
       Destination: {
         ToAddresses: [options.to],
@@ -411,10 +466,21 @@ async function sendViaSES(options: EmailOptions): Promise<string | undefined> {
             : undefined,
         },
       },
-      ConfigurationSetName: SES_CONFIGURATION_SET,
+      ConfigurationSetName: configurationSetName,
     });
-
-    const result = await sesClient.send(command);
+    let result;
+    try {
+      result = await sesClient.send(createCommand(SES_CONFIGURATION_SET));
+    } catch (error: unknown) {
+      if (SES_CONFIGURATION_SET && isMissingSesConfigurationSetError(error)) {
+        console.warn(
+          `[EmailService] Missing SES configuration set "${SES_CONFIGURATION_SET}" for regular email; retrying without it.`
+        );
+        result = await sesClient.send(createCommand(undefined));
+      } else {
+        throw error;
+      }
+    }
     const messageId = result.MessageId;
     console.log(`✅ Email sent via SES to ${options.to} | MessageId=${messageId ?? "n/a"} | From=${from} | Region=${region} | ConfigSet=${SES_CONFIGURATION_SET}`);
     return messageId ?? undefined;
@@ -732,6 +798,7 @@ export async function sendPasswordResetEmail(
   email: string,
   resetUrl: string,
   userName?: string,
+  options?: { strict?: boolean },
 ): Promise<void> {
   const displayName = userName || email.split("@")[0];
 
@@ -807,6 +874,7 @@ If you didn't request this password reset, you can safely ignore this email.
     subject: "Reset Your Cohi Password",
     html,
     text,
+    strict: options?.strict ?? false,
     emailType: "password_reset",
     containsPii: false,
   });
@@ -880,6 +948,7 @@ This invitation expires in 7 days.
     subject: `You're invited to join ${tenantName} on Cohi`,
     html,
     text,
+    strict: true,
     emailType: "user_invitation",
     containsPii: false,
   });

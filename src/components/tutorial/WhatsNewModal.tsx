@@ -10,14 +10,15 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { useTutorial } from '@/contexts/TutorialContext';
-import { whatsNewEntries, getUnseenEntries } from '@/data/whatsNew';
+import { getUnseenEntries } from '@/data/whatsNew';
+import type { WhatsNewEntry } from '@/data/whatsNew';
 import { Sparkles, ArrowRight, Rocket, Wrench, Bug } from 'lucide-react';
 
 interface WhatsNewModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  entries: WhatsNewEntry[];
 }
 
 const categoryConfig = {
@@ -26,13 +27,13 @@ const categoryConfig = {
   fix: { label: 'Fixed', icon: Bug, color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' },
 };
 
-export function WhatsNewModal({ open, onOpenChange }: WhatsNewModalProps) {
+export function WhatsNewModal({ open, onOpenChange, entries }: WhatsNewModalProps) {
   const navigate = useNavigate();
   const { prefs, markWhatsNewSeen } = useTutorial();
 
   const unseenEntries = useMemo(
-    () => getUnseenEntries(prefs.whats_new_last_seen),
-    [prefs.whats_new_last_seen]
+    () => getUnseenEntries(prefs.whats_new_last_seen, entries),
+    [prefs.whats_new_last_seen, entries]
   );
 
   const handleClose = () => {
@@ -40,11 +41,19 @@ export function WhatsNewModal({ open, onOpenChange }: WhatsNewModalProps) {
     onOpenChange(false);
   };
 
-  const entriesToShow = open ? (unseenEntries.length > 0 ? unseenEntries : whatsNewEntries.slice(0, 5)) : [];
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      handleClose();
+      return;
+    }
+    onOpenChange(true);
+  };
+
+  const entriesToShow = open ? (unseenEntries.length > 0 ? unseenEntries : entries.slice(0, 5)) : [];
 
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-lg">
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col">
         <DialogHeader>
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center">
@@ -60,8 +69,8 @@ export function WhatsNewModal({ open, onOpenChange }: WhatsNewModalProps) {
           </DialogDescription>
         </DialogHeader>
 
-        <ScrollArea className="max-h-[400px] pr-4">
-          <div className="space-y-4">
+        <div className="flex-1 min-h-0 overflow-y-auto pr-2">
+          <div className="space-y-4 pr-2">
             {entriesToShow.map((entry) => {
               const config = categoryConfig[entry.category];
               return (
@@ -97,7 +106,7 @@ export function WhatsNewModal({ open, onOpenChange }: WhatsNewModalProps) {
               );
             })}
           </div>
-        </ScrollArea>
+        </div>
 
         <DialogFooter>
           <Button onClick={handleClose}>Got it</Button>

@@ -19,6 +19,8 @@ import {
   ConfirmForgotPasswordCommand,
   ChangePasswordCommand,
   InitiateAuthCommand,
+  DescribeUserPoolCommand,
+  GetUserPoolMfaConfigCommand,
   type AuthenticationResultType,
   type ChallengeNameType,
 } from "@aws-sdk/client-cognito-identity-provider";
@@ -64,6 +66,77 @@ export function isCognitoAuthEnabled(): boolean {
   );
 }
 
+function getEnabledMfasFromDescribeUserPool(userPool: unknown): string[] {
+  if (!userPool || typeof userPool !== "object") return [];
+  const poolObj = userPool as Record<string, unknown>;
+
+  const directEnabled = poolObj.EnabledMfas;
+  if (Array.isArray(directEnabled)) {
+    return directEnabled.filter((v): v is string => typeof v === "string");
+  }
+
+  const mfaCfg = poolObj.UserPoolMfaConfiguration;
+  if (mfaCfg && typeof mfaCfg === "object") {
+    const nestedEnabled = (mfaCfg as Record<string, unknown>).EnabledMfas;
+    if (Array.isArray(nestedEnabled)) {
+      return nestedEnabled.filter((v): v is string => typeof v === "string");
+    }
+  }
+
+  return [];
+}
+
+export async function assertMfaConfigurationReady(): Promise<void> {
+  if (!isCognitoAuthEnabled()) return;
+
+  let mfaConfiguration = "OFF";
+  let hasTotp = false;
+  let hasEmailOtp = false;
+  let enabledMfas: string[] = [];
+
+  // Preferred source: dedicated MFA config API (returns software/email MFA config directly).
+  try {
+    const mfaConfig = await getClient().send(
+      new GetUserPoolMfaConfigCommand({
+        UserPoolId: getCognitoUserPoolId(),
+      }),
+    );
+
+    mfaConfiguration = mfaConfig.MfaConfiguration || "OFF";
+    hasTotp = !!mfaConfig.SoftwareTokenMfaConfiguration?.Enabled;
+    hasEmailOtp = !!(
+      mfaConfig.EmailMfaConfiguration?.Message &&
+      mfaConfig.EmailMfaConfiguration?.Subject
+    );
+    if (hasTotp) enabledMfas.push("SOFTWARE_TOKEN_MFA");
+    if (hasEmailOtp) enabledMfas.push("EMAIL_OTP");
+  } catch {
+    // Backward compatibility fallback for older permissions/deployments.
+    const response = await getClient().send(
+      new DescribeUserPoolCommand({
+        UserPoolId: getCognitoUserPoolId(),
+      }),
+    );
+    const userPool = response.UserPool;
+    mfaConfiguration = userPool?.MfaConfiguration || "OFF";
+    enabledMfas = getEnabledMfasFromDescribeUserPool(userPool);
+    hasTotp = enabledMfas.includes("SOFTWARE_TOKEN_MFA");
+    hasEmailOtp = enabledMfas.includes("EMAIL_OTP");
+  }
+
+  if (mfaConfiguration === "OFF") {
+    throw new Error(
+      "Cognito MFA is OFF. Enable MFA (OPTIONAL/ON) and EMAIL_OTP + SOFTWARE_TOKEN_MFA factors.",
+    );
+  }
+
+  if (!hasTotp || !hasEmailOtp) {
+    throw new Error(
+      `Cognito MFA factors are incomplete. Found: [${enabledMfas.join(", ")}]. Required: EMAIL_OTP and SOFTWARE_TOKEN_MFA.`,
+    );
+  }
+}
+
 // --- Result types ---
 
 export interface CognitoSignInResult {
@@ -75,6 +148,8 @@ export interface CognitoSignInResult {
   idToken?: string;
   refreshToken?: string;
 }
+
+export type MfaMethod = "totp" | "email" | null;
 
 export interface CognitoCreateUserResult {
   cognitoSub: string;
@@ -137,11 +212,16 @@ export async function respondToMfaChallenge(
   email: string,
   session: string,
   mfaCode: string,
+  challengeName: "SOFTWARE_TOKEN_MFA" | "EMAIL_OTP" | "SMS_MFA" = "SOFTWARE_TOKEN_MFA",
 ): Promise<CognitoSignInResult> {
-  const challengeResponses: Record<string, string> = {
-    USERNAME: email,
-    SOFTWARE_TOKEN_MFA_CODE: mfaCode,
-  };
+  const challengeResponses: Record<string, string> = { USERNAME: email };
+  if (challengeName === "SOFTWARE_TOKEN_MFA") {
+    challengeResponses.SOFTWARE_TOKEN_MFA_CODE = mfaCode;
+  } else if (challengeName === "EMAIL_OTP") {
+    challengeResponses.EMAIL_OTP_CODE = mfaCode;
+  } else if (challengeName === "SMS_MFA") {
+    challengeResponses.SMS_MFA_CODE = mfaCode;
+  }
 
   const secretHash = computeSecretHash(email);
   if (secretHash) challengeResponses.SECRET_HASH = secretHash;
@@ -150,7 +230,7 @@ export async function respondToMfaChallenge(
     const command = new AdminRespondToAuthChallengeCommand({
       UserPoolId: getCognitoUserPoolId(),
       ClientId: getCognitoClientId(),
-      ChallengeName: "SOFTWARE_TOKEN_MFA",
+      ChallengeName: challengeName,
       Session: session,
       ChallengeResponses: challengeResponses,
     });
@@ -301,7 +381,7 @@ export async function deleteUser(username: string): Promise<void> {
 
 export async function getUser(
   username: string,
-): Promise<{ mfaEnabled: boolean; cognitoSub: string }> {
+): Promise<{ mfaEnabled: boolean; cognitoSub: string; mfaMethod: MfaMethod | null }> {
   try {
     const command = new AdminGetUserCommand({
       UserPoolId: getCognitoUserPoolId(),
@@ -311,11 +391,23 @@ export async function getUser(
 
     const sub =
       response.UserAttributes?.find((a) => a.Name === "sub")?.Value || "";
-    const mfaEnabled = (response.UserMFASettingList || []).includes(
-      "SOFTWARE_TOKEN_MFA",
-    );
+    const mfaSettings = response.UserMFASettingList || [];
+    const hasTotp = mfaSettings.includes("SOFTWARE_TOKEN_MFA");
+    const hasEmailOtp = mfaSettings.includes("EMAIL_OTP");
+    const mfaEnabled = hasTotp || hasEmailOtp;
+    const preferred = response.PreferredMfaSetting || "";
+    const mfaMethod: MfaMethod =
+      preferred === "EMAIL_OTP"
+        ? "email"
+        : preferred === "SOFTWARE_TOKEN_MFA"
+          ? "totp"
+          : hasEmailOtp
+            ? "email"
+            : hasTotp
+              ? "totp"
+              : null;
 
-    return { mfaEnabled, cognitoSub: sub };
+    return { mfaEnabled, cognitoSub: sub, mfaMethod };
   } catch (error: any) {
     logError("[CognitoAuth] Get user failed", error, { username });
     throw mapCognitoError(error);
@@ -439,12 +531,91 @@ export async function verifyMfaSetup(
   }
 }
 
+export async function enableEmailMfa(username: string): Promise<void> {
+  try {
+    const command = new AdminSetUserMFAPreferenceCommand({
+      UserPoolId: getCognitoUserPoolId(),
+      Username: username,
+      SoftwareTokenMfaSettings: {
+        Enabled: false,
+        PreferredMfa: false,
+      },
+      EmailMfaSettings: {
+        Enabled: true,
+        PreferredMfa: true,
+      },
+    });
+    await getClient().send(command);
+    logInfo("[CognitoAuth] Email MFA enabled", { username });
+  } catch (error: unknown) {
+    logError("[CognitoAuth] Enable email MFA failed", error, { username });
+    throw mapCognitoError(error);
+  }
+}
+
+function getUsernameFromAccessToken(accessToken: string): string {
+  const payloadPart = accessToken.split(".")[1];
+  if (!payloadPart) return "";
+
+  const payload = JSON.parse(
+    Buffer.from(payloadPart, "base64url").toString(),
+  ) as { username?: string; sub?: string; [key: string]: unknown };
+
+  const cognitoUsername = payload["cognito:username"];
+  return (
+    payload.username ||
+    (typeof cognitoUsername === "string" ? cognitoUsername : "") ||
+    payload.sub ||
+    ""
+  );
+}
+
+export async function enableEmailMfaWithAccessToken(accessToken: string): Promise<void> {
+  const username = getUsernameFromAccessToken(accessToken);
+  if (!username) {
+    throw Object.assign(new Error("Unable to resolve user from access token"), {
+      code: "AUTH_ERROR",
+      statusCode: 400,
+    });
+  }
+  await enableEmailMfa(username);
+}
+
+export async function setPreferredMfaMethod(
+  username: string,
+  method: "totp" | "email",
+): Promise<void> {
+  if (method === "email") {
+    await enableEmailMfa(username);
+    return;
+  }
+
+  const command = new AdminSetUserMFAPreferenceCommand({
+    UserPoolId: getCognitoUserPoolId(),
+    Username: username,
+    SoftwareTokenMfaSettings: {
+      Enabled: true,
+      PreferredMfa: true,
+    },
+    EmailMfaSettings: {
+      Enabled: false,
+      PreferredMfa: false,
+    },
+  });
+  await getClient().send(command);
+  logInfo("[CognitoAuth] Preferred MFA set to TOTP", { username });
+}
+
 export async function disableMfa(username: string): Promise<void> {
   try {
     const command = new AdminSetUserMFAPreferenceCommand({
       UserPoolId: getCognitoUserPoolId(),
       Username: username,
       SoftwareTokenMfaSettings: {
+        Enabled: false,
+        PreferredMfa: false,
+      },
+      EmailMfaSettings: {
         Enabled: false,
         PreferredMfa: false,
       },
@@ -568,6 +739,18 @@ function mapCognitoError(error: any): Error {
         code: "MFA_CODE_INVALID",
         statusCode: 400,
       });
+    case "MFAMethodNotFoundException":
+      return Object.assign(new Error("MFA method is not available for this user"), {
+        code: "MFA_METHOD_NOT_AVAILABLE",
+        statusCode: 400,
+      });
+    case "InvalidParameterException":
+      return Object.assign(
+        new Error(
+          "Requested MFA method is not enabled in this Cognito user pool/app client.",
+        ),
+        { code: "MFA_METHOD_NOT_CONFIGURED", statusCode: 400 },
+      );
     default:
       return Object.assign(
         new Error(error.message || "Authentication service error"),

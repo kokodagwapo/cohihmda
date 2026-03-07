@@ -12,22 +12,16 @@ import { enforcePlatformOnly } from '@/stores/tenantStore';
  * 
  * Tenant roles (stored in tenant DBs):
  * - tenant_admin: Client admin with access to their organization's settings
- * - admin: Organization admin (legacy, same as tenant_admin)
  * - user: Regular user with standard access
  * - viewer: Read-only access
- * - loan_officer: Loan officer with specific permissions
- * - processor: Loan processor with specific permissions
  */
 export type UserRole = 
   | 'super_admin' 
   | 'platform_admin' 
   | 'support'
   | 'tenant_admin' 
-  | 'admin' 
   | 'user' 
-  | 'viewer' 
-  | 'loan_officer' 
-  | 'processor';
+  | 'viewer';
 
 /**
  * User object returned from the API
@@ -71,7 +65,13 @@ interface AuthContextType {
   
   // Actions
   login: (email: string, password: string, tenantSlug?: string) => Promise<void>;
-  completeMfaLogin: (email: string, session: string, code: string, tenantSlug?: string) => Promise<void>;
+  completeMfaLogin: (
+    email: string,
+    session: string,
+    code: string,
+    tenantSlug?: string,
+    challengeName?: 'SOFTWARE_TOKEN_MFA' | 'EMAIL_OTP' | 'SMS_MFA',
+  ) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   clearError: () => void;
@@ -112,6 +112,25 @@ export function AuthProvider({ children }: AuthProviderProps) {
     localStorage.getItem(IMPERSONATION_KEY)
   );
 
+  const clearAuthState = useCallback(() => {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
+    localStorage.removeItem(IMPERSONATION_KEY);
+    localStorage.removeItem('cognito_access_token');
+
+    // Clear API client state (token and cache)
+    api.clearToken();
+    api.setUserRole(null);
+
+    // Clear React state
+    setUser(null);
+    setImpersonatingTenant(null);
+    setTenants([]);
+    setError(null);
+    setIsLoading(false);
+    enforcePlatformOnly(undefined);
+  }, []);
+
   // Check authentication status on mount
   useEffect(() => {
     const initAuth = async () => {
@@ -131,18 +150,26 @@ export function AuthProvider({ children }: AuthProviderProps) {
         }
       } catch (err) {
         // Token is invalid or expired
-        api.clearToken();
-        localStorage.removeItem(AUTH_TOKEN_KEY);
-        setUser(null);
-        api.setUserRole(null);
-        enforcePlatformOnly(undefined);
+        clearAuthState();
       } finally {
         setIsLoading(false);
       }
     };
 
     initAuth();
-  }, []);
+  }, [clearAuthState]);
+
+  // Keep AuthContext state in sync with API-level token expiry/logout handling.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleAuthExpired = () => {
+      clearAuthState();
+    };
+    window.addEventListener('cohi:auth-expired', handleAuthExpired);
+    return () => {
+      window.removeEventListener('cohi:auth-expired', handleAuthExpired);
+    };
+  }, [clearAuthState]);
 
   /**
    * Load available tenants for login dropdown
@@ -171,7 +198,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
         user?: AuthUser;
         token?: string;
         refreshToken?: string;
+        cognitoAccessToken?: string;
         mfaRequired?: boolean;
+        mfaSetupRequired?: boolean;
         challengeName?: string;
         session?: string;
         email?: string;
@@ -200,6 +229,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
         throw pwError;
       }
 
+      if (response.mfaSetupRequired) {
+        const setupError = Object.assign(new Error('MFA_SETUP_REQUIRED'), {
+          mfaSetupRequired: true,
+          challengeName: response.challengeName,
+          session: response.session,
+          email: response.email || email,
+          cognitoAccessToken: response.cognitoAccessToken,
+        });
+        throw setupError;
+      }
+
       if (response.token) {
         localStorage.setItem(AUTH_TOKEN_KEY, response.token);
         api.setToken(response.token);
@@ -207,8 +247,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (response.refreshToken) {
         localStorage.setItem(REFRESH_TOKEN_KEY, response.refreshToken);
       }
-      if ((response as any).cognitoAccessToken) {
-        localStorage.setItem('cognito_access_token', (response as any).cognitoAccessToken);
+      if (response.cognitoAccessToken) {
+        localStorage.setItem('cognito_access_token', response.cognitoAccessToken);
       }
       
       if (response.user) {
@@ -217,7 +257,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         enforcePlatformOnly(response.user.role, response.user.tenant_id);
       }
     } catch (err: any) {
-      if (err.mfaRequired || err.newPasswordRequired) {
+      if (err.mfaRequired || err.newPasswordRequired || err.mfaSetupRequired) {
         throw err;
       }
       const message = err.message || 'Login failed';
@@ -231,7 +271,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
   /**
    * Complete login after MFA challenge verification
    */
-  const completeMfaLogin = useCallback(async (email: string, session: string, code: string, tenantSlug?: string) => {
+  const completeMfaLogin = useCallback(async (
+    email: string,
+    session: string,
+    code: string,
+    tenantSlug?: string,
+    challengeName: 'SOFTWARE_TOKEN_MFA' | 'EMAIL_OTP' | 'SMS_MFA' = 'SOFTWARE_TOKEN_MFA',
+  ) => {
     setIsLoading(true);
     setError(null);
 
@@ -243,7 +289,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         cognitoAccessToken?: string;
       }>('/api/auth/mfa/verify', {
         method: 'POST',
-        body: JSON.stringify({ email, session, code, tenantSlug }),
+        body: JSON.stringify({ email, session, code, tenantSlug, challengeName }),
       });
 
       if (response.token) {
@@ -281,25 +327,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // Ignore errors during logout - we still want to clear local state
       console.warn('[Auth] Error during signout API call:', err);
     } finally {
-      localStorage.removeItem(AUTH_TOKEN_KEY);
-      localStorage.removeItem(REFRESH_TOKEN_KEY);
-      localStorage.removeItem(IMPERSONATION_KEY);
-      localStorage.removeItem('cognito_access_token');
-      
-      // Clear API client state (token and cache)
-      api.clearToken();
-      api.setUserRole(null);
-      
-      // Clear React state
-      setUser(null);
-      setImpersonatingTenant(null);
-      setTenants([]);
-      setError(null);
-      setIsLoading(false);
-      
+      clearAuthState();
       console.log('[Auth] Logout complete - all state cleared');
     }
-  }, []);
+  }, [clearAuthState]);
 
   /**
    * Refresh user data from server
@@ -354,7 +385,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
    * Check if user is a tenant admin
    */
   const isTenantAdmin = useCallback((): boolean => {
-    return user?.role === 'tenant_admin' || user?.role === 'admin';
+    return user?.role === 'tenant_admin';
   }, [user]);
 
   /**

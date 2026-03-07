@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -24,7 +24,7 @@ function decodeJwtPayload(token: string): Record<string, any> | null {
 
 /** Check if the current session was authenticated via SSO */
 function isAuthViaSso(): boolean {
-  const token = localStorage.getItem('auth_token');
+  const token = api.getToken();
   if (!token) return false;
   const payload = decodeJwtPayload(token);
   return payload?.authMethod === 'cognito_sso';
@@ -86,6 +86,20 @@ export function AccountSection() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [mfaMethod, setMfaMethod] = useState<'totp' | 'email' | null>(null);
+
+  useEffect(() => {
+    if (isSso) return;
+    const loadMfaStatus = async () => {
+      try {
+        const response = await api.request<{ mfaMethod: 'totp' | 'email' | null }>('/api/auth/mfa/status');
+        setMfaMethod(response.mfaMethod || null);
+      } catch {
+        setMfaMethod(null);
+      }
+    };
+    void loadMfaStatus();
+  }, [isSso]);
 
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -178,6 +192,20 @@ export function AccountSection() {
                 {user.tenant_name || (user.is_super_admin ? 'Cohi Platform' : 'Not assigned')}
               </div>
             </div>
+
+            {!isSso && (
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
+                  <ShieldAlert className="h-3 w-3" />
+                  MFA Method
+                </Label>
+                <div className="px-3 py-2 bg-muted/50 rounded-md">
+                  <Badge variant="secondary" className="font-medium">
+                    {mfaMethod === 'totp' ? 'Authenticator App' : mfaMethod === 'email' ? 'Email Code' : 'Not configured'}
+                  </Badge>
+                </div>
+              </div>
+            )}
           </div>
 
           {isSso && (

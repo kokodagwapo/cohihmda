@@ -1,0 +1,11 @@
+{
+  "UserPoolId": "us-east-2_lArr8IsFK",
+  "MfaConfiguration": "OPTIONAL",
+  "SoftwareTokenMfaConfiguration": {
+    "Enabled": true
+  },
+  "EmailMfaConfiguration": {
+    "Subject": "Your Coheus verification code",
+    "Message": "Your Coheus verification code is {####}. This code expires shortly."
+  }
+}

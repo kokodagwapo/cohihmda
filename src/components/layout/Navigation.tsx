@@ -30,6 +30,8 @@ import {
   DollarSign,
   Pin,
   PinOff,
+  Lock,
+  Layers,
 } from "lucide-react";
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -104,13 +106,18 @@ const topTieringMenuGroups = {
         icon: ClipboardList,
         iconColor: "indigo" as const,
       },
-      // Hidden for now – needs work
-      // {
-      //   id: "pricingDashboard",
-      //   label: "Pricing Dashboard",
-      //   icon: DollarSign,
-      //   iconColor: "emerald" as const,
-      // },
+      {
+        id: "pricingDashboard",
+        label: "Pricing Dashboard",
+        icon: DollarSign,
+        iconColor: "emerald" as const,
+      },
+      {
+        id: "lockStratification",
+        label: "Lock Stratification",
+        icon: Lock,
+        iconColor: "blue" as const,
+      },
       {
         id: "workflowConversion",
         label: "Workflow Conversion",
@@ -122,6 +129,12 @@ const topTieringMenuGroups = {
         label: "Pipeline Analysis",
         icon: LineChart,
         iconColor: "emerald" as const,
+      },
+      {
+        id: "loanComplexity",
+        label: "Loan Complexity",
+        icon: Layers,
+        iconColor: "indigo" as const,
       },
       {
         id: "highPerformers",
@@ -140,6 +153,12 @@ const topTieringMenuGroups = {
         label: "Loan Detail",
         icon: FileText,
         iconColor: "blue" as const,
+      },
+      {
+        id: "falloutForecastPage",
+        label: "Fallout Report",
+        icon: BarChart3,
+        iconColor: "indigo" as const,
       },
     ],
   },
@@ -160,7 +179,7 @@ const topTieringMenuGroups = {
     items: [
       {
         id: "salesScorecard",
-        label: "Scorecard",
+        label: "Sales Scorecard",
         icon: Target,
         iconColor: "blue" as const,
       },
@@ -172,7 +191,7 @@ const topTieringMenuGroups = {
       },
       {
         id: "salesTrends",
-        label: "Trends",
+        label: "Sales Trends",
         icon: TrendingUp,
         iconColor: "emerald" as const,
       },
@@ -184,13 +203,13 @@ const topTieringMenuGroups = {
     items: [
       {
         id: "operationsScorecard",
-        label: "Scorecard",
+        label: "Operations Scorecard",
         icon: Target,
         iconColor: "blue" as const,
       },
       {
         id: "operationsTrends",
-        label: "Trends",
+        label: "Operations Trends",
         icon: LineChart,
         iconColor: "indigo" as const,
       },
@@ -255,8 +274,11 @@ const routeMap: Record<string, string> = {
   topTieringComparison: "/performance/toptiering-comparison",
   workflowConversion: "/workflow-conversion",
   pipelineAnalysis: "/pipeline-analysis",
+  loanComplexity: "/loan-complexity",
   loanDetail: "/loan-detail",
-  // pricingDashboard: "/pricing-dashboard", // hidden for now
+  falloutForecastPage: "/fallout-forecast",
+  pricingDashboard: "/pricing-dashboard",
+  lockStratification: "/lock-stratification",
   highPerformers: "/high-performers",
   actors: "/actors",
   salesScorecard: "/sales-scorecard",
@@ -494,13 +516,16 @@ export function Navigation(
   // Check if current page is a TopTiering page
   const isTopTieringPage = useMemo(() => {
     const topTieringRoutes = [
-      // "/loan-funnel", // hidden – page removed
       "/credit-risk-management",
       "/company-scorecard",
       "/performance/toptiering-comparison",
       "/workflow-conversion",
       "/pipeline-analysis",
+      "/loan-complexity",
       "/loan-detail",
+      "/fallout-forecast",
+      "/pricing-dashboard",
+      "/lock-stratification",
       "/high-performers",
       "/sales-scorecard",
       "/sales-scorecard-overview",
@@ -1039,18 +1064,18 @@ export function Navigation(
                                 iconColor: "blue" as const,
                               },
                               {
-                                id: "closingFalloutForecast",
-                                label: "Closing & Fallout Forecast",
-                                icon: BarChart3,
-                                hash: "#section-closingFalloutForecast",
-                                iconColor: "indigo" as const,
-                              },
-                              {
                                 id: "myWorkbench",
                                 label: "My Workbench",
                                 icon: Grid3X3,
                                 route: "/my-dashboard",
                                 iconColor: "violet" as const,
+                              },
+                              {
+                                id: "falloutForecastPage",
+                                label: "Fallout Report",
+                                icon: BarChart3,
+                                route: "/fallout-forecast",
+                                iconColor: "indigo" as const,
                               },
                             ].map((item) => {
                               const Icon = item.icon;

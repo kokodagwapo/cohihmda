@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, Zap, BarChart3, Target, Trophy, X, Sun, FileText, LayoutGrid, TrendingUp, LayoutDashboard, Filter, ArrowLeftRight, Shield, ClipboardList, Calculator, LineChart, Pin, PinOff, FlaskConical, GripVertical } from 'lucide-react';
+import { ChevronDown, Zap, BarChart3, Target, Trophy, X, Sun, FileText, LayoutGrid, TrendingUp, LayoutDashboard, Filter, ArrowLeftRight, Shield, ClipboardList, Calculator, LineChart, Pin, PinOff, FlaskConical, GripVertical, Lock, Layers } from 'lucide-react';
 import { getReportById, ReportData, allReports } from '@/data/reportSimulations';
 import { useTheme } from '@/components/theme-provider';
 import {
@@ -190,7 +190,6 @@ const dashboardSectionsConfig = [
   { id: 'industryNews' as SectionId, label: 'Mortgage News', icon: FileText, color: 'text-blue-500', section: 'main' },
   { id: 'leaderboard' as SectionId, label: 'Leaderboard', icon: Trophy, color: 'text-amber-500', section: 'dashboards' },
   { id: 'executiveDashboard' as SectionId, label: 'Business Overview', icon: Target, color: 'text-blue-500', section: 'dashboards' },
-  { id: 'closingFalloutForecast' as SectionId, label: 'Closing & Fallout Forecast', icon: BarChart3, color: 'text-indigo-500', section: 'dashboards' },
 ];
 
 // Default section order - matches actual display order on /insights page
@@ -199,7 +198,6 @@ export const defaultSectionOrder: SectionId[] = [
   'industryNews',
   'leaderboard',
   'executiveDashboard',
-  'closingFalloutForecast',
 ];
 
 // Nav menu structure mirroring top Navigation (keep sidemenu icons: Sun, FileText, Trophy, Target, BarChart3 for sections)
@@ -212,7 +210,6 @@ const INSIGHTS_CHILDREN = [
 const DASHBOARD_FLOATING_ITEMS: { id: SectionId; label: string; icon: typeof Trophy; color: string }[] = [
   { id: 'leaderboard', label: 'Leaderboard', icon: Trophy, color: 'text-amber-500' },
   { id: 'executiveDashboard', label: 'Business Overview', icon: Target, color: 'text-blue-500' },
-  { id: 'closingFalloutForecast', label: 'Closing & Fallout Forecast', icon: BarChart3, color: 'text-indigo-500' },
 ];
 
 type SubsectionKey = 'dashboard' | 'topTiering' | 'sales' | 'operations' | 'financialModeling';
@@ -221,7 +218,6 @@ const DASHBOARD_CHILDREN = [
   { type: 'subheader' as const, label: 'Dashboard', subsectionKey: 'dashboard' as SubsectionKey },
   { type: 'section' as const, id: 'leaderboard' as SectionId, label: 'Leaderboard', icon: Trophy, color: 'text-amber-500', subsectionKey: 'dashboard' as SubsectionKey },
   { type: 'section' as const, id: 'executiveDashboard' as SectionId, label: 'Business Overview', icon: Target, color: 'text-blue-500', subsectionKey: 'dashboard' as SubsectionKey },
-  { type: 'section' as const, id: 'closingFalloutForecast' as SectionId, label: 'Closing & Fallout Forecast', icon: BarChart3, color: 'text-indigo-500', subsectionKey: 'dashboard' as SubsectionKey },
 ];
 
 // Submenus under Toptiering main menu (Core Analytics, Sales, Operations, Financial Modeling)
@@ -232,6 +228,9 @@ const TOPTIERING_CHILDREN = [
   { type: 'route' as const, id: 'topTieringComparison', label: 'TopTiering Comparison', icon: ArrowLeftRight, path: '/performance/toptiering-comparison', subsectionKey: 'topTiering' as SubsectionKey },
   { type: 'route' as const, id: 'creditRiskManagement', label: 'Credit Risk Management', icon: Shield, path: '/credit-risk-management', subsectionKey: 'topTiering' as SubsectionKey },
   { type: 'route' as const, id: 'companyScorecard', label: 'Company Scorecard', icon: ClipboardList, path: '/company-scorecard', subsectionKey: 'topTiering' as SubsectionKey },
+  { type: 'route' as const, id: 'lockStratification', label: 'Lock Stratification', icon: Lock, path: '/lock-stratification', subsectionKey: 'topTiering' as SubsectionKey },
+  { type: 'route' as const, id: 'loanComplexity', label: 'Loan Complexity', icon: Layers, path: '/loan-complexity', subsectionKey: 'topTiering' as SubsectionKey },
+  { type: 'route' as const, id: 'falloutForecastPage', label: 'Fallout Report', icon: BarChart3, path: '/fallout-forecast', subsectionKey: 'topTiering' as SubsectionKey },
   { type: 'subheader' as const, label: 'Sales', subsectionKey: 'sales' as SubsectionKey },
   { type: 'route' as const, id: 'salesScorecard', label: 'Scorecard', icon: Target, path: '/sales-scorecard', subsectionKey: 'sales' as SubsectionKey },
   { type: 'route' as const, id: 'salesTrends', label: 'Trends', icon: TrendingUp, path: '/sales-trends', subsectionKey: 'sales' as SubsectionKey },
@@ -280,6 +279,9 @@ const navIconColorByItemId: Record<string, string> = {
   topTieringComparison: 'blue',
   creditRiskManagement: 'emerald',
   companyScorecard: 'indigo',
+  lockStratification: 'blue',
+  loanComplexity: 'indigo',
+  falloutForecastPage: 'indigo',
   workflowConversion: 'blue',
   highPerformers: 'amber',
   loanDetail: 'blue',
@@ -934,12 +936,22 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                     <Icon size={18} style={{ color: colorMap[it.color]?.text || '#64748b' }} />
                   </div>
                   <span style={{ fontSize: 13, fontWeight: 500, color: isDarkMode ? '#e2e8f0' : '#1a1d29', flex: 1 }}>{it.label}</span>
-                  <button
+                  <div
+                    role="switch"
+                    aria-checked={isActive}
+                    tabIndex={0}
                     onClick={(e) => { e.stopPropagation(); handleToggleSection(it.id); }}
-                    style={{ flexShrink: 0, width: 32, height: 20, borderRadius: 9999, backgroundColor: isActive ? '#10b981' : (isDarkMode ? '#475569' : '#cbd5e1'), border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 2, justifyContent: isActive ? 'flex-end' : 'flex-start' }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleToggleSection(it.id);
+                      }
+                    }}
+                    style={{ flexShrink: 0, width: 32, height: 20, borderRadius: 9999, backgroundColor: isActive ? '#10b981' : (isDarkMode ? '#475569' : '#cbd5e1'), cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 2, justifyContent: isActive ? 'flex-end' : 'flex-start' }}
                   >
                     <div style={{ width: 16, height: 16, borderRadius: '50%', backgroundColor: 'white', boxShadow: '0 1px 2px rgba(0,0,0,0.1)' }} />
-                  </button>
+                  </div>
                 </button>
               );
             })}
@@ -997,13 +1009,22 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                           <Icon className="h-4 w-4" style={{ color: colorMap[it.color]?.text || '#64748b' }} />
                         </div>
                         <span className="flex-1 text-left truncate">{it.label}</span>
-                        <button
-                          type="button"
+                        <div
+                          role="switch"
+                          aria-checked={isActive}
+                          tabIndex={0}
                           onClick={(e) => { e.stopPropagation(); handleToggleSection(it.id); }}
-                          className={cn("shrink-0 w-8 h-5 rounded-full flex items-center p-0.5 transition-colors", isActive ? "bg-emerald-500 justify-end" : (isDarkMode ? "bg-slate-600 justify-start" : "bg-slate-300 justify-start"))}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleToggleSection(it.id);
+                            }
+                          }}
+                          className={cn("shrink-0 w-8 h-5 rounded-full flex items-center p-0.5 transition-colors cursor-pointer", isActive ? "bg-emerald-500 justify-end" : (isDarkMode ? "bg-slate-600 justify-start" : "bg-slate-300 justify-start"))}
                         >
                           <span className="w-4 h-4 rounded-full bg-white shadow-sm" />
-                        </button>
+                        </div>
                       </button>
                     );
                   })}
