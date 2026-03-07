@@ -8,126 +8,16 @@ import { AuthRequest } from "./auth.js";
 import { pool as managementPool } from "../config/managementDatabase.js";
 import { tenantDbManager } from "../config/tenantDatabaseManager.js";
 import { auditLog } from "../services/auditLogger.js";
-import pg from "pg";
 
 export interface TenantContext {
   tenantId: string;
-  tenantPool: pg.Pool;
+  tenantPool: import("pg").Pool;
   tenantInfo: {
     id: string;
     name: string;
     slug: string;
     database_name: string;
   };
-}
-
-// Cache for shadow user creation to avoid repeated checks
-const shadowUserCache = new Map<string, Set<string>>(); // tenantId -> Set of userIds
-
-/**
- * Ensure a platform user has a shadow record in the tenant database
- * This allows platform staff to have chat history, saved dashboards, etc.
- */
-async function ensurePlatformUserShadow(
-  tenantPool: pg.Pool,
-  userId: string,
-  userEmail: string | undefined,
-  userRole: string,
-  tenantId: string
-): Promise<void> {
-  // Check cache first
-  const tenantCache = shadowUserCache.get(tenantId);
-  if (tenantCache?.has(userId)) {
-    return; // Already ensured this session
-  }
-
-  try {
-    // Check if user already exists in tenant database
-    const existing = await tenantPool.query(
-      "SELECT id FROM public.users WHERE id = $1",
-      [userId]
-    );
-
-    if (existing.rows.length === 0) {
-      // Tenant DB supports only simplified roles; map platform roles safely.
-      const tenantSafeRole =
-        userRole === "tenant_admin" ? "tenant_admin" : "user";
-
-      // Check if is_platform_user column exists
-      const columnCheck = await tenantPool.query(`
-        SELECT EXISTS (
-          SELECT FROM information_schema.columns 
-          WHERE table_schema = 'public' 
-          AND table_name = 'users' 
-          AND column_name = 'is_platform_user'
-        ) as exists
-      `);
-
-      const hasPlatformUserColumn = columnCheck.rows[0]?.exists;
-      const fallbackEmail = `platform-${userId.substring(0, 8)}@coheus.internal`;
-      const preferredEmail = userEmail?.trim().toLowerCase() || fallbackEmail;
-
-      // Avoid unique(email) collisions with existing tenant users.
-      const emailOwnerResult = await tenantPool.query(
-        "SELECT id FROM public.users WHERE email = $1 LIMIT 1",
-        [preferredEmail]
-      );
-      const emailOwnerId = emailOwnerResult.rows[0]?.id as string | undefined;
-      const safeEmail =
-        emailOwnerId && emailOwnerId !== userId ? fallbackEmail : preferredEmail;
-
-      if (hasPlatformUserColumn) {
-        // Modern schema with is_platform_user column
-        await tenantPool.query(
-          `
-          INSERT INTO public.users (id, email, role, is_platform_user, created_at, updated_at)
-          VALUES ($1, $2, $3, true, NOW(), NOW())
-          ON CONFLICT (id) DO UPDATE SET
-            email = EXCLUDED.email,
-            role = EXCLUDED.role,
-            is_platform_user = true,
-            updated_at = NOW()
-        `,
-          [userId, safeEmail, tenantSafeRole]
-        );
-      } else {
-        // Legacy schema - try with minimal columns
-        // Note: This may fail if encrypted_password is NOT NULL
-        await tenantPool.query(
-          `
-          INSERT INTO public.users (id, email, role, encrypted_password, created_at, updated_at)
-          VALUES ($1, $2, $3, '', NOW(), NOW())
-          ON CONFLICT (id) DO UPDATE SET
-            email = EXCLUDED.email,
-            role = EXCLUDED.role,
-            updated_at = NOW()
-        `,
-          [userId, safeEmail, tenantSafeRole]
-        );
-      }
-
-      console.log("[TenantContext] Created shadow user for platform staff:", {
-        userId,
-        tenantId,
-        userRole,
-      });
-    }
-
-    // Add to cache
-    if (!shadowUserCache.has(tenantId)) {
-      shadowUserCache.set(tenantId, new Set());
-    }
-    shadowUserCache.get(tenantId)!.add(userId);
-  } catch (error: unknown) {
-    // Don't fail the request if shadow user creation fails
-    // This could happen if users table schema doesn't support it yet
-    const errorMessage =
-      error instanceof Error ? error.message : "Unknown error";
-    console.warn(
-      "[TenantContext] Failed to create shadow user (non-fatal):",
-      errorMessage
-    );
-  }
 }
 
 declare global {
@@ -149,11 +39,7 @@ export async function attachTenantContext(
   next: NextFunction
 ): Promise<void> {
   try {
-    // Check if tenant_id is provided in query params (for admin tenant selection)
     const queryTenantId = req.query.tenant_id as string | undefined;
-
-    // Use role and tenant from JWT (set by authenticateToken middleware)
-    // This avoids expensive database lookups since we already have the info
     const userRole = req.userRole || "user";
     const jwtTenantId = req.tenantId || null;
 
@@ -164,8 +50,6 @@ export async function attachTenantContext(
       queryTenantId,
     });
 
-    // Only platform staff can use the tenant_id query param to select different tenants
-    // Tenant admins and regular users always use their JWT tenant (security: prevents cross-tenant access)
     const isPlatformStaff = [
       "super_admin",
       "platform_admin",
@@ -174,13 +58,11 @@ export async function attachTenantContext(
     let tenantId: string | null = null;
 
     if (queryTenantId && isPlatformStaff) {
-      // Platform staff can select any tenant
       console.log("[TenantContext] Platform staff selecting tenant:", {
         userId: req.userId,
         userRole,
         queryTenantId,
       });
-      // Verify tenant exists
       const tenantCheck = await managementPool.query(
         `SELECT id FROM coheus_tenants WHERE id = $1 AND status = 'active'`,
         [queryTenantId]
@@ -188,7 +70,6 @@ export async function attachTenantContext(
       if (tenantCheck.rows.length > 0) {
         tenantId = queryTenantId;
 
-        // Audit log: platform staff accessing another tenant's data
         auditLog({
           userId: req.userId!,
           userEmail: req.userEmail,
@@ -204,7 +85,7 @@ export async function attachTenantContext(
           },
           ipAddress: req.ip,
           userAgent: req.get("user-agent"),
-        }).catch(() => {}); // Non-blocking
+        }).catch(() => {});
 
       } else {
         console.warn(
@@ -215,23 +96,18 @@ export async function attachTenantContext(
         return;
       }
     } else if (queryTenantId && !isPlatformStaff) {
-      // Non-platform users cannot use tenant_id query param - silently ignore it
-      // Their tenant comes from JWT (secure, cannot be tampered)
       console.warn(
         "[TenantContext] Non-platform user attempted to use tenant_id query param (ignored):",
         { userId: req.userId, userRole, queryTenantId }
       );
     }
 
-    // If no query tenant, use tenant_id from JWT (for tenant users)
     if (!tenantId && jwtTenantId) {
       console.log("[TenantContext] Using tenant from JWT:", jwtTenantId);
       tenantId = jwtTenantId;
     }
 
     if (!tenantId) {
-      // Super admins without a tenant_id query param should not be blocked
-      // They just need to select a tenant in the UI
       if (
         userRole === "super_admin" ||
         userRole === "platform_admin" ||
@@ -263,25 +139,9 @@ export async function attachTenantContext(
       userRole,
     });
 
-    // Get tenant database pool
     const tenantPool = await tenantDbManager.getTenantPool(tenantId);
-
-    // Get tenant info
     const tenantConfig = await tenantDbManager.getTenantConfig(tenantId);
 
-    // For platform staff, ensure they have a shadow user record in the tenant database
-    // This allows them to use features like chat history, saved dashboards, etc.
-    if (isPlatformStaff && req.userId) {
-      await ensurePlatformUserShadow(
-        tenantPool,
-        req.userId,
-        req.userEmail,
-        userRole,
-        tenantId
-      );
-    }
-
-    // Attach to request
     req.tenantContext = {
       tenantId,
       tenantPool,
@@ -333,35 +193,26 @@ const TENANT_EXEMPT_PREFIXES = [
 /**
  * Global middleware: attempts to attach tenant context on every authenticated
  * request that hasn't already been handled by the explicit per-route middleware.
- * This is a defence-in-depth layer: if a developer adds a new tenant-scoped route
- * but forgets `attachTenantContext`, the context will already be there.
- *
- * Importantly this middleware never sends an error response — it only silently
- * skips when it can't resolve a tenant (unauthenticated, exempt path, platform
- * staff without tenant selection, etc.).
+ * Defence-in-depth layer — never sends an error response, only silently skips.
  */
 export async function globalTenantContext(
   req: AuthRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
-  // Skip if already attached (explicit per-route middleware ran first)
   if (req.tenantContext) {
     return next();
   }
 
-  // Skip exempt routes
   const path = req.originalUrl || req.path;
   if (TENANT_EXEMPT_PREFIXES.some((p) => path.startsWith(p))) {
     return next();
   }
 
-  // Skip if user is not authenticated
   if (!req.userId) {
     return next();
   }
 
-  // Try to resolve tenant context silently
   try {
     const userRole = req.userRole || "user";
     const jwtTenantId = req.tenantId || null;
@@ -384,18 +235,12 @@ export async function globalTenantContext(
       tenantId = jwtTenantId;
     }
 
-    // If we still can't resolve a tenant, just continue — the handler can
-    // call getTenantContext(req) and will get a clear error if it needs one.
     if (!tenantId) {
       return next();
     }
 
     const tenantPool = await tenantDbManager.getTenantPool(tenantId);
     const tenantConfig = await tenantDbManager.getTenantConfig(tenantId);
-
-    if (isPlatformStaff && req.userId) {
-      await ensurePlatformUserShadow(tenantPool, req.userId, req.userEmail, userRole, tenantId);
-    }
 
     req.tenantContext = {
       tenantId,
@@ -408,7 +253,7 @@ export async function globalTenantContext(
       },
     };
   } catch (_err) {
-    // Silently continue — this is defense-in-depth, not primary protection
+    // Silently continue — defense-in-depth, not primary protection
   }
 
   next();

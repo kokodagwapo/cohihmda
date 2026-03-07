@@ -1318,7 +1318,18 @@ router.delete(
     }
     
     const tenantPool = await tenantDbManager.getTenantPool(tenantId);
-    
+
+    // Explicit cascade: clean up related records before deleting the user.
+    // FKs on these tables were dropped (migration 084) to allow platform
+    // staff UUIDs that don't exist in the tenant users table.
+    await tenantPool.query("DELETE FROM public.chat_history WHERE user_id = $1", [userId]);
+    await tenantPool.query("DELETE FROM public.chat_sessions WHERE user_id = $1", [userId]);
+    await tenantPool.query("DELETE FROM public.workbench_canvases WHERE user_id = $1", [userId]);
+    await tenantPool.query("DELETE FROM public.canvas_share_entries WHERE user_id = $1", [userId]);
+    await tenantPool.query("UPDATE public.canvas_share_entries SET shared_by = NULL WHERE shared_by = $1", [userId]);
+    await tenantPool.query("DELETE FROM public.distribution_schedules WHERE created_by = $1", [userId]);
+    await tenantPool.query("DELETE FROM public.distribution_recipient_lists WHERE created_by = $1", [userId]);
+
     const result = await tenantPool.query(
         "DELETE FROM users WHERE id = $1 RETURNING id, email, cognito_sub",
         [userId],
