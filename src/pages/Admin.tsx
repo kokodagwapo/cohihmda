@@ -136,7 +136,7 @@ export const Admin = () => {
     subscriptions,
     loading: stripeLoading,
     loadStripeData,
-  } = useStripeData();
+  } = useStripeData(isPlatform);
 
   // Local state for search
   const [searchQuery, setSearchQuery] = useState("");

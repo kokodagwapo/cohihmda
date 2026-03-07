@@ -27,13 +27,14 @@ interface StripeData {
   subscriptions: Subscription[];
 }
 
-export const useStripeData = () => {
+export const useStripeData = (enabled = true) => {
   const [loading, setLoading] = useState(false);
   const [subscriptionPlans, setSubscriptionPlans] = useState<Plan[]>([]);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const { toast } = useToast();
 
   const loadStripeData = useCallback(async () => {
+    if (!enabled) return;
     setLoading(true);
     try {
       const [plansResponse, subscriptionsResponse] = await Promise.all([
@@ -46,11 +47,9 @@ export const useStripeData = () => {
     } catch (error: any) {
       console.error('Error loading Stripe data:', error);
       
-      // Set empty arrays on error
       setSubscriptionPlans([]);
       setSubscriptions([]);
       
-      // Only show toast for non-404 errors (404 means no data exists yet, which is expected)
       if (error.status !== 404) {
         toast({
           title: 'Error Loading Stripe Data',
@@ -61,7 +60,7 @@ export const useStripeData = () => {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [toast, enabled]);
 
   useEffect(() => {
     loadStripeData();
