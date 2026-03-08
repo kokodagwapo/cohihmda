@@ -27,6 +27,20 @@ type SignInResponse = {
   };
 };
 
+function normalizeBaseUrl(baseURL: string): string {
+  const trimmed = baseURL.trim();
+  if (!/^https?:\/\//i.test(trimmed)) {
+    throw new Error(
+      `Invalid E2E_BASE_URL "${baseURL}". It must start with http:// or https://`,
+    );
+  }
+  return trimmed.replace(/\/+$/, "");
+}
+
+function apiUrl(baseURL: string, routePath: string): string {
+  return `${baseURL}${routePath.startsWith("/") ? routePath : `/${routePath}`}`;
+}
+
 async function postJson(
   url: string,
   body: Record<string, unknown>,
@@ -79,7 +93,13 @@ function assertStringEnv(name: string): string {
   if (!value || !value.trim()) {
     throw new Error(`Missing required environment variable: ${name}`);
   }
-  return value.trim();
+  const trimmed = value.trim();
+  if (trimmed.startsWith("$")) {
+    throw new Error(
+      `Environment variable ${name} appears to be set to a literal placeholder value ("${trimmed}"). Set it to the real secret/value, not "$VARNAME".`,
+    );
+  }
+  return trimmed;
 }
 
 function assertStringField(data: Record<string, unknown>, field: string): string {
@@ -106,7 +126,7 @@ async function completeMfaChallenge(
   baseURL: string,
   email: string,
   session: string,
-  tenantSlug: string,
+  tenantSlug: string | undefined,
   challengeName: "SOFTWARE_TOKEN_MFA" | "EMAIL_OTP" | "SMS_MFA",
   totpSecret: string,
 ): Promise<{ token: string; cognitoAccessToken: string | undefined }> {
@@ -121,13 +141,16 @@ async function completeMfaChallenge(
   );
 
   for (const code of candidateCodes) {
-    const verify = await postJson(`${baseURL}/api/auth/mfa/verify`, {
+    const payload: Record<string, unknown> = {
       email,
       session,
       code,
       challengeName,
-      tenantSlug,
-    });
+    };
+    if (tenantSlug && tenantSlug.trim()) {
+      payload.tenantSlug = tenantSlug.trim();
+    }
+    const verify = await postJson(apiUrl(baseURL, "/api/auth/mfa/verify"), payload);
     if (verify.ok) {
       const token = assertStringField(verify.data, "token");
       const cognitoAccessToken =
@@ -155,7 +178,7 @@ async function signInAndResolveToken(
     signInPayload.tenantSlug = tenantSlug.trim();
   }
 
-  const first = await postJson(`${baseURL}/api/auth/signin`, {
+  const first = await postJson(apiUrl(baseURL, "/api/auth/signin"), {
     ...signInPayload,
   });
   const data = first.data as SignInResponse;
@@ -203,7 +226,7 @@ async function signInAndResolveToken(
       );
     }
 
-    const setup = await postJson(`${baseURL}/api/auth/mfa/setup`, { cognitoAccessToken });
+    const setup = await postJson(apiUrl(baseURL, "/api/auth/mfa/setup"), { cognitoAccessToken });
     if (!setup.ok) {
       throw new Error(
         `[E2E] Failed to initialize MFA setup for ${email} (status ${setup.status}).`,
@@ -216,7 +239,7 @@ async function signInAndResolveToken(
     );
     let confirmSucceeded = false;
     for (const code of candidateCodes) {
-      const confirm = await postJson(`${baseURL}/api/auth/mfa/setup/confirm`, {
+      const confirm = await postJson(apiUrl(baseURL, "/api/auth/mfa/setup/confirm"), {
         cognitoAccessToken,
         code,
       });
@@ -254,7 +277,7 @@ async function loginAndPersistState(
   const browser = await chromium.launch();
   const page = await browser.newPage();
 
-  await page.goto(`${baseURL}/login`, { waitUntil: "domcontentloaded" });
+  await page.goto(apiUrl(baseURL, "/login"), { waitUntil: "domcontentloaded" });
   await page.getByLabel("Email").fill(email);
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByLabel("Password").fill(password);
@@ -305,7 +328,7 @@ async function getAdminSession(baseURL: string, tenantSlugHint?: string) {
     { allowMfaSetup: false, existingTotpSecret: adminTotpSecret },
   );
 
-  const me = await getJson(`${baseURL}/api/auth/me`, {
+  const me = await getJson(apiUrl(baseURL, "/api/auth/me"), {
     Authorization: `Bearer ${signedIn.token}`,
   });
   if (!me.ok || typeof me.data.user !== "object" || !me.data.user) {
@@ -332,7 +355,7 @@ async function deleteManagedUsersByPrefix(
   tenantId: string,
   managedEmailPrefix: string,
 ): Promise<void> {
-  const list = await getJson(`${baseURL}/api/admin/tenants/${tenantId}/users`, {
+  const list = await getJson(apiUrl(baseURL, `/api/admin/tenants/${tenantId}/users`), {
     Authorization: `Bearer ${adminToken}`,
   });
 
@@ -355,7 +378,7 @@ async function deleteManagedUsersByPrefix(
     const id = typeof user.id === "string" ? user.id : "";
     if (!id) continue;
     await deleteWithAuth(
-      `${baseURL}/api/admin/tenants/${tenantId}/users/${id}`,
+      apiUrl(baseURL, `/api/admin/tenants/${tenantId}/users/${id}`),
       adminToken,
     );
   }
@@ -374,7 +397,7 @@ async function createProvisionedUser(
   },
 ): Promise<ProvisionedUser> {
   const create = await postJson(
-    `${baseURL}/api/admin/tenants/${tenantId}/users`,
+    apiUrl(baseURL, `/api/admin/tenants/${tenantId}/users`),
     {
       email: params.email,
       password: params.password,
@@ -419,7 +442,7 @@ async function createProvisionedUser(
 }
 
 export default async function globalSetup(config: FullConfig) {
-  const baseURL = config.projects[0]?.use.baseURL as string;
+  const baseURL = normalizeBaseUrl(config.projects[0]?.use.baseURL as string);
   const admin = await getAdminSession(baseURL);
   await mkdir(AUTH_DIR, { recursive: true });
 

@@ -9,6 +9,20 @@ type SignInResponse = {
   session?: string;
 };
 
+function normalizeBaseUrl(baseURL: string): string {
+  const trimmed = baseURL.trim();
+  if (!/^https?:\/\//i.test(trimmed)) {
+    throw new Error(
+      `Invalid E2E_BASE_URL "${baseURL}". It must start with http:// or https://`,
+    );
+  }
+  return trimmed.replace(/\/+$/, "");
+}
+
+function apiUrl(baseURL: string, routePath: string): string {
+  return `${baseURL}${routePath.startsWith("/") ? routePath : `/${routePath}`}`;
+}
+
 async function postJson(url: string, body: Record<string, unknown>) {
   const response = await fetch(url, {
     method: "POST",
@@ -30,7 +44,7 @@ async function signInAdminToken(baseURL: string, tenantSlug: string): Promise<st
     );
   }
 
-  const signIn = await postJson(`${baseURL}/api/auth/signin`, {
+  const signIn = await postJson(apiUrl(baseURL, "/api/auth/signin"), {
     email: adminEmail,
     password: adminPassword,
     tenantSlug,
@@ -58,7 +72,7 @@ async function signInAdminToken(baseURL: string, tenantSlug: string): Promise<st
   );
 
   for (const code of candidateCodes) {
-    const verify = await postJson(`${baseURL}/api/auth/mfa/verify`, {
+    const verify = await postJson(apiUrl(baseURL, "/api/auth/mfa/verify"), {
       email: adminEmail,
       session: signInData.session,
       code,
@@ -74,7 +88,7 @@ async function signInAdminToken(baseURL: string, tenantSlug: string): Promise<st
 }
 
 async function deleteUser(baseURL: string, token: string, tenantId: string, userId: string) {
-  const response = await fetch(`${baseURL}/api/admin/tenants/${tenantId}/users/${userId}`, {
+  const response = await fetch(apiUrl(baseURL, `/api/admin/tenants/${tenantId}/users/${userId}`), {
     method: "DELETE",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -95,7 +109,7 @@ export default async function globalTeardown(config: FullConfig) {
     return;
   }
 
-  const baseURL = config.projects[0]?.use.baseURL as string;
+  const baseURL = normalizeBaseUrl(config.projects[0]?.use.baseURL as string);
   try {
     const adminToken = await signInAdminToken(baseURL, state.tenantSlug);
     await deleteUser(baseURL, adminToken, state.tenantId, state.users.tenantUser.id);
