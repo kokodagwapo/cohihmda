@@ -78,7 +78,7 @@ const queryClient = new QueryClient();
 function AccessModeGate() {
   const { user } = useAuth();
   const location = useLocation();
-  if (user?.access_mode === "canvas_only") {
+  if (user?.persona === "tenant_canvas_only_user") {
     const onWorkbench = location.pathname === "/my-dashboard" || location.pathname.startsWith("/my-dashboard/");
     if (!onWorkbench) return <Navigate to="/my-dashboard" replace />;
     return <CanvasOnlyLayout />;
@@ -127,7 +127,9 @@ function RootRoute() {
   const { isAuthenticated, user, isLoading } = useAuth();
   if (isLoading) return null;
   if (isAuthenticated) {
-    if (user?.access_mode === "canvas_only") return <Navigate to="/my-dashboard" replace />;
+    if (user?.persona === "tenant_canvas_only_user") {
+      return <Navigate to="/my-dashboard" replace />;
+    }
     return <Navigate to="/insights" replace />;
   }
   return <Index />;
@@ -135,7 +137,9 @@ function RootRoute() {
 
 function FullAccessOnly({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  if (user?.access_mode === "canvas_only") return null;
+  if (user?.persona === "tenant_canvas_only_user") {
+    return null;
+  }
   return <>{children}</>;
 }
 

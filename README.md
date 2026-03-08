@@ -56,7 +56,7 @@ docker-compose up -d postgres
 cd server
 npm run migrate
 
-# Seed default users (creates admin, user, and viewer accounts)
+# Seed default users (creates admin and user accounts)
 npm run seed:users
 # Note: Credentials will be displayed and saved to .credentials/ folder
 
@@ -71,10 +71,9 @@ npm run dev
 Visit `http://localhost:8084` to access the application.
 
 **Default Development Credentials:**
-The seed script creates three users with randomly generated passwords (saved in `.credentials/` folder):
+The seed script creates two users with randomly generated passwords (saved in `.credentials/` folder):
 - Admin user (role: admin) - Full system access
 - Standard user (role: user) - Normal user access
-- Viewer user (role: viewer) - Read-only access
 
 **Custom Credentials:**
 Set environment variables in `server/.env` to use specific credentials:
@@ -83,8 +82,6 @@ ADMIN_EMAIL=admin@yourcompany.com
 ADMIN_PASSWORD=your-secure-password
 USER_EMAIL=user@yourcompany.com
 USER_PASSWORD=your-secure-password
-VIEWER_EMAIL=viewer@yourcompany.com
-VIEWER_PASSWORD=your-secure-password
 ```
 
 ### Production Deployment
@@ -295,7 +292,7 @@ See [README.DEPLOYMENT.md](./README.DEPLOYMENT.md) for detailed instructions.
 
 - **SOC 2 Type II Compliance**: Role-based access control, audit logging, encryption
 - **Multi-Tenant Isolation**: Row-level security with tenant_id, tenant isolation middleware
-- **RBAC**: Role-based permissions (admin, user, viewer)
+- **RBAC**: Role-based permissions (admin, user)
 - **Audit Logging**: All sensitive operations logged
 - **Encryption**: AWS KMS for secrets, encrypted database connections
 - **Session Management**: Secure JWT tokens with expiration

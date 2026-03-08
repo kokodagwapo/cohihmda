@@ -3,7 +3,7 @@
  * GET /api/pipeline-analysis/treasury-30yr-rate
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { api } from "@/lib/api";
 
 export interface Pipeline30yrRatePoint {
@@ -35,6 +35,22 @@ export function usePipeline30yrRates(options: UsePipeline30yrRatesOptions): {
   const [rates, setRates] = useState<Pipeline30yrRatePoint[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const normalizedLoanTypes = useMemo(
+    () => (filters?.loanTypes?.length ? [...filters.loanTypes].sort() : []),
+    [filters?.loanTypes]
+  );
+  const normalizedLoanPurposes = useMemo(
+    () => (filters?.loanPurposes?.length ? [...filters.loanPurposes].sort() : []),
+    [filters?.loanPurposes]
+  );
+  const normalizedBranches = useMemo(
+    () => (filters?.branches?.length ? [...filters.branches].sort() : []),
+    [filters?.branches]
+  );
+  const snapshotDatesKey = useMemo(
+    () => (snapshotDates?.length ? [...snapshotDates].sort().join(",") : ""),
+    [snapshotDates]
+  );
 
   const fetchData = useCallback(async () => {
     if (!from || !to) {
@@ -48,10 +64,10 @@ export function usePipeline30yrRates(options: UsePipeline30yrRatesOptions): {
       const params = new URLSearchParams({ from, to });
       if (tenantId) params.set("tenant_id", tenantId);
       if (startDateField && startDateField !== "application_date") params.set("start_date_field", startDateField);
-      if (filters?.loanTypes?.length) filters.loanTypes.forEach((v) => params.append("loan_type", v));
-      if (filters?.loanPurposes?.length) filters.loanPurposes.forEach((v) => params.append("loan_purpose", v));
-      if (filters?.branches?.length) filters.branches.forEach((v) => params.append("branch", v));
-      if (snapshotDates?.length) snapshotDates.forEach((d) => params.append("snapshot_dates", d));
+      normalizedLoanTypes.forEach((v) => params.append("loan_type", v));
+      normalizedLoanPurposes.forEach((v) => params.append("loan_purpose", v));
+      normalizedBranches.forEach((v) => params.append("branch", v));
+      if (snapshotDatesKey) snapshotDatesKey.split(",").forEach((d) => params.append("snapshot_dates", d));
       const result = await api.request<{ rates: Pipeline30yrRatePoint[] }>(
         `/api/pipeline-analysis/treasury-30yr-rate?${params.toString()}`,
         { headers: { "Cache-Control": "no-cache" } }
@@ -63,7 +79,7 @@ export function usePipeline30yrRates(options: UsePipeline30yrRatesOptions): {
     } finally {
       setLoading(false);
     }
-  }, [from, to, tenantId, startDateField, filters?.loanTypes, filters?.loanPurposes, filters?.branches, snapshotDates?.length, snapshotDates?.join(",")]);
+  }, [from, to, tenantId, startDateField, normalizedLoanTypes, normalizedLoanPurposes, normalizedBranches, snapshotDatesKey]);
 
   useEffect(() => {
     fetchData();

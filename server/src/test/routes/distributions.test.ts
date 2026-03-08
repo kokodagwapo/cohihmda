@@ -19,16 +19,16 @@ describe("Distributions route contracts", () => {
     expect(platformAdmin.status).toBe(200);
   });
 
-  it("denies support and viewer for send-now", async () => {
+  it("denies support and tenant user for send-now", async () => {
     const support = await request(app)
       .post("/api/distributions/__functional/send-now")
       .set("Authorization", `Bearer ${tokenForRole("support")}`)
       .send({});
-    const viewer = await request(app)
+    const tenantUser = await request(app)
       .post("/api/distributions/__functional/send-now")
-      .set("Authorization", `Bearer ${tokenForRole("viewer")}`)
+      .set("Authorization", `Bearer ${tokenForRole("user")}`)
       .send({});
     expect(support.status).toBe(403);
-    expect(viewer.status).toBe(403);
+    expect(tenantUser.status).toBe(403);
   });
 });

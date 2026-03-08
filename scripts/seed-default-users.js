@@ -2,7 +2,7 @@
 /**
  * Seed Default Users for All Roles
  * 
- * This script creates default users for all roles (tenant_admin, user, viewer)
+ * This script creates default users for all supported roles (tenant_admin, user)
  * using secure credentials from environment variables.
  * 
  * Usage:
@@ -15,8 +15,6 @@
  *   ADMIN_PASSWORD - Admin user password (required in production)
  *   USER_EMAIL     - Standard user email (default: generates random)
  *   USER_PASSWORD  - Standard user password (optional)
- *   VIEWER_EMAIL   - Viewer user email (default: generates random)
- *   VIEWER_PASSWORD- Viewer user password (optional)
  * 
  * Security:
  *   - Production (NODE_ENV=production): Requires all passwords via env vars
@@ -99,14 +97,6 @@ const userConfigs = [
     password: process.env.USER_PASSWORD,
     fullName: 'Standard User',
     tenantName: 'User Tenant',
-    required: false,
-  },
-  {
-    role: 'viewer',
-    email: process.env.VIEWER_EMAIL || `viewer-${Date.now()}@coheus.local`,
-    password: process.env.VIEWER_PASSWORD,
-    fullName: 'Viewer User',
-    tenantName: 'Viewer Tenant',
     required: false,
   },
 ];

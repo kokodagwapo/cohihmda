@@ -793,7 +793,6 @@ function HistoryDialog({
 const ROLES = [
   { value: "tenant_admin", label: "Admin" },
   { value: "user", label: "User" },
-  { value: "viewer", label: "Viewer" },
 ];
 
 function RecipientListSection({

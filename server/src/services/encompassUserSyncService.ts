@@ -10,6 +10,9 @@ import { EncompassApiService, EncompassUser } from "./encompassApiService.js";
 import { logError, logInfo, logDebug, logWarn } from "./logger.js";
 import { sendUserInvitationEmail } from "./emailService.js";
 import * as cognitoAuth from "./cognito/cognitoAuthService.js";
+import {
+  type TenantPersona,
+} from "../utils/userAccessProfile.js";
 
 const { Pool } = pg;
 
@@ -41,10 +44,10 @@ export interface SyncResult {
 
 export interface InviteUserOptions {
   role?: string;
+  persona?: TenantPersona;
   invite_method?: "email" | "sso_only" | "manual";
   password?: string;
   inviter_name?: string;
-  access_mode?: "full" | "canvas_only";
   group_ids?: string[];
 }
 
@@ -378,10 +381,10 @@ export class EncompassUserSyncService {
   ): Promise<InviteResult> {
     const {
       role = "user",
+      persona = role === "tenant_admin" ? "tenant_admin" : "tenant_user",
       invite_method = "email",
       password,
       inviter_name,
-      access_mode = "full",
       group_ids = [],
     } = options || {};
 
@@ -505,23 +508,38 @@ export class EncompassUserSyncService {
         hashedPassword = crypto.randomBytes(32).toString("hex");
       }
 
+      const resolvedPersona: TenantPersona =
+        persona === "tenant_canvas_only_user"
+          ? "tenant_canvas_only_user"
+          : role === "tenant_admin"
+            ? "tenant_admin"
+            : "tenant_user";
+      const resolvedRole = resolvedPersona === "tenant_admin" ? "tenant_admin" : "user";
+      const loanScope =
+        resolvedPersona === "tenant_admin"
+          ? "all"
+          : resolvedPersona === "tenant_canvas_only_user"
+            ? "none"
+            : "encompass";
+
       const newUserResult = await this.tenantPool.query(
         `
         INSERT INTO users 
           (email, encrypted_password, full_name, role, is_active, 
-           encompass_user_id, los_connection_id, access_mode, loan_access_mode, cognito_sub)
-        VALUES ($1, $2, $3, $4, true, $5, $6, $7, 'full_access', $8)
+           encompass_user_id, los_connection_id, cognito_sub, persona, loan_scope)
+        VALUES ($1, $2, $3, $4, true, $5, $6, $7, $8, $9)
         RETURNING id
       `,
         [
           encompassUser.email,
           hashedPassword,
           fullName,
-          role,
+          resolvedRole,
           encompassUser.encompass_user_id,
           losConnectionId,
-          access_mode,
           cognitoSub,
+          resolvedPersona,
+          loanScope,
         ],
       );
 
@@ -583,7 +601,8 @@ export class EncompassUserSyncService {
         encompassUserId: encompassUser.encompass_user_id,
         cohiUserId: newUserId,
         email: encompassUser.email,
-        role,
+        role: resolvedRole,
+        persona: resolvedPersona,
         inviteMethod: invite_method,
       });
 

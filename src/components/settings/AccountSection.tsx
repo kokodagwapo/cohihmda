@@ -39,7 +39,6 @@ function roleLabel(role: string): string {
     tenant_admin: 'Organization Admin',
     admin: 'Admin',
     user: 'User',
-    viewer: 'Viewer',
     loan_officer: 'Loan Officer',
     processor: 'Processor',
   };

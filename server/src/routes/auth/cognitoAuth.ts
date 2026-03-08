@@ -22,6 +22,9 @@ import { isCognitoAuthEnabled } from "../../services/cognito/cognitoAuthService.
 import { auditLog, createSession } from "../../services/auditLogger.js";
 import { logError, logInfo, logDebug, logWarn } from "../../services/logger.js";
 import { authLimiter } from "../../middleware/rateLimiter.js";
+import {
+  type TenantPersona,
+} from "../../utils/userAccessProfile.js";
 
 const { Pool } = pg;
 const router = Router();
@@ -232,7 +235,9 @@ router.post("/callback", authLimiter, async (req, res) => {
       tenantId: user.tenant_id,
       tenantSlug,
       authMethod: "cognito_sso",
-      access_mode: isSuperAdmin ? "full" : (user.access_mode || "full"),
+      persona: isSuperAdmin
+        ? undefined
+        : (user.persona as TenantPersona),
     };
 
     const token = jwt.sign(jwtPayload, getJwtSecret(), { expiresIn: "7d" });
@@ -283,7 +288,9 @@ router.post("/callback", authLimiter, async (req, res) => {
         tenant_id: user.tenant_id,
         tenant_name: user.tenant_name,
         tenant_slug: tenantSlug,
-        access_mode: isSuperAdmin ? "full" : (user.access_mode || "full"),
+        persona: isSuperAdmin
+          ? undefined
+          : (user.persona as TenantPersona),
       },
       token,
       returnUrl: ssoState?.returnUrl,
@@ -560,7 +567,7 @@ async function findOrCreateSsoUser(
     // Check if user exists in tenant DB
     const userResult = await tenantPool.query(
       `SELECT id, email, full_name, role, is_active, encompass_user_id,
-              COALESCE(access_mode, 'full') AS access_mode
+              persona
        FROM users WHERE email = $1`,
       [email],
     );
@@ -593,9 +600,9 @@ async function findOrCreateSsoUser(
     // JIT provisioning - create new user
     const newUserResult = await tenantPool.query(
       `
-      INSERT INTO users (email, full_name, role, encrypted_password, is_active, encompass_user_id, cognito_sub, loan_access_mode)
-      VALUES ($1, $2, $3, $4, true, $5, $6, 'full_access')
-      RETURNING id, email, full_name, role, is_active, encompass_user_id
+      INSERT INTO users (email, full_name, role, encrypted_password, is_active, encompass_user_id, cognito_sub, persona, loan_scope)
+      VALUES ($1, $2, $3, $4, true, $5, $6, 'tenant_user', 'encompass')
+      RETURNING id, email, full_name, role, is_active, encompass_user_id, persona
     `,
       [
         email,

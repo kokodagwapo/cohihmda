@@ -11,7 +11,7 @@
  */
 
 import pg from "pg";
-import { buildChannelWhereClause } from "../../utils/scorecard-utils.js";
+import { buildChannelWhereClause, sanitizeAndSqlClause } from "../../utils/scorecard-utils.js";
 import { LoanComplexityService } from "../scoring/loanComplexityService.js";
 
 export type ActorsCalculation = "average" | "median";
@@ -202,8 +202,9 @@ export async function getActorsDashboardData(
   if (channelWhere) {
     conditions.push(channelWhere.replace(/^AND\s+/i, "").trim());
   }
-  if (accessClause) {
-    conditions.push(accessClause);
+  const accessCondition = sanitizeAndSqlClause(accessClause, "accessClause");
+  if (accessCondition) {
+    conditions.push(accessCondition);
     params.push(...accessParams);
   }
   if (selectedActor?.type && selectedActor?.name != null) {
@@ -228,7 +229,11 @@ export async function getActorsDashboardData(
     }
   }
 
-  const whereSql = conditions.join(" AND ") + (dimensionFilterClause ? ` ${dimensionFilterClause}` : "");
+  const dimensionCondition = sanitizeAndSqlClause(dimensionFilterClause, "dimensionFilterClause");
+  if (dimensionCondition) {
+    conditions.push(dimensionCondition);
+  }
+  const whereSql = conditions.join(" AND ");
 
   // ---- Status counts (bar chart): count and volume per status ----
   const statusResult = await tenantPool.query(

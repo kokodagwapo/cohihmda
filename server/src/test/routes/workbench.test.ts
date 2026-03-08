@@ -26,10 +26,10 @@ describe("Workbench route contracts", () => {
     expect(platformAdmin.status).toBe(200);
   });
 
-  it("denies viewer from update-any contract endpoint", async () => {
+  it("denies tenant user from update-any contract endpoint", async () => {
     const res = await request(app)
       .post("/api/workbench/canvases/__functional/update-any")
-      .set("Authorization", `Bearer ${tokenForRole("viewer")}`)
+      .set("Authorization", `Bearer ${tokenForRole("user")}`)
       .send({});
     expect(res.status).toBe(403);
   });

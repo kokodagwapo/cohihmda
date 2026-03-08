@@ -199,11 +199,11 @@ async function ensureRecipientUsers(
         : await bcrypt.hash(crypto.randomBytes(24).toString('hex'), 10);
 
       const insertResult = await tenantPool.query(
-        `INSERT INTO public.users (email, encrypted_password, full_name, role, is_active, loan_access_mode, access_mode, cognito_sub)
-         VALUES ($1, $2, $3, $4, true, 'full_access', 'canvas_only', $5)
+        `INSERT INTO public.users (email, encrypted_password, full_name, role, is_active, cognito_sub, persona, loan_scope)
+         VALUES ($1, $2, $3, $4, true, $5, 'tenant_canvas_only_user', 'none')
          ON CONFLICT (email) DO UPDATE SET cognito_sub = COALESCE(EXCLUDED.cognito_sub, users.cognito_sub), updated_at = NOW()
          RETURNING id, email`,
-        [email, placeholderPassword, null, 'viewer', cognitoSub]
+        [email, placeholderPassword, null, 'user', cognitoSub]
       );
 
       userId = insertResult.rows[0]?.id;
