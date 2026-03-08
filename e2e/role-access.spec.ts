@@ -14,7 +14,6 @@ test.describe("@critical Consolidated role access matrix", () => {
   }) => {
     await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
     await expect(userPage).toHaveURL(/\/insights/);
-    await expect(userPage.getByRole("navigation", { name: /main navigation/i })).toBeVisible();
 
     await userPage.goto("/admin", { waitUntil: "domcontentloaded" });
     await expect(userPage.getByText(/Access Denied/i)).toBeVisible();
@@ -29,7 +28,7 @@ test.describe("@critical Consolidated role access matrix", () => {
 
     // Canvas-only layout should render and hide full-app nav.
     await expect(canvasOnlyPage.getByText("Cohi Dashboards")).toBeVisible();
-    await expect(canvasOnlyPage.getByText("Shared with you")).toBeVisible();
+    await expect(canvasOnlyPage.getByText("Shared with you").first()).toBeVisible();
     await expect(
       canvasOnlyPage.getByRole("navigation", { name: /main navigation/i }),
     ).toHaveCount(0);

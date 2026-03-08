@@ -1,4 +1,4 @@
-import { chromium, type FullConfig } from "@playwright/test";
+import { chromium, type FullConfig, type Page } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -12,6 +12,7 @@ import { generateTotpCode } from "./totp";
 const USER_STATE = path.join(AUTH_DIR, "user.json");
 const ADMIN_STATE = path.join(AUTH_DIR, "admin.json");
 const CANVAS_ONLY_STATE = path.join(AUTH_DIR, "canvas-only.json");
+const TOTP_RETRY_OFFSETS_MS = [0, -30_000, 30_000, -60_000, 60_000, -90_000, 90_000];
 
 type SignInResponse = {
   token?: string;
@@ -26,6 +27,14 @@ type SignInResponse = {
     tenant_slug?: string | null;
   };
 };
+
+function sanitizeAuthPayload(data: SignInResponse): Record<string, unknown> {
+  const clone: Record<string, unknown> = { ...data };
+  if (typeof clone.cognitoAccessToken === "string") {
+    clone.cognitoAccessToken = "[REDACTED]";
+  }
+  return clone;
+}
 
 function normalizeBaseUrl(baseURL: string): string {
   const trimmed = baseURL.trim();
@@ -46,7 +55,7 @@ async function postJson(
   body: Record<string, unknown>,
   headers?: Record<string, string>,
 ) {
-  const response = await fetch(url, {
+  const response = await fetchWithRateLimitRetry(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -62,7 +71,7 @@ async function getJson(
   url: string,
   headers?: Record<string, string>,
 ): Promise<{ ok: boolean; status: number; data: Record<string, unknown> }> {
-  const response = await fetch(url, {
+  const response = await fetchWithRateLimitRetry(url, {
     method: "GET",
     headers: {
       ...headers,
@@ -72,8 +81,29 @@ async function getJson(
   return { ok: response.ok, status: response.status, data };
 }
 
+async function fetchWithRateLimitRetry(
+  url: string,
+  init: RequestInit,
+  maxRetries = 4,
+): Promise<Response> {
+  let attempt = 0;
+  while (true) {
+    const response = await fetch(url, init);
+    if (response.status !== 429 || attempt >= maxRetries) {
+      return response;
+    }
+    const retryAfterHeader = response.headers.get("retry-after");
+    const retryAfterSeconds = retryAfterHeader ? Number(retryAfterHeader) : NaN;
+    const waitMs = Number.isFinite(retryAfterSeconds)
+      ? Math.max(1000, retryAfterSeconds * 1000)
+      : 1500 * (attempt + 1);
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+    attempt += 1;
+  }
+}
+
 async function deleteWithAuth(url: string, token: string): Promise<void> {
-  const response = await fetch(url, {
+  const response = await fetchWithRateLimitRetry(url, {
     method: "DELETE",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -110,6 +140,28 @@ function assertStringField(data: Record<string, unknown>, field: string): string
   return value;
 }
 
+function isAuthenticatedAppPath(urlString: string): boolean {
+  try {
+    const path = new URL(urlString).pathname.toLowerCase();
+    if (path === "/login" || path === "/forgot-password" || path === "/reset-password") {
+      return false;
+    }
+    if (path.startsWith("/auth/")) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForAuthenticatedNavigation(page: Page, timeout: number): Promise<boolean> {
+  return page
+    .waitForURL((url) => isAuthenticatedAppPath(url.toString()), { timeout })
+    .then(() => true)
+    .catch(() => false);
+}
+
 function getRunId(): string {
   const raw =
     process.env.BITBUCKET_BUILD_NUMBER ||
@@ -136,28 +188,38 @@ async function completeMfaChallenge(
     );
   }
 
-  const candidateCodes = [0, -30_000, 30_000].map((offsetMs) =>
-    generateTotpCode(totpSecret, Date.now() + offsetMs),
-  );
+  for (let round = 0; round < 3; round += 1) {
+    const candidateCodes = Array.from(
+      new Set(
+        TOTP_RETRY_OFFSETS_MS.map((offsetMs) =>
+          generateTotpCode(totpSecret, Date.now() + offsetMs),
+        ),
+      ),
+    );
 
-  for (const code of candidateCodes) {
-    const payload: Record<string, unknown> = {
-      email,
-      session,
-      code,
-      challengeName,
-    };
-    if (tenantSlug && tenantSlug.trim()) {
-      payload.tenantSlug = tenantSlug.trim();
+    for (const code of candidateCodes) {
+      const payload: Record<string, unknown> = {
+        email,
+        session,
+        code,
+        challengeName,
+      };
+      if (tenantSlug && tenantSlug.trim()) {
+        payload.tenantSlug = tenantSlug.trim();
+      }
+      const verify = await postJson(apiUrl(baseURL, "/api/auth/mfa/verify"), payload);
+      if (verify.ok) {
+        const token = assertStringField(verify.data, "token");
+        const cognitoAccessToken =
+          typeof verify.data.cognitoAccessToken === "string"
+            ? verify.data.cognitoAccessToken
+            : undefined;
+        return { token, cognitoAccessToken };
+      }
     }
-    const verify = await postJson(apiUrl(baseURL, "/api/auth/mfa/verify"), payload);
-    if (verify.ok) {
-      const token = assertStringField(verify.data, "token");
-      const cognitoAccessToken =
-        typeof verify.data.cognitoAccessToken === "string"
-          ? verify.data.cognitoAccessToken
-          : undefined;
-      return { token, cognitoAccessToken };
+
+    if (round < 2) {
+      await new Promise((resolve) => setTimeout(resolve, 10_000));
     }
   }
 
@@ -234,7 +296,7 @@ async function signInAndResolveToken(
     }
     const totpSecret = assertStringField(setup.data, "secret");
 
-    const candidateCodes = [0, -30_000, 30_000].map((offsetMs) =>
+    const candidateCodes = TOTP_RETRY_OFFSETS_MS.map((offsetMs) =>
       generateTotpCode(totpSecret, Date.now() + offsetMs),
     );
     let confirmSucceeded = false;
@@ -260,9 +322,15 @@ async function signInAndResolveToken(
     });
   }
 
+  if (data.mfaSetupRequired && !opts.allowMfaSetup) {
+    throw new Error(
+      `[E2E] ${email} requires MFA setup before automated tests can run. Complete authenticator MFA enrollment for this admin account, then set E2E_ADMIN_TOTP_SECRET to that account's Base32 secret.`,
+    );
+  }
+
   throw new Error(
     `[E2E] Sign-in failed for ${email} with status ${first.status}. Payload: ${JSON.stringify(
-      data,
+      sanitizeAuthPayload(data),
     )}`,
   );
 }
@@ -273,41 +341,31 @@ async function loginAndPersistState(
   password: string,
   totpSecret: string,
   outputPath: string,
+  tenantSlug?: string,
 ) {
+  const signedIn = await signInAndResolveToken(baseURL, email, password, tenantSlug, {
+    allowMfaSetup: false,
+    existingTotpSecret: totpSecret,
+  });
+
   const browser = await chromium.launch();
   const page = await browser.newPage();
 
   await page.goto(apiUrl(baseURL, "/login"), { waitUntil: "domcontentloaded" });
-  await page.getByLabel("Email").fill(email);
-  await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign In" }).click();
-
-  const otpInput = page
-    .locator('input[data-input-otp], input[autocomplete="one-time-code"], input[inputmode="numeric"]')
-    .first();
-  await otpInput.waitFor({ state: "visible", timeout: 15_000 });
-
-  const verifyButton = page.getByRole("button", { name: "Verify" });
-  const candidateCodes = [0, -30_000, 30_000].map((offsetMs) =>
-    generateTotpCode(totpSecret, Date.now() + offsetMs),
+  await page.evaluate(
+    ({ token, cognitoAccessToken }) => {
+      localStorage.setItem("auth_token", token);
+      if (cognitoAccessToken) {
+        localStorage.setItem("cognito_access_token", cognitoAccessToken);
+      }
+    },
+    { token: signedIn.token, cognitoAccessToken: signedIn.cognitoAccessToken },
   );
 
-  let authed = false;
-  for (const code of candidateCodes) {
-    await otpInput.fill(code);
-    await verifyButton.click();
-    try {
-      await page.waitForURL(/\/(insights|my-dashboard)/, { timeout: 8_000 });
-      authed = true;
-      break;
-    } catch {
-      // Try next TOTP window.
-    }
-  }
-
+  await page.goto(apiUrl(baseURL, "/insights"), { waitUntil: "domcontentloaded" });
+  const authed = await waitForAuthenticatedNavigation(page, 15_000);
   if (!authed) {
-    throw new Error(`[E2E] Unable to authenticate ${email} via UI MFA flow.`);
+    throw new Error(`[E2E] Unable to persist authenticated state for ${email}.`);
   }
 
   await page.context().storageState({ path: outputPath });
@@ -504,6 +562,7 @@ export default async function globalSetup(config: FullConfig) {
     admin.adminPassword,
     admin.adminTotpSecret,
     ADMIN_STATE,
+    admin.tenantSlug,
   );
   await loginAndPersistState(
     baseURL,
@@ -511,6 +570,7 @@ export default async function globalSetup(config: FullConfig) {
     tenantUser.password,
     tenantUser.totpSecret,
     USER_STATE,
+    admin.tenantSlug,
   );
   await loginAndPersistState(
     baseURL,
@@ -518,5 +578,6 @@ export default async function globalSetup(config: FullConfig) {
     canvasOnlyUser.password,
     canvasOnlyUser.totpSecret,
     CANVAS_ONLY_STATE,
+    admin.tenantSlug,
   );
 }

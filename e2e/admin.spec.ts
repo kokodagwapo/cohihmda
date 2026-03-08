@@ -4,15 +4,15 @@ test.describe("@critical Admin", () => {
   test("@smoke admin user can access admin panel and major sections", async ({ adminPage }) => {
     await adminPage.goto("/admin", { waitUntil: "domcontentloaded" });
     await expect(adminPage).toHaveURL(/\/admin/);
-    await expect(adminPage.getByText(/Users & Access/i)).toBeVisible();
-    await expect(adminPage.getByText(/Organization Settings/i)).toBeVisible();
-    await expect(adminPage.getByText(/Connections/i)).toBeVisible();
+    await expect(adminPage.getByRole("button", { name: "Users & Access" }).first()).toBeVisible();
+    await expect(adminPage.getByRole("button", { name: "Organization Settings" }).first()).toBeVisible();
+    await expect(adminPage.getByRole("button", { name: "Connections" }).first()).toBeVisible();
   });
 
   test("@smoke admin knowledge-base route loads", async ({ adminPage }) => {
     await adminPage.goto("/admin/knowledge-base", { waitUntil: "domcontentloaded" });
     await expect(adminPage).toHaveURL(/\/admin\/knowledge-base/);
-    await expect(adminPage.getByText(/Knowledge Base/i)).toBeVisible();
+    await expect(adminPage.getByRole("heading", { name: /Knowledge Base/i })).toBeVisible();
   });
 
   test("admin can open user management and launch add-user flow", async ({ adminPage }) => {
