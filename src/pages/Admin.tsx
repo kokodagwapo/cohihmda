@@ -85,7 +85,7 @@ export const Admin = () => {
     stats,
     loading: statsLoading,
     refetch: refetchStats,
-  } = useAdminStats();
+  } = useAdminStats(isPlatform);
   const {
     systemInfo,
     loading: systemLoading,

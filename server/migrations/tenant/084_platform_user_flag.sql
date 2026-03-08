@@ -29,6 +29,36 @@ ALTER TABLE public.distribution_recipient_lists
 ALTER TABLE public.distribution_schedules
   DROP CONSTRAINT IF EXISTS distribution_schedules_created_by_fkey;
 
+-- Clean up existing shadow user records BEFORE dropping the flag column.
+-- Step 1: Delete shadow users tagged with the is_platform_user flag (if column exists).
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'is_platform_user'
+  ) THEN
+    -- Remove related records first (FKs are dropped above, but other FKs may still exist)
+    DELETE FROM public.chat_history      WHERE user_id IN (SELECT id FROM public.users WHERE is_platform_user = true);
+    DELETE FROM public.chat_sessions     WHERE user_id IN (SELECT id FROM public.users WHERE is_platform_user = true);
+    DELETE FROM public.canvas_share_entries WHERE user_id IN (SELECT id FROM public.users WHERE is_platform_user = true);
+    UPDATE public.canvas_share_entries   SET shared_by = NULL WHERE shared_by IN (SELECT id FROM public.users WHERE is_platform_user = true);
+    DELETE FROM public.workbench_canvases WHERE user_id IN (SELECT id FROM public.users WHERE is_platform_user = true);
+    DELETE FROM public.distribution_schedules WHERE created_by IN (SELECT id FROM public.users WHERE is_platform_user = true);
+    DELETE FROM public.distribution_recipient_lists WHERE created_by IN (SELECT id FROM public.users WHERE is_platform_user = true);
+    DELETE FROM public.users WHERE is_platform_user = true;
+  END IF;
+END $$;
+
+-- Step 2: Also clean up any shadow users created before the flag existed (identified by internal email).
+DELETE FROM public.chat_history      WHERE user_id IN (SELECT id FROM public.users WHERE email LIKE 'platform-%@coheus.internal');
+DELETE FROM public.chat_sessions     WHERE user_id IN (SELECT id FROM public.users WHERE email LIKE 'platform-%@coheus.internal');
+DELETE FROM public.canvas_share_entries WHERE user_id IN (SELECT id FROM public.users WHERE email LIKE 'platform-%@coheus.internal');
+UPDATE public.canvas_share_entries   SET shared_by = NULL WHERE shared_by IN (SELECT id FROM public.users WHERE email LIKE 'platform-%@coheus.internal');
+DELETE FROM public.workbench_canvases WHERE user_id IN (SELECT id FROM public.users WHERE email LIKE 'platform-%@coheus.internal');
+DELETE FROM public.distribution_schedules WHERE created_by IN (SELECT id FROM public.users WHERE email LIKE 'platform-%@coheus.internal');
+DELETE FROM public.distribution_recipient_lists WHERE created_by IN (SELECT id FROM public.users WHERE email LIKE 'platform-%@coheus.internal');
+DELETE FROM public.users WHERE email LIKE 'platform-%@coheus.internal';
+
 -- Drop the is_platform_user column if it was already added by a prior deploy.
 ALTER TABLE public.users
   DROP COLUMN IF EXISTS is_platform_user;
