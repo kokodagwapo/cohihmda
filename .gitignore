@@ -185,6 +185,10 @@ Thumbs.db
 coverage/
 .nyc_output/
 *.test.js.snap
+e2e/.auth/
+playwright-report/
+test-results/
+blob-report/
 
 # Misc
 .cache/

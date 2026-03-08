@@ -123,6 +123,7 @@ export function UserMenu({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
+          data-testid="user-menu-trigger"
           variant="ghost"
           className={cn(
             "h-10 px-2.5 rounded-xl flex items-center gap-2.5",

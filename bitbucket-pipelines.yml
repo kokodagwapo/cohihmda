@@ -102,6 +102,42 @@ definitions:
         script:
           - cd server && npm ci && npm run test:integration
 
+    - step: &test-e2e-smoke
+        name: Test E2E Smoke (Chromium)
+        image: mcr.microsoft.com/playwright:v1.50.0-noble
+        caches:
+          - npm
+        script:
+          - npm ci
+          - npm run test:e2e:smoke
+        artifacts:
+          - playwright-report/**
+          - test-results/**
+
+    - step: &test-e2e-critical
+        name: Test E2E Critical
+        image: mcr.microsoft.com/playwright:v1.50.0-noble
+        caches:
+          - npm
+        script:
+          - npm ci
+          - npm run test:e2e:critical
+        artifacts:
+          - playwright-report/**
+          - test-results/**
+
+    - step: &test-e2e-regression
+        name: Test E2E Regression (Cross-browser)
+        image: mcr.microsoft.com/playwright:v1.50.0-noble
+        caches:
+          - npm
+        script:
+          - npm ci
+          - npm run test:e2e:regression
+        artifacts:
+          - playwright-report/**
+          - test-results/**
+
     # Deploy steps with automatic change detection
     - step: &deploy-dev
         name: Deploy to Dev
@@ -266,6 +302,7 @@ pipelines:
           - step: *test-backend
           - step: *test-backend-integration
       - step: *deploy-dev
+      - step: *test-e2e-critical
 
     main:
       - parallel:
@@ -276,6 +313,7 @@ pipelines:
           - step: *test-backend
           - step: *test-backend-integration
       - step: *deploy-prod
+      - step: *test-e2e-critical
 
   # Pull request validation (only for PRs targeting dev or main)
   pull-requests:
@@ -287,6 +325,7 @@ pipelines:
           - step: *test-frontend
           - step: *test-backend
           - step: *test-backend-integration
+      - step: *test-e2e-smoke
     main:
       - parallel:
           - step: *build-frontend
@@ -295,6 +334,7 @@ pipelines:
           - step: *test-frontend
           - step: *test-backend
           - step: *test-backend-integration
+      - step: *test-e2e-smoke
 
   # Custom pipelines for individual deployments
   custom:
@@ -335,6 +375,9 @@ pipelines:
           - step: *build-frontend
           - step: *build-backend
       - step: *deploy-prod
+
+    e2e-regression:
+      - step: *test-e2e-regression
 
     # Database migrations
     run-migrations-dev:
