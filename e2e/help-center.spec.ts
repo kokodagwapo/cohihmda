@@ -13,6 +13,6 @@ test.describe("Help Center", () => {
     await userPage.getByTestId("help-category-workbench").click();
     await expect(userPage.getByRole("heading", { name: /Workbench/i })).toBeVisible();
     await userPage.getByTestId("help-article-first-canvas").click();
-    await expect(userPage.getByRole("button", { name: "Help Center" })).toBeVisible();
+    await expect(userPage.getByRole("button", { name: "Help Center" }).first()).toBeVisible();
   });
 });
