@@ -124,7 +124,7 @@ definitions:
 
     - step: &test-e2e-smoke
         name: Test E2E Smoke (Chromium)
-        image: mcr.microsoft.com/playwright:v1.50.0-noble
+        image: mcr.microsoft.com/playwright:v1.58.2-noble
         caches:
           - npm
         script:
@@ -137,7 +137,7 @@ definitions:
 
     - step: &test-e2e-critical
         name: Test E2E Critical
-        image: mcr.microsoft.com/playwright:v1.50.0-noble
+        image: mcr.microsoft.com/playwright:v1.58.2-noble
         caches:
           - npm
         script:
@@ -150,7 +150,7 @@ definitions:
 
     - step: &test-e2e-regression
         name: Test E2E Regression (Cross-browser)
-        image: mcr.microsoft.com/playwright:v1.50.0-noble
+        image: mcr.microsoft.com/playwright:v1.58.2-noble
         caches:
           - npm
         script:
@@ -163,7 +163,7 @@ definitions:
 
     - step: &test-e2e-prod-smoke
         name: Test E2E Prod Smoke (Manual)
-        image: mcr.microsoft.com/playwright:v1.50.0-noble
+        image: mcr.microsoft.com/playwright:v1.58.2-noble
         deployment: production
         caches:
           - npm
