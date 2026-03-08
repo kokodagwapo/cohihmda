@@ -39,7 +39,7 @@ export interface AdminStats {
   } | null;
 }
 
-export const useAdminStats = () => {
+export const useAdminStats = (enabled = true) => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [stats, setStats] = useState<AdminStats>({
@@ -68,6 +68,7 @@ export const useAdminStats = () => {
   const [error, setError] = useState<string | null>(null);
 
   const loadStats = useCallback(async () => {
+    if (!enabled) { setLoading(false); return; }
     try {
       setLoading(true);
       setError(null);
