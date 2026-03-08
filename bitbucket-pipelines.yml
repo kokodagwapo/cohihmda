@@ -18,6 +18,8 @@
 #   - VITE_API_URL                 - Backend API URL for frontend build
 #   - CF_STACK_BACKEND             - CloudFormation stack name (e.g., coheus-dev-backend)
 #   - COGNITO_PASSWORD_AUTH        - Set to "true" (Cognito-only password auth policy)
+#   - E2E_ADMIN_EMAIL / E2E_ADMIN_PASSWORD / E2E_ADMIN_TOTP_SECRET
+#   - (Optional) E2E_MANAGED_EMAIL_PREFIX      - defaults to "e2e.auto"
 # ============================================================================
 
 image: node:20
@@ -134,6 +136,19 @@ definitions:
         script:
           - npm ci
           - npm run test:e2e:regression
+        artifacts:
+          - playwright-report/**
+          - test-results/**
+
+    - step: &test-e2e-prod-smoke
+        name: Test E2E Prod Smoke (Manual)
+        image: mcr.microsoft.com/playwright:v1.50.0-noble
+        deployment: production
+        caches:
+          - npm
+        script:
+          - npm ci
+          - npm run test:e2e:smoke
         artifacts:
           - playwright-report/**
           - test-results/**
@@ -292,6 +307,11 @@ definitions:
 
 pipelines:
   # Branch-based deployments
+  #
+  # E2E policy:
+  # - dev: run authenticated @critical E2E after deploy
+  # - main (production): do not run authenticated post-deploy E2E in branch pipeline
+  # - production smoke: run manually via custom pipeline `e2e-prod-smoke`
   branches:
     dev:
       - parallel:
@@ -313,7 +333,6 @@ pipelines:
           - step: *test-backend
           - step: *test-backend-integration
       - step: *deploy-prod
-      - step: *test-e2e-critical
 
   # Pull request validation (only for PRs targeting dev or main)
   pull-requests:
@@ -378,6 +397,9 @@ pipelines:
 
     e2e-regression:
       - step: *test-e2e-regression
+
+    e2e-prod-smoke:
+      - step: *test-e2e-prod-smoke
 
     # Database migrations
     run-migrations-dev:

@@ -1,9 +1,5 @@
 import { test, expect } from "./fixtures";
 
-const hasCanvasOnlyCreds = Boolean(
-  process.env.E2E_CANVAS_ONLY_EMAIL && process.env.E2E_CANVAS_ONLY_PASSWORD,
-);
-
 test.describe("@critical Consolidated role access matrix", () => {
   test("tenant_admin can access admin area", async ({ adminPage }) => {
     await adminPage.goto("/admin", { waitUntil: "domcontentloaded" });
@@ -27,11 +23,6 @@ test.describe("@critical Consolidated role access matrix", () => {
   test("tenant_canvas_only_user is constrained to canvas-only experience", async ({
     canvasOnlyPage,
   }) => {
-    test.skip(
-      !hasCanvasOnlyCreds,
-      "Set E2E_CANVAS_ONLY_EMAIL and E2E_CANVAS_ONLY_PASSWORD to run canvas-only role tests.",
-    );
-
     // Canvas-only users should be redirected away from non-canvas routes.
     await canvasOnlyPage.goto("/insights", { waitUntil: "domcontentloaded" });
     await expect(canvasOnlyPage).toHaveURL(/\/my-dashboard/);
