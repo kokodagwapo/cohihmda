@@ -13,15 +13,18 @@ import { enforcePlatformOnly } from '@/stores/tenantStore';
  * Tenant roles (stored in tenant DBs):
  * - tenant_admin: Client admin with access to their organization's settings
  * - user: Regular user with standard access
- * - viewer: Read-only access
  */
 export type UserRole = 
   | 'super_admin' 
   | 'platform_admin' 
   | 'support'
   | 'tenant_admin' 
-  | 'user' 
-  | 'viewer';
+  | 'user';
+
+export type UserPersona =
+  | "tenant_admin"
+  | "tenant_user"
+  | "tenant_canvas_only_user";
 
 /**
  * User object returned from the API
@@ -38,8 +41,8 @@ export interface AuthUser {
   is_active?: boolean;
   last_login_at?: string;
   created_at?: string;
-  /** 'full' = normal platform; 'canvas_only' = only shared canvases (slim UI) */
-  access_mode?: 'full' | 'canvas_only';
+  persona?: UserPersona;
+  loan_scope?: "all" | "encompass" | "manual" | "none";
 }
 
 /**
@@ -104,6 +107,13 @@ interface AuthProviderProps {
 }
 
 export function AuthProvider({ children }: AuthProviderProps) {
+  const resolvePersona = useCallback((u: AuthUser | null): UserPersona | null => {
+    if (!u) return null;
+    if (u.persona) return u.persona;
+    if (u.role === "tenant_admin") return "tenant_admin";
+    return "tenant_user";
+  }, []);
+
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -399,8 +409,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
    * Check if user is canvas-only (restricted to shared canvases, slim UI)
    */
   const isCanvasOnly = useCallback((): boolean => {
-    return user?.access_mode === 'canvas_only';
-  }, [user]);
+    return resolvePersona(user) === "tenant_canvas_only_user";
+  }, [resolvePersona, user]);
 
   /**
    * Impersonate a tenant (super admin only)

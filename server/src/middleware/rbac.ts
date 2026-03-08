@@ -198,7 +198,6 @@ async function getUserRoleAndTenant(userId: string): Promise<{ role: string; ten
            WHEN u.role = 'super_admin' THEN 'super_admin'
            WHEN u.role = 'tenant_admin' THEN 'tenant_admin'
            WHEN u.role = 'user' THEN 'user'
-           WHEN u.role = 'viewer' THEN 'viewer'
            ELSE u.role
          END as role,
          COALESCE(u.tenant_id, p.tenant_id) as tenant_id
@@ -453,7 +452,7 @@ export function enforceTenantIsolation() {
 }
 
 /**
- * Middleware: block canvas_only users from non-canvas routes.
+ * Middleware: block canvas-only persona from non-canvas routes.
  * Allowed routes and methods are defined in isCanvasOnlyRequestAllowed().
  * Must run after authenticateToken.
  */
@@ -463,8 +462,8 @@ export function requireFullAccess() {
       if (!req.userId) {
         return next();
       }
-      const accessMode = req.userAccessMode ?? 'full';
-      if (accessMode !== 'canvas_only') {
+      const persona = req.userPersona ?? "tenant_user";
+      if (persona !== "tenant_canvas_only_user") {
         return next();
       }
       const path = req.originalUrl || req.url || '';

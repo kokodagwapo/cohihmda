@@ -12,7 +12,7 @@
  */
 
 import pg from "pg";
-import { buildChannelWhereClause } from "../../utils/scorecard-utils.js";
+import { buildChannelWhereClause, sanitizeAndSqlClause } from "../../utils/scorecard-utils.js";
 
 // ---------------------------------------------------------------------------
 // Workflow conversion milestones (date columns) — dynamic from schema + cache
@@ -181,13 +181,13 @@ export async function getWorkflowConversionData(
     })();
 
   const channelClause = buildChannelWhereClause(channelGroup, "l");
-  const dimensionFilterClause = dimensionFilterClauseOpt?.trim() ? " " + dimensionFilterClauseOpt.trim() : "";
+  const dimensionCondition = sanitizeAndSqlClause(dimensionFilterClauseOpt, "dimensionFilterClause");
   const params: unknown[] = [startDate, endDate];
-  const accessClause = accessClauseOpt ? " " + accessClauseOpt.trim() : "";
+  const accessCondition = sanitizeAndSqlClause(accessClauseOpt, "accessClause");
   if (accessParamsOpt && accessParamsOpt.length > 0) {
     params.push(...accessParamsOpt);
   }
-  if (accessClauseOpt?.trim() === "AND FALSE") {
+  if (/^FALSE$/i.test(accessCondition)) {
     return {
       segments: segments.map((s) => ({
         from: s.from,
@@ -249,8 +249,8 @@ export async function getWorkflowConversionData(
         FROM public.loans l
         WHERE ${cohortWhere}
           ${channelClause}
-          ${accessClause}
-          ${dimensionFilterClause}
+          ${accessCondition ? `AND ${accessCondition}` : ""}
+          ${dimensionCondition ? `AND ${dimensionCondition}` : ""}
       )
       SELECT
         COUNT(*) FILTER (WHERE from_d IS NOT NULL) AS left_count,
@@ -284,8 +284,8 @@ export async function getWorkflowConversionData(
         FROM public.loans l
         WHERE ${cohortWhere}
           ${channelClause}
-          ${accessClause}
-          ${dimensionFilterClause}
+          ${accessCondition ? `AND ${accessCondition}` : ""}
+          ${dimensionCondition ? `AND ${dimensionCondition}` : ""}
       )
       SELECT
         bucket AS period,
@@ -392,12 +392,12 @@ export async function getWorkflowConversionSegmentLoans(
   }
 
   const params: unknown[] = [startDate, endDate];
-  const accessClause = accessClauseOpt ? " " + accessClauseOpt.trim() : "";
-  const dimensionFilterClause = dimensionFilterClauseOpt?.trim() ? " " + dimensionFilterClauseOpt.trim() : "";
+  const accessCondition = sanitizeAndSqlClause(accessClauseOpt, "accessClause");
+  const dimensionCondition = sanitizeAndSqlClause(dimensionFilterClauseOpt, "dimensionFilterClause");
   if (accessParamsOpt && accessParamsOpt.length > 0) {
     params.push(...accessParamsOpt);
   }
-  if (accessClauseOpt?.trim() === "AND FALSE") {
+  if (/^FALSE$/i.test(accessCondition)) {
     return { loans: [] };
   }
 
@@ -466,8 +466,8 @@ export async function getWorkflowConversionSegmentLoans(
     WHERE ${cohortWhere}
       AND ${filterWhere}
       ${channelClause}
-      ${accessClause}
-      ${dimensionFilterClause}
+      ${accessCondition ? `AND ${accessCondition}` : ""}
+      ${dimensionCondition ? `AND ${dimensionCondition}` : ""}
     ORDER BY l.loan_id
   `;
 

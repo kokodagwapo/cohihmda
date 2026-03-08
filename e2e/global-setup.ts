@@ -5,6 +5,7 @@ import path from "node:path";
 const AUTH_DIR = path.join(process.cwd(), "e2e", ".auth");
 const USER_STATE = path.join(AUTH_DIR, "user.json");
 const ADMIN_STATE = path.join(AUTH_DIR, "admin.json");
+const CANVAS_ONLY_STATE = path.join(AUTH_DIR, "canvas-only.json");
 
 async function loginAndPersistState(
   baseURL: string,
@@ -32,6 +33,8 @@ export default async function globalSetup(config: FullConfig) {
   const userPassword = process.env.E2E_TEST_PASSWORD;
   const adminEmail = process.env.E2E_ADMIN_EMAIL;
   const adminPassword = process.env.E2E_ADMIN_PASSWORD;
+  const canvasOnlyEmail = process.env.E2E_CANVAS_ONLY_EMAIL;
+  const canvasOnlyPassword = process.env.E2E_CANVAS_ONLY_PASSWORD;
 
   if (!userEmail || !userPassword) {
     throw new Error(
@@ -48,4 +51,14 @@ export default async function globalSetup(config: FullConfig) {
   await mkdir(AUTH_DIR, { recursive: true });
   await loginAndPersistState(baseURL, userEmail, userPassword, USER_STATE);
   await loginAndPersistState(baseURL, adminEmail, adminPassword, ADMIN_STATE);
+
+  // Optional: enable dedicated canvas-only persona tests when credentials are provided.
+  if (canvasOnlyEmail && canvasOnlyPassword) {
+    await loginAndPersistState(
+      baseURL,
+      canvasOnlyEmail,
+      canvasOnlyPassword,
+      CANVAS_ONLY_STATE,
+    );
+  }
 }

@@ -634,7 +634,7 @@ export function getLearningPathForRole(role: string): LearningPath | undefined {
     platform_admin: "IT Admin / Tenant Admin",
     tenant_admin: "IT Admin / Tenant Admin",
     user: "Branch Manager / VP of Sales",
-    viewer: "Executive / C-Suite",
+    tenant_canvas_only_user: "Executive / C-Suite",
   };
   const targetRole = roleMap[role] || "Executive / C-Suite";
   return learningPaths.find((p) => p.role === targetRole);

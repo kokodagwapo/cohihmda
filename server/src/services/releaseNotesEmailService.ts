@@ -215,7 +215,7 @@ async function getEligibleRecipients(): Promise<ReleaseNotesRecipient[]> {
          FROM users
          WHERE is_active = true
            AND email IS NOT NULL
-           AND COALESCE(access_mode, 'full') <> 'canvas_only'`,
+           AND persona <> 'tenant_canvas_only_user'`,
       );
       for (const user of usersResult.rows as Array<{
         id: string;

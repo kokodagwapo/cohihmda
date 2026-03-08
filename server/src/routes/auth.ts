@@ -21,6 +21,10 @@ import {
 import { logError, logWarn, logInfo, logDebug } from "../services/logger.js";
 import crypto from "crypto";
 import * as cognitoAuth from "../services/cognito/cognitoAuthService.js";
+import {
+  type LoanScope,
+  type TenantPersona,
+} from "../utils/userAccessProfile.js";
 
 const { Pool } = pg;
 const router = Router();
@@ -44,15 +48,15 @@ interface TenantUser {
   full_name: string | null;
   role:
     | "tenant_admin"
-    | "user"
-    | "viewer";
+    | "user";
   is_active: boolean;
   tenant_id: string;
   tenant_name: string;
   tenant_slug: string;
   locked_until?: Date | null;
   failed_login_attempts?: number;
-  access_mode?: 'full' | 'canvas_only';
+  persona?: TenantPersona;
+  loan_scope?: LoanScope;
 }
 
 type AuthUser =
@@ -71,7 +75,7 @@ interface JwtPayload {
   tenantId?: string;
   tenantSlug?: string;
   isSuperAdmin: boolean;
-  access_mode?: 'full' | 'canvas_only';
+  persona?: TenantPersona;
 }
 
 // Database pools
@@ -254,7 +258,8 @@ async function findTenantUser(
         const userResult = await tenantPool.query(
           `SELECT id, email, encrypted_password, full_name, role, is_active,
                   failed_login_attempts, locked_until,
-                  COALESCE(access_mode, 'full') AS access_mode
+                  persona,
+                  loan_scope
            FROM users 
            WHERE email = $1`,
           [email]
@@ -321,7 +326,10 @@ async function issueAppToken(
     email: user.email,
     role: user.role,
     isSuperAdmin,
-    access_mode: !isSuperAdmin && 'access_mode' in user ? (user.access_mode || 'full') : 'full',
+    persona:
+      !isSuperAdmin && "persona" in user
+        ? user.persona
+        : undefined,
   };
 
   if (!isSuperAdmin && "tenant_id" in user) {
@@ -686,10 +694,14 @@ function buildUserResponse(user: AuthUser, isSuperAdmin: boolean) {
     tenant_id: "tenant_id" in user ? user.tenant_id : null,
     tenant_name: "tenant_name" in user ? user.tenant_name : null,
     tenant_slug: "tenant_slug" in user ? user.tenant_slug : null,
-    access_mode:
-      !isSuperAdmin && "access_mode" in user
-        ? (user.access_mode || "full")
-        : "full",
+    persona:
+      !isSuperAdmin && "persona" in user
+        ? user.persona
+        : undefined,
+    loan_scope:
+      !isSuperAdmin && "loan_scope" in user
+        ? user.loan_scope
+        : undefined,
   };
 }
 
@@ -745,7 +757,8 @@ async function findUserByCognitoSub(
       if (!tenantPool) continue;
       try {
         const result = await tenantPool.query(
-          `SELECT id, email, encrypted_password, full_name, role, is_active, failed_login_attempts, locked_until
+          `SELECT id, email, encrypted_password, full_name, role, is_active, failed_login_attempts, locked_until,
+                  persona, loan_scope
            FROM users WHERE cognito_sub = $1`,
           [cognitoSub],
         );
@@ -796,7 +809,8 @@ router.get("/me", async (req, res) => {
           tenant_id: null,
           tenant_name: null,
           tenant_slug: null,
-          access_mode: 'full',
+            persona: undefined,
+            loan_scope: undefined,
         };
       }
     } else if (decoded.tenantSlug) {
@@ -804,7 +818,7 @@ router.get("/me", async (req, res) => {
       if (tenantPool) {
         const result = await tenantPool.query(
           `SELECT id, email, full_name, role, is_active, last_login_at, created_at,
-                  COALESCE(access_mode, 'full') AS access_mode
+                  persona, loan_scope
            FROM users WHERE id = $1`,
           [decoded.userId]
         );

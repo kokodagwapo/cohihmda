@@ -331,7 +331,7 @@ async function runMigrations() {
         email TEXT NOT NULL UNIQUE,
         encrypted_password TEXT NOT NULL,
         full_name TEXT,
-        role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('tenant_admin', 'user', 'viewer')),
+        role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('tenant_admin', 'user')),
         tenant_id UUID REFERENCES public.tenants(id) ON DELETE SET NULL,
         is_active BOOLEAN NOT NULL DEFAULT true,
         last_login_at TIMESTAMPTZ,
@@ -354,7 +354,7 @@ async function runMigrations() {
           AND column_name = 'role'
         ) THEN
           ALTER TABLE public.users ADD COLUMN role TEXT NOT NULL DEFAULT 'user';
-          ALTER TABLE public.users ADD CONSTRAINT users_role_check CHECK (role IN ('tenant_admin', 'user', 'viewer'));
+          ALTER TABLE public.users ADD CONSTRAINT users_role_check CHECK (role IN ('tenant_admin', 'user'));
         END IF;
         
         -- Update existing role constraint if it exists to allow all roles
@@ -365,7 +365,7 @@ async function runMigrations() {
           AND constraint_name = 'users_role_check'
         ) THEN
           ALTER TABLE public.users DROP CONSTRAINT IF EXISTS users_role_check;
-          ALTER TABLE public.users ADD CONSTRAINT users_role_check CHECK (role IN ('tenant_admin', 'user', 'viewer'));
+          ALTER TABLE public.users ADD CONSTRAINT users_role_check CHECK (role IN ('tenant_admin', 'user'));
         END IF;
         
         -- Add tenant_id column if it doesn't exist
@@ -483,7 +483,7 @@ async function runMigrations() {
         
         -- Add updated constraint with all valid roles
         ALTER TABLE public.users ADD CONSTRAINT users_role_check 
-          CHECK (role IN ('tenant_admin', 'user', 'viewer'));
+          CHECK (role IN ('tenant_admin', 'user'));
       END $$;
     `,
       )

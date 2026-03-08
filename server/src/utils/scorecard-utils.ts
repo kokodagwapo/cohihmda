@@ -339,6 +339,29 @@ export const buildDimensionFilterWhereClause = (
 };
 
 /**
+ * Normalize and validate a pre-built SQL WHERE fragment that must begin with AND.
+ * Use this for server-generated clause snippets (e.g. access/dimension filters) before concatenation.
+ */
+export const sanitizeAndSqlClause = (
+  clause: string | null | undefined,
+  label: string,
+): string => {
+  const trimmed = (clause ?? "").trim();
+  if (!trimmed) return "";
+  if (!/^AND\b/i.test(trimmed)) {
+    throw new Error(`${label} must start with AND`);
+  }
+  // Disallow statement terminators/comments and high-risk SQL keywords in injected fragments.
+  if (
+    /;|--|\/\*|\*\//.test(trimmed) ||
+    /\b(UNION|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|GRANT|REVOKE|TRUNCATE|EXECUTE|CALL|DO)\b/i.test(trimmed)
+  ) {
+    throw new Error(`${label} contains unsafe SQL content`);
+  }
+  return trimmed.replace(/^AND\s+/i, "").trim();
+};
+
+/**
  * Build a SQL CASE expression that classifies a loan into a channel group.
  * TPO requires BOTH a TPO channel pattern AND a populated account_executive.
  * Loans with a TPO channel but no AE are classified as Retail.

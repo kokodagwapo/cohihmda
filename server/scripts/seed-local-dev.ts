@@ -127,7 +127,7 @@ async function initTenantSchema(pool: pg.Pool): Promise<void> {
       email TEXT NOT NULL UNIQUE,
       encrypted_password TEXT NOT NULL,
       full_name TEXT,
-      role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('tenant_admin', 'user', 'viewer')),
+      role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('tenant_admin', 'user')),
       is_active BOOLEAN NOT NULL DEFAULT true,
       last_login_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

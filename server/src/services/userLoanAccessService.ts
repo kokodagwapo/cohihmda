@@ -30,9 +30,11 @@ import { EncompassApiService } from "./encompassApiService.js";
 export interface UserAccessInfo {
   userId: string;
   role: string;
+  persona: "tenant_admin" | "tenant_user" | "tenant_canvas_only_user";
   encompassUserId?: string;
   losConnectionId?: string;
-  loanAccessMode: "encompass_sync" | "full_access" | "no_access" | "manual";
+  loanScope: "all" | "encompass" | "manual" | "none";
+  loanAccessMode: "encompass_sync" | "full_access" | "no_access" | "manual"; // legacy mirror
   loanAccessSyncedAt?: Date;
   isAdmin: boolean;
   isTenantAdmin: boolean;
@@ -88,9 +90,6 @@ export interface LoanAccessContext {
 // Roles that have full loan access
 const FULL_ACCESS_ROLES = ["tenant_admin", "super_admin", "platform_admin"];
 
-// Roles with no direct loan access (aggregate metrics only)
-const NO_LOAN_ACCESS_ROLES = ["viewer"];
-
 // =============================================================================
 // CONTEXT BUILDER (Primary API for Routes)
 // =============================================================================
@@ -126,6 +125,8 @@ export async function getLoanAccessContext(
     return createAccessContext({
       userId,
       role: userRole || 'super_admin',
+      persona: "tenant_admin",
+      loanScope: "all",
       loanAccessMode: 'full_access',
       isAdmin: true,
       isTenantAdmin: false,
@@ -237,7 +238,8 @@ export async function getUserAccessInfo(
       `
       SELECT 
         id, role, encompass_user_id, los_connection_id,
-        COALESCE(loan_access_mode, 'full_access') as loan_access_mode,
+        persona,
+        loan_scope,
         loan_access_synced_at
       FROM users 
       WHERE id = $1 AND is_active = true
@@ -253,21 +255,24 @@ export async function getUserAccessInfo(
     const isAdmin = FULL_ACCESS_ROLES.includes(user.role);
     const isTenantAdmin = user.role === "tenant_admin";
 
-    // Determine access mode
-    let loanAccessMode = user.loan_access_mode;
-    
-    // Override based on role
-    if (FULL_ACCESS_ROLES.includes(user.role)) {
-      loanAccessMode = "full_access";
-    } else if (NO_LOAN_ACCESS_ROLES.includes(user.role)) {
-      loanAccessMode = "no_access";
-    }
+    const persona = user.persona as UserAccessInfo["persona"];
+    const loanScope = user.loan_scope as UserAccessInfo["loanScope"];
+    const loanAccessMode =
+      loanScope === "all"
+        ? "full_access"
+        : loanScope === "manual"
+          ? "manual"
+          : loanScope === "none"
+            ? "no_access"
+            : "encompass_sync";
 
     return {
       userId: user.id,
       role: user.role,
+      persona,
       encompassUserId: user.encompass_user_id,
       losConnectionId: user.los_connection_id,
+      loanScope,
       loanAccessMode,
       loanAccessSyncedAt: user.loan_access_synced_at,
       isAdmin,

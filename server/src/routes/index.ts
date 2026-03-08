@@ -79,8 +79,8 @@ export function setupRoutes(app: Express) {
     const token = authHeader && authHeader.split(" ")[1];
     if (!token) return next();
     try {
-      const decoded = jwt.verify(token, getJwtSecret()) as { access_mode?: string };
-      if (decoded.access_mode === "canvas_only") {
+      const decoded = jwt.verify(token, getJwtSecret()) as { persona?: string };
+      if (decoded.persona === "tenant_canvas_only_user") {
         const path = req.originalUrl || req.url || "";
         const method = (req.method || "GET").toUpperCase();
         if (!isCanvasOnlyRequestAllowed(path, method)) {

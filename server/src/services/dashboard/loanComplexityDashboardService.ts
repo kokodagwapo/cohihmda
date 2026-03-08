@@ -7,7 +7,7 @@
  */
 
 import pg from "pg";
-import { buildChannelWhereClause } from "../../utils/scorecard-utils.js";
+import { buildChannelWhereClause, sanitizeAndSqlClause } from "../../utils/scorecard-utils.js";
 import { LoanComplexityService } from "../scoring/loanComplexityService.js";
 
 export type LoanComplexityGroupBy =
@@ -134,14 +134,17 @@ export async function getLoanComplexityDashboardData(
   if (channelWhere) {
     conditions.push(channelWhere.replace(/^AND\s+/i, "").trim());
   }
-  if (accessClause) {
-    conditions.push(accessClause.replace(/^AND\s+/i, "").trim());
+  const accessCondition = sanitizeAndSqlClause(accessClause, "accessClause");
+  if (accessCondition) {
+    conditions.push(accessCondition);
     params.push(...accessParams);
   }
 
-  const whereSql =
-    conditions.join(" AND ") +
-    (dimensionFilterClause ? ` ${dimensionFilterClause}` : "");
+  const dimensionCondition = sanitizeAndSqlClause(dimensionFilterClause, "dimensionFilterClause");
+  if (dimensionCondition) {
+    conditions.push(dimensionCondition);
+  }
+  const whereSql = conditions.join(" AND ");
 
   const groupByExpr = groupBySelect(groupBy, "l");
 
@@ -224,14 +227,17 @@ export async function getLoanComplexityStatusOptions(
   if (channelWhere) {
     conditions.push(channelWhere.replace(/^AND\s+/i, "").trim());
   }
-  if (accessClause) {
-    conditions.push(accessClause.replace(/^AND\s+/i, "").trim());
+  const accessCondition = sanitizeAndSqlClause(accessClause, "accessClause");
+  if (accessCondition) {
+    conditions.push(accessCondition);
     params.push(...accessParams);
   }
 
-  const whereSql =
-    conditions.join(" AND ") +
-    (dimensionFilterClause ? ` ${dimensionFilterClause}` : "");
+  const dimensionCondition = sanitizeAndSqlClause(dimensionFilterClause, "dimensionFilterClause");
+  if (dimensionCondition) {
+    conditions.push(dimensionCondition);
+  }
+  const whereSql = conditions.join(" AND ");
 
   const query = `
     SELECT DISTINCT current_loan_status AS value
@@ -276,8 +282,9 @@ export async function getLoanComplexityGroupLoans(
   if (channelWhere) {
     conditions.push(channelWhere.replace(/^AND\s+/i, "").trim());
   }
-  if (accessClause) {
-    conditions.push(accessClause.replace(/^AND\s+/i, "").trim());
+  const accessCondition = sanitizeAndSqlClause(accessClause, "accessClause");
+  if (accessCondition) {
+    conditions.push(accessCondition);
     params.push(...accessParams);
   }
 
@@ -285,9 +292,11 @@ export async function getLoanComplexityGroupLoans(
   conditions.push(`${groupByExpr} = $${params.length + 1}`);
   params.push(groupName.trim() || "Unknown");
 
-  const whereSql =
-    conditions.join(" AND ") +
-    (dimensionFilterClause ? ` ${dimensionFilterClause}` : "");
+  const dimensionCondition = sanitizeAndSqlClause(dimensionFilterClause, "dimensionFilterClause");
+  if (dimensionCondition) {
+    conditions.push(dimensionCondition);
+  }
+  const whereSql = conditions.join(" AND ");
 
   const loansQuery = `
     SELECT l.loan_id,
@@ -388,8 +397,9 @@ export async function getLoanComplexityGroupLoansMulti(
   if (channelWhere) {
     conditions.push(channelWhere.replace(/^AND\s+/i, "").trim());
   }
-  if (accessClause) {
-    conditions.push(accessClause.replace(/^AND\s+/i, "").trim());
+  const accessCondition = sanitizeAndSqlClause(accessClause, "accessClause");
+  if (accessCondition) {
+    conditions.push(accessCondition);
     params.push(...accessParams);
   }
 
@@ -398,9 +408,11 @@ export async function getLoanComplexityGroupLoansMulti(
   conditions.push(`${groupByExpr} IN (${placeholders})`);
   params.push(...trimmed.map((n) => n || "Unknown"));
 
-  const whereSql =
-    conditions.join(" AND ") +
-    (dimensionFilterClause ? ` ${dimensionFilterClause}` : "");
+  const dimensionCondition = sanitizeAndSqlClause(dimensionFilterClause, "dimensionFilterClause");
+  if (dimensionCondition) {
+    conditions.push(dimensionCondition);
+  }
+  const whereSql = conditions.join(" AND ");
 
   const loansQuery = `
     SELECT l.loan_id,
@@ -502,8 +514,9 @@ export async function getLoanComplexityGroupLoansCrossDimension(
   if (channelWhere) {
     conditions.push(channelWhere.replace(/^AND\s+/i, "").trim());
   }
-  if (accessClause) {
-    conditions.push(accessClause.replace(/^AND\s+/i, "").trim());
+  const accessCondition = sanitizeAndSqlClause(accessClause, "accessClause");
+  if (accessCondition) {
+    conditions.push(accessCondition);
     params.push(...accessParams);
   }
 
@@ -514,9 +527,11 @@ export async function getLoanComplexityGroupLoansCrossDimension(
   trimmed.forEach((f) => params.push(f.groupName));
   conditions.push(`(${orParts.join(" OR ")})`);
 
-  const whereSql =
-    conditions.join(" AND ") +
-    (dimensionFilterClause ? ` ${dimensionFilterClause}` : "");
+  const dimensionCondition = sanitizeAndSqlClause(dimensionFilterClause, "dimensionFilterClause");
+  if (dimensionCondition) {
+    conditions.push(dimensionCondition);
+  }
+  const whereSql = conditions.join(" AND ");
 
   const loansQuery = `
     SELECT l.loan_id,
@@ -607,14 +622,17 @@ export async function getLoanComplexityLoansInPeriod(
   if (channelWhere) {
     conditions.push(channelWhere.replace(/^AND\s+/i, "").trim());
   }
-  if (accessClause) {
-    conditions.push(accessClause.replace(/^AND\s+/i, "").trim());
+  const accessCondition = sanitizeAndSqlClause(accessClause, "accessClause");
+  if (accessCondition) {
+    conditions.push(accessCondition);
     params.push(...accessParams);
   }
 
-  const whereSql =
-    conditions.join(" AND ") +
-    (dimensionFilterClause ? ` ${dimensionFilterClause}` : "");
+  const dimensionCondition = sanitizeAndSqlClause(dimensionFilterClause, "dimensionFilterClause");
+  if (dimensionCondition) {
+    conditions.push(dimensionCondition);
+  }
+  const whereSql = conditions.join(" AND ");
 
   const loansQuery = `
     SELECT l.loan_id,
@@ -815,14 +833,17 @@ export async function getLoanComplexityPivotData(
   if (channelWhere) {
     conditions.push(channelWhere.replace(/^AND\s+/i, "").trim());
   }
-  if (accessClause) {
-    conditions.push(accessClause.replace(/^AND\s+/i, "").trim());
+  const accessCondition = sanitizeAndSqlClause(accessClause, "accessClause");
+  if (accessCondition) {
+    conditions.push(accessCondition);
     params.push(...accessParams);
   }
 
-  const whereSql =
-    conditions.join(" AND ") +
-    (dimensionFilterClause ? ` ${dimensionFilterClause}` : "");
+  const dimensionCondition = sanitizeAndSqlClause(dimensionFilterClause, "dimensionFilterClause");
+  if (dimensionCondition) {
+    conditions.push(dimensionCondition);
+  }
+  const whereSql = conditions.join(" AND ");
 
   const query = `
     SELECT

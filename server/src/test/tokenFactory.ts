@@ -2,7 +2,7 @@ import jwt from "jsonwebtoken";
 import { getJwtSecret } from "../middleware/auth.js";
 import { ROLE_TO_USER_ID, TEST_TENANT_ID, type AuthRole } from "./constants.js";
 
-type AccessMode = "full" | "canvas_only";
+type Persona = "tenant_admin" | "tenant_user" | "tenant_canvas_only_user";
 
 interface JwtTokenPayload {
   userId: string;
@@ -11,12 +11,14 @@ interface JwtTokenPayload {
   isSuperAdmin: boolean;
   tenantId?: string;
   tenantSlug?: string;
-  access_mode?: AccessMode;
+  persona?: Persona;
 }
 
 export function makeToken(overrides: Partial<JwtTokenPayload> = {}): string {
   const role = (overrides.role as AuthRole | undefined) || "user";
-  const accessMode: AccessMode = overrides.access_mode || "full";
+  const persona: Persona =
+    overrides.persona ||
+    (role === "tenant_admin" ? "tenant_admin" : "tenant_user");
   const isPlatform = ["super_admin", "platform_admin", "support"].includes(role);
 
   const payload: JwtTokenPayload = {
@@ -24,7 +26,7 @@ export function makeToken(overrides: Partial<JwtTokenPayload> = {}): string {
     email: overrides.email || "test-user@coheus.test",
     role,
     isSuperAdmin: role === "super_admin",
-    access_mode: accessMode,
+    persona: isPlatform ? undefined : persona,
     ...(isPlatform ? {} : { tenantId: TEST_TENANT_ID, tenantSlug: "test-tenant" }),
     ...overrides,
   };
@@ -37,16 +39,16 @@ export function tokenForRole(role: AuthRole): string {
     role,
     userId: ROLE_TO_USER_ID[role],
     email: `${role}@coheus.test`,
-    access_mode: "full",
+    persona: role === "tenant_admin" ? "tenant_admin" : "tenant_user",
   });
 }
 
 export function tokenForCanvasOnlyUser(): string {
   return makeToken({
-    role: "viewer",
+    role: "user",
     userId: ROLE_TO_USER_ID.canvas_only_user,
     email: "canvas-only@coheus.test",
-    access_mode: "canvas_only",
+    persona: "tenant_canvas_only_user",
     tenantId: TEST_TENANT_ID,
     tenantSlug: "test-tenant",
   });

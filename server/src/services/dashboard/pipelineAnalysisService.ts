@@ -15,6 +15,7 @@
  */
 
 import pg from "pg";
+import { sanitizeAndSqlClause } from "../../utils/scorecard-utils.js";
 
 /** Snapshot day of week: 1 = Monday, 2 = Tuesday, ... 5 = Friday. */
 export type SnapshotDayOfWeek = 1 | 2 | 3 | 4 | 5;
@@ -234,7 +235,11 @@ export async function computeSnapshotForDate(
     params.push(filters.branches);
   }
 
-  const whereClause = conditions.join(" AND ") + (dimensionFilterClause ?? "");
+  const dimensionCondition = sanitizeAndSqlClause(dimensionFilterClause, "dimensionFilterClause");
+  if (dimensionCondition) {
+    conditions.push(dimensionCondition);
+  }
+  const whereClause = conditions.join(" AND ");
   const sql = `
     WITH active_loans AS (
       SELECT l.loan_amount,
@@ -540,7 +545,11 @@ export async function getPipelineLoansInRange(
     nextParam++;
   }
 
-  const whereClause = conditions.join(" AND ") + (dimensionFilterClause ?? "");
+  const dimensionCondition = sanitizeAndSqlClause(dimensionFilterClause, "dimensionFilterClause");
+  if (dimensionCondition) {
+    conditions.push(dimensionCondition);
+  }
+  const whereClause = conditions.join(" AND ");
   const sql = `
     SELECT
       l.loan_id,
@@ -662,7 +671,11 @@ export async function getPipelineLoansActiveInRange(
     nextParam++;
   }
 
-  const whereClause = conditions.join(" AND ") + (dimensionFilterClause ?? "");
+  const dimensionCondition = sanitizeAndSqlClause(dimensionFilterClause, "dimensionFilterClause");
+  if (dimensionCondition) {
+    conditions.push(dimensionCondition);
+  }
+  const whereClause = conditions.join(" AND ");
   const sql = `
     SELECT
       l.loan_id,
@@ -776,7 +789,11 @@ export async function getPipeline30YearFixedWeightedRates(
     baseConditions.push(`l.branch = ANY($${nextParam}::text[])`);
     nextParam++;
   }
-  const baseWhere = baseConditions.join(" AND ") + (dimensionFilterClause ?? "");
+  const dimensionCondition = sanitizeAndSqlClause(dimensionFilterClause, "dimensionFilterClause");
+  if (dimensionCondition) {
+    baseConditions.push(dimensionCondition);
+  }
+  const baseWhere = baseConditions.join(" AND ");
   const baseParams: unknown[] = [];
   if (filters?.loanTypes?.length) baseParams.push(filters.loanTypes);
   if (filters?.loanPurposes?.length) baseParams.push(filters.loanPurposes);
