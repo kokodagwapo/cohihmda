@@ -151,6 +151,7 @@ function HelpHome() {
       {!search.trim() && (
         <div className="max-w-md mx-auto">
           <Card
+            data-testid="help-learning-paths-card"
             className="cursor-pointer hover:shadow-md transition-shadow group border-blue-200 dark:border-blue-800 bg-gradient-to-br from-blue-50/50 to-indigo-50/50 dark:from-blue-950/20 dark:to-indigo-950/20"
             onClick={() => navigate('/help/learning-paths')}
           >
@@ -172,6 +173,7 @@ function HelpHome() {
           <p className="text-sm text-muted-foreground">{results.length} result{results.length !== 1 ? 's' : ''}</p>
           {results.map((article) => (
             <Card
+              data-testid={`help-search-result-${article.slug}`}
               key={article.id}
               className="cursor-pointer hover:shadow-md transition-shadow"
               onClick={() => navigate(`/help/${article.categorySlug}/${article.slug}`)}
@@ -199,6 +201,7 @@ function HelpHome() {
             const articleCount = getArticlesByCategory(cat.slug).length;
             return (
               <Card
+                data-testid={`help-category-${cat.slug}`}
                 key={cat.slug}
                 className="cursor-pointer hover:shadow-md transition-shadow group"
                 onClick={() => navigate(`/help/${cat.slug}`)}
@@ -263,6 +266,7 @@ function CategoryPage() {
       <div className="space-y-3">
         {articles.map((article) => (
           <Card
+            data-testid={`help-article-${article.slug}`}
             key={article.id}
             className="cursor-pointer hover:shadow-md transition-shadow"
             onClick={() => navigate(`/help/${categorySlug}/${article.slug}`)}
@@ -509,6 +513,7 @@ function ArticlePage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {relatedArticles.map((a) => (
               <Card
+                data-testid={`help-related-article-${a.slug}`}
                 key={a.id}
                 className="cursor-pointer hover:shadow-md transition-shadow"
                 onClick={() => navigate(`/help/${a.categorySlug}/${a.slug}`)}

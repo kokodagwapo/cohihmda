@@ -48,7 +48,6 @@ import {
   Loader2,
   CheckCircle2,
   XCircle,
-  Eye,
   Link2,
   Settings2,
   Database,
@@ -83,9 +82,9 @@ interface UserDisplay {
   // Encompass integration
   encompass_user_id?: string;
   los_connection_id?: string;
-  loan_access_mode?: 'encompass_sync' | 'full_access' | 'no_access' | 'manual';
+  persona?: 'tenant_admin' | 'tenant_user' | 'tenant_canvas_only_user';
+  loan_scope?: 'all' | 'encompass' | 'manual' | 'none';
   loan_access_synced_at?: string;
-  access_mode?: 'full' | 'canvas_only';
 }
 
 // Role display names and colors
@@ -95,7 +94,12 @@ const ROLE_CONFIG: Record<string, { label: string; color: string; icon: typeof S
   support: { label: 'Support', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400', icon: Shield },
   tenant_admin: { label: 'Tenant Admin', color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400', icon: Building2 },
   user: { label: 'User', color: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300', icon: Users },
-  viewer: { label: 'Viewer', color: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400', icon: Eye },
+};
+
+const PERSONA_CONFIG: Record<'tenant_admin' | 'tenant_user' | 'tenant_canvas_only_user', { label: string; helper: string }> = {
+  tenant_admin: { label: 'Tenant admin', helper: 'Admin access to tenant settings and full app.' },
+  tenant_user: { label: 'Full user', helper: 'Full app access without tenant admin controls.' },
+  tenant_canvas_only_user: { label: 'Canvas-only user', helper: 'Can access only canvases shared with them.' },
 };
 
 export function UserManagementSection() {
@@ -105,6 +109,19 @@ export function UserManagementSection() {
   // Use admin tenant context for tenant awareness
   // tenants list comes from context (loaded once for platform admins) -- no local duplicate
   const { selectedTenantId, isTenantAdmin, isPlatformAdmin, currentTenantName, tenants: contextTenants } = useAdminTenant();
+
+  const resolvePersona = useCallback((user: Pick<UserDisplay, 'persona' | 'role'>): 'tenant_admin' | 'tenant_user' | 'tenant_canvas_only_user' => {
+    if (user.persona) return user.persona;
+    if (user.role === 'tenant_admin') return 'tenant_admin';
+    return 'tenant_user';
+  }, []);
+
+  const resolveLoanScope = useCallback((user: Pick<UserDisplay, 'loan_scope' | 'persona' | 'role'>): 'all' | 'encompass' | 'manual' | 'none' => {
+    const persona = resolvePersona(user);
+    if (persona === 'tenant_admin') return 'all';
+    if (persona === 'tenant_canvas_only_user') return 'none';
+    return user.loan_scope || 'encompass';
+  }, [resolvePersona]);
   
   // State
   const [tenantUsers, setTenantUsers] = useState<UserDisplay[]>([]);
@@ -133,9 +150,9 @@ export function UserManagementSection() {
     email: '',
     password: '',
     full_name: '',
-    role: 'user',
+    persona: 'tenant_user' as 'tenant_admin' | 'tenant_user' | 'tenant_canvas_only_user',
+    loan_scope: 'encompass' as 'all' | 'encompass' | 'manual' | 'none',
     tenant_slug: '',
-    access_mode: 'full' as 'full' | 'canvas_only',
   });
 
   // When true, new users receive an email with sign-in instructions (no password field in form)
@@ -304,8 +321,13 @@ export function UserManagementSection() {
       const body: Record<string, unknown> = {
         email: formData.email,
         full_name: formData.full_name,
-        role: formData.role || 'user',
-        access_mode: formData.access_mode || 'full',
+        persona: formData.persona,
+        loan_scope:
+          formData.persona === 'tenant_user'
+            ? formData.loan_scope
+            : formData.persona === 'tenant_admin'
+              ? 'all'
+              : 'none',
       };
       if (!useInviteFlow && formData.password) body.password = formData.password;
 
@@ -339,9 +361,17 @@ export function UserManagementSection() {
       const updateData: any = {};
       if (formData.email !== selectedUser.email) updateData.email = formData.email;
       if (formData.full_name !== selectedUser.full_name) updateData.full_name = formData.full_name;
-      if (formData.role !== selectedUser.role) updateData.role = formData.role;
       if (formData.password) updateData.password = formData.password;
-      if (formData.access_mode !== (selectedUser.access_mode ?? 'full')) updateData.access_mode = formData.access_mode;
+      const selectedPersona = resolvePersona(selectedUser);
+      if (formData.persona !== selectedPersona) updateData.persona = formData.persona;
+      const selectedScope = resolveLoanScope(selectedUser);
+      const nextScope =
+        formData.persona === 'tenant_user'
+          ? formData.loan_scope
+          : formData.persona === 'tenant_admin'
+            ? 'all'
+            : 'none';
+      if (nextScope !== selectedScope) updateData.loan_scope = nextScope;
       
       await api.request(`/api/admin/tenants/${selectedUser.tenant_id}/users/${selectedUser.id}`, {
         method: 'PUT',
@@ -412,21 +442,22 @@ export function UserManagementSection() {
       email: '',
       password: '',
       full_name: '',
-      role: 'user',
+      persona: 'tenant_user',
+      loan_scope: 'encompass',
       tenant_slug: '',
-      access_mode: 'full',
     });
   };
 
   const openEditDialog = (user: UserDisplay) => {
+    const persona = resolvePersona(user);
     setSelectedUser(user);
     setFormData({
       email: user.email,
       password: '',
       full_name: user.full_name || '',
-      role: user.role,
+      persona,
+      loan_scope: resolveLoanScope(user),
       tenant_slug: user.tenant_slug || '',
-      access_mode: (user.access_mode === 'canvas_only' ? 'canvas_only' : 'full') as 'full' | 'canvas_only',
     });
     setEditDialogOpen(true);
   };
@@ -476,7 +507,7 @@ export function UserManagementSection() {
     }
   };
 
-  const handleUpdateLoanAccessMode = async (mode: 'encompass_sync' | 'full_access' | 'no_access' | 'manual') => {
+  const handleUpdateLoanScope = async (scope: 'all' | 'encompass' | 'manual' | 'none') => {
     if (!selectedUser) return;
     
     // Get tenant context
@@ -494,16 +525,16 @@ export function UserManagementSection() {
     try {
       await api.request(`/api/admin/tenants/${tenantId}/users/${selectedUser.id}`, {
         method: 'PUT',
-        body: JSON.stringify({ loan_access_mode: mode }),
+        body: JSON.stringify({ loan_scope: scope }),
       });
       
       toast({
-        title: 'Loan Access Mode Updated',
-        description: `Updated to "${mode}" for ${selectedUser.full_name || selectedUser.email}`,
+        title: 'Loan Visibility Updated',
+        description: `Updated to "${scope}" for ${selectedUser.full_name || selectedUser.email}`,
       });
       
       // Update local state
-      setSelectedUser({ ...selectedUser, loan_access_mode: mode });
+      setSelectedUser({ ...selectedUser, loan_scope: scope });
       await loadData();
     } catch (error: any) {
       toast({
@@ -693,8 +724,8 @@ export function UserManagementSection() {
               <TableHeader>
                   <TableRow>
                     <TableHead>User</TableHead>
-                    <TableHead>Role</TableHead>
-                    <TableHead>Access</TableHead>
+                    <TableHead>Access Profile</TableHead>
+                    <TableHead>Loan Visibility</TableHead>
                     <TableHead>Encompass</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Last Login</TableHead>
@@ -704,6 +735,8 @@ export function UserManagementSection() {
               <TableBody>
                   {filteredTenantUsers.map(user => {
                     const roleConfig = ROLE_CONFIG[user.role] || ROLE_CONFIG.user;
+                    const persona = resolvePersona(user);
+                    const loanScope = resolveLoanScope(user);
                     return (
                       <TableRow key={user.id}>
                         <TableCell>
@@ -713,13 +746,21 @@ export function UserManagementSection() {
                           </div>
                     </TableCell>
                         <TableCell>
-                          <Badge className={roleConfig.color}>
-                            {roleConfig.label}
-                          </Badge>
+                          <div className="space-y-1">
+                            <Badge className={roleConfig.color}>
+                              {PERSONA_CONFIG[persona].label}
+                            </Badge>
+                          </div>
                     </TableCell>
                     <TableCell>
                           <span className="text-sm text-slate-600 dark:text-slate-400">
-                            {user.access_mode === 'canvas_only' ? 'Canvas only' : 'Full'}
+                            {loanScope === 'all'
+                              ? 'All loans'
+                              : loanScope === 'encompass'
+                                ? 'Encompass scope'
+                                : loanScope === 'manual'
+                                  ? 'Manual scope'
+                                  : 'No loan access'}
                           </span>
                     </TableCell>
                     <TableCell>
@@ -758,6 +799,7 @@ export function UserManagementSection() {
                               size="sm"
                               onClick={() => openLoanAccessDialog(user)}
                               title="Loan Access Settings"
+                              disabled={persona !== 'tenant_user'}
                             >
                               <Settings2 className="h-4 w-4" />
                             </Button>
@@ -797,7 +839,7 @@ export function UserManagementSection() {
                   })}
                   {filteredTenantUsers.length === 0 && (
                   <TableRow>
-                      <TableCell colSpan={6} className="text-center py-8 text-slate-500">
+                      <TableCell colSpan={7} className="text-center py-8 text-slate-500">
                         {searchQuery
                           ? 'No users match your search'
                           : 'No users found'}
@@ -938,42 +980,55 @@ export function UserManagementSection() {
             )}
 
             <div className="space-y-2">
-              <Label>Role</Label>
+              <Label>User Type</Label>
               <Select
-                value={formData.role}
-                onValueChange={(v) => setFormData({ ...formData, role: v })}
+                value={formData.persona}
+                onValueChange={(v) =>
+                  setFormData({
+                    ...formData,
+                    persona: v as 'tenant_admin' | 'tenant_user' | 'tenant_canvas_only_user',
+                    loan_scope:
+                      v === 'tenant_user'
+                        ? formData.loan_scope
+                        : v === 'tenant_admin'
+                          ? 'all'
+                          : 'none',
+                  })
+                }
               >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="tenant_admin">Tenant Admin</SelectItem>
-                  <SelectItem value="user">User</SelectItem>
-                  <SelectItem value="viewer">Viewer</SelectItem>
+                  <SelectItem value="tenant_admin">Tenant admin</SelectItem>
+                  <SelectItem value="tenant_user">Full user</SelectItem>
+                  <SelectItem value="tenant_canvas_only_user">Canvas-only user</SelectItem>
                 </SelectContent>
               </Select>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {PERSONA_CONFIG[formData.persona].helper}
+              </p>
             </div>
 
-            <div className="space-y-2">
-              <Label>Access mode</Label>
-              <Select
-                value={formData.access_mode}
-                onValueChange={(v) => setFormData({ ...formData, access_mode: v as 'full' | 'canvas_only' })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="full">Full platform</SelectItem>
-                  <SelectItem value="canvas_only">Canvas only</SelectItem>
-                </SelectContent>
-              </Select>
-              {formData.access_mode === 'canvas_only' && (
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  This user will only see canvases shared with them (slim UI, no Insights/Loans/Admin).
-                </p>
-              )}
-            </div>
+            {formData.persona === 'tenant_user' && (
+              <div className="space-y-2">
+                <Label>Loan Visibility</Label>
+                <Select
+                  value={formData.loan_scope}
+                  onValueChange={(v) => setFormData({ ...formData, loan_scope: v as 'all' | 'encompass' | 'manual' | 'none' })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="encompass">Encompass scope</SelectItem>
+                    <SelectItem value="manual">Manual scope</SelectItem>
+                    <SelectItem value="all">All loans</SelectItem>
+                    <SelectItem value="none">No loan access</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
 
           <DialogFooter>
@@ -1033,42 +1088,55 @@ export function UserManagementSection() {
             </div>
 
             <div className="space-y-2">
-              <Label>Role</Label>
+              <Label>User Type</Label>
               <Select
-                value={formData.role}
-                onValueChange={(v) => setFormData({ ...formData, role: v })}
+                value={formData.persona}
+                onValueChange={(v) =>
+                  setFormData({
+                    ...formData,
+                    persona: v as 'tenant_admin' | 'tenant_user' | 'tenant_canvas_only_user',
+                    loan_scope:
+                      v === 'tenant_user'
+                        ? formData.loan_scope
+                        : v === 'tenant_admin'
+                          ? 'all'
+                          : 'none',
+                  })
+                }
               >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="tenant_admin">Tenant Admin</SelectItem>
-                  <SelectItem value="user">User</SelectItem>
-                  <SelectItem value="viewer">Viewer</SelectItem>
+                  <SelectItem value="tenant_admin">Tenant admin</SelectItem>
+                  <SelectItem value="tenant_user">Full user</SelectItem>
+                  <SelectItem value="tenant_canvas_only_user">Canvas-only user</SelectItem>
                 </SelectContent>
               </Select>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {PERSONA_CONFIG[formData.persona].helper}
+              </p>
             </div>
 
-            <div className="space-y-2">
-              <Label>Access mode</Label>
-              <Select
-                value={formData.access_mode}
-                onValueChange={(v) => setFormData({ ...formData, access_mode: v as 'full' | 'canvas_only' })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="full">Full platform</SelectItem>
-                  <SelectItem value="canvas_only">Canvas only</SelectItem>
-                </SelectContent>
-              </Select>
-              {formData.access_mode === 'canvas_only' && (
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  This user will only see canvases shared with them (slim UI).
-                </p>
-              )}
-            </div>
+            {formData.persona === 'tenant_user' && (
+              <div className="space-y-2">
+                <Label>Loan Visibility</Label>
+                <Select
+                  value={formData.loan_scope}
+                  onValueChange={(v) => setFormData({ ...formData, loan_scope: v as 'all' | 'encompass' | 'manual' | 'none' })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="encompass">Encompass scope</SelectItem>
+                    <SelectItem value="manual">Manual scope</SelectItem>
+                    <SelectItem value="all">All loans</SelectItem>
+                    <SelectItem value="none">No loan access</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
 
           <DialogFooter>
@@ -1129,21 +1197,21 @@ export function UserManagementSection() {
               <div className="space-y-3">
                 <h4 className="text-sm font-medium flex items-center gap-2">
                   <Database className="h-4 w-4" />
-                  Loan Data Access Mode
+                  Loan Visibility
                 </h4>
                 <div className="space-y-2">
                   {[
-                    { value: 'encompass_sync', label: 'Encompass Sync', desc: 'Access only loans they can see in Encompass', requiresLink: true },
-                    { value: 'full_access', label: 'Full Access', desc: 'Access all loans (for admins)', requiresLink: false },
-                    { value: 'no_access', label: 'No Access', desc: 'Cannot view individual loans', requiresLink: false },
-                    { value: 'manual', label: 'Manual', desc: 'Manually configured loan access', requiresLink: false },
+                    { value: 'encompass', label: 'Encompass Scope', desc: 'Access loans visible to them in Encompass', requiresLink: true },
+                    { value: 'all', label: 'All Loans', desc: 'Access all loans in this tenant', requiresLink: false },
+                    { value: 'none', label: 'No Loan Access', desc: 'Cannot view individual loans', requiresLink: false },
+                    { value: 'manual', label: 'Manual Scope', desc: 'Manually configured loan access', requiresLink: false },
                   ].map((option) => {
-                    const isSelected = selectedUser.loan_access_mode === option.value;
+                    const isSelected = resolveLoanScope(selectedUser) === option.value;
                     const isDisabled = option.requiresLink && !selectedUser.encompass_user_id;
                     return (
                       <div
                         key={option.value}
-                        onClick={() => !isDisabled && !isSelected && handleUpdateLoanAccessMode(option.value as any)}
+                        onClick={() => !isDisabled && !isSelected && handleUpdateLoanScope(option.value as 'all' | 'encompass' | 'manual' | 'none')}
                         className={`p-3 rounded-lg border cursor-pointer transition-colors ${
                           isSelected
                             ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
@@ -1183,7 +1251,7 @@ export function UserManagementSection() {
               </div>
 
               {/* Sync Button */}
-              {selectedUser.encompass_user_id && selectedUser.loan_access_mode === 'encompass_sync' && (
+              {selectedUser.encompass_user_id && resolveLoanScope(selectedUser) === 'encompass' && (
                 <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
                   <Button
                     onClick={handleSyncLoanAccess}

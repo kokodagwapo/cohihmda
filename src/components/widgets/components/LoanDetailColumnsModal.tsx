@@ -61,7 +61,7 @@ function toSaved(c: ColumnDef): SavedLoanDetailColumn {
     raw === undefined || raw === BLANK_FIELD_VALUE
       ? BLANK_FIELD_VALUE
       : raw;
-  return { id: c.id, label: c.label, field: field === BLANK_FIELD_VALUE ? BLANK_FIELD_VALUE : field };
+  return { id: c.id, label: c.label, field };
 }
 
 type FieldOption = { value: string; label: string };

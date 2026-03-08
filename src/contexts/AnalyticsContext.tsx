@@ -227,7 +227,7 @@ export function AnalyticsProviderWithAuth({
  */
 export function AnalyticsWrapper({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  if (user?.access_mode === "canvas_only") {
+  if (user?.persona === "tenant_canvas_only_user") {
     // Canvas-only users run in a slim shell; disable analytics/replay to avoid
     // unnecessary blocked calls and keep logs clean.
     return <>{children}</>;

@@ -643,8 +643,8 @@ Enable auto-invite to provision unknown external emails as canvas-only users. Op
 
 ## What Auto-Invite Does
 When enabled, unknown recipient emails are automatically provisioned as:
-- **viewer** role
-- **canvas_only** access mode
+- **Canvas-only user** persona
+- **No loan access** visibility
 
 This allows external recipients to access shared canvases securely without giving full platform access.
 
@@ -683,12 +683,12 @@ Use this to verify onboarding outcomes after each run.
 ## Canvas-Only Access
 Canvas-only users are intended for shared-canvas consumption. They do not have full analytics/admin navigation.
 
-## What Viewers Can Do
+## What Canvas-Only Users Can Do
 - Open shared canvases
 - Navigate between canvases shared with them
 - Bookmark useful canvases
 
-## What Viewers Cannot Do
+## What Canvas-Only Users Cannot Do
 - Edit canvas content
 - Add widgets, rich text, or background changes
 - Clear canvases
@@ -1335,29 +1335,20 @@ Use the **Start Tour** button below to walk through each section in the Admin si
 4. Enter email, name, and select a role
 5. The user will receive an invitation email
 
-## Role Types
-- **Admin** — Full access to all features and admin panel
-- **User** — Standard access to analytics and workbench
-- **Viewer** — Read-only access to dashboards
-- **Loan Officer** — Access to assigned loans and personal metrics
-- **Processor** — Access to assigned files and processing features
+## Access Profiles
+Users are managed with a single access profile:
+- **Tenant admin** — Full app access plus tenant administration
+- **Full user** — Full app access without tenant admin actions
+- **Canvas-only user** — Can open shared canvases only
 
-## Access Modes
-Users can also have an access mode:
-- **full** — Full platform experience
-- **canvas_only** — Restricted experience for viewing shared canvases
+## Loan Visibility
+Loan visibility is configured only for **Full user** profiles:
+- **Encompass scope** — Loans visible in Encompass
+- **Manual scope** — Admin-curated loan access
+- **All loans** — Full tenant loan visibility
+- **No loan access** — No direct loan-level visibility
 
-Auto-invited external distribution recipients are typically created as:
-- Role: **Viewer**
-- Access mode: **canvas_only**
-
-## Custom Roles
-Create custom roles with specific permissions:
-1. Go to **Admin > Roles**
-2. Click **Create Role**
-3. Set section access (which pages they can see)
-4. Set field restrictions (which data columns they can view)
-5. Set row-level filters (e.g., only see their branch's data)
+Canvas-only users always use **No loan access**.
 
 ## Managing Access
 - **Deactivate** users who leave the organization
@@ -1365,7 +1356,7 @@ Create custom roles with specific permissions:
 - **Monitor login activity** to ensure security
 
 ## Managing Auto-Invited Users
-- Filter users by role/access to review canvas-only recipients
+- Filter users by access profile to review canvas-only recipients
 - Move them into groups if needed for access governance
 - Deactivate accounts that should no longer receive shared canvases
 

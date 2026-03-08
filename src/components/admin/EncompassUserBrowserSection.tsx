@@ -127,17 +127,16 @@ export function EncompassUserBrowserSection({
   // Invite dialog state
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
   const [inviteUser, setInviteUser] = useState<EncompassUser | null>(null);
-  const [inviteRole, setInviteRole] = useState("user");
+  const [invitePersona, setInvitePersona] = useState<"tenant_admin" | "tenant_user" | "tenant_canvas_only_user">("tenant_user");
   const [inviteMethod, setInviteMethod] = useState<"email" | "sso_only" | "manual">(
     "manual", // Default to manual for dev convenience
   );
   const [invitePassword, setInvitePassword] = useState("");
-  const [inviteAccessMode, setInviteAccessMode] = useState<"full" | "canvas_only">("full");
   const [inviteGroupIds, setInviteGroupIds] = useState<string[]>([]);
   const [isInviting, setIsInviting] = useState(false);
 
-  // Bulk invite: shared role/method plus access_mode and groups
-  const [bulkInviteAccessMode, setBulkInviteAccessMode] = useState<"full" | "canvas_only">("full");
+  // Bulk invite: shared profile/method and groups
+  const [bulkInvitePersona, setBulkInvitePersona] = useState<"tenant_admin" | "tenant_user" | "tenant_canvas_only_user">("tenant_user");
   const [bulkInviteGroupIds, setBulkInviteGroupIds] = useState<string[]>([]);
 
   // Groups for invite dropdowns (tenant-scoped)
@@ -293,9 +292,8 @@ export function EncompassUserBrowserSection({
     try {
       const requestBody: Record<string, unknown> = {
         los_connection_id: connectionId,
-        role: inviteRole,
+        persona: invitePersona,
         invite_method: inviteMethod,
-        access_mode: inviteAccessMode,
         group_ids: inviteGroupIds.length > 0 ? inviteGroupIds : undefined,
       };
 
@@ -329,7 +327,7 @@ export function EncompassUserBrowserSection({
       setInviteDialogOpen(false);
       setInviteUser(null);
       setInvitePassword("");
-      setInviteAccessMode("full");
+      setInvitePersona("tenant_user");
       setInviteGroupIds([]);
       fetchUsers();
     } catch (error: any) {
@@ -352,9 +350,8 @@ export function EncompassUserBrowserSection({
       const body: Record<string, unknown> = {
         los_connection_id: connectionId,
         encompass_user_ids: Array.from(selectedUsers),
-        role: inviteRole,
+        persona: bulkInvitePersona,
         invite_method: inviteMethod,
-        access_mode: bulkInviteAccessMode,
         group_ids: bulkInviteGroupIds.length > 0 ? bulkInviteGroupIds : undefined,
       };
       
@@ -531,26 +528,14 @@ export function EncompassUserBrowserSection({
                 {selectedUsers.size} user{selectedUsers.size > 1 ? "s" : ""}{" "}
                 selected
               </span>
-              <Select value={inviteRole} onValueChange={setInviteRole}>
+              <Select value={bulkInvitePersona} onValueChange={(v) => setBulkInvitePersona(v as any)}>
                 <SelectTrigger className="w-[140px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="user">User</SelectItem>
-                  <SelectItem value="tenant_admin">Tenant Admin</SelectItem>
-                  <SelectItem value="viewer">Viewer</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select
-                value={bulkInviteAccessMode}
-                onValueChange={(v: "full" | "canvas_only") => setBulkInviteAccessMode(v)}
-              >
-                <SelectTrigger className="w-[140px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="full">Full platform</SelectItem>
-                  <SelectItem value="canvas_only">Canvas only</SelectItem>
+                  <SelectItem value="tenant_user">Full user</SelectItem>
+                  <SelectItem value="tenant_admin">Tenant admin</SelectItem>
+                  <SelectItem value="tenant_canvas_only_user">Canvas-only user</SelectItem>
                 </SelectContent>
               </Select>
               {groups.length > 0 && (
@@ -769,30 +754,15 @@ export function EncompassUserBrowserSection({
               <div className="col-span-3">{inviteUser?.email}</div>
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
-              <Label className="text-right">Role</Label>
-              <Select value={inviteRole} onValueChange={setInviteRole}>
+              <Label className="text-right">User Type</Label>
+              <Select value={invitePersona} onValueChange={(v) => setInvitePersona(v as any)}>
                 <SelectTrigger className="col-span-3">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="user">User</SelectItem>
-                  <SelectItem value="tenant_admin">Tenant Admin</SelectItem>
-                  <SelectItem value="viewer">Viewer</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label className="text-right">Access</Label>
-              <Select
-                value={inviteAccessMode}
-                onValueChange={(v: "full" | "canvas_only") => setInviteAccessMode(v)}
-              >
-                <SelectTrigger className="col-span-3">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="full">Full platform</SelectItem>
-                  <SelectItem value="canvas_only">Canvas only</SelectItem>
+                  <SelectItem value="tenant_user">Full user</SelectItem>
+                  <SelectItem value="tenant_admin">Tenant admin</SelectItem>
+                  <SelectItem value="tenant_canvas_only_user">Canvas-only user</SelectItem>
                 </SelectContent>
               </Select>
             </div>

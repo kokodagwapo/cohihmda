@@ -18,7 +18,7 @@ interface JwtTokenPayload {
   isSuperAdmin: boolean;
   tenantId?: string;
   tenantSlug?: string;
-  access_mode?: 'full' | 'canvas_only';
+  persona?: "tenant_admin" | "tenant_user" | "tenant_canvas_only_user";
 }
 
 export interface AuthRequest extends Request {
@@ -28,7 +28,7 @@ export interface AuthRequest extends Request {
   isSuperAdmin?: boolean;
   tenantId?: string;
   tenantSlug?: string;
-  userAccessMode?: 'full' | 'canvas_only';
+  userPersona?: "tenant_admin" | "tenant_user" | "tenant_canvas_only_user";
 }
 
 export function authenticateToken(req: AuthRequest, res: Response, next: NextFunction) {
@@ -47,7 +47,7 @@ export function authenticateToken(req: AuthRequest, res: Response, next: NextFun
     req.isSuperAdmin = decoded.isSuperAdmin;
     req.tenantId = decoded.tenantId;
     req.tenantSlug = decoded.tenantSlug;
-    req.userAccessMode = decoded.access_mode || 'full';
+    req.userPersona = decoded.persona || "tenant_user";
     next();
   } catch (error: any) {
     // Authentication failures (expired/invalid/malformed token) should be 401

@@ -81,7 +81,7 @@ const DEFAULT_ROLE_PERMISSIONS: Record<string, Partial<UserPermissions>> = {
     rowFilters: [],
     fieldRestrictions: [],
   },
-  viewer: {
+  tenant_canvas_only_user: {
     sectionAccess: ['insights', 'cohi_chat'],
     rowFilters: [],
     fieldRestrictions: ['branch_price_concession', 'corporate_price_concession', 'net_buy', 'net_sell', 'srp_from_investor', 'pa_srp_amt', 'pa_sell_amt'],

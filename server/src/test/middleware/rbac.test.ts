@@ -97,7 +97,7 @@ describe("requireFullAccess", () => {
     const middleware = requireFullAccess();
     const req = {
       userId: "u1",
-      userAccessMode: "canvas_only",
+      userPersona: "tenant_canvas_only_user",
       originalUrl: "/api/admin/release-notes",
       method: "GET",
     } as any;
@@ -111,7 +111,7 @@ describe("requireFullAccess", () => {
     const middleware = requireFullAccess();
     const req = {
       userId: "u1",
-      userAccessMode: "canvas_only",
+      userPersona: "tenant_canvas_only_user",
       originalUrl: "/api/workbench/canvases",
       method: "GET",
     } as any;

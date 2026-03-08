@@ -20,6 +20,10 @@ import { AdditionalFieldService } from "../services/additionalFieldService.js";
 import { createEncompassUserSyncService } from "../services/encompassUserSyncService.js";
 import ssoConfigRoutes from "./admin/ssoConfig.js";
 import * as cognitoAuth from "../services/cognito/cognitoAuthService.js";
+import {
+  type LoanScope,
+  type TenantPersona,
+} from "../utils/userAccessProfile.js";
 
 const router = Router();
 
@@ -87,7 +91,6 @@ const createUserSchema = z.object({
     .enum([
       "super_admin",
       "tenant_admin",
-      "viewer",
       "user",
     ])
     .optional()
@@ -103,7 +106,6 @@ const updateUserSchema = z.object({
     .enum([
       "super_admin",
       "tenant_admin",
-      "viewer",
       "user",
     ])
     .optional(),
@@ -949,9 +951,9 @@ router.get(
         updated_at,
         encompass_user_id,
         los_connection_id,
-        loan_access_mode,
+        persona,
+        loan_scope,
         loan_access_synced_at,
-        COALESCE(access_mode, 'full') AS access_mode
       FROM users
       WHERE role != 'super_admin'
       ORDER BY created_at DESC
@@ -1058,14 +1060,14 @@ router.post(
       email: z.string().email(),
       password: z.string().min(6).optional(),
       full_name: z.string().optional(),
-        role: z
-          .enum([
-            "tenant_admin",
-            "user",
-            "viewer",
-          ])
-          .default("user"),
-      access_mode: z.enum(["full", "canvas_only"]).optional(),
+      persona: z
+        .enum([
+          "tenant_admin",
+          "tenant_user",
+          "tenant_canvas_only_user",
+        ])
+        .optional(),
+      loan_scope: z.enum(["all", "encompass", "manual", "none"]).optional(),
     });
     
     const validated = schema.parse(req.body);
@@ -1127,20 +1129,30 @@ router.post(
       }
     }
 
-    const accessMode = validated.access_mode ?? "full";
+    const persona: TenantPersona =
+      validated.persona ?? "tenant_user";
+    const loanScope: LoanScope =
+      validated.loan_scope ??
+      (persona === "tenant_admin"
+        ? "all"
+        : persona === "tenant_canvas_only_user"
+          ? "none"
+          : "encompass");
+    const role = persona === "tenant_admin" ? "tenant_admin" : "user";
     const result = await tenantPool.query(
         `
-      INSERT INTO users (email, encrypted_password, full_name, role, is_active, loan_access_mode, cognito_sub, access_mode)
-      VALUES ($1, $2, $3, $4, true, 'full_access', $5, $6)
+      INSERT INTO users (email, encrypted_password, full_name, role, is_active, cognito_sub, persona, loan_scope)
+      VALUES ($1, $2, $3, $4, true, $5, $6, $7)
       RETURNING id, email, full_name, role, is_active, created_at
     `,
         [
           validated.email,
           hashedPassword,
           validated.full_name || null,
-          validated.role,
+          role,
           cognitoSub,
-          accessMode,
+          persona,
+          loanScope,
         ],
       );
     
@@ -1209,16 +1221,15 @@ router.put(
       email: z.string().email().optional(),
       password: z.string().min(6).optional(),
       full_name: z.string().optional(),
-        role: z
-          .enum([
-            "tenant_admin",
-            "user",
-            "viewer",
-          ])
-          .optional(),
       is_active: z.boolean().optional(),
-      loan_access_mode: z.enum(["encompass_sync", "full_access", "no_access", "manual"]).optional(),
-      access_mode: z.enum(["full", "canvas_only"]).optional(),
+      persona: z
+        .enum([
+          "tenant_admin",
+          "tenant_user",
+          "tenant_canvas_only_user",
+        ])
+        .optional(),
+      loan_scope: z.enum(["all", "encompass", "manual", "none"]).optional(),
     });
     
     const validated = schema.parse(req.body);
@@ -1234,10 +1245,6 @@ router.put(
       updates.push(`full_name = $${paramIndex++}`);
       params.push(validated.full_name);
     }
-    if (validated.role !== undefined) {
-      updates.push(`role = $${paramIndex++}`);
-      params.push(validated.role);
-    }
     if (validated.is_active !== undefined) {
       updates.push(`is_active = $${paramIndex++}`);
       params.push(validated.is_active);
@@ -1247,13 +1254,22 @@ router.put(
       updates.push(`encrypted_password = $${paramIndex++}`);
       params.push(hashedPassword);
     }
-    if (validated.loan_access_mode !== undefined) {
-      updates.push(`loan_access_mode = $${paramIndex++}`);
-      params.push(validated.loan_access_mode);
+    const personaFromRequest =
+      validated.persona ??
+      undefined;
+    const loanScopeFromRequest = validated.loan_scope ?? undefined;
+
+    if (personaFromRequest !== undefined) {
+      updates.push(`persona = $${paramIndex++}`);
+      params.push(personaFromRequest);
     }
-    if (validated.access_mode !== undefined) {
-      updates.push(`access_mode = $${paramIndex++}`);
-      params.push(validated.access_mode);
+    if (loanScopeFromRequest !== undefined) {
+      updates.push(`loan_scope = $${paramIndex++}`);
+      params.push(loanScopeFromRequest);
+    }
+    if (personaFromRequest !== undefined) {
+      updates.push(`role = $${paramIndex++}`);
+      params.push(personaFromRequest === "tenant_admin" ? "tenant_admin" : "user");
     }
     
     if (updates.length === 0) {
@@ -1271,7 +1287,7 @@ router.put(
       SET ${updates.join(", ")}
       WHERE id = $${paramIndex}
       RETURNING id, email, full_name, role, is_active, created_at, updated_at, 
-                encompass_user_id, los_connection_id, loan_access_mode, loan_access_synced_at
+                encompass_user_id, los_connection_id, loan_access_synced_at, persona, loan_scope
     `,
         params,
       );
@@ -1489,7 +1505,8 @@ router.get(
             created_at,
             encompass_user_id,
             los_connection_id,
-            loan_access_mode,
+            persona,
+            loan_scope,
             loan_access_synced_at
           FROM users
           ORDER BY created_at DESC
@@ -1665,11 +1682,10 @@ router.post(
       const encompassUserId = req.params.encompassUserId as string;
       const {
         los_connection_id,
-        role,
         invite_method,
         password,
         tenant_id,
-        access_mode,
+        persona,
         group_ids,
       } = req.body;
 
@@ -1702,16 +1718,21 @@ router.post(
         tenantPool,
         tenantContext.tenantId,
       );
+      const invitePersona: TenantPersona =
+        persona === "tenant_canvas_only_user"
+          ? "tenant_canvas_only_user"
+          : persona === "tenant_admin"
+            ? "tenant_admin"
+            : "tenant_user";
       const result = await syncService.inviteUser(
         encompassUserId,
         los_connection_id,
         {
-          role: role || "user",
+          role: invitePersona === "tenant_admin" ? "tenant_admin" : "user",
           invite_method: invite_method || "email",
           password: password, // Pass password for manual invites
           inviter_name: req.userEmail,
-          access_mode:
-            access_mode === "canvas_only" ? "canvas_only" : "full",
+          persona: invitePersona,
           group_ids: Array.isArray(group_ids) ? group_ids : undefined,
         },
       );
@@ -1728,7 +1749,7 @@ router.post(
           resourceId: result.cohi_user_id,
           description: `Invited Encompass user ${encompassUserId} to Cohi`,
           status: "success",
-          metadata: { encompassUserId, role, invite_method },
+          metadata: { encompassUserId, persona: invitePersona, invite_method },
         }).catch(() => {});
       }
 
@@ -1754,10 +1775,9 @@ router.post(
       const {
         los_connection_id,
         encompass_user_ids,
-        role,
         invite_method,
         tenant_id,
-        access_mode,
+        persona,
         group_ids,
       } = req.body;
 
@@ -1788,15 +1808,20 @@ router.post(
         tenantPool,
         tenantContext.tenantId,
       );
+      const invitePersona: TenantPersona =
+        persona === "tenant_canvas_only_user"
+          ? "tenant_canvas_only_user"
+          : persona === "tenant_admin"
+            ? "tenant_admin"
+            : "tenant_user";
       const result = await syncService.bulkInviteUsers(
         encompass_user_ids,
         los_connection_id,
         {
-          role: role || "user",
+          role: invitePersona === "tenant_admin" ? "tenant_admin" : "user",
           invite_method: invite_method || "email",
           inviter_name: req.userEmail,
-          access_mode:
-            access_mode === "canvas_only" ? "canvas_only" : "full",
+          persona: invitePersona,
           group_ids: Array.isArray(group_ids) ? group_ids : undefined,
         },
       );
@@ -2148,7 +2173,7 @@ router.get(
       // Get user info
       const userResult = await tenantPool.query(
         `SELECT id, email, role, encompass_user_id, los_connection_id, 
-                loan_access_mode, loan_access_synced_at 
+                loan_scope, loan_access_synced_at 
          FROM users WHERE id = $1`,
         [userId],
       );
@@ -2206,7 +2231,7 @@ router.get(
           role: user.role,
           encompassUserId: user.encompass_user_id,
           losConnectionId: user.los_connection_id,
-          loanAccessMode: user.loan_access_mode,
+          loanScope: user.loan_scope,
           loanAccessSyncedAt: user.loan_access_synced_at,
         },
         loanAccess: {

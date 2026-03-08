@@ -3632,7 +3632,10 @@ Structure it as a narrative-first executive briefing:
         >
           {/* Read-only banner for non-owner canvases */}
           {!isOwner && canvasId && (
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800/50 text-amber-700 dark:text-amber-300 text-xs font-medium">
+            <div
+              data-testid="workbench-readonly-banner"
+              className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800/50 text-amber-700 dark:text-amber-300 text-xs font-medium"
+            >
               <Lock className="h-3.5 w-3.5 shrink-0" />
               <span>
                 Read-only — this canvas was shared with you by its owner.
@@ -3677,6 +3680,7 @@ Structure it as a narrative-first executive briefing:
                   <div className="w-px h-5 bg-slate-200 dark:bg-slate-600 shrink-0 mx-0.5" />
                   {/* Inline editable canvas name */}
                   <input
+                    data-testid="workbench-canvas-title-input"
                     type="text"
                     value={saveTitle}
                     onChange={(e) => isOwner && setSaveTitle(e.target.value)}
@@ -3703,6 +3707,7 @@ Structure it as a narrative-first executive briefing:
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <Button
+                            data-testid="workbench-save-button"
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400"
@@ -3746,6 +3751,7 @@ Structure it as a narrative-first executive briefing:
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button
+                          data-testid="workbench-share-button"
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400"

@@ -111,9 +111,12 @@ function buildLockedClause(locked: LockedFilter, alias: string): string {
 
 function buildBaseWhere(
   filters: LockStratFilters,
-  alias: string
-): string {
+  alias: string,
+  startParamIndex: number = 1
+): { clause: string; params: unknown[] } {
   const l = alias ? `${alias}.` : "";
+  const params: unknown[] = [];
+  let idx = startParamIndex;
   const conditions: string[] = [
     `(${l}current_loan_status = 'Active Loan')`,
     `(${l}application_date IS NOT NULL AND ${l}application_date::text != '')`,
@@ -129,10 +132,14 @@ function buildBaseWhere(
   if (lockClause) conditions.push(lockClause);
 
   if (filters.rateMin != null && filters.rateMax != null) {
-    conditions.push(`(${l}interest_rate IS NOT NULL AND ${l}interest_rate >= ${Number(filters.rateMin)} AND ${l}interest_rate < ${Number(filters.rateMax)})`);
+    conditions.push(
+      `(${l}interest_rate IS NOT NULL AND ${l}interest_rate >= $${idx} AND ${l}interest_rate < $${idx + 1})`
+    );
+    params.push(Number(filters.rateMin), Number(filters.rateMax));
+    idx += 2;
   }
 
-  return `WHERE ${conditions.join(" AND ")}`;
+  return { clause: `WHERE ${conditions.join(" AND ")}`, params };
 }
 
 const EXPIRATION_BUCKET_CASE = (alias: string) => {
@@ -207,7 +214,7 @@ export async function getLockStratKPIs(
   filters: LockStratFilters
 ): Promise<LockStratKPIs> {
   const labelPrefix = getLabelPrefix(filters.locked);
-  const whereClause = buildBaseWhere(filters, "l");
+  const { clause: whereClause, params } = buildBaseWhere(filters, "l");
 
   const sql = `
     SELECT
@@ -235,7 +242,7 @@ export async function getLockStratKPIs(
     ${whereClause}
   `;
 
-  const result = await tenantPool.query(sql);
+  const result = await tenantPool.query(sql, params);
   const row = result.rows[0] || {};
   return {
     units: Number(row.units) || 0,
@@ -255,7 +262,7 @@ export async function getInterestRateDistribution(
   filters: LockStratFilters,
   drill?: InterestRateDrillOptions | null
 ): Promise<InterestRateBucket[]> {
-  const whereClause = buildBaseWhere(filters, "l");
+  const { clause: whereClause, params: whereParams } = buildBaseWhere(filters, "l");
   const measureExpr = getMeasureExpression(filters.measure, "l");
 
   // Level 0: 1.00% buckets (default)
@@ -272,7 +279,7 @@ export async function getInterestRateDistribution(
       GROUP BY FLOOR(l.interest_rate)
       ORDER BY rate_floor
     `;
-    const result = await tenantPool.query(sql);
+    const result = await tenantPool.query(sql, whereParams);
     return (result.rows || []).map((r: Record<string, unknown>) => {
       const floor = Number(r.rate_floor);
       return {
@@ -284,12 +291,13 @@ export async function getInterestRateDistribution(
 
   // Level 1: 0.125% buckets within [drillMin, drillMax)
   if (drill.increment === 0.125) {
+    const { clause: whereClauseWithOffset, params: whereParamsWithOffset } = buildBaseWhere(filters, "l", 3);
     const sql = `
       SELECT
         (FLOOR((l.interest_rate - $1) / 0.125) * 0.125 + $1) AS bucket_start,
         ${measureExpr} AS value
       FROM public.loans l
-      ${whereClause}
+      ${whereClauseWithOffset}
         AND l.interest_rate IS NOT NULL
         AND l.interest_rate > 0
         AND l.interest_rate < 15
@@ -298,7 +306,7 @@ export async function getInterestRateDistribution(
       GROUP BY bucket_start
       ORDER BY bucket_start
     `;
-    const result = await tenantPool.query(sql, [drill.drillMin, drill.drillMax]);
+    const result = await tenantPool.query(sql, [drill.drillMin, drill.drillMax, ...whereParamsWithOffset]);
     return (result.rows || []).map((r: Record<string, unknown>) => {
       const start = Number(r.bucket_start);
       const end = Math.round((start + 0.125) * 1000) / 1000;
@@ -311,12 +319,13 @@ export async function getInterestRateDistribution(
 
   // Level 2: individual rates (distinct rate values) within [drillMin, drillMax)
   if (drill.increment === "rate") {
+    const { clause: whereClauseWithOffset, params: whereParamsWithOffset } = buildBaseWhere(filters, "l", 3);
     const sql = `
       SELECT
         ROUND(l.interest_rate::numeric, 4) AS rate_val,
         ${measureExpr} AS value
       FROM public.loans l
-      ${whereClause}
+      ${whereClauseWithOffset}
         AND l.interest_rate IS NOT NULL
         AND l.interest_rate > 0
         AND l.interest_rate < 15
@@ -325,7 +334,7 @@ export async function getInterestRateDistribution(
       GROUP BY rate_val
       ORDER BY rate_val
     `;
-    const result = await tenantPool.query(sql, [drill.drillMin, drill.drillMax]);
+    const result = await tenantPool.query(sql, [drill.drillMin, drill.drillMax, ...whereParamsWithOffset]);
     return (result.rows || []).map((r: Record<string, unknown>) => {
       const rate = Number(r.rate_val);
       return {
@@ -343,7 +352,7 @@ export async function getMilestoneChart(
   filters: LockStratFilters,
   groupBy: MilestoneGroupBy
 ): Promise<MilestoneChartRow[]> {
-  const whereClause = buildBaseWhere(filters, "l");
+  const { clause: whereClause, params } = buildBaseWhere(filters, "l");
   const measureExpr = getMeasureExpression(filters.measure, "l");
   const bucketCase = EXPIRATION_BUCKET_CASE("l");
   const bucketOrder = EXPIRATION_BUCKET_ORDER("l");
@@ -360,7 +369,7 @@ export async function getMilestoneChart(
     ORDER BY 1, (${bucketOrder})
   `;
 
-  const result = await tenantPool.query(sql);
+  const result = await tenantPool.query(sql, params);
   return (result.rows || []).map((r: Record<string, unknown>) => ({
     group: String(r.group_name ?? "(Blank)"),
     expirationBucket: String(r.expiration_bucket ?? ""),
@@ -373,7 +382,7 @@ export async function getMilestonePivot(
   filters: LockStratFilters,
   groupBy: MilestoneGroupBy
 ): Promise<{ rows: MilestonePivotRow[]; totals: { units: number; volume: number } }> {
-  const whereClause = buildBaseWhere(filters, "l");
+  const { clause: whereClause, params } = buildBaseWhere(filters, "l");
   const bucketCase = EXPIRATION_BUCKET_CASE("l");
   const bucketOrder = EXPIRATION_BUCKET_ORDER("l");
 
@@ -390,7 +399,7 @@ export async function getMilestonePivot(
     ORDER BY 1, (${bucketOrder})
   `;
 
-  const result = await tenantPool.query(sql);
+  const result = await tenantPool.query(sql, params);
 
   const totalUnits = (result.rows || []).reduce((s: number, r: Record<string, unknown>) => s + (Number(r.units) || 0), 0);
   const totalVolume = (result.rows || []).reduce((s: number, r: Record<string, unknown>) => s + (Number(r.volume) || 0), 0);
@@ -428,7 +437,7 @@ export async function getDaysToExpiration(
   tenantPool: pg.Pool,
   filters: LockStratFilters
 ): Promise<DaysToExpirationRow[]> {
-  const whereClause = buildBaseWhere(filters, "l");
+  const { clause: whereClause, params } = buildBaseWhere(filters, "l");
   const bucketCase = EXPIRATION_BUCKET_CASE("l");
   const bucketOrder = EXPIRATION_BUCKET_ORDER("l");
 
@@ -448,7 +457,7 @@ export async function getDaysToExpiration(
     ORDER BY (${bucketOrder})
   `;
 
-  const result = await tenantPool.query(sql);
+  const result = await tenantPool.query(sql, params);
   return (result.rows || []).map((r: Record<string, unknown>) => ({
     bucket: String(r.bucket ?? ""),
     units: Number(r.units) || 0,
@@ -464,6 +473,7 @@ export async function getPullThrough(
   period: PullThroughPeriod
 ): Promise<PullThroughData> {
   const l = "l.";
+  const params: unknown[] = [];
   const conditions: string[] = [
     `(${l}current_loan_status != 'Active Loan')`,
     `(${l}lock_date IS NOT NULL)`,
@@ -480,7 +490,8 @@ export async function getPullThrough(
     conditions.push(`(${l}current_status_date)::date >= DATE_TRUNC('year', CURRENT_DATE)`);
   } else {
     const days = Number(period);
-    conditions.push(`((${l}current_status_date)::date >= CURRENT_DATE - INTERVAL '${days} days')`);
+    conditions.push(`((${l}current_status_date)::date >= CURRENT_DATE - ($1::int * INTERVAL '1 day'))`);
+    params.push(days);
   }
 
   const whereClause = `WHERE ${conditions.join(" AND ")}`;
@@ -510,7 +521,7 @@ export async function getPullThrough(
     GROUP BY (${dispositionCase})
   `;
 
-  const summaryResult = await tenantPool.query(summarySQL);
+  const summaryResult = await tenantPool.query(summarySQL, params);
   let originated = 0, withdrawn = 0, denied = 0, total = 0;
   for (const r of summaryResult.rows || []) {
     const cnt = Number((r as Record<string, unknown>).cnt) || 0;
@@ -537,7 +548,7 @@ export async function getPullThrough(
     ORDER BY year_num, month_num
   `;
 
-  const barsResult = await tenantPool.query(barsSQL);
+  const barsResult = await tenantPool.query(barsSQL, params);
   const bars: PullThroughMonthBar[] = (barsResult.rows || []).map((r: Record<string, unknown>) => ({
     month: String(r.month_label ?? ""),
     monthNum: Number(r.month_num) || 0,

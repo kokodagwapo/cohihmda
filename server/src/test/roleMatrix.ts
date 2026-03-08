@@ -26,7 +26,6 @@ const AUTH_EXPECTED: Record<RoleKey, number> = {
   support: 200,
   tenant_admin: 200,
   user: 200,
-  viewer: 200,
   canvas_only_user: 200,
   unauthenticated: 401,
 };
@@ -42,7 +41,6 @@ const PLATFORM_STAFF_EXPECTED: Record<RoleKey, number> = {
   support: 200,
   tenant_admin: 403,
   user: 403,
-  viewer: 403,
   canvas_only_user: 403,
   unauthenticated: 401,
 };
@@ -53,7 +51,6 @@ const PLATFORM_ADMIN_EXPECTED: Record<RoleKey, number> = {
   support: 403,
   tenant_admin: 403,
   user: 403,
-  viewer: 403,
   canvas_only_user: 403,
   unauthenticated: 401,
 };
@@ -64,7 +61,6 @@ const ANY_ADMIN_EXPECTED: Record<RoleKey, number> = {
   support: 200,
   tenant_admin: 200,
   user: 403,
-  viewer: 403,
   canvas_only_user: 403,
   unauthenticated: 401,
 };
@@ -75,7 +71,6 @@ const TENANT_ADMIN_OR_SUPER_EXPECTED: Record<RoleKey, number> = {
   support: 403,
   tenant_admin: 200,
   user: 403,
-  viewer: 403,
   canvas_only_user: 403,
   unauthenticated: 401,
 };
@@ -86,7 +81,6 @@ const ANALYTICS_ADMIN_EXPECTED: Record<RoleKey, number> = {
   support: 403,
   tenant_admin: 200,
   user: 403,
-  viewer: 403,
   canvas_only_user: 403,
   unauthenticated: 401,
 };
@@ -97,7 +91,6 @@ const DISTRIBUTIONS_ADMIN_EXPECTED: Record<RoleKey, number> = {
   support: 403,
   tenant_admin: 200,
   user: 403,
-  viewer: 403,
   canvas_only_user: 403,
   unauthenticated: 401,
 };
@@ -108,7 +101,6 @@ const PUBLIC_EXPECTED: Record<RoleKey, number> = {
   support: 200,
   tenant_admin: 200,
   user: 200,
-  viewer: 200,
   canvas_only_user: 200,
   unauthenticated: 200,
 };

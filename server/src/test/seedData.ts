@@ -6,7 +6,6 @@ import {
   TEST_TENANT_ID,
   TEST_USER_ID,
   TEST_USER_STANDARD_ID,
-  TEST_VIEWER_ID,
 } from "./constants.js";
 
 export type SeedUser = {
@@ -54,16 +53,9 @@ export const SEED_USERS: SeedUser[] = [
     accessMode: "full",
   },
   {
-    id: TEST_VIEWER_ID,
-    email: "viewer@coheus.test",
-    role: "viewer",
-    tenantId: TEST_TENANT_ID,
-    accessMode: "full",
-  },
-  {
     id: TEST_CANVAS_ONLY_ID,
     email: "canvas_only@coheus.test",
-    role: "viewer",
+    role: "user",
     tenantId: TEST_TENANT_ID,
     accessMode: "canvas_only",
   },

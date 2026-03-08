@@ -8,7 +8,7 @@ import pg from "pg";
 import {
   getTenantRevenueExpression,
   buildChannelWhereClause,
-  buildDimensionFilterWhereClause,
+  sanitizeAndSqlClause,
 } from "../../utils/scorecard-utils.js";
 
 export type PricingEntityType = "branch" | "broker_lender_name" | "channel" | "investor";
@@ -327,12 +327,12 @@ function buildBaseWhere(
     idx++;
   }
 
-  const dimFilter = filters.dimensionFilterClause || '';
+  const dimFilter = sanitizeAndSqlClause(filters.dimensionFilterClause, "dimensionFilterClause");
   let clause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   if (dimFilter) {
     clause = clause
-      ? `${clause} ${dimFilter}`
-      : `WHERE ${dimFilter.replace(/^\s*AND\s+/i, '')}`;
+      ? `${clause} AND ${dimFilter}`
+      : `WHERE ${dimFilter}`;
   }
   return { clause, nextIndex: idx };
 }
