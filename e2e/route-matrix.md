@@ -19,9 +19,10 @@ Status legend:
 | `/insights` | Protected | Covered | `e2e/insights-dashboard.spec.ts` |
 | `/legacy` | Protected | Gap | — |
 | `/loans` | Protected | Covered | `e2e/critical-routes.spec.ts` |
+| `/my-dashboard` | Protected | Covered (redirect) | `e2e/critical-routes.spec.ts` |
 | `/my-dashboard/:canvasId?` | Protected | Covered | `e2e/workbench.spec.ts` |
 | `/my-dashboard-legacy` | Protected | Gap | — |
-| `/workbench` | Protected | Covered (redirect) | `e2e/critical-routes.spec.ts` |
+| `/workbench` | Protected | Covered | `e2e/workbench.spec.ts` |
 | `/workbench/shared` | Protected | Covered | `e2e/workbench.spec.ts` |
 | `/workbench/team-folders` | Protected | Covered | `e2e/workbench.spec.ts` |
 | `/workbench/favorites` | Protected | Covered | `e2e/workbench.spec.ts` |
