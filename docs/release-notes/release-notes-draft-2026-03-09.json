@@ -1,0 +1,64 @@
+{
+  "version": "1.0",
+  "exportedAt": "2026-03-09T00:00:00.000Z",
+  "exportedBy": "release-notes-assistant",
+  "notes": [
+    {
+      "version": "2026.03.09",
+      "title": "March Platform Update",
+      "isDraft": true,
+      "publishedAt": null,
+      "emailSentAt": null,
+      "entries": [
+        {
+          "title": "Release Notes Workspace in Admin",
+          "description": "Platform admins can now create, edit, publish, and email release notes from a dedicated admin workspace with entry ordering and preview support.",
+          "category": "feature",
+          "link": null,
+          "linkLabel": null,
+          "sortOrder": 0
+        },
+        {
+          "title": "Release Notes JSON Import and Export",
+          "description": "Release notes can now be exported to JSON and imported back into the platform for backup, migration, and collaborative editing workflows.",
+          "category": "feature",
+          "link": null,
+          "linkLabel": null,
+          "sortOrder": 1
+        },
+        {
+          "title": "Cross-Tenant Sync Management",
+          "description": "Platform teams now have a unified sync management view across tenants, including connection status, trigger controls, and sync history visibility.",
+          "category": "improvement",
+          "link": null,
+          "linkLabel": null,
+          "sortOrder": 2
+        },
+        {
+          "title": "Insight Feedback Operations",
+          "description": "New insight feedback tooling supports review workflows, training example management, and experimentation for improving insight quality over time.",
+          "category": "feature",
+          "link": null,
+          "linkLabel": null,
+          "sortOrder": 3
+        },
+        {
+          "title": "Platform User Analytics",
+          "description": "Expanded analytics capabilities provide better visibility into user behavior, adoption, and activity trends across the platform.",
+          "category": "improvement",
+          "link": null,
+          "linkLabel": null,
+          "sortOrder": 4
+        },
+        {
+          "title": "Tenant Configuration Transfer Improvements",
+          "description": "Tenant configuration import/export now includes stronger validation and safer transfer controls to simplify moving setup between environments.",
+          "category": "improvement",
+          "link": null,
+          "linkLabel": null,
+          "sortOrder": 5
+        }
+      ]
+    }
+  ]
+}
