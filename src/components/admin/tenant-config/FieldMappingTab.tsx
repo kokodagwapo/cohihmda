@@ -376,12 +376,14 @@ export function FieldMappingTab({ losConnections, onRefresh }: FieldMappingTabPr
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <Button
-                    onClick={() => setShowOnboarding(true)}
-                  >
-                    <Zap className="h-4 w-4 mr-2" />
-                    Run Onboarding Analysis
-                  </Button>
+                  {isPlatformAdmin && (
+                    <Button
+                      onClick={() => setShowOnboarding(true)}
+                    >
+                      <Zap className="h-4 w-4 mr-2" />
+                      Run Onboarding Analysis
+                    </Button>
+                  )}
                   <Button
                     variant="outline"
                     onClick={() => setShowWizard(true)}
@@ -674,6 +676,7 @@ export function FieldMappingTab({ losConnections, onRefresh }: FieldMappingTabPr
                   <EncompassFieldMapping
                     losConnectionId={selectedConnectionId}
                     tenantId={selectedTenantId}
+                    isPlatformAdmin={isPlatformAdmin}
                   />
                 </TabsContent>
 
