@@ -24,10 +24,11 @@ import {
   Users,
   FileText,
 } from "lucide-react";
-import { Navigation } from "@/components/layout/Navigation";
 import { WorkbenchTopBar } from "@/components/workbench/WorkbenchTopBar";
-import { WorkbenchSidebar } from "@/components/workbench/WorkbenchSidebar";
 import { IconBadge } from "@/components/workbench/IconBadge";
+import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
+import { useDashboardVisibility } from "@/hooks/useDashboardVisibility";
+import type { ReportData } from "@/data/reportSimulations";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -100,8 +101,8 @@ function formatTzLabel(tzValue: string): string {
 }
 
 export default function Distributions() {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const { dashboardVisibility, handleVisibilityChange } = useDashboardVisibility();
   const [createOpen, setCreateOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [historyId, setHistoryId] = useState<string | null>(null);
@@ -249,18 +250,17 @@ export default function Distributions() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50/90 via-white to-sky-50/40 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950/80">
-      <Navigation />
-      <div className="flex pt-14 sm:pt-16 min-h-screen relative">
-        <WorkbenchSidebar
-          sidebarOpen={sidebarOpen}
-          onSidebarOpenChange={setSidebarOpen}
-          sidebarCollapsed={sidebarCollapsed}
-          onSidebarCollapsedChange={setSidebarCollapsed}
-        />
-        <div className="flex-1 flex flex-col min-w-0">
-          <WorkbenchTopBar onOpenSidebar={() => setSidebarOpen(true)} />
-          <main className="flex-1 relative w-full min-h-0 overflow-hidden">
+    <DashboardLayout
+      isAuthenticated={!!user}
+      mobileMenuOpen={mobileMenuOpen}
+      onMobileMenuToggle={() => setMobileMenuOpen((prev) => !prev)}
+      dashboardVisibility={dashboardVisibility}
+      onVisibilityChange={handleVisibilityChange}
+      onReportClick={(_report: ReportData) => {}}
+    >
+      <div className="min-h-[calc(100vh-4rem)] bg-gradient-to-br from-slate-50/90 via-white to-sky-50/40 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950/80 flex flex-col">
+        <WorkbenchTopBar onOpenSidebar={() => setMobileMenuOpen(true)} />
+        <main className="flex-1 relative w-full min-h-0 overflow-hidden">
             <div className="h-full overflow-y-auto px-4 sm:px-6 py-4 sm:py-6">
               <div className="max-w-[1600px] mx-auto">
                 <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -441,9 +441,7 @@ export default function Distributions() {
                 />
               </div>
             </div>
-          </main>
-        </div>
-      </div>
+        </main>
 
       {/* Create / Edit dialog: minimal form for Phase 3 */}
       <DistributionScheduleDialog
@@ -470,7 +468,8 @@ export default function Distributions() {
           tenantId={tenantId}
         />
       )}
-    </div>
+      </div>
+    </DashboardLayout>
   );
 }
 
