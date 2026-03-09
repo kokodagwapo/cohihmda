@@ -34,6 +34,7 @@ import {
   processEncompassWebhookPayload,
   EncompassWebhookService,
 } from "../services/encompassWebhookService.js";
+import { enqueueBackfillJob } from "../services/syncJobPoller.js";
 import { tenantDbManager } from "../config/tenantDatabaseManager.js";
 import { pool as managementPool } from "../config/managementDatabase.js";
 import { z } from "zod";
@@ -499,7 +500,7 @@ router.post(
       });
 
       const body = schema.parse(req.body);
-      const { tenantPool } = getTenantContext(req);
+      const { tenantId, tenantPool } = getTenantContext(req);
 
       await saveFieldSwap(
         tenantPool,
@@ -509,7 +510,18 @@ router.post(
         body.swapType
       );
 
-      res.json({ success: true, message: "Field swap saved successfully" });
+      const jobId = await enqueueBackfillJob(
+        tenantId,
+        body.losConnectionId,
+        {},
+        req.userId ?? null
+      );
+
+      res.json({
+        success: true,
+        message: "Field swap saved. Backfill job queued.",
+        backfillJobId: jobId,
+      });
     } catch (error: any) {
       if (error instanceof z.ZodError) {
         return res
@@ -520,6 +532,54 @@ router.post(
       res
         .status(500)
         .json({ error: error.message || "Failed to save field swap" });
+    }
+  }
+);
+
+/**
+ * POST /api/encompass/field-backfill/:connectionId
+ * Manually enqueue targeted field backfill for pending swaps.
+ */
+router.post(
+  "/field-backfill/:connectionId",
+  authenticateToken,
+  attachTenantContext,
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const { tenantId, tenantPool } = getTenantContext(req);
+      const losConnectionId = req.params.connectionId as string;
+
+      if (!losConnectionId) {
+        return res.status(400).json({ error: "Connection ID is required" });
+      }
+
+      const connectionResult = await tenantPool.query(
+        "SELECT id FROM public.los_connections WHERE id = $1 AND is_active = true",
+        [losConnectionId]
+      );
+      if (connectionResult.rows.length === 0) {
+        return res.status(404).json({ error: "LOS connection not found" });
+      }
+
+      const jobId = await enqueueBackfillJob(
+        tenantId,
+        losConnectionId,
+        {},
+        req.userId ?? null
+      );
+
+      return res.status(202).json({
+        success: true,
+        jobId,
+        status: "pending",
+        message: "Field backfill job queued.",
+      });
+    } catch (error: any) {
+      console.error("[Field Backfill POST] Error queueing job:", error);
+      return res.status(500).json({
+        error: error.message || "Failed to queue field backfill job",
+      });
     }
   }
 );

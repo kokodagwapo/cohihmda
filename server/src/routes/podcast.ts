@@ -10,29 +10,40 @@ import { apiLimiter } from "../middleware/rateLimiter.js";
 
 const router = Router();
 
-const TTS_MODEL = "tts-1";
-const TTS_VOICE = "nova";
+const TTS_MODEL = "gpt-4o-mini-tts";
+const TTS_VOICE = "cedar";
 const CHAT_MODEL = "gpt-4o";
 
-const BRIEFING_SYSTEM_PROMPT = `You are Cohi, an executive-intelligent AI analyst for the Coheus Executive Intelligence Platform.
+const TTS_INSTRUCTIONS = `Voice: calm, even-paced, professional newsreader. Maintain a steady, clear tone throughout the entire reading. Do not speed up, trail off, or lose clarity at any point. Consistent volume and articulation from start to finish.`;
 
-Write a concise spoken briefing script (~90 seconds when read aloud) for a mortgage executive.
-Rules:
-- Speak naturally as if delivering a live briefing. No stage directions, no brackets, no music cues.
-- Lead with the most critical finding, then cover 3-5 key insights.
+const BRIEFING_SYSTEM_PROMPT = `You are Cohi, a neutral data analyst for the Coheus Executive Intelligence Platform.
+
+Write a spoken briefing script (~90 seconds when read aloud) for a mortgage executive.
+
+TONE — STRICTLY NEUTRAL & OBJECTIVE:
+- You are a data reporter, not an advisor. Report facts. Do not editorialize.
+- BANNED WORDS — never use any of these: significant, critical, pressing, extreme, massive, dramatic, alarming, staggering, unprecedented, explosive, crucial, urgent, remarkable, notable, concerning, troubling, worrisome, key, vital, important, major. This list is non-exhaustive — avoid ALL adjectives that imply urgency, severity, or prioritization.
+- Do NOT prioritize or rank findings for the listener. Present each data point objectively and let the executive decide what matters.
+- Do NOT frame anything as "good news" or "bad news". Just state the numbers.
+- Use plain, factual phrasing: "Revenue was one point two million dollars, down twelve percent from last month." Not: "Revenue saw a significant decline."
+
+FORMAT:
+- Speak naturally. No stage directions, brackets, or music cues.
+- Cover 3-5 data points from the insights provided.
 - Read financial figures in full: "$1.2M" → "one point two million dollars".
-- Be fact-first: state what the data shows. Never recommend actions.
-- End with a brief forward-looking observation.
-- Output ONLY the spoken script text, nothing else.`;
+- Do not recommend actions or suggest what the executive should focus on.
+- Close with one factual forward-looking data point if available.
+- Output ONLY the spoken script text.`;
 
-const QUESTION_SYSTEM_PROMPT = `You are Cohi, an executive AI analyst on the Coheus platform.
-The user just listened to a daily briefing and has a follow-up question.
-Answer concisely and factually based on the briefing context and your domain expertise.
+const QUESTION_SYSTEM_PROMPT = `You are Cohi, a neutral data analyst on the Coheus platform.
+The user has a follow-up question after their briefing.
 Rules:
-- Speak naturally, as if answering live. No brackets or stage directions.
+- Answer with facts only. Do not editorialize or prioritize.
+- Never use dramatic adjectives (significant, critical, pressing, extreme, massive, etc.).
+- Do not tell the user what they should focus on or what matters most. Just answer the question.
 - Read financial figures in full.
-- Be direct and factual.
-- Keep your answer under 60 seconds when read aloud.`;
+- Keep your answer under 60 seconds when read aloud.
+- No brackets, stage directions, or filler.`;
 
 async function getOpenAIKey(tenantId?: string): Promise<string> {
   if (tenantId) {
@@ -161,6 +172,7 @@ async function streamTTSToSSE(
       model: TTS_MODEL,
       input: text,
       voice: TTS_VOICE,
+      instructions: TTS_INSTRUCTIONS,
       response_format: "pcm",
     }),
   });
@@ -171,7 +183,8 @@ async function streamTTSToSSE(
   }
 
   const reader = (ttsResponse.body as any).getReader();
-  const CHUNK_SIZE = 4800; // ~100ms of 24kHz 16-bit mono PCM
+  // 4800 bytes = 2400 samples of 16-bit PCM = 100ms at 24kHz
+  const CHUNK_SIZE = 4800;
   let leftover = new Uint8Array(0);
 
   while (true) {
@@ -192,9 +205,18 @@ async function streamTTSToSSE(
     leftover = combined.slice(offset);
   }
 
-  if (leftover.length > 0) {
-    const base64 = Buffer.from(leftover).toString("base64");
-    res.write(`data: ${JSON.stringify({ type: "audio", data: base64 })}\n\n`);
+  // Flush remaining bytes, ensuring 2-byte alignment for PCM16 samples
+  if (leftover.length > 1) {
+    const aligned =
+      leftover.length % 2 === 0
+        ? leftover
+        : leftover.slice(0, leftover.length - 1);
+    if (aligned.length > 0) {
+      const base64 = Buffer.from(aligned).toString("base64");
+      res.write(
+        `data: ${JSON.stringify({ type: "audio", data: base64 })}\n\n`
+      );
+    }
   }
 }
 
