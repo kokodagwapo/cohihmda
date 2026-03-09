@@ -124,7 +124,8 @@ definitions:
 
     - step: &test-e2e-smoke
         name: Test E2E Smoke (Chromium)
-        image: mcr.microsoft.com/playwright:v1.58.2-noble
+        # Keep Playwright Docker image pinned and centralized via YAML anchor.
+        image: &playwright_docker_image mcr.microsoft.com/playwright:v1.58.2-noble
         caches:
           - npm
         script:
@@ -137,7 +138,7 @@ definitions:
 
     - step: &test-e2e-critical
         name: Test E2E Critical
-        image: mcr.microsoft.com/playwright:v1.58.2-noble
+        image: *playwright_docker_image
         caches:
           - npm
         script:
@@ -150,7 +151,7 @@ definitions:
 
     - step: &test-e2e-regression
         name: Test E2E Regression (Cross-browser)
-        image: mcr.microsoft.com/playwright:v1.58.2-noble
+        image: *playwright_docker_image
         caches:
           - npm
         script:
@@ -163,7 +164,7 @@ definitions:
 
     - step: &test-e2e-prod-smoke
         name: Test E2E Prod Smoke (Manual)
-        image: mcr.microsoft.com/playwright:v1.58.2-noble
+        image: *playwright_docker_image
         deployment: production
         caches:
           - npm
