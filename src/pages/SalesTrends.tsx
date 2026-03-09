@@ -4,7 +4,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useTheme } from '@/components/theme-provider';
-import { Search, BarChart3, Filter, Target, DollarSign, Users, Clock, TrendingUp, TrendingDown, Bookmark, Mail, Phone, MapPin, LineChart, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
+import { Search, BarChart3, Filter, Target, DollarSign, Users, Clock, TrendingUp, TrendingDown, Bookmark, LineChart, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip, Legend, AreaChart, Area, ComposedChart, Line } from 'recharts';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
@@ -14,7 +14,7 @@ import { useTenantStore } from '@/stores/tenantStore';
 import { useAuth } from '@/contexts/AuthContext';
 import { TopTieringLayout } from '@/components/layout/TopTieringLayout';
 import { TopTieringTopBar } from '@/components/layout/TopTieringTopBar';
-import { DatePeriodPicker, type PeriodSelection, type PeriodPreset } from '@/components/ui/DatePeriodPicker';
+import { DatePeriodPicker, type PeriodSelection, type PeriodPreset, computePresetDateRange } from '@/components/ui/DatePeriodPicker';
 
 type DateRange = '3-months' | '6-months';
 
@@ -159,6 +159,15 @@ const SalesTrends = () => {
       setStCustomDateRange(undefined);
     }
   }, []);
+
+  // Drive picker from current date range so selection is visible immediately (including initial load / while data loads)
+  const salesTrendsPeriodSelection: PeriodSelection | null = useMemo(() => {
+    if (stCustomDateRange) {
+      return { type: 'custom', dateRange: stCustomDateRange };
+    }
+    const preset: PeriodPreset = dateRange === '6-months' ? 'rolling-6' : 'rolling-3';
+    return { type: 'preset', preset, dateRange: computePresetDateRange(preset) };
+  }, [dateRange, stCustomDateRange]);
 
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     const saved = localStorage.getItem('sales-trends-viewMode');
@@ -400,10 +409,14 @@ const SalesTrends = () => {
                       presets={['rolling-3', 'rolling-6']}
                       showYears={false}
                       onPeriodChange={handleSalesTrendsPeriodChange}
+                      periodSelectionFromStore={salesTrendsPeriodSelection}
                       defaultPreset="rolling-3"
                       showLabel={false}
                       size="sm"
                     />
+                    {loading && (
+                      <Loader2 className="h-4 w-4 animate-spin text-slate-400 dark:text-slate-500 flex-shrink-0" aria-hidden />
+                    )}
 
                     <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)} className="w-full sm:w-auto">
                       <TabsList className={`grid w-full sm:w-auto grid-cols-2 h-9 sm:h-10 ${isDarkMode ? 'bg-slate-900/60 border border-slate-700/50' : 'bg-slate-100/80 border border-slate-300/40'}`}>
@@ -589,8 +602,11 @@ const SalesTrends = () => {
                       <XAxis dataKey="month" stroke={isDarkMode ? '#94a3b8' : '#64748b'} tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={60} />
                       <YAxis stroke={isDarkMode ? '#94a3b8' : '#64748b'} tick={{ fontSize: 11 }} label={{ value: 'Units', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: '11px' } }} />
                       <Tooltip contentStyle={{ backgroundColor: isDarkMode ? '#1e293b' : '#ffffff', border: `1px solid ${isDarkMode ? '#475569' : '#e2e8f0'}`, borderRadius: '8px', color: isDarkMode ? '#f1f5f9' : '#1e293b' }} formatter={(value: number, name: string) => { if (name === 'units') return [value, 'Units']; if (name === 'volume') return [formatCurrency(value), 'Volume']; return [value, name]; }} />
-                      <Bar dataKey="units" radius={[4, 4, 0, 0]} fill={monthlyPerformance[monthlyPerformance.length - 1]?.month === '2026-Jan' ? '#10b981' : '#64748b'}>
-                        {monthlyPerformance.map((entry, index) => (<Cell key={`cell-${index}`} fill={entry.month === '2026-Jan' ? '#10b981' : '#64748b'} />))}
+                      <Bar dataKey="units" radius={[4, 4, 0, 0]} fill="#64748b">
+                        {monthlyPerformance.map((entry, index) => {
+                          const isLatestMonth = index === monthlyPerformance.length - 1;
+                          return <Cell key={`cell-${index}`} fill={isLatestMonth ? '#10b981' : '#64748b'} />;
+                        })}
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>
@@ -644,74 +660,59 @@ const SalesTrends = () => {
                     <Button variant="outline" size="sm" className="gap-2 w-full sm:w-auto flex-shrink-0" onClick={() => {}}><Bookmark className="h-4 w-4" /><span className="hidden sm:inline">Save</span></Button>
                   </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6">
+                  <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 mb-6">
                     <Card className={`${isDarkMode ? 'bg-green-500/10 border-green-500/20' : 'bg-green-50 border-green-100'}`}>
                       <CardContent className="pt-4 sm:pt-6">
-                        <div className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-slate-100 mb-1">{drilldownData.totalClosed}</div>
+                        <div className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100 mb-1">{drilldownData.totalClosed}</div>
                         <div className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 uppercase">Total Closed</div>
                       </CardContent>
                     </Card>
                     <Card className={`${isDarkMode ? 'bg-blue-500/10 border-blue-500/20' : 'bg-blue-50 border-blue-100'}`}>
                       <CardContent className="pt-4 sm:pt-6">
-                        <div className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-slate-100 mb-1">{formatCurrency(drilldownData.totalVolume)}</div>
+                        <div className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100 mb-1">{formatCurrency(drilldownData.totalVolume)}</div>
                         <div className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 uppercase">Total Volume</div>
                       </CardContent>
                     </Card>
                     <Card className={`${isDarkMode ? 'bg-yellow-500/10 border-yellow-500/20' : 'bg-yellow-50 border-yellow-100'}`}>
                       <CardContent className="pt-4 sm:pt-6">
-                        <div className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-slate-100 mb-1">{drilldownData.avgMargin} BPS</div>
+                        <div className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100 mb-1">{drilldownData.avgMargin} BPS</div>
                         <div className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 uppercase">Avg Margin</div>
                       </CardContent>
                     </Card>
                     <Card className={`${isDarkMode ? 'bg-purple-500/10 border-purple-500/20' : 'bg-purple-50 border-purple-100'}`}>
                       <CardContent className="pt-4 sm:pt-6">
-                        <div className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-slate-100 mb-1">{drilldownData.turnTime} days</div>
+                        <div className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100 mb-1">{drilldownData.turnTime} days</div>
                         <div className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 uppercase">Turn Time</div>
+                      </CardContent>
+                    </Card>
+                    <Card className={`${isDarkMode ? 'bg-orange-500/10 border-orange-500/20' : 'bg-orange-50 border-orange-100'}`}>
+                      <CardContent className="pt-4 sm:pt-6">
+                        <div className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100 mb-1">#{drilldownData.branchRank}</div>
+                        <div className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 uppercase">of {drilldownData.branchTotal} in branch</div>
                       </CardContent>
                     </Card>
                   </div>
 
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-                    <div className="lg:col-span-2">
-                      <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70' : 'border-blue-200/40 bg-white'}`}>
-                        <CardHeader><CardTitle className="text-base sm:text-lg">Performance Trend</CardTitle></CardHeader>
-                        <CardContent>
-                          <div className="h-64 sm:h-72 lg:h-80">
-                            <ResponsiveContainer width="100%" height="100%">
-                              <ComposedChart data={drilldownData.performanceTrend} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#475569' : '#e2e8f0'} />
-                                <XAxis dataKey="month" stroke={isDarkMode ? '#94a3b8' : '#64748b'} tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={60} />
-                                <YAxis yAxisId="left" stroke={isDarkMode ? '#94a3b8' : '#64748b'} tick={{ fontSize: 10 }} width={50} label={{ value: 'Closed Units', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: '10px' } }} />
-                                <YAxis yAxisId="right" orientation="right" stroke={isDarkMode ? '#94a3b8' : '#64748b'} tick={{ fontSize: 10 }} width={50} label={{ value: 'Margin BPS', angle: 90, position: 'insideRight', style: { textAnchor: 'middle', fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: '10px' } }} />
-                                <Tooltip contentStyle={{ backgroundColor: isDarkMode ? '#1e293b' : '#ffffff', border: `1px solid ${isDarkMode ? '#475569' : '#e2e8f0'}`, borderRadius: '8px', color: isDarkMode ? '#f1f5f9' : '#1e293b' }} />
-                                <Legend />
-                                <Bar yAxisId="left" dataKey="closedUnits" fill="#10b981" radius={[4, 4, 0, 0]} name="Closed Units" />
-                                <Line yAxisId="right" type="monotone" dataKey="marginBPS" stroke="#f97316" strokeWidth={2} dot={{ fill: '#f97316', r: 4 }} name="Margin BPS" />
-                              </ComposedChart>
-                            </ResponsiveContainer>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </div>
-
-                    <div className="space-y-4">
-                      <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70' : 'border-blue-200/40 bg-white'}`}>
-                        <CardHeader><CardTitle className="text-sm font-semibold uppercase">Contact</CardTitle></CardHeader>
-                        <CardContent className="space-y-3">
-                          <div className="flex items-start gap-3"><Mail className="h-4 w-4 text-slate-500 dark:text-slate-400 flex-shrink-0 mt-0.5" /><span className="text-xs sm:text-sm text-slate-700 dark:text-slate-300 break-all">{drilldownData.contact.email}</span></div>
-                          <div className="flex items-center gap-3"><Phone className="h-4 w-4 text-slate-500 dark:text-slate-400 flex-shrink-0" /><span className="text-xs sm:text-sm text-slate-700 dark:text-slate-300">{drilldownData.contact.phone}</span></div>
-                          <div className="flex items-center gap-3"><MapPin className="h-4 w-4 text-slate-500 dark:text-slate-400 flex-shrink-0" /><span className="text-xs sm:text-sm text-slate-700 dark:text-slate-300">{drilldownData.contact.location}</span></div>
-                        </CardContent>
-                      </Card>
-
-                      <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70' : 'border-blue-200/40 bg-white'}`}>
-                        <CardHeader><CardTitle className="text-sm font-semibold uppercase">Branch Rank</CardTitle></CardHeader>
-                        <CardContent>
-                          <div className="text-4xl font-bold text-orange-600 dark:text-orange-400 mb-2">#{drilldownData.branchRank}</div>
-                          <div className="text-sm text-slate-600 dark:text-slate-400">of {drilldownData.branchTotal} in branch</div>
-                        </CardContent>
-                      </Card>
-                    </div>
+                  <div className="mb-6">
+                    <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70' : 'border-blue-200/40 bg-white'}`}>
+                      <CardHeader><CardTitle className="text-base sm:text-lg">Performance Trend</CardTitle></CardHeader>
+                      <CardContent>
+                        <div className="h-72 sm:h-80 lg:h-96">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <ComposedChart data={drilldownData.performanceTrend} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#475569' : '#e2e8f0'} />
+                              <XAxis dataKey="month" stroke={isDarkMode ? '#94a3b8' : '#64748b'} tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={60} />
+                              <YAxis yAxisId="left" stroke={isDarkMode ? '#94a3b8' : '#64748b'} tick={{ fontSize: 10 }} width={50} label={{ value: 'Closed Units', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: '10px' } }} />
+                              <YAxis yAxisId="right" orientation="right" stroke={isDarkMode ? '#94a3b8' : '#64748b'} tick={{ fontSize: 10 }} width={50} label={{ value: 'Margin BPS', angle: 90, position: 'insideRight', style: { textAnchor: 'middle', fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: '10px' } }} />
+                              <Tooltip contentStyle={{ backgroundColor: isDarkMode ? '#1e293b' : '#ffffff', border: `1px solid ${isDarkMode ? '#475569' : '#e2e8f0'}`, borderRadius: '8px', color: isDarkMode ? '#f1f5f9' : '#1e293b' }} />
+                              <Legend />
+                              <Bar yAxisId="left" dataKey="closedUnits" fill="#10b981" radius={[4, 4, 0, 0]} name="Closed Units" />
+                              <Line yAxisId="right" type="monotone" dataKey="marginBPS" stroke="#f97316" strokeWidth={2} dot={{ fill: '#f97316', r: 4 }} name="Margin BPS" />
+                            </ComposedChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </CardContent>
+                    </Card>
                   </div>
 
                   <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70' : 'border-blue-200/40 bg-white'}`}>
