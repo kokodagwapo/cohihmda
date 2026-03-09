@@ -178,10 +178,18 @@ export function WorkflowConversionView({
   });
 
   const updateSegment = useCallback((index: number, field: "from" | "to", value: string) => {
-    setSegments((prev) =>
-      prev.map((s, i) => (i === index ? { ...s, [field]: value } : s))
-    );
-  }, []);
+    setSegments((prev) => {
+      const next = prev.map((s, i) => (i === index ? { ...s, [field]: value } : s));
+      if (grouping !== "workflow") return next;
+      // In workflow mode, keep the chain in sync: segment[i].to === segment[i+1].from
+      if (field === "to" && index + 1 < next.length) {
+        next[index + 1] = { ...next[index + 1], from: value };
+      } else if (field === "from" && index > 0) {
+        next[index - 1] = { ...next[index - 1], to: value };
+      }
+      return next;
+    });
+  }, [grouping]);
 
   const resetToDefault = useCallback(() => {
     setSegments([...DEFAULT_WORKFLOW_SEGMENTS]);
