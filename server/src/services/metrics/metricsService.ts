@@ -2815,6 +2815,245 @@ export async function queryCreditRiskStory(
   };
 }
 
+/** Loan row shape for credit risk drilldown modal (matches frontend Loan interface) */
+export interface CreditRiskDrilldownLoan {
+  id: string;
+  loan_number?: string | null;
+  borrower: string;
+  officer: string;
+  amount: string;
+  amountValue: number;
+  riskLevel: string;
+  riskScore: number;
+  reason: string;
+  loanType?: string;
+  loanPurpose?: string | null;
+  channel?: string | null;
+  status?: string;
+  currentMilestone?: string | null;
+  applicationDate?: string | null;
+  estimatedClosingDate?: string | null;
+  closingDate?: string | null;
+  ficoScore: number | null;
+  ltvRatio: number | null;
+  dtiRatio: number | null;
+  /** From loan_predictions.loan_data when available */
+  loPullthroughPct?: number | null;
+  activeDays?: number | null;
+}
+
+/**
+ * Build WHERE fragment for credit risk drilldown by range (FICO/LTV/DTI) or category (loan_type/loan_purpose/occupancy_type).
+ * Matches the same bucket logic as queryFicoDistribution, queryLtvDistribution, queryDtiDistribution, and queryLoanMix.
+ */
+function buildCreditRiskDrilldownFilter(
+  filterType: string,
+  filterValue: string,
+  paramOffset: number
+): { clause: string; params: any[] } {
+  const params: any[] = [];
+  let clause = "";
+
+  if (filterType === "fico") {
+    // FICO buckets: 800-850, 750-799, 680-749, 620-679, 580-619, <580, Missing/Invalid
+    if (filterValue === "<580") {
+      clause = "AND (l.fico_score IS NOT NULL AND l.fico_score >= 350 AND l.fico_score < 580)";
+    } else if (filterValue === "Missing/Invalid") {
+      clause = "AND (l.fico_score IS NULL OR l.fico_score < 350)";
+    } else {
+      const match = filterValue.match(/^(\d+)-(\d+)$/);
+      if (match) {
+        const low = parseInt(match[1], 10);
+        const high = parseInt(match[2], 10);
+        clause = `AND (l.fico_score >= $${paramOffset + 1} AND l.fico_score <= $${paramOffset + 2})`;
+        params.push(low, high);
+      } else {
+        clause = "AND (1=0)";
+      }
+    }
+  } else if (filterType === "ltv") {
+    // LTV buckets: 0.01-60.00, 60.01-75.00, 75.01-80.00, 80.01-90.00, 90.01-100.00, >100, 0-Values
+    if (filterValue === ">100") {
+      clause = "AND (l.ltv_ratio IS NOT NULL AND l.ltv_ratio > 100)";
+    } else if (filterValue === "0-Values") {
+      clause = "AND (l.ltv_ratio IS NULL OR l.ltv_ratio <= 0)";
+    } else {
+      const match = filterValue.match(/^([\d.]+)-([\d.]+)$/);
+      if (match) {
+        const low = parseFloat(match[1]);
+        const high = parseFloat(match[2]);
+        clause = `AND (l.ltv_ratio IS NOT NULL AND l.ltv_ratio > $${paramOffset + 1} AND l.ltv_ratio <= $${paramOffset + 2})`;
+        params.push(low, high);
+      } else {
+        clause = "AND (1=0)";
+      }
+    }
+  } else if (filterType === "dti") {
+    // DTI buckets: 0.01-28.00, 28.01-36.00, 36.01-43.00, 43.01-50.00, >50.00, Values<=0
+    if (filterValue === ">50.00") {
+      clause = "AND (l.be_dti_ratio IS NOT NULL AND l.be_dti_ratio > 50)";
+    } else if (filterValue === "Values<=0") {
+      clause = "AND (l.be_dti_ratio IS NULL OR l.be_dti_ratio <= 0)";
+    } else {
+      const match = filterValue.match(/^([\d.]+)-([\d.]+)$/);
+      if (match) {
+        const low = parseFloat(match[1]);
+        const high = parseFloat(match[2]);
+        clause = `AND (l.be_dti_ratio IS NOT NULL AND l.be_dti_ratio > $${paramOffset + 1} AND l.be_dti_ratio <= $${paramOffset + 2})`;
+        params.push(low, high);
+      } else {
+        clause = "AND (1=0)";
+      }
+    }
+  } else if (
+    filterType === "loan_type" ||
+    filterType === "loan_purpose" ||
+    filterType === "occupancy_type"
+  ) {
+    const col = filterType;
+    if (filterValue === "Other") {
+      clause = `AND (l.${col} IS NULL OR NULLIF(TRIM(l.${col}::text), '') IS NULL)`;
+    } else {
+      clause = `AND (COALESCE(NULLIF(TRIM(l.${col}::text), ''), 'Other') = $${paramOffset + 1})`;
+      params.push(filterValue);
+    }
+  } else {
+    clause = "AND (1=0)";
+  }
+
+  return { clause, params };
+}
+
+/**
+ * Query loans for credit risk drilldown modal: same filters as credit-risk endpoint plus one range or category filter.
+ */
+export async function queryCreditRiskDrilldownLoans(
+  tenantPool: pg.Pool,
+  options: MetricQueryOptions & { filterType: string; filterValue: string }
+): Promise<CreditRiskDrilldownLoan[]> {
+  if (options.userAccessFilter?.sql === "FALSE") {
+    return [];
+  }
+
+  const dateField = options.dateField || "application_date";
+  const {
+    userAccessClause,
+    dateRangeClause,
+    additionalFiltersClause,
+    allParams: baseParams,
+  } = buildAllFilterClauses(options, dateField);
+
+  const paramOffset = baseParams.length;
+  const { clause: drilldownClause, params: drilldownParams } =
+    buildCreditRiskDrilldownFilter(
+      options.filterType,
+      options.filterValue,
+      paramOffset
+    );
+  const allParams = [...baseParams, ...drilldownParams];
+
+  const query = `
+    SELECT 
+      COALESCE(l.guid::text, l.loan_id) as id,
+      l.loan_number as loan_number,
+      ('Loan #' || COALESCE(l.loan_number, l.loan_id)) as borrower,
+      COALESCE(NULLIF(TRIM(l.loan_officer), ''), NULLIF(TRIM(l.account_executive), ''), '—') as officer,
+      l.loan_amount as amount_value,
+      l.loan_type,
+      l.loan_purpose,
+      l.channel,
+      l.current_loan_status as status,
+      l.current_milestone,
+      l.application_date as application_date,
+      l.estimated_closing_date as estimated_closing_date,
+      l.closing_date as closing_date,
+      l.fico_score as fico_score,
+      l.ltv_ratio as ltv_ratio,
+      l.be_dti_ratio as dti_ratio,
+      (pred.loan_data->>'loPullthroughPercentage')::numeric as lo_pullthrough_pct,
+      (pred.loan_data->>'activeDays')::int as active_days
+    FROM public.loans l
+    LEFT JOIN LATERAL (
+      SELECT lp.loan_data
+      FROM public.loan_predictions lp
+      WHERE lp.loan_id = l.loan_id
+      ORDER BY lp.created_at DESC
+      LIMIT 1
+    ) pred ON true
+    WHERE 1=1
+      ${userAccessClause}
+      ${dateRangeClause.clause}
+      ${additionalFiltersClause.clause}
+      ${drilldownClause}
+    ORDER BY l.loan_amount DESC NULLS LAST
+    LIMIT 500
+  `;
+
+  const result = await tenantPool.query(query, allParams);
+
+  function riskFromScores(
+    fico: number | null,
+    ltv: number | null,
+    dti: number | null
+  ): { level: string; score: number } {
+    let score = 0;
+    if (fico != null) {
+      if (fico < 580) score += 3;
+      else if (fico < 620) score += 2;
+      else if (fico < 680) score += 1;
+    }
+    if (ltv != null && ltv > 95) score += 2;
+    else if (ltv != null && ltv > 80) score += 1;
+    if (dti != null && dti > 50) score += 2;
+    else if (dti != null && dti > 43) score += 1;
+    if (score >= 4) return { level: "Very High", score: Math.min(score, 10) };
+    if (score >= 2) return { level: "Medium", score: Math.min(score, 10) };
+    return { level: "Low", score: Math.min(score, 10) };
+  }
+
+  return result.rows.map((row: any) => {
+    const fico =
+      row.fico_score != null ? parseFloat(row.fico_score) : null;
+    const ltv = row.ltv_ratio != null ? parseFloat(row.ltv_ratio) : null;
+    const dti = row.dti_ratio != null ? parseFloat(row.dti_ratio) : null;
+    const amountValue = parseFloat(row.amount_value) || 0;
+    const { level, score } = riskFromScores(fico, ltv, dti);
+    const amountStr =
+      amountValue >= 0
+        ? new Intl.NumberFormat("en-US", {
+            style: "currency",
+            currency: "USD",
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 0,
+          }).format(amountValue)
+        : "—";
+    return {
+      id: row.id || row.loan_id || "",
+      loan_number: row.loan_number != null ? String(row.loan_number).trim() || null : null,
+      borrower: row.borrower || "—",
+      officer: row.officer || "—",
+      amount: amountStr,
+      amountValue,
+      riskLevel: level,
+      riskScore: score,
+      reason: "",
+      loanType: row.loan_type || undefined,
+      loanPurpose: row.loan_purpose != null ? String(row.loan_purpose).trim() || null : null,
+      channel: row.channel != null ? String(row.channel).trim() || null : null,
+      status: row.status || undefined,
+      currentMilestone: row.current_milestone != null ? String(row.current_milestone).trim() || null : null,
+      applicationDate: row.application_date != null ? (typeof row.application_date === 'string' ? row.application_date : row.application_date?.toISOString?.()?.slice(0, 10)) : null,
+      estimatedClosingDate: row.estimated_closing_date != null ? (typeof row.estimated_closing_date === 'string' ? row.estimated_closing_date : row.estimated_closing_date?.toISOString?.()?.slice(0, 10)) : null,
+      closingDate: row.closing_date != null ? (typeof row.closing_date === 'string' ? row.closing_date : row.closing_date?.toISOString?.()?.slice(0, 10)) : null,
+      ficoScore: fico,
+      ltvRatio: ltv,
+      dtiRatio: dti,
+      loPullthroughPct: row.lo_pullthrough_pct != null && !Number.isNaN(Number(row.lo_pullthrough_pct)) ? Number(row.lo_pullthrough_pct) : null,
+      activeDays: row.active_days != null && Number.isInteger(Number(row.active_days)) ? Number(row.active_days) : null,
+    };
+  });
+}
+
 // ============================================================================
 // Scorecard Actor-Grouped Queries
 // ============================================================================

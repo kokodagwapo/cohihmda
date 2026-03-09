@@ -24,6 +24,7 @@ export interface LoanCardContentLoan {
   activeDays?: number | null;
   applicationDate?: string | null;
   estimatedClosingDate?: string | null;
+  closingDate?: string | null;
   interestRate?: number | null;
   marketRate?: number | null;
   lockMarketRate?: number | null;
@@ -110,6 +111,8 @@ interface LoanCardContentProps {
   isFavorited?: boolean;
   onToggleFavorite?: (e: React.MouseEvent) => void;
   showFavoriteButton?: boolean;
+  /** When true, hide the risk score line and the LOW/CRITICAL/IMPORTANT label (e.g. credit risk drilldown modal) */
+  hideRiskScoreAndLabel?: boolean;
 }
 
 export const LoanCardContent = memo(
@@ -124,6 +127,7 @@ export const LoanCardContent = memo(
     isFavorited,
     onToggleFavorite,
     showFavoriteButton,
+    hideRiskScoreAndLabel = false,
   }: LoanCardContentProps) => {
     const [aiRecommendations, setAiRecommendations] = useState<string[] | null>(
       null
@@ -357,26 +361,9 @@ export const LoanCardContent = memo(
             </div>
             <div className="flex flex-col items-end gap-0.5 mt-0.5">
               {(() => {
-                const ecdRaw = loan.estimatedClosingDate;
-                const isPastEcd =
-                  ecdRaw != null &&
-                  ecdRaw !== "" &&
-                  (() => {
-                    try {
-                      const ecd = new Date(ecdRaw);
-                      if (Number.isNaN(ecd.getTime())) return false;
-                      const today = new Date();
-                      today.setHours(0, 0, 0, 0);
-                      ecd.setHours(0, 0, 0, 0);
-                      return today > ecd;
-                    } catch {
-                      return false;
-                    }
-                  })();
                 const showBadge =
                   (loan.riskSummary?.predictedOutcome &&
                     loan.riskSummary.predictedOutcome !== "originate") ||
-                  isPastEcd ||
                   (loan.riskSummary?.predictedOutcome === "originate" &&
                     loan.closeLateRisk === true);
                 if (!showBadge) return null;
@@ -386,8 +373,6 @@ export const LoanCardContent = memo(
                   ? "⚠ Likely Decline"
                   : isWithdraw
                   ? "↩ Likely Withdraw"
-                  : isPastEcd
-                  ? "📅 Past Est. Closing"
                   : loan.closeLateRisk === true
                   ? "⏱ Likely Close Late"
                   : "⚡ At Risk";
@@ -399,10 +384,6 @@ export const LoanCardContent = memo(
                   ? isDarkMode
                     ? "bg-orange-500/30 text-orange-300"
                     : "bg-orange-100 text-orange-700"
-                  : isPastEcd
-                  ? isDarkMode
-                    ? "bg-orange-600/30 text-orange-200"
-                    : "bg-orange-200 text-orange-800"
                   : loan.closeLateRisk === true
                   ? isDarkMode
                     ? "bg-amber-500/30 text-amber-300"
@@ -418,6 +399,7 @@ export const LoanCardContent = memo(
                   </span>
                 );
               })()}
+              {!hideRiskScoreAndLabel && (
               <span
                 className={`text-[9px] sm:text-[10px] font-medium px-1.5 sm:px-2 py-0.5 rounded inline-block ${
                   (loan.riskScore ?? 0) >= 75
@@ -439,9 +421,11 @@ export const LoanCardContent = memo(
                   ? "IMPORTANT"
                   : "LOW"}
               </span>
+              )}
             </div>
           </div>
         </div>
+        {!hideRiskScoreAndLabel && (
         <div className="flex items-center justify-between text-[11px] sm:text-[12px] mb-2">
           <div
             className={`flex items-center gap-1.5 ${
@@ -470,6 +454,7 @@ export const LoanCardContent = memo(
             </span>
           </div>
         </div>
+        )}
         {hasAnySignal && (
           <div className="mb-3 pt-2.5 pb-2 border-t border-transparent">
             <p
@@ -519,6 +504,7 @@ export const LoanCardContent = memo(
             applicationDate={loan.applicationDate}
             currentMilestone={loan.currentMilestone}
             estimatedClosingDate={loan.estimatedClosingDate}
+            closingDate={loan.closingDate}
             loPullthroughPct={loan.loPullthroughPct}
             interestRate={loan.interestRate}
             marketRate={loan.marketRate}

@@ -24,6 +24,7 @@ import {
   queryLockExpirationDistribution,
   queryLoanMix,
   queryCreditRiskStory,
+  queryCreditRiskDrilldownLoans,
   DistributionBucket,
   ExtendedDistributionBucket,
   LoanMixRow,
@@ -656,6 +657,90 @@ router.post(
       res
         .status(500)
         .json({ error: error.message || "Failed to query credit risk data" });
+    }
+  }
+);
+
+/**
+ * POST /api/metrics/credit-risk/loans
+ * Returns loan list for credit risk drilldown modal (FICO/LTV/DTI range or loan mix category).
+ * Body: { applicationType?, dateRange?, year?, channel?, filterType, filterValue }
+ * filterType: 'fico' | 'ltv' | 'dti' | 'loan_type' | 'loan_purpose' | 'occupancy_type'
+ * filterValue: range string (e.g. '75.01-80.00') or category (e.g. 'Conventional')
+ */
+router.post(
+  "/credit-risk/loans",
+  authenticateToken,
+  attachTenantContext,
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const {
+        applicationType,
+        dateRange: dateRangeBody,
+        year,
+        channel,
+        filterType,
+        filterValue,
+      } = req.body;
+
+      if (!filterType || filterValue == null) {
+        return res.status(400).json({
+          error: "filterType and filterValue are required",
+        });
+      }
+
+      const tenantPool = getTenantContext(req).tenantPool;
+      const accessCtx = await getLoanAccessContext(req, tenantPool);
+      if (accessCtx.hasNoAccess) {
+        return res.json({ loans: [] });
+      }
+
+      let effectiveDateField = "application_date";
+      const effectiveFilters: Record<string, any> = {};
+      if (channel && channel !== "All") {
+        effectiveFilters.consolidated_channel = channel;
+      }
+
+      if (applicationType === "Funded Production") {
+        effectiveDateField = "funding_date";
+      } else if (applicationType === "Lost Opportunities") {
+        effectiveDateField = "any_date";
+        effectiveFilters.withdrawn_filter = true;
+      } else if (applicationType === "All Loans") {
+        effectiveDateField = "started_date";
+      }
+
+      const parsedDateRange = dateRangeBody
+        ? {
+            start: dateRangeBody.start || null,
+            end: dateRangeBody.end || null,
+          }
+        : year
+          ? { start: `${year}-01-01`, end: `${year}-12-31` }
+          : undefined;
+
+      const options = {
+        dateRange: parsedDateRange,
+        dateField: effectiveDateField,
+        additionalFilters: effectiveFilters,
+        userAccessFilter: accessCtx.getFilter("l"),
+        filterType:
+          filterType === "occupancy" ? "occupancy_type" : String(filterType),
+        filterValue: String(filterValue),
+      };
+
+      const loans = await queryCreditRiskDrilldownLoans(tenantPool, options);
+      res.json({ loans });
+    } catch (error: any) {
+      console.error(
+        "[Metrics] Error querying credit risk drilldown loans:",
+        error
+      );
+      res.status(500).json({
+        error:
+          error.message || "Failed to query credit risk drilldown loans",
+      });
     }
   }
 );
