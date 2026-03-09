@@ -22,6 +22,8 @@ import {
 import {
   getFieldCategoryInfo,
   getAllCategories,
+  getFieldCriticality,
+  isCriticalDashboardField,
   inferFieldDataType,
   FIELD_CATEGORIES,
   type FieldCategory,
@@ -588,6 +590,7 @@ router.get(
       const mappings = aliases.map((alias) => {
         const fieldId = getDefaultFieldId(alias);
         const categoryInfo = getFieldCategoryInfo(alias);
+        const criticality = getFieldCriticality(alias);
         const fieldType = inferFieldDataType(alias, fieldId || "");
 
         return {
@@ -602,16 +605,30 @@ router.get(
           category: categoryInfo.category,
           categoryLabel: categoryInfo.label,
           categoryOrder: categoryInfo.order,
+          criticality,
+          isCritical: isCriticalDashboardField(alias),
           fieldType,
         };
       });
 
       // Also return categories for UI
       const categories = getAllCategories();
+      const criticalCounts = mappings.reduce(
+        (acc, m) => {
+          if (m.isCritical) {
+            acc.critical += 1;
+          } else {
+            acc.nonCritical += 1;
+          }
+          return acc;
+        },
+        { critical: 0, nonCritical: 0 }
+      );
 
       res.json({
         mappings,
         categories,
+        criticalCounts,
       });
     } catch (error: any) {
       console.error("Error getting field mappings:", error);

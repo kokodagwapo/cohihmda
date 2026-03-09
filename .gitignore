@@ -198,3 +198,4 @@ temp/
 
 # Qlik documentation (large, not needed in repo)
 QlikAppsAndLogicDictionaryDocs/
+scripts/deploy/config.ps1

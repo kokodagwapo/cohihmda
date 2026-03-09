@@ -18,6 +18,7 @@ export interface FieldMappingDefinition {
   alias: string;
   description?: string;
   category?: FieldCategory;
+  criticality?: FieldCriticality;
 }
 
 // ============================================================================
@@ -41,6 +42,13 @@ export type FieldCategory =
   | "heloc"
   | "compliance"
   | "fees";
+
+/**
+ * Field criticality classification:
+ * - critical_dashboard: required by core dashboard/scorecard/pipeline experiences
+ * - non_critical: kept for research/insights or optional use cases
+ */
+export type FieldCriticality = "critical_dashboard" | "non_critical";
 
 /**
  * Category metadata with labels and descriptions for UI display
@@ -759,6 +767,58 @@ export const DEFAULT_ENCOMPASS_FIELD_MAPPINGS: Record<string, string> = {
 };
 
 /**
+ * Default mapping aliases that are actively used by core dashboard experiences.
+ * These should be treated as highest priority in onboarding, mapping QA, and
+ * tenant validation.
+ *
+ * NOTE:
+ * - This list intentionally focuses on aliases present in DEFAULT_ENCOMPASS_FIELD_MAPPINGS.
+ * - Some dashboard-critical columns (e.g. lender_credits, line_800_* fields) come from
+ *   additional field ingestion and are tracked outside this default alias dictionary.
+ */
+export const CRITICAL_DASHBOARD_FIELD_ALIASES = [
+  "Application Date",
+  "BE DTI Ratio",
+  "Branch",
+  "Broker Lender Name",
+  "CD Lender Credits",
+  "Channel",
+  "Closer",
+  "Closing Date",
+  "Credit Pull Date",
+  "Current Loan Status",
+  "Current Status Date",
+  "FICO Score",
+  "Funding Date",
+  "Interest Rate",
+  "Investor",
+  "Is Archived",
+  "Loan Amount",
+  "Loan Number",
+  "Loan Officer",
+  "Loan Program",
+  "Loan Purpose",
+  "Loan Term",
+  "Loan Type",
+  "Lock Date",
+  "Lock Expiration Date",
+  "LTV Ratio",
+  "PA Payout 1",
+  "PA Payout 2",
+  "PA Payout 3",
+  "PA Sell Amt",
+  "Processor",
+  "Started Date",
+  "Submitted To Processing Date",
+  "Submitted To Underwriting Date",
+  "Underwriter",
+] as const;
+
+const CRITICAL_DASHBOARD_FIELD_ALIAS_SET = new Set<string>(
+  CRITICAL_DASHBOARD_FIELD_ALIASES
+);
+
+/**
  * Get all Coheus aliases
  */
 export function getAllCoheusAliases(): string[] {
@@ -799,6 +859,36 @@ export function getAllMappingsAsArray(): Array<{
       fieldId,
     })
   );
+}
+
+/**
+ * Get field criticality for a Coheus alias.
+ */
+export function getFieldCriticality(alias: string): FieldCriticality {
+  return CRITICAL_DASHBOARD_FIELD_ALIAS_SET.has(alias)
+    ? "critical_dashboard"
+    : "non_critical";
+}
+
+/**
+ * Check whether an alias is critical for core dashboard experiences.
+ */
+export function isCriticalDashboardField(alias: string): boolean {
+  return getFieldCriticality(alias) === "critical_dashboard";
+}
+
+/**
+ * Get all aliases classified as critical dashboard fields.
+ */
+export function getCriticalDashboardFieldAliases(): string[] {
+  return [...CRITICAL_DASHBOARD_FIELD_ALIASES];
+}
+
+/**
+ * Get count of critical dashboard aliases.
+ */
+export function getCriticalDashboardFieldCount(): number {
+  return CRITICAL_DASHBOARD_FIELD_ALIASES.length;
 }
 
 // ============================================================================
