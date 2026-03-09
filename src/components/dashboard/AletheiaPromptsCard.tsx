@@ -201,20 +201,6 @@ function getInsightChipLabel(insight: AletheiaInsight): string {
     return SOURCE_CHIP_LABELS[source];
   }
 
-  const headline = (insight.headline || insight.message || "").toLowerCase();
-  if (/(closing risk|ctc|clear to close|trid|cd sent|lock exp)/.test(headline)) {
-    return "Closing Risk";
-  }
-  if (/(pipeline|active loans)/.test(headline)) {
-    return "Pipeline";
-  }
-  if (/(loan officer|top performers?|officer performance| lo )/.test(headline)) {
-    return "Loan Officer Performance";
-  }
-  if (/(pull-through|conversion|fallout)/.test(headline)) {
-    return "Conversion";
-  }
-
   if (source) {
     return toTitleCase(source);
   }
