@@ -59,6 +59,23 @@ type UpsertEntryInput = {
   sortOrder?: number;
 };
 
+type ReleaseNoteImportItem = {
+  version?: unknown;
+  title?: unknown;
+  isDraft?: unknown;
+  is_draft?: unknown;
+  publishedAt?: unknown;
+  published_at?: unknown;
+  emailSentAt?: unknown;
+  email_sent_at?: unknown;
+  entries?: unknown;
+};
+
+type ReleaseNotesImportOptions = {
+  overwriteAll: boolean;
+  replaceMatching: boolean;
+};
+
 function isNonNull<T>(value: T | null): value is T {
   return value !== null;
 }
@@ -84,6 +101,63 @@ function normalizeEntries(raw: unknown): UpsertEntryInput[] {
         linkLabel: item.linkLabel ? String(item.linkLabel).trim() : null,
         sortOrder:
           typeof item.sortOrder === "number" ? item.sortOrder : Number(idx),
+      };
+    })
+    .filter(isNonNull);
+}
+
+function normalizeImportOptions(raw: unknown): ReleaseNotesImportOptions {
+  const options = (raw || {}) as Record<string, unknown>;
+  return {
+    overwriteAll: options.overwriteAll === true,
+    replaceMatching: options.replaceMatching !== false,
+  };
+}
+
+function normalizeImportItems(raw: unknown): Array<{
+  version: string;
+  title: string;
+  isDraft: boolean;
+  publishedAt: string | null;
+  emailSentAt: string | null;
+  entries: UpsertEntryInput[];
+}> {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => {
+      const note = (item || {}) as ReleaseNoteImportItem;
+      const version = String(note.version || "").trim();
+      const title = String(note.title || "").trim();
+      if (!version || !title) return null;
+
+      const entries = normalizeEntries(note.entries);
+      if (entries.length === 0) return null;
+
+      const isDraftRaw =
+        typeof note.isDraft === "boolean"
+          ? note.isDraft
+          : typeof note.is_draft === "boolean"
+            ? note.is_draft
+            : true;
+      const publishedAtRaw =
+        (note.publishedAt as string | null | undefined) ??
+        (note.published_at as string | null | undefined) ??
+        null;
+      const emailSentAtRaw =
+        (note.emailSentAt as string | null | undefined) ??
+        (note.email_sent_at as string | null | undefined) ??
+        null;
+
+      const publishedAt = publishedAtRaw ? String(publishedAtRaw) : null;
+      const emailSentAt = emailSentAtRaw ? String(emailSentAtRaw) : null;
+
+      return {
+        version,
+        title,
+        isDraft: isDraftRaw,
+        publishedAt,
+        emailSentAt,
+        entries,
       };
     })
     .filter(isNonNull);
@@ -120,6 +194,167 @@ function toReleaseNoteEmailPayload(
     })),
   };
 }
+
+router.get(
+  "/export",
+  authenticateToken,
+  requirePlatformAdmin,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const notesResult = await managementPool.query(
+        `SELECT id, version, title, is_draft, published_at, email_sent_at, created_by, created_at, updated_at
+         FROM release_notes
+         ORDER BY COALESCE(published_at, created_at) DESC`,
+      );
+
+      const notes = [];
+      for (const row of notesResult.rows as NoteRow[]) {
+        const entries = await getEntriesByNoteId(row.id);
+        notes.push({
+          version: row.version,
+          title: row.title,
+          isDraft: row.is_draft,
+          publishedAt: row.published_at,
+          emailSentAt: row.email_sent_at,
+          entries: entries.map((entry) => ({
+            title: entry.title,
+            description: entry.description,
+            category: entry.category,
+            link: entry.link,
+            linkLabel: entry.link_label,
+            sortOrder: entry.sort_order,
+          })),
+        });
+      }
+
+      return res.json({
+        version: "1.0",
+        exportedAt: new Date().toISOString(),
+        exportedBy: req.userEmail || req.userId || "unknown",
+        notes,
+      });
+    } catch (error: any) {
+      console.error("[ReleaseNotesAdmin] export error:", error);
+      return res.status(500).json({ error: "Failed to export release notes" });
+    }
+  },
+);
+
+router.post(
+  "/import",
+  authenticateToken,
+  requirePlatformAdmin,
+  async (req: AuthRequest, res: Response) => {
+    const client = await managementPool.connect();
+    try {
+      const body = (req.body || {}) as Record<string, unknown>;
+      const importData = (body.importData || body) as Record<string, unknown>;
+      const options = normalizeImportOptions(body.options);
+      const notes = normalizeImportItems(importData.notes);
+
+      if (notes.length === 0) {
+        return res.status(400).json({
+          error:
+            "No valid release notes found in import payload. Each note must include version, title, and at least one entry.",
+        });
+      }
+
+      let imported = 0;
+      let updated = 0;
+      let skipped = 0;
+
+      await client.query("BEGIN");
+
+      if (options.overwriteAll) {
+        await client.query("DELETE FROM release_notes");
+      }
+
+      for (const note of notes) {
+        const existing = await client.query(
+          `SELECT id
+           FROM release_notes
+           WHERE version = $1 AND title = $2
+           LIMIT 1`,
+          [note.version, note.title],
+        );
+
+        let releaseNoteId: string | null = null;
+        if (existing.rows.length > 0) {
+          if (!options.replaceMatching) {
+            skipped += 1;
+            continue;
+          }
+
+          releaseNoteId = String(existing.rows[0].id);
+          await client.query(
+            `UPDATE release_notes
+             SET is_draft = $2,
+                 published_at = $3,
+                 email_sent_at = $4,
+                 updated_at = NOW()
+             WHERE id = $1`,
+            [releaseNoteId, note.isDraft, note.publishedAt, note.emailSentAt],
+          );
+          await client.query(
+            `DELETE FROM release_note_entries
+             WHERE release_note_id = $1`,
+            [releaseNoteId],
+          );
+          updated += 1;
+        } else {
+          const created = await client.query(
+            `INSERT INTO release_notes (version, title, is_draft, published_at, email_sent_at, created_by, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+             RETURNING id`,
+            [
+              note.version,
+              note.title,
+              note.isDraft,
+              note.publishedAt,
+              note.emailSentAt,
+              req.userId || null,
+            ],
+          );
+          releaseNoteId = String(created.rows[0].id);
+          imported += 1;
+        }
+
+        for (const [idx, entry] of note.entries.entries()) {
+          await client.query(
+            `INSERT INTO release_note_entries (release_note_id, title, description, category, link, link_label, sort_order, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), $7, NOW(), NOW())`,
+            [
+              releaseNoteId,
+              entry.title,
+              entry.description,
+              entry.category,
+              entry.link || null,
+              entry.linkLabel || null,
+              entry.sortOrder ?? idx,
+            ],
+          );
+        }
+      }
+
+      await client.query("COMMIT");
+      return res.json({
+        success: true,
+        result: {
+          imported,
+          updated,
+          skipped,
+          totalProcessed: notes.length,
+        },
+      });
+    } catch (error: any) {
+      await client.query("ROLLBACK");
+      console.error("[ReleaseNotesAdmin] import error:", error);
+      return res.status(500).json({ error: "Failed to import release notes" });
+    } finally {
+      client.release();
+    }
+  },
+);
 
 router.get(
   "/",

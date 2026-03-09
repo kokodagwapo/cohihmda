@@ -3,7 +3,7 @@
  * Manage platform-wide API keys and configuration
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef, type ChangeEvent } from "react";
 import {
   Card,
   CardContent,
@@ -27,6 +27,9 @@ import {
   RefreshCw,
   AlertCircle,
   Shield,
+  Download,
+  FileUp,
+  FileText,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
@@ -40,6 +43,7 @@ interface PlatformSetting {
 }
 
 export function PlatformSettingsSection() {
+  const releaseNotesImportRef = useRef<HTMLInputElement | null>(null);
   const [settings, setSettings] = useState<PlatformSetting[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -50,6 +54,7 @@ export function PlatformSettingsSection() {
   const [showValue, setShowValue] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
+  const [releaseNotesBusy, setReleaseNotesBusy] = useState<"import" | "export" | null>(null);
   const [testResults, setTestResults] = useState<
     Record<string, { valid: boolean; message: string }>
   >({});
@@ -180,6 +185,95 @@ export function PlatformSettingsSection() {
     return <Settings className="h-5 w-5 text-slate-500" />;
   };
 
+  const handleReleaseNotesExport = async () => {
+    setReleaseNotesBusy("export");
+    try {
+      const result = await api.request<{
+        version: string;
+        exportedAt: string;
+        exportedBy: string;
+        notes: unknown[];
+      }>("/api/admin/release-notes/export");
+
+      const json = JSON.stringify(result, null, 2);
+      const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `release-notes-export-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+
+      toast({
+        title: "Export complete",
+        description: `Downloaded ${result.notes?.length || 0} release notes.`,
+      });
+    } catch (err: any) {
+      toast({
+        title: "Error",
+        description: err.message || "Failed to export release notes",
+        variant: "destructive",
+      });
+    } finally {
+      setReleaseNotesBusy(null);
+    }
+  };
+
+  const triggerReleaseNotesImport = () => {
+    releaseNotesImportRef.current?.click();
+  };
+
+  const handleReleaseNotesImport = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setReleaseNotesBusy("import");
+    try {
+      const content = await file.text();
+      const parsed = JSON.parse(content);
+      const overwriteAll = window.confirm(
+        "Overwrite all existing release notes before import?\n\nSelect OK for full replace, Cancel to merge and replace matching version+title entries only.",
+      );
+
+      const response = await api.request<{
+        result?: {
+          imported: number;
+          updated: number;
+          skipped: number;
+          totalProcessed: number;
+        };
+      }>("/api/admin/release-notes/import", {
+        method: "POST",
+        body: JSON.stringify({
+          importData: parsed,
+          options: {
+            overwriteAll,
+            replaceMatching: true,
+          },
+        }),
+      });
+
+      const stats = response.result;
+      toast({
+        title: "Import complete",
+        description: stats
+          ? `Processed ${stats.totalProcessed}. Imported ${stats.imported}, updated ${stats.updated}, skipped ${stats.skipped}.`
+          : "Release notes imported successfully.",
+      });
+    } catch (err: any) {
+      toast({
+        title: "Error",
+        description: err.message || "Failed to import release notes",
+        variant: "destructive",
+      });
+    } finally {
+      setReleaseNotesBusy(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -234,6 +328,57 @@ export function PlatformSettingsSection() {
 
       {/* Settings Cards */}
       <div className="grid gap-4">
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-3">
+              <FileText className="h-5 w-5 text-indigo-500" />
+              <div>
+                <CardTitle className="text-base">Release Notes Transfer</CardTitle>
+                <CardDescription className="text-sm mt-0.5">
+                  Export and import release notes JSON for manual curation and backups.
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <input
+              ref={releaseNotesImportRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(e) => void handleReleaseNotesImport(e)}
+            />
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void handleReleaseNotesExport()}
+                disabled={releaseNotesBusy !== null}
+              >
+                {releaseNotesBusy === "export" ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4 mr-2" />
+                )}
+                Export JSON
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={triggerReleaseNotesImport}
+                disabled={releaseNotesBusy !== null}
+              >
+                {releaseNotesBusy === "import" ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <FileUp className="h-4 w-4 mr-2" />
+                )}
+                Import JSON
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
         {settings.map((setting) => (
           <Card key={setting.setting_key}>
             <CardHeader className="pb-3">
