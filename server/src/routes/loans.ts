@@ -466,39 +466,29 @@ router.get(
       const params: any[] = [];
       let paramIndex = 1;
 
-      // Apply user-level loan access filter (based on role and encompass_user_id mapping)
-      if (req.userId) {
-        const accessFilter = await getUserLoanAccessFilter(
-          req.userId,
-          tenantPool,
-          {
-            loanTableAlias: "", // No alias for simple queries
-            startParamIndex: paramIndex,
-          },
+      // Apply user-level loan access filter (respects JWT role for platform admins)
+      const accessCtx = await getLoanAccessContext(req, tenantPool);
+      if (accessCtx.hasNoAccess) {
+        logDebug(
+          "[Loans] User has no loan access, returning empty result",
+          { userId: req.userId },
         );
-
-        if (accessFilter) {
-          if (accessFilter.sql === "FALSE") {
-            // User has no loan access - return empty result
-            logDebug(
-              "[Loans] User has no loan access, returning empty result",
-              { userId: req.userId },
-            );
-            return res.json({
-              loans: [],
-              total: 0,
-              limit: parseInt(limit as string),
-              offset: parseInt(offset as string),
-            });
-          }
-          conditions.push(accessFilter.sql);
-          params.push(...accessFilter.params);
-          paramIndex += accessFilter.paramOffset;
-          logDebug("[Loans] Applied user loan access filter", {
-            userId: req.userId,
-            filter: accessFilter.sql,
-          });
-        }
+        return res.json({
+          loans: [],
+          total: 0,
+          limit: parseInt(limit as string),
+          offset: parseInt(offset as string),
+        });
+      }
+      const accessFilter = accessCtx.getFilter("", paramIndex);
+      if (accessFilter) {
+        conditions.push(accessFilter.sql);
+        params.push(...accessFilter.params);
+        paramIndex += accessFilter.paramOffset;
+        logDebug("[Loans] Applied user loan access filter", {
+          userId: req.userId,
+          filter: accessFilter.sql,
+        });
       }
 
       // Exclude archived loans by default
@@ -785,27 +775,22 @@ router.get(
       const params: any[] = [];
       let paramIndex = 1;
 
-      if (req.userId) {
-        const accessFilter = await getUserLoanAccessFilter(
-          req.userId,
-          tenantPool,
-          { loanTableAlias: "", startParamIndex: paramIndex },
-        );
-        if (accessFilter) {
-          if (accessFilter.sql === "FALSE") {
-            return res.json({
-              loans: [],
-              total: 0,
-              limit,
-              offset,
-              page: 1,
-              totalPages: 0,
-            });
-          }
-          conditions.push(accessFilter.sql);
-          params.push(...accessFilter.params);
-          paramIndex += accessFilter.paramOffset;
-        }
+      const accessCtx = await getLoanAccessContext(req, tenantPool);
+      if (accessCtx.hasNoAccess) {
+        return res.json({
+          loans: [],
+          total: 0,
+          limit,
+          offset,
+          page: 1,
+          totalPages: 0,
+        });
+      }
+      const accessFilter = accessCtx.getFilter("", paramIndex);
+      if (accessFilter) {
+        conditions.push(accessFilter.sql);
+        params.push(...accessFilter.params);
+        paramIndex += accessFilter.paramOffset;
       }
 
       // Exclude archived loans
