@@ -1141,24 +1141,24 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
     defaultDateField: "closing_date",
   },
 
-  // Closer Turn Time - Days from closing to disbursement
+  // Closer Turn Time - Days from closing to funding
   // Source: scorecard-utils.ts lines 103-124 (OPERATIONS_ACTOR_CONFIGS)
   closer_turn_time: {
     id: "closer_turn_time",
     name: "Closer Turn Time",
     description:
-      "Average days from closing_date to disbursement_date. Used in Operations Scorecard for Closer actors.",
+      "Average days from closing_date to funding_date. Used in Operations Scorecard for Closer actors.",
     category: "turn_time",
-    formula: "AVG(disbursement_date - closing_date)",
+    formula: "AVG(funding_date - closing_date)",
     sqlQuery: `AVG(
       CASE 
-        WHEN l.closing_date IS NOT NULL AND l.disbursement_date IS NOT NULL 
-          AND l.disbursement_date > l.closing_date
-        THEN EXTRACT(EPOCH FROM (l.disbursement_date - l.closing_date)) / 86400
+        WHEN l.closing_date IS NOT NULL AND l.funding_date IS NOT NULL 
+          AND l.funding_date > l.closing_date
+        THEN EXTRACT(EPOCH FROM (l.funding_date - l.closing_date)) / 86400
       END
     )`,
     dependencies: [],
-    defaultDateField: "disbursement_date",
+    defaultDateField: "funding_date",
   },
 
   // Warehouse Days - Days from funding to investor purchase
