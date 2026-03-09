@@ -13,9 +13,9 @@ test.describe("Settings", () => {
   test("@critical appearance and account security controls are interactive", async ({ userPage }) => {
     await userPage.goto("/settings", { waitUntil: "domcontentloaded" });
     await userPage.getByRole("button", { name: /Appearance/i }).click();
-    await expect(userPage.getByText(/Theme/i)).toBeVisible();
+    await expect(userPage.getByText(/Theme/i).first()).toBeVisible();
 
     await userPage.getByRole("button", { name: /Account/i }).click();
-    await expect(userPage.getByText(/MFA|Multi[- ]Factor/i)).toBeVisible();
+    await expect(userPage.getByText(/MFA|Multi[- ]Factor/i).first()).toBeVisible();
   });
 });

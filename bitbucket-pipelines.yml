@@ -18,6 +18,8 @@
 #   - VITE_API_URL                 - Backend API URL for frontend build
 #   - CF_STACK_BACKEND             - CloudFormation stack name (e.g., coheus-dev-backend)
 #   - COGNITO_PASSWORD_AUTH        - Set to "true" (Cognito-only password auth policy)
+#   - E2E_ADMIN_EMAIL / E2E_ADMIN_PASSWORD / E2E_ADMIN_TOTP_SECRET
+#   - (Optional) E2E_MANAGED_EMAIL_PREFIX      - defaults to "e2e.auto"
 # ============================================================================
 
 image: node:20
@@ -57,6 +59,24 @@ definitions:
       export AWS_ROLE_SESSION_NAME="bitbucket-coheus-${BITBUCKET_DEPLOYMENT_ENVIRONMENT:-build}-${BITBUCKET_BUILD_NUMBER}"
       export AWS_REGION="${AWS_REGION:-us-east-2}"
       echo "Using AWS Role: $AWS_ROLE_ARN"
+
+    e2e-env-preflight: &e2e-env-preflight |
+      echo "Running E2E environment preflight..."
+      required_vars="E2E_BASE_URL E2E_ADMIN_EMAIL E2E_ADMIN_PASSWORD E2E_ADMIN_TOTP_SECRET"
+      for name in $required_vars; do
+        value=$(printenv "$name" || true)
+        if [ -z "$value" ]; then
+          echo "ERROR: Missing required variable $name"
+          exit 1
+        fi
+        case "$value" in
+          \$*)
+            echo "ERROR: Variable $name appears to be a literal placeholder ($value). Set the actual secret/value."
+            exit 1
+            ;;
+        esac
+      done
+      echo "E2E environment preflight passed."
 
   steps:
     # Build steps (no deployment environment)
@@ -104,11 +124,13 @@ definitions:
 
     - step: &test-e2e-smoke
         name: Test E2E Smoke (Chromium)
-        image: mcr.microsoft.com/playwright:v1.50.0-noble
+        # Keep Playwright Docker image pinned and centralized via YAML anchor.
+        image: &playwright_docker_image mcr.microsoft.com/playwright:v1.58.2-noble
         caches:
           - npm
         script:
           - npm ci
+          - *e2e-env-preflight
           - npm run test:e2e:smoke
         artifacts:
           - playwright-report/**
@@ -116,11 +138,12 @@ definitions:
 
     - step: &test-e2e-critical
         name: Test E2E Critical
-        image: mcr.microsoft.com/playwright:v1.50.0-noble
+        image: *playwright_docker_image
         caches:
           - npm
         script:
           - npm ci
+          - *e2e-env-preflight
           - npm run test:e2e:critical
         artifacts:
           - playwright-report/**
@@ -128,12 +151,27 @@ definitions:
 
     - step: &test-e2e-regression
         name: Test E2E Regression (Cross-browser)
-        image: mcr.microsoft.com/playwright:v1.50.0-noble
+        image: *playwright_docker_image
         caches:
           - npm
         script:
           - npm ci
+          - *e2e-env-preflight
           - npm run test:e2e:regression
+        artifacts:
+          - playwright-report/**
+          - test-results/**
+
+    - step: &test-e2e-prod-smoke
+        name: Test E2E Prod Smoke (Manual)
+        image: *playwright_docker_image
+        deployment: production
+        caches:
+          - npm
+        script:
+          - npm ci
+          - *e2e-env-preflight
+          - npm run test:e2e:smoke
         artifacts:
           - playwright-report/**
           - test-results/**
@@ -292,6 +330,11 @@ definitions:
 
 pipelines:
   # Branch-based deployments
+  #
+  # E2E policy:
+  # - dev: run authenticated @critical E2E after deploy
+  # - main (production): do not run authenticated post-deploy E2E in branch pipeline
+  # - production smoke: run manually via custom pipeline `e2e-prod-smoke`
   branches:
     dev:
       - parallel:
@@ -313,7 +356,6 @@ pipelines:
           - step: *test-backend
           - step: *test-backend-integration
       - step: *deploy-prod
-      - step: *test-e2e-critical
 
   # Pull request validation (only for PRs targeting dev or main)
   pull-requests:
@@ -378,6 +420,9 @@ pipelines:
 
     e2e-regression:
       - step: *test-e2e-regression
+
+    e2e-prod-smoke:
+      - step: *test-e2e-prod-smoke
 
     # Database migrations
     run-migrations-dev:

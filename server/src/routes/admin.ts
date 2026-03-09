@@ -953,7 +953,7 @@ router.get(
         los_connection_id,
         persona,
         loan_scope,
-        loan_access_synced_at,
+        loan_access_synced_at
       FROM users
       WHERE role != 'super_admin'
       ORDER BY created_at DESC
