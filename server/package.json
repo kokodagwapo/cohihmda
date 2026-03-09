@@ -15,6 +15,7 @@
     "migrate:all": "tsx src/migrations/cli.ts all",
     "migrate:create": "tsx src/migrations/cli.ts create",
     "migrate:repair": "tsx scripts/repair-tenant-schemas.ts",
+    "audit:pricing-schema": "tsx scripts/audit-tenant-pricing-schema.ts",
     "seed:super-admin": "tsx scripts/seed-super-admin.ts",
     "seed:local": "tsx scripts/seed-local-dev.ts",
     "news:refresh": "tsx scripts/refresh-news.ts",

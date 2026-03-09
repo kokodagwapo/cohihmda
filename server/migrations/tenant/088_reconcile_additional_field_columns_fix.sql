@@ -1,5 +1,6 @@
--- Fix for 065: db_column_type may be NULL for rows imported by legacy paths.
--- Fall back to deriving the PG type from data_type when db_column_type is missing.
+-- Migration: Reconcile additional field columns (db_column_type fallback fix)
+-- This is a re-versioned copy of the former duplicate-version 066 migration.
+-- Some tenants may have skipped the old file due duplicate version numbers.
 
 DO $$
 DECLARE
@@ -16,7 +17,6 @@ BEGIN
     WHERE afd.column_created = TRUE
       AND isc.column_name IS NULL
   LOOP
-    -- Resolve type: prefer db_column_type; fall back by data_type
     resolved_type := COALESCE(NULLIF(TRIM(rec.db_column_type), ''), CASE rec.data_type
       WHEN 'string'     THEN 'TEXT'
       WHEN 'number'     THEN 'DECIMAL(15,4)'
@@ -37,7 +37,6 @@ BEGIN
       rec.column_name, resolved_type
     );
 
-    -- Back-fill db_column_type if it was missing
     IF rec.db_column_type IS NULL OR TRIM(rec.db_column_type) = '' THEN
       UPDATE additional_field_definitions
         SET db_column_type = resolved_type
