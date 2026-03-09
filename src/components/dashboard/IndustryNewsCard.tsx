@@ -47,6 +47,7 @@ import {
 } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import { ExportMenu } from "@/components/common/ExportMenu";
+import { CohiPodcast } from "@/components/cohi/CohiPodcast";
 
 // Sample data for Daily Morning Brief charts (from Markets & Economy brief)
 const FIXED_RATE_DATA = [
@@ -1321,6 +1322,7 @@ export const IndustryNewsCard = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <CohiPodcast />
             <ExportMenu
               title="Industry News"
               targetRef={cardRef}

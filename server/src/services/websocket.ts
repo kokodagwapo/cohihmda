@@ -359,7 +359,7 @@ export function setupWebSocket(wss: WebSocketServer) {
           url.searchParams.get("context") === "qlik" ||
           url.searchParams.get("qlik") === "true";
 
-        const geminiUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${apiKeyToUse}`;
+        const geminiUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKeyToUse}`;
 
         try {
           geminiSocket = new WebSocket(geminiUrl);
@@ -491,7 +491,7 @@ When answering questions about the backend architecture, be specific, reference 
               setup: {
                 model:
                   ragSettings.voice_model ||
-                  "models/gemini-2.0-flash-exp",
+                  "models/gemini-2.5-flash-native-audio-preview-12-2025",
                 generation_config: {
                   response_modalities: ["AUDIO"],
                   speech_config: {
