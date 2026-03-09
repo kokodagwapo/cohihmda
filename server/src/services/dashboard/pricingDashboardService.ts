@@ -52,16 +52,7 @@ export interface PricingReportRow {
   loanPricingDollars: number;
   pricingMargin: number;
   cdLenderCredits: number;
-  purchaseAdviceSellAmount: number;
-  line800TotalBorrowerPaidAmount: number;
-  feesAppraisalFeeBorr: number;
-  line800TotalSellerPaidAmount: number;
-  feesInterestBorr: number;
-  purchaseAdvExpectedIntPymtFromInvestor: number;
-  purchaseAdviceExpctdPayout1Amt: number;
-  purchaseAdviceExpctdPayout2Amt: number;
-  purchaseAdviceExpctdPayout3Amt: number;
-  lenderCredits: number;
+  [key: string]: unknown;
 }
 
 export interface PricingDetailRow {
@@ -77,16 +68,7 @@ export interface PricingDetailRow {
   loanPricingDollars: number;
   pricingMargin: number;
   cdLenderCredits: number | null;
-  purchaseAdviceSellAmount: number | null;
-  line800TotalBorrowerPaidAmount: number | null;
-  feesAppraisalFeeBorr: number | null;
-  line800TotalSellerPaidAmount: number | null;
-  feesInterestBorr: number | null;
-  purchaseAdvExpectedIntPymtFromInvestor: number | null;
-  purchaseAdviceExpctdPayout1Amt: number | null;
-  purchaseAdviceExpctdPayout2Amt: number | null;
-  purchaseAdviceExpctdPayout3Amt: number | null;
-  lenderCredits: number | null;
+  [key: string]: unknown;
 }
 
 const ENTITY_COLUMN: Record<PricingEntityType, string> = {
@@ -110,16 +92,46 @@ const FIXED_REPORT_KEYS = new Set([
   "loanPricingDollars",
   "pricingMargin",
   "cdLenderCredits",
-  "purchaseAdviceSellAmount",
-  "line800TotalBorrowerPaidAmount",
-  "feesAppraisalFeeBorr",
-  "line800TotalSellerPaidAmount",
-  "feesInterestBorr",
-  "purchaseAdvExpectedIntPymtFromInvestor",
-  "purchaseAdviceExpctdPayout1Amt",
-  "purchaseAdviceExpctdPayout2Amt",
-  "purchaseAdviceExpctdPayout3Amt",
-  "lenderCredits",
+]);
+
+const FIXED_DETAIL_KEYS = new Set([
+  "entityName",
+  "actorName",
+  "loanNumber",
+  "applicationDate",
+  "lockExpirationDate",
+  "fundingDate",
+  "closingDate",
+  "currentLoanStatus",
+  "volume",
+  "loanPricingDollars",
+  "pricingMargin",
+  "cdLenderCredits",
+]);
+
+const RESERVED_REPORT_ALIASES = new Set([
+  "entity_name",
+  "actor_name",
+  "units",
+  "volume",
+  "loan_pricing_dollars",
+  "pricing_margin",
+  "cd_lender_credits",
+]);
+
+const RESERVED_DETAIL_ALIASES = new Set([
+  "entity_name",
+  "actor_name",
+  "loan_number",
+  "application_date",
+  "lock_expiration_date",
+  "funding_date",
+  "closing_date",
+  "current_loan_status",
+  "volume",
+  "loan_pricing_dollars",
+  "pricing_margin",
+  "cd_lender_credits",
 ]);
 
 /** Return map of column_name -> data_type for public.loans (for dynamic metric columns). */
@@ -407,25 +419,15 @@ export async function getPricingReport(
   const groupByCols = isBranchReport ? `l.${entityCol}` : `l.${entityCol}, l.${actorCol}`;
   const loanAmountNum = toNumericSql("l.loan_amount");
   const cdLenderCreditsNum = toNumericSql("l.cd_lender_credits");
-  const paSellAmtNum = toNumericSql("l.pa_sell_amt");
-  const line800BorrowerNum = toNumericSql("l.line_800_total_borrower_paid_amount");
-  const appraisalFeeNum = toNumericSql("l.fee_details_line_804_borrower_amount_appraisal_fee");
-  const line800SellerNum = toNumericSql("l.line_800_total_seller_paid_amount");
-  const feesInterestNum = toNumericSql("l.fees_interest_borr");
-  const expectedIntPymtNum = toNumericSql("l.purchase_adv_expected_int_pymt_from_investor");
-  const paPayout1Num = toNumericSql("l.pa_payout_1");
-  const paPayout2Num = toNumericSql("l.pa_payout_2");
-  const paPayout3Num = toNumericSql("l.pa_payout_3");
-  const lenderCreditsNum = toNumericSql("l.lender_credits");
 
   let dynamicReportCols: { key: string; type: string }[] = [];
   if (options.metricColumns?.length) {
     const meta = await getLoansColumnMeta(tenantPool);
     for (const key of options.metricColumns) {
       if (FIXED_REPORT_KEYS.has(key)) continue;
-      const col = key;
-      const dataType = meta.get(col);
-      if (dataType) dynamicReportCols.push({ key: col, type: dataType });
+      if (RESERVED_REPORT_ALIASES.has(key)) continue;
+      const dataType = meta.get(key);
+      if (dataType) dynamicReportCols.push({ key, type: dataType });
     }
   }
 
@@ -458,17 +460,7 @@ export async function getPricingReport(
     (CASE WHEN SUM(${loanAmountNum}) IS NOT NULL AND SUM(${loanAmountNum}) <> 0
       THEN (SUM((${revenueExpr})) / NULLIF(SUM(${loanAmountNum}), 0)) * 100
       ELSE NULL END)::double precision AS pricing_margin,
-    COALESCE(SUM(${cdLenderCreditsNum}), 0)::double precision AS cd_lender_credits,
-    COALESCE(SUM(${paSellAmtNum}), 0)::double precision AS purchase_advice_sell_amount,
-    COALESCE(SUM(${line800BorrowerNum}), 0)::double precision AS line_800_total_borrower_paid_amount,
-    COALESCE(SUM(${appraisalFeeNum}), 0)::double precision AS fees_appraisal_fee_borr,
-    COALESCE(SUM(${line800SellerNum}), 0)::double precision AS line_800_total_seller_paid_amount,
-    COALESCE(SUM(${feesInterestNum}), 0)::double precision AS fees_interest_borr,
-    COALESCE(SUM(${expectedIntPymtNum}), 0)::double precision AS purchase_adv_expected_int_pymt_from_investor,
-    COALESCE(SUM(${paPayout1Num}), 0)::double precision AS purchase_advice_expctd_payout_1_amt,
-    COALESCE(SUM(${paPayout2Num}), 0)::double precision AS purchase_advice_expctd_payout_2_amt,
-    COALESCE(SUM(${paPayout3Num}), 0)::double precision AS purchase_advice_expctd_payout_3_amt,
-    COALESCE(SUM(${lenderCreditsNum}), 0)::double precision AS lender_credits
+    COALESCE(SUM(${cdLenderCreditsNum}), 0)::double precision AS cd_lender_credits
     ${dynamicSelectSql}
   `
     : `
@@ -480,17 +472,7 @@ export async function getPricingReport(
     (CASE WHEN SUM(${loanAmountNum}) IS NOT NULL AND SUM(${loanAmountNum}) <> 0
       THEN (SUM((${revenueExpr})) / NULLIF(SUM(${loanAmountNum}), 0)) * 100
       ELSE NULL END)::double precision AS pricing_margin,
-    COALESCE(SUM(${cdLenderCreditsNum}), 0)::double precision AS cd_lender_credits,
-    COALESCE(SUM(${paSellAmtNum}), 0)::double precision AS purchase_advice_sell_amount,
-    COALESCE(SUM(${line800BorrowerNum}), 0)::double precision AS line_800_total_borrower_paid_amount,
-    COALESCE(SUM(${appraisalFeeNum}), 0)::double precision AS fees_appraisal_fee_borr,
-    COALESCE(SUM(${line800SellerNum}), 0)::double precision AS line_800_total_seller_paid_amount,
-    COALESCE(SUM(${feesInterestNum}), 0)::double precision AS fees_interest_borr,
-    COALESCE(SUM(${expectedIntPymtNum}), 0)::double precision AS purchase_adv_expected_int_pymt_from_investor,
-    COALESCE(SUM(${paPayout1Num}), 0)::double precision AS purchase_advice_expctd_payout_1_amt,
-    COALESCE(SUM(${paPayout2Num}), 0)::double precision AS purchase_advice_expctd_payout_2_amt,
-    COALESCE(SUM(${paPayout3Num}), 0)::double precision AS purchase_advice_expctd_payout_3_amt,
-    COALESCE(SUM(${lenderCreditsNum}), 0)::double precision AS lender_credits
+    COALESCE(SUM(${cdLenderCreditsNum}), 0)::double precision AS cd_lender_credits
     ${dynamicSelectSql}
   `;
 
@@ -513,16 +495,6 @@ export async function getPricingReport(
       loanPricingDollars: Number(r.loan_pricing_dollars) ?? 0,
       pricingMargin: Number(r.pricing_margin) ?? 0,
       cdLenderCredits: Number(r.cd_lender_credits) ?? 0,
-      purchaseAdviceSellAmount: Number(r.purchase_advice_sell_amount) ?? 0,
-      line800TotalBorrowerPaidAmount: Number(r.line_800_total_borrower_paid_amount) ?? 0,
-      feesAppraisalFeeBorr: Number(r.fees_appraisal_fee_borr) ?? 0,
-      line800TotalSellerPaidAmount: Number(r.line_800_total_seller_paid_amount) ?? 0,
-      feesInterestBorr: Number(r.fees_interest_borr) ?? 0,
-      purchaseAdvExpectedIntPymtFromInvestor: Number(r.purchase_adv_expected_int_pymt_from_investor) ?? 0,
-      purchaseAdviceExpctdPayout1Amt: Number(r.purchase_advice_expctd_payout_1_amt) ?? 0,
-      purchaseAdviceExpctdPayout2Amt: Number(r.purchase_advice_expctd_payout_2_amt) ?? 0,
-      purchaseAdviceExpctdPayout3Amt: Number(r.purchase_advice_expctd_payout_3_amt) ?? 0,
-      lenderCredits: Number(r.lender_credits) ?? 0,
     };
     for (const { key } of dynamicReportCols) {
       const val = r[key];
@@ -545,16 +517,6 @@ export async function getPricingReport(
             ? (rows.reduce((s, r) => s + r.loanPricingDollars, 0) / rows.reduce((s, r) => s + r.volume, 0)) * 100
             : 0,
         cdLenderCredits: rows.reduce((s, r) => s + r.cdLenderCredits, 0),
-        purchaseAdviceSellAmount: rows.reduce((s, r) => s + r.purchaseAdviceSellAmount, 0),
-        line800TotalBorrowerPaidAmount: rows.reduce((s, r) => s + r.line800TotalBorrowerPaidAmount, 0),
-        feesAppraisalFeeBorr: rows.reduce((s, r) => s + r.feesAppraisalFeeBorr, 0),
-        line800TotalSellerPaidAmount: rows.reduce((s, r) => s + r.line800TotalSellerPaidAmount, 0),
-        feesInterestBorr: rows.reduce((s, r) => s + r.feesInterestBorr, 0),
-        purchaseAdvExpectedIntPymtFromInvestor: rows.reduce((s, r) => s + r.purchaseAdvExpectedIntPymtFromInvestor, 0),
-        purchaseAdviceExpctdPayout1Amt: rows.reduce((s, r) => s + r.purchaseAdviceExpctdPayout1Amt, 0),
-        purchaseAdviceExpctdPayout2Amt: rows.reduce((s, r) => s + r.purchaseAdviceExpctdPayout2Amt, 0),
-        purchaseAdviceExpctdPayout3Amt: rows.reduce((s, r) => s + r.purchaseAdviceExpctdPayout3Amt, 0),
-        lenderCredits: rows.reduce((s, r) => s + r.lenderCredits, 0),
       }
     : {};
 
@@ -588,32 +550,9 @@ export async function getPricingDetail(
   let dynamicDetailCols: { key: string; type: string }[] = [];
   if (options.metricColumns?.length) {
     const meta = await getLoansColumnMeta(tenantPool);
-    const fixedDetailKeys = new Set([
-      "entityName",
-      "actorName",
-      "loanNumber",
-      "applicationDate",
-      "lockExpirationDate",
-      "fundingDate",
-      "closingDate",
-      "currentLoanStatus",
-      "volume",
-      "loanPricingDollars",
-      "pricingMargin",
-      "cdLenderCredits",
-      "purchaseAdviceSellAmount",
-      "line800TotalBorrowerPaidAmount",
-      "feesAppraisalFeeBorr",
-      "line800TotalSellerPaidAmount",
-      "feesInterestBorr",
-      "purchaseAdvExpectedIntPymtFromInvestor",
-      "purchaseAdviceExpctdPayout1Amt",
-      "purchaseAdviceExpctdPayout2Amt",
-      "purchaseAdviceExpctdPayout3Amt",
-      "lenderCredits",
-    ]);
     for (const key of options.metricColumns) {
-      if (fixedDetailKeys.has(key)) continue;
+      if (FIXED_DETAIL_KEYS.has(key)) continue;
+      if (RESERVED_DETAIL_ALIASES.has(key)) continue;
       const dataType = meta.get(key);
       if (dataType) dynamicDetailCols.push({ key, type: dataType });
     }
@@ -642,17 +581,7 @@ export async function getPricingDetail(
       (CASE WHEN l.loan_amount IS NOT NULL AND l.loan_amount <> 0
         THEN ((${revenueExpr}) / NULLIF(l.loan_amount, 0)) * 100
         ELSE NULL END)::double precision AS pricing_margin,
-      l.cd_lender_credits,
-      l.pa_sell_amt,
-      l.line_800_total_borrower_paid_amount,
-      l.fee_details_line_804_borrower_amount_appraisal_fee AS fees_appraisal_fee_borr,
-      l.line_800_total_seller_paid_amount,
-      l.fees_interest_borr,
-      l.purchase_adv_expected_int_pymt_from_investor,
-      l.pa_payout_1,
-      l.pa_payout_2,
-      l.pa_payout_3,
-      l.lender_credits
+      l.cd_lender_credits
       ${dynamicSelectSql}
     FROM public.loans l
     ${whereClause}
@@ -674,16 +603,6 @@ export async function getPricingDetail(
       loanPricingDollars: Number(r.loan_pricing_dollars) ?? 0,
       pricingMargin: Number(r.pricing_margin) ?? 0,
       cdLenderCredits: r.cd_lender_credits != null ? Number(r.cd_lender_credits) : null,
-      purchaseAdviceSellAmount: r.pa_sell_amt != null ? Number(r.pa_sell_amt) : null,
-      line800TotalBorrowerPaidAmount: r.line_800_total_borrower_paid_amount != null ? Number(r.line_800_total_borrower_paid_amount) : null,
-      feesAppraisalFeeBorr: r.fees_appraisal_fee_borr != null ? Number(r.fees_appraisal_fee_borr) : null,
-      line800TotalSellerPaidAmount: r.line_800_total_seller_paid_amount != null ? Number(r.line_800_total_seller_paid_amount) : null,
-      feesInterestBorr: r.fees_interest_borr != null ? Number(r.fees_interest_borr) : null,
-      purchaseAdvExpectedIntPymtFromInvestor: r.purchase_adv_expected_int_pymt_from_investor != null ? Number(r.purchase_adv_expected_int_pymt_from_investor) : null,
-      purchaseAdviceExpctdPayout1Amt: r.pa_payout_1 != null ? Number(r.pa_payout_1) : null,
-      purchaseAdviceExpctdPayout2Amt: r.pa_payout_2 != null ? Number(r.pa_payout_2) : null,
-      purchaseAdviceExpctdPayout3Amt: r.pa_payout_3 != null ? Number(r.pa_payout_3) : null,
-      lenderCredits: r.lender_credits != null ? Number(r.lender_credits) : null,
     };
     for (const { key } of dynamicDetailCols) {
       const val = r[key];
@@ -703,16 +622,6 @@ export async function getPricingDetail(
     loanPricingDollars: sumPricing,
     pricingMargin: sumVolume > 0 ? (sumPricing / sumVolume) * 100 : 0,
     cdLenderCredits: rows.reduce((s, r) => s + (r.cdLenderCredits ?? 0), 0),
-    purchaseAdviceSellAmount: rows.reduce((s, r) => s + (r.purchaseAdviceSellAmount ?? 0), 0),
-    line800TotalBorrowerPaidAmount: rows.reduce((s, r) => s + (r.line800TotalBorrowerPaidAmount ?? 0), 0),
-    feesAppraisalFeeBorr: rows.reduce((s, r) => s + (r.feesAppraisalFeeBorr ?? 0), 0),
-    line800TotalSellerPaidAmount: rows.reduce((s, r) => s + (r.line800TotalSellerPaidAmount ?? 0), 0),
-    feesInterestBorr: rows.reduce((s, r) => s + (r.feesInterestBorr ?? 0), 0),
-    purchaseAdvExpectedIntPymtFromInvestor: rows.reduce((s, r) => s + (r.purchaseAdvExpectedIntPymtFromInvestor ?? 0), 0),
-    purchaseAdviceExpctdPayout1Amt: rows.reduce((s, r) => s + (r.purchaseAdviceExpctdPayout1Amt ?? 0), 0),
-    purchaseAdviceExpctdPayout2Amt: rows.reduce((s, r) => s + (r.purchaseAdviceExpctdPayout2Amt ?? 0), 0),
-    purchaseAdviceExpctdPayout3Amt: rows.reduce((s, r) => s + (r.purchaseAdviceExpctdPayout3Amt ?? 0), 0),
-    lenderCredits: rows.reduce((s, r) => s + (r.lenderCredits ?? 0), 0),
   };
 
   for (const { key, type } of dynamicDetailCols) {

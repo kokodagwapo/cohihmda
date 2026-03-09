@@ -507,7 +507,7 @@ export function ReleaseNotesSection() {
       transition={{ duration: 0.3 }}
       className="space-y-6"
     >
-      <div className="flex items-center justify-between p-6 rounded-2xl bg-gradient-to-br from-violet-50 via-white to-indigo-50 dark:from-slate-800/50 dark:to-slate-900/50 border border-violet-200/40 dark:border-slate-700/50">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between p-6 rounded-2xl bg-gradient-to-br from-violet-50 via-white to-indigo-50 dark:from-slate-800/50 dark:to-slate-900/50 border border-violet-200/40 dark:border-slate-700/50">
         <div>
           <h2 className="text-4xl font-thin text-slate-900 dark:text-white tracking-tight mb-2">
             Release Notes
@@ -516,7 +516,7 @@ export function ReleaseNotesSection() {
             Create, publish, and distribute release notes to active users.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 md:justify-end">
           <input
             ref={importInputRef}
             type="file"
