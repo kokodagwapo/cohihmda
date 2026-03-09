@@ -382,7 +382,7 @@ export const LOS_FIELD_LIBRARY: LOSField[] = [
     dataType: 'date',
     required: false,
     description: 'Date loan was funded',
-    aliases: ['fundDate', 'funded_date', 'fundedDate', 'disbursement_date', 'disbursementDate'],
+    aliases: ['fundDate', 'funded_date', 'fundedDate'],
   },
   {
     sourceKey: 'recording_date',

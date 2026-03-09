@@ -130,7 +130,7 @@ export async function getOperationsScorecardTrends(
       loan_amount, loan_type, loan_purpose, current_loan_status, channel,
       processor, underwriter, closer,
       submitted_to_processing_date, submitted_to_underwriting_date,
-      processing_date, approval_date, closing_date, disbursement_date,
+      processing_date, approval_date, closing_date,
       funding_date, application_date, fico_score, ltv_ratio, be_dti_ratio,
       occupancy_type, borr_self_employed
     FROM loans

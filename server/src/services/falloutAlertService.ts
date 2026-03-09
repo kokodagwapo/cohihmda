@@ -81,6 +81,31 @@ export interface SendFalloutAlertsResult {
   };
 }
 
+const UUID_V4_OR_V1_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isUuidLike(value: string): boolean {
+  return UUID_V4_OR_V1_REGEX.test(value.trim());
+}
+
+async function resolveTenantCreatedByUserId(
+  tenantPool: Pool,
+  createdBy: string | null | undefined,
+): Promise<string | null> {
+  if (!createdBy) return null;
+  const normalized = createdBy.trim();
+  if (!isUuidLike(normalized)) return null;
+
+  const exists = await tenantPool.query<{ id: string }>(
+    `SELECT id
+     FROM public.users
+     WHERE id = $1
+     LIMIT 1`,
+    [normalized],
+  );
+  return exists.rows[0]?.id ?? null;
+}
+
 function getRiskLevel(score: number): string {
   if (score >= 75) return "Very High";
   if (score >= 50) return "High";
@@ -121,6 +146,10 @@ export async function upsertFalloutAlertConfig(
   tenantPool: Pool,
   input: Partial<FalloutAlertConfig> & { createdBy: string | null },
 ): Promise<FalloutAlertConfig> {
+  const createdByTenantUserId = await resolveTenantCreatedByUserId(
+    tenantPool,
+    input.createdBy,
+  );
   const existing = await getFalloutAlertConfig(tenantPool);
   if (!existing) {
     const insertResult = await tenantPool.query<FalloutAlertConfig>(
@@ -140,7 +169,7 @@ export async function upsertFalloutAlertConfig(
         input.notify_managers ?? false,
         Array.isArray(input.target_encompass_user_ids) ? input.target_encompass_user_ids : [],
         Array.isArray(input.manager_user_ids) ? input.manager_user_ids : [],
-        input.createdBy,
+        createdByTenantUserId,
       ],
     );
     return insertResult.rows[0];

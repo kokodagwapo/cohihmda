@@ -158,6 +158,8 @@ interface FieldMapping {
   categoryLabel: string;
   categoryOrder: number;
   fieldType: FieldDataType;
+  criticality?: "critical" | "non_critical";
+  isCritical?: boolean;
 }
 
 interface FieldSwap {
@@ -175,12 +177,14 @@ interface EncompassRdbField {
 interface EncompassFieldMappingProps {
   losConnectionId: string;
   tenantId?: string;
+  isPlatformAdmin?: boolean;
 }
 
 
 export function EncompassFieldMapping({
   losConnectionId,
   tenantId,
+  isPlatformAdmin = false,
 }: EncompassFieldMappingProps) {
   const { toast } = useToast();
   const [mappings, setMappings] = useState<FieldMapping[]>([]);
@@ -230,8 +234,15 @@ export function EncompassFieldMapping({
 
   // Category state
   const [categories, setCategories] = useState<CategoryInfo[]>([]);
+  const [criticalCounts, setCriticalCounts] = useState<{
+    critical: number;
+    nonCritical: number;
+  }>({ critical: 0, nonCritical: 0 });
   const [selectedCategory, setSelectedCategory] = useState<
     FieldCategory | "all"
+  >("all");
+  const [criticalityFilter, setCriticalityFilter] = useState<
+    "all" | "critical" | "standard"
   >("all");
   const [expandedCategories, setExpandedCategories] = useState<
     Set<FieldCategory>
@@ -281,10 +292,14 @@ export function EncompassFieldMapping({
       const mappingsResponse = await api.request<{
         mappings: FieldMapping[];
         categories: CategoryInfo[];
+        criticalCounts?: { critical: number; nonCritical: number };
       }>("/api/encompass/field-mappings");
 
       if (mappingsResponse.categories) {
         setCategories(mappingsResponse.categories);
+      }
+      if (mappingsResponse.criticalCounts) {
+        setCriticalCounts(mappingsResponse.criticalCounts);
       }
 
       // Load saved field swaps
@@ -878,11 +893,22 @@ export function EncompassFieldMapping({
       const matchesCategory =
         selectedCategory === "all" || mapping.category === selectedCategory;
 
+      // Apply criticality filter
+      const matchesCriticality =
+        criticalityFilter === "all" ||
+        (criticalityFilter === "critical" && !!mapping.isCritical) ||
+        (criticalityFilter === "standard" && !mapping.isCritical);
+
       // Apply invalid filter
       if (filterMode === "invalid") {
-        return matchesSearch && matchesCategory && !mapping.isValid;
+        return (
+          matchesSearch &&
+          matchesCategory &&
+          matchesCriticality &&
+          !mapping.isValid
+        );
       }
-      return matchesSearch && matchesCategory;
+      return matchesSearch && matchesCategory && matchesCriticality;
     })
     .sort((a, b) => {
       let comparison = 0;
@@ -1008,6 +1034,15 @@ export function EncompassFieldMapping({
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Badge className="bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300 border-0">
+              Critical: {criticalCounts.critical}
+            </Badge>
+            <Badge variant="secondary">
+              Standard: {criticalCounts.nonCritical}
+            </Badge>
+          </div>
+
           {/* Analysis Progress - shown inline when running */}
           {isAnalyzing && (
             <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800 flex items-center gap-3">
@@ -1024,7 +1059,7 @@ export function EncompassFieldMapping({
 
           {/* Search and Filter Toolbar */}
           <div className="space-y-3">
-            {/* Row 1: Search + Category + Filter */}
+            {/* Row 1: Search + Category + Criticality + Filter */}
             <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
               <div className="relative flex-1 min-w-0">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -1066,6 +1101,27 @@ export function EncompassFieldMapping({
                       </div>
                     </SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+
+              {/* Criticality Filter */}
+              <Select
+                value={criticalityFilter}
+                onValueChange={(value) =>
+                  setCriticalityFilter(value as "all" | "critical" | "standard")
+                }
+              >
+                <SelectTrigger className="w-[180px] shrink-0">
+                  <SelectValue placeholder="Criticality" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Criticality</SelectItem>
+                  <SelectItem value="critical">
+                    Critical ({criticalCounts.critical})
+                  </SelectItem>
+                  <SelectItem value="standard">
+                    Standard ({criticalCounts.nonCritical})
+                  </SelectItem>
                 </SelectContent>
               </Select>
 
@@ -1111,7 +1167,7 @@ export function EncompassFieldMapping({
             </div>
 
             {/* Row 2: Auto-Fix action bar (only when invalid fields exist) */}
-            {invalidFieldsCount > 0 && (
+            {isPlatformAdmin && invalidFieldsCount > 0 && (
               <div className="flex items-center gap-3 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
                 <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
                 <span className="text-sm text-amber-800 dark:text-amber-200">
@@ -1253,7 +1309,18 @@ export function EncompassFieldMapping({
                                         className="font-medium"
                                         title={`${mapping.coheusAlias}\nDB column: ${mapping.postgresqlColumn}`}
                                       >
-                                        <div className="text-sm">{mapping.coheusAlias}</div>
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-sm">{mapping.coheusAlias}</span>
+                                          {mapping.isCritical ? (
+                                            <Badge className="h-5 px-1.5 text-[10px] bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300 border-0">
+                                              Critical
+                                            </Badge>
+                                          ) : (
+                                            <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+                                              Standard
+                                            </Badge>
+                                          )}
+                                        </div>
                                       </TableCell>
                                       {/* Type */}
                                       <TableCell>
@@ -1293,7 +1360,7 @@ export function EncompassFieldMapping({
                                       <TableCell>
                                         <div className="flex items-center gap-1 flex-wrap">
                                           {/* Fix button with suggestion popover for invalid fields */}
-                                          {!isValid && (
+                                          {isPlatformAdmin && !isValid && (
                                             <Popover
                                               open={
                                                 fixPopoverOpen ===
