@@ -252,9 +252,9 @@ export const learningPaths: LearningPath[] = [
         steps: [
           {
             id: "mgr-w2-1",
-            title: "Read: Loan Funnel Analysis",
+            title: "Read: Pipeline Analysis Dashboard",
             type: "article",
-            link: "/help/toptiering/loan-funnel",
+            link: "/help/toptiering/pipeline-analysis",
           },
           {
             id: "mgr-w2-2",
@@ -461,9 +461,9 @@ export const learningPaths: LearningPath[] = [
         steps: [
           {
             id: "ops-w2-1",
-            title: "Read: Loan Funnel Analysis",
+            title: "Read: Pipeline Analysis Dashboard",
             type: "article",
-            link: "/help/toptiering/loan-funnel",
+            link: "/help/toptiering/pipeline-analysis",
           },
           {
             id: "ops-w2-2",

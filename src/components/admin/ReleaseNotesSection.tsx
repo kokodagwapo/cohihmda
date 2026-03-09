@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { motion } from "framer-motion";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -33,6 +33,8 @@ import {
   Pencil,
   ArrowUp,
   ArrowDown,
+  Download,
+  FileUp,
 } from "lucide-react";
 
 type ReleaseNoteCategory = "feature" | "improvement" | "fix";
@@ -89,11 +91,14 @@ function sortEntries(entries: ReleaseNoteEntry[]): ReleaseNoteEntry[] {
 
 export function ReleaseNotesSection() {
   const { toast } = useToast();
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState<ReleaseNoteListItem[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({
     version: "",
@@ -391,6 +396,110 @@ export function ReleaseNotesSection() {
     }
   };
 
+  const exportJson = async () => {
+    setExporting(true);
+    try {
+      const result = await api.request<{
+        version: string;
+        exportedAt: string;
+        exportedBy: string;
+        notes: Array<{
+          version: string;
+          title: string;
+          isDraft: boolean;
+          publishedAt: string | null;
+          emailSentAt: string | null;
+          entries: Array<{
+            title: string;
+            description: string;
+            category: ReleaseNoteCategory;
+            link?: string | null;
+            linkLabel?: string | null;
+            sortOrder?: number;
+          }>;
+        }>;
+      }>("/api/admin/release-notes/export");
+
+      const json = JSON.stringify(result, null, 2);
+      const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `release-notes-export-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+
+      toast({
+        title: "Export complete",
+        description: `Downloaded ${result.notes?.length || 0} release notes.`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to export release notes.",
+        variant: "destructive",
+      });
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const triggerImport = () => {
+    importInputRef.current?.click();
+  };
+
+  const importJson = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setImporting(true);
+    try {
+      const content = await file.text();
+      const parsed = JSON.parse(content);
+      const overwriteAll = window.confirm(
+        "Overwrite all existing release notes before import?\n\nSelect OK for full replace, Cancel to merge and replace matching version+title entries only.",
+      );
+
+      const result = await api.request<{
+        result?: {
+          imported: number;
+          updated: number;
+          skipped: number;
+          totalProcessed: number;
+        };
+      }>("/api/admin/release-notes/import", {
+        method: "POST",
+        body: JSON.stringify({
+          importData: parsed,
+          options: {
+            overwriteAll,
+            replaceMatching: true,
+          },
+        }),
+      });
+
+      const stats = result.result;
+      toast({
+        title: "Import complete",
+        description: stats
+          ? `Processed ${stats.totalProcessed}. Imported ${stats.imported}, updated ${stats.updated}, skipped ${stats.skipped}.`
+          : "Release notes imported.",
+      });
+      await loadNotes();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to import release notes.",
+        variant: "destructive",
+      });
+    } finally {
+      setImporting(false);
+    }
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -407,10 +516,27 @@ export function ReleaseNotesSection() {
             Create, publish, and distribute release notes to active users.
           </p>
         </div>
-        <Button onClick={openCreate} className="gap-2">
-          <Plus className="h-4 w-4" />
-          New Release Note
-        </Button>
+        <div className="flex items-center gap-2">
+          <input
+            ref={importInputRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={(e) => void importJson(e)}
+          />
+          <Button variant="outline" onClick={() => void exportJson()} disabled={exporting || importing}>
+            {exporting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
+            Export JSON
+          </Button>
+          <Button variant="outline" onClick={triggerImport} disabled={importing || exporting}>
+            {importing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileUp className="h-4 w-4 mr-2" />}
+            Import JSON
+          </Button>
+          <Button onClick={openCreate} className="gap-2">
+            <Plus className="h-4 w-4" />
+            New Release Note
+          </Button>
+        </div>
       </div>
 
       <Card>

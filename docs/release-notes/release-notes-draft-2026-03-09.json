@@ -1,0 +1,144 @@
+{
+  "version": "1.0",
+  "exportedAt": "2026-03-09T00:00:00.000Z",
+  "exportedBy": "release-notes-assistant",
+  "notes": [
+    {
+      "version": "2026.03.09",
+      "title": "Tenant & User Experience Update (Since Feb 25)",
+      "isDraft": true,
+      "publishedAt": null,
+      "emailSentAt": null,
+      "entries": [
+        {
+          "title": "Pricing Dashboard Is Now Live",
+          "description": "A dedicated Pricing Dashboard is now available with full page navigation and Workbench support, giving teams a centralized view into pricing drivers and performance.",
+          "category": "feature",
+          "link": "/pricing-dashboard",
+          "linkLabel": "Open Pricing Dashboard",
+          "sortOrder": 0
+        },
+        {
+          "title": "Pipeline Analysis Added to Product and Workbench",
+          "description": "Pipeline Analysis is now available as a full dashboard and as Workbench widgets, including historical snapshots and workflow-oriented analysis views.",
+          "category": "feature",
+          "link": "/pipeline-analysis",
+          "linkLabel": "View Pipeline Analysis",
+          "sortOrder": 1
+        },
+        {
+          "title": "Loan Complexity Dashboard and Widgets",
+          "description": "Loan Complexity now includes dedicated widgets and improved individual selection filtering so teams can isolate high-friction loans and monitor complexity shifts faster.",
+          "category": "feature",
+          "link": "/loan-complexity",
+          "linkLabel": "Analyze Loan Complexity",
+          "sortOrder": 2
+        },
+        {
+          "title": "Lock Stratification Added to Workbench",
+          "description": "Lock Stratification has been added to Workbench with dynamic filtering, making it easier to segment lock behavior and compare performance by custom dimensions.",
+          "category": "feature",
+          "link": "/lock-stratification",
+          "linkLabel": "Open Lock Stratification",
+          "sortOrder": 3
+        },
+        {
+          "title": "Workflow Conversion Milestones Persist on Save",
+          "description": "Workflow Conversion milestone settings now save with your canvas, so users do not lose milestone configuration when revisiting Workbench dashboards.",
+          "category": "improvement",
+          "link": "/workflow-conversion",
+          "linkLabel": "Go to Workflow Conversion",
+          "sortOrder": 4
+        },
+        {
+          "title": "Research Analyst Simple Mode and Better Reports",
+          "description": "Research Lab now supports a simpler interaction mode and improved reporting detail, including stronger finding drill-down for clearer actionability.",
+          "category": "improvement",
+          "link": "/research",
+          "linkLabel": "Try Research Analyst",
+          "sortOrder": 5
+        },
+        {
+          "title": "Standalone Data Chat Experience",
+          "description": "A dedicated Data Chat page is now available for users who want a focused AI conversation workflow outside full dashboard context.",
+          "category": "feature",
+          "link": "/data-chat",
+          "linkLabel": "Open Data Chat",
+          "sortOrder": 6
+        },
+        {
+          "title": "Workbench Report Export (PDF and PowerPoint)",
+          "description": "Users can now generate polished PDF and PPT exports from Workbench canvases, helping teams share narrative-ready updates with stakeholders.",
+          "category": "feature",
+          "link": "/my-dashboard",
+          "linkLabel": "Open Workbench",
+          "sortOrder": 7
+        },
+        {
+          "title": "Distributions: Scheduling, Timezone, and Resend Improvements",
+          "description": "Workbench Distributions received multiple reliability upgrades including timezone hardening, resend behavior improvements, and delivery flow fixes.",
+          "category": "improvement",
+          "link": "/workbench/distributions",
+          "linkLabel": "Manage Distributions",
+          "sortOrder": 8
+        },
+        {
+          "title": "Sidebar Navigation: Search, Pin/Unpin, and Sorting",
+          "description": "Navigation now supports route search plus pinned and sorted dashboard shortcuts, making it much faster for users to jump to frequently used pages.",
+          "category": "improvement",
+          "link": "/insights",
+          "linkLabel": "Go to Insights",
+          "sortOrder": 9
+        },
+        {
+          "title": "Top Navigation and Layout Consolidation",
+          "description": "Dashboard navigation and top bar behavior were streamlined across scorecards and performance pages to reduce context switching and improve consistency.",
+          "category": "improvement",
+          "link": "/sales-scorecard",
+          "linkLabel": "View Dashboards",
+          "sortOrder": 10
+        },
+        {
+          "title": "Pricing Dashboard Filters Expanded",
+          "description": "Pricing Dashboard now supports more specific actor and entity filtering for tighter segmentation when analyzing margin and performance variance.",
+          "category": "improvement",
+          "link": "/pricing-dashboard",
+          "linkLabel": "Explore Pricing Filters",
+          "sortOrder": 11
+        },
+        {
+          "title": "Sales Scorecard Overview Enhancements",
+          "description": "Sales Scorecard Overview now includes improved naming consistency, custom date controls, and Workbench integration for deeper trend exploration.",
+          "category": "improvement",
+          "link": "/sales-scorecard-overview",
+          "linkLabel": "Open Sales Scorecard Overview",
+          "sortOrder": 12
+        },
+        {
+          "title": "Workflow Conversion Filtering Improvements",
+          "description": "Workflow Conversion now supports additional filters and broader date handling, making historical comparisons and cohort slicing more accurate.",
+          "category": "improvement",
+          "link": "/workflow-conversion",
+          "linkLabel": "Analyze Workflow Conversion",
+          "sortOrder": 13
+        },
+        {
+          "title": "Canvas-Only User Access Mode",
+          "description": "Tenant admins can now support restricted canvas-only users who are limited to Workbench routes, improving safe collaboration for targeted stakeholders.",
+          "category": "feature",
+          "link": "/my-dashboard",
+          "linkLabel": "Open Workbench",
+          "sortOrder": 14
+        },
+        {
+          "title": "Help Center and In-App Guidance Updates",
+          "description": "Help content and guided learning paths were refreshed with clearer folder and workflow documentation to improve first-run adoption for tenant teams.",
+          "category": "improvement",
+          "link": "/help",
+          "linkLabel": "Visit Help Center",
+          "sortOrder": 16
+        }
+      ]
+    }
+  ]
+}

@@ -163,6 +163,7 @@ The navigation bar at the top of every page provides access to all major section
 - **Dashboard** (dropdown) — Access TopTiering analytics including Scorecards, Credit Risk, Financial Modeling, and more
 - **My Workbench** — Your custom dashboard builder
 - **Research Lab** — AI-powered data investigation tool
+- **Data Chat** — A dedicated AI conversation page for focused analysis
 
 ## Right Side Controls
 - **Tenant Selector** — Switch between tenants (platform admins only)
@@ -174,6 +175,11 @@ The navigation bar at the top of every page provides access to all major section
 
 ## Reports Sidebar
 On the Insights page, a collapsible sidebar on the left provides quick navigation between dashboard sections.
+
+## Navigation Search and Pinning
+- Use sidebar search to find dashboards and pages quickly
+- Pin frequently used pages for one-click access
+- Reorder pinned pages to match your workflow priorities
 
 ## Keyboard Shortcuts
 - Use **arrow keys** in dropdown menus to navigate items
@@ -934,6 +940,69 @@ Focused on sales team performance:
 Both Operations and Sales have companion Trends pages showing how metrics change over time. Use these to identify improvements or degradation in performance.`,
   },
   {
+    id: "tt-pricing-dashboard",
+    slug: "pricing-dashboard",
+    title: "Pricing Dashboard",
+    category: "TopTiering Analytics",
+    categorySlug: "toptiering",
+    summary:
+      "Track pricing performance, margin drivers, and segment-level variance.",
+    content: `# Pricing Dashboard
+
+## What It Shows
+The Pricing Dashboard helps you monitor how pricing decisions affect volume, conversion, and revenue outcomes.
+
+## Common Views
+- **Pricing performance trends** over time
+- **Segment comparisons** by branch, channel, product, or other dimensions
+- **Margin-related metrics** to understand profitability tradeoffs
+- **Detailed tables** for deep drill-down and export
+
+## Filters
+Use filters to narrow the analysis by:
+- Date range
+- Branch or channel
+- Product type
+- Entity or actor selections for targeted comparisons
+
+## Recommended Workflow
+1. Start broad with organization-level metrics
+2. Narrow to specific channels or products
+3. Compare outlier segments against baseline performance
+4. Export detailed results for team reviews
+
+## Workbench
+Pricing widgets are available in Workbench so you can combine pricing analysis with scorecards and operational metrics on one canvas.`,
+  },
+  {
+    id: "tt-pipeline-analysis",
+    slug: "pipeline-analysis",
+    title: "Pipeline Analysis Dashboard",
+    category: "TopTiering Analytics",
+    categorySlug: "toptiering",
+    summary:
+      "Analyze pipeline shape, movement, and trend snapshots over time.",
+    content: `# Pipeline Analysis Dashboard
+
+## Overview
+Pipeline Analysis provides a focused view of pipeline movement and composition so teams can spot shifts early and prioritize action.
+
+## What You Can Analyze
+- Volume and status distribution across the pipeline
+- Trend snapshots over time for historical comparison
+- Segment-level differences by branch, channel, and product
+- Movement patterns that may indicate friction or concentration risk
+
+## How to Use It
+1. Select date range and key filters
+2. Review aggregate trends first
+3. Drill into segments with unusual movement
+4. Compare current behavior against prior periods
+
+## Workbench Integration
+Pipeline Analysis widgets can be added to Workbench canvases so you can pair pipeline views with scorecard, lock, and complexity insights in one dashboard.`,
+  },
+  {
     id: "tt-sales-trends",
     slug: "sales-trends",
     title: "Sales Trends",
@@ -956,6 +1025,59 @@ The Sales Trends view tracks sales team performance metrics over time, helping y
 - Spot declining performance early
 - Measure the impact of initiatives or market changes
 - Set realistic targets based on historical data`,
+  },
+  {
+    id: "tt-lock-stratification",
+    slug: "lock-stratification",
+    title: "Lock Stratification",
+    category: "TopTiering Analytics",
+    categorySlug: "toptiering",
+    summary:
+      "Segment lock performance and monitor lock behavior with dynamic filters.",
+    content: `# Lock Stratification
+
+## What It Does
+Lock Stratification helps you break down lock-related performance across dimensions such as branch, channel, product, and timeframe.
+
+## Key Use Cases
+- Identify where lock behavior differs across teams
+- Compare lock performance across cohorts
+- Spot segments with elevated risk or weaker conversion patterns
+- Build targeted follow-up actions for operations and sales leaders
+
+## Dynamic Filtering
+Use dynamic filters to isolate the combinations that matter most for your review cadence.
+
+## Workbench
+Lock Stratification widgets are available in Workbench so you can include lock analysis in recurring dashboards and exported reports.`,
+  },
+  {
+    id: "tt-loan-complexity-dashboard",
+    slug: "loan-complexity-dashboard",
+    title: "Loan Complexity Dashboard",
+    category: "TopTiering Analytics",
+    categorySlug: "toptiering",
+    summary:
+      "Monitor complexity patterns and drill into high-friction segments.",
+    content: `# Loan Complexity Dashboard
+
+## Overview
+The Loan Complexity dashboard helps operations and sales teams identify where files are becoming harder to process and where extra support is needed.
+
+## What You Can See
+- Complexity distribution across the active pipeline
+- Segment-level complexity by branch, product, and channel
+- Individual selection and filtering for targeted reviews
+- Trend behavior to detect improving or worsening complexity
+
+## Why It Matters
+Loan complexity is often linked to turn times, fallout risk, and staffing load. Tracking it helps teams prioritize process improvements.
+
+## Best Practices
+1. Review complexity trends weekly
+2. Compare high-complexity segments to turn-time outcomes
+3. Flag repeated high-friction patterns for remediation
+4. Add complexity widgets to Workbench for recurring leadership reviews`,
   },
   {
     id: "tt-fms",
@@ -1209,6 +1331,35 @@ When using Cohi Chat within the Workbench, it gains additional capabilities:
 - "Create a PDF report with all widgets"
 
 The Workbench AI assistant is context-aware — it knows which canvas and widgets you're working with.`,
+  },
+  {
+    id: "cc-data-chat",
+    slug: "data-chat-page",
+    title: "Using the Data Chat Page",
+    category: "Cohi Chat",
+    categorySlug: "cohi-chat",
+    summary:
+      "Use Data Chat for focused, standalone AI analysis conversations.",
+    content: `# Using the Data Chat Page
+
+## What Is Data Chat?
+Data Chat is a dedicated page for conversational analysis when you want a focused chat workflow outside full dashboard context.
+
+## When to Use It
+- Quick investigative questions without switching between multiple dashboards
+- Iterative follow-up questions on a single analysis thread
+- Fast ad-hoc checks before sharing findings with your team
+
+## Example Questions
+- "What changed in pull-through this month by branch?"
+- "Show top contributors to current fallout risk."
+- "Compare this month to last month for funded volume and margin."
+- "Which segments show worsening turn time trend?"
+
+## Workflow Tips
+- Start broad, then narrow with filters and follow-ups
+- Ask for period-over-period comparisons
+- Move high-value outputs into Workbench or reports for distribution`,
   },
 
   // ─── Settings ──────────────────────────────────────────────────────
