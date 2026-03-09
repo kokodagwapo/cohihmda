@@ -31,6 +31,7 @@ import { DatePeriodPicker, useDatePeriodState } from '@/components/ui/DatePeriod
 
 interface Loan {
   id: string;
+  loan_number?: string | null;
   borrower: string;
   officer: string;
   amount: string;
@@ -39,10 +40,18 @@ interface Loan {
   riskScore: number;
   reason: string;
   loanType?: string;
+  loanPurpose?: string | null;
+  channel?: string | null;
   status?: string;
+  currentMilestone?: string | null;
+  applicationDate?: string | null;
+  estimatedClosingDate?: string | null;
+  closingDate?: string | null;
   ficoScore: number | null;
   ltvRatio: number | null;
   dtiRatio: number | null;
+  loPullthroughPct?: number | null;
+  activeDays?: number | null;
   category?: string;
   range?: string;
 }
@@ -146,7 +155,9 @@ export default function CreditRiskManagement() {
     setDrilldownTitle(title);
 
     try {
-      const response = await api.request<{ loans: Loan[] }>(`/api/credit-risk/loans`, {
+      let url = '/api/metrics/credit-risk/loans';
+      if (tenantId) url += `?tenant_id=${encodeURIComponent(tenantId)}`;
+      const response = await api.request<{ loans: Loan[] }>(url, {
         method: 'POST',
         body: JSON.stringify({
           applicationType,
@@ -174,7 +185,9 @@ export default function CreditRiskManagement() {
     setDrilldownTitle(`${loanMixTab}: ${category}`);
 
     try {
-      const response = await api.request<{ loans: Loan[] }>(`/api/credit-risk/loans`, {
+      let url = '/api/metrics/credit-risk/loans';
+      if (tenantId) url += `?tenant_id=${encodeURIComponent(tenantId)}`;
+      const response = await api.request<{ loans: Loan[] }>(url, {
         method: 'POST',
         body: JSON.stringify({
           applicationType,
@@ -1069,6 +1082,7 @@ export default function CreditRiskManagement() {
           isOpen={!!selectedLoan}
           onClose={() => setSelectedLoan(null)}
           isDarkMode={isDarkMode}
+          hideRiskScoreAndLabel
         />
       )}
     </TopTieringLayout>

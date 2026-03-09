@@ -15,6 +15,7 @@ interface LoanRiskDistributionProps {
   applicationDate?: string | null;
   currentMilestone?: string | null;
   estimatedClosingDate?: string | null;
+  closingDate?: string | null;
   loPullthroughPct?: number | null;
   interestRate?: number | null;
   marketRate?: number | null;
@@ -80,6 +81,7 @@ export const LoanRiskDistribution: React.FC<LoanRiskDistributionProps> = memo(({
   applicationDate,
   currentMilestone,
   estimatedClosingDate,
+  closingDate,
   loPullthroughPct,
   interestRate,
   marketRate,
@@ -95,10 +97,11 @@ export const LoanRiskDistribution: React.FC<LoanRiskDistributionProps> = memo(({
   const hasMilestone = true; // Always show; display "—" when empty
   const hasTimeInMotion = true; // Always show (days or "—")
   const hasEstimatedClosing = true; // Always show; display "—" when empty
+  const hasClosingDate = true; // Always show; display "—" when empty
   const hasLoPullthrough = loPullthroughPct != null && !Number.isNaN(Number(loPullthroughPct));
   const hasLockVsMarket = (interestRate != null && !Number.isNaN(Number(interestRate))) || (marketRate != null && !Number.isNaN(Number(marketRate))) || (marketChangeDelta != null && !Number.isNaN(Number(marketChangeDelta)));
 
-  const hasAny = hasFico || hasLtv || hasDti || hasLoanType || hasLoanPurpose || hasChannel || hasMilestone || hasTimeInMotion || hasEstimatedClosing || hasLoPullthrough || hasLockVsMarket;
+  const hasAny = hasFico || hasLtv || hasDti || hasLoanType || hasLoanPurpose || hasChannel || hasMilestone || hasTimeInMotion || hasEstimatedClosing || hasClosingDate || hasLoPullthrough || hasLockVsMarket;
   if (!hasAny) return null;
 
   // Zone-based colors when reason_codes present: Zone1=red … Zone6=no color
@@ -181,6 +184,16 @@ export const LoanRiskDistribution: React.FC<LoanRiskDistributionProps> = memo(({
       return String(estimatedClosingDate);
     }
   })();
+  const closingDateDisplay = (() => {
+    if (closingDate == null || String(closingDate).trim() === '') return '—';
+    try {
+      const d = new Date(closingDate);
+      if (Number.isNaN(d.getTime())) return String(closingDate);
+      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    } catch {
+      return String(closingDate);
+    }
+  })();
 
   const lockVsMarketValue = (() => {
     const lock = interestRate != null && !Number.isNaN(Number(interestRate)) ? Number(interestRate) : null;
@@ -233,8 +246,9 @@ export const LoanRiskDistribution: React.FC<LoanRiskDistributionProps> = memo(({
         <MetricItem label="Channel" value={channel != null && String(channel).trim() !== '' ? String(channel) : '—'} isDarkMode={isDarkMode} />
         <MetricItem label="Milestone" value={milestoneDisplay} isDarkMode={isDarkMode} />
         <MetricItem label="Application Date" value={applicationDateDisplay} isDarkMode={isDarkMode} />
-        {/* Row 3: Estimated Closing */}
+        {/* Row 3: Estimated Closing, Closing Date */}
         <MetricItem label="Est. Closing" value={estimatedClosingDisplay} isDarkMode={isDarkMode} />
+        <MetricItem label="Closing Date" value={closingDateDisplay} isDarkMode={isDarkMode} />
       </div>
     </div>
   );

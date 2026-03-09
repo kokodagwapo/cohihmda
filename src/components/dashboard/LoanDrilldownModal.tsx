@@ -69,6 +69,8 @@ interface LoanDrilldownModalProps {
   isDarkMode?: boolean;
   onSelectOfficer?: (officer: string) => void;
   selectedTenantId?: string | null;
+  /** When true, hide risk score line and LOW/CRITICAL/IMPORTANT label (e.g. credit risk drilldown) */
+  hideRiskScoreAndLabel?: boolean;
 }
 
 function formatLockExpirationForEmail(value: string | null | undefined): string {
@@ -200,6 +202,7 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(
     isDarkMode = false,
     onSelectOfficer,
     selectedTenantId,
+    hideRiskScoreAndLabel = false,
   }) => {
     const [saveLoading, setSaveLoading] = useState(false);
     const cardRef = useRef<HTMLDivElement>(null);
@@ -300,6 +303,7 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(
                   showTapForDetails={false}
                   showRiskBreakdown={true}
                   selectedTenantId={selectedTenantId}
+                  hideRiskScoreAndLabel={hideRiskScoreAndLabel}
                 />
               </div>
             ) : (
