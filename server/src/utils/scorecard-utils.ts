@@ -117,8 +117,8 @@ export const OPERATIONS_ACTOR_CONFIGS: Record<string, ActorConfig> = {
   },
   closer: {
     actorColumn: "closer",
-    // NOTE: Using funding_date instead of disbursement_date since disbursement_date
-    // is not mapped in defaultEncompassFieldMappings (no Encompass field for it)
+    // Canonical "funded" milestone is funding_date.
+    // Keep closer scorecard date semantics aligned to funding-based dashboards.
     outputDateField: "funding_date",
     // Turn Time: closing_date → funding_date
     turnTimeStartField: "closing_date",

@@ -389,7 +389,7 @@ export const LOS_FIELD_LIBRARY: LOSField[] = [
     dataType: 'date',
     required: false,
     description: 'Date loan was funded',
-    aliases: ['fundDate', 'funded_date', 'fundedDate', 'disbursement_date', 'disbursementDate'],
+    aliases: ['fundDate', 'funded_date', 'fundedDate'],
   },
   {
     sourceKey: 'recording_date',
@@ -1014,7 +1014,7 @@ export const LOS_FIELD_LIBRARY: LOSField[] = [
     dataType: 'date',
     required: false,
     description: 'Date loan was funded (Qlik: Used for App-Fund turn time and funded flag)',
-    aliases: ['fundDate', 'funded_date', 'fundedDate', 'disbursement_date', 'disbursementDate'],
+    aliases: ['fundDate', 'funded_date', 'fundedDate'],
   },
   {
     sourceKey: 'shipped_date',
