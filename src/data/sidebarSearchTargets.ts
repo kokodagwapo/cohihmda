@@ -34,10 +34,10 @@ export function getSidebarSearchTargets(): SidebarRouteSearchTarget[] {
 
   const pageTargets: SidebarRouteSearchTarget[] = [
     { id: 'route:insights', label: 'Insights', group: 'Pages', kind: 'route', path: '/insights', keywords: ['home', 'dashboard'] },
-    { id: 'route:my-workbench', label: 'My Workbench', group: 'Pages', kind: 'route', path: '/my-dashboard', keywords: ['workbench', 'canvas'] },
-    { id: 'route:my-workbench-canvases', label: 'My Workbench: My Canvases', group: 'Pages', kind: 'route', path: '/my-dashboard', keywords: ['workbench', 'my canvases', 'canvas'] },
-    { id: 'route:research', label: 'Research Lab', group: 'Pages', kind: 'route', path: '/research', keywords: ['research'] },
-    { id: 'route:research-shared', label: 'Research Lab: Shared With Me', group: 'Pages', kind: 'route', path: '/research?tab=shared', keywords: ['research', 'shared', 'sessions'] },
+    { id: 'route:workbench-hub', label: 'Workbench Hub', group: 'Pages', kind: 'route', path: '/workbench', keywords: ['workbench', 'canvas', 'hub'] },
+    { id: 'route:my-workbench', label: 'My Workbench Editor', group: 'Pages', kind: 'route', path: '/my-dashboard', keywords: ['workbench', 'canvas', 'editor'] },
+    { id: 'route:research-hub', label: 'Research Hub', group: 'Pages', kind: 'route', path: '/research', keywords: ['research', 'hub', 'sessions'] },
+    { id: 'route:research-session', label: 'Research Session', group: 'Pages', kind: 'route', path: '/research/session', keywords: ['research', 'session', 'analysis'] },
     { id: 'route:loans', label: 'Loans', group: 'Pages', kind: 'route', path: '/loans', keywords: ['pipeline'] },
     { id: 'route:fallout-forecast', label: 'Coheus Fallout Report', group: 'Pages', kind: 'route', path: '/fallout-forecast', keywords: ['fallout', 'forecast', 'risk', 'closing'] },
     { id: 'route:settings', label: 'Settings', group: 'Pages', kind: 'route', path: '/settings', keywords: ['profile', 'preferences'] },

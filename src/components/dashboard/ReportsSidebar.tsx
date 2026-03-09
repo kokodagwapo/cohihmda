@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, Zap, BarChart3, Target, Trophy, X, Sun, FileText, LayoutGrid, TrendingUp, LayoutDashboard, Filter, ArrowLeftRight, Shield, ClipboardList, Calculator, LineChart, Pin, PinOff, FlaskConical, GripVertical, Lock, Layers, Mail, Users, MessageSquare } from 'lucide-react';
+import { ChevronDown, Zap, BarChart3, Target, Trophy, X, Sun, FileText, LayoutGrid, TrendingUp, LayoutDashboard, Filter, ArrowLeftRight, Shield, ClipboardList, Calculator, LineChart, Pin, PinOff, FlaskConical, GripVertical, Lock, Layers, Mail, Users, MessageSquare, LayoutPanelLeft } from 'lucide-react';
 import { getReportById, ReportData, allReports } from '@/data/reportSimulations';
 import { useTheme } from '@/components/theme-provider';
 import {
@@ -313,18 +313,6 @@ const colorMap: Record<string, { bg: string; text: string }> = {
   'text-slate-500': { bg: 'rgba(100, 116, 139, 0.1)', text: '#64748b' },
 };
 
-const WORKBENCH_CHILDREN = [
-  { id: 'my-canvases', label: 'My Canvases', path: '/my-dashboard', icon: LayoutDashboard },
-  { id: 'shared-with-me', label: 'Shared with Me', path: '/workbench/shared', icon: Users },
-  { id: 'team-folders', label: 'Team Folders', path: '/workbench/team-folders', icon: Layers },
-  { id: 'favorites', label: 'Favorites', path: '/workbench/favorites', icon: Pin },
-];
-
-const RESEARCH_CHILDREN = [
-  { id: 'my-sessions', label: 'My Sessions', path: '/research', icon: MessageSquare },
-  { id: 'shared-research', label: 'Shared with Me', path: '/research?tab=shared', icon: Users },
-];
-
 interface SortablePinnedItemProps {
   id: string;
   item: PinnedItem;
@@ -454,16 +442,10 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
   const [insightsFlyoutOpen, setInsightsFlyoutOpen] = useState(false);
   const [pinnedDashboardFlyoutOpen, setPinnedDashboardFlyoutOpen] = useState(false);
   const [toptieringFlyoutOpen, setToptieringFlyoutOpen] = useState(false);
-  const [workbenchFlyoutOpen, setWorkbenchFlyoutOpen] = useState(false);
-  const [researchFlyoutOpen, setResearchFlyoutOpen] = useState(false);
   const flyoutLeaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMobileOpen = externalMobileOpen !== undefined ? externalMobileOpen : internalMobileOpen;
   const [insightsExpanded, setInsightsExpanded] = useState(true);
   const [toptieringExpanded, setToptieringExpanded] = useState(false);
-  const [workbenchExpanded, setWorkbenchExpanded] = useState(true);
-  const [researchExpanded, setResearchExpanded] = useState(true);
-  const [mobileWorkbenchExpanded, setMobileWorkbenchExpanded] = useState(true);
-  const [mobileResearchExpanded, setMobileResearchExpanded] = useState(true);
   const [topTieringSubExpanded, setTopTieringSubExpanded] = useState(true);
   const [salesSubExpanded, setSalesSubExpanded] = useState(true);
   const [operationsSubExpanded, setOperationsSubExpanded] = useState(true);
@@ -548,6 +530,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
     }
     return location.pathname === path || location.pathname.startsWith(`${path}/`);
   };
+
 
   const handleButtonClick = (reportId: string) => {
     const report = getReportById(reportId);
@@ -680,7 +663,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                     className="w-full flex items-center gap-3 p-3 min-h-[44px] rounded-xl hover:bg-slate-100/80 dark:hover:bg-slate-800/80 transition-all touch-manipulation"
                   >
                     <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-slate-50 dark:bg-slate-800/30">
-                      <LayoutGrid className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+                      <TrendingUp className="w-5 h-5 text-slate-600 dark:text-slate-400" />
                     </div>
                     <p className="text-sm font-medium text-slate-800 dark:text-slate-200 flex-1 text-left">Insights</p>
                     <ChevronDown className={cn("w-4 h-4 text-slate-400 transition-transform duration-200", !insightsExpanded && "-rotate-90")} />
@@ -734,10 +717,14 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                     <div className="flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center bg-slate-100 dark:bg-slate-800/30">
                       <LayoutGrid className="w-[18px] h-[18px] text-slate-600 dark:text-slate-400" />
                     </div>
-                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Dashboards</p>
+                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">My Dashboards</p>
                   </div>
                   <div className="pl-4 pr-2 pb-2 space-y-1">
-                    {pinnedItems.map((item) => {
+                    {pinnedItems.length === 0 ? (
+                      <p className="px-2 py-2 text-xs text-slate-500 dark:text-slate-400">
+                        Pin a dashboard for quick access.
+                      </p>
+                    ) : pinnedItems.map((item) => {
                       const { Icon, iconColor } = getIconAndColorForPinnedItem(item);
                       const style = navIconStyleMap[iconColor] ?? navIconStyleMap.blue;
                       if (item.type === 'section') {
@@ -844,92 +831,26 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                 )}
 
                 {/* My Workbench */}
-                <div>
-                  <button
-                    onClick={() => setMobileWorkbenchExpanded((prev) => !prev)}
-                    className="w-full flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 touch-manipulation"
-                  >
-                    <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-slate-50 dark:bg-slate-800/30">
-                      <LayoutDashboard className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-                    </div>
-                    <span className="flex-1 text-left text-sm text-slate-700 dark:text-slate-300">My Workbench</span>
-                    <ChevronDown className={cn("w-4 h-4 text-slate-400 transition-transform", !mobileWorkbenchExpanded && "-rotate-90")} />
-                  </button>
-                  <AnimatePresence initial={false}>
-                    {mobileWorkbenchExpanded && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.2, ease: 'easeInOut' }}
-                        className="overflow-hidden"
-                      >
-                        <div className="pl-4 pr-2 pb-2 space-y-1">
-                          {WORKBENCH_CHILDREN.map((item) => {
-                            const Icon = item.icon;
-                            const active = isPathActive(item.path);
-                            return (
-                              <button
-                                key={item.id}
-                                onClick={() => { navigate(item.path); onMobileMenuToggle?.(); }}
-                                className={cn("w-full flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80", active && "bg-slate-100 dark:bg-slate-800/60")}
-                              >
-                                <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center", active ? "bg-slate-100 dark:bg-slate-800/60" : "bg-slate-50 dark:bg-slate-800/30")}>
-                                  <Icon className={cn("w-4 h-4", active ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500 dark:text-slate-400")} />
-                                </div>
-                                <span className={cn("text-sm", active ? "text-slate-900 dark:text-slate-100 font-medium" : "text-slate-700 dark:text-slate-300")}>{item.label}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
+                <button
+                  onClick={() => { navigate('/workbench'); onMobileMenuToggle?.(); }}
+                  className={cn("w-full flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 touch-manipulation", isPathActive('/workbench') && "bg-slate-100 dark:bg-slate-800/60")}
+                >
+                  <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center", isPathActive('/workbench') ? "bg-slate-100 dark:bg-slate-800/60" : "bg-slate-50 dark:bg-slate-800/30")}>
+                    <LayoutPanelLeft className={cn("w-4 h-4", isPathActive('/workbench') ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500 dark:text-slate-400")} />
+                  </div>
+                  <span className={cn("text-sm", isPathActive('/workbench') ? "text-slate-900 dark:text-slate-100 font-medium" : "text-slate-700 dark:text-slate-300")}>My Workbench</span>
+                </button>
 
                 {/* Research Lab */}
-                <div>
-                  <button
-                    onClick={() => setMobileResearchExpanded((prev) => !prev)}
-                    className="w-full flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 touch-manipulation"
-                  >
-                    <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-slate-50 dark:bg-slate-800/30">
-                      <FlaskConical className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-                    </div>
-                    <span className="flex-1 text-left text-sm text-slate-700 dark:text-slate-300">Research Lab</span>
-                    <ChevronDown className={cn("w-4 h-4 text-slate-400 transition-transform", !mobileResearchExpanded && "-rotate-90")} />
-                  </button>
-                  <AnimatePresence initial={false}>
-                    {mobileResearchExpanded && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.2, ease: 'easeInOut' }}
-                        className="overflow-hidden"
-                      >
-                        <div className="pl-4 pr-2 pb-2 space-y-1">
-                          {RESEARCH_CHILDREN.map((item) => {
-                            const Icon = item.icon;
-                            const active = isPathActive(item.path);
-                            return (
-                              <button
-                                key={item.id}
-                                onClick={() => { navigate(item.path); onMobileMenuToggle?.(); }}
-                                className={cn("w-full flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80", active && "bg-slate-100 dark:bg-slate-800/60")}
-                              >
-                                <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center", active ? "bg-slate-100 dark:bg-slate-800/60" : "bg-slate-50 dark:bg-slate-800/30")}>
-                                  <Icon className={cn("w-4 h-4", active ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500 dark:text-slate-400")} />
-                                </div>
-                                <span className={cn("text-sm", active ? "text-slate-900 dark:text-slate-100 font-medium" : "text-slate-700 dark:text-slate-300")}>{item.label}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
+                <button
+                  onClick={() => { navigate('/research'); onMobileMenuToggle?.(); }}
+                  className={cn("w-full flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 touch-manipulation", isPathActive('/research') && "bg-slate-100 dark:bg-slate-800/60")}
+                >
+                  <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center", isPathActive('/research') ? "bg-slate-100 dark:bg-slate-800/60" : "bg-slate-50 dark:bg-slate-800/30")}>
+                    <FlaskConical className={cn("w-4 h-4", isPathActive('/research') ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500 dark:text-slate-400")} />
+                  </div>
+                  <span className={cn("text-sm", isPathActive('/research') ? "text-slate-900 dark:text-slate-100 font-medium" : "text-slate-700 dark:text-slate-300")}>Research Lab</span>
+                </button>
 
                 {/* Distribution Center */}
                 <div className={cn("flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 touch-manipulation", isPathActive('/workbench/distributions') && "bg-slate-100 dark:bg-slate-800/60")}>
@@ -1278,13 +1199,13 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
             <div className={cn("mb-2")}>
               <div className="flex items-center gap-2.5 px-2 pb-2">
                 <div className="flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center bg-slate-100 dark:bg-slate-800/30">
-                  <LayoutGrid className="w-[18px] h-[18px] text-slate-600 dark:text-slate-400" />
+                  <TrendingUp className="w-[18px] h-[18px] text-slate-600 dark:text-slate-400" />
                 </div>
-                <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Dashboards</p>
+                <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">My Dashboards</p>
               </div>
               <div className="space-y-0.5">
                 {pinnedItems.length === 0 ? (
-                  <p className="px-2 py-2 text-xs text-slate-500 dark:text-slate-400">Pin dashboards from the top navigation</p>
+                  <p className="px-2 py-2 text-xs text-slate-500 dark:text-slate-400">Pin a dashboard for quick access.</p>
                 ) : (
                   <DndContext
                     sensors={sensors}
@@ -1333,10 +1254,10 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                         type="button"
                         className="w-9 h-9 rounded-lg flex items-center justify-center bg-slate-50 dark:bg-slate-800/30"
                       >
-                        <LayoutDashboard className="w-4 h-4 text-slate-500 dark:text-slate-400" />
+                        <TrendingUp className="w-4 h-4 text-slate-500 dark:text-slate-400" />
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent side="right">Dashboards</TooltipContent>
+                    <TooltipContent side="right">My Dashboards</TooltipContent>
                   </Tooltip>
                 </div>
               </PopoverTrigger>
@@ -1349,13 +1270,13 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
               >
                 <div className="flex items-center gap-2 px-2 pb-2">
                   <div className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 dark:bg-slate-800/30">
-                    <LayoutGrid className="w-4 h-4 text-slate-600 dark:text-slate-400" />
+                    <TrendingUp className="w-4 h-4 text-slate-600 dark:text-slate-400" />
                   </div>
-                  <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Dashboards</p>
+                  <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">My Dashboards</p>
                 </div>
                 <div className="space-y-0.5">
                   {pinnedItems.length === 0 ? (
-                    <p className="px-2 py-3 text-xs text-slate-500 dark:text-slate-400">Pin dashboards from the top navigation</p>
+                    <p className="px-2 py-3 text-xs text-slate-500 dark:text-slate-400">Pin a dashboard for quick access.</p>
                   ) : pinnedItems.map((item) => {
                     const { Icon, iconColor } = getIconAndColorForPinnedItem(item);
                     const style = navIconStyleMap[iconColor] ?? navIconStyleMap.blue;
@@ -1393,194 +1314,64 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
 
           {/* My Workbench */}
           {isExpanded ? (
-            <div>
-              <button
-                onClick={() => setWorkbenchExpanded((prev) => !prev)}
-                style={{ width: '100%', padding: '12px 10px', background: 'transparent', border: 'none', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 10, transition: 'all 0.2s ease' }}
-                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-              >
-                <div style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)' }}>
-                  <LayoutDashboard size={18} style={{ color: isDarkMode ? '#94a3b8' : '#64748b' }} />
-                </div>
-                <h4 style={{ fontSize: 14, fontWeight: 600, color: isDarkMode ? '#e2e8f0' : '#1a1d29', margin: 0, flex: 1 }}>My Workbench</h4>
-                <ChevronDown size={18} style={{ color: isDarkMode ? '#94a3b8' : '#64748b', transform: workbenchExpanded ? 'none' : 'rotate(-90deg)', transition: 'transform 0.2s ease' }} />
+            <div
+              style={{ width: '100%', padding: '12px 10px', display: 'flex', alignItems: 'center', gap: 10, transition: 'all 0.2s ease', cursor: 'pointer' }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+              onClick={() => navigate('/workbench')}
+            >
+              <button onClick={(e) => { e.stopPropagation(); navigate('/workbench'); }} style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)', border: 'none', cursor: 'pointer' }}>
+                <LayoutPanelLeft size={18} style={{ color: isPathActive('/workbench') ? '#10b981' : (isDarkMode ? '#94a3b8' : '#64748b') }} />
               </button>
-              <AnimatePresence initial={false}>
-                {workbenchExpanded && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: 'auto', opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.2, ease: 'easeInOut' }}
-                    style={{ overflow: 'hidden' }}
-                  >
-                    {WORKBENCH_CHILDREN.map((item) => {
-                      const Icon = item.icon;
-                      const active = isPathActive(item.path);
-                      return (
-                        <button
-                          key={item.id}
-                          onClick={() => navigate(item.path)}
-                          style={{ width: '100%', padding: '12px 20px 12px 36px', background: 'transparent', border: 'none', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12, transition: 'all 0.2s ease' }}
-                          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-                        >
-                          <div style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: active ? (isDarkMode ? 'rgba(30, 41, 59, 0.7)' : 'rgba(241, 245, 249, 1)') : 'rgba(100, 116, 139, 0.1)' }}>
-                            <Icon size={18} style={{ color: active ? '#10b981' : (isDarkMode ? '#94a3b8' : '#64748b') }} />
-                          </div>
-                          <span style={{ fontSize: 13, fontWeight: active ? 600 : 500, color: isDarkMode ? '#e2e8f0' : '#1a1d29', flex: 1 }}>{item.label}</span>
-                        </button>
-                      );
-                    })}
-                  </motion.div>
-                )}
-              </AnimatePresence>
+              <button onClick={() => navigate('/workbench')} style={{ flex: 1, fontSize: 14, fontWeight: 600, color: isDarkMode ? '#e2e8f0' : '#1a1d29', textAlign: 'left', border: 'none', background: 'none', cursor: 'pointer', padding: 0 }}>My Workbench</button>
             </div>
           ) : (
-            <Popover open={workbenchFlyoutOpen} onOpenChange={setWorkbenchFlyoutOpen}>
-              <PopoverTrigger asChild>
+            <Tooltip>
+              <TooltipTrigger asChild>
                 <div
-                  className="w-full"
-                  onMouseEnter={() => { if (flyoutLeaveRef.current) clearTimeout(flyoutLeaveRef.current); setWorkbenchFlyoutOpen(true); }}
-                  onMouseLeave={() => { flyoutLeaveRef.current = window.setTimeout(() => setWorkbenchFlyoutOpen(false), 150); }}
+                  style={{ width: '100%', padding: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, transition: 'all 0.2s ease', cursor: 'pointer' }}
+                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                  onClick={() => navigate('/workbench')}
                 >
-                  <button
-                    type="button"
-                    style={{ width: '100%', padding: '10px', background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease' }}
-                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-                  >
-                    <div style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)' }}>
-                      <LayoutDashboard size={18} style={{ color: isDarkMode ? '#94a3b8' : '#64748b' }} />
-                    </div>
+                  <button onClick={(e) => { e.stopPropagation(); navigate('/workbench'); }} style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)', border: 'none', cursor: 'pointer' }}>
+                    <LayoutPanelLeft size={18} style={{ color: isPathActive('/workbench') ? '#10b981' : (isDarkMode ? '#94a3b8' : '#64748b') }} />
                   </button>
                 </div>
-              </PopoverTrigger>
-              <PopoverContent
-                side="right"
-                align="start"
-                className="w-56 p-1"
-                onMouseEnter={() => { if (flyoutLeaveRef.current) clearTimeout(flyoutLeaveRef.current); setWorkbenchFlyoutOpen(true); }}
-                onMouseLeave={() => setWorkbenchFlyoutOpen(false)}
-              >
-                <div className="py-0.5">
-                  {WORKBENCH_CHILDREN.map((item) => {
-                    const Icon = item.icon;
-                    const active = isPathActive(item.path);
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => { navigate(item.path); setWorkbenchFlyoutOpen(false); }}
-                        className={cn("w-full flex items-center gap-2 rounded-md px-2 py-2 text-sm", isDarkMode ? "hover:bg-slate-700/50" : "hover:bg-slate-100", active && (isDarkMode ? "bg-slate-700/40" : "bg-slate-100"))}
-                      >
-                        <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-md", active ? (isDarkMode ? "bg-slate-600/50" : "bg-slate-200") : (isDarkMode ? "bg-slate-700/30" : "bg-slate-100"))}>
-                          <Icon className={cn("h-4 w-4", active ? "text-emerald-500 dark:text-emerald-400" : "text-slate-500 dark:text-slate-400")} />
-                        </div>
-                        <span className="flex-1 text-left truncate">{item.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </PopoverContent>
-            </Popover>
+              </TooltipTrigger>
+              <TooltipContent side="right">My Workbench</TooltipContent>
+            </Tooltip>
           )}
 
           {/* Research Lab */}
           {isExpanded ? (
-            <div>
-              <button
-                onClick={() => setResearchExpanded((prev) => !prev)}
-                style={{ width: '100%', padding: '12px 10px', background: 'transparent', border: 'none', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 10, transition: 'all 0.2s ease' }}
-                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-              >
-                <div style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)' }}>
-                  <FlaskConical size={18} style={{ color: isDarkMode ? '#94a3b8' : '#64748b' }} />
-                </div>
-                <h4 style={{ fontSize: 14, fontWeight: 600, color: isDarkMode ? '#e2e8f0' : '#1a1d29', margin: 0, flex: 1 }}>Research Lab</h4>
-                <ChevronDown size={18} style={{ color: isDarkMode ? '#94a3b8' : '#64748b', transform: researchExpanded ? 'none' : 'rotate(-90deg)', transition: 'transform 0.2s ease' }} />
+            <div
+              style={{ width: '100%', padding: '12px 10px', display: 'flex', alignItems: 'center', gap: 10, transition: 'all 0.2s ease', cursor: 'pointer' }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+              onClick={() => navigate('/research')}
+            >
+              <button onClick={(e) => { e.stopPropagation(); navigate('/research'); }} style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)', border: 'none', cursor: 'pointer' }}>
+                <FlaskConical size={18} style={{ color: isPathActive('/research') ? '#10b981' : (isDarkMode ? '#94a3b8' : '#64748b') }} />
               </button>
-              <AnimatePresence initial={false}>
-                {researchExpanded && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: 'auto', opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.2, ease: 'easeInOut' }}
-                    style={{ overflow: 'hidden' }}
-                  >
-                    {RESEARCH_CHILDREN.map((item) => {
-                      const Icon = item.icon;
-                      const active = isPathActive(item.path);
-                      return (
-                        <button
-                          key={item.id}
-                          onClick={() => navigate(item.path)}
-                          style={{ width: '100%', padding: '12px 20px 12px 36px', background: 'transparent', border: 'none', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12, transition: 'all 0.2s ease' }}
-                          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-                        >
-                          <div style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: active ? (isDarkMode ? 'rgba(30, 41, 59, 0.7)' : 'rgba(241, 245, 249, 1)') : 'rgba(100, 116, 139, 0.1)' }}>
-                            <Icon size={18} style={{ color: active ? '#10b981' : (isDarkMode ? '#94a3b8' : '#64748b') }} />
-                          </div>
-                          <span style={{ fontSize: 13, fontWeight: active ? 600 : 500, color: isDarkMode ? '#e2e8f0' : '#1a1d29', flex: 1 }}>{item.label}</span>
-                        </button>
-                      );
-                    })}
-                  </motion.div>
-                )}
-              </AnimatePresence>
+              <button onClick={() => navigate('/research')} style={{ flex: 1, fontSize: 14, fontWeight: 600, color: isDarkMode ? '#e2e8f0' : '#1a1d29', textAlign: 'left', border: 'none', background: 'none', cursor: 'pointer', padding: 0 }}>Research Lab</button>
             </div>
           ) : (
-            <Popover open={researchFlyoutOpen} onOpenChange={setResearchFlyoutOpen}>
-              <PopoverTrigger asChild>
+            <Tooltip>
+              <TooltipTrigger asChild>
                 <div
-                  className="w-full"
-                  onMouseEnter={() => { if (flyoutLeaveRef.current) clearTimeout(flyoutLeaveRef.current); setResearchFlyoutOpen(true); }}
-                  onMouseLeave={() => { flyoutLeaveRef.current = window.setTimeout(() => setResearchFlyoutOpen(false), 150); }}
+                  style={{ width: '100%', padding: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, transition: 'all 0.2s ease', cursor: 'pointer' }}
+                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                  onClick={() => navigate('/research')}
                 >
-                  <button
-                    type="button"
-                    style={{ width: '100%', padding: '10px', background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease' }}
-                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-                  >
-                    <div style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)' }}>
-                      <FlaskConical size={18} style={{ color: isDarkMode ? '#94a3b8' : '#64748b' }} />
-                    </div>
+                  <button onClick={(e) => { e.stopPropagation(); navigate('/research'); }} style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)', border: 'none', cursor: 'pointer' }}>
+                    <FlaskConical size={18} style={{ color: isPathActive('/research') ? '#10b981' : (isDarkMode ? '#94a3b8' : '#64748b') }} />
                   </button>
                 </div>
-              </PopoverTrigger>
-              <PopoverContent
-                side="right"
-                align="start"
-                className="w-56 p-1"
-                onMouseEnter={() => { if (flyoutLeaveRef.current) clearTimeout(flyoutLeaveRef.current); setResearchFlyoutOpen(true); }}
-                onMouseLeave={() => setResearchFlyoutOpen(false)}
-              >
-                <div className="py-0.5">
-                  {RESEARCH_CHILDREN.map((item) => {
-                    const Icon = item.icon;
-                    const active = isPathActive(item.path);
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => { navigate(item.path); setResearchFlyoutOpen(false); }}
-                        className={cn("w-full flex items-center gap-2 rounded-md px-2 py-2 text-sm", isDarkMode ? "hover:bg-slate-700/50" : "hover:bg-slate-100", active && (isDarkMode ? "bg-slate-700/40" : "bg-slate-100"))}
-                      >
-                        <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-md", active ? (isDarkMode ? "bg-slate-600/50" : "bg-slate-200") : (isDarkMode ? "bg-slate-700/30" : "bg-slate-100"))}>
-                          <Icon className={cn("h-4 w-4", active ? "text-emerald-500 dark:text-emerald-400" : "text-slate-500 dark:text-slate-400")} />
-                        </div>
-                        <span className="flex-1 text-left truncate">{item.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </PopoverContent>
-            </Popover>
+              </TooltipTrigger>
+              <TooltipContent side="right">Research Lab</TooltipContent>
+            </Tooltip>
           )}
 
           {/* Distribution Center */}
