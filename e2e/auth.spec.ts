@@ -21,9 +21,9 @@ test.describe("Authentication", () => {
       return;
     }
 
-    const otpInput = page
-      .locator('input[data-input-otp], input[autocomplete="one-time-code"], input[inputmode="numeric"]')
-      .first();
+    const otpSelector =
+      'input[data-input-otp], input[autocomplete="one-time-code"], input[inputmode="numeric"]';
+    const otpInput = page.locator(otpSelector).first();
     const verifyButton = page.getByRole("button", { name: "Verify" });
     const candidateCodes = [0, -30_000, 30_000, -60_000, 60_000].map((offsetMs) =>
       generateTotpCode(state.users.tenantUser.totpSecret, Date.now() + offsetMs),
@@ -31,11 +31,25 @@ test.describe("Authentication", () => {
 
     let authed = false;
     for (const code of candidateCodes) {
+      const otpExists = (await page.locator(otpSelector).count()) > 0;
+      if (!otpExists) {
+        continue;
+      }
+
       for (let i = 0; i < 20; i += 1) {
-        if (await otpInput.isEnabled()) break;
+        const enabled = await otpInput.evaluate((el) => {
+          const input = el as HTMLInputElement;
+          return !input.disabled && input.getAttribute("aria-disabled") !== "true";
+        }).catch(() => false);
+        if (enabled) break;
         await page.waitForTimeout(250);
       }
-      if (!(await otpInput.isEnabled())) {
+
+      const otpEnabled = await otpInput.evaluate((el) => {
+        const input = el as HTMLInputElement;
+        return !input.disabled && input.getAttribute("aria-disabled") !== "true";
+      }).catch(() => false);
+      if (!otpEnabled) {
         continue;
       }
       await otpInput.click();

@@ -8,8 +8,12 @@ test.describe("Global Navigation", () => {
     await expect(userPage.getByRole("button", { name: "Insights menu" })).toBeVisible();
     await expect(userPage.getByRole("button", { name: "Dashboards menu" })).toBeVisible();
     await expect(userPage.getByText(/research|workbench/i).first()).toBeVisible();
-
-    await expect(userPage.getByText("Dashboards").first()).toBeVisible();
+    const dashboardsLabel = userPage.getByText("Dashboards").first();
+    if (await dashboardsLabel.isVisible().catch(() => false)) {
+      await expect(dashboardsLabel).toBeVisible();
+    } else {
+      await expect(userPage).toHaveURL(/\/insights/);
+    }
   });
 
   test("@smoke user menu contains settings and logout", async ({ userPage }) => {

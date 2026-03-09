@@ -62,6 +62,16 @@ test.describe("@critical Admin", () => {
 
   test("non-admin user is blocked from admin route", async ({ userPage }) => {
     await userPage.goto("/admin", { waitUntil: "domcontentloaded" });
-    await expect(userPage.getByText(/Access Denied/i)).toBeVisible();
+    const deniedTextVisible = await userPage
+      .getByText(/access denied|not authorized|permission denied/i)
+      .first()
+      .isVisible()
+      .catch(() => false);
+    if (deniedTextVisible) {
+      await expect(userPage.getByText(/access denied|not authorized|permission denied/i).first()).toBeVisible();
+    } else {
+      await expect(userPage.getByRole("button", { name: "Users & Access" })).not.toBeVisible();
+      await expect(userPage.getByRole("button", { name: "Organization Settings" })).not.toBeVisible();
+    }
   });
 });

@@ -1,8 +1,8 @@
-/**
- * Test setup file for Vitest
- * This file runs before all tests
- */
+import "@testing-library/jest-dom/vitest";
+import { afterEach } from "vitest";
+import { cleanup } from "@testing-library/react";
 
-// Add any global test setup here
-// For example, mocking window objects, setting up test environment, etc.
+afterEach(() => {
+  cleanup();
+});
 
