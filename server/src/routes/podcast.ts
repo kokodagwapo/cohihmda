@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { Router, Response } from "express";
 import { WebSocket } from "ws";
 import { authenticateToken, AuthRequest } from "../middleware/auth.js";
@@ -165,9 +166,10 @@ function getAletheiaCacheKey(tenantId?: string): string {
 
 export function hashBriefingContext(briefingContext: unknown): string {
   try {
-    return JSON.stringify(briefingContext ?? {});
+    const raw = JSON.stringify(briefingContext ?? {});
+    return crypto.createHash("sha256").update(raw).digest("hex");
   } catch {
-    return String(Date.now());
+    return crypto.createHash("sha256").update(String(Date.now())).digest("hex");
   }
 }
 
