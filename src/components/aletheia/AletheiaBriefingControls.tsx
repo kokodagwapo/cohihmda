@@ -312,6 +312,10 @@ export function AletheiaBriefingControls({
                   description: payload.error,
                   variant: "destructive",
                 });
+                isInCallRef.current = false;
+                setIsInCall(false);
+                setIsConnected(false);
+                setIsLoading(false);
                 break;
             }
           } catch {
