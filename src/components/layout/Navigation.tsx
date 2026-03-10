@@ -1627,9 +1627,19 @@ export function Navigation(
                         <div>
                           <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Shared With Me</p>
                           {sharedCanvases.slice(0, 8).map((canvas) => (
-                            <button key={canvas.id} className="w-full text-left text-sm truncate rounded-md px-2 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800/60" onClick={() => { navigate(`/my-dashboard/${canvas.id}`); setWorkbenchOpen(false); }}>
-                              {canvas.title}
-                            </button>
+                            <div key={canvas.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800/60">
+                              <button className="flex-1 text-left text-sm truncate" onClick={() => { navigate(`/my-dashboard/${canvas.id}`); setWorkbenchOpen(false); }}>
+                                {canvas.title}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void toggleCanvasFavorite(canvas.id, !canvas.favorited)}
+                                disabled={favoriteUpdatingIds.has(canvas.id)}
+                                className="shrink-0 p-0.5 rounded hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
+                              >
+                                {canvas.favorited ? <PinOff className="w-3.5 h-3.5 text-amber-500" /> : <Pin className="w-3.5 h-3.5 text-slate-400" />}
+                              </button>
+                            </div>
                           ))}
                         </div>
                         <div>
