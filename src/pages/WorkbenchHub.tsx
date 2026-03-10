@@ -119,16 +119,14 @@ function CanvasTable({
                       <td className="px-3 py-3 text-sm text-slate-600 dark:text-slate-300">{formatDate(row.updated_at)}</td>
                       <td className="px-3 py-3">
                         <div className="flex items-center justify-end gap-1">
-                          {row.is_owner !== false ? (
-                            <button
-                              onClick={() => onToggleFavorite(row)}
-                              disabled={favoriteUpdatingIds.has(row.id)}
-                              className="h-8 w-8 rounded-md inline-flex items-center justify-center text-slate-500 hover:bg-slate-200/70 dark:hover:bg-slate-700/60 disabled:opacity-50"
-                              title={row.favorited ? "Unpin from favorites" : "Pin to favorites"}
-                            >
-                              {row.favorited ? <PinOff className="w-4 h-4 text-amber-500" /> : <Pin className="w-4 h-4" />}
-                            </button>
-                          ) : null}
+                          <button
+                            onClick={() => onToggleFavorite(row)}
+                            disabled={favoriteUpdatingIds.has(row.id)}
+                            className="h-8 w-8 rounded-md inline-flex items-center justify-center text-slate-500 hover:bg-slate-200/70 dark:hover:bg-slate-700/60 disabled:opacity-50"
+                            title={row.favorited ? "Unpin from favorites" : "Pin to favorites"}
+                          >
+                            {row.favorited ? <PinOff className="w-4 h-4 text-amber-500" /> : <Pin className="w-4 h-4" />}
+                          </button>
                           <button
                             onClick={() => onOpen(row.id)}
                             className="px-2.5 h-8 rounded-md text-xs font-medium bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 hover:opacity-90"

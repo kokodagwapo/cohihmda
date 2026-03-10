@@ -432,14 +432,39 @@ router.post(
       const { id } = req.params;
       const { favorited } = req.body;
       const { tenantPool } = getTenantContext(req);
+      const userId = req.userId!;
+      const hasFullCanvasAccess = FULL_CANVAS_ACCESS_ROLES.includes(req.userRole || '');
 
-      const result = await tenantPool.query(
-        `UPDATE public.workbench_canvases
-         SET favorited = $1, updated_at = NOW()
-         WHERE id = $2 AND user_id = $3
-         RETURNING id, favorited`,
-        [!!favorited, id, req.userId],
-      );
+      const result = hasFullCanvasAccess
+        ? await tenantPool.query(
+            `UPDATE public.workbench_canvases
+             SET favorited = $1, updated_at = NOW()
+             WHERE id = $2
+             RETURNING id, favorited`,
+            [!!favorited, id],
+          )
+        : await tenantPool.query(
+            `UPDATE public.workbench_canvases c
+             SET favorited = $1, updated_at = NOW()
+             WHERE c.id = $2
+               AND (
+                 c.user_id = $3
+                 OR c.visibility = 'global'
+                 OR (c.visibility = 'shared' AND $3 = ANY(COALESCE(c.shared_with_user_ids, '{}')))
+                 OR (c.visibility = 'shared' AND EXISTS (
+                   SELECT 1
+                   FROM public.canvas_share_entries e
+                   WHERE e.canvas_id = c.id
+                     AND (e.user_id = $3 OR e.group_id IN (
+                       SELECT m.group_id
+                       FROM public.user_group_memberships m
+                       WHERE m.user_id = $3
+                     ))
+                 ))
+               )
+             RETURNING c.id, c.favorited`,
+            [!!favorited, id, userId],
+          );
 
       if (result.rows.length === 0) {
         return res.status(404).json({ error: 'Canvas not found' });
