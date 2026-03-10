@@ -96,11 +96,14 @@ export const Admin = () => {
     loading: tenantsLoading,
     duplicating,
     duplicationProgress,
+    refreshingDemoTenantId,
     loadTenants,
     createTenant,
     updateTenant,
     deleteTenant,
     duplicateTenant,
+    refreshDemoTenant,
+    updateDemoSettings,
   } = useTenants();
   const {
     securityInfo,
@@ -337,8 +340,11 @@ export const Admin = () => {
                   onUpdateTenant={updateTenant}
                   onDeleteTenant={deleteTenant}
                   onDuplicateTenant={duplicateTenant}
+                  onRefreshDemoTenant={refreshDemoTenant}
+                  onUpdateDemoSettings={updateDemoSettings}
                   duplicating={duplicating}
                   duplicationProgress={duplicationProgress}
+                  refreshingDemoTenantId={refreshingDemoTenantId}
                   onRefresh={loadTenants}
                 />
               )}

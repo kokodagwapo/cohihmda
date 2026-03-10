@@ -31,7 +31,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Label } from '@/components/ui/label';
-import { Search, Eye, Edit, Plus, Trash2, Copy, Loader2 } from 'lucide-react';
+import { Search, Edit, Plus, Trash2, Copy, Loader2, RefreshCw } from 'lucide-react';
 import type { Tenant } from '@/hooks/admin/useTenants';
 
 interface TenantsSectionProps {
@@ -41,9 +41,17 @@ interface TenantsSectionProps {
   onCreateTenant: (data: Partial<Tenant>) => Promise<void>;
   onUpdateTenant: (id: string, data: Partial<Tenant>) => Promise<void>;
   onDeleteTenant: (id: string) => Promise<void>;
-  onDuplicateTenant?: (id: string, name: string, slug: string) => Promise<any>;
+  onDuplicateTenant?: (
+    id: string,
+    name: string,
+    slug: string,
+    options?: { autoRefresh?: boolean },
+  ) => Promise<any>;
+  onRefreshDemoTenant?: (id: string) => Promise<void>;
+  onUpdateDemoSettings?: (id: string, autoRefresh: boolean) => Promise<void>;
   duplicating?: boolean;
   duplicationProgress?: string | null;
+  refreshingDemoTenantId?: string | null;
   onRefresh: () => Promise<void>;
 }
 
@@ -55,8 +63,11 @@ export const TenantsSection = ({
   onUpdateTenant,
   onDeleteTenant,
   onDuplicateTenant,
+  onRefreshDemoTenant,
+  onUpdateDemoSettings,
   duplicating = false,
   duplicationProgress,
+  refreshingDemoTenantId = null,
   onRefresh,
 }: TenantsSectionProps) => {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -65,7 +76,11 @@ export const TenantsSection = ({
   const [isDuplicateDialogOpen, setIsDuplicateDialogOpen] = useState(false);
   const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null);
   const [formData, setFormData] = useState({ name: '' });
-  const [duplicateFormData, setDuplicateFormData] = useState({ name: '', slug: '' });
+  const [duplicateFormData, setDuplicateFormData] = useState({
+    name: '',
+    slug: '',
+    autoRefresh: false,
+  });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const filteredTenants = tenants.filter(tenant =>
@@ -92,13 +107,13 @@ export const TenantsSection = ({
     setSelectedTenant(tenant);
     const defaultName = `${tenant.name} (Anonymized)`;
     const defaultSlug = defaultName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-    setDuplicateFormData({ name: defaultName, slug: defaultSlug });
+    setDuplicateFormData({ name: defaultName, slug: defaultSlug, autoRefresh: false });
     setIsDuplicateDialogOpen(true);
   };
 
   const handleDuplicateNameChange = (name: string) => {
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-    setDuplicateFormData({ name, slug });
+    setDuplicateFormData((prev) => ({ ...prev, name, slug }));
   };
 
   const handleDuplicate = async () => {
@@ -107,11 +122,16 @@ export const TenantsSection = ({
 
     try {
       setIsSubmitting(true);
-      await onDuplicateTenant(selectedTenant.id, duplicateFormData.name, duplicateFormData.slug);
+      await onDuplicateTenant(
+        selectedTenant.id,
+        duplicateFormData.name,
+        duplicateFormData.slug,
+        { autoRefresh: duplicateFormData.autoRefresh },
+      );
       await onRefresh();
       setIsDuplicateDialogOpen(false);
       setSelectedTenant(null);
-      setDuplicateFormData({ name: '', slug: '' });
+      setDuplicateFormData({ name: '', slug: '', autoRefresh: false });
     } catch (error) {
       console.error('Error duplicating tenant:', error);
     } finally {
@@ -168,6 +188,26 @@ export const TenantsSection = ({
     }
   };
 
+  const handleRefreshDemoTenant = async (tenant: Tenant) => {
+    if (!onRefreshDemoTenant) return;
+    try {
+      await onRefreshDemoTenant(tenant.id);
+      await onRefresh();
+    } catch (error) {
+      console.error('Error refreshing demo tenant:', error);
+    }
+  };
+
+  const handleToggleAutoRefresh = async (tenant: Tenant) => {
+    if (!onUpdateDemoSettings) return;
+    try {
+      await onUpdateDemoSettings(tenant.id, !(tenant.auto_refresh ?? false));
+      await onRefresh();
+    } catch (error) {
+      console.error('Error updating demo settings:', error);
+    }
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -221,18 +261,60 @@ export const TenantsSection = ({
                 {filteredTenants.map((tenant) => (
                   <TableRow key={tenant.id} className="border-slate-100 dark:border-slate-700">
                     <TableCell className="font-extralight text-slate-900 dark:text-white">
-                      {tenant.name}
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span>{tenant.name}</span>
+                          {tenant.is_demo ? (
+                            <Badge variant="secondary" className="text-xs">Demo</Badge>
+                          ) : null}
+                        </div>
+                        {tenant.is_demo ? (
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            Source: {tenant.source_tenant_name || tenant.source_tenant_id || 'Unknown'}
+                            {tenant.last_refreshed_at
+                              ? ` · Refreshed ${new Date(tenant.last_refreshed_at).toLocaleString()}`
+                              : ' · Never refreshed'}
+                          </p>
+                        ) : null}
+                      </div>
                     </TableCell>
                     <TableCell className="text-base font-extralight text-slate-600 dark:text-slate-400">
                       {new Date(tenant.created_at).toLocaleDateString()}
                     </TableCell>
                     <TableCell>
                       <Badge variant="default" className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300 border-0">
-                        Active
+                        {tenant.status || 'Active'}
                       </Badge>
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
+                        {tenant.is_demo && onRefreshDemoTenant && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-sky-600 hover:text-sky-700 hover:bg-sky-50 dark:text-sky-400 dark:hover:bg-sky-950"
+                            onClick={() => handleRefreshDemoTenant(tenant)}
+                            title="Refresh from source"
+                            disabled={refreshingDemoTenantId === tenant.id}
+                          >
+                            {refreshingDemoTenantId === tenant.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <RefreshCw className="h-4 w-4" />
+                            )}
+                          </Button>
+                        )}
+                        {tenant.is_demo && onUpdateDemoSettings && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 px-2 text-xs"
+                            onClick={() => handleToggleAutoRefresh(tenant)}
+                            title="Toggle auto-refresh"
+                          >
+                            Auto {tenant.auto_refresh ? 'On' : 'Off'}
+                          </Button>
+                        )}
                         <Button 
                           variant="ghost" 
                           size="sm" 
@@ -427,6 +509,25 @@ export const TenantsSection = ({
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 Lowercase letters, numbers, and hyphens only. Used for the database name.
               </p>
+            </div>
+            <div className="flex items-center justify-between rounded-md border border-slate-200 dark:border-slate-700 p-3">
+              <div>
+                <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                  Auto-refresh when source updates
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Keep this demo tenant in sync after source sync jobs complete.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant={duplicateFormData.autoRefresh ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setDuplicateFormData((prev) => ({ ...prev, autoRefresh: !prev.autoRefresh }))}
+                disabled={isSubmitting}
+              >
+                {duplicateFormData.autoRefresh ? 'Enabled' : 'Disabled'}
+              </Button>
             </div>
             {isSubmitting && duplicationProgress ? (
               <div className="rounded-md bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-3 flex items-center gap-3">
