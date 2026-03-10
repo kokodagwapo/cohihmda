@@ -1472,98 +1472,71 @@ router.post(
 
     try {
       const tenantId = req.tenantContext?.tenantId || req.tenantId;
-      const geminiConfig = await getGeminiVoiceConfig(tenantId);
+      if (!tenantId) {
+        await writeSSE(res, { type: "error", error: "No tenant selected" });
+        res.end();
+        return;
+      }
 
-      const briefingContext = req.body?.briefingContext || {};
-      const contextHash = hashBriefingContext(briefingContext);
       const cacheKey = getAletheiaCacheKey(tenantId);
       let cached = aletheiaPrefetchCache.get(cacheKey);
-
-      console.log(
-        `[Aletheia] Starting Gemini SSE briefing for tenant ${tenantId || "env"} (model: ${geminiConfig.model}, voice: ${geminiConfig.voiceName})`
-      );
       let script = "";
       let prefetchedAudio: Buffer | null = null;
       let prefetchedMime = "audio/pcm;rate=24000";
       let prefetchedRate = 24000;
       let prefetchedSegments = 0;
-      if (
-        cached &&
-        cached.contextHash === contextHash &&
-        Date.now() - cached.createdAt < ALETHEIA_PREFETCH_TTL_MS
-      ) {
-        script = cached.script;
-        console.log(`[Aletheia] Using prefetched script for ${cacheKey}`);
-        if (cached.audioBase64) {
-          prefetchedAudio = Buffer.from(cached.audioBase64, "base64");
-          prefetchedMime = cached.mimeType || prefetchedMime;
-          prefetchedRate = cached.sampleRate || prefetchedRate;
-          prefetchedSegments = cached.segmentsCount || 0;
-        }
-      } else {
-        cached = undefined;
-        if (tenantId) {
-          let persisted = await loadPersistedAletheiaAsset(tenantId, contextHash);
-          if (!persisted) {
-            persisted = await loadLatestPersistedAletheiaAsset(tenantId);
-            if (persisted) {
-              console.log(
-                `[Aletheia] Hash mismatch — serving latest persisted asset for tenant ${tenantId}`
-              );
-            }
-          }
-          if (persisted) {
-            script = persisted.script;
-            prefetchedAudio = persisted.pcm;
-            prefetchedMime = persisted.mimeType || prefetchedMime;
-            prefetchedRate = persisted.sampleRate || prefetchedRate;
-            prefetchedSegments = persisted.segmentsCount || 1;
-            aletheiaPrefetchCache.set(cacheKey, {
-              script: persisted.script,
-              createdAt: persisted.createdAt,
-              contextHash: persisted.contextHash,
-              audioBase64: persisted.pcm.toString("base64"),
-              sampleRate: persisted.sampleRate,
-              mimeType: persisted.mimeType,
-              segmentsCount: persisted.segmentsCount,
-              model: persisted.model,
-              voiceName: persisted.voiceName,
-            });
-            cached = aletheiaPrefetchCache.get(cacheKey);
-          }
-        }
+      let voiceName = "";
+      let model = "";
 
-        if (!script) {
-          const generated = await prefetchAletheiaBriefing(tenantId, briefingContext);
-          script = generated.script;
-          prefetchedAudio = generated.combined;
-          prefetchedMime = generated.mimeType;
-          prefetchedRate = generated.sampleRate;
-          prefetchedSegments = generated.segmentsCount;
-          cached = aletheiaPrefetchCache.get(cacheKey);
+      if (cached && cached.audioBase64 && Date.now() - cached.createdAt < ALETHEIA_PREFETCH_TTL_MS) {
+        script = cached.script;
+        prefetchedAudio = Buffer.from(cached.audioBase64, "base64");
+        prefetchedMime = cached.mimeType || prefetchedMime;
+        prefetchedRate = cached.sampleRate || prefetchedRate;
+        prefetchedSegments = cached.segmentsCount || 1;
+        voiceName = cached.voiceName || "";
+        model = cached.model || "";
+        console.log(`[Aletheia] Serving cached audio for ${cacheKey}`);
+      } else {
+        const persisted = await loadLatestPersistedAletheiaAsset(tenantId);
+        if (persisted && persisted.pcm.length > 0) {
+          script = persisted.script;
+          prefetchedAudio = persisted.pcm;
+          prefetchedMime = persisted.mimeType || prefetchedMime;
+          prefetchedRate = persisted.sampleRate || prefetchedRate;
+          prefetchedSegments = persisted.segmentsCount || 1;
+          voiceName = persisted.voiceName || "";
+          model = persisted.model || "";
+          aletheiaPrefetchCache.set(cacheKey, {
+            script: persisted.script,
+            createdAt: persisted.createdAt,
+            contextHash: persisted.contextHash,
+            audioBase64: persisted.pcm.toString("base64"),
+            sampleRate: persisted.sampleRate,
+            mimeType: persisted.mimeType,
+            segmentsCount: persisted.segmentsCount,
+            model: persisted.model,
+            voiceName: persisted.voiceName,
+          });
+          console.log(`[Aletheia] Serving persisted audio for tenant ${tenantId}`);
         }
+      }
+
+      if (!prefetchedAudio || prefetchedAudio.length === 0) {
+        console.log(`[Aletheia] No pre-generated podcast for tenant ${tenantId}`);
+        await writeSSE(res, { type: "error", error: "No pre-generated podcast available. Generate one from the admin panel first." });
+        res.end();
+        return;
       }
 
       await writeSSE(res, { type: "script", data: script });
-
-      if (prefetchedAudio && prefetchedAudio.length > 0) {
-        await streamPcmBufferToSSE(res, prefetchedAudio, {
-          mimeType: prefetchedMime,
-          sampleRate: prefetchedRate,
-          voiceName: cached?.voiceName || geminiConfig.voiceName,
-          model: cached?.model || geminiConfig.model,
-          segmentsCount: prefetchedSegments || 1,
-        });
-      } else if (!abortController.signal.aborted) {
-        const generated = await prefetchAletheiaBriefing(tenantId, briefingContext);
-        await streamPcmBufferToSSE(res, generated.combined, {
-          mimeType: generated.mimeType,
-          sampleRate: generated.sampleRate,
-          voiceName: generated.voiceName,
-          model: generated.model,
-          segmentsCount: generated.segmentsCount,
-        });
-      }
+      await streamPcmBufferToSSE(res, prefetchedAudio, {
+        mimeType: prefetchedMime,
+        sampleRate: prefetchedRate,
+        voiceName,
+        model,
+        segmentsCount: prefetchedSegments,
+      });
 
       await writeSSE(res, { type: "done" });
       res.end();
