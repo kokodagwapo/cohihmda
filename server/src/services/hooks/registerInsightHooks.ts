@@ -8,6 +8,7 @@
 
 import { registerPostSyncHook, type PostSyncContext } from "./postSyncHookService.js";
 import { logInfo, logError } from "../logger.js";
+import { queueAutoRefreshForSourceTenant } from "../tenantRefreshService.js";
 
 let registered = false;
 
@@ -113,5 +114,22 @@ export function registerInsightHooks(): void {
       }
     },
     200
+  );
+
+  registerPostSyncHook(
+    "demo-tenant-auto-refresh",
+    async (ctx: PostSyncContext) => {
+      try {
+        const queued = await queueAutoRefreshForSourceTenant(ctx.tenantId);
+        if (queued > 0) {
+          logInfo(
+            `[PostSyncHook] Queued ${queued} demo tenant refresh job(s) for source tenant ${ctx.tenantId}`
+          );
+        }
+      } catch (err: any) {
+        logError(`[PostSyncHook] Demo tenant auto-refresh failed: ${err.message}`, err);
+      }
+    },
+    300
   );
 }

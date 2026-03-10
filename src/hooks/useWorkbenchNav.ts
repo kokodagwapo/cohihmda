@@ -71,8 +71,8 @@ export function useWorkbenchNav() {
     [canvases],
   );
   const favoriteCanvases = useMemo(
-    () => ownedCanvases.filter((c) => !!c.favorited),
-    [ownedCanvases],
+    () => canvases.filter((c) => !!c.favorited),
+    [canvases],
   );
 
   const ownedSessions = useMemo(

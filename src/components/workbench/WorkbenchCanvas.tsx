@@ -34,7 +34,6 @@ import {
   Clock,
   Type,
   Sparkles,
-  Download,
   Presentation,
   Link as LinkIcon,
   Code,
@@ -886,9 +885,6 @@ export function WorkbenchCanvas({
   const isOwner = isOwnerProp ?? true; // Default to true for new/own canvases
   const canEdit = isOwner;
   const {
-    handleExportPng,
-    handleExportPdf,
-    handleExportPptx,
     handleExportExcel,
     handleEmailScreenshot,
   } = useCanvasExport({ items, saveTitle });
@@ -5289,39 +5285,6 @@ Structure it as a narrative-first executive briefing:
                   Export canvas
                 </div>
                 <div className="flex flex-col gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      handleExportPdf();
-                      setShareDialogOpen(false);
-                    }}
-                    className="w-full gap-2"
-                  >
-                    <FileText className="h-4 w-4" />
-                    Download as PDF
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      handleExportPptx();
-                      setShareDialogOpen(false);
-                    }}
-                    className="w-full gap-2"
-                  >
-                    <Presentation className="h-4 w-4" />
-                    Download as PowerPoint
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      handleExportPng();
-                      setShareDialogOpen(false);
-                    }}
-                    className="w-full gap-2"
-                  >
-                    <Download className="h-4 w-4" />
-                    Download as PNG
-                  </Button>
                   <Button
                     variant="outline"
                     onClick={() => {

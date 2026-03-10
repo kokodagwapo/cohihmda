@@ -5,6 +5,13 @@ import { useToast } from "@/hooks/use-toast";
 export interface Tenant {
   id: string;
   name: string;
+  slug?: string;
+  status?: string;
+  is_demo?: boolean;
+  source_tenant_id?: string | null;
+  source_tenant_name?: string | null;
+  last_refreshed_at?: string | null;
+  auto_refresh?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -118,9 +125,15 @@ export const useTenants = () => {
 
   const [duplicating, setDuplicating] = useState(false);
   const [duplicationProgress, setDuplicationProgress] = useState<string | null>(null);
+  const [refreshingDemoTenantId, setRefreshingDemoTenantId] = useState<string | null>(null);
 
   const duplicateTenant = useCallback(
-    async (tenantId: string, name: string, slug: string) => {
+    async (
+      tenantId: string,
+      name: string,
+      slug: string,
+      options?: { autoRefresh?: boolean },
+    ) => {
       try {
         setDuplicating(true);
         setDuplicationProgress("Starting duplication...");
@@ -128,7 +141,11 @@ export const useTenants = () => {
         // 1. Start the async job (returns 202 immediately)
         const startResult = await api.request<{ jobSlug: string }>(`/api/tenants/${tenantId}/duplicate`, {
           method: "POST",
-          body: JSON.stringify({ name, slug }),
+          body: JSON.stringify({
+            name,
+            slug,
+            auto_refresh: options?.autoRefresh ?? false,
+          }),
         });
 
         const jobSlug = startResult.jobSlug || slug;
@@ -191,6 +208,80 @@ export const useTenants = () => {
     [loadTenants]
   );
 
+  const refreshDemoTenant = useCallback(
+    async (tenantId: string) => {
+      try {
+        setRefreshingDemoTenantId(tenantId);
+
+        const startResult = await api.request<{ jobId: string }>(
+          `/api/tenants/${tenantId}/refresh`,
+          { method: "POST" },
+        );
+
+        const jobId = startResult.jobId;
+        let attempts = 0;
+        const maxAttempts = 120;
+        while (attempts < maxAttempts) {
+          await new Promise((resolve) => setTimeout(resolve, 5000));
+          attempts += 1;
+
+          const status = await api.request<{
+            status: "running" | "completed" | "failed";
+            elapsedSeconds?: number;
+            error?: string;
+          }>(`/api/tenants/refresh-status/${jobId}`);
+
+          if (status.status === "completed") {
+            toastRef.current({
+              title: "Success",
+              description: "Demo tenant refreshed from source data",
+            });
+            await loadTenants();
+            return;
+          }
+          if (status.status === "failed") {
+            throw new Error(status.error || "Demo tenant refresh failed");
+          }
+
+        }
+
+        throw new Error("Refresh timed out after 10 minutes");
+      } catch (error: any) {
+        console.error("Error refreshing demo tenant:", error);
+        toastRef.current({
+          title: "Error",
+          description: error.message || "Failed to refresh demo tenant",
+          variant: "destructive",
+        });
+        throw error;
+      } finally {
+        setRefreshingDemoTenantId(null);
+      }
+    },
+    [loadTenants],
+  );
+
+  const updateDemoSettings = useCallback(
+    async (tenantId: string, autoRefresh: boolean) => {
+      try {
+        await api.request(`/api/tenants/${tenantId}/demo-settings`, {
+          method: "PATCH",
+          body: JSON.stringify({ auto_refresh: autoRefresh }),
+        });
+        await loadTenants();
+      } catch (error: any) {
+        console.error("Error updating demo settings:", error);
+        toastRef.current({
+          title: "Error",
+          description: error.message || "Failed to update demo settings",
+          variant: "destructive",
+        });
+        throw error;
+      }
+    },
+    [loadTenants],
+  );
+
   const deleteTenant = useCallback(
     async (tenantId: string) => {
       try {
@@ -221,10 +312,13 @@ export const useTenants = () => {
     error,
     duplicating,
     duplicationProgress,
+    refreshingDemoTenantId,
     loadTenants,
     createTenant,
     updateTenant,
     deleteTenant,
     duplicateTenant,
+    refreshDemoTenant,
+    updateDemoSettings,
   };
 };
