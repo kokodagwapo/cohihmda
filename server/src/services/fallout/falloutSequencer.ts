@@ -24,6 +24,24 @@ const MAX_REASON_CODES = 10;
 /** Zone points: 6 pts = bucket 6 (worst), 1 pt = best. Both middle (P45–P55) and worse tail get 6 pts (direction-aware). */
 const ZONE_POINTS = [6, 5, 4, 3, 2, 1];
 
+/**
+ * Static market delta zone from fixed bucket ranges (not profile-based).
+ * Bucket 1 (low risk) = ≤−0.25%, Bucket 6 (high risk) = >+0.3%.
+ * Zone = 7 − bucket (Zone 1 = worst/6pts, Zone 6 = best/1pt).
+ */
+function staticMarketDeltaZone(delta: number | null): { zone: number; points: number } | null {
+  if (delta == null || isNaN(delta)) return null;
+  let bucket: number;
+  if (delta <= -0.25) bucket = 1;
+  else if (delta <= 0) bucket = 2;
+  else if (delta <= 0.1) bucket = 3;
+  else if (delta <= 0.2) bucket = 4;
+  else if (delta <= 0.3) bucket = 5;
+  else bucket = 6;
+  const zone = 7 - bucket;
+  return { zone, points: ZONE_POINTS[zone - 1] };
+}
+
 /** Risk threshold: only predict Denied/Withdrawn when risk score (0-100) is above this. */
 const RISK_THRESHOLD_PCT = 60;
 
@@ -186,7 +204,7 @@ function computeSimilarityScore(
   const features =
     statusType === 'Withdrawn'
       ? (['fico_score', 'ltv_ratio', 'be_dti_ratio', 'days_active', 'market_delta'] as const)
-      : (['fico_score', 'ltv_ratio', 'be_dti_ratio', 'days_active'] as const); // Denied: days_active = app to today
+      : (['fico_score', 'ltv_ratio', 'be_dti_ratio', 'days_active'] as const); // Denied (likely decline): 4 features only; market_delta not used
 
   // Lower value = worse: fico_score, market_delta. Higher value = worse: ltv_ratio, be_dti_ratio, days_active.
   const higherIsWorseFeatures = new Set(['ltv_ratio', 'be_dti_ratio', 'days_active']);
@@ -206,6 +224,21 @@ function computeSimilarityScore(
               ? vals.days_active
               : vals.market_delta;
     if (value == null || isNaN(value)) continue; // skip null/missing
+
+    // market_delta: use static bucket ranges instead of profile-based zones
+    if (f === 'market_delta') {
+      const result = staticMarketDeltaZone(value);
+      if (result) {
+        score += result.points;
+        reasonCodes.push({
+          bucket_type: f,
+          bucket_value: `Zone${result.zone}`,
+          risk_score: result.points,
+        });
+      }
+      continue;
+    }
+
     const stats = profile.get(f);
     if (!stats) continue;
     const higherIsWorse = higherIsWorseFeatures.has(f);
@@ -391,12 +424,18 @@ export async function runFalloutSequencer(
   }
 
   // Compare-risks: Predict Deny when deny risk > 60% and (withdraw ≤ 60% or deny > withdraw); Predict Withdraw when withdraw > 60% and (deny ≤ 60% or withdraw ≥ deny). Ties go to Withdraw.
+  // Withdrawn risk denominator: 30 if loan has market_delta (5 features), else 24 (4 features) so % is comparable.
   const deniedRisk100 = (score: number) => (score / MAX_DENIED_POINTS) * 100;
-  const withdrawnRisk100 = (score: number) => (score / MAX_WITHDRAWN_POINTS) * 100;
+  const getWithdrawnMaxPoints = (loan: any): number => {
+    const vals = getFeatureValues(loan);
+    return vals.market_delta != null ? MAX_WITHDRAWN_POINTS : MAX_DENIED_POINTS;
+  };
+  const withdrawnRisk100 = (score: number, loan: any) =>
+    (score / getWithdrawnMaxPoints(loan)) * 100;
 
   for (const item of list) {
     const dRisk = deniedRisk100(item.deniedScore);
-    const wRisk = withdrawnRisk100(item.withdrawnScore);
+    const wRisk = withdrawnRisk100(item.withdrawnScore, item.loan);
     const denyMeetsThreshold = dRisk > RISK_THRESHOLD_PCT;
     const withdrawMeetsThreshold = wRisk > RISK_THRESHOLD_PCT;
     if (denyMeetsThreshold && (!withdrawMeetsThreshold || dRisk > wRisk)) {
@@ -478,6 +517,20 @@ export async function runFalloutSequencer(
                 ? vals.days_active
                 : vals.market_delta;
       if (value == null || isNaN(value)) continue;
+
+      // market_delta: use static bucket ranges instead of profile-based zones
+      if (f === 'market_delta') {
+        const staticResult = staticMarketDeltaZone(value);
+        if (staticResult) {
+          item.reason_codes.push({
+            bucket_type: f,
+            bucket_value: `Zone${staticResult.zone}`,
+            risk_score: 0,
+          });
+        }
+        continue;
+      }
+
       const stats = profile.get(f);
       if (!stats) continue;
       const higherIsWorse = higherIsWorseFeatures.has(f);
@@ -486,7 +539,7 @@ export async function runFalloutSequencer(
         item.reason_codes.push({
           bucket_type: f,
           bucket_value: `Zone${result.zone}`,
-          risk_score: 0, // not used for official risk score; UI derives bucket value 1–6 from zone (Zone1→6, Zone6→1)
+          risk_score: 0,
         });
       }
     }
@@ -501,7 +554,7 @@ export async function runFalloutSequencer(
       item.projected_status === 'Denied'
         ? MAX_DENIED_POINTS
         : item.projected_status === 'Withdrawn'
-          ? MAX_WITHDRAWN_POINTS
+          ? getWithdrawnMaxPoints(item.loan)
           : MAX_OTHER_POINTS;
     return Math.min(100, Math.round((sum / max) * 100));
   };

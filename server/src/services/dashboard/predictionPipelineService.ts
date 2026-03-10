@@ -55,7 +55,17 @@ const MAX_DENIED_POINTS = 24;
 const MAX_WITHDRAWN_POINTS = 30;
 const MAX_OTHER_POINTS = 18;
 
-function reasonCodesToRiskScore(raw: any, predictedOutcome?: string): number | null {
+/** True if loan has a valid market_delta (used for withdrawn max points: 30 vs 24). */
+function loanHasMarketDelta(loan: any): boolean {
+  const delta = loan?.marketChangeDelta ?? loan?.market_change_delta;
+  return delta != null && !isNaN(Number(delta));
+}
+
+function reasonCodesToRiskScore(
+  raw: any,
+  predictedOutcome?: string,
+  loan?: any
+): number | null {
   if (raw == null) return null;
   const codes = Array.isArray(raw)
     ? raw
@@ -76,7 +86,9 @@ function reasonCodesToRiskScore(raw: any, predictedOutcome?: string): number | n
     predictedOutcome === "deny"
       ? MAX_DENIED_POINTS
       : predictedOutcome === "withdraw"
-        ? MAX_WITHDRAWN_POINTS
+        ? loan != null && loanHasMarketDelta(loan)
+          ? MAX_WITHDRAWN_POINTS
+          : MAX_DENIED_POINTS
         : MAX_OTHER_POINTS;
   return Math.min(100, Math.max(0, Math.round((sum / maxPoints) * 100)));
 }
@@ -167,42 +179,39 @@ function calcTimeInMotionSignal(l: any): number | null {
 }
 
 function calcInterestLockVsMarketSignal(l: any): number | null {
+  // Only show Lock vs Market when loan has a lock date; otherwise N/A
+  if (l.lock_date == null && l.lockDate == null) return null;
   const deltaFromFred =
     l.marketChangeDelta != null && !isNaN(Number(l.marketChangeDelta))
       ? Number(l.marketChangeDelta)
       : null;
   if (deltaFromFred !== null) {
-    if (deltaFromFred <= -0.3) return 1;
-    if (deltaFromFred <= -0.1) return 2;
-    if (deltaFromFred <= 0.05) return 3;
-    if (deltaFromFred <= 0.2) return 4;
-    if (deltaFromFred <= 0.5) return 5;
-    return 6;
+    return staticMarketDeltaBucket(deltaFromFred);
   }
   const rate = l.interest_rate != null ? Number(l.interest_rate) : null;
   if (rate === null) return null;
   const market = l.market_rate ?? l.market_rate_at_lock;
   if (market != null && !isNaN(Number(market))) {
-    const delta = Number(market) - rate;
-    if (delta <= -0.3) return 1;
-    if (delta <= 0) return 2;
-    if (delta <= 0.25) return 3;
-    if (delta <= 0.5) return 5;
-    return 6;
+    return staticMarketDeltaBucket(Number(market) - rate);
   }
-  if (rate <= 5.5) return 2;
-  if (rate <= 6.5) return 3;
-  if (rate <= 7.5) return 4;
-  return 5;
+  return null;
 }
 
 function calcMarketChangeDeltaSignal(delta: number | null): number | null {
-  if (delta == null) return null;
-  if (delta <= -0.5) return 1;
-  if (delta <= -0.25) return 2;
+  return staticMarketDeltaBucket(delta);
+}
+
+/**
+ * Static market delta bucket (1=low risk, 6=high risk). Same ranges used by the sequencer and UI.
+ * ≤−0.25% → 1, −0.25 to 0% → 2, 0 to 0.1% → 3, 0.1 to 0.2% → 4, 0.2 to 0.3% → 5, >0.3% → 6.
+ */
+function staticMarketDeltaBucket(delta: number | null): number | null {
+  if (delta == null || isNaN(delta)) return null;
+  if (delta <= -0.25) return 1;
+  if (delta <= 0) return 2;
   if (delta <= 0.1) return 3;
-  if (delta <= 0.25) return 4;
-  if (delta <= 0.5) return 5;
+  if (delta <= 0.2) return 4;
+  if (delta <= 0.3) return 5;
   return 6;
 }
 
@@ -345,18 +354,24 @@ export async function runPredictionPipeline(
           ? Number(loan.market_change_delta)
           : null;
       if (stored != null) {
-        loan.marketChangeDelta = stored;
+        // Only use stored delta when loan has a lock date; otherwise leave blank (unlocked = no market data)
+        const hasLock = loan.lock_date != null || loan.lockDate != null;
+        if (hasLock) {
+          loan.marketChangeDelta = stored;
+        } else {
+          loan.marketChangeDelta = undefined;
+        }
       } else {
-        const lockDate = loan.lock_date ?? loan.application_date;
+        // Only compute market delta when loan has a lock date; do not use application date
+        const lockDate = loan.lock_date ?? null;
         if (lockDate) {
           const delta = await computeMarketDeltaForDates(lockDate, today);
           loan.marketChangeDelta = delta ?? undefined;
         }
       }
       const hasRateAtLock = loan.market_rate_at_lock != null && !isNaN(Number(loan.market_rate_at_lock));
-      if (!hasRateAtLock && (loan.lock_date || loan.application_date)) {
-        const refDate = loan.lock_date ?? loan.application_date;
-        const refObj = typeof refDate === "string" ? new Date(refDate) : refDate;
+      if (!hasRateAtLock && loan.lock_date) {
+        const refObj = typeof loan.lock_date === "string" ? new Date(loan.lock_date) : loan.lock_date;
         if (!isNaN(refObj.getTime())) {
           let dateStr = refObj.toISOString().split("T")[0];
           let rate = await getMarketRateForDate(dateStr);
@@ -371,11 +386,13 @@ export async function runPredictionPipeline(
           if (rate != null && !isNaN(rate)) loan.market_rate_at_lock = rate;
         }
       }
-      if (!loan.lock_date && loan.application_date) {
+      if (loan.lock_date) {
+        loan.rateReferenceType = "lock";
+      } else if (loan.application_date) {
         const appRate = await getMarketRateForDate(loan.application_date);
         loan.rateAtApplicationDate = appRate ?? undefined;
+        loan.rateReferenceType = "application";
       }
-      loan.rateReferenceType = loan.lock_date != null ? "lock" : "application";
     })
   );
 
@@ -405,6 +422,19 @@ export async function runPredictionPipeline(
     } catch (e: any) {
       if (e?.code !== "42703") logWarn("[Predict] Persist market_change_delta failed", { message: e?.message });
     }
+  }
+
+  // Clear stored market_change_delta for active loans that have no lock date (so no stale market data for unlocked loans)
+  try {
+    const clearResult = await tenantPool.query(
+      `UPDATE public.loans SET market_change_delta = NULL
+       WHERE current_loan_status = 'Active Loan' AND (lock_date IS NULL OR lock_date::text = '')`
+    );
+    if (clearResult.rowCount != null && clearResult.rowCount > 0) {
+      logDebug("[Predict] Cleared market_change_delta for unlocked active loans", { count: clearResult.rowCount });
+    }
+  } catch (e: any) {
+    if (e?.code !== "42703") logWarn("[Predict] Clear market_change_delta for unlocked loans failed", { message: e?.message });
   }
 
   const withRates = activeLoans.filter((l: any) => l.loan_id != null);
@@ -518,6 +548,7 @@ export async function runPredictionPipeline(
       appDate != null
         ? Math.floor((Date.now() - new Date(appDate).getTime()) / (1000 * 60 * 60 * 24))
         : null;
+    const hasLock = loan.lock_date != null || loan.lockDate != null;
     const lockRate = loan.interest_rate != null ? Number(loan.interest_rate) : null;
     const marketRate =
       loan.market_rate != null
@@ -526,15 +557,16 @@ export async function runPredictionPipeline(
           ? Number(loan.market_rate_at_lock)
           : null;
     const marketChangeDeltaFromDb =
-      lockRate != null && marketRate != null && !isNaN(lockRate) && !isNaN(marketRate)
+      hasLock && lockRate != null && marketRate != null && !isNaN(lockRate) && !isNaN(marketRate)
         ? marketRate - lockRate
         : null;
-    const marketChangeDelta =
-      loan.marketChangeDelta != null && !isNaN(Number(loan.marketChangeDelta))
-        ? Number(loan.marketChangeDelta)
-        : marketChangeDeltaFromDb;
+    const marketChangeDelta = hasLock
+      ? (loan.marketChangeDelta != null && !isNaN(Number(loan.marketChangeDelta))
+          ? Number(loan.marketChangeDelta)
+          : marketChangeDeltaFromDb)
+      : null;
 
-    const sequencerRisk = reasonCodesToRiskScore(row?.reason_codes, outcome);
+    const sequencerRisk = reasonCodesToRiskScore(row?.reason_codes, outcome, loan);
     const rawReasonCodes = row?.reason_codes;
     const normalizedReasonCodes =
       rawReasonCodes != null
@@ -569,17 +601,17 @@ export async function runPredictionPipeline(
         ) ?? calcLoanCharacteristicsSignal(loan) ?? undefined,
       timeInMotionSignalStrength: calcTimeInMotionSignal(loan) ?? undefined,
       interestLockVsMarketSignalStrength: calcInterestLockVsMarketSignal(loan) ?? undefined,
-      marketChangeDeltaSignal: calcMarketChangeDeltaSignal(marketChangeDelta) ?? undefined,
+      marketChangeDeltaSignal: hasLock ? (calcMarketChangeDeltaSignal(marketChangeDelta) ?? undefined) : undefined,
       activeDays: activeDays ?? undefined,
-      market_rate: loan.market_rate != null ? Number(loan.market_rate) : undefined,
-      market_rate_at_lock: loan.market_rate_at_lock != null ? Number(loan.market_rate_at_lock) : undefined,
+      market_rate: hasLock && loan.market_rate != null ? Number(loan.market_rate) : undefined,
+      market_rate_at_lock: hasLock && loan.market_rate_at_lock != null ? Number(loan.market_rate_at_lock) : undefined,
       lockMarketRate:
-        loan.market_rate_at_lock != null
+        hasLock && loan.market_rate_at_lock != null
           ? Number(loan.market_rate_at_lock)
-          : loan.interest_rate != null
+          : hasLock && loan.interest_rate != null
             ? Number(loan.interest_rate)
             : undefined,
-      marketChangeDelta: marketChangeDelta != null ? marketChangeDelta : null,
+      marketChangeDelta: hasLock && marketChangeDelta != null ? marketChangeDelta : null,
       riskSummary: {
         predictedOutcome: outcome,
         confidence,

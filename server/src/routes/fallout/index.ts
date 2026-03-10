@@ -216,7 +216,8 @@ router.post('/recompute', async (req: AuthRequest, res) => {
     const today = new Date();
     await Promise.all(
       activeLoans.map(async (loan: any) => {
-        const lockDate = loan.lock_date ?? loan.application_date;
+        // Only compute market delta when loan has a lock date; do not use application date
+        const lockDate = loan.lock_date ?? null;
         if (lockDate) {
           const delta = await computeMarketDeltaForDates(lockDate, today);
           loan.marketChangeDelta = delta ?? undefined;

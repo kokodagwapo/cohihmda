@@ -344,7 +344,8 @@ export async function runNumericOutcomeProfileDerivation(pool: pg.Pool): Promise
 
     let market_delta: number | null = null;
     if (rawStatus === 'Withdrawn' || rawStatus === 'FundedOnTime') {
-      const lockDate = row.lock_date ?? row.application_date;
+      // Only compute market delta when loan has a lock date; do not use application date for lock rate
+      const lockDate = row.lock_date ?? null;
       const outcomeDate = row.current_status_date ?? row.funding_date ?? row.closing_date;
       if (lockDate && outcomeDate) {
         market_delta = await computeMarketDeltaForDates(lockDate, outcomeDate);

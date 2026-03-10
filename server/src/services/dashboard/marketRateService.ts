@@ -535,9 +535,9 @@ export async function getMarketRateForDate(date: string | Date): Promise<number 
 
 /**
  * Compute market delta for historical outcome (lock rate - close rate at outcome date).
- * Used by outcome numeric profile service. Same convention as predictionService: positive = rates fell.
- * @param lockDate - Lock or application date
- * @param outcomeDate - Outcome date (e.g. current_status_date)
+ * Only call when the loan has a lock date; do not pass application date.
+ * @param lockDate - Lock date only (market rate at this date = lock rate)
+ * @param outcomeDate - Outcome date (e.g. current_status_date, or today for active loans)
  * @returns lockMarketRate - closeMarketRate, or null if either rate unavailable
  */
 export async function computeMarketDeltaForDates(
