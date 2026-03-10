@@ -10,6 +10,7 @@ import { apiLimiter } from "../middleware/rateLimiter.js";
 import { startSSEHeartbeat } from "../utils/sseUtils.js";
 import { getPlatformSetting } from "../services/platformSettingsService.js";
 import {
+  hasPersistedAletheiaAsset,
   loadPersistedAletheiaAsset,
   persistAletheiaAsset,
 } from "../services/aletheiaAssetStore.js";
@@ -323,6 +324,9 @@ async function getGeminiVoiceConfig(
     throw new Error("Gemini API key not configured");
   }
   const { apiKey, keySource } = selectedKey;
+  console.log(
+    `[Aletheia] Gemini key resolved: source=${keySource}, length=${apiKey.length}, prefix=${apiKey.slice(0, 8)}...`
+  );
 
   const normalizedModel = (() => {
     const raw = (voiceModel || "").trim();
@@ -1365,6 +1369,40 @@ export async function prefetchAletheiaBriefing(
     contextHash,
   };
 }
+
+// GET /api/podcast/cohi/aletheia/status — check if a pre-generated podcast exists
+router.get(
+  "/aletheia/status",
+  authenticateToken,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantId =
+        (req as any).tenantContext?.tenantId ||
+        req.headers["x-tenant-id"] as string ||
+        "";
+
+      if (!tenantId) {
+        return res.json({ available: false });
+      }
+
+      const cacheKey = getAletheiaCacheKey(tenantId);
+      const cached = aletheiaPrefetchCache.get(cacheKey);
+      if (cached) {
+        return res.json({
+          available: true,
+          createdAt: new Date(cached.createdAt).toISOString(),
+          source: "cache",
+        });
+      }
+
+      const result = await hasPersistedAletheiaAsset(tenantId);
+      return res.json(result);
+    } catch (error: any) {
+      console.error("[Aletheia] Status check failed:", error.message);
+      return res.json({ available: false });
+    }
+  }
+);
 
 // POST /api/podcast/cohi/aletheia/stream — Aletheia Insights via Gemini audio over SSE
 router.post(

@@ -43,6 +43,7 @@ export interface AletheiaBriefingControlsProps {
     };
     userName?: string;
   };
+  tenantId?: string;
   onChatToggle?: (show: boolean) => void;
   showChat?: boolean;
 }
@@ -51,9 +52,11 @@ const OUTPUT_SAMPLE_RATE = 24000;
 
 export function AletheiaBriefingControls({
   briefingContext,
+  tenantId,
   onChatToggle,
   showChat = false,
 }: AletheiaBriefingControlsProps) {
+  const [podcastAvailable, setPodcastAvailable] = useState<boolean | null>(null);
   const [isInCall, setIsInCall] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -143,6 +146,23 @@ export function AletheiaBriefingControls({
       }
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function checkAvailability() {
+      try {
+        const res = await api.fetchWithAuth("/api/podcast/cohi/aletheia/status");
+        if (!cancelled && res.ok) {
+          const data = await res.json();
+          setPodcastAvailable(data.available === true);
+        }
+      } catch {
+        if (!cancelled) setPodcastAvailable(false);
+      }
+    }
+    checkAvailability();
+    return () => { cancelled = true; };
+  }, [tenantId]);
 
   useEffect(() => {
     if (workletRef.current) {
@@ -529,6 +549,9 @@ export function AletheiaBriefingControls({
   useEffect(() => {
     onChatToggle?.(showChat && isInCall);
   }, [isInCall, onChatToggle, showChat]);
+
+  if (podcastAvailable === null) return null; // still checking
+  if (!podcastAvailable && !isInCall) return null; // nothing to play
 
   return (
     <div className="flex items-center gap-2 sm:gap-3">
