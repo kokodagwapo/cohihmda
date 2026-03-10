@@ -1406,6 +1406,7 @@ router.get(
   async (req: AuthRequest, res) => {
     try {
       const tenantId =
+        (req.query.tenantId as string) ||
         (req as any).tenantContext?.tenantId ||
         req.headers["x-tenant-id"] as string ||
         "";

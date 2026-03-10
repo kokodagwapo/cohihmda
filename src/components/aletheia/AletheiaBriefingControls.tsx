@@ -148,10 +148,16 @@ export function AletheiaBriefingControls({
   }, []);
 
   useEffect(() => {
+    if (!tenantId) {
+      setPodcastAvailable(false);
+      return;
+    }
     let cancelled = false;
     async function checkAvailability() {
       try {
-        const res = await api.fetchWithAuth("/api/podcast/cohi/aletheia/status");
+        const res = await api.fetchWithAuth(
+          `/api/podcast/cohi/aletheia/status?tenantId=${encodeURIComponent(tenantId!)}`
+        );
         if (!cancelled && res.ok) {
           const data = await res.json();
           setPodcastAvailable(data.available === true);
