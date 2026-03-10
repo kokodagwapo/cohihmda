@@ -124,9 +124,9 @@ export function AletheiaBriefingControls({
             }
           };
           worklet.port.postMessage({ type: "setSpeed", speed: 1.0 });
-          console.log("[Aletheia] AudioWorklet ready");
+          console.log("[Cohi] AudioWorklet ready");
         })
-        .catch((e) => console.warn("[Aletheia] AudioWorklet load failed:", e));
+        .catch((e) => console.warn("[Cohi] AudioWorklet load failed:", e));
 
       if (audioCtxRef.current.state === "suspended") {
         audioCtxRef.current.resume().catch(() => {});
@@ -232,7 +232,7 @@ export function AletheiaBriefingControls({
           samples: normalized,
         });
       } catch (e) {
-        console.error("[Aletheia] Error decoding audio chunk", e);
+        console.error("[Cohi] Error decoding audio chunk", e);
       }
     },
     [resampleToOutputRate]
@@ -293,10 +293,10 @@ export function AletheiaBriefingControls({
                 playPcmChunk(payload.data, streamSampleRateRef.current);
                 break;
               case "script":
-                console.log("[Aletheia] Script text:", payload.data);
+                console.log("[Cohi] Script text:", payload.data);
                 break;
               case "transcript":
-                console.log("[Aletheia] Transcript text:", payload.data);
+                console.log("[Cohi] Transcript text:", payload.data);
                 break;
               case "done":
                 setIsLoading(false);
@@ -306,7 +306,7 @@ export function AletheiaBriefingControls({
                 }
                 break;
               case "error":
-                console.error("[Aletheia] Server error:", payload.error);
+                console.error("[Cohi] Server error:", payload.error);
                 toast({
                   title: "Briefing Error",
                   description: payload.error,
@@ -363,6 +363,7 @@ export function AletheiaBriefingControls({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            tenantId,
             briefingContext: {
               ...briefingContext,
               greeting,
@@ -380,7 +381,7 @@ export function AletheiaBriefingControls({
       await consumeSSEStream(response, abort.signal);
     } catch (error: any) {
       if (error.name === "AbortError") return;
-      console.error("[Aletheia] Briefing failed:", error);
+      console.error("[Cohi] Briefing failed:", error);
       toast({
         title: "Briefing Failed",
         description: error.message || "Failed to start briefing",
@@ -479,7 +480,7 @@ export function AletheiaBriefingControls({
         await consumeSSEStream(response, abort.signal);
       } catch (error: any) {
         if (error.name === "AbortError") return;
-        console.error("[Aletheia] Ask failed:", error);
+        console.error("[Cohi] Ask failed:", error);
         toast({
           title: "Question Failed",
           description: error.message || "Failed to process question",
