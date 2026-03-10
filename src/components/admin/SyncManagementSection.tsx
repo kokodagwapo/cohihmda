@@ -206,6 +206,11 @@ export const SyncManagementSection = () => {
   const [podcastTenantId, setPodcastTenantId] = useState<string>('');
   const [updatingPodcastSettings, setUpdatingPodcastSettings] = useState(false);
   const [generatingPodcast, setGeneratingPodcast] = useState(false);
+  const [podcastJobId, setPodcastJobId] = useState<number | null>(null);
+  const [podcastJobTenantId, setPodcastJobTenantId] = useState<string>('');
+  const [podcastJobStatus, setPodcastJobStatus] = useState<'idle' | 'pending' | 'processing' | 'complete' | 'failed'>('idle');
+  const [podcastJobMessage, setPodcastJobMessage] = useState<string>('');
+  const podcastPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadData = useCallback(async (showSpinner = true) => {
     try {
@@ -469,46 +474,83 @@ export const SyncManagementSection = () => {
     }
   };
 
+  const stopPodcastPolling = useCallback(() => {
+    if (podcastPollRef.current) {
+      clearInterval(podcastPollRef.current);
+      podcastPollRef.current = null;
+    }
+  }, []);
+
+  const pollPodcastJob = useCallback(async (tenantId: string, jobId: number) => {
+    try {
+      const resp = await api.request<{
+        jobId: number;
+        status: string;
+        progress: number;
+        message: string;
+        error?: string;
+        completedAt?: string;
+      }>(`/api/admin/sync-management/podcast/job/${tenantId}/${jobId}`);
+
+      setPodcastJobMessage(resp.message || '');
+
+      if (resp.status === 'complete') {
+        setPodcastJobStatus('complete');
+        stopPodcastPolling();
+        setGeneratingPodcast(false);
+        const tenant = tenants.find(t => t.id === tenantId);
+        toast({ title: 'Podcast generated and stored', description: tenant?.name || 'Tenant' });
+        loadData(false);
+      } else if (resp.status === 'failed') {
+        setPodcastJobStatus('failed');
+        stopPodcastPolling();
+        setGeneratingPodcast(false);
+        toast({ title: 'Podcast generation failed', description: resp.error || resp.message, variant: 'destructive' });
+      } else {
+        setPodcastJobStatus(resp.status === 'processing' ? 'processing' : 'pending');
+      }
+    } catch {
+      // Transient fetch error, keep polling
+    }
+  }, [tenants, toast, loadData, stopPodcastPolling]);
+
   const handleGeneratePodcast = async () => {
     if (!podcastTenantId) {
-      toast({
-        title: 'Select a tenant',
-        description: 'Choose a tenant before generating a podcast.',
-        variant: 'destructive',
-      });
+      toast({ title: 'Select a tenant', description: 'Choose a tenant before generating a podcast.', variant: 'destructive' });
       return;
     }
     setGeneratingPodcast(true);
-    try {
-      const response = await api.request<{
-        success: boolean;
-        script_length: number;
-        audio_bytes: number;
-        segments_count: number;
-      }>('/api/admin/sync-management/podcast/generate', {
-        method: 'POST',
-        body: JSON.stringify({
-          tenant_id: podcastTenantId,
-          async: false,
-        }),
-      });
+    setPodcastJobStatus('pending');
+    setPodcastJobMessage('Enqueuing job...');
+    stopPodcastPolling();
 
-      const tenant = tenants.find(t => t.id === podcastTenantId);
-      toast({
-        title: 'Podcast generated and stored',
-        description: `${tenant?.name || 'Tenant'}: ${response.segments_count} clips, ${(response.audio_bytes / 1024).toFixed(0)} KB`,
-      });
-      loadData(false);
+    try {
+      const response = await api.request<{ success: boolean; jobId: number; tenant_id: string }>(
+        '/api/admin/sync-management/podcast/generate',
+        { method: 'POST', body: JSON.stringify({ tenant_id: podcastTenantId }) }
+      );
+
+      setPodcastJobId(response.jobId);
+      setPodcastJobTenantId(podcastTenantId);
+      setPodcastJobMessage('Waiting for worker to pick up job...');
+
+      podcastPollRef.current = setInterval(() => {
+        pollPodcastJob(podcastTenantId, response.jobId);
+      }, 3000);
+      // Immediate first poll after a short delay
+      setTimeout(() => pollPodcastJob(podcastTenantId, response.jobId), 1500);
     } catch (error: any) {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to generate podcast',
-        variant: 'destructive',
-      });
-    } finally {
+      setPodcastJobStatus('failed');
+      setPodcastJobMessage(error.message || 'Failed to enqueue');
       setGeneratingPodcast(false);
+      toast({ title: 'Error', description: error.message || 'Failed to start podcast generation', variant: 'destructive' });
     }
   };
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => stopPodcastPolling();
+  }, [stopPodcastPolling]);
 
   // Helper to fetch history for a connection
   const fetchHistory = async (connection: SyncConnection) => {
@@ -717,6 +759,31 @@ export const SyncManagementSection = () => {
               Generate and Store Podcast
             </Button>
           </div>
+          {podcastJobStatus !== 'idle' && (
+            <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-900/40 border border-slate-200/60 dark:border-slate-700/50">
+              {(podcastJobStatus === 'pending' || podcastJobStatus === 'processing') && (
+                <Loader2 className="h-4 w-4 animate-spin text-blue-500 flex-shrink-0" />
+              )}
+              {podcastJobStatus === 'complete' && (
+                <CheckCircle2 className="h-4 w-4 text-emerald-500 flex-shrink-0" />
+              )}
+              {podcastJobStatus === 'failed' && (
+                <XCircle className="h-4 w-4 text-red-500 flex-shrink-0" />
+              )}
+              <span className={`text-sm font-light ${
+                podcastJobStatus === 'complete' ? 'text-emerald-700 dark:text-emerald-400'
+                  : podcastJobStatus === 'failed' ? 'text-red-700 dark:text-red-400'
+                  : 'text-slate-600 dark:text-slate-400'
+              }`}>
+                {podcastJobMessage}
+              </span>
+              {podcastJobStatus === 'failed' && (
+                <Button variant="ghost" size="sm" onClick={handleGeneratePodcast} className="ml-auto h-7 text-xs font-light">
+                  Retry
+                </Button>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 

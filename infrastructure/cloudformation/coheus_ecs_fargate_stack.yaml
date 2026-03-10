@@ -972,7 +972,7 @@ Resources:
             - Name: ALETHEIA_PREFETCH_WORKER_ENABLED
               Value: "true"
             - Name: ALETHEIA_PREFETCH_POLL_MS
-              Value: "60000"
+              Value: "15000"
             - Name: ALETHEIA_PREFETCH_MAX_JOBS_PER_TICK
               Value: "2"
           Secrets:
