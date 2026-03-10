@@ -248,13 +248,13 @@ Every loan is analyzed across multiple dimensions, each producing a **signal buc
 Calculated as: `lockMarketRate - closeMarketRate` (rate at lock vs. current market rate).
 
 | Bucket | Delta Range | Meaning |
-|--------|-----------|---------|
-| 1 | ≤ -0.3% | Very favorable (rates rose, lock saves money) |
-| 2 | -0.299% to -0.1% | Favorable |
-| 3 | -0.099% to +0.05% | Neutral |
-| 4 | +0.051% to +0.2% | Slightly unfavorable |
-| 5 | +0.201% to +0.5% | Unfavorable (borrower may shop) |
-| 6 | > +0.5% | Very unfavorable |
+|--------|-------------|---------|
+| 1 | ≤ −0.25% | Borrower has great rate |
+| 2 | −0.25% to 0% | Favorable |
+| 3 | 0% to 0.1% | Neutral |
+| 4 | 0.1% to +0.2% | Slightly unfavorable |
+| 5 | +0.2% to +0.3% | Unfavorable (borrower may shop) |
+| 6 | > 0.3% | May shop elsewhere |
 
 #### Time to Approval
 

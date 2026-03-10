@@ -2422,14 +2422,20 @@ export const ClosingFalloutForecast = ({
           activeDays:
             l.activeDays ?? l.active_days ?? activeDaysComputed ?? null,
           // Rates and market delta (with snake_case fallbacks and computed delta)
+          // When loan has no lock date: show no market data at all (Ref. Market Rate, Market Rate Today, Market Delta, Lock vs Market = blank/N/A)
           interestRate: l.interest_rate ?? null,
-          marketRate: l.market_rate ?? l.closeMarketRate ?? marketRateVal ?? null,
-          lockMarketRate: l.lockMarketRate ?? (l.market_rate_at_lock != null ? Number(l.market_rate_at_lock) : lockRate) ?? null,
+          marketRate: lockDate != null
+            ? (l.market_rate ?? l.closeMarketRate ?? marketRateVal ?? null)
+            : null,
+          lockMarketRate: lockDate != null
+            ? (l.lockMarketRate ?? (l.market_rate_at_lock != null ? Number(l.market_rate_at_lock) : lockRate) ?? null)
+            : null,
           rateReferenceType: l.rateReferenceType ?? (lockDate != null ? "lock" : "application") as "lock" | "application",
-          marketChangeDelta:
-            (l.marketChangeDelta != null && l.marketChangeDelta !== "" ? Number(l.marketChangeDelta) : null)
-            ?? (l.market_change_delta != null ? Number(l.market_change_delta) : null)
-            ?? marketDeltaComputed ?? null,
+          marketChangeDelta: lockDate != null
+            ? ((l.marketChangeDelta != null && l.marketChangeDelta !== "" ? Number(l.marketChangeDelta) : null)
+              ?? (l.market_change_delta != null ? Number(l.market_change_delta) : null)
+              ?? marketDeltaComputed ?? null)
+            : null,
           lockDate: lockDate ?? null,
           lockExpirationDate: lockExpirationDate ?? null,
           applicationDate: l.application_date ?? l.applicationDate ?? null,
@@ -2455,10 +2461,9 @@ export const ClosingFalloutForecast = ({
             const fromZones = signalBucketsFromReasonCodes(codes);
             return {
               creditMetricsSignalStrength: fromZones.creditMetrics ?? l.creditMetricsSignalStrength ?? null,
-              // Prefer backend segment-fallout Loan Characteristics bucket; only use reason_codes LTV zone when missing
               loanCharacteristicsSignalStrength: l.loanCharacteristicsSignalStrength ?? fromZones.loanCharacteristics ?? null,
               timeInMotionSignalStrength: fromZones.timeInMotion ?? l.timeInMotionSignalStrength ?? null,
-              interestLockVsMarketSignalStrength: fromZones.lockVsMarket ?? l.interestLockVsMarketSignalStrength ?? null,
+              interestLockVsMarketSignalStrength: lockDate != null ? (fromZones.lockVsMarket ?? l.interestLockVsMarketSignalStrength ?? null) : null,
             };
           })(),
           mloAeFalloutProneSignalStrength:
@@ -2474,7 +2479,7 @@ export const ClosingFalloutForecast = ({
           ltvSignal: l.ltvSignal ?? null,
           dtiSignal: l.dtiSignal ?? null,
           loPullthroughSignal: l.loPullthroughSignal ?? null,
-          marketChangeDeltaSignal: l.marketChangeDeltaSignal ?? null,
+          marketChangeDeltaSignal: lockDate != null ? (l.marketChangeDeltaSignal ?? null) : null,
           loanType: l.loan_type || null,
           loanPurpose: loanPurpose,
           channel: channel,

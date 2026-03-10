@@ -11,7 +11,7 @@
  * consumers always receive YYYY-MM-DD strings.
  */
 
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   format,
   subMonths,
@@ -93,6 +93,17 @@ const PRESET_META: Record<PeriodPreset, PresetMeta> = {
 /** Compute the DateRange for a given preset */
 export function computePresetDateRange(preset: PeriodPreset): DateRange {
   return PRESET_META[preset].computeRange();
+}
+
+/** Returns true if two period selections represent the same choice (for optimistic UI) */
+function selectionMatches(a: PeriodSelection | null | undefined, b: PeriodSelection | null | undefined): boolean {
+  if (a == null || b == null) return a === b;
+  if (a.type !== b.type) return false;
+  if (a.type === 'preset' && b.type === 'preset') return a.preset === b.preset;
+  if (a.type === 'year' && b.type === 'year') return a.year === b.year;
+  if (a.type === 'custom' && b.type === 'custom')
+    return a.dateRange?.start === b.dateRange?.start && a.dateRange?.end === b.dateRange?.end;
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -177,30 +188,44 @@ export const DatePeriodPicker = ({
     end: null,
   });
 
+  // Optimistic UI: when user clicks a period, we show it immediately. Don't let the sync-from-store
+  // effect overwrite with stale value while the parent/store is updating (e.g. during data load).
+  const pendingSelectionRef = useRef<PeriodSelection | null>(null);
+
   // When "All" is selected (store has no period), keep internal state so no year/preset appears active
   useEffect(() => {
     if (showAllOption && periodSelectionFromStore == null) {
+      pendingSelectionRef.current = null;
       setActiveType('preset');
       setActivePreset(null);
     }
   }, [showAllOption, periodSelectionFromStore]);
 
   // Sync active selection from store when periodSelectionFromStore is provided (e.g. workbench actors)
+  // Skip overwriting when we have an optimistic (pending) selection that the store hasn't reflected yet.
   useEffect(() => {
     if (periodSelectionFromStore == null) return;
-    if (periodSelectionFromStore.type === 'preset' && periodSelectionFromStore.preset) {
+    const store = periodSelectionFromStore;
+    if (pendingSelectionRef.current != null) {
+      if (selectionMatches(store, pendingSelectionRef.current)) {
+        pendingSelectionRef.current = null;
+      } else {
+        return;
+      }
+    }
+    if (store.type === 'preset' && store.preset) {
       setActiveType('preset');
-      setActivePreset(periodSelectionFromStore.preset);
-    } else if (periodSelectionFromStore.type === 'year' && periodSelectionFromStore.year != null) {
+      setActivePreset(store.preset);
+    } else if (store.type === 'year' && store.year != null) {
       setActiveType('year');
       setActivePreset(null);
-    } else if (periodSelectionFromStore.type === 'custom') {
+    } else if (store.type === 'custom') {
       setActiveType('custom');
       setActivePreset(null);
-      if (periodSelectionFromStore.dateRange?.start && periodSelectionFromStore.dateRange?.end) {
+      if (store.dateRange?.start && store.dateRange?.end) {
         setCustomDateRange({
-          start: new Date(periodSelectionFromStore.dateRange.start),
-          end: new Date(periodSelectionFromStore.dateRange.end),
+          start: new Date(store.dateRange.start),
+          end: new Date(store.dateRange.end),
         });
       }
     }
@@ -229,14 +254,18 @@ export const DatePeriodPicker = ({
       start: `${selectedYear}-01-01`,
       end: isCurrentYear ? fmtDate(today) : `${selectedYear}-12-31`,
     };
-    notify({ type: 'year', year: selectedYear, dateRange });
+    const selection: PeriodSelection = { type: 'year', year: selectedYear, dateRange };
+    pendingSelectionRef.current = selection;
+    notify(selection);
   };
 
   const handlePresetSelect = (preset: PeriodPreset) => {
     setActiveType('preset');
     setActivePreset(preset);
     const dateRange = computePresetDateRange(preset);
-    notify({ type: 'preset', preset, dateRange });
+    const selection: PeriodSelection = { type: 'preset', preset, dateRange };
+    pendingSelectionRef.current = selection;
+    notify(selection);
   };
 
   const handleCustomDateSelect = (range: { from?: Date; to?: Date } | undefined) => {
@@ -249,7 +278,9 @@ export const DatePeriodPicker = ({
         start: fmtDate(range.from),
         end: fmtDate(range.to),
       };
-      notify({ type: 'custom', dateRange });
+      const selection: PeriodSelection = { type: 'custom', dateRange };
+      pendingSelectionRef.current = selection;
+      notify(selection);
     }
   };
 
@@ -277,8 +308,16 @@ export const DatePeriodPicker = ({
 
   // When "All" is selected in the store, only "All" should appear active (override year/preset/custom)
   const allSelected = Boolean(showAllOption && periodSelectionFromStore == null);
+  // When controlled (periodSelectionFromStore provided), derive active state from prop so selection
+  // appears immediately when parent updates (e.g. after setState in onPeriodChange), matching Sales Trends.
   const isActive = (type: 'year' | 'preset' | 'custom', value?: number | PeriodPreset) => {
     if (allSelected) return false;
+    if (periodSelectionFromStore != null) {
+      const s = periodSelectionFromStore;
+      if (type === 'year') return s.type === 'year' && s.year === value;
+      if (type === 'preset') return s.type === 'preset' && s.preset === value;
+      return s.type === 'custom';
+    }
     if (type === 'year') return activeType === 'year' && year === value;
     if (type === 'preset') return activeType === 'preset' && activePreset === value;
     return activeType === 'custom';
@@ -354,6 +393,11 @@ export const DatePeriodPicker = ({
                 <span className="hidden sm:inline">
                   {format(customDateRange.start, 'MMM d')} -{' '}
                   {format(customDateRange.end, 'MMM d, yyyy')}
+                </span>
+              ) : periodSelectionFromStore?.type === 'custom' && periodSelectionFromStore?.dateRange?.start && periodSelectionFromStore?.dateRange?.end ? (
+                <span className="hidden sm:inline">
+                  {format(new Date(periodSelectionFromStore.dateRange.start), 'MMM d')} -{' '}
+                  {format(new Date(periodSelectionFromStore.dateRange.end), 'MMM d, yyyy')}
                 </span>
               ) : (
                 <span className="hidden sm:inline">Custom</span>

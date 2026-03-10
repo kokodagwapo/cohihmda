@@ -1002,10 +1002,11 @@ export function prepareLoanData(loans: any[]): any[] {
  */
 
 /**
- * Calculate market change delta for a loan
- * Lock rate = market rate at lock date (or application date if no lock date)
- * Close rate = market rate at close/status date (or most recent for active loans)
- * Delta = lockMarketRate - closeMarketRate (positive = rates fell = withdrawal risk)
+ * Calculate market change delta for a loan.
+ * Only computed when the loan has a lock date (lock_date). Do not use application date or any other date for the lock rate.
+ * Lock rate = market rate at lock date. Close rate = market rate at close/status date (historical) or today (active).
+ * Delta = lockMarketRate - closeMarketRate (positive = rates fell = withdrawal risk).
+ * If the loan is not locked, returns all nulls; UI should show Lock vs Market as N/A.
  */
 async function calculateMarketDelta(loan: any): Promise<{
   marketChangeDelta: number | null;
@@ -1015,8 +1016,8 @@ async function calculateMarketDelta(loan: any): Promise<{
   maxChangeRate: number | null;
   maxChangeDate: string | null;
 }> {
-  // Determine lock date (priority: lock_date > application_date)
-  const lockDate = loan.lockDate || loan.lock_date || loan.applicationDate || loan.application_date;
+  // Only calculate when loan has a lock date; do not use application date for lock rate
+  const lockDate = loan.lockDate ?? loan.lock_date ?? null;
   if (!lockDate) {
     return {
       marketChangeDelta: null,
@@ -1143,7 +1144,7 @@ async function calculateMarketDelta(loan: any): Promise<{
     const lockDateStr = lockDateObj.toISOString().split('T')[0];
     const closeDateStr = closeDateObj.toISOString().split('T')[0];
 
-    // Get lock rate: Market rate at lock date (or application date if no lock date - lockDate already falls back to application_date)
+    // Get lock rate: market rate at lock date only (no application date fallback)
     let lockMarketRate: number | null = await getMarketRateForDate(lockDateStr);
     if (lockMarketRate === null) {
       // If not found for exact date, try going back up to 7 days to find a rate
@@ -1943,7 +1944,7 @@ function bucketCategorical(value: string | null, mapping: Record<string, number>
  * ✅ Time to Approval: Bucket 1 (0-25 days) = fresh (less fallout prone), Bucket 6 (>150 days) = old (more fallout prone)
  * ✅ LO Pullthrough: Bucket 1 (≥85%) = high pullthrough (less fallout prone), Bucket 6 (<50%) = low pullthrough (more fallout prone)
  * ✅ UW/Closer/Processor Pullthrough: Same as LO (high = 1, low = 6)
- * ✅ Market Delta: Bucket 1 (≤-0.3) = favorable rates (less fallout prone), Bucket 6 (>+0.5) = unfavorable (more fallout prone)
+ * ✅ Market Delta: Bucket 1 (≤−0.25%) = favorable rates (less fallout prone), Bucket 6 (>+0.3%) = unfavorable (more fallout prone)
  * ✅ Credit Signal: Composite (lower = less fallout prone, higher = more fallout prone)
  * ✅ Loan Characteristics Signal: Composite (lower = simple/less fallout prone, higher = complex/more fallout prone)
  * ✅ MLO AE Fallout Prone: Uses LO Pullthrough directly (high pullthrough = 1, low = 6)
@@ -2201,16 +2202,15 @@ export async function bucketLoanData(
           { min: null, max: 49.999, bucket: 6 }
         ]);
 
-    // Market Change Delta: Negative (favorable) = less fallout prone (1), Positive (unfavorable) = more fallout prone (6)
-    // Negative delta = rates went UP since lock (borrower saved, motivated to close)
-    // Positive delta = rates went DOWN since lock (better rates available, withdrawal risk)
+    // Market Change Delta: static bucket ranges (not profile-based).
+    // Bucket 1 (≤−0.25%) = borrower has great rate, low risk. Bucket 6 (>+0.3%) = may shop elsewhere, high risk.
     const marketDeltaBucket = bucketNumeric(marketDelta.marketChangeDelta, [
-      { min: null, max: -0.3, bucket: 1 }, // Very favorable (rates up ≥0.3%, less fallout prone)
-      { min: -0.299, max: -0.1, bucket: 2 }, // Favorable (rates up 0.1-0.3%) - Fixed: -0.299 to cover gap
-      { min: -0.099, max: 0.05, bucket: 3 }, // Neutral (minimal change) - Fixed: -0.099 to cover gap
-      { min: 0.051, max: 0.2, bucket: 4 }, // Slightly unfavorable (rates down 0.06-0.2%) - Fixed: 0.051 to cover gap
-      { min: 0.201, max: 0.5, bucket: 5 }, // Unfavorable (rates down 0.21-0.5%) - Fixed: 0.201 to cover gap
-      { min: 0.501, max: null, bucket: 6 } // Very unfavorable (rates down >0.5%, more fallout prone) - Fixed: 0.501 to cover gap
+      { min: null, max: -0.25, bucket: 1 },
+      { min: -0.2499, max: 0, bucket: 2 },
+      { min: 0.0001, max: 0.1, bucket: 3 },
+      { min: 0.1001, max: 0.2, bucket: 4 },
+      { min: 0.2001, max: 0.3, bucket: 5 },
+      { min: 0.3001, max: null, bucket: 6 }
     ]);
 
     // Step 5: Calculate composite signals
