@@ -31,6 +31,12 @@ export interface TenantInfo {
   database_name: string;
   status: string;
   deployment_type: string;
+  updated_at?: Date;
+  is_demo?: boolean;
+  source_tenant_id?: string | null;
+  source_tenant_name?: string | null;
+  last_refreshed_at?: Date | null;
+  auto_refresh?: boolean;
   created_at: Date;
 }
 
@@ -242,8 +248,11 @@ async function createTenantDatabase(
  */
 export async function getTenant(tenantId: string): Promise<TenantInfo | null> {
   const result = await managementPool.query(
-    `SELECT id, name, slug, database_name, status, deployment_type, created_at
-     FROM coheus_tenants
+    `SELECT t.id, t.name, t.slug, t.database_name, t.status, t.deployment_type,
+            t.created_at, t.updated_at, t.is_demo, t.source_tenant_id,
+            t.last_refreshed_at, t.auto_refresh, st.name AS source_tenant_name
+     FROM coheus_tenants t
+     LEFT JOIN coheus_tenants st ON st.id = t.source_tenant_id
      WHERE id = $1`,
     [tenantId],
   );
@@ -260,6 +269,12 @@ export async function getTenant(tenantId: string): Promise<TenantInfo | null> {
     database_name: row.database_name,
     status: row.status,
     deployment_type: row.deployment_type,
+    updated_at: row.updated_at,
+    is_demo: row.is_demo ?? false,
+    source_tenant_id: row.source_tenant_id ?? null,
+    source_tenant_name: row.source_tenant_name ?? null,
+    last_refreshed_at: row.last_refreshed_at ?? null,
+    auto_refresh: row.auto_refresh ?? false,
     created_at: row.created_at,
   };
 }
@@ -271,9 +286,12 @@ export async function getTenantBySlug(
   slug: string,
 ): Promise<TenantInfo | null> {
   const result = await managementPool.query(
-    `SELECT id, name, slug, database_name, status, deployment_type, created_at
-     FROM coheus_tenants
-     WHERE slug = $1`,
+    `SELECT t.id, t.name, t.slug, t.database_name, t.status, t.deployment_type,
+            t.created_at, t.updated_at, t.is_demo, t.source_tenant_id,
+            t.last_refreshed_at, t.auto_refresh, st.name AS source_tenant_name
+     FROM coheus_tenants t
+     LEFT JOIN coheus_tenants st ON st.id = t.source_tenant_id
+     WHERE t.slug = $1`,
     [slug],
   );
 
@@ -289,6 +307,12 @@ export async function getTenantBySlug(
     database_name: row.database_name,
     status: row.status,
     deployment_type: row.deployment_type,
+    updated_at: row.updated_at,
+    is_demo: row.is_demo ?? false,
+    source_tenant_id: row.source_tenant_id ?? null,
+    source_tenant_name: row.source_tenant_name ?? null,
+    last_refreshed_at: row.last_refreshed_at ?? null,
+    auto_refresh: row.auto_refresh ?? false,
     created_at: row.created_at,
   };
 }
@@ -298,10 +322,13 @@ export async function getTenantBySlug(
  */
 export async function listTenants(): Promise<TenantInfo[]> {
   const result = await managementPool.query(
-    `SELECT id, name, slug, database_name, status, deployment_type, created_at
-     FROM coheus_tenants
-     WHERE status != 'deleted'
-     ORDER BY created_at DESC`,
+    `SELECT t.id, t.name, t.slug, t.database_name, t.status, t.deployment_type,
+            t.created_at, t.updated_at, t.is_demo, t.source_tenant_id,
+            t.last_refreshed_at, t.auto_refresh, st.name AS source_tenant_name
+     FROM coheus_tenants t
+     LEFT JOIN coheus_tenants st ON st.id = t.source_tenant_id
+     WHERE t.status != 'deleted'
+     ORDER BY t.created_at DESC`,
   );
 
   return result.rows.map((row) => ({
@@ -311,6 +338,12 @@ export async function listTenants(): Promise<TenantInfo[]> {
     database_name: row.database_name,
     status: row.status,
     deployment_type: row.deployment_type,
+    updated_at: row.updated_at,
+    is_demo: row.is_demo ?? false,
+    source_tenant_id: row.source_tenant_id ?? null,
+    source_tenant_name: row.source_tenant_name ?? null,
+    last_refreshed_at: row.last_refreshed_at ?? null,
+    auto_refresh: row.auto_refresh ?? false,
     created_at: row.created_at,
   }));
 }

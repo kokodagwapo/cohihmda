@@ -17,6 +17,10 @@ import {
   CreateTenantOptions,
 } from "../services/tenantProvisioningService.js";
 import { duplicateTenantAnonymized } from "../services/tenantDuplicationService.js";
+import {
+  getDemoTenantRefreshJob,
+  startDemoTenantRefresh,
+} from "../services/tenantRefreshService.js";
 import { z } from "zod";
 import { pool as managementPool } from "../config/managementDatabase.js";
 
@@ -113,6 +117,34 @@ router.get(
     } catch (error: any) {
       console.error("[Tenants] Error listing tenants:", error);
       res.status(500).json({ error: "Failed to list tenants" });
+    }
+  },
+);
+
+/**
+ * GET /api/tenants/demo
+ * List demo tenants (super_admin / platform_admin only)
+ */
+router.get(
+  "/demo",
+  authenticateToken,
+  requirePlatformStaff(),
+  apiLimiter,
+  async (_req: AuthRequest, res) => {
+    try {
+      const result = await managementPool.query(
+        `SELECT t.id, t.name, t.slug, t.status, t.created_at, t.updated_at,
+                t.is_demo, t.source_tenant_id, t.last_refreshed_at, t.auto_refresh,
+                st.name AS source_tenant_name
+         FROM coheus_tenants t
+         LEFT JOIN coheus_tenants st ON st.id = t.source_tenant_id
+         WHERE t.is_demo = true
+         ORDER BY t.created_at DESC`
+      );
+      res.json(result.rows);
+    } catch (error: any) {
+      console.error("[Tenants] Error listing demo tenants:", error);
+      res.status(500).json({ error: "Failed to list demo tenants" });
     }
   },
 );
@@ -342,6 +374,7 @@ router.post(
             /^[a-z0-9-]+$/,
             "Slug must be lowercase alphanumeric with hyphens",
           ),
+        auto_refresh: z.boolean().optional(),
       });
 
       const validated = schema.parse(req.body);
@@ -368,7 +401,12 @@ router.post(
       duplicationJobs.set(validated.slug, job);
 
       // Fire-and-forget: run duplication in the background
-      duplicateTenantAnonymized(sourceId, validated.name, validated.slug)
+      duplicateTenantAnonymized(
+        sourceId,
+        validated.name,
+        validated.slug,
+        { autoRefresh: validated.auto_refresh ?? false },
+      )
         .then((result) => {
           job.status = "completed";
           job.completedAt = new Date();
@@ -410,6 +448,121 @@ router.post(
         .status(500)
         .json({ error: error.message || "Failed to start duplication" });
     }
+  },
+);
+
+/**
+ * PATCH /api/tenants/:id/demo-settings
+ * Update demo tenant settings (super_admin only)
+ */
+router.patch(
+  "/:id/demo-settings",
+  authenticateToken,
+  requireRole("super_admin"),
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const id = req.params.id as string;
+      const schema = z.object({
+        auto_refresh: z.boolean(),
+      });
+      const validated = schema.parse(req.body);
+
+      const result = await managementPool.query(
+        `UPDATE coheus_tenants
+         SET auto_refresh = $1, updated_at = NOW()
+         WHERE id = $2
+         RETURNING id, auto_refresh`,
+        [validated.auto_refresh, id],
+      );
+      if (!result.rows.length) {
+        return res.status(404).json({ error: "Tenant not found" });
+      }
+
+      return res.json({
+        message: "Demo settings updated",
+        tenant: result.rows[0],
+      });
+    } catch (error: any) {
+      console.error("[Tenants] Error updating demo settings:", error);
+      if (error instanceof z.ZodError) {
+        return res
+          .status(400)
+          .json({ error: "Validation error", details: error.errors });
+      }
+      return res.status(500).json({ error: "Failed to update demo settings" });
+    }
+  },
+);
+
+/**
+ * POST /api/tenants/:id/refresh
+ * Trigger async refresh for a demo tenant (super_admin only)
+ */
+router.post(
+  "/:id/refresh",
+  authenticateToken,
+  requireRole("super_admin"),
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const id = req.params.id as string;
+      const tenant = await managementPool.query(
+        `SELECT id, is_demo FROM coheus_tenants WHERE id = $1`,
+        [id],
+      );
+      if (!tenant.rows.length) {
+        return res.status(404).json({ error: "Tenant not found" });
+      }
+      if (!tenant.rows[0].is_demo) {
+        return res
+          .status(400)
+          .json({ error: "Only demo tenants can be refreshed" });
+      }
+
+      const job = startDemoTenantRefresh(id);
+      return res.status(202).json({
+        message: "Demo tenant refresh started",
+        jobId: job.id,
+        pollUrl: `/api/tenants/refresh-status/${job.id}`,
+      });
+    } catch (error: any) {
+      console.error("[Tenants] Error refreshing demo tenant:", error);
+      return res.status(500).json({
+        error: error.message || "Failed to start demo tenant refresh",
+      });
+    }
+  },
+);
+
+/**
+ * GET /api/tenants/refresh-status/:jobId
+ * Poll async refresh status
+ */
+router.get(
+  "/refresh-status/:jobId",
+  authenticateToken,
+  requireRole("super_admin"),
+  async (req: AuthRequest, res) => {
+    const jobId = req.params.jobId as string;
+    const job = getDemoTenantRefreshJob(jobId);
+    if (!job) {
+      return res.status(404).json({ error: "No refresh job found" });
+    }
+
+    const elapsed = Math.round((Date.now() - job.startedAt.getTime()) / 1000);
+    if (job.status === "running") {
+      return res.json({
+        status: "running",
+        elapsedSeconds: elapsed,
+      });
+    }
+    return res.json({
+      status: job.status,
+      elapsedSeconds: elapsed,
+      result: job.result,
+      error: job.error,
+    });
   },
 );
 

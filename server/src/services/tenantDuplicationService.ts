@@ -44,7 +44,7 @@ const FAKE_LAST_NAMES = [
 
 // ── Anonymization mapping types ───────────────────────────────────────
 
-interface AnonymizationMappings {
+export interface AnonymizationMappings {
   /** Maps original full name -> pseudonym full name */
   nameMap: Map<string, string>;
   /** Maps original first name -> pseudonym first name (for employees) */
@@ -67,7 +67,7 @@ interface AnonymizationMappings {
 // Note: encompass_field_swaps is excluded because it has a FK to
 // los_connections, which we intentionally skip (contains LOS credentials).
 
-const CONFIG_TABLES = [
+export const CONFIG_TABLES = [
   "personas",
   "custom_fields",
   // "range_rules" removed – dropped by migration 010_remove_range_rules
@@ -80,7 +80,7 @@ const CONFIG_TABLES = [
 ];
 
 // Loan-related data tables copied as-is (no PII)
-const LOAN_DATA_TABLES = [
+export const LOAN_DATA_TABLES = [
   "loan_predictions",
   "ai_pattern_learnings",
   "historical_loan_bucket_cache",
@@ -165,7 +165,7 @@ function serializeValue(value: any, colName: string, jsonbColumns: Set<string>):
 
 // ── Helper: get a pool to a tenant's database ─────────────────────────
 
-async function getTenantPoolById(tenantId: string): Promise<{ pool: pg.Pool; cleanup: () => Promise<void> }> {
+export async function getTenantPoolById(tenantId: string): Promise<{ pool: pg.Pool; cleanup: () => Promise<void> }> {
   const result = await managementPool.query(
     `SELECT database_name, database_host, database_port,
             database_user, database_password_encrypted
@@ -213,7 +213,7 @@ function generatePseudonym(index: number): { first: string; last: string; full: 
 
 // ── Build anonymization mappings ──────────────────────────────────────
 
-async function buildAnonymizationMappings(
+export async function buildAnonymizationMappings(
   srcPool: pg.Pool
 ): Promise<AnonymizationMappings> {
   const nameMap = new Map<string, string>();
@@ -344,7 +344,7 @@ async function buildAnonymizationMappings(
 
 // ── Copy config tables verbatim ───────────────────────────────────────
 
-async function copyConfigTables(
+export async function copyConfigTables(
   srcPool: pg.Pool,
   dstPool: pg.Pool
 ): Promise<void> {
@@ -391,7 +391,7 @@ async function copyConfigTables(
 
 // ── Copy employees with anonymization ─────────────────────────────────
 
-async function copyEmployeesAnonymized(
+export async function copyEmployeesAnonymized(
   srcPool: pg.Pool,
   dstPool: pg.Pool,
   mappings: AnonymizationMappings
@@ -446,7 +446,7 @@ async function copyEmployeesAnonymized(
 
 // ── Copy loans with anonymization (batched) ───────────────────────────
 
-async function copyLoansAnonymized(
+export async function copyLoansAnonymized(
   srcPool: pg.Pool,
   dstPool: pg.Pool,
   mappings: AnonymizationMappings
@@ -549,7 +549,7 @@ async function copyLoansAnonymized(
 
 // ── Copy loan-related data tables (no PII) ────────────────────────────
 
-async function copyLoanRelatedData(
+export async function copyLoanRelatedData(
   srcPool: pg.Pool,
   dstPool: pg.Pool
 ): Promise<void> {
@@ -629,7 +629,8 @@ export interface DuplicateTenantResult {
 export async function duplicateTenantAnonymized(
   sourceId: string,
   newName: string,
-  newSlug: string
+  newSlug: string,
+  options?: { autoRefresh?: boolean }
 ): Promise<DuplicateTenantResult> {
   console.log(`[TenantDuplication] Starting duplication of tenant ${sourceId} -> "${newName}" (${newSlug})`);
 
@@ -688,6 +689,16 @@ export async function duplicateTenantAnonymized(
         slug: newSlug,
         deployment_type: sourceTenant.deployment_type as "cloud" | "on_premise" | "per_lender_aws",
       });
+      await managementPool.query(
+        `UPDATE coheus_tenants
+         SET is_demo = true,
+             source_tenant_id = $2,
+             last_refreshed_at = NOW(),
+             auto_refresh = $3,
+             updated_at = NOW()
+         WHERE id = $1`,
+        [newTenant.id, sourceId, options?.autoRefresh ?? false]
+      );
       console.log(`[TenantDuplication] New tenant created: "${newTenant.name}" (${newTenant.database_name})`);
     } catch (err: any) {
       throw new Error(`Failed to create new tenant: ${err.message}`);
