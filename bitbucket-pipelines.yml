@@ -328,6 +328,42 @@ definitions:
           - chmod +x ./scripts/bitbucket/deploy-infrastructure.sh
           - ./scripts/bitbucket/deploy-infrastructure.sh
 
+    - step: &deploy-all-dev-force
+        name: Force Deploy All to Dev
+        oidc: true
+        deployment: dev
+        services:
+          - docker
+        script:
+          - *setup-oidc
+          - echo ">>> Force deploying infrastructure"
+          - chmod +x ./scripts/bitbucket/deploy-infrastructure.sh
+          - ./scripts/bitbucket/deploy-infrastructure.sh
+          - echo ">>> Force deploying frontend"
+          - chmod +x ./scripts/bitbucket/deploy-frontend.sh
+          - ./scripts/bitbucket/deploy-frontend.sh
+          - echo ">>> Force deploying backend"
+          - chmod +x ./scripts/bitbucket/deploy-backend-ecs.sh
+          - ./scripts/bitbucket/deploy-backend-ecs.sh
+
+    - step: &deploy-all-prod-force
+        name: Force Deploy All to Prod
+        oidc: true
+        deployment: production
+        services:
+          - docker
+        script:
+          - *setup-oidc
+          - echo ">>> Force deploying infrastructure"
+          - chmod +x ./scripts/bitbucket/deploy-infrastructure.sh
+          - ./scripts/bitbucket/deploy-infrastructure.sh
+          - echo ">>> Force deploying frontend"
+          - chmod +x ./scripts/bitbucket/deploy-frontend.sh
+          - ./scripts/bitbucket/deploy-frontend.sh
+          - echo ">>> Force deploying backend"
+          - chmod +x ./scripts/bitbucket/deploy-backend-ecs.sh
+          - ./scripts/bitbucket/deploy-backend-ecs.sh
+
 pipelines:
   # Branch-based deployments
   #
@@ -414,7 +450,7 @@ pipelines:
           - step: *test-frontend
           - step: *test-backend
           - step: *test-backend-integration
-      - step: *deploy-dev
+      - step: *deploy-all-dev-force
       - step: *test-e2e-critical
 
     deploy-all-prod:
@@ -425,7 +461,7 @@ pipelines:
           - step: *test-frontend
           - step: *test-backend
           - step: *test-backend-integration
-      - step: *deploy-prod
+      - step: *deploy-all-prod-force
 
     e2e-regression:
       - step: *test-e2e-regression
