@@ -630,9 +630,6 @@ export function AletheiaBriefingControls({
             onChange={(e) => {
               const value = Number(e.target.value);
               setCurrentTime(value);
-              if (!isSeeking) {
-                handleSeekCommit(value);
-              }
             }}
             className="flex-1"
             title={
