@@ -23,6 +23,9 @@ const TTS_VOICE = "cedar";
 const CHAT_MODEL = "gpt-4o";
 const GEMINI_DEFAULT_MODEL = "models/gemini-2.5-flash-native-audio-latest";
 const GEMINI_DEFAULT_VOICE = "Aoede";
+const GEMINI_VALID_VOICES = new Set([
+  "Aoede", "Charon", "Fenrir", "Kore", "Leda", "Orus", "Puck", "Zephyr",
+]);
 const GEMINI_MODEL_FALLBACKS = [
   "models/gemini-2.5-flash-native-audio-latest",
   "models/gemini-2.5-flash-native-audio-preview-12-2025",
@@ -358,10 +361,20 @@ async function getGeminiVoiceConfig(
     return candidate;
   })();
 
+  const resolvedVoice = (() => {
+    const candidate = (voiceName || "").trim();
+    if (!candidate) return GEMINI_DEFAULT_VOICE;
+    if (GEMINI_VALID_VOICES.has(candidate)) return candidate;
+    console.warn(
+      `[Aletheia] Ignoring invalid voice_name "${candidate}" (not in ${[...GEMINI_VALID_VOICES].join(", ")}), using ${GEMINI_DEFAULT_VOICE}`
+    );
+    return GEMINI_DEFAULT_VOICE;
+  })();
+
   return {
     apiKey,
     model: normalizedModel,
-    voiceName: voiceName || GEMINI_DEFAULT_VOICE,
+    voiceName: resolvedVoice,
     keySource,
   };
 }
