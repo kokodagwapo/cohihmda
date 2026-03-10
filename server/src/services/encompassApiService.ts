@@ -1510,6 +1510,7 @@ export class EncompassApiService {
       fields?: string[]; // Encompass field IDs (e.g., ['Fields.2', 'Fields.3'])
       folderName?: string; // Deprecated: use folderNames instead
       folderNames?: string[]; // Array of folder names to sync
+      skipArchiveDetection?: boolean;
     } = {},
   ): Promise<EncompassApiResponse<EncompassLoan[]>> {
     // Get client details to retrieve API server URL
@@ -1620,47 +1621,49 @@ export class EncompassApiService {
     // collect non-archived GUIDs. We diff against the full call to tag archived.
     // =========================================================================
     const nonArchivedGuids = new Set<string>();
-    try {
-      const archiveDetectBody: any = {
-        fields: ["Fields.GUID"],
-        sortOrder: [{ canonicalName: "Loan.LastModified", order: "descending" }],
-        includeArchivedLoans: false,
-      };
-      if (filter) archiveDetectBody.filter = filter;
+    if (!options.skipArchiveDetection) {
+      try {
+        const archiveDetectBody: any = {
+          fields: ["Fields.GUID"],
+          sortOrder: [{ canonicalName: "Loan.LastModified", order: "descending" }],
+          includeArchivedLoans: false,
+        };
+        if (filter) archiveDetectBody.filter = filter;
 
-      let adStart = 0;
-      const adLimit = 5000;
-      let adTotal: number | undefined;
-      let adPage = 0;
+        let adStart = 0;
+        const adLimit = 5000;
+        let adTotal: number | undefined;
+        let adPage = 0;
 
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        adPage++;
-        const adResponse = await this.executeWithTokenRetry<any>(
-          tenantId, losConnectionId, async (accessToken) => {
-            const r = await apiClientForConnection.post<any>(
-              "/v3/loanPipeline", archiveDetectBody,
-              { headers: { Authorization: accessToken, "Content-Type": "application/json" }, params: { start: adStart, limit: adLimit } },
-            );
-            if (adPage === 1) {
-              const tc = r.headers["x-total-count"] || r.headers["X-Total-Count"] || r.headers["X-TOTAL-COUNT"];
-              if (tc) { const p = parseInt(tc, 10); if (!isNaN(p)) adTotal = p; }
-            }
-            return r;
-          },
-        );
-        const adLoans = this.transformPipelineResponse(adResponse);
-        for (const loan of adLoans) {
-          const guid = loan["Fields.GUID"] || loan["GUID"] || loan.loanGuid || loan.guid;
-          if (guid) nonArchivedGuids.add(guid.replace(/[{}]/g, "").toLowerCase());
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          adPage++;
+          const adResponse = await this.executeWithTokenRetry<any>(
+            tenantId, losConnectionId, async (accessToken) => {
+              const r = await apiClientForConnection.post<any>(
+                "/v3/loanPipeline", archiveDetectBody,
+                { headers: { Authorization: accessToken, "Content-Type": "application/json" }, params: { start: adStart, limit: adLimit } },
+              );
+              if (adPage === 1) {
+                const tc = r.headers["x-total-count"] || r.headers["X-Total-Count"] || r.headers["X-TOTAL-COUNT"];
+                if (tc) { const p = parseInt(tc, 10); if (!isNaN(p)) adTotal = p; }
+              }
+              return r;
+            },
+          );
+          const adLoans = this.transformPipelineResponse(adResponse);
+          for (const loan of adLoans) {
+            const guid = loan["Fields.GUID"] || loan["GUID"] || loan.loanGuid || loan.guid;
+            if (guid) nonArchivedGuids.add(guid.replace(/[{}]/g, "").toLowerCase());
+          }
+          adStart += adLoans.length;
+          if (adLoans.length === 0) break;
+          if (adTotal !== undefined && adStart >= adTotal) break;
         }
-        adStart += adLoans.length;
-        if (adLoans.length === 0) break;
-        if (adTotal !== undefined && adStart >= adTotal) break;
+        console.log(`[Sync] Archive detection: ${nonArchivedGuids.size} non-archived GUIDs collected in ${adPage} page(s)`);
+      } catch (err: any) {
+        console.warn(`[Sync] Archive detection call failed (will default is_archived to false): ${err.message}`);
       }
-      console.log(`[Sync] Archive detection: ${nonArchivedGuids.size} non-archived GUIDs collected in ${adPage} page(s)`);
-    } catch (err: any) {
-      console.warn(`[Sync] Archive detection call failed (will default is_archived to false): ${err.message}`);
     }
 
     // =========================================================================

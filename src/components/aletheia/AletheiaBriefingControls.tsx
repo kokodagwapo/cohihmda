@@ -620,6 +620,92 @@ Use executive terminology and be candid and direct. After the briefing, be ready
   return (
     <div className="flex items-center gap-2 sm:gap-3">
       {/* Start/Stop Briefing Button - Single button that toggles */}
+      <button
+        onClick={() => {
+          const refIsInCall = isInCallRef.current;
+
+          const wsExists = wsRef.current !== null;
+          const wsReadyState = wsRef.current?.readyState;
+          const wsIsOpen =
+            wsRef.current &&
+            (wsReadyState === WebSocket.OPEN ||
+              wsReadyState === WebSocket.CONNECTING);
+          const hasActiveAudio = activeAudioSourcesRef.current.size > 0;
+
+          const isActuallyInCall =
+            refIsInCall ||
+            wsIsOpen ||
+            hasActiveAudio ||
+            (wsExists && wsReadyState === WebSocket.OPEN);
+
+          if (isActuallyInCall) {
+            stopBriefing();
+          } else {
+            startBriefing();
+          }
+        }}
+        disabled={false}
+        className={`p-3 sm:p-2 rounded-xl sm:rounded-lg text-white transition-all active:scale-95 shadow-md ${
+          isInCall
+            ? "bg-rose-600 hover:bg-rose-700 shadow-rose-500/20 animate-pulse-glow-rose"
+            : "bg-blue-600 hover:bg-blue-700 shadow-blue-500/20 animate-pulse-glow"
+        } ${isLoading ? "opacity-75 cursor-wait" : ""}`}
+        title={
+          isInCall
+            ? "End Briefing"
+            : isLoading
+              ? "Connecting..."
+              : "Start Briefing"
+        }
+      >
+        {isInCall ? (
+          <AudioWaveIcon className="w-6 h-6 sm:w-5 sm:h-5" />
+        ) : isLoading ? (
+          <Loader2 className="w-6 h-6 sm:w-5 sm:h-5 animate-spin" />
+        ) : (
+          <PlayCircle className="w-6 h-6 sm:w-5 sm:h-5" />
+        )}
+      </button>
+
+      {/* Call Controls - Show when in call */}
+      <AnimatePresence mode="wait">
+        {isInCall && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="flex items-center gap-2"
+          >
+            <button
+              onClick={toggleMic}
+              className={`p-3 sm:p-2 rounded-xl sm:rounded-lg transition-all active:scale-95 ${
+                isListening
+                  ? "bg-emerald-600 hover:bg-emerald-700 text-white animate-pulse"
+                  : "bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300"
+              }`}
+              title={isListening ? "Stop Voice Input" : "Start Voice Input"}
+            >
+              {isListening ? (
+                <Mic className="w-5 h-5 sm:w-4 sm:h-4" />
+              ) : (
+                <MicOff className="w-5 h-5 sm:w-4 sm:h-4" />
+              )}
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Connection Status */}
+      {isInCall && (
+        <div className="flex items-center gap-2 px-3 py-1.5 sm:px-2 sm:py-1 rounded-xl sm:rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200/50 dark:border-slate-700/50">
+          <div
+            className={`w-2.5 h-2.5 sm:w-2 sm:h-2 rounded-full ${isConnected ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "bg-amber-500 animate-pulse"}`}
+          />
+          <span className="text-[10px] sm:text-xs font-medium text-slate-600 dark:text-slate-400">
+            {isConnected ? "LIVE" : "SYNCING"}
+          </span>
+        </div>
+      )}
 
       {/* Chat Panel */}
       <AnimatePresence>
