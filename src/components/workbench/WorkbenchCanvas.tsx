@@ -885,7 +885,6 @@ export function WorkbenchCanvas({
   const isOwner = isOwnerProp ?? true; // Default to true for new/own canvases
   const canEdit = isOwner;
   const {
-    handleExportPptx,
     handleExportExcel,
     handleEmailScreenshot,
   } = useCanvasExport({ items, saveTitle });
@@ -5286,17 +5285,6 @@ Structure it as a narrative-first executive briefing:
                   Export canvas
                 </div>
                 <div className="flex flex-col gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      handleExportPptx();
-                      setShareDialogOpen(false);
-                    }}
-                    className="w-full gap-2"
-                  >
-                    <Presentation className="h-4 w-4" />
-                    Download as PowerPoint
-                  </Button>
                   <Button
                     variant="outline"
                     onClick={() => {
