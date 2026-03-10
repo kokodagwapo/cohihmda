@@ -12,6 +12,7 @@ import { startSSEHeartbeat } from "../utils/sseUtils.js";
 import { getPlatformSetting } from "../services/platformSettingsService.js";
 import {
   hasPersistedAletheiaAsset,
+  loadLatestPersistedAletheiaAsset,
   loadPersistedAletheiaAsset,
   persistAletheiaAsset,
 } from "../services/aletheiaAssetStore.js";
@@ -91,11 +92,15 @@ FORMAT:
 const ALETHEIA_QUESTION_PROMPT = `${QUESTION_SYSTEM_PROMPT}
 - Keep responses concise and complete.
 - If you must stop due to length, end with a partial coverage note.`;
-const ALETHEIA_GEMINI_TTS_PROMPT = `You are voicing a prewritten script.
-- Read the script naturally and clearly.
-- Preserve wording exactly. Do not add, remove, summarize, or paraphrase.
-- Keep tone calm, objective, and professional.
-- Do not include stage directions or extra commentary.`;
+const ALETHEIA_GEMINI_TTS_PROMPT = `You are a text-to-speech engine. Your ONLY job is to convert the provided text into spoken audio.
+
+CRITICAL RULES:
+- Output ONLY the audio of the exact text provided. Nothing more.
+- Do NOT add any preamble, greeting, acknowledgment, or commentary such as "Understood", "Sure", "Ok", "Here is the reading", etc.
+- Do NOT paraphrase, summarize, or alter the text in any way.
+- Begin speaking the provided text immediately from the very first word.
+- Tone: calm, professional, and objective.
+- Pace: natural broadcast cadence suitable for an executive briefing.`;
 
 const ALETHEIA_PREFETCH_TTL_MS = 24 * 60 * 60 * 1000;
 type AletheiaPrefetchEntry = {
@@ -506,10 +511,14 @@ async function streamGeminiToSSEOnce(
 
         if (msg.setupComplete && !setupSentPrompt) {
           setupSentPrompt = true;
+          const isTTS = systemInstruction === ALETHEIA_GEMINI_TTS_PROMPT;
+          const userText = isTTS
+            ? `[READ ALOUD VERBATIM — no preamble, no acknowledgment, start from the first word immediately]\n\n${prompt}`
+            : prompt;
           socket.send(
             JSON.stringify({
               client_content: {
-                turns: [{ role: "user", parts: [{ text: prompt }] }],
+                turns: [{ role: "user", parts: [{ text: userText }] }],
                 turn_complete: true,
               },
             })
@@ -703,10 +712,14 @@ async function synthesizeGeminiSegmentToPCMOnce(
 
         if (msg.setupComplete && !setupSentPrompt) {
           setupSentPrompt = true;
+          const isTTS = systemInstruction === ALETHEIA_GEMINI_TTS_PROMPT;
+          const userText = isTTS
+            ? `[READ ALOUD VERBATIM — no preamble, no acknowledgment, start from the first word immediately]\n\n${prompt}`
+            : prompt;
           socket.send(
             JSON.stringify({
               client_content: {
-                turns: [{ role: "user", parts: [{ text: prompt }] }],
+                turns: [{ role: "user", parts: [{ text: userText }] }],
                 turn_complete: true,
               },
             })
@@ -1490,7 +1503,15 @@ router.post(
       } else {
         cached = undefined;
         if (tenantId) {
-          const persisted = await loadPersistedAletheiaAsset(tenantId, contextHash);
+          let persisted = await loadPersistedAletheiaAsset(tenantId, contextHash);
+          if (!persisted) {
+            persisted = await loadLatestPersistedAletheiaAsset(tenantId);
+            if (persisted) {
+              console.log(
+                `[Aletheia] Hash mismatch — serving latest persisted asset for tenant ${tenantId}`
+              );
+            }
+          }
           if (persisted) {
             script = persisted.script;
             prefetchedAudio = persisted.pcm;
@@ -1500,7 +1521,7 @@ router.post(
             aletheiaPrefetchCache.set(cacheKey, {
               script: persisted.script,
               createdAt: persisted.createdAt,
-              contextHash,
+              contextHash: persisted.contextHash,
               audioBase64: persisted.pcm.toString("base64"),
               sampleRate: persisted.sampleRate,
               mimeType: persisted.mimeType,
