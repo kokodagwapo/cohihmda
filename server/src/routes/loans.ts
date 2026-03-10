@@ -793,9 +793,6 @@ router.get(
         paramIndex += accessFilter.paramOffset;
       }
 
-      // Exclude archived loans
-      conditions.push("(is_archived IS DISTINCT FROM TRUE)");
-
       const dateField = (req.query.date_field as string) || "application_date";
       const dateFrom = req.query.date_from as string | undefined;
       const dateTo = req.query.date_to as string | undefined;
@@ -818,6 +815,15 @@ router.get(
         conditions.push(`loan_officer = $${paramIndex}`);
         params.push(loanOfficer);
         paramIndex += 1;
+      }
+
+      // Channel group filter (Retail, TPO, etc.) — uses the same CASE expression as the channel selector
+      const channelGroup = req.query.channel_group as string | undefined;
+      if (channelGroup && channelGroup !== "All") {
+        const clause = buildChannelWhereClause(channelGroup);
+        if (clause) {
+          conditions.push(clause.replace(/^AND\s+/i, ""));
+        }
       }
 
       // Apply additional dimension filters (loan_purpose, channel, etc.) from workbench "ADD FILTER DIMENSION"
