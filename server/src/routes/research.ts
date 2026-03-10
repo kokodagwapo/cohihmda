@@ -31,6 +31,9 @@ import {
   resumeSession,
   runResearchPipeline,
   runFollowUp,
+  attachSessionEmitter,
+  detachSessionEmitter,
+  isSessionRunning,
   updateSessionSharing,
   canAccessSession,
   type SSEEvent,
@@ -51,14 +54,9 @@ function setupSSE(res: Response): void {
   res.flushHeaders();
 }
 
-function sseEmitter(res: Response, session: { events: SSEEvent[] }) {
+function sseEmitter(res: Response) {
   return (event: SSEEvent) => {
-    session.events.push(event);
-    try {
-      res.write(`data: ${JSON.stringify(event)}\n\n`);
-    } catch {
-      // Client disconnected
-    }
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
   };
 }
 
@@ -149,27 +147,43 @@ router.get(
       }
     }
 
-    const emit = sseEmitter(res, session);
-
-    let clientDisconnected = false;
-    req.on("close", () => {
-      clientDisconnected = true;
+    const baseEmitter = sseEmitter(res);
+    let emit: (event: SSEEvent) => void = () => {};
+    let cleanedUp = false;
+    const cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      detachSessionEmitter(id, emit);
       stopHeartbeat();
+      if (!res.writableEnded) {
+        res.end();
+      }
+    };
+
+    emit = (event: SSEEvent) => {
+      try {
+        baseEmitter(event);
+        if (event.type === "complete" || event.type === "error") {
+          cleanup();
+        }
+      } catch {
+        cleanup();
+      }
+    };
+    attachSessionEmitter(id, emit);
+
+    req.on("close", () => {
+      cleanup();
       console.log(`[Research] Client disconnected from session ${id}`);
     });
 
     res.write(`data: ${JSON.stringify({ type: "heartbeat", data: { sessionId: id }, timestamp: Date.now() })}\n\n`);
 
-    try {
-      await runResearchPipeline(id, tenantPool, emit);
-    } catch (err: any) {
-      if (!clientDisconnected) {
-        emit({ type: "error", data: { message: err.message }, timestamp: Date.now() });
-      }
+    if (!isSessionRunning(id) && session.phase !== "complete" && session.phase !== "error") {
+      runResearchPipeline(id, tenantPool).catch((err: any) => {
+        console.error(`[Research] Pipeline failed for session ${id}:`, err);
+      });
     }
-
-    stopHeartbeat();
-    if (!clientDisconnected) res.end();
   }
 );
 
@@ -276,24 +290,37 @@ router.post(
 
     setupSSE(res);
     const stopHeartbeat = startSSEHeartbeat(res);
-    const emit = sseEmitter(res, session);
-
-    let clientDisconnected = false;
-    req.on("close", () => {
-      clientDisconnected = true;
+    const baseEmitter = sseEmitter(res);
+    let emit: (event: SSEEvent) => void = () => {};
+    let cleanedUp = false;
+    const cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      detachSessionEmitter(id, emit);
       stopHeartbeat();
+      if (!res.writableEnded) {
+        res.end();
+      }
+    };
+    emit = (event: SSEEvent) => {
+      try {
+        baseEmitter(event);
+        if (event.type === "complete" || event.type === "error") {
+          cleanup();
+        }
+      } catch {
+        cleanup();
+      }
+    };
+    attachSessionEmitter(id, emit);
+
+    req.on("close", () => {
+      cleanup();
     });
 
-    try {
-      await runFollowUp(id, question, tenantPool, emit);
-    } catch (err: any) {
-      if (!clientDisconnected) {
-        emit({ type: "error", data: { message: err.message }, timestamp: Date.now() });
-      }
-    }
-
-    stopHeartbeat();
-    if (!clientDisconnected) res.end();
+    runFollowUp(id, question, tenantPool).catch((err: any) => {
+      console.error(`[Research] Follow-up failed for session ${id}:`, err);
+    });
   }
 );
 

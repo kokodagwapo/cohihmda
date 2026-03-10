@@ -110,6 +110,8 @@ function SessionSidebar({
   collapsed: boolean;
   onToggle: () => void;
 }) {
+  const isRunningPhase = (phase: string) =>
+    phase === "planning" || phase === "investigating" || phase === "synthesizing" || phase === "followup";
   const [search, setSearch] = useState("");
   const searchLower = search.trim().toLowerCase();
   const matchesSearch = (s: { topic: string | null }) =>
@@ -182,6 +184,7 @@ function SessionSidebar({
                       </Badge>
                     )}
                     <PhaseBadge phase={s.phase} />
+                    {isRunningPhase(s.phase) && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
                     <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
                       <Clock className="h-2.5 w-2.5" />
                       {new Date(s.updatedAt || s.createdAt).toLocaleDateString()}
@@ -224,6 +227,7 @@ function SessionSidebar({
                       </Badge>
                     )}
                     <PhaseBadge phase={s.phase} />
+                    {isRunningPhase(s.phase) && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
                     <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
                       <Clock className="h-2.5 w-2.5" />
                       {new Date(s.updatedAt || s.createdAt).toLocaleDateString()}

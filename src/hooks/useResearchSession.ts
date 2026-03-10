@@ -6,7 +6,7 @@
  * session history, and feedback submission.
  */
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
 
 // ============================================================================
@@ -100,6 +100,7 @@ export type SessionPhase =
   | "error";
 
 export type ResearchMode = "quick" | "deep";
+const ACTIVE_SESSION_PHASES = new Set(["planning", "investigating", "synthesizing", "followup"]);
 
 export interface AgentEvent {
   type: string;
@@ -138,16 +139,6 @@ export function useResearchSession(tenantId?: string | null) {
 
   const abortRef = useRef<AbortController | null>(null);
   const sessionIdRef = useRef<string | null>(null);
-
-  // Clean up on unmount
-  useEffect(() => {
-    return () => {
-      if (abortRef.current) {
-        abortRef.current.abort();
-        abortRef.current = null;
-      }
-    };
-  }, []);
 
   const tenantParam = tenantId ? `?tenant_id=${tenantId}` : "";
 
@@ -383,25 +374,31 @@ export function useResearchSession(tenantId?: string | null) {
 
       try {
         const data = await api.request<any>(`/api/research/sessions/${id}${tenantParam}`);
+        const loadedPhase = data.phase === "created" ? "idle" : (data.phase as SessionPhase);
+        const isActivePhase = ACTIVE_SESSION_PHASES.has(data.phase);
 
         setSessionId(data.id);
         sessionIdRef.current = data.id;
-        setPhase(data.phase === "created" ? "idle" : (data.phase as SessionPhase));
+        setPhase(loadedPhase);
         setPlan(data.plan || null);
         setFindings(data.findings || []);
         setReport(data.report || null);
         setEvents(data.events || []);
         setError(data.error || null);
-        setIsRunning(false);
+        setIsRunning(isActivePhase);
         setIsPaused(false);
         setSessionVisibility(data.visibility ?? "private");
         setSessionSharedWithUserIds(Array.isArray(data.sharedWithUserIds) ? data.sharedWithUserIds : []);
+
+        if (isActivePhase) {
+          readSSEStream(`/api/research/sessions/${id}/stream${tenantParam}`);
+        }
       } catch (err: any) {
         console.error("[Research] Failed to load session:", err);
         setError(err.message);
       }
     },
-    [tenantParam]
+    [readSSEStream, tenantParam]
   );
 
   // ── Run an existing session (start the SSE stream for a pre-created session) ──
