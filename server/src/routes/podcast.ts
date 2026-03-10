@@ -212,6 +212,14 @@ export async function buildDefaultAletheiaBriefingContext(tenantId: string): Pro
 }
 
 async function getOpenAIKey(tenantId?: string): Promise<string> {
+  // 1. Platform key takes priority (consistent across all tenants)
+  const platformKey = await getPlatformSetting("openai_api_key");
+  if (platformKey?.trim()) {
+    console.log("[Podcast] Using OpenAI key from platform_settings");
+    return platformKey.trim();
+  }
+
+  // 2. Tenant-specific key from rag_settings
   if (tenantId) {
     try {
       const tenantPool = await tenantDbManager.getTenantPool(tenantId);
@@ -229,7 +237,10 @@ async function getOpenAIKey(tenantId?: string): Promise<string> {
           const decrypted = await decryptAPIKeys({
             openai_api_key: result.rows[0].openai_api_key,
           });
-          if (decrypted.openai_api_key) return decrypted.openai_api_key;
+          if (decrypted.openai_api_key) {
+            console.log("[Podcast] Using OpenAI key from tenant rag_settings");
+            return decrypted.openai_api_key;
+          }
         }
       }
     } catch (err: any) {
@@ -237,6 +248,7 @@ async function getOpenAIKey(tenantId?: string): Promise<string> {
     }
   }
 
+  // 3. Environment variable fallback
   const envKey = process.env.OPENAI_API_KEY?.trim();
   if (envKey) {
     if (envKey.startsWith("{")) {
@@ -248,11 +260,15 @@ async function getOpenAIKey(tenantId?: string): Promise<string> {
         };
         const fromJson =
           parsed.api_key || parsed.apiKey || parsed.OPENAI_API_KEY || "";
-        if (fromJson.trim()) return fromJson.trim();
+        if (fromJson.trim()) {
+          console.log("[Podcast] Using OpenAI key from env (JSON)");
+          return fromJson.trim();
+        }
       } catch {
         // keep raw
       }
     }
+    console.log("[Podcast] Using OpenAI key from env");
     return envKey;
   }
 

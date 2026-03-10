@@ -3,6 +3,7 @@ import { Play, Pause, Mic, MicOff, PhoneOff, Volume2, VolumeX, Loader2, Radio, S
 import { useToast } from '@/hooks/use-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface CohiPodcastProps {
   className?: string;
@@ -31,6 +32,9 @@ function decodePCM16ToFloat32(base64Audio: string): Float32Array {
 }
 
 export function CohiPodcast({ className }: CohiPodcastProps) {
+  const { user, isPlatformStaff, impersonatingTenant } = useAuth();
+  const hasTenant = !!(user?.tenant_id || impersonatingTenant);
+
   const [state, setState] = useState<PlaybackState>('idle');
   const [prefetchState, setPrefetchState] = useState<PrefetchState>('idle');
   const [prefetchedBriefing, setPrefetchedBriefing] = useState<PrefetchedBriefing | null>(null);
@@ -93,8 +97,8 @@ export function CohiPodcast({ className }: CohiPodcastProps) {
   }, [prefetchState, requestPodcastEndpoint]);
 
   useEffect(() => {
-    prefetchBriefing();
-  }, []);
+    if (hasTenant) prefetchBriefing();
+  }, [hasTenant]);
 
   const initAudio = useCallback(async () => {
     if (audioCtxRef.current && workletRef.current) {
@@ -423,6 +427,8 @@ export function CohiPodcast({ className }: CohiPodcastProps) {
 
   const isActive = state === 'playing' || state === 'paused' || state === 'loading' || state === 'listening';
   const [showPanel, setShowPanel] = useState(false);
+
+  if (!hasTenant && !isActive) return null;
 
   return (
     <div className={`relative flex items-center gap-2 ${className || ''}`}>
