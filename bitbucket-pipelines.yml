@@ -405,17 +405,26 @@ pipelines:
     infrastructure-prod:
       - step: *deploy-infra-prod
 
-    # Full deploy (skip build if you want)
+    # Full deploy with test gates
     deploy-all-dev:
       - parallel:
           - step: *build-frontend
           - step: *build-backend
+      - parallel:
+          - step: *test-frontend
+          - step: *test-backend
+          - step: *test-backend-integration
       - step: *deploy-dev
+      - step: *test-e2e-critical
 
     deploy-all-prod:
       - parallel:
           - step: *build-frontend
           - step: *build-backend
+      - parallel:
+          - step: *test-frontend
+          - step: *test-backend
+          - step: *test-backend-integration
       - step: *deploy-prod
 
     e2e-regression:
