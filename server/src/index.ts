@@ -399,6 +399,15 @@ async function startWorker() {
   }
 
   try {
+    const { startAletheiaPrefetchWorker } = await import(
+      "./services/aletheiaPrefetchWorker.js"
+    );
+    startAletheiaPrefetchWorker();
+  } catch (error) {
+    console.warn("⚠️ Failed to start Aletheia prefetch worker:", error);
+  }
+
+  try {
     const { startSyncJobPoller } = await import(
       "./services/syncJobPoller.js"
     );
@@ -469,6 +478,15 @@ if (SKIP_DB) {
           startDistributionScheduler();
         } catch (error) {
           console.warn("⚠️ Failed to start distribution scheduler:", error);
+        }
+
+        try {
+          const { startAletheiaPrefetchWorker } = await import(
+            "./services/aletheiaPrefetchWorker.js"
+          );
+          startAletheiaPrefetchWorker();
+        } catch (error) {
+          console.warn("⚠️ Failed to start Aletheia prefetch worker:", error);
         }
 
         try {

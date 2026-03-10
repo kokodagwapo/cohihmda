@@ -8,6 +8,11 @@ import { tenantDbManager } from "../config/tenantDatabaseManager.js";
 import { decryptAPIKeys } from "../services/encryption.js";
 import { apiLimiter } from "../middleware/rateLimiter.js";
 import { startSSEHeartbeat } from "../utils/sseUtils.js";
+import {
+  loadPersistedAletheiaAsset,
+  persistAletheiaAsset,
+} from "../services/aletheiaAssetStore.js";
+import { enqueueAletheiaPrefetchJob } from "../services/aletheiaPrefetchWorker.js";
 
 const router = Router();
 
@@ -99,6 +104,10 @@ type AletheiaPrefetchEntry = {
   voiceName?: string;
 };
 const aletheiaPrefetchCache = new Map<string, AletheiaPrefetchEntry>();
+
+function isAletheiaAsyncPrefetchEnabled(): boolean {
+  return process.env.ALETHEIA_PREFETCH_ASYNC === "true";
+}
 
 function parseSampleRateFromMimeType(mimeType: string): number {
   const match = mimeType.match(/rate=(\d+)/i);
@@ -1172,6 +1181,82 @@ async function streamGeminiScriptInSegments(
   });
 }
 
+export async function prefetchAletheiaBriefing(
+  tenantId: string | undefined,
+  briefingContext: unknown
+): Promise<{
+  script: string;
+  combined: Buffer;
+  sampleRate: number;
+  mimeType: string;
+  segmentsCount: number;
+  model: string;
+  voiceName: string;
+  contextHash: string;
+}> {
+  const safeTenantId = tenantId || "";
+  const openAIKey = await getOpenAIKey(tenantId);
+  const geminiConfig = await getGeminiVoiceConfig(tenantId);
+  const script = await generateAletheiaScriptText(openAIKey, briefingContext as any);
+  const segments = splitIntoSegments(script);
+  const segmentBuffers: Buffer[] = [];
+  let mimeType = "audio/pcm;rate=24000";
+  let sampleRate = 24000;
+
+  for (const segment of segments) {
+    const clip = await synthesizeGeminiSegmentToPCM(
+      geminiConfig,
+      segment,
+      ALETHEIA_GEMINI_TTS_PROMPT
+    );
+    mimeType = clip.mimeType || mimeType;
+    sampleRate = clip.sampleRate || sampleRate;
+    segmentBuffers.push(clip.pcm);
+  }
+
+  const combined = Buffer.concat(segmentBuffers);
+  const contextHash = hashBriefingContext(briefingContext);
+  const cacheKey = getAletheiaCacheKey(tenantId);
+
+  aletheiaPrefetchCache.set(cacheKey, {
+    script,
+    createdAt: Date.now(),
+    contextHash,
+    audioBase64: combined.toString("base64"),
+    sampleRate,
+    mimeType,
+    segmentsCount: segments.length,
+    model: geminiConfig.model,
+    voiceName: geminiConfig.voiceName,
+  });
+
+  if (safeTenantId) {
+    await persistAletheiaAsset({
+      tenantId: safeTenantId,
+      contextHash,
+      script,
+      pcm: combined,
+      sampleRate,
+      mimeType,
+      segmentsCount: segments.length,
+      model: geminiConfig.model,
+      voiceName: geminiConfig.voiceName,
+      ttlMs: ALETHEIA_PREFETCH_TTL_MS,
+    });
+  }
+
+  return {
+    script,
+    combined,
+    sampleRate,
+    mimeType,
+    segmentsCount: segments.length,
+    model: geminiConfig.model,
+    voiceName: geminiConfig.voiceName,
+    contextHash,
+  };
+}
+
 // POST /api/podcast/cohi/aletheia/stream — Aletheia Insights via Gemini audio over SSE
 router.post(
   "/aletheia/stream",
@@ -1196,12 +1281,11 @@ router.post(
     try {
       const tenantId = req.tenantContext?.tenantId || req.tenantId;
       const geminiConfig = await getGeminiVoiceConfig(tenantId);
-      const openAIKey = await getOpenAIKey(tenantId);
 
       const briefingContext = req.body?.briefingContext || {};
       const contextHash = hashBriefingContext(briefingContext);
       const cacheKey = getAletheiaCacheKey(tenantId);
-      const cached = aletheiaPrefetchCache.get(cacheKey);
+      let cached = aletheiaPrefetchCache.get(cacheKey);
 
       console.log(
         `[Aletheia] Starting Gemini SSE briefing for tenant ${tenantId || "env"} (model: ${geminiConfig.model}, voice: ${geminiConfig.voiceName})`
@@ -1225,12 +1309,39 @@ router.post(
           prefetchedSegments = cached.segmentsCount || 0;
         }
       } else {
-        script = await generateAletheiaScriptText(openAIKey, briefingContext);
-        aletheiaPrefetchCache.set(cacheKey, {
-          script,
-          createdAt: Date.now(),
-          contextHash,
-        });
+        cached = undefined;
+        if (tenantId) {
+          const persisted = await loadPersistedAletheiaAsset(tenantId, contextHash);
+          if (persisted) {
+            script = persisted.script;
+            prefetchedAudio = persisted.pcm;
+            prefetchedMime = persisted.mimeType || prefetchedMime;
+            prefetchedRate = persisted.sampleRate || prefetchedRate;
+            prefetchedSegments = persisted.segmentsCount || 1;
+            aletheiaPrefetchCache.set(cacheKey, {
+              script: persisted.script,
+              createdAt: persisted.createdAt,
+              contextHash,
+              audioBase64: persisted.pcm.toString("base64"),
+              sampleRate: persisted.sampleRate,
+              mimeType: persisted.mimeType,
+              segmentsCount: persisted.segmentsCount,
+              model: persisted.model,
+              voiceName: persisted.voiceName,
+            });
+            cached = aletheiaPrefetchCache.get(cacheKey);
+          }
+        }
+
+        if (!script) {
+          const generated = await prefetchAletheiaBriefing(tenantId, briefingContext);
+          script = generated.script;
+          prefetchedAudio = generated.combined;
+          prefetchedMime = generated.mimeType;
+          prefetchedRate = generated.sampleRate;
+          prefetchedSegments = generated.segmentsCount;
+          cached = aletheiaPrefetchCache.get(cacheKey);
+        }
       }
 
       await writeSSE(res, { type: "script", data: script });
@@ -1243,41 +1354,14 @@ router.post(
           model: cached?.model || geminiConfig.model,
           segmentsCount: prefetchedSegments || 1,
         });
-      } else {
-        const segments = splitIntoSegments(script);
-        const segmentBuffers: Buffer[] = [];
-        let mimeType = "audio/pcm;rate=24000";
-        let sampleRate = 24000;
-        for (const segment of segments) {
-          if (abortController.signal.aborted) break;
-          const clip = await synthesizeGeminiSegmentToPCM(
-            geminiConfig,
-            segment,
-            ALETHEIA_GEMINI_TTS_PROMPT,
-            abortController.signal
-          );
-          mimeType = clip.mimeType || mimeType;
-          sampleRate = clip.sampleRate || sampleRate;
-          segmentBuffers.push(clip.pcm);
-        }
-        const combined = Buffer.concat(segmentBuffers);
-        aletheiaPrefetchCache.set(cacheKey, {
-          script,
-          createdAt: Date.now(),
-          contextHash,
-          audioBase64: combined.toString("base64"),
-          sampleRate,
-          mimeType,
-          segmentsCount: segments.length,
-          model: geminiConfig.model,
-          voiceName: geminiConfig.voiceName,
-        });
-        await streamPcmBufferToSSE(res, combined, {
-          mimeType,
-          sampleRate,
-          voiceName: geminiConfig.voiceName,
-          model: geminiConfig.model,
-          segmentsCount: segments.length,
+      } else if (!abortController.signal.aborted) {
+        const generated = await prefetchAletheiaBriefing(tenantId, briefingContext);
+        await streamPcmBufferToSSE(res, generated.combined, {
+          mimeType: generated.mimeType,
+          sampleRate: generated.sampleRate,
+          voiceName: generated.voiceName,
+          model: generated.model,
+          segmentsCount: generated.segmentsCount,
         });
       }
 
@@ -1306,48 +1390,43 @@ router.post(
   async (req: AuthRequest, res) => {
     try {
       const tenantId = req.tenantContext?.tenantId || req.tenantId;
-      const openAIKey = await getOpenAIKey(tenantId);
-      const geminiConfig = await getGeminiVoiceConfig(tenantId);
       const briefingContext = req.body?.briefingContext || {};
-      const script = await generateAletheiaScriptText(openAIKey, briefingContext);
-      const segments = splitIntoSegments(script);
-      const segmentBuffers: Buffer[] = [];
-      let mimeType = "audio/pcm;rate=24000";
-      let sampleRate = 24000;
-      for (const segment of segments) {
-        const clip = await synthesizeGeminiSegmentToPCM(
-          geminiConfig,
-          segment,
-          ALETHEIA_GEMINI_TTS_PROMPT
-        );
-        mimeType = clip.mimeType || mimeType;
-        sampleRate = clip.sampleRate || sampleRate;
-        segmentBuffers.push(clip.pcm);
-      }
-      const combined = Buffer.concat(segmentBuffers);
       const contextHash = hashBriefingContext(briefingContext);
-      const cacheKey = getAletheiaCacheKey(tenantId);
-      aletheiaPrefetchCache.set(cacheKey, {
-        script,
-        createdAt: Date.now(),
-        contextHash,
-        audioBase64: combined.toString("base64"),
-        sampleRate,
-        mimeType,
-        segmentsCount: segments.length,
-        model: geminiConfig.model,
-        voiceName: geminiConfig.voiceName,
-      });
+
+      if (isAletheiaAsyncPrefetchEnabled()) {
+        if (!tenantId) {
+          return res.status(400).json({
+            error:
+              "A tenant must be selected before enqueuing async podcast prefetch.",
+          });
+        }
+        const requestedBy = req.userEmail || req.userId || null;
+        const jobId = await enqueueAletheiaPrefetchJob({
+          tenantId,
+          contextHash,
+          briefingContext,
+          requestedBy: requestedBy || undefined,
+        });
+        return res.status(202).json({
+          success: true,
+          enqueued: true,
+          jobId,
+          contextHash,
+          queuedAt: new Date().toISOString(),
+        });
+      }
+
+      const generated = await prefetchAletheiaBriefing(tenantId, briefingContext);
 
       res.json({
         success: true,
         prefetchedAt: new Date().toISOString(),
-        scriptLength: script.length,
-        audioBytes: combined.length,
-        segmentsCount: segments.length,
-        sampleRate,
-        model: geminiConfig.model,
-        voiceName: geminiConfig.voiceName,
+        scriptLength: generated.script.length,
+        audioBytes: generated.combined.length,
+        segmentsCount: generated.segmentsCount,
+        sampleRate: generated.sampleRate,
+        model: generated.model,
+        voiceName: generated.voiceName,
       });
     } catch (error: any) {
       console.error("[Aletheia] Prefetch error:", error.message);

@@ -541,6 +541,33 @@ Resources:
       KmsKeyId: !Ref EncryptionKey
       SecretString: !Sub '{"secret":"${JwtSecret}"}'
 
+  PodcastAudioBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "${ProjectName}-${Environment}-podcast-audio-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt EncryptionKey.Arn
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireOldPodcastAssets
+            Status: Enabled
+            ExpirationInDays: 14
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-${Environment}-podcast-audio"
+
   # ============================================================================
   # Application Load Balancer
   # ============================================================================
@@ -703,6 +730,16 @@ Resources:
                   - kms:Encrypt
                   - kms:GenerateDataKey
                 Resource: !GetAtt EncryptionKey.Arn
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !GetAtt PodcastAudioBucket.Arn
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub "${PodcastAudioBucket.Arn}/*"
               # ECS Exec permissions (for running migrations via aws ecs execute-command)
               - Effect: Allow
                 Action:
@@ -823,6 +860,14 @@ Resources:
             # FRED API for market rate data
             - Name: FRED_API_KEY
               Value: !Ref FredApiKey
+            - Name: PODCAST_AUDIO_BUCKET
+              Value: !Ref PodcastAudioBucket
+            - Name: PODCAST_AUDIO_PREFIX
+              Value: !Sub "${Environment}/audio"
+            - Name: ALETHEIA_PREFETCH_ASYNC
+              Value: "true"
+            - Name: ALETHEIA_PREFETCH_WORKER_ENABLED
+              Value: "false"
           Secrets:
             - Name: DB_USER
               ValueFrom: !Sub "${AuroraSecretArn}:username::"
@@ -918,6 +963,18 @@ Resources:
               Value: !If [HasCognito, !Ref CognitoDomain, ""]
             - Name: FRED_API_KEY
               Value: !Ref FredApiKey
+            - Name: PODCAST_AUDIO_BUCKET
+              Value: !Ref PodcastAudioBucket
+            - Name: PODCAST_AUDIO_PREFIX
+              Value: !Sub "${Environment}/audio"
+            - Name: ALETHEIA_PREFETCH_ASYNC
+              Value: "true"
+            - Name: ALETHEIA_PREFETCH_WORKER_ENABLED
+              Value: "true"
+            - Name: ALETHEIA_PREFETCH_POLL_MS
+              Value: "60000"
+            - Name: ALETHEIA_PREFETCH_MAX_JOBS_PER_TICK
+              Value: "2"
           Secrets:
             - Name: DB_USER
               ValueFrom: !Sub "${AuroraSecretArn}:username::"
@@ -1185,6 +1242,10 @@ Outputs:
     Value: !GetAtt EncryptionKey.Arn
     Export:
       Name: !Sub "${ProjectName}-${Environment}-kms-key"
+
+  PodcastAudioBucketName:
+    Description: Private bucket storing generated podcast audio assets
+    Value: !Ref PodcastAudioBucket
 
   AlertsTopicArn:
     Description: SNS alerts topic ARN
