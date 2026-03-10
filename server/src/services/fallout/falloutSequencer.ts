@@ -51,8 +51,8 @@ const MAX_WITHDRAWN_POINTS = 5 * 6;
 
 /**
  * Zone scoring for Denied vs Withdrawn.
- * Denied (symmetricBands = false): Direction-aware. Zone 1 = middle (P45–P55) OR worse tail only. Zone 6 = good tail (1 pt).
  * Withdrawn (symmetricBands = true): Symmetric only. Zone 1 = middle (P45–P55) only. Zone 6 = both tails (<P10 or >P90) = 1 pt.
+ * Denied (symmetricBands = false): Purely direction-based. FICO (lowerIsWorse): Zone 1 = ≤P40, Zone 2 = P40–P55, Zone 3 = P55–P60, Zone 4 = P60–P70, Zone 5 = P70–P80, Zone 6 = >P80. LTV/DTI/days_active (higherIsWorse): Zone 1 = ≥P60, Zone 2 = P45–<P60, Zone 3 = P40–P45, Zone 4 = P30–P40, Zone 5 = P20–P30, Zone 6 = <P20.
  */
 function zoneAndPoints(
   value: number,
@@ -91,20 +91,24 @@ function zoneAndPoints(
       if ((value >= p10 && value < p20) || (value > p80 && value <= p90)) return { zone: 5, points: ZONE_POINTS[4] };
       return { zone: 6, points: ZONE_POINTS[5] }; // both tails
     }
-    // Denied: direction-aware. Worse tail → Zone 1, good tail → Zone 6.
+    // Denied: purely direction-based bands. Lower-is-worse = FICO; higher-is-worse = LTV, DTI, days_active.
     if (higherIsWorse) {
-      if (value > p90) return { zone: 1, points: ZONE_POINTS[0] };
-      if (value < p10) return { zone: 6, points: ZONE_POINTS[5] };
+      // LTV, DTI, days_active: Zone 1 = worst (high), Zone 6 = best (low). Zone 1: ≥P60, Zone 2: P45–<P60, Zone 3: P40–P45, Zone 4: P30–P40, Zone 5: P20–P30, Zone 6: <P20.
+      if (value >= p60) return { zone: 1, points: ZONE_POINTS[0] };
+      if (value >= p45 && value < p60) return { zone: 2, points: ZONE_POINTS[1] };
+      if (value >= p40 && value < p45) return { zone: 3, points: ZONE_POINTS[2] };
+      if (value >= p30 && value < p40) return { zone: 4, points: ZONE_POINTS[3] };
+      if (value >= p20 && value < p30) return { zone: 5, points: ZONE_POINTS[4] };
+      return { zone: 6, points: ZONE_POINTS[5] }; // value < p20
     } else {
-      if (value < p10) return { zone: 1, points: ZONE_POINTS[0] };
-      if (value > p90) return { zone: 6, points: ZONE_POINTS[5] };
+      // FICO: Zone 1 = worst (low), Zone 6 = best (high). Zone 1: ≤P40, Zone 2: P40–P55, Zone 3: P55–P60, Zone 4: P60–P70, Zone 5: P70–P80, Zone 6: >P80.
+      if (value <= p40) return { zone: 1, points: ZONE_POINTS[0] };
+      if (value > p40 && value <= p55) return { zone: 2, points: ZONE_POINTS[1] };
+      if (value > p55 && value <= p60) return { zone: 3, points: ZONE_POINTS[2] };
+      if (value > p60 && value <= p70) return { zone: 4, points: ZONE_POINTS[3] };
+      if (value > p70 && value <= p80) return { zone: 5, points: ZONE_POINTS[4] };
+      return { zone: 6, points: ZONE_POINTS[5] }; // value > p80
     }
-    if (value >= p45 && value <= p55) return { zone: 1, points: ZONE_POINTS[0] };
-    if ((value >= p40 && value < p45) || (value > p55 && value <= p60)) return { zone: 2, points: ZONE_POINTS[1] };
-    if ((value >= p30 && value < p40) || (value > p60 && value <= p70)) return { zone: 3, points: ZONE_POINTS[2] };
-    if ((value >= p20 && value < p30) || (value > p70 && value <= p80)) return { zone: 4, points: ZONE_POINTS[3] };
-    if ((value >= p10 && value < p20) || (value > p80 && value <= p90)) return { zone: 5, points: ZONE_POINTS[4] };
-    return { zone: 5, points: ZONE_POINTS[4] };
   }
   const { blended_q1, blended_q3, blended_iqr } = stats;
   const iqr = Math.max(blended_iqr, 0.01);
