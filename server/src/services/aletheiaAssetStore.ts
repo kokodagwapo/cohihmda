@@ -133,6 +133,40 @@ export async function loadPersistedAletheiaAsset(
   }
 }
 
+export async function hasPersistedAletheiaAsset(
+  tenantId: string
+): Promise<{ available: boolean; createdAt?: string; durationSec?: number }> {
+  const bucket = getPodcastBucket();
+  if (!bucket) return { available: false };
+
+  try {
+    const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+    const result = await tenantPool.query(
+      `SELECT created_at, audio_bytes, sample_rate
+       FROM public.podcast_assets
+       WHERE asset_type = $1
+         AND expires_at > NOW()
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [PODCAST_ASSET_TYPE]
+    );
+    if (result.rows.length === 0) return { available: false };
+
+    const row = result.rows[0];
+    const sampleRate = Number(row.sample_rate) || 24000;
+    const audioBytes = Number(row.audio_bytes) || 0;
+    const durationSec = audioBytes > 0 ? audioBytes / 2 / sampleRate : undefined;
+
+    return {
+      available: true,
+      createdAt: row.created_at,
+      durationSec,
+    };
+  } catch {
+    return { available: false };
+  }
+}
+
 export async function persistAletheiaAsset(input: {
   tenantId: string;
   contextHash: string;

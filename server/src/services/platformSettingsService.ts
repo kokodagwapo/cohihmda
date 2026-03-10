@@ -42,11 +42,17 @@ export async function getPlatformSetting(key: string): Promise<string | null> {
       return null;
     }
 
-    // Decrypt if needed
     if (encrypted) {
-      return await decryptField(setting_value);
+      const decrypted = await decryptField(setting_value);
+      console.log(
+        `[PlatformSettings] Read "${key}" (encrypted=true, decrypted length=${decrypted?.length ?? 0})`
+      );
+      return decrypted;
     }
 
+    console.log(
+      `[PlatformSettings] Read "${key}" (encrypted=false, raw length=${setting_value.length})`
+    );
     return setting_value;
   } catch (error: any) {
     console.error(
@@ -88,14 +94,19 @@ export async function setPlatformSetting(
       storedValue = await encryptField(value);
     }
 
-    // Upsert the setting
+    // Upsert the setting — always persist the encrypted flag so reads
+    // know whether to decrypt.  Without this the INSERT path defaults
+    // encrypted to false (the column default), creating a state where
+    // the value is KMS-encrypted but getPlatformSetting returns the
+    // raw ciphertext.
     await managementPool.query(
-      `INSERT INTO platform_settings (setting_key, setting_value, updated_at)
-       VALUES ($1, $2, NOW())
+      `INSERT INTO platform_settings (setting_key, setting_value, encrypted, updated_at)
+       VALUES ($1, $2, $3, NOW())
        ON CONFLICT (setting_key) DO UPDATE SET
          setting_value = $2,
+         encrypted = $3,
          updated_at = NOW()`,
-      [key, storedValue]
+      [key, storedValue, shouldEncrypt]
     );
 
     console.log(`[PlatformSettings] Updated setting: ${key}`);
