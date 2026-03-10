@@ -17,12 +17,14 @@ function getFredApiKey(): string | undefined {
 const FRED_API_BASE_URL = 'https://api.stlouisfed.org/fred/series/observations';
 const FRED_SERIES_ID = 'OBMMIC30YF'; // 30-Year Fixed Rate Conforming Mortgage Index
 
-/** Optimal Blue Mortgage Market Indices — all 30-year fixed rate series. */
+/** Optimal Blue Mortgage Market Indices — 30-yr and 15-yr series for ticker and rate snapshot. */
 export const OBMMI_SERIES = {
   conforming: 'OBMMIC30YF',
   jumbo: 'OBMMIJUMBO30YF',
   fha: 'OBMMIFHA30YF',
   va: 'OBMMIVA30YF',
+  conforming15yr: 'OBMMIC15YF',
+  usda: 'OBMMIUSDA30YF',
 } as const;
 
 export type RateType = keyof typeof OBMMI_SERIES;
@@ -30,6 +32,7 @@ export type RateType = keyof typeof OBMMI_SERIES;
 export interface RateSnapshot {
   rate: number | null;
   delta: number | null;
+  priorRate: number | null; // previous observation (e.g. prior week) for "prior vs today" charts
   asOf: string | null;
 }
 
@@ -55,6 +58,12 @@ export interface FREDResponse {
 
 /** FRED series ID for 10-Year Treasury Constant Maturity Rate (daily, percent). */
 export const FRED_SERIES_DGS10 = 'DGS10';
+
+/** FRED series ID for Freddie Mac PMMS 30-Year Fixed Rate (weekly, percent). */
+export const FRED_SERIES_MORTGAGE30US = 'MORTGAGE30US';
+
+/** FRED series ID for Existing Home Sales, SAAR (monthly, millions). NAR. */
+export const FRED_SERIES_EXISTING_HOME_SALES = 'EXHOSLUSM495S';
 
 /**
  * Fetch observations for any FRED series (on-demand, no DB storage).
@@ -721,7 +730,7 @@ let multiSeriesCacheExpiry = 0;
 const MULTI_SERIES_CACHE_TTL = 10 * 60 * 1000; // 10 min
 
 async function fetchLatestFromFred(seriesId: string): Promise<RateSnapshot> {
-  const empty: RateSnapshot = { rate: null, delta: null, asOf: null };
+  const empty: RateSnapshot = { rate: null, delta: null, priorRate: null, asOf: null };
   const apiKey = getFredApiKey();
   if (!apiKey) return empty;
 
@@ -750,6 +759,7 @@ async function fetchLatestFromFred(seriesId: string): Promise<RateSnapshot> {
     return {
       rate: latest.rate,
       delta: prev ? +(latest.rate - prev.rate).toFixed(4) : null,
+      priorRate: prev ? prev.rate : null,
       asOf: latest.date,
     };
   } catch {
@@ -758,15 +768,15 @@ async function fetchLatestFromFred(seriesId: string): Promise<RateSnapshot> {
 }
 
 /**
- * Fetch the most recent rate + day-over-day delta for all four OBMMI 30-year
- * fixed series (Conforming, Jumbo, FHA, VA). Cached in memory for 10 minutes.
+ * Fetch the most recent rate + delta + prior rate for all six OBMMI series
+ * (30-Yr Conforming, Jumbo, FHA, VA, USDA, 15-Yr Conforming). Cached 10 min.
  */
 export async function getMultiSeriesSnapshot(): Promise<MultiSeriesSnapshot> {
   if (multiSeriesCache && Date.now() < multiSeriesCacheExpiry) {
     return multiSeriesCache;
   }
 
-  const empty: RateSnapshot = { rate: null, delta: null, asOf: null };
+  const empty: RateSnapshot = { rate: null, delta: null, priorRate: null, asOf: null };
   const entries = Object.entries(OBMMI_SERIES) as [RateType, string][];
   const results = await Promise.allSettled(
     entries.map(async ([key, seriesId]) => {
@@ -780,6 +790,8 @@ export async function getMultiSeriesSnapshot(): Promise<MultiSeriesSnapshot> {
     jumbo: { ...empty },
     fha: { ...empty },
     va: { ...empty },
+    conforming15yr: { ...empty },
+    usda: { ...empty },
   };
 
   for (const result of results) {
