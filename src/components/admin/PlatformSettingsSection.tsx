@@ -484,7 +484,8 @@ export function PlatformSettingsSection() {
                     )}
                   </div>
                   <div className="flex gap-2">
-                    {setting.setting_key === "openai_api_key" &&
+                    {(setting.setting_key === "openai_api_key" ||
+                      setting.setting_key === "gemini_api_key") &&
                       setting.has_value && (
                         <Button
                           variant="outline"

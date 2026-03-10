@@ -258,11 +258,21 @@ async function getOpenAIKey(tenantId?: string): Promise<string> {
   throw new Error("OpenAI API key not configured");
 }
 
-async function getGeminiVoiceConfig(tenantId?: string): Promise<{
+async function getGeminiVoiceConfig(
+  tenantId?: string,
+  ignoreTenantKey = false
+): Promise<{
   apiKey: string;
   model: string;
   voiceName: string;
+  keySource: "tenant" | "platform" | "env";
 }> {
+  const sanitizeKey = (input?: string): string => {
+    const trimmed = String(input || "").trim();
+    // Accept keys accidentally wrapped in quotes from copy/paste.
+    return trimmed.replace(/^['"]+|['"]+$/g, "").trim();
+  };
+
   let geminiApiKey = "";
   let voiceModel = "";
   let voiceName = "";
@@ -284,7 +294,7 @@ async function getGeminiVoiceConfig(tenantId?: string): Promise<{
           const decrypted = await decryptAPIKeys({
             gemini_api_key: result.rows[0].gemini_api_key,
           });
-          geminiApiKey = decrypted.gemini_api_key || "";
+          geminiApiKey = sanitizeKey(decrypted.gemini_api_key || "");
           voiceModel = result.rows[0].voice_model || "";
           voiceName = result.rows[0].voice_name || "";
         }
@@ -294,9 +304,24 @@ async function getGeminiVoiceConfig(tenantId?: string): Promise<{
     }
   }
 
-  const platformGeminiKey = (await getPlatformSetting("gemini_api_key")) || "";
-  const envGeminiKey = process.env.GEMINI_API_KEY?.trim() || "";
-  const apiKey = geminiApiKey || platformGeminiKey || envGeminiKey;
+  const platformGeminiKey = sanitizeKey(
+    (await getPlatformSetting("gemini_api_key")) || ""
+  );
+  const envGeminiKey = sanitizeKey(process.env.GEMINI_API_KEY?.trim() || "");
+  let apiKey = "";
+  let keySource: "tenant" | "platform" | "env" = "env";
+  // Platform key is the primary key for all tenants in Aletheia podcast flows.
+  if (platformGeminiKey) {
+    apiKey = platformGeminiKey;
+    keySource = "platform";
+  } else if (!ignoreTenantKey && geminiApiKey) {
+    // Tenant key remains a fallback for backwards compatibility only.
+    apiKey = geminiApiKey;
+    keySource = "tenant";
+  } else if (envGeminiKey) {
+    apiKey = envGeminiKey;
+    keySource = "env";
+  }
   if (!apiKey) {
     throw new Error("Gemini API key not configured");
   }
@@ -319,6 +344,7 @@ async function getGeminiVoiceConfig(tenantId?: string): Promise<{
     apiKey,
     model: normalizedModel,
     voiceName: voiceName || GEMINI_DEFAULT_VOICE,
+    keySource,
   };
 }
 
@@ -1239,27 +1265,67 @@ export async function prefetchAletheiaBriefing(
   voiceName: string;
   contextHash: string;
 }> {
+  const isInvalidGeminiKeyError = (error: unknown): boolean => {
+    const msg = String((error as any)?.message || error || "").toLowerCase();
+    return (
+      msg.includes("api key not valid") ||
+      (msg.includes("1007") && msg.includes("api key"))
+    );
+  };
+
+  const synthesizeWithConfig = async (geminiConfig: {
+    apiKey: string;
+    model: string;
+    voiceName: string;
+    keySource: "tenant" | "platform" | "env";
+  }) => {
+    const segments = splitIntoSegments(script);
+    const segmentBuffers: Buffer[] = [];
+    let mimeType = "audio/pcm;rate=24000";
+    let sampleRate = 24000;
+    for (const segment of segments) {
+      const clip = await synthesizeGeminiSegmentToPCM(
+        geminiConfig,
+        segment,
+        ALETHEIA_GEMINI_TTS_PROMPT
+      );
+      mimeType = clip.mimeType || mimeType;
+      sampleRate = clip.sampleRate || sampleRate;
+      segmentBuffers.push(clip.pcm);
+    }
+    return {
+      combined: Buffer.concat(segmentBuffers),
+      mimeType,
+      sampleRate,
+      segmentsCount: segments.length,
+      model: geminiConfig.model,
+      voiceName: geminiConfig.voiceName,
+    };
+  };
+
   const safeTenantId = tenantId || "";
   const openAIKey = await getOpenAIKey(tenantId);
-  const geminiConfig = await getGeminiVoiceConfig(tenantId);
+  let geminiConfig = await getGeminiVoiceConfig(tenantId);
   const script = await generateAletheiaScriptText(openAIKey, briefingContext as any);
-  const segments = splitIntoSegments(script);
-  const segmentBuffers: Buffer[] = [];
-  let mimeType = "audio/pcm;rate=24000";
-  let sampleRate = 24000;
+  let synthesis = await synthesizeWithConfig(geminiConfig).catch(async (error) => {
+    if (
+      tenantId &&
+      geminiConfig.keySource === "tenant" &&
+      isInvalidGeminiKeyError(error)
+    ) {
+      const fallbackConfig = await getGeminiVoiceConfig(tenantId, true);
+      if (fallbackConfig.apiKey !== geminiConfig.apiKey) {
+        console.warn(
+          `[Aletheia] Tenant Gemini key invalid for ${tenantId}; retrying with ${fallbackConfig.keySource} key`
+        );
+        geminiConfig = fallbackConfig;
+        return synthesizeWithConfig(geminiConfig);
+      }
+    }
+    throw error;
+  });
 
-  for (const segment of segments) {
-    const clip = await synthesizeGeminiSegmentToPCM(
-      geminiConfig,
-      segment,
-      ALETHEIA_GEMINI_TTS_PROMPT
-    );
-    mimeType = clip.mimeType || mimeType;
-    sampleRate = clip.sampleRate || sampleRate;
-    segmentBuffers.push(clip.pcm);
-  }
-
-  const combined = Buffer.concat(segmentBuffers);
+  const combined = synthesis.combined;
   const contextHash = hashBriefingContext(briefingContext);
   const cacheKey = getAletheiaCacheKey(tenantId);
 
@@ -1268,11 +1334,11 @@ export async function prefetchAletheiaBriefing(
     createdAt: Date.now(),
     contextHash,
     audioBase64: combined.toString("base64"),
-    sampleRate,
-    mimeType,
-    segmentsCount: segments.length,
-    model: geminiConfig.model,
-    voiceName: geminiConfig.voiceName,
+    sampleRate: synthesis.sampleRate,
+    mimeType: synthesis.mimeType,
+    segmentsCount: synthesis.segmentsCount,
+    model: synthesis.model,
+    voiceName: synthesis.voiceName,
   });
 
   if (safeTenantId) {
@@ -1281,11 +1347,11 @@ export async function prefetchAletheiaBriefing(
       contextHash,
       script,
       pcm: combined,
-      sampleRate,
-      mimeType,
-      segmentsCount: segments.length,
-      model: geminiConfig.model,
-      voiceName: geminiConfig.voiceName,
+      sampleRate: synthesis.sampleRate,
+      mimeType: synthesis.mimeType,
+      segmentsCount: synthesis.segmentsCount,
+      model: synthesis.model,
+      voiceName: synthesis.voiceName,
       ttlMs: ALETHEIA_PREFETCH_TTL_MS,
     });
   }
@@ -1293,11 +1359,11 @@ export async function prefetchAletheiaBriefing(
   return {
     script,
     combined,
-    sampleRate,
-    mimeType,
-    segmentsCount: segments.length,
-    model: geminiConfig.model,
-    voiceName: geminiConfig.voiceName,
+    sampleRate: synthesis.sampleRate,
+    mimeType: synthesis.mimeType,
+    segmentsCount: synthesis.segmentsCount,
+    model: synthesis.model,
+    voiceName: synthesis.voiceName,
     contextHash,
   };
 }
