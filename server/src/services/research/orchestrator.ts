@@ -88,8 +88,9 @@ export interface ResearchSession {
   pauseRequested: boolean;
   paused: boolean;
   _pauseResolver?: () => void;
-  // Active SSE emitter (set when streaming)
-  _activeEmitter?: SSEEmitter;
+  // Active SSE emitters (multiple clients can subscribe to the same session stream)
+  _emitters: SSEEmitter[];
+  _isRunning: boolean;
   // Sharing (in-app user picker)
   visibility?: string;
   sharedWithUserIds?: string[];
@@ -265,6 +266,8 @@ export async function loadSession(sessionId: string, tenantPool: pg.Pool): Promi
       error: row.error,
       pauseRequested: false,
       paused: false,
+      _emitters: [],
+      _isRunning: false,
       visibility: row.visibility ?? "private",
       sharedWithUserIds: Array.isArray(row.shared_with_user_ids) ? row.shared_with_user_ids : [],
     };
@@ -496,6 +499,8 @@ export async function createSession(
     mode,
     pauseRequested: false,
     paused: false,
+    _emitters: [],
+    _isRunning: false,
   };
 
   sessions.set(session.id, session);
@@ -515,22 +520,58 @@ export function addSteeringDirective(sessionId: string, message: string): boolea
   return true;
 }
 
+export function attachSessionEmitter(sessionId: string, emitter: SSEEmitter): boolean {
+  const session = sessions.get(sessionId);
+  if (!session) return false;
+  session._emitters.push(emitter);
+  return true;
+}
+
+export function detachSessionEmitter(sessionId: string, emitter: SSEEmitter): void {
+  const session = sessions.get(sessionId);
+  if (!session) return;
+  session._emitters = session._emitters.filter((candidate) => candidate !== emitter);
+}
+
+export function isSessionRunning(sessionId: string): boolean {
+  const session = sessions.get(sessionId);
+  return !!session?._isRunning;
+}
+
+function emitSessionEvent(session: ResearchSession, event: SSEEvent): void {
+  session.events.push(event);
+  if (session._emitters.length === 0) return;
+
+  const nextEmitters: SSEEmitter[] = [];
+  for (const emitter of session._emitters) {
+    try {
+      emitter(event);
+      nextEmitters.push(emitter);
+    } catch {
+      // Drop emitters that throw (usually disconnected clients).
+    }
+  }
+  session._emitters = nextEmitters;
+}
+
 // ============================================================================
 // Main Orchestration Pipeline
 // ============================================================================
 
 export async function runResearchPipeline(
   sessionId: string,
-  tenantPool: pg.Pool,
-  emit: SSEEmitter
+  tenantPool: pg.Pool
 ): Promise<void> {
   const session = sessions.get(sessionId);
   if (!session) {
-    emit({ type: "error", data: { message: "Session not found" }, timestamp: Date.now() });
     return;
   }
-
-  session._activeEmitter = emit;
+  if (session._isRunning) {
+    console.log(`[Research] Session ${sessionId}: pipeline already running; skipping duplicate start`);
+    return;
+  }
+  session._isRunning = true;
+  const emit: SSEEmitter = (event) => emitSessionEvent(session, event);
 
   const isQuickMode = session.mode === "quick";
 
@@ -760,7 +801,7 @@ export async function runResearchPipeline(
     emit({ type: "error", data: { message: err.message }, timestamp: Date.now() });
     await saveSession(session, tenantPool);
   } finally {
-    session._activeEmitter = undefined;
+    session._isRunning = false;
   }
 }
 
@@ -771,22 +812,25 @@ export async function runResearchPipeline(
 export async function runFollowUp(
   sessionId: string,
   question: string,
-  tenantPool: pg.Pool,
-  emit: SSEEmitter
+  tenantPool: pg.Pool
 ): Promise<void> {
   const session = sessions.get(sessionId);
   if (!session) {
-    emit({ type: "error", data: { message: "Session not found" }, timestamp: Date.now() });
+    return;
+  }
+  if (session._isRunning) {
+    emitSessionEvent(session, { type: "error", data: { message: "Session is currently running another investigation" }, timestamp: Date.now() });
     return;
   }
 
   if (session.phase !== "complete") {
-    emit({ type: "error", data: { message: "Session must be complete before asking follow-ups" }, timestamp: Date.now() });
+    emitSessionEvent(session, { type: "error", data: { message: "Session must be complete before asking follow-ups" }, timestamp: Date.now() });
     return;
   }
+  session._isRunning = true;
+  const emit: SSEEmitter = (event) => emitSessionEvent(session, event);
 
   session.phase = "followup" as SessionPhase;
-  session._activeEmitter = emit;
 
   emit({
     type: "phase",
@@ -864,6 +908,6 @@ export async function runFollowUp(
     console.error(`[Research] Follow-up error for session ${sessionId}:`, err);
     emit({ type: "error", data: { message: err.message }, timestamp: Date.now() });
   } finally {
-    session._activeEmitter = undefined;
+    session._isRunning = false;
   }
 }

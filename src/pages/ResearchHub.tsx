@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Clock3 } from "lucide-react";
+import { Clock3, Loader2 } from "lucide-react";
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { useDashboardVisibility } from "@/hooks/useDashboardVisibility";
 import { useWorkbenchNav, type SidebarResearchSession } from "@/hooks/useWorkbenchNav";
@@ -13,6 +13,10 @@ function formatDate(value?: string) {
   const dt = new Date(value);
   if (Number.isNaN(dt.getTime())) return "—";
   return dt.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function isRunningPhase(phase?: string) {
+  return phase === "planning" || phase === "investigating" || phase === "synthesizing" || phase === "followup";
 }
 
 function SessionTable({
@@ -63,7 +67,12 @@ function SessionTable({
                   <td className="px-3 py-3">
                     <Badge variant="secondary">{row.isOwner === false ? "Shared" : "Owned"}</Badge>
                   </td>
-                  <td className="px-3 py-3 text-sm text-slate-600 dark:text-slate-300 capitalize">{row.phase || "idle"}</td>
+                  <td className="px-3 py-3 text-sm text-slate-600 dark:text-slate-300 capitalize">
+                    <span className="inline-flex items-center gap-1.5">
+                      {row.phase || "idle"}
+                      {isRunningPhase(row.phase) && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    </span>
+                  </td>
                   <td className="px-3 py-3 text-sm text-slate-600 dark:text-slate-300">{formatDate(row.updatedAt)}</td>
                   <td className="px-3 py-3 text-right">
                     <button
