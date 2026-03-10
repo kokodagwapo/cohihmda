@@ -158,12 +158,55 @@ function getAletheiaCacheKey(tenantId?: string): string {
   return tenantId || "global";
 }
 
-function hashBriefingContext(briefingContext: unknown): string {
+export function hashBriefingContext(briefingContext: unknown): string {
   try {
     return JSON.stringify(briefingContext ?? {});
   } catch {
     return String(Date.now());
   }
+}
+
+export async function buildDefaultAletheiaBriefingContext(tenantId: string): Promise<{
+  dialogues: Array<{ message: string; type: string; priority: string }>;
+  greeting: string;
+}> {
+  const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+  const dialogues: Array<{ message: string; type: string; priority: string }> = [];
+
+  try {
+    const result = await tenantPool.query(
+      `SELECT headline, understory, insight_type, priority
+       FROM public.generated_insights
+       WHERE COALESCE(for_podcast, true) = true
+       ORDER BY generated_at DESC
+       LIMIT 18`
+    );
+
+    for (const row of result.rows) {
+      const headline = String(row.headline || "").trim();
+      const understory = String(row.understory || "").trim();
+      const message = [headline, understory].filter(Boolean).join(". ");
+      if (!message) continue;
+      dialogues.push({
+        message,
+        type: String(row.insight_type || "info"),
+        priority: String(row.priority || "GRAY"),
+      });
+    }
+  } catch (error: any) {
+    // Older tenants may not have generated_insights yet.
+    if (error?.code !== "42P01") {
+      console.warn(
+        `[Aletheia] Failed to build default briefing context for tenant ${tenantId}:`,
+        error?.message || error
+      );
+    }
+  }
+
+  return {
+    dialogues,
+    greeting: "Good morning",
+  };
 }
 
 async function getOpenAIKey(tenantId?: string): Promise<string> {

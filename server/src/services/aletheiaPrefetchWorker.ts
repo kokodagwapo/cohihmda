@@ -1,5 +1,9 @@
 import { pool as managementPool } from "../config/managementDatabase.js";
 import { tenantDbManager } from "../config/tenantDatabaseManager.js";
+import {
+  getPlatformSetting,
+  setPlatformSetting,
+} from "./platformSettingsService.js";
 
 const POLL_INTERVAL_MS = Math.max(
   10_000,
@@ -9,9 +13,16 @@ const MAX_JOBS_PER_TICK = Math.max(
   1,
   Number(process.env.ALETHEIA_PREFETCH_MAX_JOBS_PER_TICK || 2)
 );
+const NIGHTLY_HOUR_UTC = Math.max(
+  0,
+  Math.min(23, Number(process.env.ALETHEIA_NIGHTLY_PREFETCH_HOUR_UTC || 2))
+);
+const NIGHTLY_ENABLED_KEY = "aletheia_nightly_prefetch_enabled";
+const NIGHTLY_LAST_RUN_KEY = "aletheia_nightly_prefetch_last_run_at";
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let isTickRunning = false;
+let nightlyRunStamp = "";
 
 function isPrefetchWorkerEnabled(): boolean {
   return process.env.ALETHEIA_PREFETCH_WORKER_ENABLED === "true";
@@ -135,12 +146,52 @@ async function processOneJob(job: ClaimedJob): Promise<void> {
   await mod.prefetchAletheiaBriefing(job.tenantId, job.briefingContext);
 }
 
+async function maybeRunNightlyPrefetch(tenantIds: string[]): Promise<void> {
+  const enabledValue = (await getPlatformSetting(NIGHTLY_ENABLED_KEY)) || "false";
+  if (enabledValue.toLowerCase() !== "true") return;
+
+  const now = new Date();
+  if (now.getUTCHours() !== NIGHTLY_HOUR_UTC) return;
+
+  const runStamp = now.toISOString().slice(0, 10);
+  if (nightlyRunStamp === runStamp) return;
+  nightlyRunStamp = runStamp;
+
+  const mod = await import("../routes/podcast.js");
+  let queuedCount = 0;
+
+  for (const tenantId of tenantIds) {
+    try {
+      const briefingContext = await mod.buildDefaultAletheiaBriefingContext(tenantId);
+      const contextHash = mod.hashBriefingContext(briefingContext);
+      await enqueueAletheiaPrefetchJob({
+        tenantId,
+        contextHash,
+        briefingContext,
+        requestedBy: "nightly-worker",
+      });
+      queuedCount += 1;
+    } catch (error: any) {
+      console.warn(
+        `[AletheiaPrefetchWorker] Nightly enqueue failed for tenant ${tenantId}:`,
+        error?.message || error
+      );
+    }
+  }
+
+  await setPlatformSetting(NIGHTLY_LAST_RUN_KEY, new Date().toISOString());
+  console.log(
+    `[AletheiaPrefetchWorker] Nightly prefetch enqueued for ${queuedCount}/${tenantIds.length} tenants`
+  );
+}
+
 async function pollOnce(): Promise<void> {
   if (isTickRunning) return;
   isTickRunning = true;
 
   try {
     const tenantIds = await listActiveTenantIds();
+    await maybeRunNightlyPrefetch(tenantIds);
     let processed = 0;
 
     for (const tenantId of tenantIds) {

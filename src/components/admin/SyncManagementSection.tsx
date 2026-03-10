@@ -84,6 +84,17 @@ interface SchedulerInfo {
   next_run_estimate: string;
 }
 
+interface TenantOption {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+interface PodcastSettings {
+  nightly_enabled: boolean;
+  nightly_last_run_at: string | null;
+}
+
 const FREQUENCY_OPTIONS = [
   { value: 'hourly', label: 'Hourly' },
   { value: 'daily', label: 'Daily (2 AM)' },
@@ -187,6 +198,14 @@ export const SyncManagementSection = () => {
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [historyData, setHistoryData] = useState<Record<string, SyncHistoryEntry[]>>({});
   const [historyLoading, setHistoryLoading] = useState<Set<string>>(new Set());
+  const [tenants, setTenants] = useState<TenantOption[]>([]);
+  const [podcastSettings, setPodcastSettings] = useState<PodcastSettings>({
+    nightly_enabled: false,
+    nightly_last_run_at: null,
+  });
+  const [podcastTenantId, setPodcastTenantId] = useState<string>('');
+  const [updatingPodcastSettings, setUpdatingPodcastSettings] = useState(false);
+  const [generatingPodcast, setGeneratingPodcast] = useState(false);
 
   const loadData = useCallback(async (showSpinner = true) => {
     try {
@@ -195,11 +214,21 @@ export const SyncManagementSection = () => {
         connections: SyncConnection[];
         scheduler: SchedulerInfo;
         total_tenants: number;
+        tenants?: TenantOption[];
+        podcast?: PodcastSettings;
       }>('/api/admin/sync-management');
 
       setConnections(response.connections);
       setScheduler(response.scheduler);
       setTotalTenants(response.total_tenants);
+      const nextTenants = response.tenants || [];
+      setTenants(nextTenants);
+      if (!podcastTenantId && nextTenants.length > 0) {
+        setPodcastTenantId(nextTenants[0].id);
+      }
+      if (response.podcast) {
+        setPodcastSettings(response.podcast);
+      }
     } catch (error: any) {
       console.error('Error loading sync management data:', error);
       if (showSpinner) {
@@ -212,7 +241,7 @@ export const SyncManagementSection = () => {
     } finally {
       if (showSpinner) setLoading(false);
     }
-  }, [toast]);
+  }, [toast, podcastTenantId]);
 
   useEffect(() => {
     loadData();
@@ -413,6 +442,74 @@ export const SyncManagementSection = () => {
     }
   };
 
+  const handleToggleNightlyPodcast = async (enabled: boolean) => {
+    setUpdatingPodcastSettings(true);
+    try {
+      await api.request('/api/admin/sync-management/podcast/settings', {
+        method: 'PUT',
+        body: JSON.stringify({
+          nightly_enabled: enabled,
+        }),
+      });
+      setPodcastSettings(prev => ({ ...prev, nightly_enabled: enabled }));
+      toast({
+        title: enabled ? 'Nightly podcast enabled' : 'Nightly podcast disabled',
+        description: enabled
+          ? 'Nightly Aletheia podcast generation is now ON.'
+          : 'Nightly Aletheia podcast generation is now OFF.',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to update nightly podcast setting',
+        variant: 'destructive',
+      });
+    } finally {
+      setUpdatingPodcastSettings(false);
+    }
+  };
+
+  const handleGeneratePodcast = async () => {
+    if (!podcastTenantId) {
+      toast({
+        title: 'Select a tenant',
+        description: 'Choose a tenant before generating a podcast.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setGeneratingPodcast(true);
+    try {
+      const response = await api.request<{
+        success: boolean;
+        script_length: number;
+        audio_bytes: number;
+        segments_count: number;
+      }>('/api/admin/sync-management/podcast/generate', {
+        method: 'POST',
+        body: JSON.stringify({
+          tenant_id: podcastTenantId,
+          async: false,
+        }),
+      });
+
+      const tenant = tenants.find(t => t.id === podcastTenantId);
+      toast({
+        title: 'Podcast generated and stored',
+        description: `${tenant?.name || 'Tenant'}: ${response.segments_count} clips, ${(response.audio_bytes / 1024).toFixed(0)} KB`,
+      });
+      loadData(false);
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to generate podcast',
+        variant: 'destructive',
+      });
+    } finally {
+      setGeneratingPodcast(false);
+    }
+  };
+
   // Helper to fetch history for a connection
   const fetchHistory = async (connection: SyncConnection) => {
     const key = connKey(connection);
@@ -565,6 +662,63 @@ export const SyncManagementSection = () => {
           </CardContent>
         </Card>
       )}
+
+      <Card className="border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50">
+        <CardHeader>
+          <CardTitle className="text-lg font-thin text-slate-900 dark:text-white tracking-tight">
+            Aletheia Podcast Generation
+          </CardTitle>
+          <CardDescription className="text-sm text-slate-600 dark:text-slate-400 font-light">
+            Platform-admin controls for manual generation and nightly auto-generation.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={podcastSettings.nightly_enabled}
+                onCheckedChange={handleToggleNightlyPodcast}
+                disabled={updatingPodcastSettings}
+                className="data-[state=checked]:bg-violet-500"
+              />
+              <span className="text-sm font-light text-slate-700 dark:text-slate-300">
+                Nightly generation
+              </span>
+            </div>
+            <div className="text-xs text-slate-500 dark:text-slate-400 font-light">
+              Last nightly run: {formatRelativeTime(podcastSettings.nightly_last_run_at)}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Select value={podcastTenantId} onValueChange={setPodcastTenantId}>
+              <SelectTrigger className="w-[260px] h-9 text-sm font-light">
+                <SelectValue placeholder="Select tenant" />
+              </SelectTrigger>
+              <SelectContent>
+                {tenants.map((tenant) => (
+                  <SelectItem key={tenant.id} value={tenant.id}>
+                    {tenant.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              variant="default"
+              size="sm"
+              onClick={handleGeneratePodcast}
+              disabled={generatingPodcast || !podcastTenantId}
+              className="font-light"
+            >
+              {generatingPodcast ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Play className="h-4 w-4 mr-2" />
+              )}
+              Generate and Store Podcast
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Connections Table */}
       <Card className="border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50">
