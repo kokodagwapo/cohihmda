@@ -45,7 +45,7 @@ export function getSidebarSearchTargets(): SidebarRouteSearchTarget[] {
     { id: 'route:workbench-shared', label: 'Workbench: Shared With Me', group: 'Pages', kind: 'route', path: '/workbench/shared', keywords: ['workbench', 'shared'] },
     { id: 'route:workbench-team', label: 'Workbench: Team Folders', group: 'Pages', kind: 'route', path: '/workbench/team-folders', keywords: ['workbench', 'team'] },
     { id: 'route:workbench-favorites', label: 'Workbench: Favorites', group: 'Pages', kind: 'route', path: '/workbench/favorites', keywords: ['workbench', 'favorites'] },
-    { id: 'route:distribution-center', label: 'Distribution Center', group: 'Pages', kind: 'route', path: '/workbench/distributions', keywords: ['distribution', 'distribution center', 'workbench', 'schedules'] },
+    { id: 'route:distribution-center', label: 'Communications Center', group: 'Pages', kind: 'route', path: '/workbench/distributions', keywords: ['communications', 'communications center', 'distribution', 'distribution center', 'workbench', 'schedules'] },
   ];
 
   return [...sectionTargets, ...toptieringTargets, ...pageTargets];

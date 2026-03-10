@@ -531,6 +531,55 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
     return location.pathname === path || location.pathname.startsWith(`${path}/`);
   };
 
+  const getSectionElementId = (sectionId: string): string => {
+    const sectionIdMap: Record<string, string> = {
+      aletheiaInsights: 'aletheiaInsights',
+      industryNews: 'industryNews',
+      leaderboard: 'leaderboard',
+      executiveDashboard: 'executiveDashboard',
+      closingFalloutForecast: 'closingFalloutForecast',
+    };
+    return sectionIdMap[sectionId] || `section-${sectionId}`;
+  };
+
+  const scrollToElementWithHeaderOffset = (elementId: string) => {
+    const element = document.getElementById(elementId);
+    if (!element) return false;
+
+    const headerOffset = 80;
+    const elementPosition = element.getBoundingClientRect().top;
+    const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
+    window.scrollTo({
+      top: offsetPosition,
+      behavior: 'smooth',
+    });
+    return true;
+  };
+
+  const handleSectionNavigation = (sectionId: string) => {
+    const elementId = getSectionElementId(sectionId);
+
+    if (location.pathname !== '/insights') {
+      navigate('/insights');
+      setTimeout(() => {
+        const scrollToElement = () => {
+          if (!scrollToElementWithHeaderOffset(elementId)) {
+            setTimeout(scrollToElement, 100);
+          }
+        };
+        scrollToElement();
+      }, 300);
+      return;
+    }
+
+    if (onSectionClick) {
+      onSectionClick(sectionId);
+      return;
+    }
+
+    scrollToElementWithHeaderOffset(elementId);
+  };
+
 
   const handleButtonClick = (reportId: string) => {
     const report = getReportById(reportId);
@@ -616,7 +665,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                           />
                         </div>
                         <button
-                          onClick={() => { onSectionClick?.(it.id); onMobileMenuToggle?.(); }}
+                          onClick={() => { handleSectionNavigation(it.id); onMobileMenuToggle?.(); }}
                           className="flex-1 text-left text-sm font-medium text-slate-800 dark:text-slate-200 min-h-[44px] flex items-center"
                         >
                           {it.label}
@@ -691,7 +740,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                               {isActive && <span className="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500" />}
                             </button>
                             <button
-                              onClick={() => { onSectionClick?.(it.id); onMobileMenuToggle?.(); }}
+                              onClick={() => { handleSectionNavigation(it.id); onMobileMenuToggle?.(); }}
                               className="flex-1 text-left text-sm text-slate-700 dark:text-slate-300 min-h-[44px] flex items-center"
                             >
                               {it.label}
@@ -731,12 +780,12 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                         const label = getSectionLabel(item.id);
                         return (
                           <div key={`section-${item.id}`} className="flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 touch-manipulation">
-                            <button onClick={() => { onSectionClick?.(item.id); onMobileMenuToggle?.(); }} className="relative flex-shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center">
+                            <button onClick={() => { handleSectionNavigation(item.id); onMobileMenuToggle?.(); }} className="relative flex-shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center">
                               <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center", style.bg)}>
                                 <Icon className={cn("w-4 h-4", style.icon)} />
                               </div>
                             </button>
-                            <button onClick={() => { onSectionClick?.(item.id); onMobileMenuToggle?.(); }} className="flex-1 text-left text-sm text-slate-700 dark:text-slate-300 min-h-[44px] flex items-center">{label}</button>
+                            <button onClick={() => { handleSectionNavigation(item.id); onMobileMenuToggle?.(); }} className="flex-1 text-left text-sm text-slate-700 dark:text-slate-300 min-h-[44px] flex items-center">{label}</button>
                             <button onClick={(e) => { e.stopPropagation(); removePinned(item); }} className="shrink-0 p-1.5 rounded hover:bg-slate-200/60 dark:hover:bg-slate-600/60" title="Unpin"><PinOff className="w-3.5 h-3.5 text-amber-500" /></button>
                           </div>
                         );
@@ -852,14 +901,14 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                   <span className={cn("text-sm", isPathActive('/research') ? "text-slate-900 dark:text-slate-100 font-medium" : "text-slate-700 dark:text-slate-300")}>Research Lab</span>
                 </button>
 
-                {/* Distribution Center */}
+                {/* Communications Center */}
                 <div className={cn("flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 touch-manipulation", isPathActive('/workbench/distributions') && "bg-slate-100 dark:bg-slate-800/60")}>
                   <button onClick={() => { navigate('/workbench/distributions'); onMobileMenuToggle?.(); }} className="relative flex-shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center">
                     <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center", isPathActive('/workbench/distributions') ? "bg-slate-100 dark:bg-slate-800/60" : "bg-slate-50 dark:bg-slate-800/30")}>
                       <Mail className={cn("w-4 h-4", isPathActive('/workbench/distributions') ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500 dark:text-slate-400")} />
                     </div>
                   </button>
-                  <button onClick={() => { navigate('/workbench/distributions'); onMobileMenuToggle?.(); }} className="flex-1 text-left text-sm text-slate-700 dark:text-slate-300 min-h-[44px] flex items-center">Distribution Center</button>
+                  <button onClick={() => { navigate('/workbench/distributions'); onMobileMenuToggle?.(); }} className="flex-1 text-left text-sm text-slate-700 dark:text-slate-300 min-h-[44px] flex items-center">Communications Center</button>
                 </div>
               </div>
               </>
@@ -952,7 +1001,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
               return (
                 <button
                   key={it.id}
-                  onClick={() => onSectionClick?.(it.id)}
+                  onClick={() => handleSectionNavigation(it.id)}
                   style={{ width: '100%', padding: '12px 20px 12px 36px', background: 'transparent', border: 'none', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12, transition: 'all 0.2s ease' }}
                   onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
                   onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
@@ -1027,7 +1076,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                       <button
                         key={it.id}
                         type="button"
-                        onClick={() => { onSectionClick?.(it.id); setInsightsFlyoutOpen(false); }}
+                        onClick={() => { handleSectionNavigation(it.id); setInsightsFlyoutOpen(false); }}
                         className={cn("w-full flex items-center gap-2 rounded-md px-2 py-2 text-sm", isDarkMode ? "hover:bg-slate-700/50" : "hover:bg-slate-100")}
                       >
                         <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-md", isActive ? (isDarkMode ? "bg-slate-600/50" : "bg-slate-200") : (isDarkMode ? "bg-slate-700/30" : "bg-slate-100"))}>
@@ -1231,7 +1280,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                             style={style}
                             onNavigate={() => item.type === 'route' && navigate(item.path)}
                             onRemove={() => removePinned(item)}
-                            onSectionClick={item.type === 'section' ? onSectionClick : undefined}
+                            onSectionClick={item.type === 'section' ? handleSectionNavigation : undefined}
                           />
                         );
                       })}
@@ -1284,7 +1333,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                       const label = getSectionLabel(item.id);
                       return (
                         <div key={`section-${item.id}`} className="flex items-center gap-1 group rounded-md">
-                          <button type="button" onClick={() => { onSectionClick?.(item.id); setPinnedDashboardFlyoutOpen(false); }} className="flex-1 flex items-center gap-2 px-2 py-2 rounded-md text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-800/60 min-w-0">
+                          <button type="button" onClick={() => { handleSectionNavigation(item.id); setPinnedDashboardFlyoutOpen(false); }} className="flex-1 flex items-center gap-2 px-2 py-2 rounded-md text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-800/60 min-w-0">
                             <div className={cn("flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center", style.bg)}>
                               <Icon className={cn("w-4 h-4", style.icon)} />
                             </div>
@@ -1374,7 +1423,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
             </Tooltip>
           )}
 
-          {/* Distribution Center */}
+          {/* Communications Center */}
           {isExpanded ? (
             <div
               style={{ width: '100%', padding: '12px 10px', display: 'flex', alignItems: 'center', gap: 10, transition: 'all 0.2s ease', cursor: 'pointer' }}
@@ -1385,7 +1434,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
               <button onClick={(e) => { e.stopPropagation(); navigate('/workbench/distributions'); }} style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)', border: 'none', cursor: 'pointer' }}>
                 <Mail size={18} style={{ color: isPathActive('/workbench/distributions') ? '#10b981' : (isDarkMode ? '#94a3b8' : '#64748b') }} />
               </button>
-              <button onClick={() => navigate('/workbench/distributions')} style={{ flex: 1, fontSize: 14, fontWeight: 600, color: isDarkMode ? '#e2e8f0' : '#1a1d29', textAlign: 'left', border: 'none', background: 'none', cursor: 'pointer', padding: 0 }}>Distribution Center</button>
+              <button onClick={() => navigate('/workbench/distributions')} style={{ flex: 1, fontSize: 14, fontWeight: 600, color: isDarkMode ? '#e2e8f0' : '#1a1d29', textAlign: 'left', border: 'none', background: 'none', cursor: 'pointer', padding: 0 }}>Communications Center</button>
             </div>
           ) : (
             <Tooltip>
@@ -1401,7 +1450,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                   </button>
                 </div>
               </TooltipTrigger>
-              <TooltipContent side="right">Distribution Center</TooltipContent>
+              <TooltipContent side="right">Communications Center</TooltipContent>
             </Tooltip>
           )}
         </div>

@@ -308,23 +308,21 @@ async function getGeminiVoiceConfig(
     (await getPlatformSetting("gemini_api_key")) || ""
   );
   const envGeminiKey = sanitizeKey(process.env.GEMINI_API_KEY?.trim() || "");
-  let apiKey = "";
-  let keySource: "tenant" | "platform" | "env" = "env";
-  // Platform key is the primary key for all tenants in Aletheia podcast flows.
-  if (platformGeminiKey) {
-    apiKey = platformGeminiKey;
-    keySource = "platform";
-  } else if (!ignoreTenantKey && geminiApiKey) {
-    // Tenant key remains a fallback for backwards compatibility only.
-    apiKey = geminiApiKey;
-    keySource = "tenant";
-  } else if (envGeminiKey) {
-    apiKey = envGeminiKey;
-    keySource = "env";
-  }
-  if (!apiKey) {
+  const selectedKey =
+    // Platform key is the primary key for all tenants in Aletheia podcast flows.
+    platformGeminiKey
+      ? { apiKey: platformGeminiKey, keySource: "platform" as const }
+      : !ignoreTenantKey && geminiApiKey
+        ? // Tenant key remains a fallback for backwards compatibility only.
+          { apiKey: geminiApiKey, keySource: "tenant" as const }
+        : envGeminiKey
+          ? { apiKey: envGeminiKey, keySource: "env" as const }
+          : null;
+
+  if (!selectedKey) {
     throw new Error("Gemini API key not configured");
   }
+  const { apiKey, keySource } = selectedKey;
 
   const normalizedModel = (() => {
     const raw = (voiceModel || "").trim();
