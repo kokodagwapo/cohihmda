@@ -22,7 +22,7 @@ import type { FalloutStatusType, OutcomeProfileStatusType } from './falloutTypes
 const START_YEAR = 2023;
 /** Minimum loans in a segment/feature to save a profile row (skip saving below this). */
 const MIN_SAMPLE_SIZE = 10;
-/** Minimum loans for loan-type-only fallback profile (Denied|VA, Withdrawn|VA, etc.); use 1 so sparse types still get a profile. */
+/** Minimum loans for loan-type-only fallback profile (Denied|VA, Withdrawn|VA, etc.); use 1 so sparse types still get a profile. Type+ purpose fallback (e.g. Denied|VA|NoCash-Out Refinance|All) requires MIN_SAMPLE_SIZE so we do not persist 1-loan groupings. */
 const MIN_SAMPLE_SIZE_FALLBACK = 1;
 
 /** Recency cutoff: loans with outcome date within this many days of reference date are "<=180 days". */
@@ -552,6 +552,7 @@ export async function runNumericOutcomeProfileDerivation(pool: pg.Pool): Promise
   }
 
   // Fallback profiles: one per (status_type, loan_type, loan_purpose, recency_bucket) with occupancy='All' (type + purpose fallback)
+  // Require MIN_SAMPLE_SIZE so we do not persist e.g. Denied|VA|NoCash-Out Refinance|All with only 1 loan; use loan-type-only fallback instead.
   for (const [key, data] of aggByLoanTypePurpose) {
     const parts = key.split('|');
     const recency_bucket = parts[3] ?? RECENCY_BUCKET_OLDER;
@@ -574,7 +575,7 @@ export async function runNumericOutcomeProfileDerivation(pool: pg.Pool): Promise
 
       if (arr.length === 0) continue;
       const sorted = [...arr].sort((a, b) => a - b);
-      if (sorted.length < MIN_SAMPLE_SIZE_FALLBACK) continue;
+      if (sorted.length < MIN_SAMPLE_SIZE) continue;
       const mean = sorted.reduce((s, x) => s + x, 0) / sorted.length;
       const q1 = quantile(sorted, 0.25);
       const q3 = quantile(sorted, 0.75);
