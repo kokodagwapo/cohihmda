@@ -153,32 +153,6 @@ function buildBucketLookup(
   byWithdrawn.forEach((k, i) => rankByWithdrawn.set(k, i + 1));
   byFallout.forEach((k, i) => rankByFallout.set(k, i + 1));
 
-  // Terminal log: Loan Characteristic fallout percentages and buckets per segment
-  const pad = (s: string, len: number) => (s ?? '').toString().slice(0, len).padEnd(len);
-  // eslint-disable-next-line no-console
-  console.log('\n[Segment Fallout Rates] Loan Characteristics — fallout % and buckets by segment (1=best, 6=worst)');
-  // eslint-disable-next-line no-console
-  console.log('─'.repeat(120));
-  // eslint-disable-next-line no-console
-  console.log(
-    `${pad('Segment (type|purpose|occupancy)', 42)} | ${pad('Denied %', 8)} | ${pad('Withdrawn %', 10)} | ${pad('Fallout %', 9)} | B(deny) B(wdraw) B(orig)`
-  );
-  // eslint-disable-next-line no-console
-  console.log('─'.repeat(120));
-  const keysForLog = [...keys].sort((a, b) => (ratesMap.get(b)!.fallout_pct ?? 0) - (ratesMap.get(a)!.fallout_pct ?? 0));
-  for (const key of keysForLog) {
-    const r = ratesMap.get(key)!;
-    const bDeny = rankToBucket(rankByDenied.get(key) ?? n);
-    const bWithdraw = rankToBucket(rankByWithdrawn.get(key) ?? n);
-    const bOrig = rankToBucket(rankByFallout.get(key) ?? n);
-    // eslint-disable-next-line no-console
-    console.log(
-      `${pad(key, 42)} | ${pad(r.denied_pct.toFixed(1), 8)} | ${pad(r.withdrawn_pct.toFixed(1), 10)} | ${pad(r.fallout_pct.toFixed(1), 9)} | ${bDeny}        ${bWithdraw}        ${bOrig}`
-    );
-  }
-  // eslint-disable-next-line no-console
-  console.log('─'.repeat(120) + '\n');
-
   /**
    * Resolve segment to a key that exists in ratesMap (with fallback).
    */

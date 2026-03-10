@@ -356,12 +356,12 @@ router.get(
         const needDelta = loanDataResult.rows.filter(
           (row: any) =>
             (row.market_change_delta == null || (typeof row.market_change_delta === "number" && isNaN(row.market_change_delta))) &&
-            (row.lock_date || row.application_date)
+            row.lock_date
         );
         if (needDelta.length > 0) {
           await initializeMarketRateCache().catch(() => {});
           for (const row of needDelta) {
-            const lockDate = row.lock_date ?? row.application_date;
+            const lockDate = row.lock_date;
             if (lockDate) {
               const delta = await computeMarketDeltaForDates(lockDate, today);
               if (delta != null && !isNaN(delta)) {
@@ -371,18 +371,18 @@ router.get(
           }
         }
 
-        // Enrich market_rate_at_lock when missing: use lock date, else application date, then get market rate for that date
+        // Enrich market_rate_at_lock when missing: only for loans with lock_date (use market rate at lock date)
         const needMarketRateAtLock = loanDataResult.rows.filter(
           (row: any) => {
             const current = loanDataMap[row.loan_id] ?? row;
             const hasRate = current.market_rate_at_lock != null && !isNaN(Number(current.market_rate_at_lock));
-            return !hasRate && (row.lock_date || row.application_date);
+            return !hasRate && row.lock_date;
           }
         );
         if (needMarketRateAtLock.length > 0) {
           await initializeMarketRateCache().catch(() => {});
           for (const row of needMarketRateAtLock) {
-            const refDate = row.lock_date ?? row.application_date;
+            const refDate = row.lock_date;
             if (!refDate) continue;
             const refObj = typeof refDate === "string" ? new Date(refDate) : refDate;
             if (isNaN(refObj.getTime())) continue;
@@ -512,7 +512,16 @@ router.get(
         return 6;
       }
 
-      // Lock vs Market: prefer market delta (same bands as POST); fallback to rate-only
+      function staticMarketDeltaBucketLocal(delta: number | null): number | null {
+        if (delta == null || isNaN(delta)) return null;
+        if (delta <= -0.25) return 1;
+        if (delta <= 0) return 2;
+        if (delta <= 0.1) return 3;
+        if (delta <= 0.2) return 4;
+        if (delta <= 0.3) return 5;
+        return 6;
+      }
+
       function calculateInterestLockVsMarketSignal(loan: any): number | null {
         const delta =
           loan.market_change_delta != null && !isNaN(Number(loan.market_change_delta))
@@ -521,32 +530,21 @@ router.get(
               ? Number(loan.marketChangeDelta)
               : null;
         if (delta !== null) {
-          if (delta <= -0.3) return 1;
-          if (delta <= -0.1) return 2;
-          if (delta <= 0.05) return 3;
-          if (delta <= 0.2) return 4;
-          if (delta <= 0.5) return 5;
-          return 6;
+          return staticMarketDeltaBucketLocal(delta);
         }
         const interestRate =
           loan.interest_rate != null ? Number(loan.interest_rate) : null;
         if (interestRate === null) return null;
         const market = loan.market_rate ?? loan.market_rate_at_lock;
         if (market != null && !isNaN(Number(market))) {
-          const d = Number(market) - interestRate;
-          if (d <= -0.3) return 1;
-          if (d <= 0) return 2;
-          if (d <= 0.25) return 3;
-          if (d <= 0.5) return 5;
-          return 6;
+          return staticMarketDeltaBucketLocal(Number(market) - interestRate);
         }
-        if (interestRate <= 5.5) return 2;
-        if (interestRate <= 6.5) return 3;
-        if (interestRate <= 7.5) return 4;
-        return 5;
+        return null;
       }
 
       function calculateMarketChangeDelta(loan: any): number | null {
+        // Only compute delta when loan has a lock date; otherwise leave blank (Lock vs Market = N/A)
+        if (loan.lock_date == null && loan.lockDate == null) return null;
         const lockRate = loan.interest_rate != null ? Number(loan.interest_rate) : null;
         const marketRate =
           loan.market_rate != null ? Number(loan.market_rate)
@@ -558,13 +556,7 @@ router.get(
       }
 
       function calculateMarketChangeDeltaSignal(delta: number | null): number | null {
-        if (delta == null) return null;
-        if (delta <= -0.5) return 1;
-        if (delta <= -0.25) return 2;
-        if (delta <= 0.1) return 3;
-        if (delta <= 0.25) return 4;
-        if (delta <= 0.5) return 5;
-        return 6;
+        return staticMarketDeltaBucketLocal(delta);
       }
 
       // MLO Fallout Prone: from LO pullthrough % only. 1=90-100%, 2=80-90%, 3=70-80%, 4=60-70%, 5=30-60%, 6=0-30%. Accept decimal (0-1) or percentage.
@@ -633,10 +625,14 @@ router.get(
           mergedLoanData.mloAeFalloutProneSignalStrength ?? loPullthroughSignal;
 
         // Risk score from fallout sequencer reason_codes (zone points sum scaled to 0-100).
-        // Use outcome-specific max to match sequencer: Denied max=24 (4 features × 6 pts), Withdrawn max=30 (5 × 6), else 18.
+        // Use outcome-specific max to match sequencer: Denied max=24 (4 features × 6 pts).
+        // Withdrawn: max=30 if loan has market_delta (5 features), else 24 (4 features). Other: 18.
         const MAX_DENIED_POINTS = 24;
         const MAX_WITHDRAWN_POINTS = 30;
         const MAX_OTHER_POINTS = 18;
+        const withdrawHasMarketDelta =
+          mergedLoanData.marketChangeDelta != null &&
+          !isNaN(Number(mergedLoanData.marketChangeDelta));
         let sequencerRiskScore100: number | null = null;
         const rawReasonCodes = row.reason_codes;
         const normalizedReasonCodes = rawReasonCodes != null
@@ -661,7 +657,9 @@ router.get(
             row.predicted_outcome === "deny"
               ? MAX_DENIED_POINTS
               : row.predicted_outcome === "withdraw"
-                ? MAX_WITHDRAWN_POINTS
+                ? withdrawHasMarketDelta
+                  ? MAX_WITHDRAWN_POINTS
+                  : MAX_DENIED_POINTS
                 : MAX_OTHER_POINTS;
           sequencerRiskScore100 = Math.min(
             100,
@@ -757,25 +755,27 @@ router.get(
             mergedLoanData.processorPullthroughSignalStrength ?? null,
           loPullthroughSignal:
             mergedLoanData.loPullthroughSignal ?? loPullthroughSignal,
-          market_rate: mergedLoanData.market_rate != null ? Number(mergedLoanData.market_rate) : null,
-          market_rate_at_lock: mergedLoanData.market_rate_at_lock != null ? Number(mergedLoanData.market_rate_at_lock) : null,
+          market_rate: (mergedLoanData.lock_date ?? mergedLoanData.lockDate) != null && mergedLoanData.market_rate != null ? Number(mergedLoanData.market_rate) : null,
+          market_rate_at_lock: (mergedLoanData.lock_date ?? mergedLoanData.lockDate) != null && mergedLoanData.market_rate_at_lock != null ? Number(mergedLoanData.market_rate_at_lock) : null,
           rateReferenceType: mergedLoanData.rateReferenceType ??
             ((mergedLoanData.lock_date ?? mergedLoanData.lockDate) != null ? "lock" : "application"),
           rateAtApplicationDate: mergedLoanData.rateAtApplicationDate != null ? Number(mergedLoanData.rateAtApplicationDate) : null,
           lockMarketRate:
-            mergedLoanData.lockMarketRate != null ? Number(mergedLoanData.lockMarketRate) :
-            ((mergedLoanData.lock_date ?? mergedLoanData.lockDate) != null
-              ? (mergedLoanData.market_rate_at_lock != null
+            (mergedLoanData.lock_date ?? mergedLoanData.lockDate) != null
+              ? (mergedLoanData.lockMarketRate != null ? Number(mergedLoanData.lockMarketRate) :
+                (mergedLoanData.market_rate_at_lock != null
                   ? Number(mergedLoanData.market_rate_at_lock)
-                  : mergedLoanData.interest_rate != null ? Number(mergedLoanData.interest_rate) : null)
-              : (mergedLoanData.rateAtApplicationDate != null
-                  ? Number(mergedLoanData.rateAtApplicationDate)
-                  : null)),
+                  : mergedLoanData.interest_rate != null ? Number(mergedLoanData.interest_rate) : null))
+              : null,
           marketChangeDelta:
-            mergedLoanData.marketChangeDelta != null ? Number(mergedLoanData.marketChangeDelta) : calculateMarketChangeDelta(mergedLoanData),
+            (mergedLoanData.lock_date ?? mergedLoanData.lockDate) != null
+              ? (mergedLoanData.marketChangeDelta != null ? Number(mergedLoanData.marketChangeDelta) : calculateMarketChangeDelta(mergedLoanData))
+              : null,
           marketChangeDeltaSignal:
-            mergedLoanData.marketChangeDeltaSignal ??
-            calculateMarketChangeDeltaSignal(mergedLoanData.marketChangeDelta != null ? Number(mergedLoanData.marketChangeDelta) : calculateMarketChangeDelta(mergedLoanData)),
+            (mergedLoanData.lock_date ?? mergedLoanData.lockDate) != null
+              ? (mergedLoanData.marketChangeDeltaSignal ??
+                calculateMarketChangeDeltaSignal(mergedLoanData.marketChangeDelta != null ? Number(mergedLoanData.marketChangeDelta) : calculateMarketChangeDelta(mergedLoanData)))
+              : null,
           bucket: riskBucket,
           riskSummary: storedRiskSummary,
           closeOnTimeProbability: mergedLoanData.closeOnTimeProbability ?? null,

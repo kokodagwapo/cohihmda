@@ -88,6 +88,8 @@ const RATE_SNAPSHOT_DATA = [
   { product: "15-Yr Fixed", prior: 5.73, today: 5.28 },
   { product: "30-Yr FHA", prior: 5.55, today: 5.99 },
   { product: "30-Yr Jumbo", prior: 6.39, today: 5.5 },
+  { product: "30-Yr VA", prior: 5.69, today: 5.65 },
+  { product: "30-Yr USDA", prior: 6.04, today: 6.02 },
 ];
 const EXISTING_HOME_SALES_DATA = [
   { month: "Aug '25", value: 4.02 },
@@ -112,8 +114,8 @@ const CHART_SOURCE_META: Record<
   { label: string; url: string }
 > = {
   fixedRate: {
-    label: "Freddie Mac PMMS",
-    url: "https://www.freddiemac.com/pmms",
+    label: "Optimal Blue OBMMI",
+    url: "https://www2.optimalblue.com/obmmi",
   },
   treasury: {
     label: "U.S. Treasury",
@@ -217,6 +219,14 @@ const EXCERPT_PARAGRAPHS_PER_PAGE = 4;
 
 const isValidDate = (value: Date) => !Number.isNaN(value.getTime());
 
+/** Format a FRED YYYY-MM-DD string as "MMM 'yy" using local calendar date (avoids UTC→local shift). */
+function formatFredDateAsMonthYear(dateStr: string): string {
+  const parts = dateStr.split("-").map(Number);
+  if (parts.length !== 3) return dateStr;
+  const [y, m, d] = parts;
+  return format(new Date(y, m - 1, d), "MMM ''yy");
+}
+
 const parseNewsReleaseDate = (item: any): Date | null => {
   const directCandidates = [
     item?.publishedAt,
@@ -247,7 +257,11 @@ const parseNewsReleaseDate = (item: any): Date | null => {
 
 const OBMMI_WIDGET_URL = "https://www2.optimalblue.com/OBMMI/widgetConfig.php";
 
-function MarketIntelligenceTicker() {
+function MarketIntelligenceTicker({
+  seriesFromApi,
+}: {
+  seriesFromApi?: Record<string, { rate: number; delta: number; trend: string; priorRate: number | null }> | null;
+}) {
   const [obModalOpen, setObModalOpen] = useState(false);
 
   const FALLBACK_INDICES: Array<{ label: string; rate: number; delta: number; trend: "up" | "down" }> = [
@@ -261,28 +275,35 @@ function MarketIntelligenceTicker() {
 
   const [rateIndices, setRateIndices] = useState(FALLBACK_INDICES);
 
+  // Map API series key -> ticker label (order matches FALLBACK_INDICES)
+  const SERIES_TO_LABEL: Record<string, string> = {
+    conforming: "30-Yr. Conforming",
+    jumbo: "30-Yr. Jumbo",
+    fha: "30-Yr. FHA",
+    va: "30-Yr. VA",
+    usda: "30-Yr. USDA",
+    conforming15yr: "15-Yr. Conforming",
+  };
+
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await api.get("/api/loans/market-rates/current");
-        const data = res.data;
-        if (!cancelled && data?.available && data.conforming30yr) {
-          const live = data.conforming30yr;
-          setRateIndices((prev) =>
-            prev.map((item) =>
-              item.label === "30-Yr. Conforming"
-                ? { ...item, rate: live.rate, delta: live.delta, trend: live.trend === "down" ? "down" as const : "up" as const }
-                : item
-            )
-          );
-        }
-      } catch {
-        // Fall back to hardcoded values silently
+    if (!seriesFromApi) return;
+    const keys = ["conforming", "jumbo", "fha", "va", "usda", "conforming15yr"];
+    const next = keys.map((key) => {
+      const s = seriesFromApi[key];
+      const label = SERIES_TO_LABEL[key];
+      const fallback = FALLBACK_INDICES.find((i) => i.label === label)!;
+      if (s && s.rate != null) {
+        return {
+          label,
+          rate: s.rate,
+          delta: s.delta,
+          trend: (s.trend === "down" ? "down" : "up") as "up" | "down",
+        };
       }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+      return fallback;
+    });
+    setRateIndices(next);
+  }, [seriesFromApi]);
 
   const RATE_INDICES = rateIndices;
 
@@ -464,6 +485,23 @@ export const IndustryNewsCard = () => {
   const [showChartDrilldown, setShowChartDrilldown] = useState(false);
   const [activeChart, setActiveChart] = useState<DrilldownChartKey | null>(null);
   const [drilldownRange, setDrilldownRange] = useState<DrilldownRange>("mtd");
+
+  // FRED-sourced chart data for 30-Yr Fixed (MORTGAGE30US) and 10-Yr Treasury (DGS10)
+  const [fixedRateObservations, setFixedRateObservations] = useState<
+    Array<{ date: string; rate: number }> | null
+  >(null);
+  const [treasuryObservations, setTreasuryObservations] = useState<
+    Array<{ date: string; yield: number }> | null
+  >(null);
+
+  const [existingHomeSalesObservations, setExistingHomeSalesObservations] = useState<
+    Array<{ date: string; value: number }> | null
+  >(null);
+
+  // OBMMI multi-series (conforming, jumbo, fha, va, conforming15yr, usda) for ticker + rate snapshot
+  const [currentObmmiSeries, setCurrentObmmiSeries] = useState<
+    Record<string, { rate: number; delta: number; trend: string; priorRate: number | null }> | null
+  >(null);
   
   // Initialize with government/GSE sources enabled by default
   // RSS feed sources (National Mortgage News, etc.) are disabled by default
@@ -572,6 +610,54 @@ export const IndustryNewsCard = () => {
   // Load preferences on mount
   useEffect(() => {
     loadUserPreferences();
+  }, []);
+
+  // Fetch FRED 30-Yr Fixed (MORTGAGE30US), 10-Yr Treasury (DGS10), and Existing Home Sales (EXHOSLUSM495S)
+  useEffect(() => {
+    const end = new Date();
+    const start = new Date();
+    start.setFullYear(start.getFullYear() - 3);
+    const observationEnd = end.toISOString().split("T")[0];
+    const observationStart = start.toISOString().split("T")[0];
+    const qs = `observation_start=${observationStart}&observation_end=${observationEnd}`;
+
+    let cancelled = false;
+    Promise.all([
+      api.request<{ observations: Array<{ date: string; rate: number }> }>(
+        `/api/loans/market-rates/mortgage-30y?${qs}`
+      ),
+      api.request<{ observations: Array<{ date: string; yield: number }> }>(
+        `/api/loans/market-rates/treasury-10y?${qs}`
+      ),
+      api.request<{ observations: Array<{ date: string; value: number }> }>(
+        `/api/loans/market-rates/existing-home-sales?${qs}`
+      ),
+    ])
+      .then(([mort, treas, exHome]) => {
+        if (cancelled) return;
+        if (mort?.observations?.length) setFixedRateObservations(mort.observations);
+        if (treas?.observations?.length) setTreasuryObservations(treas.observations);
+        if (exHome?.observations?.length) setExistingHomeSalesObservations(exHome.observations);
+      })
+      .catch(() => {
+        // Keep fallback static data on error
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Fetch OBMMI current (all 6 series) for ticker and rate snapshot card
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .request<{
+        available?: boolean;
+        series?: Record<string, { rate: number; delta: number; trend: string; priorRate: number | null }>;
+      }>("/api/loans/market-rates/current")
+      .then((data) => {
+        if (!cancelled && data?.series) setCurrentObmmiSeries(data.series);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   // Available news sources - Government/GSE sites (enabled by default) + RSS feeds (disabled by default)
@@ -1157,12 +1243,129 @@ export const IndustryNewsCard = () => {
     window.open(source.url, "_blank", "noopener,noreferrer");
   }, []);
 
+  // Build range start dates (YYYY-MM-DD) for filtering FRED observations
+  const rangeStartDates = useMemo(() => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    const mtd = new Date(y, m, 1);
+    const qtrMonth = Math.floor(m / 3) * 3;
+    const qtr = new Date(y, qtrMonth, 1);
+    const ytd = new Date(y, 0, 1);
+    const threeY = new Date(y - 3, 0, 1);
+    const fmt = (d: Date) => d.toISOString().split("T")[0];
+    return { mtd: fmt(mtd), qtr: fmt(qtr), ytd: fmt(ytd), "3y": fmt(threeY) };
+  }, []);
+
+  const displayRateSnapshotData = useMemo(() => {
+    const s = currentObmmiSeries;
+    if (!s) return RATE_SNAPSHOT_DATA;
+    const rows: Array<{ product: string; prior: number; today: number }> = [
+      { product: "30-Yr Fixed", prior: s.conforming?.priorRate ?? s.conforming?.rate ?? 0, today: s.conforming?.rate ?? 0 },
+      { product: "15-Yr Fixed", prior: s.conforming15yr?.priorRate ?? s.conforming15yr?.rate ?? 0, today: s.conforming15yr?.rate ?? 0 },
+      { product: "30-Yr FHA", prior: s.fha?.priorRate ?? s.fha?.rate ?? 0, today: s.fha?.rate ?? 0 },
+      { product: "30-Yr Jumbo", prior: s.jumbo?.priorRate ?? s.jumbo?.rate ?? 0, today: s.jumbo?.rate ?? 0 },
+      { product: "30-Yr VA", prior: s.va?.priorRate ?? s.va?.rate ?? 0, today: s.va?.rate ?? 0 },
+      { product: "30-Yr USDA", prior: s.usda?.priorRate ?? s.usda?.rate ?? 0, today: s.usda?.rate ?? 0 },
+    ];
+    const hasAny = rows.some((r) => r.today > 0);
+    return hasAny ? rows : RATE_SNAPSHOT_DATA;
+  }, [currentObmmiSeries]);
+
+  const displayExistingHomeSalesData = useMemo(() => {
+    if (!existingHomeSalesObservations?.length) return EXISTING_HOME_SALES_DATA;
+    return existingHomeSalesObservations.map((o) => ({
+      month: formatFredDateAsMonthYear(o.date),
+      value: o.value,
+    }));
+  }, [existingHomeSalesObservations]);
+
+  // Resolved drilldown data: use FRED API data for fixedRate/treasury/rateSnapshot/existingSales when available
+  const resolvedDrilldownData = useMemo(() => {
+    const base = { ...CHART_DRILLDOWN_DATA };
+    if (fixedRateObservations?.length) {
+      const filter = (range: DrilldownRange) => {
+        const start = rangeStartDates[range];
+        return fixedRateObservations
+          .filter((o) => o.date >= start)
+          .map((o) => ({ week: format(new Date(o.date), "MMM d"), rate: o.rate }));
+      };
+      base.fixedRate = {
+        mtd: filter("mtd"),
+        qtr: filter("qtr"),
+        ytd: filter("ytd"),
+        "3y": filter("3y"),
+      };
+    }
+    if (treasuryObservations?.length) {
+      const filter = (range: DrilldownRange) => {
+        const start = rangeStartDates[range];
+        return treasuryObservations
+          .filter((o) => o.date >= start)
+          .map((o) => ({ date: format(new Date(o.date), "MMM d"), yield: o.yield }));
+      };
+      base.treasury = {
+        mtd: filter("mtd"),
+        qtr: filter("qtr"),
+        ytd: filter("ytd"),
+        "3y": filter("3y"),
+      };
+    }
+    if (displayRateSnapshotData.length > 0) {
+      base.rateSnapshot = {
+        mtd: displayRateSnapshotData,
+        qtr: displayRateSnapshotData,
+        ytd: displayRateSnapshotData,
+        "3y": displayRateSnapshotData,
+      };
+    }
+    if (existingHomeSalesObservations?.length) {
+      const filter = (range: DrilldownRange) => {
+        const start = rangeStartDates[range];
+        return existingHomeSalesObservations
+          .filter((o) => o.date >= start)
+          .map((o) => ({
+            month: formatFredDateAsMonthYear(o.date),
+            value: o.value,
+          }));
+      };
+      base.existingSales = {
+        mtd: filter("mtd"),
+        qtr: filter("qtr"),
+        ytd: filter("ytd"),
+        "3y": filter("3y"),
+      };
+    }
+    return base;
+  }, [fixedRateObservations, treasuryObservations, rangeStartDates, displayRateSnapshotData, existingHomeSalesObservations]);
+
   const availableDrilldownRanges = useMemo<DrilldownRange[]>(() => {
     if (!activeChart) return [];
-    return (Object.keys(CHART_DRILLDOWN_DATA[activeChart]) as DrilldownRange[]).filter(
-      (range) => (CHART_DRILLDOWN_DATA[activeChart][range] || []).length > 0
+    return (Object.keys(resolvedDrilldownData[activeChart]) as DrilldownRange[]).filter(
+      (range) => (resolvedDrilldownData[activeChart][range] || []).length > 0
     );
-  }, [activeChart]);
+  }, [activeChart, resolvedDrilldownData]);
+
+  // Preview data for the 30-Yr Fixed and 10-Yr Treasury cards (last ~8 points when from API)
+  const displayFixedRateData = useMemo(() => {
+    if (fixedRateObservations?.length) {
+      return fixedRateObservations.slice(-8).map((o) => ({
+        week: format(new Date(o.date), "MMM d"),
+        rate: o.rate,
+      }));
+    }
+    return FIXED_RATE_DATA;
+  }, [fixedRateObservations]);
+
+  const displayTreasuryData = useMemo(() => {
+    if (treasuryObservations?.length) {
+      return treasuryObservations.slice(-8).map((o) => ({
+        date: format(new Date(o.date), "MMM d"),
+        yield: o.yield,
+      }));
+    }
+    return TREASURY_DATA;
+  }, [treasuryObservations]);
 
   useEffect(() => {
     if (!showChartDrilldown || !activeChart) return;
@@ -1198,7 +1401,7 @@ export const IndustryNewsCard = () => {
 
   const renderDrilldownChart = () => {
     if (!activeChart) return null;
-    const chartData = CHART_DRILLDOWN_DATA[activeChart][drilldownRange];
+    const chartData = resolvedDrilldownData[activeChart][drilldownRange];
     if (!chartData || chartData.length === 0) {
       return (
         <div className="h-full flex items-center justify-center rounded-xl border border-dashed border-slate-300 dark:border-slate-700">
@@ -1347,7 +1550,7 @@ export const IndustryNewsCard = () => {
 
         {/* Market Intelligence Ticker - rate strip */}
         <div className="mb-5 md:mb-6">
-          <MarketIntelligenceTicker />
+          <MarketIntelligenceTicker seriesFromApi={currentObmmiSeries} />
         </div>
 
         {/* Charts Grid - 2 rows x 3 */}
@@ -1358,7 +1561,7 @@ export const IndustryNewsCard = () => {
             onClick={() => openChartDrilldown("fixedRate")}
           >
             <p className="text-sm font-medium text-slate-800 dark:text-slate-200">30-YR FIXED RATE</p>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Lowest in several years — now sub-6%</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">OBMMI 30 Year Fixed Rate Conforming Mortgage Index</p>
             <button
               type="button"
               onClick={(event) => {
@@ -1367,12 +1570,12 @@ export const IndustryNewsCard = () => {
               }}
               className="mb-2 inline-flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 hover:underline"
             >
-              Source: Freddie Mac PMMS
+              Source: {CHART_SOURCE_META.fixedRate.label}
               <ExternalLink className="w-3 h-3" />
             </button>
             <div className="h-[140px] w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={FIXED_RATE_DATA} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                <LineChart data={displayFixedRateData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
                   <XAxis dataKey="week" tick={{ fontSize: 10 }} stroke="currentColor" className="fill-slate-500" />
                   <YAxis domain={["dataMin - 0.2", "dataMax + 0.2"]} tick={{ fontSize: 10 }} width={28} tickFormatter={(v) => `${v}%`} />
@@ -1402,10 +1605,10 @@ export const IndustryNewsCard = () => {
             </button>
             <div className="h-[140px] w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={TREASURY_DATA} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                <LineChart data={displayTreasuryData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
                   <XAxis dataKey="date" tick={{ fontSize: 10 }} />
-                  <YAxis domain={[3.9, 4.2]} tick={{ fontSize: 10 }} width={28} tickFormatter={(v) => `${v}%`} />
+                  <YAxis domain={["dataMin - 0.05", "dataMax + 0.05"]} tick={{ fontSize: 10 }} width={28} tickFormatter={(v) => `${v}%`} />
                   <RechartsTooltip formatter={(v: number) => [`${v}%`, "Yield"]} contentStyle={{ fontSize: 12 }} />
                   <Line type="monotone" dataKey="yield" stroke="rgb(249, 115, 22)" strokeWidth={2} dot={{ r: 2 }} />
                 </LineChart>
@@ -1494,9 +1697,9 @@ export const IndustryNewsCard = () => {
             </button>
             <div className="h-[140px] w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={RATE_SNAPSHOT_DATA} margin={{ top: 4, right: 4, left: -20, bottom: 0 }} layout="vertical" barCategoryGap="12%">
+                <BarChart data={displayRateSnapshotData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }} layout="vertical" barCategoryGap="12%">
                   <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
-                  <XAxis type="number" domain={[4.5, 7]} tick={{ fontSize: 10 }} tickFormatter={(v) => `${v}%`} />
+                  <XAxis type="number" domain={["auto", "auto"]} tick={{ fontSize: 10 }} tickFormatter={(v) => `${v}%`} />
                   <YAxis type="category" dataKey="product" tick={{ fontSize: 10 }} width={70} />
                   <RechartsTooltip formatter={(v: number) => [`${v}%`, ""]} contentStyle={{ fontSize: 12 }} />
                   <Legend wrapperStyle={{ fontSize: 10 }} />
@@ -1526,10 +1729,10 @@ export const IndustryNewsCard = () => {
             </button>
             <div className="h-[140px] w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={EXISTING_HOME_SALES_DATA} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                <BarChart data={displayExistingHomeSalesData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
                   <XAxis dataKey="month" tick={{ fontSize: 10 }} />
-                  <YAxis domain={[0, 5]} tick={{ fontSize: 10 }} width={28} tickFormatter={(v) => `${v}M`} />
+                  <YAxis domain={["auto", "auto"]} tick={{ fontSize: 10 }} width={28} tickFormatter={(v) => `${v}M`} />
                   <RechartsTooltip formatter={(v: number) => [`${v}M`, "Units"]} contentStyle={{ fontSize: 12 }} />
                   <Bar dataKey="value" fill="rgb(59, 130, 246)" radius={[2, 2, 0, 0]} />
                 </BarChart>
@@ -1679,7 +1882,9 @@ export const IndustryNewsCard = () => {
                   {activeChart ? `${chartTitles[activeChart]} Drilldown` : "Chart Drilldown"}
                 </DialogTitle>
                 <DialogDescription className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  MTD, QTR, YTD, and 3-year views (when available)
+                  {activeChart === "rateSnapshot"
+                    ? "Prior week vs today by product"
+                    : "MTD, QTR, YTD, and 3-year views (when available)"}
                 </DialogDescription>
               </div>
               <button
@@ -1695,6 +1900,7 @@ export const IndustryNewsCard = () => {
               </button>
             </div>
 
+            {activeChart !== "rateSnapshot" && (
             <div className="px-4 pt-3 pb-2 border-b border-slate-200/60 dark:border-slate-700/50 flex items-center gap-2 overflow-x-auto">
               {(Object.keys(DRILLDOWN_RANGE_LABELS) as DrilldownRange[]).map((range) => {
                 const hasData = availableDrilldownRanges.includes(range);
@@ -1717,6 +1923,7 @@ export const IndustryNewsCard = () => {
                 );
               })}
             </div>
+            )}
 
             <div className="flex-1 p-4 sm:p-6">
               <div className="h-full min-h-[420px] rounded-xl border border-slate-200/60 dark:border-slate-700/50 bg-slate-50/40 dark:bg-slate-800/30 p-3 sm:p-4">
