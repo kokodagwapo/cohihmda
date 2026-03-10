@@ -72,7 +72,12 @@ export async function setPlatformSetting(
       [key]
     );
 
-    let shouldEncrypt = false;
+    const encryptedDefaults = new Set([
+      "openai_api_key",
+      "anthropic_api_key",
+      "gemini_api_key",
+    ]);
+    let shouldEncrypt = encryptedDefaults.has(key);
     if (existingResult.rows.length > 0) {
       shouldEncrypt = existingResult.rows[0].encrypted;
     }

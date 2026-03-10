@@ -172,6 +172,7 @@ export function PlatformSettingsSection() {
   const getSettingLabel = (key: string): string => {
     const labels: Record<string, string> = {
       openai_api_key: "OpenAI API Key",
+      gemini_api_key: "Gemini API Key",
       anthropic_api_key: "Anthropic API Key",
       default_embedding_model: "Default Embedding Model",
     };

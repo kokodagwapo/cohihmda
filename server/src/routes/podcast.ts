@@ -8,6 +8,7 @@ import { tenantDbManager } from "../config/tenantDatabaseManager.js";
 import { decryptAPIKeys } from "../services/encryption.js";
 import { apiLimiter } from "../middleware/rateLimiter.js";
 import { startSSEHeartbeat } from "../utils/sseUtils.js";
+import { getPlatformSetting } from "../services/platformSettingsService.js";
 import {
   loadPersistedAletheiaAsset,
   persistAletheiaAsset,
@@ -293,8 +294,9 @@ async function getGeminiVoiceConfig(tenantId?: string): Promise<{
     }
   }
 
+  const platformGeminiKey = (await getPlatformSetting("gemini_api_key")) || "";
   const envGeminiKey = process.env.GEMINI_API_KEY?.trim() || "";
-  const apiKey = geminiApiKey || envGeminiKey;
+  const apiKey = geminiApiKey || platformGeminiKey || envGeminiKey;
   if (!apiKey) {
     throw new Error("Gemini API key not configured");
   }
