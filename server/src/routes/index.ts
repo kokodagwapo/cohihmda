@@ -46,6 +46,7 @@ import analyticsRoutes from "./analytics.js";
 import releaseNotesRoutes from "./releaseNotes.js";
 import falloutAlertsRoutes from "./falloutAlerts.js";
 import falloutResponseRoutes from "./falloutResponse.js";
+import podcastRoutes from "./podcast.js";
 import { pool, resetPool } from "../config/database.js";
 import { setupMockLosApi } from "../services/mockLosApi.js";
 import { getVersionInfo } from "../services/versionService.js";
@@ -146,6 +147,7 @@ export function setupRoutes(app: Express) {
   app.use("/api/release-notes", releaseNotesRoutes); // Published release notes (management DB)
   app.use("/api/fallout-alerts", falloutAlertsRoutes); // Fallout alert config + send + response tracking
   app.use("/api/fallout-response", falloutResponseRoutes); // Public one-time fallout response links
+  app.use("/api/podcast/cohi", podcastRoutes); // Cohi Daily Briefing podcast (TTS streaming)
 
   // Health check handler (shared by both /health and /api/health)
   const healthCheckHandler = async (req: any, res: any) => {

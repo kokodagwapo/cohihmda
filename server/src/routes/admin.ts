@@ -21,6 +21,16 @@ import { createEncompassUserSyncService } from "../services/encompassUserSyncSer
 import ssoConfigRoutes from "./admin/ssoConfig.js";
 import * as cognitoAuth from "../services/cognito/cognitoAuthService.js";
 import {
+  getPlatformSetting,
+  setPlatformSetting,
+} from "../services/platformSettingsService.js";
+import {
+  buildDefaultAletheiaBriefingContext,
+  hashBriefingContext,
+  prefetchAletheiaBriefing,
+} from "./podcast.js";
+import { enqueueAletheiaPrefetchJob } from "../services/aletheiaPrefetchWorker.js";
+import {
   type LoanScope,
   type TenantPersona,
 } from "../utils/userAccessProfile.js";
@@ -2457,10 +2467,22 @@ router.get(
         ).toISOString(),
       };
 
+      const nightlyEnabled =
+        ((await getPlatformSetting("aletheia_nightly_prefetch_enabled")) || "false")
+          .toLowerCase() === "true";
+      const nightlyLastRunAt =
+        (await getPlatformSetting("aletheia_nightly_prefetch_last_run_at")) ||
+        null;
+
       return res.json({
         connections: allConnections,
         scheduler: schedulerInfo,
         total_tenants: tenantsResult.rows.length,
+        tenants: tenantsResult.rows,
+        podcast: {
+          nightly_enabled: nightlyEnabled,
+          nightly_last_run_at: nightlyLastRunAt,
+        },
       });
     } catch (error: any) {
       logError("Error fetching sync management data", error, {
@@ -2469,6 +2491,143 @@ router.get(
       return res
         .status(500)
         .json({ error: "Failed to fetch sync management data" });
+    }
+  }
+);
+
+/**
+ * PUT /api/admin/sync-management/podcast/settings
+ * Update nightly podcast generation settings (platform-wide)
+ */
+router.put(
+  "/sync-management/podcast/settings",
+  authenticateToken,
+  requireRole("super_admin", "platform_admin"),
+  async (req: AuthRequest, res) => {
+    try {
+      const { nightly_enabled } = req.body || {};
+      if (typeof nightly_enabled !== "boolean") {
+        return res
+          .status(400)
+          .json({ error: "nightly_enabled boolean is required" });
+      }
+
+      const ok = await setPlatformSetting(
+        "aletheia_nightly_prefetch_enabled",
+        nightly_enabled ? "true" : "false"
+      );
+      if (!ok) {
+        return res.status(500).json({ error: "Failed to update setting" });
+      }
+
+      return res.json({
+        success: true,
+        nightly_enabled,
+      });
+    } catch (error: any) {
+      logError("Error updating podcast nightly setting", error, {
+        userId: req.userId,
+      });
+      return res.status(500).json({ error: "Failed to update setting" });
+    }
+  }
+);
+
+/**
+ * POST /api/admin/sync-management/podcast/generate
+ * Enqueue podcast generation on the worker node (always async).
+ */
+router.post(
+  "/sync-management/podcast/generate",
+  authenticateToken,
+  requireRole("super_admin", "platform_admin"),
+  async (req: AuthRequest, res) => {
+    try {
+      const { tenant_id } = req.body || {};
+      if (!tenant_id) {
+        return res.status(400).json({ error: "tenant_id is required" });
+      }
+
+      const briefingContext = await buildDefaultAletheiaBriefingContext(tenant_id);
+      const contextHash = hashBriefingContext(briefingContext);
+      const jobId = await enqueueAletheiaPrefetchJob({
+        tenantId: tenant_id,
+        contextHash,
+        briefingContext,
+        requestedBy: req.userId || "platform-admin",
+      });
+
+      return res.status(202).json({
+        success: true,
+        jobId,
+        tenant_id,
+      });
+    } catch (error: any) {
+      logError("Error enqueuing podcast generation", error, {
+        userId: req.userId,
+      });
+      return res.status(500).json({ error: "Failed to enqueue podcast generation" });
+    }
+  }
+);
+
+/**
+ * GET /api/admin/sync-management/podcast/job/:tenantId/:jobId
+ * Poll the status of a podcast generation job.
+ */
+router.get(
+  "/sync-management/podcast/job/:tenantId/:jobId",
+  authenticateToken,
+  requireRole("super_admin", "platform_admin"),
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.params.tenantId as string;
+      const jobId = req.params.jobId as string;
+      const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+      const result = await tenantPool.query(
+        `SELECT id, status, error_message, attempt_count, created_at, started_at, completed_at
+         FROM public.podcast_prefetch_jobs
+         WHERE id = $1
+         LIMIT 1`,
+        [jobId]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Job not found" });
+      }
+
+      const row = result.rows[0];
+      const status = row.status as string;
+
+      let progress = 0;
+      let message = "Waiting for worker...";
+      if (status === "processing") {
+        progress = 50;
+        message = "Generating podcast audio...";
+      } else if (status === "completed") {
+        progress = 100;
+        message = "Podcast generated and stored";
+      } else if (status === "failed") {
+        progress = 0;
+        message = row.error_message || "Generation failed";
+      }
+
+      return res.json({
+        jobId: Number(row.id),
+        status: status === "completed" ? "complete" : status,
+        progress,
+        message,
+        error: status === "failed" ? (row.error_message || "Unknown error") : undefined,
+        attempts: row.attempt_count,
+        createdAt: row.created_at,
+        startedAt: row.started_at,
+        completedAt: row.completed_at,
+      });
+    } catch (error: any) {
+      logError("Error fetching podcast job status", error, {
+        userId: req.userId,
+      });
+      return res.status(500).json({ error: "Failed to fetch job status" });
     }
   }
 );

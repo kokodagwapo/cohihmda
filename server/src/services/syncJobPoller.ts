@@ -7,6 +7,7 @@
 import { pool as managementPool } from "../config/managementDatabase.js";
 import { tenantDbManager } from "../config/tenantDatabaseManager.js";
 import { EncompassEtlService } from "./etl/encompassEtlService.js";
+import { FieldBackfillService } from "./etl/fieldBackfillService.js";
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -52,6 +53,24 @@ export async function enqueueSyncJob(
   const result = await managementPool.query(
     `INSERT INTO sync_jobs (tenant_id, los_connection_id, job_type, status, options, requested_by)
      VALUES ($1, $2, 'encompass-sync', 'pending', $3, $4)
+     RETURNING id`,
+    [tenantId, losConnectionId, JSON.stringify(options), requestedBy ?? null]
+  );
+  return result.rows[0].id;
+}
+
+/**
+ * Enqueue a targeted field backfill job.
+ */
+export async function enqueueBackfillJob(
+  tenantId: string,
+  losConnectionId: string,
+  options: SyncJobOptions = {},
+  requestedBy?: string | null
+): Promise<string> {
+  const result = await managementPool.query(
+    `INSERT INTO sync_jobs (tenant_id, los_connection_id, job_type, status, options, requested_by)
+     VALUES ($1, $2, 'field-backfill', 'pending', $3, $4)
      RETURNING id`,
     [tenantId, losConnectionId, JSON.stringify(options), requestedBy ?? null]
   );
@@ -145,6 +164,20 @@ async function processJob(job: SyncJobRow): Promise<void> {
 
   try {
     const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+
+    if (job.job_type === "field-backfill") {
+      await updateSyncJobProgress(jobId, 20, "Backfilling swapped fields...");
+      const backfillService = new FieldBackfillService(tenantPool);
+      const result = await backfillService.backfillSwappedFields(tenantId, losConnectionId, {
+        loanStartDate: opts.loanStartDate ? new Date(opts.loanStartDate) : undefined,
+        loanStartDateField: opts.loanStartDateField,
+        folderName: opts.folderName,
+        folderNames: opts.folderNames,
+        limit: opts.limit,
+      });
+      await completeSyncJob(jobId, result as unknown as Record<string, unknown>);
+      return;
+    }
 
     if (opts.clearDatabase) {
       console.log(`[SyncJobPoller] Clearing loans table before full sync for tenant ${tenantId}`);

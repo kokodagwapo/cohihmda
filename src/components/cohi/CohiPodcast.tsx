@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Play, Pause, Mic, MicOff, Phone, PhoneOff, Volume2, VolumeX, Loader2, Radio, CheckCircle } from 'lucide-react';
+import { Play, Pause, Mic, MicOff, PhoneOff, Volume2, VolumeX, Loader2, Radio, Send } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { motion, AnimatePresence } from 'framer-motion';
+import { api } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface CohiPodcastProps {
   className?: string;
@@ -30,6 +32,9 @@ function decodePCM16ToFloat32(base64Audio: string): Float32Array {
 }
 
 export function CohiPodcast({ className }: CohiPodcastProps) {
+  const { user, isPlatformStaff, impersonatingTenant } = useAuth();
+  const hasTenant = !!(user?.tenant_id || impersonatingTenant);
+
   const [state, setState] = useState<PlaybackState>('idle');
   const [prefetchState, setPrefetchState] = useState<PrefetchState>('idle');
   const [prefetchedBriefing, setPrefetchedBriefing] = useState<PrefetchedBriefing | null>(null);
@@ -53,13 +58,27 @@ export function CohiPodcast({ className }: CohiPodcastProps) {
   const chunksRef = useRef<Blob[]>([]);
   const { toast } = useToast();
 
+  const requestPodcastEndpoint = useCallback(async (endpoint: string, options: RequestInit = {}) => {
+    const response = await api.fetchWithAuth(endpoint, options);
+    if (!response.ok) {
+      let errorMessage = 'Podcast request failed';
+      try {
+        const err = await response.json();
+        errorMessage = err?.error || err?.message || errorMessage;
+      } catch {
+        errorMessage = `${errorMessage} (${response.status})`;
+      }
+      throw new Error(errorMessage);
+    }
+    return response;
+  }, []);
+
   const prefetchBriefing = useCallback(async () => {
     if (prefetchState === 'loading' || prefetchState === 'ready') return;
     
     setPrefetchState('loading');
     try {
-      const response = await fetch('/api/podcast/cohi/briefing');
-      if (!response.ok) throw new Error('Failed to prefetch briefing');
+      const response = await requestPodcastEndpoint('/api/podcast/cohi/briefing');
       
       const data = await response.json();
       if (data.success && data.briefing) {
@@ -75,11 +94,11 @@ export function CohiPodcast({ className }: CohiPodcastProps) {
       console.error('Failed to prefetch briefing:', error);
       setPrefetchState('error');
     }
-  }, [prefetchState]);
+  }, [prefetchState, requestPodcastEndpoint]);
 
   useEffect(() => {
-    prefetchBriefing();
-  }, []);
+    if (hasTenant) prefetchBriefing();
+  }, [hasTenant]);
 
   const initAudio = useCallback(async () => {
     if (audioCtxRef.current && workletRef.current) {
@@ -171,13 +190,11 @@ export function CohiPodcast({ className }: CohiPodcastProps) {
       
       streamAbortRef.current = new AbortController();
       
-      const response = await fetch('/api/podcast/cohi/stream', {
+      const response = await requestPodcastEndpoint('/api/podcast/cohi/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: streamAbortRef.current.signal,
       });
-
-      if (!response.ok) throw new Error('Failed to start briefing');
 
       setState('playing');
       
@@ -317,13 +334,11 @@ export function CohiPodcast({ className }: CohiPodcastProps) {
         return;
       }
 
-      const response = await fetch('/api/podcast/cohi/ask', {
+      const response = await requestPodcastEndpoint('/api/podcast/cohi/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-
-      if (!response.ok) throw new Error('Failed to process question');
 
       setState('playing');
       setCurrentQuestion('');
@@ -410,159 +425,157 @@ export function CohiPodcast({ className }: CohiPodcastProps) {
     return 'Ready';
   };
 
+  const isActive = state === 'playing' || state === 'paused' || state === 'loading' || state === 'listening';
+  const [showPanel, setShowPanel] = useState(false);
+
+  if (!hasTenant && !isActive) return null;
+
   return (
-    <div className={`relative ${className || ''}`}>
-      <motion.div
-        className="bg-gradient-to-br from-blue-900/90 to-indigo-900/90 rounded-2xl p-6 shadow-xl border border-blue-700/30 backdrop-blur-sm"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
+    <div className={`relative flex items-center gap-2 ${className || ''}`}>
+      {/* Primary play/stop button */}
+      <button
+        onClick={() => {
+          if (isActive) {
+            stopPlayback();
+          } else {
+            startBriefing();
+          }
+        }}
+        disabled={prefetchState === 'loading' && !isActive}
+        className={`p-3 sm:p-2 rounded-xl sm:rounded-lg text-white transition-all active:scale-95 shadow-md ${
+          isActive
+            ? 'bg-rose-600 hover:bg-rose-700 shadow-rose-500/20'
+            : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-500/20'
+        } ${state === 'loading' ? 'opacity-75 cursor-wait' : ''} disabled:opacity-50 disabled:cursor-not-allowed`}
+        title={isActive ? 'Stop Briefing' : prefetchState === 'loading' ? 'Preparing...' : 'Listen to Briefing'}
       >
-        <div className="flex items-center gap-3 mb-4">
-          <div className="relative">
-            <div className={`w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center ${state === 'playing' ? 'animate-pulse' : ''}`}>
-              <Radio className="w-6 h-6 text-white" />
-            </div>
-            <AnimatePresence>
-              {state === 'playing' && (
-                <motion.div
-                  className="absolute -inset-1 rounded-full border-2 border-blue-400"
-                  initial={{ scale: 1, opacity: 1 }}
-                  animate={{ scale: 1.3, opacity: 0 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 1, repeat: Infinity }}
-                />
-              )}
-            </AnimatePresence>
-            {prefetchState === 'ready' && state === 'idle' && (
-              <div className="absolute -top-1 -right-1 w-4 h-4 bg-green-500 rounded-full flex items-center justify-center">
-                <CheckCircle className="w-3 h-3 text-white" />
-              </div>
-            )}
-          </div>
-          <div>
-            <h3 className="text-lg font-semibold text-white">Cohi Daily Briefing</h3>
-            <p className="text-sm text-blue-200 flex items-center gap-1">
-              {prefetchState === 'loading' && state === 'idle' && (
-                <Loader2 className="w-3 h-3 animate-spin" />
-              )}
-              {getStatusText()}
-            </p>
-          </div>
-        </div>
-
-        {transcript && (
-          <motion.div
-            className="mb-4 p-4 bg-black/20 rounded-lg max-h-48 overflow-y-auto"
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-          >
-            <p className="text-sm text-blue-100 whitespace-pre-wrap">{transcript}</p>
-          </motion.div>
+        {isActive ? (
+          <Radio className="w-6 h-6 sm:w-5 sm:h-5 animate-pulse" />
+        ) : state === 'loading' || prefetchState === 'loading' ? (
+          <Loader2 className="w-6 h-6 sm:w-5 sm:h-5 animate-spin" />
+        ) : (
+          <Radio className="w-6 h-6 sm:w-5 sm:h-5" />
         )}
+      </button>
 
-        <div className="flex items-center gap-3">
-          {state === 'idle' ? (
-            <button
-              onClick={startBriefing}
-              disabled={prefetchState === 'loading'}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-600/50 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-medium"
-            >
-              {prefetchState === 'loading' ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  Preparing...
-                </>
-              ) : (
-                <>
-                  <Play className="w-5 h-5" />
-                  Start Briefing
-                </>
-              )}
-            </button>
-          ) : state === 'loading' ? (
-            <button
-              disabled
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-blue-600/50 text-white rounded-lg font-medium cursor-not-allowed"
-            >
-              <Loader2 className="w-5 h-5 animate-spin" />
-              Connecting...
-            </button>
-          ) : state === 'paused' ? (
-            <>
-              <button
-                onClick={resumePlayback}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-green-600 hover:bg-green-500 text-white rounded-lg transition-colors font-medium"
-              >
-                <Play className="w-5 h-5" />
-                Resume
-              </button>
-              <button
-                onClick={stopPlayback}
-                className="px-4 py-3 bg-red-600 hover:bg-red-500 text-white rounded-lg transition-colors"
-                title="End Call"
-              >
-                <PhoneOff className="w-5 h-5" />
-              </button>
-            </>
-          ) : (
-            <>
+      {/* In-call controls */}
+      <AnimatePresence mode="wait">
+        {isActive && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="flex items-center gap-2"
+          >
+            {state === 'playing' && (
               <button
                 onClick={pausePlayback}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-yellow-600 hover:bg-yellow-500 text-white rounded-lg transition-colors font-medium"
+                className="p-3 sm:p-2 rounded-xl sm:rounded-lg bg-amber-500 hover:bg-amber-600 text-white transition-all active:scale-95"
+                title="Pause"
               >
-                <Pause className="w-5 h-5" />
-                Pause
+                <Pause className="w-5 h-5 sm:w-4 sm:h-4" />
               </button>
+            )}
+            {state === 'paused' && (
               <button
-                onClick={stopPlayback}
-                className="px-4 py-3 bg-red-600 hover:bg-red-500 text-white rounded-lg transition-colors"
-                title="End Call"
+                onClick={resumePlayback}
+                className="p-3 sm:p-2 rounded-xl sm:rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-all active:scale-95"
+                title="Resume"
               >
-                <PhoneOff className="w-5 h-5" />
+                <Play className="w-5 h-5 sm:w-4 sm:h-4" />
               </button>
-            </>
-          )}
+            )}
 
-          <button
-            onClick={() => setIsMuted(!isMuted)}
-            className={`p-3 rounded-lg transition-colors ${isMuted ? 'bg-red-600 hover:bg-red-500' : 'bg-blue-700 hover:bg-blue-600'} text-white`}
-            title={isMuted ? 'Unmute' : 'Mute'}
-          >
-            {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
-          </button>
+            <button
+              onClick={() => setIsMuted(!isMuted)}
+              className={`p-3 sm:p-2 rounded-xl sm:rounded-lg transition-all active:scale-95 ${
+                isMuted
+                  ? 'bg-red-500 hover:bg-red-600 text-white'
+                  : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
+              }`}
+              title={isMuted ? 'Unmute' : 'Mute'}
+            >
+              {isMuted ? <VolumeX className="w-5 h-5 sm:w-4 sm:h-4" /> : <Volume2 className="w-5 h-5 sm:w-4 sm:h-4" />}
+            </button>
 
-          {(state === 'playing' || state === 'paused') && (
             <button
               onClick={isRecording ? stopRecording : startRecording}
-              className={`p-3 rounded-lg transition-colors ${isRecording ? 'bg-red-600 hover:bg-red-500 animate-pulse' : 'bg-green-600 hover:bg-green-500'} text-white`}
-              title={isRecording ? 'Stop Recording' : 'Ask Question'}
+              className={`p-3 sm:p-2 rounded-xl sm:rounded-lg transition-all active:scale-95 ${
+                isRecording
+                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white animate-pulse'
+                  : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
+              }`}
+              title={isRecording ? 'Stop Recording' : 'Ask by Voice'}
             >
-              {isRecording ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+              {isRecording ? <Mic className="w-5 h-5 sm:w-4 sm:h-4" /> : <MicOff className="w-5 h-5 sm:w-4 sm:h-4" />}
             </button>
-          )}
-        </div>
 
-        {(state === 'playing' || state === 'paused') && (
-          <div className="mt-4 flex items-center gap-2">
-            <input
-              type="text"
-              value={currentQuestion}
-              onChange={(e) => setCurrentQuestion(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && askQuestion()}
-              placeholder="Type a question..."
-              className="flex-1 px-4 py-2 bg-black/20 border border-blue-600/30 rounded-lg text-white placeholder-blue-300/50 focus:outline-none focus:border-blue-500"
-            />
             <button
-              onClick={() => askQuestion()}
-              disabled={!currentQuestion.trim()}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-600/50 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+              onClick={stopPlayback}
+              className="p-3 sm:p-2 rounded-xl sm:rounded-lg bg-rose-600 hover:bg-rose-700 text-white transition-all active:scale-95"
+              title="End Briefing"
             >
-              Ask
+              <PhoneOff className="w-5 h-5 sm:w-4 sm:h-4" />
             </button>
-          </div>
+          </motion.div>
         )}
-      </motion.div>
+      </AnimatePresence>
+
+      {/* LIVE indicator */}
+      {isActive && state !== 'loading' && (
+        <div className="flex items-center gap-2 px-3 py-1.5 sm:px-2 sm:py-1 rounded-xl sm:rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200/50 dark:border-slate-700/50">
+          <div className="w-2.5 h-2.5 sm:w-2 sm:h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+          <span className="text-[10px] sm:text-xs font-medium text-slate-600 dark:text-slate-400">
+            {state === 'paused' ? 'PAUSED' : 'LIVE'}
+          </span>
+        </div>
+      )}
+
+      {/* Expandable transcript / question panel */}
+      <AnimatePresence>
+        {isActive && showPanel && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="absolute top-full right-0 mt-2 w-80 max-w-[calc(100vw-2rem)] bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 p-3 z-50"
+          >
+            {transcript && (
+              <div className="mb-3 max-h-40 overflow-y-auto text-sm text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-900 rounded-md p-2.5">
+                {transcript}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={currentQuestion}
+                onChange={(e) => setCurrentQuestion(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && askQuestion()}
+                placeholder="Ask a question..."
+                className="flex-1 px-3 py-2 text-sm border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <button
+                onClick={() => askQuestion()}
+                disabled={!currentQuestion.trim()}
+                className="px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-600/50 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Toggle panel button when active */}
+      {isActive && (
+        <button
+          onClick={() => setShowPanel(!showPanel)}
+          className="p-3 sm:p-2 rounded-xl sm:rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-all active:scale-95"
+          title="Show transcript & ask"
+        >
+          <Send className="w-5 h-5 sm:w-4 sm:h-4" />
+        </button>
+      )}
     </div>
   );
 }

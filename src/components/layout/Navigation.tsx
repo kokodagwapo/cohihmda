@@ -52,6 +52,7 @@ import { usePinnedDashboardsStore, type PinnedItem } from "@/stores/pinnedDashbo
 import { WhatsNewButton } from "@/components/tutorial/WhatsNewButton";
 import { SidebarRouteSearch } from "@/components/dashboard/SidebarRouteSearch";
 import { getSidebarSearchTargets } from "@/data/sidebarSearchTargets";
+import { useWorkbenchNav } from "@/hooks/useWorkbenchNav";
 
 export interface NavigationProps {
   onMenuToggle?: () => void;
@@ -309,6 +310,15 @@ export function Navigation(
 
   // Pinned dashboards (pin from top nav, appear in sidebar)
   const { pinned, togglePinned, isPinned } = usePinnedDashboardsStore();
+  const {
+    ownedCanvases,
+    sharedCanvases,
+    favoriteCanvases,
+    ownedSessions,
+    sharedSessions,
+    favoriteUpdatingIds,
+    toggleCanvasFavorite,
+  } = useWorkbenchNav();
 
   // Check if user is a platform admin (can view other tenants)
   const isPlatformAdmin =
@@ -324,13 +334,19 @@ export function Navigation(
   const [insightsOpen, setInsightsOpen] = useState(false);
   const [topTieringOpen, setTopTieringOpen] = useState(false);
   const [topTieringSubOpen, setTopTieringSubOpen] = useState(false);
+  const [workbenchOpen, setWorkbenchOpen] = useState(false);
+  const [researchOpen, setResearchOpen] = useState(false);
   const [allPagesOpen, setAllPagesOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const insightsRef = useRef<HTMLDivElement>(null);
   const topTieringRef = useRef<HTMLDivElement>(null);
+  const workbenchRef = useRef<HTMLDivElement>(null);
+  const researchRef = useRef<HTMLDivElement>(null);
   const allPagesRef = useRef<HTMLDivElement>(null);
   const insightsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const topTieringTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const workbenchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const researchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const allPagesTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Keyboard navigation state
@@ -376,6 +392,18 @@ export function Navigation(
         !allPagesRef.current.contains(event.target as Node)
       ) {
         setAllPagesOpen(false);
+      }
+      if (
+        workbenchRef.current &&
+        !workbenchRef.current.contains(event.target as Node)
+      ) {
+        setWorkbenchOpen(false);
+      }
+      if (
+        researchRef.current &&
+        !researchRef.current.contains(event.target as Node)
+      ) {
+        setResearchOpen(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -763,28 +791,40 @@ export function Navigation(
           </div>
         </div>
 
-        {/* My Workbench */}
-        <div>
+        {/* Workbench */}
+        <div className="space-y-1">
           <button
             onClick={() => {
-              navigate("/my-dashboard");
+              navigate("/workbench");
               setMobileMenuOpen(false);
             }}
             className={cn(
               "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
-              isActive("/my-dashboard")
+              location.pathname.startsWith("/workbench")
                 ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
                 : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800",
             )}
             data-track="nav_workbench"
           >
             <LayoutPanelLeft className="w-4 h-4 flex-shrink-0" />
-            <span>My Workbench</span>
+            <span>Workbench</span>
           </button>
+          {ownedCanvases.slice(0, 5).map((canvas) => (
+            <button
+              key={canvas.id}
+              onClick={() => {
+                navigate(`/my-dashboard/${canvas.id}`);
+                setMobileMenuOpen(false);
+              }}
+              className="w-full text-left text-xs text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 px-8 py-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
+            >
+              {canvas.title}
+            </button>
+          ))}
         </div>
 
         {/* Research Lab */}
-        <div>
+        <div className="space-y-1">
           <button
             data-track="nav_research"
             onClick={() => {
@@ -793,7 +833,7 @@ export function Navigation(
             }}
             className={cn(
               "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
-              isActive("/research")
+              location.pathname.startsWith("/research")
                 ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
                 : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800",
             )}
@@ -801,6 +841,18 @@ export function Navigation(
             <FlaskConical className="w-4 h-4 flex-shrink-0" />
             <span>Research Lab</span>
           </button>
+          {ownedSessions.slice(0, 5).map((session) => (
+            <button
+              key={session.id}
+              onClick={() => {
+                navigate(`/research/session?session=${encodeURIComponent(session.id)}`);
+                setMobileMenuOpen(false);
+              }}
+              className="w-full text-left text-xs text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 px-8 py-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
+            >
+              {session.topic || "Untitled Session"}
+            </button>
+          ))}
         </div>
       </div>
     </div>
@@ -829,7 +881,8 @@ export function Navigation(
           {/* Center: Main Navigation with Dropdowns (Desktop) - matches feb1cohi */}
           {isAuthenticated && (
             <div className="hidden lg:flex flex-1 justify-center items-center gap-2">
-              {/* Insights Dropdown */}
+              {/* Insights Dropdown removed from header */}
+              {false && (
               <div
                 ref={insightsRef}
                 className="relative"
@@ -958,6 +1011,7 @@ export function Navigation(
                   )}
                 </AnimatePresence>
               </div>
+              )}
 
               {/* Top Tiering Dropdown */}
               <div
@@ -1062,13 +1116,6 @@ export function Navigation(
                                 icon: Target,
                                 hash: "#section-executiveDashboard",
                                 iconColor: "blue" as const,
-                              },
-                              {
-                                id: "myWorkbench",
-                                label: "My Workbench",
-                                icon: Grid3X3,
-                                route: "/my-dashboard",
-                                iconColor: "violet" as const,
                               },
                               {
                                 id: "falloutForecastPage",
@@ -1517,6 +1564,148 @@ export function Navigation(
                         )}
                         </div>
                       </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              {/* Workbench Dropdown */}
+              <div
+                ref={workbenchRef}
+                className="relative"
+                onMouseEnter={() => {
+                  if (workbenchTimeoutRef.current) clearTimeout(workbenchTimeoutRef.current);
+                  setWorkbenchOpen(true);
+                }}
+                onMouseLeave={() => {
+                  workbenchTimeoutRef.current = setTimeout(() => setWorkbenchOpen(false), 150);
+                }}
+              >
+                <button
+                  data-track="nav_workbench_header"
+                  onClick={() => {
+                    navigate("/workbench");
+                    setWorkbenchOpen((prev) => !prev);
+                  }}
+                  aria-haspopup="true"
+                  aria-expanded={workbenchOpen}
+                  className={cn(topNavPillBase, (workbenchOpen || isWorkbench) ? topNavPillActive : topNavPillDefault)}
+                >
+                  <LayoutPanelLeft className="w-4 h-4" />
+                  <span>Workbench</span>
+                  <ChevronDown className={cn("w-3.5 h-3.5 transition-all duration-200", workbenchOpen && "rotate-180")} />
+                </button>
+                <AnimatePresence>
+                  {workbenchOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                      transition={{ duration: 0.15 }}
+                      className="absolute top-full left-0 mt-2 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200/80 dark:border-slate-700/80 overflow-hidden z-50 w-[360px] max-h-[70vh] overflow-y-auto"
+                    >
+                      <div className="p-3 space-y-3">
+                        <div>
+                          <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">My Canvases</p>
+                          {ownedCanvases.slice(0, 8).map((canvas) => (
+                            <div key={canvas.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800/60">
+                              <button className="flex-1 text-left text-sm truncate" onClick={() => { navigate(`/my-dashboard/${canvas.id}`); setWorkbenchOpen(false); }}>
+                                {canvas.title}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void toggleCanvasFavorite(canvas.id, !canvas.favorited)}
+                                disabled={favoriteUpdatingIds.has(canvas.id)}
+                                className="shrink-0 p-0.5 rounded hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
+                              >
+                                {canvas.favorited ? <PinOff className="w-3.5 h-3.5 text-amber-500" /> : <Pin className="w-3.5 h-3.5 text-slate-400" />}
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                        <div>
+                          <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Shared With Me</p>
+                          {sharedCanvases.slice(0, 8).map((canvas) => (
+                            <button key={canvas.id} className="w-full text-left text-sm truncate rounded-md px-2 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800/60" onClick={() => { navigate(`/my-dashboard/${canvas.id}`); setWorkbenchOpen(false); }}>
+                              {canvas.title}
+                            </button>
+                          ))}
+                        </div>
+                        <div>
+                          <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Favorites</p>
+                          {favoriteCanvases.slice(0, 8).map((canvas) => (
+                            <button key={canvas.id} className="w-full text-left text-sm truncate rounded-md px-2 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800/60" onClick={() => { navigate(`/my-dashboard/${canvas.id}`); setWorkbenchOpen(false); }}>
+                              {canvas.title}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="pt-2 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2">
+                          <button className="text-xs font-medium text-slate-600 dark:text-slate-300 hover:underline" onClick={() => { navigate("/workbench"); setWorkbenchOpen(false); }}>View All</button>
+                          <button className="text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:underline" onClick={() => { navigate("/my-dashboard/new"); setWorkbenchOpen(false); }}>New Canvas</button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              {/* Research Lab Dropdown */}
+              <div
+                ref={researchRef}
+                className="relative"
+                onMouseEnter={() => {
+                  if (researchTimeoutRef.current) clearTimeout(researchTimeoutRef.current);
+                  setResearchOpen(true);
+                }}
+                onMouseLeave={() => {
+                  researchTimeoutRef.current = setTimeout(() => setResearchOpen(false), 150);
+                }}
+              >
+                <button
+                  data-track="nav_research_header"
+                  onClick={() => {
+                    navigate("/research");
+                    setResearchOpen((prev) => !prev);
+                  }}
+                  aria-haspopup="true"
+                  aria-expanded={researchOpen}
+                  className={cn(topNavPillBase, (researchOpen || location.pathname.startsWith("/research")) ? topNavPillActive : topNavPillDefault)}
+                >
+                  <FlaskConical className="w-4 h-4" />
+                  <span>Research Lab</span>
+                  <ChevronDown className={cn("w-3.5 h-3.5 transition-all duration-200", researchOpen && "rotate-180")} />
+                </button>
+                <AnimatePresence>
+                  {researchOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                      transition={{ duration: 0.15 }}
+                      className="absolute top-full left-0 mt-2 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200/80 dark:border-slate-700/80 overflow-hidden z-50 w-[340px] max-h-[70vh] overflow-y-auto"
+                    >
+                      <div className="p-3 space-y-3">
+                        <div>
+                          <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">My Sessions</p>
+                          {ownedSessions.slice(0, 8).map((s) => (
+                            <button key={s.id} className="w-full text-left text-sm truncate rounded-md px-2 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800/60" onClick={() => { navigate(`/research/session?session=${encodeURIComponent(s.id)}`); setResearchOpen(false); }}>
+                              {s.topic || "Untitled Session"}
+                            </button>
+                          ))}
+                        </div>
+                        <div>
+                          <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Shared Sessions</p>
+                          {sharedSessions.slice(0, 8).map((s) => (
+                            <button key={s.id} className="w-full text-left text-sm truncate rounded-md px-2 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800/60" onClick={() => { navigate(`/research/session?session=${encodeURIComponent(s.id)}`); setResearchOpen(false); }}>
+                              {s.topic || "Untitled Session"}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="pt-2 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2">
+                          <button className="text-xs font-medium text-slate-600 dark:text-slate-300 hover:underline" onClick={() => { navigate("/research"); setResearchOpen(false); }}>View All</button>
+                          <button className="text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:underline" onClick={() => { navigate("/research/session"); setResearchOpen(false); }}>New Session</button>
+                        </div>
                       </div>
                     </motion.div>
                   )}

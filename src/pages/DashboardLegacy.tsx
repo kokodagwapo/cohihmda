@@ -113,7 +113,6 @@ import {
 } from "recharts";
 import { Copy, Code2 } from "lucide-react";
 import { AletheiaVoiceAssistant } from "@/components/aletheia/AletheiaVoiceAssistant";
-import { CohiPodcast } from "@/components/aletheia/CohiPodcast";
 import { motion, AnimatePresence } from "framer-motion";
 import { generatePDF } from "@/utils/pdfExport";
 import {

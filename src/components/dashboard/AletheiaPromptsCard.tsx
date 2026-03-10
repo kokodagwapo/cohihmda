@@ -170,6 +170,43 @@ const FEEDBACK_TAGS = [
   { id: "actionable", label: "Actionable" },
 ];
 
+const SOURCE_CHIP_LABELS: Record<string, string> = {
+  pipeline: "Pipeline",
+  pipeline_velocity: "Pipeline",
+  performance: "Performance",
+  officer_performance: "Loan Officer Performance",
+  personnel: "Loan Officer Performance",
+  lock_risk: "Closing Risk",
+  closing_risk: "Closing Risk",
+  trid_risk: "Closing Risk",
+  conversion_trends: "Conversion",
+  lost_opportunity: "Lost Opportunity",
+  predictions: "Forecast",
+  market_news: "Market & News",
+  compliance: "Compliance",
+  other: "Insight",
+};
+
+function toTitleCase(value: string): string {
+  return value
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function getInsightChipLabel(insight: AletheiaInsight): string {
+  const source = (insight.source || "").trim().toLowerCase();
+  if (source && SOURCE_CHIP_LABELS[source]) {
+    return SOURCE_CHIP_LABELS[source];
+  }
+
+  if (source) {
+    return toTitleCase(source);
+  }
+  return "Insight";
+}
+
 interface BucketLaneProps {
   config: BucketConfig;
   insights: AletheiaInsight[];
@@ -308,6 +345,7 @@ function BucketLane({
   ) => {
     const canDrill = isDrillable(insight);
     const isSelected = selectedInsightIdx === idx;
+    const chipLabel = getInsightChipLabel(insight);
 
     const insightFeedback = insight.insightId ? feedbackMap[insight.insightId] : null;
     const isPopoverOpen = feedbackPopoverInsightId === insight.insightId;
@@ -328,9 +366,16 @@ function BucketLane({
       >
         <div className="flex items-start gap-2">
           <div className="flex-1 min-w-0">
-            <p className="text-[13px] sm:text-sm text-slate-900 dark:text-white font-medium leading-snug">
-              {insight.headline || insight.message}
-            </p>
+            <div className="flex items-start gap-2.5 flex-wrap">
+              <span
+                className={`inline-flex items-center rounded-lg px-2.5 py-1 text-[11px] font-semibold leading-none transition-all duration-200 ease-out origin-left transform-gpu group-hover/insight:scale-[1.04] group-hover/insight:px-3 group-hover/insight:shadow-sm ${config.badgeBg} ${config.badgeText}`}
+              >
+                {chipLabel}
+              </span>
+              <p className="flex-1 min-w-[220px] text-[13px] sm:text-sm text-slate-900 dark:text-white font-medium leading-snug">
+                {insight.headline || insight.message}
+              </p>
+            </div>
           </div>
           {/* Admin feedback + delete + investigate buttons */}
           {isAdmin && insight.insightId && (

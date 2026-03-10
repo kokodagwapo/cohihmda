@@ -75,6 +75,7 @@ router.put(
       // Validate the key is a known setting
       const allowedKeys = [
         "openai_api_key",
+        "gemini_api_key",
         "anthropic_api_key",
         "default_embedding_model",
       ];
@@ -115,9 +116,9 @@ router.get(
     try {
       const key = req.params.key as string;
 
-      if (key !== "openai_api_key") {
+      if (key !== "openai_api_key" && key !== "gemini_api_key") {
         return res.status(400).json({
-          error: "Key testing only supported for openai_api_key",
+          error: "Key testing only supported for openai_api_key and gemini_api_key",
         });
       }
 
@@ -130,13 +131,20 @@ router.get(
         });
       }
 
-      // Test OpenAI key with a simple models list request
+      // Test provider key with a simple models list request
       try {
-        const response = await fetch("https://api.openai.com/v1/models", {
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-          },
-        });
+        const response =
+          key === "openai_api_key"
+            ? await fetch("https://api.openai.com/v1/models", {
+                headers: {
+                  Authorization: `Bearer ${apiKey}`,
+                },
+              })
+            : await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(
+                  apiKey
+                )}`
+              );
 
         if (response.ok) {
           res.json({

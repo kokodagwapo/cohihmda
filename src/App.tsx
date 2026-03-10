@@ -3,7 +3,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate, useSearchParams, Outlet } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate, Outlet } from "react-router-dom";
 import { useEffect, type ReactNode } from "react";
 import { EditProvider } from "@/contexts/EditContext";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
@@ -64,6 +64,8 @@ import Favorites from "./pages/workbench/Favorites";
 import Distributions from "./pages/workbench/Distributions";
 // Research Lab
 import ResearchAnalyst from "./pages/ResearchAnalyst";
+import WorkbenchHub from "./pages/WorkbenchHub";
+import ResearchHub from "./pages/ResearchHub";
 // Help Center
 import HelpCenter from "./pages/HelpCenter";
 import DataChat from "./pages/DataChat";
@@ -79,7 +81,10 @@ function AccessModeGate() {
   const { user } = useAuth();
   const location = useLocation();
   if (user?.persona === "tenant_canvas_only_user") {
-    const onWorkbench = location.pathname === "/my-dashboard" || location.pathname.startsWith("/my-dashboard/");
+    const onWorkbench =
+      location.pathname === "/my-dashboard" ||
+      location.pathname.startsWith("/my-dashboard/") ||
+      location.pathname === "/workbench";
     if (!onWorkbench) return <Navigate to="/my-dashboard" replace />;
     return <CanvasOnlyLayout />;
   }
@@ -110,25 +115,12 @@ function Handle404Redirect() {
   return null;
 }
 
-/**
- * Redirects /workbench?canvas=xxx to /my-dashboard/xxx (slug-based).
- * Falls back to /my-dashboard if no canvas param is present.
- */
-function WorkbenchRedirect() {
-  const [searchParams] = useSearchParams();
-  const canvasId = searchParams.get('canvas');
-  if (canvasId) {
-    return <Navigate to={`/my-dashboard/${canvasId}`} replace />;
-  }
-  return <Navigate to="/my-dashboard" replace />;
-}
-
 function RootRoute() {
   const { isAuthenticated, user, isLoading } = useAuth();
   if (isLoading) return null;
   if (isAuthenticated) {
     if (user?.persona === "tenant_canvas_only_user") {
-      return <Navigate to="/my-dashboard" replace />;
+      return <Navigate to="/workbench" replace />;
     }
     return <Navigate to="/insights" replace />;
   }
@@ -179,17 +171,18 @@ const App = () => (
                 <Route path="/insights" element={<Dashboard />} />
                 <Route path="/legacy" element={<DashboardLegacy />} />
               <Route path="/loans" element={<Loans />} />
-              <Route path="/my-dashboard/:canvasId?" element={<MyDashboard />} />
+              <Route path="/my-dashboard" element={<Navigate to="/workbench" replace />} />
+              <Route path="/my-dashboard/:canvasId" element={<MyDashboard />} />
               <Route path="/my-dashboard-legacy" element={<MyDashboardLegacy />} />
-              {/* Redirect /workbench to /my-dashboard (preserves search params like ?canvas=...) */}
-              <Route path="/workbench" element={<WorkbenchRedirect />} />
+              <Route path="/workbench" element={<WorkbenchHub />} />
               <Route path="/workbench/shared" element={<SharedWithMe />} />
               <Route path="/workbench/team-folders" element={<TeamFolders />} />
               <Route path="/workbench/favorites" element={<Favorites />} />
               <Route path="/workbench/distributions" element={<Distributions />} />
               
               {/* Research Lab */}
-              <Route path="/research" element={<ResearchAnalyst />} />
+              <Route path="/research" element={<ResearchHub />} />
+              <Route path="/research/session" element={<ResearchAnalyst />} />
               <Route path="/data-chat" element={
                 <ProtectedRoute>
                   <DataChat />
