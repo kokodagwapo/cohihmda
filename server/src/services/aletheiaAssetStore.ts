@@ -237,10 +237,11 @@ export async function persistAletheiaAsset(input: {
       ]
     );
   } catch (error: any) {
-    console.warn(
+    console.error(
       `[AletheiaAssetStore] Failed to persist asset for tenant ${input.tenantId}:`,
       error?.message || error
     );
+    throw error;
   }
 }
 
