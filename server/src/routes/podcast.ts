@@ -1471,7 +1471,10 @@ router.post(
     res.on("close", abortStream);
 
     try {
-      const tenantId = req.tenantContext?.tenantId || req.tenantId;
+      const tenantId =
+        (req.body?.tenantId as string) ||
+        req.tenantContext?.tenantId ||
+        req.tenantId;
       if (!tenantId) {
         await writeSSE(res, { type: "error", error: "No tenant selected" });
         res.end();
@@ -1524,7 +1527,7 @@ router.post(
 
       if (!prefetchedAudio || prefetchedAudio.length === 0) {
         console.log(`[Aletheia] No pre-generated podcast for tenant ${tenantId}`);
-        await writeSSE(res, { type: "error", error: "No pre-generated podcast available. Generate one from the admin panel first." });
+        await writeSSE(res, { type: "error", error: "No pre-generated Cohi podcast available. Generate one from the admin panel first." });
         res.end();
         return;
       }
