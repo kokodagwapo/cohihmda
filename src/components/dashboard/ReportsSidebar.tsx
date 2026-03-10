@@ -23,6 +23,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { usePinnedDashboardsStore, type PinnedItem } from '@/stores/pinnedDashboardsStore';
+import { useWorkbenchNav } from '@/hooks/useWorkbenchNav';
 import {
   DndContext,
   closestCenter,
@@ -451,6 +452,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
   const [operationsSubExpanded, setOperationsSubExpanded] = useState(true);
   const [financialModelingSubExpanded, setFinancialModelingSubExpanded] = useState(true);
   const { pinned: pinnedItems, removePinned, reorderPinned, getPinnedItemId } = usePinnedDashboardsStore();
+  const { favoriteCanvases } = useWorkbenchNav();
   const pinnedIds = useMemo(() => pinnedItems.map((p) => getPinnedItemId(p)), [pinnedItems, getPinnedItemId]);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -889,6 +891,32 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                   </div>
                   <span className={cn("text-sm", isPathActive('/workbench') ? "text-slate-900 dark:text-slate-100 font-medium" : "text-slate-700 dark:text-slate-300")}>My Workbench</span>
                 </button>
+                <div className="pl-4 pr-2 pb-2 space-y-1">
+                  {favoriteCanvases.length === 0 ? (
+                    <p className="px-2 py-2 text-xs text-slate-500 dark:text-slate-400">
+                      No favorited canvases yet.
+                    </p>
+                  ) : favoriteCanvases.slice(0, 5).map((canvas) => {
+                    const isCurrent = location.pathname === `/my-dashboard/${canvas.id}`;
+                    return (
+                      <button
+                        key={canvas.id}
+                        onClick={() => { navigate(`/my-dashboard/${canvas.id}`); onMobileMenuToggle?.(); }}
+                        className={cn(
+                          "w-full flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 text-left touch-manipulation",
+                          isCurrent && "bg-slate-100 dark:bg-slate-800/60",
+                        )}
+                      >
+                        <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center", isCurrent ? "bg-slate-100 dark:bg-slate-800/60" : "bg-slate-50 dark:bg-slate-800/30")}>
+                          <Pin className={cn("w-4 h-4", isCurrent ? "text-amber-500" : "text-slate-500 dark:text-slate-400")} />
+                        </div>
+                        <span className={cn("text-sm truncate", isCurrent ? "text-slate-900 dark:text-slate-100 font-medium" : "text-slate-700 dark:text-slate-300")}>
+                          {canvas.title}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
 
                 {/* Research Lab */}
                 <button
@@ -1363,16 +1391,43 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
 
           {/* My Workbench */}
           {isExpanded ? (
-            <div
-              style={{ width: '100%', padding: '12px 10px', display: 'flex', alignItems: 'center', gap: 10, transition: 'all 0.2s ease', cursor: 'pointer' }}
-              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-              onClick={() => navigate('/workbench')}
-            >
-              <button onClick={(e) => { e.stopPropagation(); navigate('/workbench'); }} style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)', border: 'none', cursor: 'pointer' }}>
-                <LayoutPanelLeft size={18} style={{ color: isPathActive('/workbench') ? '#10b981' : (isDarkMode ? '#94a3b8' : '#64748b') }} />
-              </button>
-              <button onClick={() => navigate('/workbench')} style={{ flex: 1, fontSize: 14, fontWeight: 600, color: isDarkMode ? '#e2e8f0' : '#1a1d29', textAlign: 'left', border: 'none', background: 'none', cursor: 'pointer', padding: 0 }}>My Workbench</button>
+            <div>
+              <div
+                style={{ width: '100%', padding: '12px 10px', display: 'flex', alignItems: 'center', gap: 10, transition: 'all 0.2s ease', cursor: 'pointer' }}
+                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                onClick={() => navigate('/workbench')}
+              >
+                <button onClick={(e) => { e.stopPropagation(); navigate('/workbench'); }} style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)', border: 'none', cursor: 'pointer' }}>
+                  <LayoutPanelLeft size={18} style={{ color: isPathActive('/workbench') ? '#10b981' : (isDarkMode ? '#94a3b8' : '#64748b') }} />
+                </button>
+                <button onClick={() => navigate('/workbench')} style={{ flex: 1, fontSize: 14, fontWeight: 600, color: isDarkMode ? '#e2e8f0' : '#1a1d29', textAlign: 'left', border: 'none', background: 'none', cursor: 'pointer', padding: 0 }}>My Workbench</button>
+              </div>
+              <div className="pl-9 pr-2 pb-2 space-y-0.5">
+                {favoriteCanvases.length === 0 ? (
+                  <p className="px-2 py-1.5 text-xs text-slate-500 dark:text-slate-400">
+                    No favorited canvases yet.
+                  </p>
+                ) : favoriteCanvases.slice(0, 5).map((canvas) => {
+                  const isCurrent = location.pathname === `/my-dashboard/${canvas.id}`;
+                  return (
+                    <button
+                      key={canvas.id}
+                      type="button"
+                      onClick={() => navigate(`/my-dashboard/${canvas.id}`)}
+                      className={cn(
+                        "w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors",
+                        isCurrent
+                          ? "bg-slate-100 dark:bg-slate-800/60 text-slate-900 dark:text-slate-100"
+                          : "text-slate-700 dark:text-slate-300 hover:bg-slate-100/80 dark:hover:bg-slate-800/80",
+                      )}
+                    >
+                      <Pin className={cn("w-3.5 h-3.5 shrink-0", isCurrent ? "text-amber-500" : "text-slate-400 dark:text-slate-500")} />
+                      <span className="truncate">{canvas.title}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           ) : (
             <Tooltip>

@@ -60,7 +60,7 @@ export default function SharedWithMe() {
                       Dashboards, reports, and insights your teammates shared with you.
                     </p>
                     <Link
-                      to="/my-dashboard"
+                      to="/workbench"
                       className="inline-flex items-center gap-1.5 mt-4 text-sm font-medium text-violet-600 dark:text-violet-400 hover:text-violet-700 dark:hover:text-violet-300"
                     >
                       Open My Workbench

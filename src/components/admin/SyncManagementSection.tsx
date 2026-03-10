@@ -460,8 +460,8 @@ export const SyncManagementSection = () => {
       toast({
         title: enabled ? 'Nightly podcast enabled' : 'Nightly podcast disabled',
         description: enabled
-          ? 'Nightly Aletheia podcast generation is now ON.'
-          : 'Nightly Aletheia podcast generation is now OFF.',
+          ? 'Nightly Cohi podcast generation is now ON.'
+          : 'Nightly Cohi podcast generation is now OFF.',
       });
     } catch (error: any) {
       toast({
@@ -708,7 +708,7 @@ export const SyncManagementSection = () => {
       <Card className="border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50">
         <CardHeader>
           <CardTitle className="text-lg font-thin text-slate-900 dark:text-white tracking-tight">
-            Aletheia Podcast Generation
+            Cohi Podcast Generation
           </CardTitle>
           <CardDescription className="text-sm text-slate-600 dark:text-slate-400 font-light">
             Platform-admin controls for manual generation and nightly auto-generation.
