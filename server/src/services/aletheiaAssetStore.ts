@@ -133,6 +133,62 @@ export async function loadPersistedAletheiaAsset(
   }
 }
 
+export async function loadLatestPersistedAletheiaAsset(
+  tenantId: string
+): Promise<PersistedAletheiaAsset | null> {
+  const bucket = getPodcastBucket();
+  if (!bucket) return null;
+
+  try {
+    const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+    const rowResult = await tenantPool.query(
+      `SELECT context_hash, script, storage_key, mime_type, sample_rate, segments_count, model, voice_name, audio_bytes, created_at, expires_at
+       FROM public.podcast_assets
+       WHERE asset_type = $1
+         AND expires_at > NOW()
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [PODCAST_ASSET_TYPE]
+    );
+    if (rowResult.rows.length === 0) return null;
+
+    const row = rowResult.rows[0];
+    const getRes = await getS3Client().send(
+      new GetObjectCommand({
+        Bucket: bucket,
+        Key: row.storage_key,
+      })
+    );
+    const pcm = await readBodyToBuffer(getRes.Body);
+    if (!pcm.length) return null;
+
+    return {
+      script: row.script,
+      contextHash: row.context_hash,
+      createdAt: new Date(row.created_at).getTime(),
+      pcm,
+      mimeType: row.mime_type || "audio/pcm;rate=24000",
+      sampleRate: Number(row.sample_rate) || 24000,
+      segmentsCount: Number(row.segments_count) || 1,
+      model: row.model || undefined,
+      voiceName: row.voice_name || undefined,
+    };
+  } catch (error: any) {
+    if (
+      error?.code === "42P01" ||
+      error?.name === "NoSuchKey" ||
+      error?.$metadata?.httpStatusCode === 404
+    ) {
+      return null;
+    }
+    console.warn(
+      `[AletheiaAssetStore] Failed to load latest persisted asset for tenant ${tenantId}:`,
+      error?.message || error
+    );
+    return null;
+  }
+}
+
 export async function hasPersistedAletheiaAsset(
   tenantId: string
 ): Promise<{ available: boolean; createdAt?: string; durationSec?: number }> {
