@@ -77,7 +77,7 @@ interface LoanDrilldownModalProps {
 }
 
 const RESPONSE_LABELS: Record<string, string> = {
-  acknowledged: "Acknowledged",
+  acknowledged: "Resolved",
   working_on_it: "Working on it",
   need_help: "Needs help",
 };

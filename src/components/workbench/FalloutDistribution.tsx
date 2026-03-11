@@ -641,7 +641,7 @@ export function FalloutDistribution({ selectedTenantId }: FalloutDistributionPro
                   className="h-8 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 text-xs"
                 >
                   <option value="all">All responses</option>
-                  <option value="acknowledged">Acknowledged</option>
+                  <option value="acknowledged">Resolved</option>
                   <option value="working_on_it">Working on it</option>
                   <option value="need_help">Need help</option>
                 </select>
@@ -678,7 +678,7 @@ export function FalloutDistribution({ selectedTenantId }: FalloutDistributionPro
                                   ? "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300"
                                   : "bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300"
                             }`}>
-                              {row.response.replace(/_/g, " ")}
+                              {row.response === "acknowledged" ? "Resolved" : row.response === "working_on_it" ? "Working on it" : row.response === "need_help" ? "Need help" : row.response.replace(/_/g, " ")}
                             </span>
                           </td>
                           <td className="p-2 whitespace-nowrap">{new Date(row.responded_at).toLocaleString()}</td>

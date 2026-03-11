@@ -589,6 +589,62 @@ function buildLoanMetrics(loan: RiskLoanRow): Record<string, string | number | n
   };
 }
 
+function generateEmailRecommendations(loan: RecipientLoan): string[] {
+  const recs: string[] = [];
+  const metrics = loan.loanMetrics;
+  const fico = metrics.fico_score != null ? Number(metrics.fico_score) : null;
+  const dti = metrics.dti_ratio != null ? Number(metrics.dti_ratio) : null;
+  const ltv = metrics.ltv_ratio != null ? Number(metrics.ltv_ratio) : null;
+  const activeDays = metrics.active_days != null ? Number(metrics.active_days) : null;
+  const milestone = String(metrics.current_milestone || "").toLowerCase();
+  const ecd = loan.estimatedClosingDate ? new Date(loan.estimatedClosingDate) : null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  if (loan.predictedOutcome === "withdraw") {
+    recs.push("High withdrawal risk — reach out to the borrower directly to confirm their intent to proceed and uncover any competing offers or hesitation.");
+  } else if (loan.predictedOutcome === "deny") {
+    recs.push("Elevated denial risk — review the latest AUS findings and identify any remaining approval paths. Prepare the adverse action framework.");
+  }
+
+  if (loan.closeLateRisk) {
+    recs.push("This loan is at risk of closing late. Confirm all clear-to-close conditions with the processor and establish a firm revised closing date with escrow.");
+  }
+
+  if (ecd && ecd < today) {
+    const overdue = Math.floor((today.getTime() - ecd.getTime()) / 86400000);
+    recs.push(`Estimated closing date passed ${overdue} day(s) ago. Immediately coordinate with title, escrow, and agents for a new closing date. Address lock extension if needed.`);
+  }
+
+  if (fico != null && fico < 640) {
+    recs.push(`FICO ${fico} is near program minimums — consider rapid rescoring and ensure borrower avoids new credit inquiries until closing.`);
+  }
+
+  if (dti != null && dti > 48) {
+    recs.push(`DTI at ${dti.toFixed(1)}% is elevated — review whether paying off a revolving balance or adding co-borrower income could improve qualification.`);
+  }
+
+  if (ltv != null && ltv > 95) {
+    recs.push(`LTV at ${ltv.toFixed(1)}% is near maximum — verify appraisal value is firm and discuss MI options with the borrower.`);
+  }
+
+  if (activeDays != null && activeDays > 45) {
+    recs.push(`Loan has been in pipeline ${activeDays} days — audit all outstanding conditions and assign clear owners with deadlines.`);
+  }
+
+  if (milestone.includes("suspend") || milestone.includes("hold")) {
+    recs.push("File is suspended — identify all suspense conditions and communicate daily with the processor until conditions are cleared.");
+  }
+
+  if (loan.riskReasons.some((r) => r === "TurnTime" || r === "turn_time" || r === "active_days")) {
+    if (!recs.some((r) => r.includes("pipeline"))) {
+      recs.push("Time in pipeline is a key risk signal. Confirm all vendor orders (appraisal, title, HOI) are in and escalate any outstanding items.");
+    }
+  }
+
+  return recs.slice(0, 3);
+}
+
 function buildLoanRowsHtml(
   recipient: ResolvedRecipient,
   tokenByLoanId: Map<string, string>,
@@ -607,11 +663,29 @@ function buildLoanRowsHtml(
       const loanDetailUrl = `${appBase}/fallout-forecast/loan/${encodeURIComponent(loan.loanId)}`;
       const reasons = loan.riskReasons.slice(0, 3).map((r) => riskFactorWithValue(r, loan.loanMetrics)).join(" · ") || "Risk factors not specified";
       const badge = riskBadgeColor(loan.riskLevel);
+      const recommendations = generateEmailRecommendations(loan);
 
       const appLinkHtml = isAppUser
         ? `<tr><td style="padding:12px 16px 0 16px;">
              <a href="${loanDetailUrl}" style="font-size:12px;color:#3b82f6;text-decoration:none;font-weight:500;">Open full coaching view ↗</a>
            </td></tr>`
+        : "";
+
+      const recsHtml = recommendations.length > 0
+        ? `<tr>
+          <td style="padding:0 16px 12px 16px;">
+            <p style="margin:0 0 6px 0;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#475569;">Recommended Actions</p>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              ${recommendations.map((rec) => `
+              <tr>
+                <td style="padding:0 0 6px 0;font-size:12px;color:#334155;line-height:1.5;">
+                  <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#3b82f6;margin-right:8px;vertical-align:middle;"></span>
+                  ${rec.replace(/</g, "&lt;").replace(/>/g, "&gt;")}
+                </td>
+              </tr>`).join("")}
+            </table>
+          </td>
+        </tr>`
         : "";
 
       return `
@@ -665,6 +739,8 @@ function buildLoanRowsHtml(
             </p>
           </td>
         </tr>
+        <!-- Recommendations row -->
+        ${recsHtml}
         <!-- Action buttons row -->
         <tr style="background:#f8fafc;border-top:1px solid #e2e8f0;">
           <td style="padding:12px 16px;">
@@ -673,7 +749,7 @@ function buildLoanRowsHtml(
                 <td style="padding-right:8px;">
                   <a href="${gotItUrl}"
                      style="display:inline-block;background:#0f766e;color:#ffffff;text-decoration:none;padding:8px 16px;border-radius:6px;font-size:12px;font-weight:600;letter-spacing:0.2px;">
-                    Got it ✓
+                    Resolved ✓
                   </a>
                 </td>
                 <td style="padding-right:8px;">
@@ -1011,7 +1087,7 @@ export async function sendFalloutAlerts({
       ? `<p style="margin:0 0 20px 0;padding:12px 16px;background:#f0f9ff;border-left:3px solid #3b82f6;font-size:14px;color:#1e40af;line-height:1.5;border-radius:0 6px 6px 0;">${config.custom_message}</p>`
       : "";
     const placeholderData = {
-      RECIPIENT_NAME: recipient.fullName || recipient.loans[0]?.loanOfficerName || "Loan Officer",
+      RECIPIENT_NAME: recipient.loans[0]?.loanOfficerName || recipient.fullName || "Loan Officer",
       LOAN_COUNT: String(recipient.loans.length),
       CUSTOM_MESSAGE: customMessageHtml,
       ALERT_DATE: new Date().toISOString().split("T")[0],
@@ -1418,7 +1494,7 @@ export async function sendSingleFalloutAlert({
   }
 
   let recipientEmail = loUser?.email ?? "";
-  const recipientName = loUser?.full_name || loan.loan_officer || "Loan Officer";
+  const recipientName = loan.loan_officer || loUser?.full_name || "Loan Officer";
   let devMode = redirectActive;
 
   if (redirectActive) {

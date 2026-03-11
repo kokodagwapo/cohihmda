@@ -152,7 +152,7 @@ const VIRTUALIZATION_THRESHOLD = 50;
 
 // PERFORMANCE: Memoized loan card component to prevent unnecessary re-renders
 const FALLOUT_RESPONSE_LABELS: Record<string, string> = {
-  acknowledged: "Acknowledged",
+  acknowledged: "Resolved",
   working_on_it: "Working on it",
   need_help: "Need help",
 };
@@ -161,6 +161,12 @@ const FALLOUT_RESPONSE_COLORS: Record<string, string> = {
   acknowledged: "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300",
   working_on_it: "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300",
   need_help: "bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300",
+};
+
+const FALLOUT_RESPONSE_BORDER: Record<string, string> = {
+  acknowledged: "border-l-emerald-500",
+  working_on_it: "border-l-blue-500",
+  need_help: "border-l-rose-500",
 };
 
 const LoanCardItem = memo(
@@ -191,7 +197,7 @@ const LoanCardItem = memo(
         isDarkMode
           ? "bg-slate-800/40 hover:bg-slate-800/60 shadow-[0_1px_3px_rgba(0,0,0,0.15)]"
           : "bg-white shadow-[0_1px_4px_rgba(0,0,0,0.04)] hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)]"
-      }`}
+      }${falloutStatus?.response ? ` border-l-[3px] ${FALLOUT_RESPONSE_BORDER[falloutStatus.response] || "border-l-slate-300"}` : falloutStatus ? " border-l-[3px] border-l-amber-400" : ""}`}
     >
       <LoanCardContent
         loan={loan}

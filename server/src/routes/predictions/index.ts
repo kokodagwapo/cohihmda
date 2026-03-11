@@ -23,6 +23,7 @@ import {
 } from "../../services/dashboard/marketRateService.js";
 import { calculatePullthroughForRole } from "../../services/dashboard/predictionService.js";
 import { runPredictionPipeline } from "../../services/dashboard/predictionPipelineService.js";
+import { generateEmbeddings } from "../../services/embeddingService.js";
 
 const router = Router();
 
@@ -888,6 +889,22 @@ router.get(
 
       const loan = loanResult.rows[0];
 
+      // Fetch the latest prediction for enriched context
+      let prediction: any = null;
+      try {
+        const predResult = await tenantPool.query(
+          `SELECT predicted_outcome, confidence, confidence_score, risk_factors, loan_data, reasoning, model_version, created_at
+           FROM public.loan_predictions
+           WHERE loan_id = $1
+           ORDER BY created_at DESC
+           LIMIT 1`,
+          [loanId]
+        );
+        prediction = predResult.rows[0] || null;
+      } catch (predErr: any) {
+        logInfo("[Predictions] Could not fetch prediction for recommendations", { error: predErr.message });
+      }
+
       // Fetch OpenAI API key
       let apiKey: string | undefined;
       try {
@@ -921,7 +938,7 @@ router.get(
 
       if (!hasValidApiKey) {
         // Return rule-based recommendations
-        const recommendations = generateRuleBasedRecommendations(loan);
+        const recommendations = generateRuleBasedRecommendations(loan, prediction);
         return res.json({
           loanId,
           recommendations,
@@ -935,6 +952,8 @@ router.get(
       try {
         const recommendations = await generateAIRecommendations(
           loan,
+          prediction,
+          tenantPool,
           apiKeyToUse
         );
         res.json({
@@ -944,7 +963,7 @@ router.get(
         });
       } catch (aiError: any) {
         logError("[Predictions] AI recommendation generation failed", aiError);
-        const recommendations = generateRuleBasedRecommendations(loan);
+        const recommendations = generateRuleBasedRecommendations(loan, prediction);
         res.json({
           loanId,
           recommendations,
@@ -971,116 +990,474 @@ router.get(
 /**
  * Generate rule-based recommendations based on loan characteristics
  */
-function generateRuleBasedRecommendations(loan: any): string[] {
+// ---------------------------------------------------------------------------
+// Shared helper – human-readable labels for raw risk factor names
+// ---------------------------------------------------------------------------
+const RISK_FACTOR_LABEL_MAP: Record<string, string> = {
+  TurnTime: "Turn Time",
+  fico_score: "FICO Score",
+  ltv_ratio: "Loan-to-Value Ratio",
+  dti_ratio: "Debt-to-Income Ratio",
+  be_dti_ratio: "Back-End DTI",
+  interest_rate: "Interest Rate",
+  loan_amount: "Loan Amount",
+  loan_type: "Loan Type",
+  loan_purpose: "Loan Purpose",
+  property_type: "Property Type",
+  occupancy_type: "Occupancy Type",
+  estimated_closing_date: "Estimated Closing Date",
+  application_date: "Application Date",
+  current_milestone: "Current Milestone",
+  lock_expiration_date: "Rate Lock Expiration",
+  market_delta: "Market Rate Delta",
+  pullthrough_rate: "LO Pullthrough Rate",
+  close_late_risk: "Close-Late Risk",
+};
+
+function humanizeRiskFactor(raw: string): string {
+  return RISK_FACTOR_LABEL_MAP[raw] || raw.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// ---------------------------------------------------------------------------
+// Rule-based recommendations (enriched with prediction data)
+// ---------------------------------------------------------------------------
+function generateRuleBasedRecommendations(loan: any, prediction?: any | null): string[] {
   const recommendations: string[] = [];
 
   const fico = loan.fico_score || loan.credit_score;
-  const dti = loan.dti_ratio || loan.dti || loan.be_dti_ratio;
+  const dti = loan.be_dti_ratio || loan.dti_ratio || loan.dti;
   const ltv = loan.ltv || loan.loan_to_value || loan.ltv_ratio;
 
-  if (fico && fico < 680) {
+  // --- FICO risk ---
+  if (fico && fico < 580) {
     recommendations.push(
-      "Consider credit counseling or rapid rescoring to improve FICO score before proceeding"
+      `FICO ${fico} is critically low — initiate rapid rescoring immediately. Identify open collections, utilization spikes, or recent derogatory events. A 20–40 point improvement may require 30–60 days.`
     );
-  }
-  if (dti && dti > 43) {
+  } else if (fico && fico < 640) {
     recommendations.push(
-      "High DTI detected - explore debt payoff strategies or income documentation to improve qualification"
+      `FICO ${fico} is near minimum threshold for most programs. Run a rapid rescore simulation to find quick wins: pay down revolving balances to <10%, request deletion of erroneous tradelines.`
     );
-  }
-  if (ltv && ltv > 80) {
+  } else if (fico && fico < 700) {
     recommendations.push(
-      "High LTV may require PMI - discuss options with borrower including larger down payment"
+      `FICO ${fico} qualifies for standard programs but limits pricing. Confirm borrower can avoid new credit inquiries until closing.`
     );
   }
 
-  const appDate = loan.application_date
-    ? new Date(loan.application_date)
+  // --- DTI risk ---
+  if (dti && dti > 50) {
+    recommendations.push(
+      `Back-end DTI at ${dti}% exceeds conventional overlays (typically ≤50%). Evaluate eliminating a liability (auto lease, student loan IBR, etc.) or adding a non-occupant co-borrower to reduce ratio.`
+    );
+  } else if (dti && dti > 43) {
+    recommendations.push(
+      `DTI of ${dti}% is above the traditional 43% QM threshold. Confirm AUS approval (DU/LP) and verify no manual underwriting applies. Explore debt payoff or additional income documentation.`
+    );
+  }
+
+  // --- LTV / PMI risk ---
+  if (ltv && ltv > 97) {
+    recommendations.push(
+      `LTV at ${ltv}% is near maximum — verify program eligibility (e.g., HomeReady/Home Possible). Confirm appraisal value is firm and no changes have occurred since application.`
+    );
+  } else if (ltv && ltv > 80) {
+    recommendations.push(
+      `LTV of ${ltv}% requires mortgage insurance. Review PMI options (monthly, single, split), lender-paid MI, or piggyback structure with borrower to find most cost-effective path to close.`
+    );
+  }
+
+  // --- Pipeline age / close-late risk ---
+  const appDate = loan.application_date ? new Date(loan.application_date) : null;
+  const ecd = loan.estimated_closing_date ? new Date(loan.estimated_closing_date) : null;
+  const today = new Date();
+  const daysSinceApp = appDate
+    ? Math.floor((today.getTime() - appDate.getTime()) / 86400000)
     : null;
-  if (appDate) {
-    const daysSinceApp = Math.floor(
-      (Date.now() - appDate.getTime()) / (1000 * 60 * 60 * 24)
+  const daysToEcd = ecd
+    ? Math.floor((ecd.getTime() - today.getTime()) / 86400000)
+    : null;
+
+  if (daysSinceApp !== null && daysSinceApp > 60) {
+    recommendations.push(
+      `Loan has been in pipeline ${daysSinceApp} days — this significantly increases fallout risk. Schedule an urgent borrower and agent status call to address outstanding conditions and re-confirm commitment to close.`
     );
-    if (daysSinceApp > 30) {
+  } else if (daysSinceApp !== null && daysSinceApp > 30) {
+    recommendations.push(
+      `Loan is ${daysSinceApp} days in pipeline. Audit outstanding conditions list and confirm each has an owner and a due date. Stalled milestones are the #1 predictor of fallout.`
+    );
+  }
+
+  if (ecd && ecd < today) {
+    recommendations.push(
+      `Estimated closing date has passed. Immediately contact escrow, title, and the real estate agents to establish a new closing date and lock extension if needed. Document reasons for delay for compliance.`
+    );
+  } else if (daysToEcd !== null && daysToEcd <= 7) {
+    recommendations.push(
+      `Closing is in ${daysToEcd} day(s). Confirm all clear-to-close conditions, wire instructions sent, and borrower has verified final cash-to-close amount.`
+    );
+  } else if (daysToEcd !== null && daysToEcd <= 14) {
+    recommendations.push(
+      `${daysToEcd} days to estimated close. Verify CD (Closing Disclosure) has been issued with the required 3-business-day waiting period and that all outstanding suspense conditions are cleared.`
+    );
+  }
+
+  // --- Rate lock expiration ---
+  const lockExp = loan.lock_expiration_date ? new Date(loan.lock_expiration_date) : null;
+  if (lockExp) {
+    const daysToLockExp = Math.floor((lockExp.getTime() - today.getTime()) / 86400000);
+    if (daysToLockExp < 0) {
       recommendations.push(
-        `Loan has been in pipeline ${daysSinceApp} days - review status and address any outstanding conditions`
+        `Rate lock has expired — immediately coordinate a lock extension or re-lock at current market rates. Document pricing impact for borrower transparency.`
       );
-    }
-    if (daysSinceApp > 45) {
+    } else if (daysToLockExp <= 7) {
       recommendations.push(
-        "Consider rate lock extension options to protect borrower from market volatility"
+        `Rate lock expires in ${daysToLockExp} day(s). Initiate extension now before the lock desk cutoff — same-day extensions are often not available. Evaluate whether current market rates warrant a float-down option.`
+      );
+    } else if (daysToLockExp <= 14) {
+      recommendations.push(
+        `Rate lock expires in ${daysToLockExp} days. Monitor market conditions. If closing is at risk, proactively price a lock extension to avoid last-minute fees.`
       );
     }
   }
 
+  // --- Current milestone stall detection ---
+  const milestone = (loan.current_milestone || "").toLowerCase();
+  if (milestone.includes("suspend") || milestone.includes("on hold")) {
+    recommendations.push(
+      `File is in a suspended/on-hold status. Identify all suspense conditions, assign clear ownership with deadlines, and communicate daily with the processor until conditions are cleared.`
+    );
+  } else if (milestone.includes("approval") || milestone.includes("conditional")) {
+    recommendations.push(
+      `Loan is in conditional approval. Prioritize clearing all prior-to-doc (PTD) conditions. Delays at this stage are the most common cause of closing date extensions.`
+    );
+  }
+
+  // --- Loan type and purpose specific guidance ---
   const loanType = (loan.loan_type || "").toLowerCase();
   if (loanType.includes("jumbo") || loanType.includes("non-conforming")) {
     recommendations.push(
-      "Jumbo loan - ensure all reserve requirements and documentation are complete"
+      `Jumbo/non-conforming loan — verify reserves (typically 6–12 months PITI), all asset statements are sourced, and appraisal has met investor guidelines. Jumbo overlays are strictly enforced.`
     );
   }
-  if (loanType.includes("investment") || loanType.includes("investor")) {
+  if (loanType.includes("fha")) {
     recommendations.push(
-      "Investment property - verify rental income documentation and DSCR requirements"
+      `FHA loan — confirm CAIVRS clearance, MIP structure, and that property condition satisfies FHA Minimum Property Requirements (MPR). FHA appraisals flag deferred maintenance that can cause delays.`
+    );
+  }
+  if (loanType.includes("va")) {
+    recommendations.push(
+      `VA loan — verify Certificate of Eligibility (COE) is on file, NOV (Notice of Value) is issued, and borrower has confirmed VA funding fee status. VA appraisals have strict MPR requirements.`
+    );
+  }
+  if (loanType.includes("usda") || loanType.includes("rural")) {
+    recommendations.push(
+      `USDA Rural Development loan — confirm property is in an eligible area and that the file has been submitted to USDA for conditional commitment. USDA turn times can add 2–4 weeks.`
     );
   }
 
   const loanPurpose = (loan.loan_purpose || loan.purpose || "").toLowerCase();
   if (loanPurpose.includes("cash") && loanPurpose.includes("out")) {
     recommendations.push(
-      "Cash-out refinance - confirm seasoning requirements and verify use of funds"
+      `Cash-out refinance — confirm 6-month seasoning requirement, verify use of funds is documented, and review state-specific rescission period that could affect wire timing.`
     );
+  }
+  if (loanPurpose.includes("investment") || (loan.occupancy_type || "").toLowerCase().includes("investment")) {
+    recommendations.push(
+      `Investment property — verify rental income (2-year history or signed lease), confirm reserves meet investor requirements (typically 6 months per financed property), and check LLPA pricing adjustments.`
+    );
+  }
+
+  // --- Prediction-driven guidance ---
+  if (prediction) {
+    const outcome = prediction.predicted_outcome || "";
+    const confidence = prediction.confidence_score || prediction.confidence || 0;
+    const riskFactors: string[] = Array.isArray(prediction.risk_factors)
+      ? prediction.risk_factors
+      : typeof prediction.risk_factors === "string"
+      ? JSON.parse(prediction.risk_factors || "[]")
+      : [];
+
+    if (outcome === "withdraw") {
+      recommendations.push(
+        `AI model predicts ${(confidence * 100).toFixed(0)}% probability of withdrawal — the borrower may disengage. Schedule a personal call to gauge commitment level and uncover any unspoken objections (competing offers, life changes, financing alternatives).`
+      );
+    } else if (outcome === "decline") {
+      recommendations.push(
+        `AI model predicts ${(confidence * 100).toFixed(0)}% probability of decline. Proactively review AUS findings for any remaining approval paths, and prepare a denial notice with specific adverse action reasons per ECOA/FCRA requirements.`
+      );
+    }
+
+    if (riskFactors.includes("TurnTime") || riskFactors.includes("turn_time")) {
+      recommendations.push(
+        `Turn time is a primary risk signal — confirm all vendor orders (appraisal, title, HOI, flood) are in and escalate any outstanding items directly with the provider.`
+      );
+    }
   }
 
   if (recommendations.length === 0) {
     recommendations.push(
-      "Continue monitoring loan progress and maintain regular borrower communication"
+      "Loan metrics are within acceptable ranges. Maintain weekly borrower contact to confirm commitment and identify any life-event changes that could affect qualification."
     );
     recommendations.push(
-      "Ensure all conditions are cleared promptly to minimize pipeline time"
+      "Conduct a full conditions audit and assign clear owners with deadlines — proactive pipeline management is the most reliable way to protect your pull-through rate."
     );
   }
 
   return recommendations;
 }
 
-/**
- * Generate AI-powered recommendations using GPT
- */
+// ---------------------------------------------------------------------------
+// Fetch knowledge center context (RAG) for recommendations
+// ---------------------------------------------------------------------------
+async function fetchRecommendationKnowledgeContext(
+  tenantPool: any,
+  topRiskFactors: string[],
+  predictedOutcome: string,
+  apiKey: string
+): Promise<string> {
+  try {
+    // Check that rag_embeddings table and data exist
+    const tableCheck = await tenantPool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'rag_embeddings'
+      ) AS exists
+    `);
+    if (!tableCheck.rows[0]?.exists) return "";
+
+    const countCheck = await tenantPool.query(
+      `SELECT COUNT(*) AS cnt FROM public.rag_embeddings`
+    );
+    if (parseInt(countCheck.rows[0]?.cnt || "0") === 0) return "";
+
+    // Build natural language query from top risk factors + outcome
+    const humanFactors = topRiskFactors.slice(0, 4).map(humanizeRiskFactor);
+    const queryText = `mortgage loan ${predictedOutcome || "fallout"} risk: ${humanFactors.join(", ")}. Recommended actions to prevent fallout and improve pull-through.`;
+
+    const embedResults = await generateEmbeddings(
+      [queryText],
+      "openai/text-embedding-3-large"
+    );
+    if (!embedResults || embedResults.length === 0) return "";
+
+    const emb = embedResults[0].embedding;
+    const embStr = `[${emb.join(",")}]`;
+
+    const result = await tenantPool.query(
+      `SELECT
+         e.chunk_text,
+         d.title,
+         d.filename,
+         1 - (e.embedding <=> $1::vector) AS similarity
+       FROM rag_embeddings e
+       JOIN rag_documents d ON e.document_id = d.id
+       WHERE d.status = 'indexed'
+         AND 1 - (e.embedding <=> $1::vector) >= 0.3
+       ORDER BY e.embedding <=> $1::vector
+       LIMIT 6`,
+      [embStr]
+    );
+
+    // Also fetch rag_knowledge_base entries categorized as Recommendations
+    let kbEntries: Array<{ title: string; content: string }> = [];
+    try {
+      const kbResult = await tenantPool.query(
+        `SELECT title, content FROM public.rag_knowledge_base
+         WHERE category = 'Recommendations' AND is_active = true
+         ORDER BY priority DESC, created_at DESC
+         LIMIT 5`
+      );
+      kbEntries = kbResult.rows;
+    } catch {
+      // table may not exist yet
+    }
+
+    const parts: string[] = [];
+
+    if (kbEntries.length > 0) {
+      parts.push("ORGANIZATION RECOMMENDATION GUIDELINES (from Knowledge Center):");
+      for (const kb of kbEntries) {
+        parts.push(`[${kb.title}]`);
+        parts.push(kb.content.trim());
+        parts.push("");
+      }
+    }
+
+    if (result.rows.length > 0) {
+      parts.push("RELEVANT KNOWLEDGE BASE CONTEXT (semantic search):");
+      for (const row of result.rows) {
+        const sim = parseFloat(row.similarity);
+        parts.push(`[Source: ${row.title || row.filename || "Unknown"} — ${(sim * 100).toFixed(0)}% relevance]`);
+        parts.push(row.chunk_text?.trim() || "");
+        parts.push("");
+      }
+    }
+
+    return parts.join("\n");
+  } catch (err: any) {
+    logWarn(`[Predictions] Knowledge context fetch failed (non-fatal): ${err.message}`, {});
+    return "";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// AI recommendations using GPT-4o with enriched context
+// ---------------------------------------------------------------------------
 async function generateAIRecommendations(
   loan: any,
+  prediction: any | null,
+  tenantPool: any,
   apiKey: string
 ): Promise<string[]> {
-  const loanSummary = {
-    loanAmount: loan.loan_amount,
-    loanType: loan.loan_type,
-    loanPurpose: loan.loan_purpose || loan.purpose,
-    fico: loan.fico_score || loan.credit_score,
-    dti: loan.dti_ratio || loan.dti || loan.be_dti_ratio,
-    ltv: loan.ltv || loan.loan_to_value || loan.ltv_ratio,
-    interestRate: loan.interest_rate,
-    applicationDate: loan.application_date,
-    currentStatus: loan.current_loan_status || loan.status,
-    loanOfficer: loan.loan_officer,
-    branch: loan.branch,
-    propertyType: loan.property_type,
-    occupancy: loan.occupancy_type,
-  };
 
-  const prompt = `You are a mortgage loan advisor. Based on the following loan details, provide 3-5 specific, actionable recommendations to help this loan close successfully.
+  // ---- Build enriched loan context ----
+  const loanData = prediction?.loan_data
+    ? (typeof prediction.loan_data === "string"
+        ? JSON.parse(prediction.loan_data)
+        : prediction.loan_data)
+    : {};
 
-Loan Details:
-${JSON.stringify(loanSummary, null, 2)}
+  const riskFactors: string[] = Array.isArray(prediction?.risk_factors)
+    ? prediction.risk_factors
+    : typeof prediction?.risk_factors === "string"
+    ? JSON.parse(prediction?.risk_factors || "[]")
+    : [];
 
-Provide recommendations as a JSON array of strings. Focus on:
-1. Risk mitigation strategies
-2. Communication touchpoints
-3. Documentation requirements
-4. Timeline optimization
-5. Borrower support actions
+  const riskSummary = loanData?.riskSummary || null;
+  const signalStrengths: Record<string, any> = loanData?.signalStrengths || loanData?.signals || {};
+  const reasonCodes: string[] = loanData?.reasonCodes || loanData?.reason_codes || [];
+  const pullthroughRate: number | null = loanData?.pullthroughRate ?? loanData?.pullthrough_rate ?? null;
+  const marketDelta: number | null = loanData?.marketDelta ?? loanData?.market_delta ?? null;
 
-Return ONLY a JSON array of recommendation strings, no other text.
-Example: ["Recommendation 1", "Recommendation 2", "Recommendation 3"]`;
+  const today = new Date();
+  const appDate = loan.application_date ? new Date(loan.application_date) : null;
+  const ecd = loan.estimated_closing_date ? new Date(loan.estimated_closing_date) : null;
+  const lockExp = loan.lock_expiration_date ? new Date(loan.lock_expiration_date) : null;
+
+  const daysInPipeline = appDate
+    ? Math.floor((today.getTime() - appDate.getTime()) / 86400000)
+    : null;
+  const daysToClose = ecd
+    ? Math.floor((ecd.getTime() - today.getTime()) / 86400000)
+    : null;
+  const daysToLockExp = lockExp
+    ? Math.floor((lockExp.getTime() - today.getTime()) / 86400000)
+    : null;
+  const isPastEcd = ecd ? ecd < today : false;
+  const isLockExpiring = daysToLockExp !== null && daysToLockExp <= 7;
+
+  const closeLateRisk =
+    loanData?.closeLateRisk ??
+    (ecd !== null && ecd < today && (prediction?.predicted_outcome || "originate") === "originate");
+
+  const outcome = prediction?.predicted_outcome || "unknown";
+  const confidence = Math.round(
+    ((prediction?.confidence_score ?? prediction?.confidence ?? 0) as number) * 100
+  );
+
+  // ---- Fetch knowledge context ----
+  const knowledgeContext = await fetchRecommendationKnowledgeContext(
+    tenantPool,
+    riskFactors,
+    outcome,
+    apiKey
+  );
+
+  // ---- Build system prompt ----
+  const systemPrompt = process.env.RECOMMENDATION_MODEL
+    ? `You are an expert mortgage lending advisor. Respond only with a valid JSON array of strings.`
+    : `You are a senior mortgage lending expert with deep knowledge of GSE guidelines (Fannie Mae, Freddie Mac), FHA/VA/USDA programs, underwriting best practices, and pipeline management. You specialize in identifying loans at risk of fallout and providing specific, actionable coaching to loan officers.
+
+Your task is to analyze a loan's risk profile and provide 5–7 targeted, actionable recommendations that directly address the identified risk drivers. Each recommendation must:
+- Reference the specific risk signal or data point driving the concern
+- Explain WHY it matters for this loan
+- Include a concrete next step or tactic (not generic advice)
+- Be written for a loan officer who will act on it today
+
+Respond ONLY with a valid JSON array of strings. No markdown, no explanation outside the array.`;
+
+  // ---- Build user prompt ----
+  const signalLines = Object.entries(signalStrengths)
+    .map(([k, v]: [string, any]) => {
+      const label = humanizeRiskFactor(k);
+      const val = typeof v === "object" ? JSON.stringify(v) : String(v ?? "N/A");
+      return `  - ${label}: ${val}`;
+    })
+    .join("\n");
+
+  const riskFactorLines = riskFactors
+    .map((f) => `  - ${humanizeRiskFactor(f)}`)
+    .join("\n") || "  (none identified)";
+
+  const reasonCodeLines = reasonCodes.length
+    ? reasonCodes.map((r: string) => `  - ${r}`).join("\n")
+    : "  (none)";
+
+  const riskSummaryBlock = riskSummary
+    ? `Risk Summary:
+  - Overall Risk: ${riskSummary.overallRisk || "N/A"}
+  - Key Risks: ${(riskSummary.risks || []).join("; ") || "none"}
+  - Positive Factors: ${(riskSummary.positives || []).join("; ") || "none"}`
+    : "";
+
+  const knowledgeBlock = knowledgeContext
+    ? `\n---\nORGANIZATION KNOWLEDGE CONTEXT\n${knowledgeContext}\n---`
+    : "";
+
+  const userPrompt = `Analyze the following loan and provide 5–7 specific, actionable recommendations for the loan officer. Tie each recommendation directly to a named risk driver or data point below.
+
+=== LOAN PROFILE ===
+Loan ID: ${loan.loan_id || "N/A"}
+Loan Amount: $${Number(loan.loan_amount || 0).toLocaleString()}
+Loan Type: ${loan.loan_type || "N/A"}
+Loan Purpose: ${loan.loan_purpose || loan.purpose || "N/A"}
+Property Type: ${loan.property_type || "N/A"}
+Occupancy: ${loan.occupancy_type || "N/A"}
+Current Milestone: ${loan.current_milestone || "N/A"}
+
+Borrower Financials:
+  - FICO Score: ${loan.fico_score || loan.credit_score || "N/A"}
+  - Back-End DTI: ${loan.be_dti_ratio || loan.dti_ratio || "N/A"}%
+  - LTV Ratio: ${loan.ltv || loan.ltv_ratio || loan.loan_to_value || "N/A"}%
+  - Loan Amount: $${Number(loan.loan_amount || 0).toLocaleString()}
+  - Interest Rate: ${loan.interest_rate || "N/A"}%
+
+Timeline:
+  - Application Date: ${loan.application_date ? new Date(loan.application_date).toLocaleDateString() : "N/A"}
+  - Days in Pipeline: ${daysInPipeline !== null ? daysInPipeline : "N/A"}
+  - Estimated Closing Date: ${ecd ? ecd.toLocaleDateString() : "N/A"}
+  - Days to Close: ${daysToClose !== null ? (daysToClose < 0 ? `PAST ECD (${Math.abs(daysToClose)} days overdue)` : daysToClose) : "N/A"}
+  - Rate Lock Expires: ${lockExp ? lockExp.toLocaleDateString() : "N/A"}${daysToLockExp !== null ? ` (${daysToLockExp < 0 ? "EXPIRED" : `${daysToLockExp} days remaining`})` : ""}
+  - Past Estimated Close: ${isPastEcd ? "YES ⚠️" : "No"}
+  - Lock Expiring Soon: ${isLockExpiring ? "YES ⚠️" : "No"}
+
+=== AI PREDICTION ===
+  - Predicted Outcome: ${outcome.toUpperCase()} (${confidence}% confidence)
+  - Close-Late Risk: ${closeLateRisk ? "YES ⚠️" : "No"}
+  - LO Pullthrough Rate: ${pullthroughRate !== null ? `${(pullthroughRate * 100).toFixed(1)}%` : "N/A"}
+  - Market Rate Delta: ${marketDelta !== null ? `${marketDelta > 0 ? "+" : ""}${marketDelta.toFixed(2)}%` : "N/A"}
+
+Top Risk Factors (model-identified drivers):
+${riskFactorLines}
+
+Signal Strengths (model feature values):
+${signalLines || "  (not available)"}
+
+Reason Codes:
+${reasonCodeLines}
+
+${riskSummaryBlock}
+${knowledgeBlock}
+
+=== INSTRUCTIONS ===
+For each recommendation:
+1. Name the specific risk factor or data point you are addressing
+2. Explain the impact on this loan if not addressed
+3. Give a concrete, immediate action the loan officer should take
+4. Note any regulatory, guideline, or timeline constraint that applies
+
+Return ONLY a JSON array of strings. Each string is one complete recommendation (2–4 sentences).`;
+
+  const model = process.env.RECOMMENDATION_MODEL || "gpt-4o";
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -1089,17 +1466,13 @@ Example: ["Recommendation 1", "Recommendation 2", "Recommendation 3"]`;
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "gpt-4o-mini",
+      model,
       messages: [
-        {
-          role: "system",
-          content:
-            "You are a mortgage lending expert. Respond only with valid JSON arrays.",
-        },
-        { role: "user", content: prompt },
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
       ],
-      temperature: 0.7,
-      max_tokens: 500,
+      temperature: 0.4,
+      max_tokens: 1800,
     }),
   });
 
