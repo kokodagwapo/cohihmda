@@ -3,7 +3,7 @@ import { test, expect } from "./fixtures";
 test.describe("@critical Distributions workflows", () => {
   test("@smoke distributions page renders with schedule controls", async ({ userPage }) => {
     await userPage.goto("/workbench/distributions", { waitUntil: "domcontentloaded" });
-    await expect(userPage.getByRole("heading", { name: "Content distribution" })).toBeVisible();
+    await expect(userPage.getByRole("heading", { name: "Communications Center" })).toBeVisible();
     await expect(userPage.getByRole("button", { name: /New schedule/i })).toBeVisible();
   });
 
@@ -53,6 +53,6 @@ test.describe("@critical Distributions workflows", () => {
 
     userPage.once("dialog", (dialog) => dialog.dismiss());
     await userPage.getByTitle("Delete").first().click();
-    await expect(userPage.getByRole("heading", { name: "Content distribution" })).toBeVisible();
+    await expect(userPage.getByRole("heading", { name: "Communications Center" })).toBeVisible();
   });
 });
