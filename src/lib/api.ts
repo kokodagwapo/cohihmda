@@ -1481,6 +1481,36 @@ export class ApiClient {
       branches: string[];
     }>(`/api/fallout-alerts/recipient-options${this._falloutTq(tenantId)}`);
   }
+
+  async getLoanFalloutStatuses(loanIds: string[], tenantId?: string | null) {
+    if (!loanIds.length) return { statuses: [] };
+    const tq = tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request<{
+      statuses: Array<{
+        loan_id: string;
+        recipient_email: string | null;
+        encompass_user_id: string | null;
+        sent_at: string;
+        alert_batch_id: string;
+        response: "acknowledged" | "working_on_it" | "need_help" | null;
+        responded_at: string | null;
+        loan_officer_name: string | null;
+      }>;
+    }>(`/api/fallout-alerts/loan-statuses?loan_ids=${loanIds.map(encodeURIComponent).join(",")}${tq}`);
+  }
+
+  async sendFalloutAlertSingle(loanId: string, tenantId?: string | null) {
+    return this.request<{
+      sent: boolean;
+      recipientEmail: string | null;
+      message: string;
+      devMode: boolean;
+      devRedirectedTo?: string[];
+    }>(`/api/fallout-alerts/send-single${this._falloutTq(tenantId)}`, {
+      method: "POST",
+      body: JSON.stringify({ loan_id: loanId }),
+    });
+  }
 }
 
 export const api = new ApiClient();

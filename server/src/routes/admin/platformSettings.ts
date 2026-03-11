@@ -173,6 +173,44 @@ router.get(
   }
 );
 
+// ── Fallout Email Redirect Toggle ──────────────────────────────────────────
+
+const FALLOUT_REDIRECT_KEY = "fallout_email_redirect_enabled";
+
+router.get(
+  "/fallout-redirect-toggle",
+  authenticateToken,
+  requirePlatformAdmin,
+  async (_req, res) => {
+    try {
+      const raw = await getPlatformSetting(FALLOUT_REDIRECT_KEY);
+      res.json({ enabled: raw === "true" });
+    } catch (error: any) {
+      console.error("[PlatformSettings] Error fetching fallout redirect toggle:", error);
+      res.status(500).json({ error: "Failed to fetch redirect toggle" });
+    }
+  },
+);
+
+router.put(
+  "/fallout-redirect-toggle",
+  authenticateToken,
+  requirePlatformAdmin,
+  async (req, res) => {
+    try {
+      const { enabled } = req.body ?? {};
+      if (typeof enabled !== "boolean") {
+        return res.status(400).json({ error: "enabled must be a boolean" });
+      }
+      await setPlatformSetting(FALLOUT_REDIRECT_KEY, enabled ? "true" : "false");
+      res.json({ enabled, message: `Fallout email redirect ${enabled ? "enabled" : "disabled"}` });
+    } catch (error: any) {
+      console.error("[PlatformSettings] Error updating fallout redirect toggle:", error);
+      res.status(500).json({ error: "Failed to update redirect toggle" });
+    }
+  },
+);
+
 // ── Fallout Dev Allowed Emails ──────────────────────────────────────────────
 
 const FALLOUT_DEV_EMAILS_KEY = "fallout_dev_allowed_emails";

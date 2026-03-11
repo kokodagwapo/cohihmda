@@ -5,6 +5,7 @@ import { requireRole } from "../middleware/rbac.js";
 import {
   getFalloutAlertConfig,
   sendFalloutAlerts,
+  sendSingleFalloutAlert,
   upsertFalloutAlertConfig,
   getFalloutDevMode,
 } from "../services/falloutAlertService.js";
@@ -30,7 +31,7 @@ router.get(
     try {
       const { tenantPool } = getTenantContext(req);
       const config = await getFalloutAlertConfig(tenantPool);
-      const { isDevMode, allowedEmails } = await getFalloutDevMode();
+      const { isDevMode, redirectActive, allowedEmails } = await getFalloutDevMode();
       res.json({
         config: config ?? {
           enabled: false,
@@ -42,8 +43,9 @@ router.get(
           target_encompass_user_ids: [],
           manager_user_ids: [],
         },
-        devMode: isDevMode,
-        devAllowedEmails: isDevMode ? allowedEmails : undefined,
+        devMode: redirectActive,
+        isNonProduction: isDevMode,
+        devAllowedEmails: redirectActive ? allowedEmails : undefined,
       });
     } catch (error: unknown) {
       res.status(500).json({ error: getErrorMessage(error, "Failed to load fallout alert config") });
@@ -308,6 +310,86 @@ router.get(
       res.json({ responses: result.rows });
     } catch (error: unknown) {
       res.status(500).json({ error: getErrorMessage(error, "Failed to fetch fallout alert responses") });
+    }
+  },
+);
+
+/**
+ * POST /api/fallout-alerts/send-single
+ * Send a fallout alert email for a single loan (used from the loan drilldown modal).
+ */
+router.post(
+  "/send-single",
+  authenticateToken,
+  attachTenantContext,
+  requireFalloutAlertAdmin,
+  async (req: AuthRequest, res) => {
+    try {
+      const { tenantPool, tenantId, tenantInfo } = getTenantContext(req);
+      const loanId = req.body?.loan_id;
+      if (typeof loanId !== "string" || !loanId.trim()) {
+        return res.status(400).json({ error: "loan_id is required" });
+      }
+      const appBaseUrl = process.env.APP_BASE_URL || resolveFrontendUrl();
+      const result = await sendSingleFalloutAlert({
+        tenantPool,
+        tenantId,
+        tenantSlug: tenantInfo.slug,
+        loanId: loanId.trim(),
+        appBaseUrl,
+      });
+      res.json(result);
+    } catch (error: unknown) {
+      res.status(500).json({ error: getErrorMessage(error, "Failed to send fallout alert") });
+    }
+  },
+);
+
+/**
+ * GET /api/fallout-alerts/loan-statuses?loan_ids=id1,id2,...
+ * Returns per-loan fallout alert send/response status for display on loan cards.
+ */
+router.get(
+  "/loan-statuses",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const { tenantPool } = getTenantContext(req);
+      const rawIds = typeof req.query.loan_ids === "string" ? req.query.loan_ids : "";
+      const loanIds = rawIds
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean)
+        .slice(0, 200);
+      if (loanIds.length === 0) {
+        return res.json({ statuses: [] });
+      }
+      const result = await tenantPool.query(
+        `SELECT DISTINCT ON (t.loan_id)
+           t.loan_id,
+           t.recipient_email,
+           t.encompass_user_id,
+           t.created_at AS sent_at,
+           t.alert_batch_id,
+           r.response,
+           r.responded_at,
+           COALESCE(
+             NULLIF(TRIM(eu.full_name), ''),
+             NULLIF(TRIM(l.loan_officer), ''),
+             t.recipient_email
+           ) AS loan_officer_name
+         FROM public.fallout_alert_tokens t
+         LEFT JOIN public.fallout_alert_responses r ON r.token_id = t.id
+         LEFT JOIN public.loans l ON l.loan_id = t.loan_id
+         LEFT JOIN public.encompass_users eu ON eu.encompass_user_id = t.encompass_user_id
+         WHERE t.loan_id = ANY($1::text[])
+         ORDER BY t.loan_id, t.created_at DESC`,
+        [loanIds],
+      );
+      res.json({ statuses: result.rows });
+    } catch (error: unknown) {
+      res.status(500).json({ error: getErrorMessage(error, "Failed to fetch loan fallout statuses") });
     }
   },
 );
