@@ -26,7 +26,6 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { FalloutDistribution } from "@/components/workbench/FalloutDistribution";
-import { WorkbenchTopBar } from "@/components/workbench/WorkbenchTopBar";
 import { IconBadge } from "@/components/workbench/IconBadge";
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { useDashboardVisibility } from "@/hooks/useDashboardVisibility";
@@ -263,7 +262,6 @@ export default function Distributions() {
       onReportClick={(_report: ReportData) => {}}
     >
       <div className="min-h-[calc(100vh-4rem)] bg-gradient-to-br from-slate-50/90 via-white to-sky-50/40 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950/80 flex flex-col">
-        <WorkbenchTopBar onOpenSidebar={() => setMobileMenuOpen(true)} />
         <main className="flex-1 relative w-full min-h-0 overflow-hidden">
             <div className="h-full overflow-y-auto px-4 sm:px-6 py-4 sm:py-6">
               <div className="max-w-[1600px] mx-auto">
