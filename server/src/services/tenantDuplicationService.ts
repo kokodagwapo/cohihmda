@@ -755,14 +755,13 @@ export async function duplicateTenantAnonymized(
   );
   if (existingSlug.rows.length > 0) {
     const existing = existingSlug.rows[0];
-    // If a previous duplication left a stale "provisioning" tenant, clean it up automatically
-    if (existing.status === "provisioning") {
-      console.log(`[TenantDuplication] Cleaning up stale provisioning tenant with slug "${newSlug}" (id: ${existing.id})`);
+    const canReuse = existing.status === "provisioning" || existing.status === "deleted";
+    if (canReuse) {
+      console.log(`[TenantDuplication] Cleaning up ${existing.status} tenant with slug "${newSlug}" (id: ${existing.id})`);
       await managementPool.query(
         `DELETE FROM coheus_tenants WHERE id = $1`,
         [existing.id]
       );
-      // Also drop the orphan database if it exists
       try {
         const dbName = `coheus_tenant_${newSlug.replace(/-/g, "_")}`;
         await managementPool.query(`DROP DATABASE IF EXISTS "${dbName}"`);
