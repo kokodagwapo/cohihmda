@@ -10,7 +10,9 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Navigation } from "@/components/layout/Navigation";
+import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
+import { useDashboardVisibility } from "@/hooks/useDashboardVisibility";
+import type { ReportData } from "@/data/reportSimulations";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTenantStore } from "@/stores/tenantStore";
 import { useResearchSession } from "@/hooks/useResearchSession";
@@ -206,7 +208,7 @@ function SessionSidebar({
             ))}
             {sharedWithMe.length > 0 && (
               <div className="px-2 pt-3 pb-1">
-                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Shared with me</span>
+                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Shared</span>
               </div>
             )}
             {sharedWithMe.map((s) => (
@@ -335,6 +337,8 @@ export default function ResearchAnalyst() {
   const { user } = useAuth();
   const { selectedTenantId } = useTenantStore();
   const effectiveTenantId = selectedTenantId || user?.tenant_id;
+  const { dashboardVisibility, handleVisibilityChange } = useDashboardVisibility();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const {
     sessionId,
@@ -547,12 +551,18 @@ export default function ResearchAnalyst() {
   const showBottomInput = isRunning || phase === "complete";
 
   return (
-    <div className="h-screen overflow-hidden bg-background flex flex-col pt-14 sm:pt-16">
-      <Navigation />
-
-      {/* Body: Sidebar + Content */}
+    <DashboardLayout
+      isAuthenticated={!!user}
+      mobileMenuOpen={mobileMenuOpen}
+      onMobileMenuToggle={() => setMobileMenuOpen((prev) => !prev)}
+      dashboardVisibility={dashboardVisibility}
+      onVisibilityChange={handleVisibilityChange}
+      onReportClick={(_report: ReportData) => {}}
+    >
+      <div className="h-[calc(100vh-4rem)] overflow-hidden bg-background flex flex-col">
+      {/* Body: Session panel + Content */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Session Sidebar */}
+        {/* Inline collapsible session panel */}
         <SessionSidebar
           sessions={sessionList}
           currentSessionId={sessionId}
@@ -993,6 +1003,7 @@ export default function ResearchAnalyst() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+    </DashboardLayout>
   );
 }

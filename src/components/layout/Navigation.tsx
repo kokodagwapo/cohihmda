@@ -1415,7 +1415,7 @@ export function Navigation(
                           ))}
                         </div>
                         <div>
-                          <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Shared With Me</p>
+                          <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Shared</p>
                           {sharedCanvases.slice(0, 8).map((canvas) => (
                             <div key={canvas.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800/60">
                               <button className="flex-1 text-left text-sm truncate" onClick={() => { navigate(`/my-dashboard/${canvas.id}`); setWorkbenchOpen(false); }}>
