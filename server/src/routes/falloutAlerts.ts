@@ -286,8 +286,8 @@ router.get(
              r.loan_id,
              l.loan_number,
              COALESCE(
-               NULLIF(TRIM(eu.full_name), ''),
                NULLIF(TRIM(l.loan_officer), ''),
+               NULLIF(TRIM(eu.full_name), ''),
                r.recipient_email
              ) AS loan_officer,
              r.encompass_user_id,
@@ -297,8 +297,10 @@ router.get(
              r.ip_address,
              r.user_agent,
              r.responded_at,
-             r.created_at
+             r.created_at,
+             t.created_at AS sent_at
            FROM public.fallout_alert_responses r
+           LEFT JOIN public.fallout_alert_tokens t ON t.id = r.token_id
            LEFT JOIN public.loans l ON l.loan_id = r.loan_id
            LEFT JOIN public.encompass_users eu ON eu.encompass_user_id = r.encompass_user_id
            ORDER BY r.token_id, r.responded_at DESC, r.created_at DESC
@@ -376,8 +378,8 @@ router.post(
            r.response,
            r.responded_at,
            COALESCE(
-             NULLIF(TRIM(eu.full_name), ''),
              NULLIF(TRIM(l.loan_officer), ''),
+             NULLIF(TRIM(eu.full_name), ''),
              t.recipient_email
            ) AS loan_officer_name
          FROM public.fallout_alert_tokens t

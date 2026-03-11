@@ -3448,8 +3448,11 @@ export const ClosingFalloutForecast = ({
     api.getLoanFalloutStatuses(loanIds, selectedTenantId || undefined)
       .then((result) => {
         const map = new Map<string, LoanFalloutStatus>();
+        const strip = (id: string) => id.replace(/^\{|\}$/g, "");
         for (const s of result.statuses) {
-          map.set(s.loan_id, s as LoanFalloutStatus);
+          const status = s as LoanFalloutStatus;
+          map.set(s.loan_id, status);
+          map.set(strip(s.loan_id), status);
         }
         setFalloutStatusMap(map);
       })
