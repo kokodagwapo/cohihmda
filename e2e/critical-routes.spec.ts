@@ -64,9 +64,9 @@ test.describe("@critical Critical missing routes", () => {
     await expect(userPage.getByRole("heading", { name: "Loan Details" })).toBeVisible();
   });
 
-  test("workbench redirect sends users to my-dashboard", async ({ userPage }) => {
-    await userPage.goto("/workbench", { waitUntil: "domcontentloaded" });
-    await expect(userPage).toHaveURL(/\/my-dashboard/);
+  test("my-dashboard redirects users to workbench", async ({ userPage }) => {
+    await userPage.goto("/my-dashboard", { waitUntil: "domcontentloaded" });
+    await expect(userPage).toHaveURL(/\/workbench/);
   });
 
   test("loan-funnel legacy route redirects to insights", async ({ userPage }) => {

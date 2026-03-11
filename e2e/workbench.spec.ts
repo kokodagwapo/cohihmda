@@ -76,7 +76,7 @@ test.describe("Workbench", () => {
     ["/workbench/shared", "Shared With Me"],
     ["/workbench/team-folders", "Team Folders"],
     ["/workbench/favorites", "Bookmarks"],
-    ["/workbench/distributions", "Content distribution"],
+    ["/workbench/distributions", "Communications Center"],
   ] as const;
 
   for (const [path, heading] of paths) {

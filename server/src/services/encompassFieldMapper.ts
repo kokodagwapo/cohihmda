@@ -265,19 +265,117 @@ export async function saveFieldSwap(
 ): Promise<void> {
   const normalizedFieldId = normalizeEncompassFieldId(encompassFieldId);
   try {
+    const existing = await tenantPool.query(
+      `SELECT encompass_field_id
+       FROM public.encompass_field_swaps
+       WHERE los_connection_id = $1
+         AND coheus_alias = $2
+         AND swap_type = $3
+       LIMIT 1`,
+      [losConnectionId, coheusAlias, swapType]
+    );
+    const previousFieldId = existing.rows[0]?.encompass_field_id ?? null;
+
     await tenantPool.query(
       `INSERT INTO public.encompass_field_swaps 
-       (los_connection_id, coheus_alias, encompass_field_id, swap_type, is_active, updated_at)
-       VALUES ($1, $2, $3, $4, TRUE, NOW())
+       (los_connection_id, coheus_alias, encompass_field_id, previous_field_id, swap_type, is_active, backfill_status, backfill_completed_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, TRUE, 'pending', NULL, NOW())
        ON CONFLICT (los_connection_id, coheus_alias, swap_type) 
        DO UPDATE SET 
+         previous_field_id = public.encompass_field_swaps.encompass_field_id,
          encompass_field_id = EXCLUDED.encompass_field_id,
          is_active = TRUE,
+         backfill_status = 'pending',
+         backfill_completed_at = NULL,
          updated_at = NOW()`,
-      [losConnectionId, coheusAlias, normalizedFieldId, swapType]
+      [
+        losConnectionId,
+        coheusAlias,
+        normalizedFieldId,
+        previousFieldId,
+        swapType,
+      ]
     );
   } catch (error: any) {
     console.error('[EncompassFieldMapper] Error saving field swap:', error.message);
+    throw error;
+  }
+}
+
+export interface PendingFieldSwap {
+  id: string;
+  losConnectionId: string;
+  coheusAlias: string;
+  encompassFieldId: string;
+  previousFieldId: string | null;
+  swapType: 'Standard' | 'Profitability';
+}
+
+/**
+ * Get active swaps that still need targeted backfill.
+ */
+export async function getFieldSwapsPendingBackfill(
+  tenantPool: any,
+  losConnectionId: string
+): Promise<PendingFieldSwap[]> {
+  try {
+    const result = await tenantPool.query(
+      `SELECT
+         id,
+         los_connection_id,
+         coheus_alias,
+         encompass_field_id,
+         previous_field_id,
+         swap_type
+       FROM public.encompass_field_swaps
+       WHERE los_connection_id = $1
+         AND is_active = TRUE
+         AND COALESCE(backfill_status, 'pending') = 'pending'
+       ORDER BY updated_at ASC`,
+      [losConnectionId]
+    );
+
+    return result.rows.map((row: any) => ({
+      id: row.id,
+      losConnectionId: row.los_connection_id,
+      coheusAlias: row.coheus_alias,
+      encompassFieldId: row.encompass_field_id,
+      previousFieldId: row.previous_field_id ?? null,
+      swapType: row.swap_type,
+    }));
+  } catch (error: any) {
+    console.error('[EncompassFieldMapper] Error reading pending backfill swaps:', error.message);
+    if (error.code === '42703') {
+      // backfill_status not migrated yet
+      return [];
+    }
+    throw error;
+  }
+}
+
+/**
+ * Update backfill status for a set of swap IDs.
+ */
+export async function updateFieldSwapBackfillStatus(
+  tenantPool: any,
+  swapIds: string[],
+  status: 'pending' | 'in_progress' | 'completed' | 'skipped'
+): Promise<void> {
+  if (swapIds.length === 0) return;
+  try {
+    await tenantPool.query(
+      `UPDATE public.encompass_field_swaps
+       SET backfill_status = $2,
+           backfill_completed_at = CASE WHEN $2 = 'completed' THEN NOW() ELSE backfill_completed_at END,
+           updated_at = NOW()
+       WHERE id = ANY($1::uuid[])`,
+      [swapIds, status]
+    );
+  } catch (error: any) {
+    console.error('[EncompassFieldMapper] Error updating backfill status:', error.message);
+    if (error.code === '42703') {
+      return;
+    }
     throw error;
   }
 }

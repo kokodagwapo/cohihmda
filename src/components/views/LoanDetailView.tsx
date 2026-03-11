@@ -10,6 +10,7 @@ import {
   useLoanDetailData,
   type LoanDetailRow,
   type LoanDetailListResponse,
+  type LoanDetailFilters,
 } from "@/hooks/useLoanDetailData";
 import { useAdditionalFieldColumns } from "@/hooks/useAdditionalFieldColumns";
 import { useTenantStore } from "@/stores/tenantStore";
@@ -407,6 +408,7 @@ function getColumnWidthFromContent(
 
 export function LoanDetailView({
   selectedTenantId: selectedTenantIdProp,
+  selectedChannel,
   data: dataProp,
   loading: loadingProp,
   error: errorProp,
@@ -420,7 +422,13 @@ export function LoanDetailView({
   const tenantId = selectedTenantIdProp ?? storeTenantId;
   const { columns: additionalColumns } = useAdditionalFieldColumns(tenantId);
   const isDarkMode = theme === "dark";
-  const fetched = useLoanDetailData(selectedTenantIdProp ?? storeTenantId);
+
+  const channelFilters = useMemo<LoanDetailFilters | null>(() => {
+    if (!selectedChannel || selectedChannel === "All") return null;
+    return { dimensionFilters: [{ column: "channel_group", value: selectedChannel }] };
+  }, [selectedChannel]);
+
+  const fetched = useLoanDetailData(tenantId, channelFilters);
   const isControlled = dataProp !== undefined;
   const data = isControlled ? dataProp ?? null : fetched.data;
   const loading = isControlled ? (loadingProp ?? false) : fetched.loading;

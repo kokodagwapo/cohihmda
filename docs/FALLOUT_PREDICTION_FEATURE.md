@@ -517,12 +517,12 @@ Difference between lock rate and current market rate:
 
 | Delta (Lock - Market) | Bucket | Interpretation |
 |-----------------------|--------|----------------|
-| ≤-0.5% | 1 | Borrower has great rate |
-| -0.5% to -0.25% | 2 | Favorable |
-| -0.25% to 0% | 3 | Neutral |
-| 0% to +0.25% | 4 | Slightly unfavorable |
-| +0.25% to +0.5% | 5 | Unfavorable |
-| >+0.5% | 6 | May shop elsewhere |
+| ≤−0.25% | 1 | Borrower has great rate |
+| −0.25% to 0% | 2 | Favorable |
+| 0% to 0.1% | 3 | Neutral |
+| 0.1% to +0.2% | 4 | Slightly unfavorable |
+| +0.2% to +0.3% | 5 | Unfavorable |
+| > 0.3% | 6 | May shop elsewhere |
 
 ### Pullthrough Signal
 

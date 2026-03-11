@@ -548,7 +548,7 @@ router.post(
       // 'Applications Taken' -> DateType={'Application'} -> application_date
       // 'Funded Production' -> DateType={'Funding'} -> funding_date
       // 'Lost Opportunities' -> [Withdrawn Flag]={1} with ANY date in range (Qlik associative model)
-      // 'All Loans' -> DateType={'Started'} -> started_date
+      // 'All Loans' -> include loan if ANY of its dates is in range (no single date required)
       let effectiveDateField = dateField || "application_date";
       let effectiveFilters = { ...additionalFilters };
 
@@ -562,7 +562,8 @@ router.post(
         effectiveDateField = "any_date"; // Special flag to trigger multi-date filtering
         effectiveFilters.withdrawn_filter = true;
       } else if (applicationType === "All Loans") {
-        effectiveDateField = "started_date";
+        // All loans in the database for the date range: include if ANY date falls in range
+        effectiveDateField = "any_date";
       }
 
       const parsedDateRange = dateRange
@@ -708,7 +709,7 @@ router.post(
         effectiveDateField = "any_date";
         effectiveFilters.withdrawn_filter = true;
       } else if (applicationType === "All Loans") {
-        effectiveDateField = "started_date";
+        effectiveDateField = "any_date";
       }
 
       const parsedDateRange = dateRangeBody

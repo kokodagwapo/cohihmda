@@ -24,6 +24,59 @@ const MAX_REASON_CODES = 10;
 /** Zone points: 6 pts = bucket 6 (worst), 1 pt = best. Both middle (P45–P55) and worse tail get 6 pts (direction-aware). */
 const ZONE_POINTS = [6, 5, 4, 3, 2, 1];
 
+/**
+ * Static market delta zone from fixed bucket ranges (not profile-based).
+ * Bucket 1 (low risk) = ≤−0.25%, Bucket 6 (high risk) = >+0.3%.
+ * Zone = 7 − bucket (Zone 1 = worst/6pts, Zone 6 = best/1pt).
+ */
+function staticMarketDeltaZone(delta: number | null): { zone: number; points: number } | null {
+  if (delta == null || isNaN(delta)) return null;
+  let bucket: number;
+  if (delta <= -0.25) bucket = 1;
+  else if (delta <= 0) bucket = 2;
+  else if (delta <= 0.1) bucket = 3;
+  else if (delta <= 0.2) bucket = 4;
+  else if (delta <= 0.3) bucket = 5;
+  else bucket = 6;
+  const zone = 7 - bucket;
+  return { zone, points: ZONE_POINTS[zone - 1] };
+}
+
+/**
+ * VA LTV hard rules: override profile-based LTV zones for VA loans by purpose.
+ * - VA + Purchase or NoCash-Out Refinance: LTV ≤ 100 → zones 4–6 (100 = zone 4); LTV > 100 → zones 1–3.
+ * - VA + Cash-Out Refinance: LTV ≤ 90 → zones 4–6 (90 = zone 4); LTV > 90 → zones 1–3.
+ * Returns null if not VA or purpose not in (Purchase, NoCash-Out Refinance, Cash-Out Refinance) so caller uses profile.
+ */
+function vaLtvZoneAndPoints(
+  ltv: number,
+  loanType: string,
+  loanPurpose: string
+): { zone: number; points: number } | null {
+  const lt = (loanType ?? '').toString().trim().toUpperCase();
+  const lp = (loanPurpose ?? '').toString().trim();
+  const lpNorm = lp.replace(/\s+/g, ' ').toLowerCase();
+  if (lt !== 'VA') return null;
+  const isPurchase = lpNorm === 'purchase';
+  const isNoCashOut =
+    lpNorm === 'nocash-out refinance' || lpNorm === 'no cash-out refinance';
+  const isCashOut = lpNorm === 'cash-out refinance';
+  if (!isPurchase && !isNoCashOut && !isCashOut) return null;
+
+  const threshold = isCashOut ? 90 : 100; // Purchase and NoCash-Out use 100
+  if (ltv <= threshold) {
+    // Zones 4–6: at threshold = 4, better = 5, 6
+    if (ltv >= threshold) return { zone: 4, points: ZONE_POINTS[3] };
+    const step = 10;
+    if (ltv >= threshold - step) return { zone: 5, points: ZONE_POINTS[4] };
+    return { zone: 6, points: ZONE_POINTS[5] };
+  }
+  // Above threshold: zones 1–3 (worse)
+  if (ltv <= threshold + 5) return { zone: 3, points: ZONE_POINTS[2] };
+  if (ltv <= threshold + 15) return { zone: 2, points: ZONE_POINTS[1] };
+  return { zone: 1, points: ZONE_POINTS[0] };
+}
+
 /** Risk threshold: only predict Denied/Withdrawn when risk score (0-100) is above this. */
 const RISK_THRESHOLD_PCT = 60;
 
@@ -33,8 +86,9 @@ const MAX_WITHDRAWN_POINTS = 5 * 6;
 
 /**
  * Zone scoring for Denied vs Withdrawn.
- * Denied (symmetricBands = false): Direction-aware. Zone 1 = middle (P45–P55) OR worse tail only. Zone 6 = good tail (1 pt).
  * Withdrawn (symmetricBands = true): Symmetric only. Zone 1 = middle (P45–P55) only. Zone 6 = both tails (<P10 or >P90) = 1 pt.
+ * Denied (symmetricBands = false): Direction-aware tails only. Middle P45–P55 = Zone 1; <P10 and >P90 by direction (FICO: <P10=Zone1, >P90=Zone6; LTV/DTI/days: >P90=Zone1, <P10=Zone6); same percentile bands as Withdrawn in between.
+ * (Purely direction-based Denied implementation is commented out below for reference.)
  */
 function zoneAndPoints(
   value: number,
@@ -73,20 +127,34 @@ function zoneAndPoints(
       if ((value >= p10 && value < p20) || (value > p80 && value <= p90)) return { zone: 5, points: ZONE_POINTS[4] };
       return { zone: 6, points: ZONE_POINTS[5] }; // both tails
     }
-    // Denied: direction-aware. Worse tail → Zone 1, good tail → Zone 6.
-    if (higherIsWorse) {
-      if (value > p90) return { zone: 1, points: ZONE_POINTS[0] };
-      if (value < p10) return { zone: 6, points: ZONE_POINTS[5] };
-    } else {
-      if (value < p10) return { zone: 1, points: ZONE_POINTS[0] };
-      if (value > p90) return { zone: 6, points: ZONE_POINTS[5] };
-    }
+    // Denied (direction-aware): middle P45–P55 = Zone 1; tails by direction; same bands as Withdrawn in between.
     if (value >= p45 && value <= p55) return { zone: 1, points: ZONE_POINTS[0] };
+    if (value < p10) return { zone: higherIsWorse ? 6 : 1, points: ZONE_POINTS[higherIsWorse ? 5 : 0] };
+    if (value > p90) return { zone: higherIsWorse ? 1 : 6, points: ZONE_POINTS[higherIsWorse ? 0 : 5] };
     if ((value >= p40 && value < p45) || (value > p55 && value <= p60)) return { zone: 2, points: ZONE_POINTS[1] };
     if ((value >= p30 && value < p40) || (value > p60 && value <= p70)) return { zone: 3, points: ZONE_POINTS[2] };
     if ((value >= p20 && value < p30) || (value > p70 && value <= p80)) return { zone: 4, points: ZONE_POINTS[3] };
     if ((value >= p10 && value < p20) || (value > p80 && value <= p90)) return { zone: 5, points: ZONE_POINTS[4] };
-    return { zone: 5, points: ZONE_POINTS[4] };
+    return { zone: 6, points: ZONE_POINTS[5] };
+    // --- COMMENTED OUT: Purely direction-based Denied (kept for reference) ---
+    // // Denied: purely direction-based bands. Lower-is-worse = FICO; higher-is-worse = LTV, DTI, days_active.
+    // if (higherIsWorse) {
+    //   // LTV, DTI, days_active: Zone 1 = worst (high), Zone 6 = best (low). Zone 1: ≥P70, Zone 2: P60–<P70, Zone 3: P55–<P60, Zone 4: P45–<P55, Zone 5: P30–<P45, Zone 6: <P30.
+    //   if (value >= p70) return { zone: 1, points: ZONE_POINTS[0] };
+    //   if (value >= p60 && value < p70) return { zone: 2, points: ZONE_POINTS[1] };
+    //   if (value >= p55 && value < p60) return { zone: 3, points: ZONE_POINTS[2] };
+    //   if (value >= p45 && value < p55) return { zone: 4, points: ZONE_POINTS[3] };
+    //   if (value >= p30 && value < p45) return { zone: 5, points: ZONE_POINTS[4] };
+    //   return { zone: 6, points: ZONE_POINTS[5] }; // value < p30
+    // } else {
+    //   // FICO: Zone 1 = worst (low), Zone 6 = best (high). Zone 1: ≤P30, Zone 2: P30–P45, Zone 3: P45–P55, Zone 4: P55–P60, Zone 5: P60–P70, Zone 6: >P70.
+    //   if (value <= p30) return { zone: 1, points: ZONE_POINTS[0] };
+    //   if (value > p30 && value <= p45) return { zone: 2, points: ZONE_POINTS[1] };
+    //   if (value > p45 && value <= p55) return { zone: 3, points: ZONE_POINTS[2] };
+    //   if (value > p55 && value <= p60) return { zone: 4, points: ZONE_POINTS[3] };
+    //   if (value > p60 && value <= p70) return { zone: 5, points: ZONE_POINTS[4] };
+    //   return { zone: 6, points: ZONE_POINTS[5] }; // value > p70
+    // }
   }
   const { blended_q1, blended_q3, blended_iqr } = stats;
   const iqr = Math.max(blended_iqr, 0.01);
@@ -105,27 +173,44 @@ function zoneAndPoints(
     if (value <= blended_q3 + 2 * iqr) return { zone: 5, points: ZONE_POINTS[4] };
     return { zone: 6, points: ZONE_POINTS[5] };
   }
-  if (higherIsWorse) {
-    if (value > blended_q3) {
-      if (value <= blended_q3 + iqr / 2) return { zone: 2, points: ZONE_POINTS[1] };
-      if (value <= blended_q3 + iqr) return { zone: 3, points: ZONE_POINTS[2] };
-      if (value <= blended_q3 + 1.5 * iqr) return { zone: 4, points: ZONE_POINTS[3] };
-      if (value <= blended_q3 + 2 * iqr) return { zone: 5, points: ZONE_POINTS[4] };
-      return { zone: 1, points: ZONE_POINTS[0] };
-    }
-    if (value < blended_q1) return { zone: 6, points: ZONE_POINTS[5] };
-  } else {
-    if (value < blended_q1) {
-      if (value >= blended_q1 - iqr / 2) return { zone: 2, points: ZONE_POINTS[1] };
-      if (value >= blended_q1 - iqr) return { zone: 3, points: ZONE_POINTS[2] };
-      if (value >= blended_q1 - 1.5 * iqr) return { zone: 4, points: ZONE_POINTS[3] };
-      if (value >= blended_q1 - 2 * iqr) return { zone: 5, points: ZONE_POINTS[4] };
-      return { zone: 1, points: ZONE_POINTS[0] };
-    }
-    if (value > blended_q3) return { zone: 6, points: ZONE_POINTS[5] };
-  }
+  // Denied (direction-aware) IQR fallback: middle = Zone 1; extreme tails by direction; same symmetric bands in between.
   if (value >= blended_q1 && value <= blended_q3) return { zone: 1, points: ZONE_POINTS[0] };
-  return { zone: 4, points: ZONE_POINTS[3] };
+  if (value < blended_q1 - 2 * iqr) return { zone: higherIsWorse ? 6 : 1, points: ZONE_POINTS[higherIsWorse ? 5 : 0] };
+  if (value > blended_q3 + 2 * iqr) return { zone: higherIsWorse ? 1 : 6, points: ZONE_POINTS[higherIsWorse ? 0 : 5] };
+  if (value < blended_q1) {
+    if (value >= blended_q1 - iqr / 2) return { zone: 2, points: ZONE_POINTS[1] };
+    if (value >= blended_q1 - iqr) return { zone: 3, points: ZONE_POINTS[2] };
+    if (value >= blended_q1 - 1.5 * iqr) return { zone: 4, points: ZONE_POINTS[3] };
+    if (value >= blended_q1 - 2 * iqr) return { zone: 5, points: ZONE_POINTS[4] };
+    return { zone: 6, points: ZONE_POINTS[5] };
+  }
+  if (value <= blended_q3 + iqr / 2) return { zone: 2, points: ZONE_POINTS[1] };
+  if (value <= blended_q3 + iqr) return { zone: 3, points: ZONE_POINTS[2] };
+  if (value <= blended_q3 + 1.5 * iqr) return { zone: 4, points: ZONE_POINTS[3] };
+  if (value <= blended_q3 + 2 * iqr) return { zone: 5, points: ZONE_POINTS[4] };
+  return { zone: 6, points: ZONE_POINTS[5] };
+  // --- COMMENTED OUT: Purely direction-based Denied IQR fallback (kept for reference) ---
+  // if (higherIsWorse) {
+  //   if (value > blended_q3) {
+  //     if (value <= blended_q3 + iqr / 2) return { zone: 2, points: ZONE_POINTS[1] };
+  //     if (value <= blended_q3 + iqr) return { zone: 3, points: ZONE_POINTS[2] };
+  //     if (value <= blended_q3 + 1.5 * iqr) return { zone: 4, points: ZONE_POINTS[3] };
+  //     if (value <= blended_q3 + 2 * iqr) return { zone: 5, points: ZONE_POINTS[4] };
+  //     return { zone: 1, points: ZONE_POINTS[0] };
+  //   }
+  //   if (value < blended_q1) return { zone: 6, points: ZONE_POINTS[5] };
+  // } else {
+  //   if (value < blended_q1) {
+  //     if (value >= blended_q1 - iqr / 2) return { zone: 2, points: ZONE_POINTS[1] };
+  //     if (value >= blended_q1 - iqr) return { zone: 3, points: ZONE_POINTS[2] };
+  //     if (value >= blended_q1 - 1.5 * iqr) return { zone: 4, points: ZONE_POINTS[3] };
+  //     if (value >= blended_q1 - 2 * iqr) return { zone: 5, points: ZONE_POINTS[4] };
+  //     return { zone: 1, points: ZONE_POINTS[0] };
+  //   }
+  //   if (value > blended_q3) return { zone: 6, points: ZONE_POINTS[5] };
+  // }
+  // if (value >= blended_q1 && value <= blended_q3) return { zone: 1, points: ZONE_POINTS[0] };
+  // return { zone: 4, points: ZONE_POINTS[3] };
 }
 
 /** Raw segment key (loan_type, loan_purpose, occupancy) for profile lookup. */
@@ -186,7 +271,7 @@ function computeSimilarityScore(
   const features =
     statusType === 'Withdrawn'
       ? (['fico_score', 'ltv_ratio', 'be_dti_ratio', 'days_active', 'market_delta'] as const)
-      : (['fico_score', 'ltv_ratio', 'be_dti_ratio', 'days_active'] as const); // Denied: days_active = app to today
+      : (['fico_score', 'ltv_ratio', 'be_dti_ratio', 'days_active'] as const); // Denied (likely decline): 4 features only; market_delta not used
 
   // Lower value = worse: fico_score, market_delta. Higher value = worse: ltv_ratio, be_dti_ratio, days_active.
   const higherIsWorseFeatures = new Set(['ltv_ratio', 'be_dti_ratio', 'days_active']);
@@ -206,6 +291,35 @@ function computeSimilarityScore(
               ? vals.days_active
               : vals.market_delta;
     if (value == null || isNaN(value)) continue; // skip null/missing
+
+    // market_delta: use static bucket ranges instead of profile-based zones
+    if (f === 'market_delta') {
+      const result = staticMarketDeltaZone(value);
+      if (result) {
+        score += result.points;
+        reasonCodes.push({
+          bucket_type: f,
+          bucket_value: `Zone${result.zone}`,
+          risk_score: result.points,
+        });
+      }
+      continue;
+    }
+
+    // VA LTV hard rules: override profile-based LTV zones for VA + Purchase / NoCash-Out / Cash-Out Refinance
+    if (f === 'ltv_ratio') {
+      const vaResult = vaLtvZoneAndPoints(value, segment.loan_type, segment.loan_purpose);
+      if (vaResult) {
+        score += vaResult.points;
+        reasonCodes.push({
+          bucket_type: f,
+          bucket_value: `Zone${vaResult.zone}`,
+          risk_score: vaResult.points,
+        });
+        continue;
+      }
+    }
+
     const stats = profile.get(f);
     if (!stats) continue;
     const higherIsWorse = higherIsWorseFeatures.has(f);
@@ -391,12 +505,18 @@ export async function runFalloutSequencer(
   }
 
   // Compare-risks: Predict Deny when deny risk > 60% and (withdraw ≤ 60% or deny > withdraw); Predict Withdraw when withdraw > 60% and (deny ≤ 60% or withdraw ≥ deny). Ties go to Withdraw.
+  // Withdrawn risk denominator: 30 if loan has market_delta (5 features), else 24 (4 features) so % is comparable.
   const deniedRisk100 = (score: number) => (score / MAX_DENIED_POINTS) * 100;
-  const withdrawnRisk100 = (score: number) => (score / MAX_WITHDRAWN_POINTS) * 100;
+  const getWithdrawnMaxPoints = (loan: any): number => {
+    const vals = getFeatureValues(loan);
+    return vals.market_delta != null ? MAX_WITHDRAWN_POINTS : MAX_DENIED_POINTS;
+  };
+  const withdrawnRisk100 = (score: number, loan: any) =>
+    (score / getWithdrawnMaxPoints(loan)) * 100;
 
   for (const item of list) {
     const dRisk = deniedRisk100(item.deniedScore);
-    const wRisk = withdrawnRisk100(item.withdrawnScore);
+    const wRisk = withdrawnRisk100(item.withdrawnScore, item.loan);
     const denyMeetsThreshold = dRisk > RISK_THRESHOLD_PCT;
     const withdrawMeetsThreshold = wRisk > RISK_THRESHOLD_PCT;
     if (denyMeetsThreshold && (!withdrawMeetsThreshold || dRisk > wRisk)) {
@@ -478,6 +598,37 @@ export async function runFalloutSequencer(
                 ? vals.days_active
                 : vals.market_delta;
       if (value == null || isNaN(value)) continue;
+
+      // market_delta: use static bucket ranges instead of profile-based zones
+      if (f === 'market_delta') {
+        const staticResult = staticMarketDeltaZone(value);
+        if (staticResult) {
+          item.reason_codes.push({
+            bucket_type: f,
+            bucket_value: `Zone${staticResult.zone}`,
+            risk_score: 0,
+          });
+        }
+        continue;
+      }
+
+      // VA LTV hard rules: same override for Originated bucket display
+      if (f === 'ltv_ratio') {
+        const vaResult = vaLtvZoneAndPoints(
+          value,
+          item.segment.loan_type,
+          item.segment.loan_purpose
+        );
+        if (vaResult) {
+          item.reason_codes.push({
+            bucket_type: f,
+            bucket_value: `Zone${vaResult.zone}`,
+            risk_score: 0,
+          });
+          continue;
+        }
+      }
+
       const stats = profile.get(f);
       if (!stats) continue;
       const higherIsWorse = higherIsWorseFeatures.has(f);
@@ -486,61 +637,21 @@ export async function runFalloutSequencer(
         item.reason_codes.push({
           bucket_type: f,
           bucket_value: `Zone${result.zone}`,
-          risk_score: 0, // not used for official risk score; UI derives bucket value 1–6 from zone (Zone1→6, Zone6→1)
+          risk_score: 0,
         });
       }
     }
     item.reason_codes = item.reason_codes.slice(0, MAX_REASON_CODES);
   }
 
-  // Highest-risk Denied and Withdrawn only (exclude ClosingLate / ProjectedToClose)
-  const pad = (s: string, len: number) => (s ?? '').toString().slice(0, len).padEnd(len);
-  const riskScore100 = (item: LoanWithMeta): number => {
-    const sum = item.reason_codes.reduce((acc, r) => acc + (r.risk_score ?? 0), 0);
-    const max =
-      item.projected_status === 'Denied'
-        ? MAX_DENIED_POINTS
-        : item.projected_status === 'Withdrawn'
-          ? MAX_WITHDRAWN_POINTS
-          : MAX_OTHER_POINTS;
-    return Math.min(100, Math.round((sum / max) * 100));
-  };
-  const topDenied = list
-    .filter((x) => x.projected_status === 'Denied')
-    .sort((a, b) => riskScore100(b) - riskScore100(a))
-    .slice(0, 20);
-  const topWithdrawn = list
-    .filter((x) => x.projected_status === 'Withdrawn')
-    .sort((a, b) => riskScore100(b) - riskScore100(a))
-    .slice(0, 20);
-  const printRow = (item: LoanWithMeta) => {
+  // Log each active loan: loan number, denied_points, withdraw_points, predicted outcome
+  // eslint-disable-next-line no-console
+  console.log('\n[Fallout Sequencer] Active loans (loan_number | denied_points | withdraw_points | outcome):');
+  for (const item of list) {
     const loanNumber = (item.loan?.loan_number ?? item.loan_id ?? '').toString();
-    const risk = riskScore100(item);
-    const outcome = item.projected_status;
-    const reasonsStr = item.reason_codes.map((r) => `${r.bucket_type}=${r.bucket_value}(${r.risk_score})`).join('; ') || '—';
     // eslint-disable-next-line no-console
-    console.log(`${pad(loanNumber, 14)} | ${pad(String(risk), 3)} | ${pad(outcome, 16)} | ${reasonsStr}`);
-  };
-  // eslint-disable-next-line no-console
-  console.log('\n[Fallout Sequencer] Highest-risk Denied (loan # | risk | outcome | reasons):');
-  // eslint-disable-next-line no-console
-  console.log('─'.repeat(110));
-  for (const item of topDenied) printRow(item);
-  if (topDenied.length === 0) {
-    // eslint-disable-next-line no-console
-    console.log('(none)');
+    console.log(`${loanNumber} | ${item.deniedScore} | ${item.withdrawnScore} | ${item.projected_status}`);
   }
-  // eslint-disable-next-line no-console
-  console.log('\n[Fallout Sequencer] Highest-risk Withdrawn (loan # | risk | outcome | reasons):');
-  // eslint-disable-next-line no-console
-  console.log('─'.repeat(110));
-  for (const item of topWithdrawn) printRow(item);
-  if (topWithdrawn.length === 0) {
-    // eslint-disable-next-line no-console
-    console.log('(none)');
-  }
-  // eslint-disable-next-line no-console
-  console.log('─'.repeat(110) + '\n');
 
   const calculatedAt = new Date();
   let saved = 0;

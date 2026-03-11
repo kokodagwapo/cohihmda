@@ -75,6 +75,7 @@ router.put(
       // Validate the key is a known setting
       const allowedKeys = [
         "openai_api_key",
+        "gemini_api_key",
         "anthropic_api_key",
         "default_embedding_model",
       ];
@@ -115,9 +116,9 @@ router.get(
     try {
       const key = req.params.key as string;
 
-      if (key !== "openai_api_key") {
+      if (key !== "openai_api_key" && key !== "gemini_api_key") {
         return res.status(400).json({
-          error: "Key testing only supported for openai_api_key",
+          error: "Key testing only supported for openai_api_key and gemini_api_key",
         });
       }
 
@@ -130,13 +131,20 @@ router.get(
         });
       }
 
-      // Test OpenAI key with a simple models list request
+      // Test provider key with a simple models list request
       try {
-        const response = await fetch("https://api.openai.com/v1/models", {
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-          },
-        });
+        const response =
+          key === "openai_api_key"
+            ? await fetch("https://api.openai.com/v1/models", {
+                headers: {
+                  Authorization: `Bearer ${apiKey}`,
+                },
+              })
+            : await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(
+                  apiKey
+                )}`
+              );
 
         if (response.ok) {
           res.json({
@@ -163,6 +171,125 @@ router.get(
       res.status(500).json({ error: "Failed to test API key" });
     }
   }
+);
+
+// ── Fallout Email Redirect Toggle ──────────────────────────────────────────
+
+const FALLOUT_REDIRECT_KEY = "fallout_email_redirect_enabled";
+
+router.get(
+  "/fallout-redirect-toggle",
+  authenticateToken,
+  requirePlatformAdmin,
+  async (_req, res) => {
+    try {
+      const raw = await getPlatformSetting(FALLOUT_REDIRECT_KEY);
+      res.json({ enabled: raw === "true" });
+    } catch (error: any) {
+      console.error("[PlatformSettings] Error fetching fallout redirect toggle:", error);
+      res.status(500).json({ error: "Failed to fetch redirect toggle" });
+    }
+  },
+);
+
+router.put(
+  "/fallout-redirect-toggle",
+  authenticateToken,
+  requirePlatformAdmin,
+  async (req, res) => {
+    try {
+      const { enabled } = req.body ?? {};
+      if (typeof enabled !== "boolean") {
+        return res.status(400).json({ error: "enabled must be a boolean" });
+      }
+      await setPlatformSetting(FALLOUT_REDIRECT_KEY, enabled ? "true" : "false");
+      res.json({ enabled, message: `Fallout email redirect ${enabled ? "enabled" : "disabled"}` });
+    } catch (error: any) {
+      console.error("[PlatformSettings] Error updating fallout redirect toggle:", error);
+      res.status(500).json({ error: "Failed to update redirect toggle" });
+    }
+  },
+);
+
+// ── Fallout Dev Allowed Emails ──────────────────────────────────────────────
+
+const FALLOUT_DEV_EMAILS_KEY = "fallout_dev_allowed_emails";
+const emailSchema = z.string().email();
+
+function parseEmailList(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((e: unknown) => typeof e === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+router.get(
+  "/fallout-dev-emails",
+  authenticateToken,
+  requirePlatformAdmin,
+  async (_req, res) => {
+    try {
+      const raw = await getPlatformSetting(FALLOUT_DEV_EMAILS_KEY);
+      res.json({ emails: parseEmailList(raw) });
+    } catch (error: any) {
+      console.error("[PlatformSettings] Error fetching fallout dev emails:", error);
+      res.status(500).json({ error: "Failed to fetch dev email list" });
+    }
+  },
+);
+
+router.post(
+  "/fallout-dev-emails",
+  authenticateToken,
+  requirePlatformAdmin,
+  async (req, res) => {
+    try {
+      const { email } = req.body ?? {};
+      const validation = emailSchema.safeParse(email);
+      if (!validation.success) {
+        return res.status(400).json({ error: "Invalid email address" });
+      }
+      const normalizedEmail = validation.data.trim().toLowerCase();
+
+      const raw = await getPlatformSetting(FALLOUT_DEV_EMAILS_KEY);
+      const emails = parseEmailList(raw);
+      if (emails.includes(normalizedEmail)) {
+        return res.json({ emails, message: "Email already in list" });
+      }
+      emails.push(normalizedEmail);
+      await setPlatformSetting(FALLOUT_DEV_EMAILS_KEY, JSON.stringify(emails));
+      res.json({ emails, message: `Added ${normalizedEmail}` });
+    } catch (error: any) {
+      console.error("[PlatformSettings] Error adding fallout dev email:", error);
+      res.status(500).json({ error: "Failed to add email" });
+    }
+  },
+);
+
+router.delete(
+  "/fallout-dev-emails",
+  authenticateToken,
+  requirePlatformAdmin,
+  async (req, res) => {
+    try {
+      const { email } = req.body ?? {};
+      if (typeof email !== "string" || !email.trim()) {
+        return res.status(400).json({ error: "Email is required" });
+      }
+      const normalizedEmail = email.trim().toLowerCase();
+
+      const raw = await getPlatformSetting(FALLOUT_DEV_EMAILS_KEY);
+      const emails = parseEmailList(raw).filter((e) => e !== normalizedEmail);
+      await setPlatformSetting(FALLOUT_DEV_EMAILS_KEY, JSON.stringify(emails));
+      res.json({ emails, message: `Removed ${normalizedEmail}` });
+    } catch (error: any) {
+      console.error("[PlatformSettings] Error removing fallout dev email:", error);
+      res.status(500).json({ error: "Failed to remove email" });
+    }
+  },
 );
 
 export default router;

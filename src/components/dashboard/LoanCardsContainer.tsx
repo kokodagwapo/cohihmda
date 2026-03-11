@@ -77,6 +77,15 @@ interface LoanPrediction {
   riskFactors?: string[];
 }
 
+export interface LoanFalloutStatus {
+  loan_id: string;
+  sent_at: string;
+  recipient_email: string | null;
+  loan_officer_name: string | null;
+  response: "acknowledged" | "working_on_it" | "need_help" | null;
+  responded_at: string | null;
+}
+
 interface LoanCardsContainerProps {
   loans: LoanCard[];
   predictions?: LoanPrediction[]; // Optional predictions map
@@ -87,6 +96,8 @@ interface LoanCardsContainerProps {
   /** When provided, filter tab is controlled by parent (shared with critical loans table). */
   activeTab?: TabType;
   onActiveTabChange?: (tab: TabType) => void;
+  /** Optional map of loan_id -> fallout alert send/response status */
+  falloutStatusMap?: Map<string, LoanFalloutStatus>;
 }
 
 export type TabType = "all" | "high-risk" | "likely-withdraw" | "likely-decline" | "past-est-closing" | "likely-close-late" | "favorites";
@@ -140,6 +151,18 @@ const ITEMS_PER_PAGE_DEFAULT = 6;
 const VIRTUALIZATION_THRESHOLD = 50;
 
 // PERFORMANCE: Memoized loan card component to prevent unnecessary re-renders
+const FALLOUT_RESPONSE_LABELS: Record<string, string> = {
+  acknowledged: "Acknowledged",
+  working_on_it: "Working on it",
+  need_help: "Need help",
+};
+
+const FALLOUT_RESPONSE_COLORS: Record<string, string> = {
+  acknowledged: "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300",
+  working_on_it: "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300",
+  need_help: "bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300",
+};
+
 const LoanCardItem = memo(
   ({
     loan,
@@ -150,6 +173,7 @@ const LoanCardItem = memo(
     isFavorited,
     onToggleFavorite,
     showFavoriteButton = false,
+    falloutStatus,
   }: {
     loan: LoanCard;
     isDarkMode: boolean;
@@ -159,6 +183,7 @@ const LoanCardItem = memo(
     isFavorited?: boolean;
     onToggleFavorite?: () => void;
     showFavoriteButton?: boolean;
+    falloutStatus?: LoanFalloutStatus;
   }) => (
     <div
       onClick={() => onSelectLoan(loan)}
@@ -179,6 +204,31 @@ const LoanCardItem = memo(
         onToggleFavorite={onToggleFavorite}
         showFavoriteButton={showFavoriteButton}
       />
+      {falloutStatus && (
+        <div
+          className="mt-2 pt-2 border-t border-slate-200/60 dark:border-slate-700/60 flex flex-wrap items-center gap-1.5 text-[10px]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 px-2 py-0.5">
+            <svg className="w-2.5 h-2.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+            Sent {new Date(falloutStatus.sent_at).toLocaleDateString()}
+          </span>
+          {falloutStatus.response ? (
+            <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-medium ${FALLOUT_RESPONSE_COLORS[falloutStatus.response] || ""}`}>
+              {FALLOUT_RESPONSE_LABELS[falloutStatus.response] || falloutStatus.response}
+              {falloutStatus.responded_at && (
+                <span className="opacity-70 font-normal">
+                  · {new Date(falloutStatus.responded_at).toLocaleDateString()}
+                </span>
+              )}
+            </span>
+          ) : (
+            <span className="inline-flex items-center rounded-full bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 px-2 py-0.5">
+              No response yet
+            </span>
+          )}
+        </div>
+      )}
     </div>
   )
 );
@@ -195,6 +245,7 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(
     onOpenLoanIdHandled,
     activeTab: controlledActiveTab,
     onActiveTabChange,
+    falloutStatusMap,
   }) => {
     const [internalActiveTab, setInternalActiveTab] = useState<TabType>("all");
     const activeTab = controlledActiveTab ?? internalActiveTab;
@@ -759,6 +810,7 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(
                           isFavorited={isFavorited(loan1.id)}
                           onToggleFavorite={() => toggleFavorite(loan1.id)}
                           showFavoriteButton={true}
+                          falloutStatus={falloutStatusMap?.get(loan1.id)}
                         />
                       )}
                       {loan2 && (
@@ -771,6 +823,7 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(
                           isFavorited={isFavorited(loan2.id)}
                           onToggleFavorite={() => toggleFavorite(loan2.id)}
                           showFavoriteButton={true}
+                          falloutStatus={falloutStatusMap?.get(loan2.id)}
                         />
                       )}
                     </div>
@@ -792,6 +845,7 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(
                   isFavorited={isFavorited(loan.id)}
                   onToggleFavorite={() => toggleFavorite(loan.id)}
                   showFavoriteButton={true}
+                  falloutStatus={falloutStatusMap?.get(loan.id)}
                 />
               ))}
             </div>

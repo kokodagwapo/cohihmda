@@ -117,7 +117,7 @@ export function WidgetShell({
       )}
 
       {/* Body */}
-      <div className="flex-1 min-h-0 overflow-auto">
+      <div className={cn('flex-1 min-h-0', compact ? 'overflow-hidden' : 'overflow-auto')}>
         {loading ? (
           <div className="h-full w-full flex items-center justify-center p-4">
             <Loader2 className="h-5 w-5 animate-spin text-slate-400 dark:text-slate-500" />

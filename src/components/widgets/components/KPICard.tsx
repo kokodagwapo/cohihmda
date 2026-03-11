@@ -93,6 +93,65 @@ export function KPICard({
     sky: 'from-sky-500/10 to-sky-600/5 dark:from-sky-500/15 dark:to-sky-600/10',
   };
 
+  const content = (
+    <>
+      {/* Label */}
+      <p
+        className={cn(
+          'uppercase tracking-wider text-slate-500 dark:text-slate-400 font-medium',
+          isCompact ? 'text-[10px]' : 'text-xs',
+        )}
+      >
+        {data?.label ?? '\u00A0'}
+      </p>
+
+      {/* Value */}
+      <p
+        className={cn(
+          'font-bold text-slate-900 dark:text-slate-100 tabular-nums',
+          isCompact ? 'text-lg' : 'text-2xl',
+        )}
+      >
+        {data ? formatKPIValue(data.value, (config?.format as KPIFormat) ?? data.format) : '\u2014'}
+      </p>
+
+      {/* Trend */}
+      {trend && (
+        <div
+          className={cn(
+            'flex items-center gap-1',
+            trend.direction === 'up' && 'text-emerald-600 dark:text-emerald-400',
+            trend.direction === 'down' && 'text-rose-600 dark:text-rose-400',
+            trend.direction === 'flat' && 'text-slate-400 dark:text-slate-500',
+          )}
+        >
+          {trend.direction === 'up' && <TrendingUp className="h-3 w-3" />}
+          {trend.direction === 'down' && <TrendingDown className="h-3 w-3" />}
+          {trend.direction === 'flat' && <Minus className="h-3 w-3" />}
+          <span className="text-[10px] font-medium">{trend.label}</span>
+        </div>
+      )}
+
+      {/* Subtitle */}
+      {data?.subtitle && (
+        <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 truncate max-w-full">
+          {data.subtitle}
+        </p>
+      )}
+    </>
+  );
+
+  const wrapperClassName = cn(
+    'w-full h-full flex flex-col items-center justify-center text-center',
+    'bg-gradient-to-br',
+    accentClasses[colorAccent] ?? accentClasses.blue,
+    'transition-colors duration-200',
+    isCompact ? 'gap-0.5 p-2' : 'gap-1 p-4',
+    onClick
+      ? 'cursor-pointer hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+      : 'cursor-default',
+  );
+
   return (
     <WidgetShell
       loading={loading}
@@ -102,65 +161,20 @@ export function KPICard({
       onDuplicate={onDuplicate}
       compact
     >
-      <button
-        type="button"
-        className={cn(
-          'w-full h-full flex flex-col items-center justify-center text-center',
-          'bg-gradient-to-br',
-          accentClasses[colorAccent] ?? accentClasses.blue,
-          'transition-all duration-200',
-          onClick && 'cursor-pointer hover:shadow-md hover:scale-[1.01]',
-          !onClick && 'cursor-default',
-          isCompact ? 'gap-0.5 p-2' : 'gap-1 p-4',
-        )}
-        onClick={onClick}
-        tabIndex={onClick ? 0 : -1}
-        disabled={!onClick}
-      >
-        {/* Label */}
-        <p
-          className={cn(
-            'uppercase tracking-wider text-slate-500 dark:text-slate-400 font-medium',
-            isCompact ? 'text-[10px]' : 'text-xs',
-          )}
+      {onClick ? (
+        <button
+          type="button"
+          className={wrapperClassName}
+          onClick={onClick}
+          tabIndex={0}
         >
-          {data?.label ?? '\u00A0'}
-        </p>
-
-        {/* Value */}
-        <p
-          className={cn(
-            'font-bold text-slate-900 dark:text-slate-100 tabular-nums',
-            isCompact ? 'text-lg' : 'text-2xl',
-          )}
-        >
-          {data ? formatKPIValue(data.value, (config?.format as KPIFormat) ?? data.format) : '\u2014'}
-        </p>
-
-        {/* Trend */}
-        {trend && (
-          <div
-            className={cn(
-              'flex items-center gap-1',
-              trend.direction === 'up' && 'text-emerald-600 dark:text-emerald-400',
-              trend.direction === 'down' && 'text-rose-600 dark:text-rose-400',
-              trend.direction === 'flat' && 'text-slate-400 dark:text-slate-500',
-            )}
-          >
-            {trend.direction === 'up' && <TrendingUp className="h-3 w-3" />}
-            {trend.direction === 'down' && <TrendingDown className="h-3 w-3" />}
-            {trend.direction === 'flat' && <Minus className="h-3 w-3" />}
-            <span className="text-[10px] font-medium">{trend.label}</span>
-          </div>
-        )}
-
-        {/* Subtitle */}
-        {data?.subtitle && (
-          <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 truncate max-w-full">
-            {data.subtitle}
-          </p>
-        )}
-      </button>
+          {content}
+        </button>
+      ) : (
+        <div className={wrapperClassName} aria-hidden>
+          {content}
+        </div>
+      )}
     </WidgetShell>
   );
 }

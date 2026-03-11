@@ -793,9 +793,6 @@ router.get(
         paramIndex += accessFilter.paramOffset;
       }
 
-      // Exclude archived loans
-      conditions.push("(is_archived IS DISTINCT FROM TRUE)");
-
       const dateField = (req.query.date_field as string) || "application_date";
       const dateFrom = req.query.date_from as string | undefined;
       const dateTo = req.query.date_to as string | undefined;
@@ -818,6 +815,15 @@ router.get(
         conditions.push(`loan_officer = $${paramIndex}`);
         params.push(loanOfficer);
         paramIndex += 1;
+      }
+
+      // Channel group filter (Retail, TPO, etc.) — uses the same CASE expression as the channel selector
+      const channelGroup = req.query.channel_group as string | undefined;
+      if (channelGroup && channelGroup !== "All") {
+        const clause = buildChannelWhereClause(channelGroup);
+        if (clause) {
+          conditions.push(clause.replace(/^AND\s+/i, ""));
+        }
       }
 
       // Apply additional dimension filters (loan_purpose, channel, etc.) from workbench "ADD FILTER DIMENSION"
@@ -7214,45 +7220,124 @@ router.post(
 
 /**
  * GET /api/loans/market-rates/current
- * Returns current market rate data for the OBMMI ticker display.
- * Uses cached FRED OBMMIC30YF data from the management database.
+ * Returns current OBMMI rates for ticker and rate snapshot (all 6 series from FRED).
+ * Series: conforming, jumbo, fha, va, conforming15yr, usda. Each has rate, delta, trend, priorRate.
  */
 router.get(
   "/market-rates/current",
   authenticateToken,
   async (_req: AuthRequest, res) => {
     try {
-      const {
-        getMostRecentMarketRate,
-        getMarketRateForDate,
-        initializeMarketRateCache,
-      } = await import("../services/dashboard/marketRateService.js");
+      const { getMultiSeriesSnapshot } =
+        await import("../services/dashboard/marketRateService.js");
 
-      await initializeMarketRateCache();
-      const currentRate = await getMostRecentMarketRate();
+      const snapshot = await getMultiSeriesSnapshot();
 
-      if (currentRate === null) {
-        return res.json({ available: false, rates: [] });
+      const toTrend = (delta: number | null) =>
+        delta == null ? "flat" : delta > 0.001 ? "up" : delta < -0.001 ? "down" : "flat";
+
+      const series: Record<string, { rate: number; delta: number; trend: string; priorRate: number | null }> = {};
+      for (const [key, snap] of Object.entries(snapshot)) {
+        const rate = snap.rate ?? 0;
+        const delta = snap.delta ?? 0;
+        series[key] = {
+          rate,
+          delta: Math.round(delta * 1000) / 1000,
+          trend: toTrend(snap.delta),
+          priorRate: snap.priorRate ?? null,
+        };
       }
 
-      const today = new Date();
-      const fmt = (d: Date) => d.toISOString().split("T")[0];
-      const d1 = new Date(today);
-      d1.setDate(d1.getDate() - 1);
-      const yesterdayRate = await getMarketRateForDate(fmt(d1));
-      const delta = yesterdayRate !== null ? currentRate - yesterdayRate : 0;
-
+      const hasAny = Object.values(snapshot).some((s) => s.rate != null);
       return res.json({
-        available: true,
-        conforming30yr: {
-          rate: currentRate,
-          delta: Math.round(delta * 1000) / 1000,
-          trend: delta > 0.001 ? "up" : delta < -0.001 ? "down" : "flat",
-        },
+        available: hasAny,
+        series,
+        // Legacy shape for callers that only expect conforming30yr
+        conforming30yr: series.conforming
+          ? {
+              rate: series.conforming.rate,
+              delta: series.conforming.delta,
+              trend: series.conforming.trend,
+            }
+          : undefined,
       });
     } catch (error: any) {
       logError("Error fetching current market rates", error);
       return res.status(500).json({ error: "Failed to fetch market rates" });
+    }
+  },
+);
+
+/**
+ * GET /api/loans/market-rates/mortgage-30y
+ * Returns 30-Year Fixed Mortgage Rate (FRED MORTGAGE30US - Freddie Mac PMMS) for a date range.
+ * Query: observation_start=YYYY-MM-DD, observation_end=YYYY-MM-DD.
+ * On-demand FRED call; no DB storage.
+ */
+router.get(
+  "/market-rates/mortgage-30y",
+  authenticateToken,
+  async (req: AuthRequest, res) => {
+    try {
+      const observationStart = req.query.observation_start as string | undefined;
+      const observationEnd = req.query.observation_end as string | undefined;
+      if (!observationStart || !observationEnd) {
+        return res.status(400).json({
+          error: "observation_start and observation_end query params required (YYYY-MM-DD)",
+        });
+      }
+      const { fetchFredSeriesObservations, FRED_SERIES_MORTGAGE30US } =
+        await import("../services/dashboard/marketRateService.js");
+      const observations = await fetchFredSeriesObservations(
+        FRED_SERIES_MORTGAGE30US,
+        observationStart,
+        observationEnd
+      );
+      return res.json({
+        observations: observations.map((o) => ({ date: o.date, rate: o.value })),
+      });
+    } catch (error: any) {
+      logError("Error fetching mortgage 30y rates", error);
+      return res.status(500).json({
+        error: error.message || "Failed to fetch 30-Year Mortgage rates",
+      });
+    }
+  },
+);
+
+/**
+ * GET /api/loans/market-rates/existing-home-sales
+ * Returns Existing Home Sales SAAR (FRED EXHOSLUSM495S - NAR) for a date range.
+ * Query: observation_start=YYYY-MM-DD, observation_end=YYYY-MM-DD.
+ * On-demand FRED call; no DB storage.
+ */
+router.get(
+  "/market-rates/existing-home-sales",
+  authenticateToken,
+  async (req: AuthRequest, res) => {
+    try {
+      const observationStart = req.query.observation_start as string | undefined;
+      const observationEnd = req.query.observation_end as string | undefined;
+      if (!observationStart || !observationEnd) {
+        return res.status(400).json({
+          error: "observation_start and observation_end query params required (YYYY-MM-DD)",
+        });
+      }
+      const { fetchFredSeriesObservations, FRED_SERIES_EXISTING_HOME_SALES } =
+        await import("../services/dashboard/marketRateService.js");
+      const observations = await fetchFredSeriesObservations(
+        FRED_SERIES_EXISTING_HOME_SALES,
+        observationStart,
+        observationEnd
+      );
+      return res.json({
+        observations: observations.map((o) => ({ date: o.date, value: o.value })),
+      });
+    } catch (error: any) {
+      logError("Error fetching existing home sales", error);
+      return res.status(500).json({
+        error: error.message || "Failed to fetch Existing Home Sales",
+      });
     }
   },
 );

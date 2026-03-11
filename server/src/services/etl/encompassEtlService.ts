@@ -9,6 +9,7 @@ import {
   LoanRecord,
 } from "../encompassLoanExtractor.js";
 import { coheusAliasToColumnName } from "../encompassFieldMapper.js";
+import { FieldBackfillService } from "./fieldBackfillService.js";
 import { runPostSyncHooks } from "../hooks/postSyncHookService.js";
 
 export interface SyncResult {
@@ -286,6 +287,33 @@ export class EncompassEtlService {
         );
       } catch (histErr: any) {
         console.warn(`[Sync] Could not write sync history: ${histErr.message}`);
+      }
+
+      try {
+        const backfillService = new FieldBackfillService(this.tenantPool);
+        const pendingBackfills = await backfillService.getPendingBackfillCount(losConnectionId);
+        if (pendingBackfills > 0) {
+          console.log(
+            `[Sync] Running post-sync backfill for ${pendingBackfills} swapped field mapping(s)`
+          );
+          const backfillResult = await backfillService.backfillSwappedFields(
+            tenantId,
+            losConnectionId,
+            {
+              loanStartDate: options.loanStartDate,
+              loanStartDateField: options.loanStartDateField,
+              folderName: options.folderName,
+              folderNames: options.folderNames,
+            }
+          );
+          console.log(
+            `[Sync] Post-sync backfill complete: ${backfillResult.loansUpdated} loans updated across ${backfillResult.fieldsBackfilled} field(s)`
+          );
+        }
+      } catch (backfillError: any) {
+        console.warn(
+          `[Sync] Post-sync backfill failed (main sync still succeeded): ${backfillError.message}`
+        );
       }
 
       console.log(

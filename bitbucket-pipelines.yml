@@ -328,6 +328,76 @@ definitions:
           - chmod +x ./scripts/bitbucket/deploy-infrastructure.sh
           - ./scripts/bitbucket/deploy-infrastructure.sh
 
+    - step: &test-e2e-all-dev
+        name: Test E2E All (Chromium)
+        image: *playwright_docker_image
+        deployment: dev
+        caches:
+          - npm
+        script:
+          - npm ci
+          - *e2e-env-preflight
+          - npm run test:e2e:all
+        artifacts:
+          - playwright-report/**
+          - test-results/**
+
+    - step: &run-migrations-dev-step
+        name: Run Migrations (Dev)
+        oidc: true
+        deployment: dev
+        script:
+          - *setup-oidc
+          - apt-get update && apt-get install -y curl
+          - chmod +x ./scripts/bitbucket/run-migrations.sh
+          - ./scripts/bitbucket/run-migrations.sh
+
+    - step: &run-migrations-prod-step
+        name: Run Migrations (Prod)
+        oidc: true
+        deployment: production
+        script:
+          - *setup-oidc
+          - apt-get update && apt-get install -y curl
+          - chmod +x ./scripts/bitbucket/run-migrations.sh
+          - ./scripts/bitbucket/run-migrations.sh
+
+    - step: &deploy-all-dev-force
+        name: Force Deploy All to Dev
+        oidc: true
+        deployment: dev
+        services:
+          - docker
+        script:
+          - *setup-oidc
+          - echo ">>> Force deploying infrastructure"
+          - chmod +x ./scripts/bitbucket/deploy-infrastructure.sh
+          - ./scripts/bitbucket/deploy-infrastructure.sh
+          - echo ">>> Force deploying frontend"
+          - chmod +x ./scripts/bitbucket/deploy-frontend.sh
+          - ./scripts/bitbucket/deploy-frontend.sh
+          - echo ">>> Force deploying backend"
+          - chmod +x ./scripts/bitbucket/deploy-backend-ecs.sh
+          - ./scripts/bitbucket/deploy-backend-ecs.sh
+
+    - step: &deploy-all-prod-force
+        name: Force Deploy All to Prod
+        oidc: true
+        deployment: production
+        services:
+          - docker
+        script:
+          - *setup-oidc
+          - echo ">>> Force deploying infrastructure"
+          - chmod +x ./scripts/bitbucket/deploy-infrastructure.sh
+          - ./scripts/bitbucket/deploy-infrastructure.sh
+          - echo ">>> Force deploying frontend"
+          - chmod +x ./scripts/bitbucket/deploy-frontend.sh
+          - ./scripts/bitbucket/deploy-frontend.sh
+          - echo ">>> Force deploying backend"
+          - chmod +x ./scripts/bitbucket/deploy-backend-ecs.sh
+          - ./scripts/bitbucket/deploy-backend-ecs.sh
+
 pipelines:
   # Branch-based deployments
   #
@@ -405,18 +475,32 @@ pipelines:
     infrastructure-prod:
       - step: *deploy-infra-prod
 
-    # Full deploy (skip build if you want)
+    # Full deploy with test gates
     deploy-all-dev:
       - parallel:
           - step: *build-frontend
           - step: *build-backend
-      - step: *deploy-dev
+      - parallel:
+          - step: *test-frontend
+          - step: *test-backend
+          - step: *test-backend-integration
+      - step: *deploy-all-dev-force
+      - step: *run-migrations-dev-step
+      - step: *test-e2e-all-dev
 
     deploy-all-prod:
       - parallel:
           - step: *build-frontend
           - step: *build-backend
-      - step: *deploy-prod
+      - parallel:
+          - step: *test-frontend
+          - step: *test-backend
+          - step: *test-backend-integration
+      - step: *deploy-all-prod-force
+      - step: *run-migrations-prod-step
+
+    e2e-dev:
+      - step: *test-e2e-all-dev
 
     e2e-regression:
       - step: *test-e2e-regression

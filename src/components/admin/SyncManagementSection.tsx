@@ -84,6 +84,17 @@ interface SchedulerInfo {
   next_run_estimate: string;
 }
 
+interface TenantOption {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+interface PodcastSettings {
+  nightly_enabled: boolean;
+  nightly_last_run_at: string | null;
+}
+
 const FREQUENCY_OPTIONS = [
   { value: 'hourly', label: 'Hourly' },
   { value: 'daily', label: 'Daily (2 AM)' },
@@ -187,6 +198,19 @@ export const SyncManagementSection = () => {
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [historyData, setHistoryData] = useState<Record<string, SyncHistoryEntry[]>>({});
   const [historyLoading, setHistoryLoading] = useState<Set<string>>(new Set());
+  const [tenants, setTenants] = useState<TenantOption[]>([]);
+  const [podcastSettings, setPodcastSettings] = useState<PodcastSettings>({
+    nightly_enabled: false,
+    nightly_last_run_at: null,
+  });
+  const [podcastTenantId, setPodcastTenantId] = useState<string>('');
+  const [updatingPodcastSettings, setUpdatingPodcastSettings] = useState(false);
+  const [generatingPodcast, setGeneratingPodcast] = useState(false);
+  const [podcastJobId, setPodcastJobId] = useState<number | null>(null);
+  const [podcastJobTenantId, setPodcastJobTenantId] = useState<string>('');
+  const [podcastJobStatus, setPodcastJobStatus] = useState<'idle' | 'pending' | 'processing' | 'complete' | 'failed'>('idle');
+  const [podcastJobMessage, setPodcastJobMessage] = useState<string>('');
+  const podcastPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadData = useCallback(async (showSpinner = true) => {
     try {
@@ -195,11 +219,21 @@ export const SyncManagementSection = () => {
         connections: SyncConnection[];
         scheduler: SchedulerInfo;
         total_tenants: number;
+        tenants?: TenantOption[];
+        podcast?: PodcastSettings;
       }>('/api/admin/sync-management');
 
       setConnections(response.connections);
       setScheduler(response.scheduler);
       setTotalTenants(response.total_tenants);
+      const nextTenants = response.tenants || [];
+      setTenants(nextTenants);
+      if (!podcastTenantId && nextTenants.length > 0) {
+        setPodcastTenantId(nextTenants[0].id);
+      }
+      if (response.podcast) {
+        setPodcastSettings(response.podcast);
+      }
     } catch (error: any) {
       console.error('Error loading sync management data:', error);
       if (showSpinner) {
@@ -212,7 +246,7 @@ export const SyncManagementSection = () => {
     } finally {
       if (showSpinner) setLoading(false);
     }
-  }, [toast]);
+  }, [toast, podcastTenantId]);
 
   useEffect(() => {
     loadData();
@@ -413,6 +447,111 @@ export const SyncManagementSection = () => {
     }
   };
 
+  const handleToggleNightlyPodcast = async (enabled: boolean) => {
+    setUpdatingPodcastSettings(true);
+    try {
+      await api.request('/api/admin/sync-management/podcast/settings', {
+        method: 'PUT',
+        body: JSON.stringify({
+          nightly_enabled: enabled,
+        }),
+      });
+      setPodcastSettings(prev => ({ ...prev, nightly_enabled: enabled }));
+      toast({
+        title: enabled ? 'Nightly podcast enabled' : 'Nightly podcast disabled',
+        description: enabled
+          ? 'Nightly Cohi podcast generation is now ON.'
+          : 'Nightly Cohi podcast generation is now OFF.',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to update nightly podcast setting',
+        variant: 'destructive',
+      });
+    } finally {
+      setUpdatingPodcastSettings(false);
+    }
+  };
+
+  const stopPodcastPolling = useCallback(() => {
+    if (podcastPollRef.current) {
+      clearInterval(podcastPollRef.current);
+      podcastPollRef.current = null;
+    }
+  }, []);
+
+  const pollPodcastJob = useCallback(async (tenantId: string, jobId: number) => {
+    try {
+      const resp = await api.request<{
+        jobId: number;
+        status: string;
+        progress: number;
+        message: string;
+        error?: string;
+        completedAt?: string;
+      }>(`/api/admin/sync-management/podcast/job/${tenantId}/${jobId}`);
+
+      setPodcastJobMessage(resp.message || '');
+
+      if (resp.status === 'complete') {
+        setPodcastJobStatus('complete');
+        stopPodcastPolling();
+        setGeneratingPodcast(false);
+        const tenant = tenants.find(t => t.id === tenantId);
+        toast({ title: 'Podcast generated and stored', description: tenant?.name || 'Tenant' });
+        loadData(false);
+      } else if (resp.status === 'failed') {
+        setPodcastJobStatus('failed');
+        stopPodcastPolling();
+        setGeneratingPodcast(false);
+        toast({ title: 'Podcast generation failed', description: resp.error || resp.message, variant: 'destructive' });
+      } else {
+        setPodcastJobStatus(resp.status === 'processing' ? 'processing' : 'pending');
+      }
+    } catch {
+      // Transient fetch error, keep polling
+    }
+  }, [tenants, toast, loadData, stopPodcastPolling]);
+
+  const handleGeneratePodcast = async () => {
+    if (!podcastTenantId) {
+      toast({ title: 'Select a tenant', description: 'Choose a tenant before generating a podcast.', variant: 'destructive' });
+      return;
+    }
+    setGeneratingPodcast(true);
+    setPodcastJobStatus('pending');
+    setPodcastJobMessage('Enqueuing job...');
+    stopPodcastPolling();
+
+    try {
+      const response = await api.request<{ success: boolean; jobId: number; tenant_id: string }>(
+        '/api/admin/sync-management/podcast/generate',
+        { method: 'POST', body: JSON.stringify({ tenant_id: podcastTenantId }) }
+      );
+
+      setPodcastJobId(response.jobId);
+      setPodcastJobTenantId(podcastTenantId);
+      setPodcastJobMessage('Waiting for worker to pick up job...');
+
+      podcastPollRef.current = setInterval(() => {
+        pollPodcastJob(podcastTenantId, response.jobId);
+      }, 3000);
+      // Immediate first poll after a short delay
+      setTimeout(() => pollPodcastJob(podcastTenantId, response.jobId), 1500);
+    } catch (error: any) {
+      setPodcastJobStatus('failed');
+      setPodcastJobMessage(error.message || 'Failed to enqueue');
+      setGeneratingPodcast(false);
+      toast({ title: 'Error', description: error.message || 'Failed to start podcast generation', variant: 'destructive' });
+    }
+  };
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => stopPodcastPolling();
+  }, [stopPodcastPolling]);
+
   // Helper to fetch history for a connection
   const fetchHistory = async (connection: SyncConnection) => {
     const key = connKey(connection);
@@ -565,6 +704,88 @@ export const SyncManagementSection = () => {
           </CardContent>
         </Card>
       )}
+
+      <Card className="border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50">
+        <CardHeader>
+          <CardTitle className="text-lg font-thin text-slate-900 dark:text-white tracking-tight">
+            Cohi Podcast Generation
+          </CardTitle>
+          <CardDescription className="text-sm text-slate-600 dark:text-slate-400 font-light">
+            Platform-admin controls for manual generation and nightly auto-generation.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={podcastSettings.nightly_enabled}
+                onCheckedChange={handleToggleNightlyPodcast}
+                disabled={updatingPodcastSettings}
+                className="data-[state=checked]:bg-violet-500"
+              />
+              <span className="text-sm font-light text-slate-700 dark:text-slate-300">
+                Nightly generation
+              </span>
+            </div>
+            <div className="text-xs text-slate-500 dark:text-slate-400 font-light">
+              Last nightly run: {formatRelativeTime(podcastSettings.nightly_last_run_at)}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Select value={podcastTenantId} onValueChange={setPodcastTenantId}>
+              <SelectTrigger className="w-[260px] h-9 text-sm font-light">
+                <SelectValue placeholder="Select tenant" />
+              </SelectTrigger>
+              <SelectContent>
+                {tenants.map((tenant) => (
+                  <SelectItem key={tenant.id} value={tenant.id}>
+                    {tenant.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              variant="default"
+              size="sm"
+              onClick={handleGeneratePodcast}
+              disabled={generatingPodcast || !podcastTenantId}
+              className="font-light"
+            >
+              {generatingPodcast ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Play className="h-4 w-4 mr-2" />
+              )}
+              Generate and Store Podcast
+            </Button>
+          </div>
+          {podcastJobStatus !== 'idle' && (
+            <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-900/40 border border-slate-200/60 dark:border-slate-700/50">
+              {(podcastJobStatus === 'pending' || podcastJobStatus === 'processing') && (
+                <Loader2 className="h-4 w-4 animate-spin text-blue-500 flex-shrink-0" />
+              )}
+              {podcastJobStatus === 'complete' && (
+                <CheckCircle2 className="h-4 w-4 text-emerald-500 flex-shrink-0" />
+              )}
+              {podcastJobStatus === 'failed' && (
+                <XCircle className="h-4 w-4 text-red-500 flex-shrink-0" />
+              )}
+              <span className={`text-sm font-light ${
+                podcastJobStatus === 'complete' ? 'text-emerald-700 dark:text-emerald-400'
+                  : podcastJobStatus === 'failed' ? 'text-red-700 dark:text-red-400'
+                  : 'text-slate-600 dark:text-slate-400'
+              }`}>
+                {podcastJobMessage}
+              </span>
+              {podcastJobStatus === 'failed' && (
+                <Button variant="ghost" size="sm" onClick={handleGeneratePodcast} className="ml-auto h-7 text-xs font-light">
+                  Retry
+                </Button>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Connections Table */}
       <Card className="border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50">

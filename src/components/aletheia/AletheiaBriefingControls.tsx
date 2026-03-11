@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   PlayCircle,
   Mic,
@@ -14,30 +14,20 @@ import { Button } from "@/components/ui/button";
 import { getActiveTimezone, getNowInTimezone } from "@/utils/timezone";
 import { api } from "@/lib/api";
 
-// Animated Audio Wave Icon Component
 const AudioWaveIcon = ({ className = "w-6 h-6" }: { className?: string }) => {
   return (
     <div className={`flex items-center justify-center gap-[2px] ${className}`}>
       <div
         className="w-[3px] bg-current rounded-full animate-audio-wave"
-        style={{
-          animationDelay: "0s",
-          animationDuration: "0.5s",
-        }}
+        style={{ animationDelay: "0s", animationDuration: "0.5s" }}
       />
       <div
         className="w-[3px] bg-current rounded-full animate-audio-wave"
-        style={{
-          animationDelay: "0.2s",
-          animationDuration: "0.7s",
-        }}
+        style={{ animationDelay: "0.2s", animationDuration: "0.7s" }}
       />
       <div
         className="w-[3px] bg-current rounded-full animate-audio-wave"
-        style={{
-          animationDelay: "0.35s",
-          animationDuration: "0.55s",
-        }}
+        style={{ animationDelay: "0.35s", animationDuration: "0.55s" }}
       />
     </div>
   );
@@ -53,73 +43,103 @@ export interface AletheiaBriefingControlsProps {
     };
     userName?: string;
   };
+  tenantId?: string;
   onChatToggle?: (show: boolean) => void;
   showChat?: boolean;
 }
 
+const OUTPUT_SAMPLE_RATE = 24000;
+
 export function AletheiaBriefingControls({
   briefingContext,
+  tenantId,
   onChatToggle,
   showChat = false,
 }: AletheiaBriefingControlsProps) {
+  const [podcastAvailable, setPodcastAvailable] = useState<boolean | null>(null);
   const [isInCall, setIsInCall] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [bufferedTime, setBufferedTime] = useState(0);
+  const [isStreamComplete, setIsStreamComplete] = useState(false);
+  const [isSeeking, setIsSeeking] = useState(false);
 
-  const wsRef = useRef<WebSocket | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
-  const nextStartTimeRef = useRef<number>(0);
+  const workletRef = useRef<AudioWorkletNode | null>(null);
+  const workletReadyRef = useRef<boolean>(false);
+  const abortRef = useRef<AbortController | null>(null);
   const recognitionRef = useRef<any>(null);
   const isInCallRef = useRef<boolean>(false);
-  const activeAudioSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
+  const streamSampleRateRef = useRef<number>(OUTPUT_SAMPLE_RATE);
+  const streamMimeTypeRef = useRef<string>("audio/pcm");
   const { toast } = useToast();
 
-  // Get time-based greeting based on user's timezone
   const getTimeBasedGreeting = (): string => {
     try {
-      const timezone = getActiveTimezone();
       const now = getNowInTimezone();
       const hour = now.getHours();
-
-      if (hour >= 5 && hour < 12) {
-        return "Good morning";
-      } else if (hour >= 12 && hour < 17) {
-        return "Good afternoon";
-      } else if (hour >= 17 && hour < 22) {
-        return "Good evening";
-      } else {
-        return "Good evening"; // Late night/early morning (22:00-04:59)
-      }
-    } catch (e) {
-      console.warn("Error getting time-based greeting:", e);
-      // Fallback to time-based greeting using local time
+      if (hour >= 5 && hour < 12) return "Good morning";
+      if (hour >= 12 && hour < 17) return "Good afternoon";
+      return "Good evening";
+    } catch {
       const hour = new Date().getHours();
-      if (hour >= 5 && hour < 12) {
-        return "Good morning";
-      } else if (hour >= 12 && hour < 17) {
-        return "Good afternoon";
-      } else {
-        return "Good evening";
-      }
+      if (hour >= 5 && hour < 12) return "Good morning";
+      if (hour >= 12 && hour < 17) return "Good afternoon";
+      return "Good evening";
     }
   };
 
-  // Initialize Audio Context - Pre-warm on mount for faster response
   useEffect(() => {
     if (!audioCtxRef.current) {
       audioCtxRef.current = new (
         window.AudioContext || (window as any).webkitAudioContext
-      )({ sampleRate: 24000 });
-      // Pre-warm audio context by resuming it immediately
+      )({ sampleRate: OUTPUT_SAMPLE_RATE });
+
+      audioCtxRef.current.audioWorklet
+        .addModule("/audio-playback-worklet.js")
+        .then(() => {
+          const worklet = new AudioWorkletNode(
+            audioCtxRef.current!,
+            "audio-playback-processor"
+          );
+          worklet.connect(audioCtxRef.current!.destination);
+          workletRef.current = worklet;
+          workletReadyRef.current = true;
+          worklet.port.onmessage = (event) => {
+            if (event.data?.type === "state") {
+              setCurrentTime(event.data.currentTime || 0);
+              setDuration(event.data.duration || 0);
+              setBufferedTime(event.data.buffered || 0);
+              if (event.data.streamComplete) {
+                setIsStreamComplete(true);
+              }
+            } else if (event.data?.type === "ended") {
+              setIsLoading(false);
+              setIsConnected(false);
+            }
+          };
+          worklet.port.postMessage({ type: "setSpeed", speed: 1.0 });
+          console.log("[Cohi] AudioWorklet ready");
+        })
+        .catch((e) => console.warn("[Cohi] AudioWorklet load failed:", e));
+
       if (audioCtxRef.current.state === "suspended") {
-        audioCtxRef.current.resume().catch(() => {
-          // Ignore errors - will resume on user interaction
-        });
+        audioCtxRef.current.resume().catch(() => {});
       }
     }
+
     return () => {
+      if (workletRef.current) {
+        workletRef.current.port.onmessage = null;
+        workletRef.current.disconnect();
+        workletRef.current = null;
+        workletReadyRef.current = false;
+      }
       if (audioCtxRef.current) {
         audioCtxRef.current.close();
         audioCtxRef.current = null;
@@ -127,403 +147,351 @@ export function AletheiaBriefingControls({
     };
   }, []);
 
-  const connectToLiveAPI = () => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      // If already connected, send briefing request immediately
-      if (isConnected) {
-        sendBriefingRequest();
-      }
+  useEffect(() => {
+    if (!tenantId) {
+      setPodcastAvailable(false);
       return;
     }
-
-    try {
-      // Connect to Aletheia via backend WebSocket
-      let ws: WebSocket;
+    let cancelled = false;
+    async function checkAvailability() {
       try {
-        ws = api.createBackendWebSocket("/ws/aletheia");
-      } catch (error: any) {
-        toast({
-          title: "WebSocket Configuration Required",
-          description:
-            error.message ||
-            "Backend URL not configured. Please set BACKEND_API_URL in localStorage.",
-          variant: "destructive",
-        });
-        console.error("WebSocket configuration error:", error);
+        const res = await api.fetchWithAuth(
+          `/api/podcast/cohi/aletheia/status?tenantId=${encodeURIComponent(tenantId!)}`
+        );
+        if (!cancelled && res.ok) {
+          const data = await res.json();
+          setPodcastAvailable(data.available === true);
+        }
+      } catch {
+        if (!cancelled) setPodcastAvailable(false);
+      }
+    }
+    checkAvailability();
+    return () => { cancelled = true; };
+  }, [tenantId]);
+
+  useEffect(() => {
+    if (workletRef.current) {
+      workletRef.current.port.postMessage({ type: "setSpeed", speed: playbackSpeed });
+    }
+  }, [playbackSpeed]);
+
+  const resampleToOutputRate = useCallback(
+    (input: Float32Array, fromRate: number) => {
+      if (!fromRate || fromRate === OUTPUT_SAMPLE_RATE) {
+        return input;
+      }
+      const ratio = OUTPUT_SAMPLE_RATE / fromRate;
+      const outputLength = Math.max(1, Math.floor(input.length * ratio));
+      const output = new Float32Array(outputLength);
+      for (let i = 0; i < outputLength; i++) {
+        const srcPos = i / ratio;
+        const i0 = Math.floor(srcPos);
+        const i1 = Math.min(i0 + 1, input.length - 1);
+        const frac = srcPos - i0;
+        output[i] = input[i0] + (input[i1] - input[i0]) * frac;
+      }
+      return output;
+    },
+    []
+  );
+
+  const playPcmChunk = useCallback(
+    (base64: string, sampleRate = OUTPUT_SAMPLE_RATE) => {
+      if (!audioCtxRef.current || !workletReadyRef.current || !workletRef.current) {
         return;
       }
-
-      ws.onopen = () => {
-        console.log("WebSocket connected to Aletheia backend");
-        // Backend handles setup automatically
-        // We'll mark as connected and send briefing request immediately
-        setIsConnected(true);
-        // Pre-resume audio context for faster playback
-        if (audioCtxRef.current && audioCtxRef.current.state === "suspended") {
-          audioCtxRef.current.resume();
-        }
-        // Send briefing request immediately after connection
-        setTimeout(() => sendBriefingRequest(), 100);
-      };
-
-      ws.onmessage = async (event) => {
-        try {
-          let data;
-          if (event.data instanceof Blob) {
-            data = JSON.parse(await event.data.text());
-          } else if (typeof event.data === "string") {
-            data = JSON.parse(event.data);
-          } else {
-            data = event.data;
-          }
-
-          // Handle errors from backend
-          if (data.error) {
-            console.error("Aletheia API error:", data.error);
-            toast({
-              title: "API Error",
-              description:
-                data.error?.message || data.message || "An error occurred",
-              variant: "destructive",
-            });
-            return;
-          }
-
-          // --- OpenAI Realtime API events ---
-          if (data.type) {
-            switch (data.type) {
-              case "response.audio.delta":
-                if (data.delta) {
-                  setIsLoading(false);
-                  playPcmData(data.delta);
-                }
-                break;
-              case "response.audio_transcript.delta":
-                // Optionally log transcript text as it streams
-                break;
-              case "response.done":
-                console.log("OpenAI response complete");
-                break;
-              case "error":
-                console.error("OpenAI Realtime error:", data.error);
-                toast({
-                  title: "API Error",
-                  description: data.error?.message || "OpenAI Realtime error",
-                  variant: "destructive",
-                });
-                break;
-              case "session.created":
-              case "session.updated":
-              case "response.created":
-              case "response.output_item.added":
-              case "conversation.item.created":
-              case "response.content_part.added":
-              case "response.audio_transcript.done":
-              case "response.content_part.done":
-              case "response.output_item.done":
-              case "rate_limits.updated":
-                // Known informational events — no action needed
-                break;
-              default:
-                console.log("Aletheia event:", data.type);
-            }
-            return;
-          }
-
-          // --- Gemini server content (fallback for Gemini provider) ---
-          const serverContent = data.serverContent || data.server_content;
-          if (serverContent) {
-            const modelTurn =
-              serverContent.modelTurn || serverContent.model_turn;
-            if (modelTurn) {
-              const parts = modelTurn.parts || [];
-              for (const part of parts) {
-                const inlineData = part.inlineData || part.inline_data;
-                if (inlineData) {
-                  const mimeType = inlineData.mimeType || inlineData.mime_type;
-                  if (mimeType?.startsWith("audio/pcm")) {
-                    setIsLoading(false);
-                    playPcmData(inlineData.data);
-                  }
-                }
-                // Skip thought/reasoning text — not shown to user
-              }
-            }
-
-            const turnComplete =
-              serverContent.turnComplete || serverContent.turn_complete;
-            if (turnComplete) {
-              setIsLoading(false);
-              console.log("Aletheia turn complete");
-            }
-          }
-        } catch (e) {
-          console.error("Error parsing WS message", e);
-        }
-      };
-
-      ws.onclose = (event) => {
-        // Only auto-stop if we're still in call and it wasn't a normal close
-        if (isInCall && event.code !== 1000) {
-          // User-initiated close (code 1000) won't trigger this
-          stopBriefing();
-        }
-        // Only show error toast for unexpected closures (not user-initiated)
-        if (event.code !== 1000 && event.code !== 1001 && isInCall) {
-          toast({
-            title: "Connection Lost",
-            description: "Briefing connection closed unexpectedly",
-            variant: "destructive",
-          });
-        }
-      };
-
-      ws.onerror = (error) => {
-        console.error("WebSocket Error", error);
-        toast({
-          title: "Connection Error",
-          description:
-            "Unable to connect to Aletheia. Please ensure the backend server is running.",
-          variant: "destructive",
-        });
-      };
-
-      wsRef.current = ws;
-    } catch (e) {
-      console.error("Connection error:", e);
-      toast({
-        title: "Connection Failed",
-        description: "Failed to establish connection.",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const sendBriefingRequest = () => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      console.error("WebSocket not ready for briefing request");
-      return;
-    }
-
-    const dialoguesText =
-      briefingContext?.dialogues
-        ?.map((d, idx) => `${idx + 1}. ${d.message}`)
-        .join("\n") || "No specific insights available.";
-
-    const funnelText = briefingContext?.funnelStory
-      ? `
-Loan Funnel Analysis:
-- Overall Conversion Rate: ${briefingContext.funnelStory.conversionRates?.overall || "N/A"}%
-- Pull-Through Rate: ${briefingContext.funnelStory.conversionRates?.pullThrough || "N/A"}%
-- Total Fallout: ${briefingContext.funnelStory.falloutData?.total || "N/A"}
-- Lost Revenue Opportunity: ${briefingContext.funnelStory.lostRevenue?.total || "N/A"}
-    `
-      : "";
-
-    const greeting = getTimeBasedGreeting();
-    const timezone = getActiveTimezone();
-
-    const briefingPrompt = `Provide a unique, high-value executive briefing in a podcast-style format. 
-
-CRITICAL: 
-- Do not include any stage directions, music descriptions, or bracketed text. Start immediately with your spoken greeting and insights.
-- GREETING: Begin your briefing with "${greeting}" followed by the executive's name if provided. This greeting is based on the user's timezone (${timezone}).
-- Pronounce financial figures properly in full words. For example, speak "$179M" as "one hundred and seventy-nine million dollars". Never use abbreviations like "em" or "kay". Accuracy and professional delivery of financial data are essential.
-- RANDOMIZE YOUR OPENING AND STRUCTURE: Do not repeat previous briefing styles. Vary your tone, greeting, and how you present the data to keep it fresh and engaging.
-- TERMINOLOGY: For your internal business insights, use the phrase "here's the latest" instead of "the headlines". Reserve the word "headlines" exclusively for the industry news section.
-- INCLUDE INDUSTRY NEWS: Incorporate a relevant current event or trend from the mortgage and lending industry (e.g., Fed rate decisions, market inventory shifts, regulatory changes). Refer to this as "Today's Industry Headlines".
-- PROVIDE INTELLIGENT INSIGHTS: Relate the industry news directly to the Coheus business data provided below. How does the macro environment impact these specific figures?
-
-First, cover these key insights (introduced as "here's the latest"):
-${dialoguesText}
-
-${
-  funnelText
-    ? `Then transition to the Loan Funnel analysis:
-${funnelText}`
-    : ""
-}
-
-${briefingContext?.userName ? `Address the executive as ${briefingContext.userName} at the beginning, right after the "${greeting}" greeting.` : `Start with "${greeting}" as your opening greeting.`}
-
-Use executive terminology and be candid and direct. After the briefing, be ready for follow-up questions. Briefing ID: ${Date.now()}`;
-
-    console.log(
-      "Sending briefing request:",
-      briefingPrompt.substring(0, 100) + "...",
-    );
-
-    try {
-      // Send message in Gemini format (backend will handle both OpenAI and Gemini)
-      const message = {
-        client_content: {
-          turns: [
-            {
-              role: "user",
-              parts: [{ text: briefingPrompt }],
-            },
-          ],
-          turn_complete: true,
-        },
-      };
-
-      wsRef.current.send(JSON.stringify(message));
-      console.log("Briefing request sent successfully");
-    } catch (error) {
-      console.error("Error sending briefing request:", error);
-      toast({
-        title: "Send Failed",
-        description: "Failed to send briefing request",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const playPcmData = (base64: string) => {
-    if (!audioCtxRef.current) return;
-    const ctx = audioCtxRef.current;
-    // Resume audio context immediately if suspended
-    if (ctx.state === "suspended") {
-      ctx
-        .resume()
-        .catch((e) => console.warn("Audio context resume failed:", e));
-    }
-
-    try {
-      // Optimize base64 decoding - use native atob which is faster
-      const binaryString = atob(base64);
-      const len = binaryString.length;
-      const bytes = new Uint8Array(len);
-      for (let i = 0; i < len; i++) bytes[i] = binaryString.charCodeAt(i);
-
-      // Optimize conversion - use TypedArray views for better performance
-      const int16Data = new Int16Array(bytes.buffer);
-      const float32Data = new Float32Array(int16Data.length);
-      for (let i = 0; i < int16Data.length; i++) {
-        float32Data[i] = int16Data[i] / 32768.0;
+      const ctx = audioCtxRef.current;
+      if (ctx.state === "suspended") {
+        ctx.resume().catch(() => {});
       }
 
-      const buffer = ctx.createBuffer(1, float32Data.length, 24000);
-      buffer.getChannelData(0).set(float32Data);
+      try {
+        const binaryString = atob(base64);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
 
-      const source = ctx.createBufferSource();
-      source.buffer = buffer;
-      source.connect(ctx.destination);
+        const alignedLength = bytes.length - (bytes.length % 2);
+        if (alignedLength <= 0) return;
 
-      // Track active audio source
-      activeAudioSourcesRef.current.add(source);
+        const int16Data = new Int16Array(
+          bytes.buffer,
+          bytes.byteOffset,
+          alignedLength / 2
+        );
+        const float32Data = new Float32Array(int16Data.length);
+        for (let i = 0; i < int16Data.length; i++) {
+          float32Data[i] = int16Data[i] / 32768.0;
+        }
 
-      // Remove from tracking when done playing
-      source.onended = () => {
-        activeAudioSourcesRef.current.delete(source);
-      };
+        const normalized = resampleToOutputRate(float32Data, sampleRate);
+        workletRef.current.port.postMessage({
+          type: "audio",
+          samples: normalized,
+        });
+      } catch (e) {
+        console.error("[Cohi] Error decoding audio chunk", e);
+      }
+    },
+    [resampleToOutputRate]
+  );
 
-      // Start playback immediately - reduce scheduling delay
-      const now = ctx.currentTime;
-      const startTime = Math.max(now, nextStartTimeRef.current);
-      source.start(startTime);
+  const consumeSSEStream = useCallback(
+    async (response: Response, signal: AbortSignal) => {
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("No response body");
 
-      nextStartTimeRef.current = startTime + buffer.duration;
-    } catch (e) {
-      console.error("Error decoding audio", e);
-    }
-  };
+      const decoder = new TextDecoder();
+      let buffer = "";
 
-  const startBriefing = () => {
+      while (!signal.aborted) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() || "";
+
+        for (const eventBlock of events) {
+          const line = eventBlock
+            .split("\n")
+            .find((entry) => entry.startsWith("data: "));
+          if (!line) continue;
+
+          try {
+            const payload = JSON.parse(line.slice(6));
+            switch (payload.type) {
+              case "meta": {
+                const mimeType = String(payload.mimeType || "audio/pcm");
+                const sampleRate = Number(payload.sampleRate || OUTPUT_SAMPLE_RATE);
+                streamMimeTypeRef.current = mimeType;
+                streamSampleRateRef.current =
+                  Number.isFinite(sampleRate) && sampleRate > 0
+                    ? sampleRate
+                    : OUTPUT_SAMPLE_RATE;
+
+                if (!mimeType.startsWith("audio/pcm")) {
+                  toast({
+                    title: "Audio Format Warning",
+                    description: `Expected PCM stream, received ${mimeType}.`,
+                    variant: "destructive",
+                  });
+                }
+                if (workletRef.current) {
+                  workletRef.current.port.postMessage({
+                    type: "meta",
+                    sampleRate: streamSampleRateRef.current,
+                  });
+                }
+                break;
+              }
+              case "audio":
+                setIsLoading(false);
+                setIsConnected(true);
+                playPcmChunk(payload.data, streamSampleRateRef.current);
+                break;
+              case "script":
+                console.log("[Cohi] Script text:", payload.data);
+                break;
+              case "transcript":
+                console.log("[Cohi] Transcript text:", payload.data);
+                break;
+              case "done":
+                setIsLoading(false);
+                setIsStreamComplete(true);
+                if (workletRef.current) {
+                  workletRef.current.port.postMessage({ type: "streamComplete" });
+                }
+                break;
+              case "error":
+                console.error("[Cohi] Server error:", payload.error);
+                toast({
+                  title: "Briefing Error",
+                  description: payload.error,
+                  variant: "destructive",
+                });
+                isInCallRef.current = false;
+                setIsInCall(false);
+                setIsConnected(false);
+                setIsLoading(false);
+                break;
+            }
+          } catch {
+            // ignore malformed event block
+          }
+        }
+      }
+    },
+    [playPcmChunk, toast]
+  );
+
+  const startBriefing = useCallback(async () => {
     setIsInCall(true);
     isInCallRef.current = true;
     setIsConnected(false);
     setIsLoading(true);
+    setIsStreamComplete(false);
+    setCurrentTime(0);
+    setDuration(0);
+    setBufferedTime(0);
+    streamSampleRateRef.current = OUTPUT_SAMPLE_RATE;
+    streamMimeTypeRef.current = "audio/pcm";
 
-    // Pre-resume audio context immediately for faster response
-    if (audioCtxRef.current) {
-      if (audioCtxRef.current.state === "suspended") {
-        audioCtxRef.current.resume();
-      }
-      // Pre-warm audio context by creating a silent buffer
-      try {
-        const buffer = audioCtxRef.current.createBuffer(1, 1, 24000);
-        const source = audioCtxRef.current.createBufferSource();
-        source.buffer = buffer;
-        source.connect(audioCtxRef.current.destination);
-        source.start(0);
-        source.stop(0.001);
-      } catch (e) {
-        // Ignore errors in pre-warming
-      }
+    if (audioCtxRef.current?.state === "suspended") {
+      audioCtxRef.current.resume();
     }
-    nextStartTimeRef.current = 0; // Reset timing
+    if (workletRef.current) {
+      workletRef.current.port.postMessage({ type: "clear" });
+      workletRef.current.port.postMessage({
+        type: "setSpeed",
+        speed: playbackSpeed,
+      });
+    }
 
-    connectToLiveAPI();
-  };
+    const abort = new AbortController();
+    abortRef.current = abort;
 
-  const stopBriefing = () => {
-    // Prevent multiple calls to stopBriefing
-    if (!isInCall) return;
+    try {
+      const greeting = getTimeBasedGreeting();
+      const timezone = getActiveTimezone();
+
+      const response = await api.fetchWithAuth(
+        "/api/podcast/cohi/aletheia/stream",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tenantId,
+            briefingContext: {
+              ...briefingContext,
+              greeting,
+              timezone,
+            },
+          }),
+          signal: abort.signal,
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.status}`);
+      }
+
+      await consumeSSEStream(response, abort.signal);
+    } catch (error: any) {
+      if (error.name === "AbortError") return;
+      console.error("[Cohi] Briefing failed:", error);
+      toast({
+        title: "Briefing Failed",
+        description: error.message || "Failed to start briefing",
+        variant: "destructive",
+      });
+      isInCallRef.current = false;
+      setIsInCall(false);
+      setIsConnected(false);
+      setIsLoading(false);
+    }
+  }, [briefingContext, consumeSSEStream, playbackSpeed, toast]);
+
+  const stopBriefing = useCallback(() => {
+    if (!isInCallRef.current && !isInCall) return;
 
     isInCallRef.current = false;
     setIsLoading(false);
 
-    // 1. Stop Speech Recognition
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
-      } catch (e) {
-        console.warn("Error stopping recognition:", e);
+      } catch {
+        // ignore
       }
       recognitionRef.current = null;
     }
 
-    // 2. Close WebSocket gracefully
-    if (wsRef.current) {
-      // Prevent onclose handler from showing toast
-      wsRef.current.onclose = null;
-      try {
-        if (
-          wsRef.current.readyState === WebSocket.OPEN ||
-          wsRef.current.readyState === WebSocket.CONNECTING
-        ) {
-          wsRef.current.close(1000, "User ended call");
-        }
-      } catch (e) {
-        console.warn("Error closing WebSocket:", e);
-      }
-      wsRef.current = null;
+    if (workletRef.current) {
+      workletRef.current.port.postMessage({ type: "clear" });
+    }
+    if (audioCtxRef.current?.state === "running") {
+      audioCtxRef.current.suspend().catch(() => {});
     }
 
-    // 3. Stop and Clear Audio
-    // Stop all active audio sources
-    activeAudioSourcesRef.current.forEach((source) => {
-      try {
-        source.stop();
-      } catch (e) {
-        console.warn("Error stopping audio source:", e);
-      }
-    });
-    activeAudioSourcesRef.current.clear();
-
-    if (audioCtxRef.current) {
-      try {
-        if (audioCtxRef.current.state === "running") {
-          audioCtxRef.current.suspend();
-        }
-      } catch (e) {
-        console.warn("Error suspending audio context:", e);
-      }
-    }
-    nextStartTimeRef.current = 0; // Reset timing buffer
-
-    // 4. Reset UI State
     setIsInCall(false);
     setIsConnected(false);
     setIsListening(false);
+    setIsStreamComplete(false);
+    setCurrentTime(0);
+    setDuration(0);
+    setBufferedTime(0);
 
     toast({
       title: "Briefing Ended",
       description: "The session has been closed.",
-      duration: 5000, // Auto-close after 5 seconds
+      duration: 5000,
     });
-  };
+  }, [isInCall, toast]);
+
+  const sendMessage = useCallback(
+    async (text: string) => {
+      if (!text.trim() || !isInCallRef.current) return;
+
+      setChatInput("");
+      setIsLoading(true);
+      setIsStreamComplete(false);
+      setCurrentTime(0);
+      setDuration(0);
+      setBufferedTime(0);
+
+      if (workletRef.current) {
+        workletRef.current.port.postMessage({ type: "clear" });
+        workletRef.current.port.postMessage({
+          type: "setSpeed",
+          speed: playbackSpeed,
+        });
+      }
+
+      const abort = new AbortController();
+      abortRef.current = abort;
+
+      try {
+        if (audioCtxRef.current?.state === "suspended") {
+          audioCtxRef.current.resume();
+        }
+
+        const response = await api.fetchWithAuth(
+          "/api/podcast/cohi/aletheia/ask",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ question: text }),
+            signal: abort.signal,
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(`Server error: ${response.status}`);
+        }
+
+        await consumeSSEStream(response, abort.signal);
+      } catch (error: any) {
+        if (error.name === "AbortError") return;
+        console.error("[Cohi] Ask failed:", error);
+        toast({
+          title: "Question Failed",
+          description: error.message || "Failed to process question",
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [consumeSSEStream, playbackSpeed, toast]
+  );
 
   const toggleMic = () => {
     if (
@@ -554,16 +522,13 @@ Use executive terminology and be candid and direct. After the briefing, be ready
 
       recognitionRef.current.onresult = (event: any) => {
         const transcript = event.results[0][0].transcript;
-        if (transcript && wsRef.current?.readyState === WebSocket.OPEN) {
+        if (transcript && event.results[0].isFinal) {
           sendMessage(transcript);
         }
       };
-
-      recognitionRef.current.onerror = (event: any) => {
-        console.error("Speech recognition error:", event.error);
+      recognitionRef.current.onerror = () => {
         setIsListening(false);
       };
-
       recognitionRef.current.onend = () => {
         setIsListening(false);
       };
@@ -573,55 +538,146 @@ Use executive terminology and be candid and direct. After the briefing, be ready
     }
   };
 
-  const sendMessage = async (text: string) => {
-    if (!text.trim()) return;
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      toast({
-        title: "Not Connected",
-        description: "Please start briefing first",
-      });
-      return;
+  const handleSpeedChange = (speed: number) => {
+    setPlaybackSpeed(speed);
+    if (workletRef.current) {
+      workletRef.current.port.postMessage({ type: "setSpeed", speed });
     }
-
-    setChatInput("");
-    setIsLoading(true);
-
-    try {
-      // Send simple text object that backend will convert to either OpenAI or Gemini format
-      wsRef.current.send(
-        JSON.stringify({
-          text: text,
-        }),
-      );
-    } catch (error) {
-      console.error("Error sending message:", error);
-      toast({
-        title: "Send Failed",
-        description: "Failed to send message",
-        variant: "destructive",
-      });
-    }
-
-    setTimeout(() => setIsLoading(false), 1000);
   };
 
-  // Cleanup on unmount
+  const handleSeekCommit = (value: number) => {
+    if (!isStreamComplete || !workletRef.current) return;
+    workletRef.current.port.postMessage({ type: "seek", timeSeconds: value });
+  };
+
   useEffect(() => {
     return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
+      if (abortRef.current) abortRef.current.abort();
+      if (recognitionRef.current) recognitionRef.current.stop();
     };
   }, []);
 
+  useEffect(() => {
+    onChatToggle?.(showChat && isInCall);
+  }, [isInCall, onChatToggle, showChat]);
+
+  if (podcastAvailable === null) return null; // still checking
+  if (!podcastAvailable && !isInCall) return null; // nothing to play
+
   return (
     <div className="flex items-center gap-2 sm:gap-3">
-      {/* Start/Stop Briefing Button - Single button that toggles */}
+      <button
+        onClick={() => {
+          if (isInCallRef.current || isInCall) {
+            stopBriefing();
+          } else {
+            startBriefing();
+          }
+        }}
+        disabled={false}
+        className={`p-3 sm:p-2 rounded-xl sm:rounded-lg text-white transition-all active:scale-95 shadow-md ${
+          isInCall
+            ? "bg-rose-600 hover:bg-rose-700 shadow-rose-500/20 animate-pulse-glow-rose"
+            : "bg-blue-600 hover:bg-blue-700 shadow-blue-500/20 animate-pulse-glow"
+        } ${isLoading ? "opacity-75 cursor-wait" : ""}`}
+        title={
+          isInCall
+            ? "End Briefing"
+            : isLoading
+              ? "Connecting..."
+              : "Start Briefing"
+        }
+      >
+        {isInCall ? (
+          <AudioWaveIcon className="w-6 h-6 sm:w-5 sm:h-5" />
+        ) : isLoading ? (
+          <Loader2 className="w-6 h-6 sm:w-5 sm:h-5 animate-spin" />
+        ) : (
+          <PlayCircle className="w-6 h-6 sm:w-5 sm:h-5" />
+        )}
+      </button>
 
-      {/* Chat Panel */}
+      <AnimatePresence mode="wait">
+        {isInCall && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="flex items-center gap-2"
+          >
+            <button
+              onClick={toggleMic}
+              className={`p-3 sm:p-2 rounded-xl sm:rounded-lg transition-all active:scale-95 ${
+                isListening
+                  ? "bg-emerald-600 hover:bg-emerald-700 text-white animate-pulse"
+                  : "bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300"
+              }`}
+              title={isListening ? "Stop Voice Input" : "Start Voice Input"}
+            >
+              {isListening ? (
+                <Mic className="w-5 h-5 sm:w-4 sm:h-4" />
+              ) : (
+                <MicOff className="w-5 h-5 sm:w-4 sm:h-4" />
+              )}
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {isInCall && (
+        <div className="flex items-center gap-2 px-3 py-1.5 sm:px-2 sm:py-1 rounded-xl sm:rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200/50 dark:border-slate-700/50">
+          <div
+            className={`w-2.5 h-2.5 sm:w-2 sm:h-2 rounded-full ${isConnected ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "bg-amber-500 animate-pulse"}`}
+          />
+          <span className="text-[10px] sm:text-xs font-medium text-slate-600 dark:text-slate-400">
+            {isConnected ? "LIVE" : "SYNCING"}
+          </span>
+        </div>
+      )}
+
+      {isInCall && (
+        <div className="flex items-center gap-2 px-2 py-1.5 rounded-xl sm:rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200/50 dark:border-slate-700/50 min-w-[260px]">
+          <select
+            value={playbackSpeed}
+            onChange={(e) => handleSpeedChange(Number(e.target.value))}
+            className="text-xs rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-1.5 py-1"
+            title="Playback speed"
+          >
+            <option value={0.75}>0.75x</option>
+            <option value={1}>1.0x</option>
+            <option value={1.25}>1.25x</option>
+            <option value={1.5}>1.5x</option>
+          </select>
+          <input
+            type="range"
+            min={0}
+            max={Math.max(duration, 0.01)}
+            step={0.1}
+            value={Math.min(currentTime, Math.max(duration, 0.01))}
+            disabled={!isStreamComplete}
+            onMouseDown={() => setIsSeeking(true)}
+            onMouseUp={(e) => {
+              const value = Number((e.target as HTMLInputElement).value);
+              handleSeekCommit(value);
+              setIsSeeking(false);
+            }}
+            onChange={(e) => {
+              const value = Number(e.target.value);
+              setCurrentTime(value);
+            }}
+            className="flex-1"
+            title={
+              isStreamComplete
+                ? "Seek through completed audio"
+                : "Seek enabled after generation completes"
+            }
+          />
+          <span className="text-[10px] sm:text-xs text-slate-600 dark:text-slate-400 tabular-nums min-w-[78px] text-right">
+            {Math.floor(currentTime)}s/{Math.floor(duration)}s
+          </span>
+        </div>
+      )}
+
       <AnimatePresence>
         {showChat && isInCall && (
           <motion.div
@@ -662,9 +718,15 @@ Use executive terminology and be candid and direct. After the briefing, be ready
                 )}
               </Button>
             </div>
+            <div className="mt-2 text-[10px] text-slate-500 dark:text-slate-400">
+              {isStreamComplete
+                ? `Playback complete. Buffered: ${Math.floor(bufferedTime)}s`
+                : "Seek unlocks when generation completes."}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
     </div>
   );
 }
+

@@ -2,21 +2,21 @@ import { test, expect } from "./fixtures";
 
 test.describe("@critical Research Lab", () => {
   test("@smoke research page loads with input and mode toggle", async ({ userPage }) => {
-    await userPage.goto("/research", { waitUntil: "domcontentloaded" });
+    await userPage.goto("/research/session", { waitUntil: "domcontentloaded" });
     await expect(userPage.getByRole("heading", { name: "Research Lab" })).toBeVisible();
     await expect(userPage.getByPlaceholder(/e\.g\., What's our YTD pull-through/i)).toBeVisible();
     await expect(userPage.getByRole("button", { name: /Deep Analysis/i })).toBeVisible();
   });
 
   test("@smoke accepts research question input", async ({ userPage }) => {
-    await userPage.goto("/research", { waitUntil: "domcontentloaded" });
+    await userPage.goto("/research/session", { waitUntil: "domcontentloaded" });
     const prompt = userPage.getByPlaceholder(/e\.g\., What's our YTD pull-through/i);
     await prompt.fill("What are the top 5 conversion bottlenecks this month?");
     await expect(prompt).toHaveValue("What are the top 5 conversion bottlenecks this month?");
   });
 
   test("runs investigation lifecycle and supports follow-up behavior", async ({ userPage }) => {
-    await userPage.goto("/research", { waitUntil: "domcontentloaded" });
+    await userPage.goto("/research/session", { waitUntil: "domcontentloaded" });
 
     const prompt = userPage.getByPlaceholder(/YTD pull-through|comprehensive analysis/i);
     await prompt.fill("What is our pull-through trend by channel this month?");

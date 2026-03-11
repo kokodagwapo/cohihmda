@@ -101,7 +101,7 @@ export default function MyDashboard() {
   /* ─── Sync URL when active tab changes ─── */
   const updateUrl = useCallback((tabId: string | null) => {
     if (!tabId || tabId.startsWith('new-')) {
-      navigate('/my-dashboard', { replace: true });
+      navigate('/my-dashboard/new', { replace: true });
     } else {
       navigate(`/my-dashboard/${tabId}`, { replace: true });
     }
@@ -137,6 +137,19 @@ export default function MyDashboard() {
       const persistedTabs = persistedTabsRaw.filter((id) => availableIds.has(id));
       const persistedActive = persistedActiveRaw && availableIds.has(persistedActiveRaw) ? persistedActiveRaw : null;
       const initialUrlCanvasId = initialUrlCanvasIdRef.current;
+
+      if (initialUrlCanvasId === 'new') {
+        const newTabId = `new-${Date.now()}`;
+        setOpenTabs([...persistedTabs, newTabId]);
+        setActiveTabId(newTabId);
+        setLoadCanvasId(null);
+        setCanvasKey((k) => k + 1);
+        setDirtyTabs(new Set());
+        setTabTitles({});
+        setIsHydratingWorkbench(false);
+        return;
+      }
+
       const urlRequested = initialUrlCanvasId && availableIds.has(initialUrlCanvasId) ? initialUrlCanvasId : null;
 
       const nextTabs = [...persistedTabs];
@@ -163,7 +176,7 @@ export default function MyDashboard() {
         setActiveTabId(newTabId);
         setLoadCanvasId(null);
         setCanvasKey((k) => k + 1);
-        navigate('/my-dashboard', { replace: true });
+        navigate('/my-dashboard/new', { replace: true });
       }
 
       setDirtyTabs(new Set());
@@ -179,7 +192,7 @@ export default function MyDashboard() {
   /* ─── Respond to URL changes post-hydration only when canvas is accessible ─── */
   useEffect(() => {
     if (isHydratingWorkbench) return;
-    if (!urlCanvasId) return;
+    if (!urlCanvasId || urlCanvasId === 'new') return;
     if (urlCanvasId === activeTabId) return;
     const isAccessible = canvasList.some((c) => c.id === urlCanvasId);
     if (!isAccessible) return;
