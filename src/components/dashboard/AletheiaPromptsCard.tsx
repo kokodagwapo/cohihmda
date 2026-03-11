@@ -170,41 +170,50 @@ const FEEDBACK_TAGS = [
   { id: "actionable", label: "Actionable" },
 ];
 
+// Canonical source keys -> chip labels.
+// Aliases below keep backward-compat with insights already persisted in the DB.
 const SOURCE_CHIP_LABELS: Record<string, string> = {
+  // --- canonical keys ---
   pipeline: "Pipeline",
-  pipeline_velocity: "Pipeline",
   performance: "Performance",
-  officer_performance: "Loan Officer Performance",
-  personnel: "Loan Officer Performance",
-  lock_risk: "Closing Risk",
+  lock_risk: "Lock Expiration",
   closing_risk: "Closing Risk",
-  trid_risk: "Closing Risk",
-  conversion_trends: "Conversion",
+  conversion: "Conversion",
   lost_opportunity: "Lost Opportunity",
   predictions: "Forecast",
   market_news: "Market & News",
   compliance: "Compliance",
+  revenue: "Revenue & Margin",
+  credit_risk: "Credit Risk",
+  operations: "Operations",
+  // --- legacy / alias keys (kept for already-persisted insights) ---
+  pipeline_velocity: "Pipeline",
+  officer_performance: "Performance",
+  personnel: "Performance",
+  conversion_trends: "Conversion",
+  lock_expiration: "Lock Expiration",
+  trid_risk: "Closing Risk",
+  trid: "Closing Risk",
+  margin: "Revenue & Margin",
+  product_breakdown: "Revenue & Margin",
+  tiering: "Performance",
+  comparisons: "Performance",
+  condition_backlog: "Operations",
+  funnel: "Pipeline",
+  loan_funnel: "Pipeline",
+  historical: "Operations",
+  knowledge_base: "Operations",
+  agent_coverage: "Operations",
+  industry_news: "Market & News",
+  leaderboard: "Performance",
+  business_overview: "Performance",
+  risk_cross_tab: "Credit Risk",
   other: "Insight",
 };
 
-function toTitleCase(value: string): string {
-  return value
-    .split(/[_\s-]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-    .join(" ");
-}
-
 function getInsightChipLabel(insight: AletheiaInsight): string {
   const source = (insight.source || "").trim().toLowerCase();
-  if (source && SOURCE_CHIP_LABELS[source]) {
-    return SOURCE_CHIP_LABELS[source];
-  }
-
-  if (source) {
-    return toTitleCase(source);
-  }
-  return "Insight";
+  return SOURCE_CHIP_LABELS[source] ?? "Insight";
 }
 
 interface BucketLaneProps {

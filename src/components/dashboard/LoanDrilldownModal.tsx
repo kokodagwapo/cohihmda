@@ -227,6 +227,7 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(
     const [loInfo, setLoInfo] = useState<{ email: string | null; name: string | null; redirectActive: boolean; redirectTo: string | null } | null>(null);
     const [additionalEmails, setAdditionalEmails] = useState<string[]>([]);
     const [newEmail, setNewEmail] = useState("");
+    const [customMessage, setCustomMessage] = useState("");
     const cardRef = useRef<HTMLDivElement>(null);
 
   const captureCardAsBlob = useCallback(async (): Promise<Blob | null> => {
@@ -276,6 +277,7 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(
     setEmailResult(null);
     setAdditionalEmails([]);
     setNewEmail("");
+    setCustomMessage("");
     try {
       const info = await api.resolveLoanLo(loan.id, selectedTenantId);
       setLoInfo({
@@ -297,7 +299,12 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(
     try {
       setEmailSending(true);
       setEmailResult(null);
-      const result = await api.sendFalloutAlertSingle(loan.id, selectedTenantId, additionalEmails.length > 0 ? additionalEmails : undefined);
+      const result = await api.sendFalloutAlertSingle(
+        loan.id,
+        selectedTenantId,
+        additionalEmails.length > 0 ? additionalEmails : undefined,
+        customMessage.trim() || undefined,
+      );
       setEmailResult({ success: result.sent, message: result.message });
       setShowEmailConfirm(false);
     } catch (err: unknown) {
@@ -305,7 +312,7 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(
     } finally {
       setEmailSending(false);
     }
-  }, [loan, selectedTenantId, additionalEmails]);
+  }, [loan, selectedTenantId, additionalEmails, customMessage]);
 
   const addExtraEmail = useCallback(() => {
     const trimmed = newEmail.trim().toLowerCase();
@@ -322,6 +329,7 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(
       setEmailResult(null);
       setAdditionalEmails([]);
       setNewEmail("");
+      setCustomMessage("");
     }
   }, [isOpen]);
 
@@ -510,6 +518,17 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(
                         <Plus className="w-4 h-4" />
                       </button>
                     </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">Personal Message (optional)</label>
+                    <textarea
+                      value={customMessage}
+                      onChange={(e) => setCustomMessage(e.target.value)}
+                      placeholder="Add a note to include in the email..."
+                      rows={3}
+                      className="mt-1 w-full text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-slate-700 dark:text-slate-300 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-sky-400 resize-none"
+                    />
                   </div>
                 </div>
 

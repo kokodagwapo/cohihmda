@@ -36,6 +36,13 @@ interface RiskLoanRow {
   risk_level: string;
   predicted_outcome: "withdraw" | "deny" | "originate";
   risk_factors: string[] | null;
+  fico_score: number | null;
+  ltv_ratio: number | null;
+  dti_ratio: number | null;
+  interest_rate: number | null;
+  active_days: number | null;
+  current_milestone: string | null;
+  close_late_risk: boolean | null;
 }
 
 interface RecipientLoan {
@@ -48,6 +55,8 @@ interface RecipientLoan {
   predictedOutcome: "withdraw" | "deny" | "originate";
   estimatedClosingDate: string | null;
   riskReasons: string[];
+  loanMetrics: Record<string, string | number | null>;
+  closeLateRisk: boolean;
 }
 
 interface ResolvedRecipient {
@@ -306,6 +315,15 @@ export async function getHighRiskLoansForAlerts(
         l.estimated_closing_date,
         p.predicted_outcome,
         p.risk_factors,
+        l.fico_score,
+        l.ltv_ratio,
+        l.be_dti_ratio AS dti_ratio,
+        l.interest_rate,
+        (CURRENT_DATE - l.application_date::date) AS active_days,
+        l.current_milestone,
+        CASE WHEN l.estimated_closing_date IS NOT NULL AND l.estimated_closing_date < CURRENT_DATE
+             AND p.predicted_outcome = 'originate'
+             THEN true ELSE false END AS close_late_risk,
         ROUND(COALESCE(
           CASE
             WHEN jsonb_typeof(p.loan_data->'riskSummary') = 'object'
@@ -343,7 +361,14 @@ export async function getHighRiskLoansForAlerts(
         ELSE 'Low'
       END AS risk_level,
       predicted_outcome,
-      risk_factors
+      risk_factors,
+      fico_score,
+      ltv_ratio,
+      dti_ratio,
+      interest_rate,
+      active_days,
+      current_milestone,
+      close_late_risk
     FROM scored
     WHERE risk_score >= $1
       AND (
@@ -450,6 +475,8 @@ export async function resolveLoanOfficerEmails(
       predictedOutcome: loan.predicted_outcome,
       estimatedClosingDate: loan.estimated_closing_date,
       riskReasons: Array.isArray(loan.risk_factors) ? loan.risk_factors : [],
+      loanMetrics: buildLoanMetrics(loan),
+      closeLateRisk: loan.close_late_risk === true,
     });
   }
 
@@ -475,13 +502,91 @@ function riskBadgeColor(level: string): { bg: string; color: string } {
   }
 }
 
-function outcomeLabel(outcome: string): string {
-  switch (outcome) {
-    case "withdraw": return "Likely Withdraw";
-    case "deny": return "Likely Decline";
-    case "originate": return "Likely to Close";
-    default: return outcome;
+function outcomeLabel(loan: RecipientLoan): string {
+  if (loan.predictedOutcome === "deny") return "Likely Decline";
+  if (loan.predictedOutcome === "withdraw") return "Likely Withdraw";
+  if (loan.closeLateRisk) return "Likely Close Late";
+  if (loan.estimatedClosingDate) {
+    const ecd = new Date(loan.estimatedClosingDate);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    ecd.setHours(0, 0, 0, 0);
+    if (today > ecd) return "Past Est. Closing";
   }
+  return "Likely to Close";
+}
+
+const RISK_FACTOR_LABELS: Record<string, string> = {
+  fico_score: "Credit Score",
+  ltv_ratio: "Loan-to-Value",
+  dti_ratio: "Debt-to-Income",
+  loan_amount: "Loan Amount",
+  interest_rate: "Interest Rate",
+  TurnTime: "Time in Pipeline",
+  turn_time: "Time in Pipeline",
+  active_days: "Days Active",
+  loan_purpose: "Loan Purpose",
+  loan_type: "Loan Type",
+  channel: "Channel",
+  lo_pullthrough: "LO Pull-Through",
+  lo_pullthrough_pct: "LO Pull-Through Rate",
+  uw_pullthrough_pct: "UW Pull-Through Rate",
+  closer_pullthrough_pct: "Closer Pull-Through Rate",
+  processor_pullthrough_pct: "Processor Pull-Through Rate",
+  current_milestone: "Current Milestone",
+  estimated_closing_date: "Est. Closing Date",
+  market_change_delta: "Rate vs Market",
+  lock_expiration_date: "Lock Expiration",
+  property_type: "Property Type",
+  occupancy_type: "Occupancy Type",
+  predicted_outcome: "Model Prediction",
+  confidence: "Model Confidence",
+  confidence_score: "Confidence Score",
+};
+
+function humanizeRiskFactor(raw: string): string {
+  if (RISK_FACTOR_LABELS[raw]) return RISK_FACTOR_LABELS[raw];
+  return raw
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function formatMetricValue(key: string, value: string | number | null): string {
+  if (value == null || value === "") return "";
+  const num = typeof value === "number" ? value : parseFloat(String(value));
+  if (Number.isNaN(num)) return String(value);
+  if (key === "fico_score") return String(Math.round(num));
+  if (key.includes("ratio") || key.includes("pullthrough") || key.includes("pct"))
+    return `${num.toFixed(1)}%`;
+  if (key === "interest_rate" || key === "market_change_delta")
+    return `${num.toFixed(3)}%`;
+  if (key === "loan_amount") return toCurrency(num);
+  if (key === "active_days" || key === "TurnTime" || key === "turn_time")
+    return `${Math.round(num)} days`;
+  return String(Math.round(num * 100) / 100);
+}
+
+function riskFactorWithValue(raw: string, metrics: Record<string, string | number | null>): string {
+  const label = humanizeRiskFactor(raw);
+  const val = metrics[raw];
+  if (val == null || val === "") return label;
+  const formatted = formatMetricValue(raw, val);
+  return formatted ? `${label}: ${formatted}` : label;
+}
+
+function buildLoanMetrics(loan: RiskLoanRow): Record<string, string | number | null> {
+  return {
+    fico_score: loan.fico_score ?? null,
+    ltv_ratio: loan.ltv_ratio ?? null,
+    dti_ratio: loan.dti_ratio ?? null,
+    interest_rate: loan.interest_rate ?? null,
+    active_days: loan.active_days ?? null,
+    TurnTime: loan.active_days ?? null,
+    turn_time: loan.active_days ?? null,
+    loan_amount: loan.loan_amount ?? null,
+    current_milestone: loan.current_milestone ?? null,
+    estimated_closing_date: loan.estimated_closing_date ?? null,
+  };
 }
 
 function buildLoanRowsHtml(
@@ -500,7 +605,7 @@ function buildLoanRowsHtml(
       const workingUrl = buildActionUrl(appBaseUrl, tenantSlug, token, "working_on_it");
       const helpUrl = buildActionUrl(appBaseUrl, tenantSlug, token, "need_help");
       const loanDetailUrl = `${appBase}/fallout-forecast/loan/${encodeURIComponent(loan.loanId)}`;
-      const reasons = loan.riskReasons.slice(0, 3).join(" · ") || "Risk factors not specified";
+      const reasons = loan.riskReasons.slice(0, 3).map((r) => riskFactorWithValue(r, loan.loanMetrics)).join(" · ") || "Risk factors not specified";
       const badge = riskBadgeColor(loan.riskLevel);
 
       const appLinkHtml = isAppUser
@@ -543,7 +648,7 @@ function buildLoanRowsHtml(
                   <span style="font-weight:600;color:#475569;">Amount</span><br>${toCurrency(loan.amount)}
                 </td>
                 <td width="33%" style="font-size:12px;color:#64748b;padding-bottom:4px;">
-                  <span style="font-weight:600;color:#475569;">Outlook</span><br>${outcomeLabel(loan.predictedOutcome)}
+                  <span style="font-weight:600;color:#475569;">Outlook</span><br>${outcomeLabel(loan)}
                 </td>
                 <td width="34%" style="font-size:12px;color:#64748b;padding-bottom:4px;">
                   <span style="font-weight:600;color:#475569;">Est. Close</span><br>${toIsoDate(loan.estimatedClosingDate)}
@@ -610,7 +715,7 @@ function buildManagerLoanCardsHtml({
     .map((loan) => {
       const loanDetailUrl = `${appBase}/fallout-forecast/loan/${encodeURIComponent(loan.loan_id)}`;
       const reasons = Array.isArray(loan.risk_factors)
-        ? loan.risk_factors.slice(0, 3).join(", ")
+        ? loan.risk_factors.slice(0, 3).map(humanizeRiskFactor).join(", ")
         : "Risk factors not specified";
       return `
         <div style="border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;margin:0 0 10px;">
@@ -815,9 +920,7 @@ export async function sendFalloutAlerts({
   if (redirectActive && devAllowedEmails.length > 0) {
     let redirectIdx = 0;
     for (const recipient of resolvedRecipients) {
-      const originalEmail = recipient.email;
       recipient.email = devAllowedEmails[redirectIdx % devAllowedEmails.length];
-      recipient.fullName = `[REDIRECTED→${recipient.email}] ${recipient.fullName || originalEmail}`;
       redirectIdx++;
     }
     console.log(
@@ -847,6 +950,8 @@ export async function sendFalloutAlerts({
       predictedOutcome: loan.predicted_outcome,
       estimatedClosingDate: loan.estimated_closing_date,
       riskReasons: Array.isArray(loan.risk_factors) ? loan.risk_factors : [],
+      loanMetrics: buildLoanMetrics(loan),
+      closeLateRisk: loan.close_late_risk === true,
     })),
   }));
   const loRecipientEmailSet = new Set(
@@ -981,9 +1086,7 @@ export async function sendFalloutAlerts({
       if (devAllowedEmails.length > 0) {
         let mgrIdx = 0;
         for (const mgr of managers.rows) {
-          const original = mgr.email;
           mgr.email = devAllowedEmails[mgrIdx % devAllowedEmails.length];
-          mgr.full_name = `[REDIRECTED→${mgr.email}] ${mgr.full_name || original}`;
           mgrIdx++;
         }
         console.log(
@@ -1103,9 +1206,7 @@ export async function sendFalloutAlerts({
       if (devAllowedEmails.length > 0) {
         let mgrCardIdx = 0;
         for (const mgr of managers.rows) {
-          const original = mgr.email;
           mgr.email = devAllowedEmails[mgrCardIdx % devAllowedEmails.length];
-          mgr.full_name = `[REDIRECTED→${mgr.email}] ${mgr.full_name || original}`;
           mgrCardIdx++;
         }
         console.log(
@@ -1208,6 +1309,7 @@ export async function sendSingleFalloutAlert({
   loanId,
   appBaseUrl,
   additionalEmails = [],
+  customMessage,
 }: {
   tenantPool: Pool;
   tenantId: string;
@@ -1215,6 +1317,7 @@ export async function sendSingleFalloutAlert({
   loanId: string;
   appBaseUrl: string;
   additionalEmails?: string[];
+  customMessage?: string;
 }): Promise<{ sent: boolean; recipientEmail: string | null; message: string; devMode: boolean; devRedirectedTo?: string[]; additionalSent?: number }> {
   const loanResult = await tenantPool.query<RiskLoanRow>(
     `SELECT
@@ -1258,7 +1361,16 @@ export async function sendSingleFalloutAlert({
          ELSE 'Low'
        END AS risk_level,
        COALESCE(p.predicted_outcome, 'originate') AS predicted_outcome,
-       p.risk_factors
+       p.risk_factors,
+       l.fico_score,
+       l.ltv_ratio,
+       l.be_dti_ratio AS dti_ratio,
+       l.interest_rate,
+       (CURRENT_DATE - l.application_date::date) AS active_days,
+       l.current_milestone,
+       CASE WHEN l.estimated_closing_date IS NOT NULL AND l.estimated_closing_date < CURRENT_DATE
+            AND COALESCE(p.predicted_outcome, 'originate') = 'originate'
+            THEN true ELSE false END AS close_late_risk
      FROM public.loans l
      LEFT JOIN LATERAL (
        SELECT * FROM public.loan_predictions lp
@@ -1293,7 +1405,10 @@ export async function sendSingleFalloutAlert({
   );
 
   const loUser = loResult.rows[0];
-  if (!loUser?.email) {
+  const redirectActive = await isEmailRedirectEnabled();
+  const devAllowedEmails = redirectActive ? await getDevAllowedEmails() : [];
+
+  if (!loUser?.email && !redirectActive) {
     return {
       sent: false,
       recipientEmail: null,
@@ -1302,24 +1417,20 @@ export async function sendSingleFalloutAlert({
     };
   }
 
-  const redirectActive = await isEmailRedirectEnabled();
-  const devAllowedEmails = redirectActive ? await getDevAllowedEmails() : [];
-
-  let recipientEmail = loUser.email;
-  let recipientName = loUser.full_name || loan.loan_officer || "Loan Officer";
+  let recipientEmail = loUser?.email ?? "";
+  const recipientName = loUser?.full_name || loan.loan_officer || "Loan Officer";
   let devMode = redirectActive;
 
   if (redirectActive) {
     if (devAllowedEmails.length === 0) {
       return {
         sent: false,
-        recipientEmail: loUser.email,
+        recipientEmail: loUser?.email ?? null,
         message: "Email redirect is active but no safe email addresses configured. Email blocked.",
         devMode: true,
       };
     }
     recipientEmail = devAllowedEmails[0];
-    recipientName = `[REDIRECTED→${recipientEmail}] ${recipientName}`;
   }
 
   const config = await getFalloutAlertConfig(tenantPool);
@@ -1331,23 +1442,25 @@ export async function sendSingleFalloutAlert({
     `INSERT INTO public.fallout_alert_tokens
      (token_hash, alert_batch_id, loan_id, encompass_user_id, recipient_email, expires_at)
      VALUES ($1, $2, $3, $4, $5, NOW() + interval '7 days')`,
-    [tokenHash, alertBatchId, loanId, loUser.encompass_user_id, recipientEmail],
+    [tokenHash, alertBatchId, loanId, loUser?.encompass_user_id || loan.loan_officer_id || "unknown", recipientEmail],
   );
 
   const recipient: ResolvedRecipient = {
-    encompassUserId: loUser.encompass_user_id,
+    encompassUserId: loUser?.encompass_user_id ?? loan.loan_officer_id ?? "",
     email: recipientEmail,
     fullName: recipientName,
     loans: [{
       loanId: loan.loan_id,
       loanNumber: loan.loan_number || loan.loan_id,
-      loanOfficerName: loan.loan_officer || loUser.full_name || "Loan Officer",
+      loanOfficerName: loan.loan_officer || loUser?.full_name || "Loan Officer",
       amount: loan.loan_amount,
       riskScore: Number(loan.risk_score) || 0,
       riskLevel: loan.risk_level || "Unknown",
       predictedOutcome: (loan.predicted_outcome as "withdraw" | "deny" | "originate") || "originate",
       estimatedClosingDate: loan.estimated_closing_date,
       riskReasons: Array.isArray(loan.risk_factors) ? loan.risk_factors : [],
+      loanMetrics: buildLoanMetrics(loan),
+      closeLateRisk: loan.close_late_risk === true,
     }],
   };
 
@@ -1359,7 +1472,7 @@ export async function sendSingleFalloutAlert({
   try {
     const appUserCheck = await tenantPool.query<{ email: string }>(
       `SELECT LOWER(email) AS email FROM public.users WHERE LOWER(email) = $1 AND is_active = true LIMIT 1`,
-      [loUser.email.trim().toLowerCase()],
+      [(loUser?.email ?? recipientEmail).trim().toLowerCase()],
     );
     isAppUser = appUserCheck.rows.length > 0;
   } catch {
@@ -1367,8 +1480,9 @@ export async function sendSingleFalloutAlert({
   }
 
   const loansHtml = buildLoanRowsHtml(recipient, tokenByLoanId, appBaseUrl, tenantSlug, isAppUser);
-  const customMessageHtml = config?.custom_message
-    ? `<p style="margin:0 0 20px 0;padding:12px 16px;background:#f0f9ff;border-left:3px solid #3b82f6;font-size:14px;color:#1e40af;line-height:1.5;border-radius:0 6px 6px 0;">${config.custom_message}</p>`
+  const msgText = customMessage || config?.custom_message || "";
+  const customMessageHtml = msgText
+    ? `<p style="margin:0 0 20px 0;padding:12px 16px;background:#f0f9ff;border-left:3px solid #3b82f6;font-size:14px;color:#1e40af;line-height:1.5;border-radius:0 6px 6px 0;">${msgText.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>")}</p>`
     : "";
   const placeholderData = {
     RECIPIENT_NAME: recipientName,
