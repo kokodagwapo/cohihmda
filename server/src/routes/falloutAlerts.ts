@@ -346,22 +346,23 @@ router.post(
 );
 
 /**
- * GET /api/fallout-alerts/loan-statuses?loan_ids=id1,id2,...
+ * POST /api/fallout-alerts/loan-statuses
+ * Body: { loan_ids: string[] }
  * Returns per-loan fallout alert send/response status for display on loan cards.
+ * Uses POST to avoid 414 URI Too Long with large loan ID lists.
  */
-router.get(
+router.post(
   "/loan-statuses",
   authenticateToken,
   attachTenantContext,
   async (req: AuthRequest, res) => {
     try {
       const { tenantPool } = getTenantContext(req);
-      const rawIds = typeof req.query.loan_ids === "string" ? req.query.loan_ids : "";
-      const loanIds = rawIds
-        .split(",")
-        .map((id) => id.trim())
+      const rawIds: unknown = req.body?.loan_ids;
+      const loanIds = (Array.isArray(rawIds) ? rawIds : [])
+        .map((id) => String(id).trim())
         .filter(Boolean)
-        .slice(0, 200);
+        .slice(0, 500);
       if (loanIds.length === 0) {
         return res.json({ statuses: [] });
       }

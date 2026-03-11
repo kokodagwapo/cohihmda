@@ -54,7 +54,7 @@ export default function SharedWithMe() {
                   <IconBadge icon={Share2} variant="rose" size="xl" rounded="2xl" />
                   <div>
                     <h1 className="text-2xl sm:text-3xl font-semibold text-slate-900 dark:text-slate-100 tracking-tight">
-                      Shared With Me
+                      Shared
                     </h1>
                     <p className="mt-1.5 text-[15px] text-slate-600 dark:text-slate-400 max-w-xl">
                       Dashboards, reports, and insights your teammates shared with you.

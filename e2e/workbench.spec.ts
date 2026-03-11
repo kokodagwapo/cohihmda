@@ -59,21 +59,21 @@ test.describe("Workbench", () => {
       await expect(userPage.getByTestId("workbench-save-button")).toHaveCount(0);
       await expect(userPage.getByTestId("workbench-share-button")).toHaveCount(0);
     } else {
-      // Owner mode/UI variants: at least one editable control should be present.
       const hasEditableControls = await isAnyVisible([
         userPage.getByTestId("workbench-save-button"),
         userPage.getByTestId("workbench-share-button"),
         userPage.getByTitle("New canvas"),
       ]);
       if (!hasEditableControls) {
-        await expect(userPage).toHaveURL(/\/my-dashboard/);
+        // /my-dashboard without a canvas ID redirects to /workbench hub
+        await expect(userPage).toHaveURL(/\/(my-dashboard|workbench)/);
         await expect(userPage.locator("h1, h2, [role='heading'], button").first()).toBeVisible();
       }
     }
   });
 
   const paths = [
-    ["/workbench/shared", "Shared With Me"],
+    ["/workbench/shared", "Shared"],
     ["/workbench/team-folders", "Team Folders"],
     ["/workbench/favorites", "Bookmarks"],
     ["/workbench/distributions", "Communications Center"],
