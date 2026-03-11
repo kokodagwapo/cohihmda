@@ -1484,7 +1484,6 @@ export class ApiClient {
 
   async getLoanFalloutStatuses(loanIds: string[], tenantId?: string | null) {
     if (!loanIds.length) return { statuses: [] };
-    const tq = tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : "";
     return this.request<{
       statuses: Array<{
         loan_id: string;
@@ -1496,19 +1495,36 @@ export class ApiClient {
         responded_at: string | null;
         loan_officer_name: string | null;
       }>;
-    }>(`/api/fallout-alerts/loan-statuses?loan_ids=${loanIds.map(encodeURIComponent).join(",")}${tq}`);
+    }>(`/api/fallout-alerts/loan-statuses${tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : ""}`, {
+      method: "POST",
+      body: JSON.stringify({ loan_ids: loanIds }),
+    });
   }
 
-  async sendFalloutAlertSingle(loanId: string, tenantId?: string | null) {
+  async resolveLoanLo(loanId: string, tenantId?: string | null) {
+    return this.request<{
+      found: boolean;
+      loEmail: string | null;
+      loName: string | null;
+      redirectActive: boolean;
+      redirectTo: string | null;
+    }>(`/api/fallout-alerts/resolve-lo${this._falloutTq(tenantId)}`, {
+      method: "POST",
+      body: JSON.stringify({ loan_id: loanId }),
+    });
+  }
+
+  async sendFalloutAlertSingle(loanId: string, tenantId?: string | null, additionalEmails?: string[], customMessage?: string) {
     return this.request<{
       sent: boolean;
       recipientEmail: string | null;
       message: string;
       devMode: boolean;
       devRedirectedTo?: string[];
+      additionalSent?: number;
     }>(`/api/fallout-alerts/send-single${this._falloutTq(tenantId)}`, {
       method: "POST",
-      body: JSON.stringify({ loan_id: loanId }),
+      body: JSON.stringify({ loan_id: loanId, additional_emails: additionalEmails, custom_message: customMessage }),
     });
   }
 }

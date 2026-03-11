@@ -201,7 +201,7 @@ export default function WorkbenchHub() {
           />
 
           <CanvasTable
-            title="Shared With Me"
+            title="Shared"
             icon={<Users className="w-4 h-4 text-slate-600 dark:text-slate-300" />}
             rows={sortedShared}
             onOpen={(id) => navigate(`/my-dashboard/${id}`)}

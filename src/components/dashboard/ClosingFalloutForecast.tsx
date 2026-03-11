@@ -1990,6 +1990,18 @@ export const ClosingFalloutForecast = ({
           },
         );
         setLoanPredictions(predictionsMap);
+        // Sync fullPredictions so filters and tab counts use the new run (same shape as GET: loanId, predictedOutcome, confidence)
+        setFullPredictions(
+          response.predictions.map(
+            (p: { loanId: string; predictedOutcome: string; confidence?: number }) => ({
+              loanId: p.loanId,
+              predictedOutcome: p.predictedOutcome,
+              confidence: p.confidence ?? 50,
+            }),
+          ),
+        );
+      } else {
+        setFullPredictions([]);
       }
 
       if (
@@ -2010,6 +2022,7 @@ export const ClosingFalloutForecast = ({
       console.error("[Predict] Prediction job failed:", predictionJob.error);
       setPredictions(null);
       setLoanPredictions({});
+      setFullPredictions([]);
       setBucketedLoans([]);
       setPredictionsLoading(false);
       setPredictionJobId(null);
@@ -2300,7 +2313,7 @@ export const ClosingFalloutForecast = ({
     // Use bucketedLoans (from prediction endpoint) as primary source; filter by active period when set
     if (bucketedLoans && bucketedLoans.length > 0) {
       const inPeriod = filterByPeriod(bucketedLoans);
-      return inPeriod.map((l: any) => {
+      const cards = inPeriod.map((l: any) => {
         // Use snake_case field names matching database columns
         const loanId = l.loan_id || l.id || l.guid || "";
         const raw = getRaw(loanId);
@@ -2464,6 +2477,10 @@ export const ClosingFalloutForecast = ({
           reason_codes: l.reasonCodes ?? l.reason_codes ?? null,
         };
       });
+      // Dedupe by loan id so pagination and React keys behave correctly (e.g. tenant with duplicate loan_id)
+      const byId = new Map<string, (typeof cards)[number]>();
+      cards.forEach((c) => byId.set(c.id, c));
+      return Array.from(byId.values());
     }
 
     // Fallback: use loansRaw if no bucketed data available - show active loans, filtered by period when set
@@ -2477,7 +2494,7 @@ export const ClosingFalloutForecast = ({
       });
     }
 
-    return activeRaw.map((l) => {
+    const fallbackCards = activeRaw.map((l) => {
       const base = transformLoanToCard(l);
       const loanId = l.loan_id || l.id;
       const predictedOutcome = loanId ? loanPredictions[loanId] : null;
@@ -2565,6 +2582,10 @@ export const ClosingFalloutForecast = ({
         closeLateRisk: (l as any).closeLateRisk ?? isLikelyCloseLateForecast(l, 30, now) ?? null,
       };
     });
+    // Dedupe by loan id so pagination and React keys behave correctly
+    const byIdFallback = new Map<string, (typeof fallbackCards)[number]>();
+    fallbackCards.forEach((c) => byIdFallback.set(c.id, c));
+    return Array.from(byIdFallback.values());
   }, [bucketedLoans, loansRaw, loanPredictions, officerTtsMap, activeLoansPeriod]);
 
   // High-risk loans (predicted withdraw or deny only, risk >= 80) in card shape for the metric modal
@@ -3427,8 +3448,11 @@ export const ClosingFalloutForecast = ({
     api.getLoanFalloutStatuses(loanIds, selectedTenantId || undefined)
       .then((result) => {
         const map = new Map<string, LoanFalloutStatus>();
+        const strip = (id: string) => id.replace(/^\{|\}$/g, "");
         for (const s of result.statuses) {
-          map.set(s.loan_id, s as LoanFalloutStatus);
+          const status = s as LoanFalloutStatus;
+          map.set(s.loan_id, status);
+          map.set(strip(s.loan_id), status);
         }
         setFalloutStatusMap(map);
       })
@@ -4884,6 +4908,8 @@ export const ClosingFalloutForecast = ({
             setSelectedLoanForDrilldown(null);
             setSelectedOfficer(officer);
           }}
+          selectedTenantId={selectedTenantId}
+          falloutStatus={selectedLoanForDrilldown ? falloutStatusMap.get(selectedLoanForDrilldown.id) : undefined}
         />
 
         {/* Loan Officer Modal */}

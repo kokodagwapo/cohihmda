@@ -4,12 +4,13 @@ import { api } from '@/lib/api';
 import { useTenantStore } from '@/stores/tenantStore';
 import { useAuth } from '@/contexts/AuthContext';
 import { WorkbenchCanvas } from '@/components/workbench/WorkbenchCanvas';
-import { Plus, X, Sparkles } from 'lucide-react';
+import { Plus, X, Sparkles, LayoutPanelLeft, Pin, PinOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DashboardLayout } from '@/components/dashboard/DashboardLayout';
 import { useDashboardVisibility } from '@/hooks/useDashboardVisibility';
 import type { ReportData } from '@/data/reportSimulations';
 import { cn } from '@/lib/utils';
+import { useWorkbenchNav } from '@/hooks/useWorkbenchNav';
 
 type CanvasListItem = {
   id: string;
@@ -219,7 +220,7 @@ export default function MyDashboard() {
     updateUrl(null);
   }, [updateUrl]);
 
-  // Close a tab (with unsaved warning)
+  // Close a tab (with unsaved warning); navigates to hub when last tab closes
   const handleCloseTab = useCallback((tabId: string) => {
     if (tabId.startsWith('new-') || dirtyTabs.has(tabId)) {
       const confirmed = window.confirm('This canvas has unsaved changes. Close anyway?');
@@ -228,11 +229,14 @@ export default function MyDashboard() {
     }
     setOpenTabs((prev) => {
       const next = prev.filter((t) => t !== tabId);
-      // If closing the active tab, switch to the last remaining tab
+      if (next.length === 0) {
+        navigate('/workbench');
+        return next;
+      }
       if (activeTabId === tabId) {
-        const newActive = next.length > 0 ? next[next.length - 1] : null;
+        const newActive = next[next.length - 1];
         setActiveTabId(newActive);
-        if (newActive && !newActive.startsWith('new-')) {
+        if (!newActive.startsWith('new-')) {
           setLoadCanvasId(newActive);
         } else {
           setLoadCanvasId(null);
@@ -242,7 +246,7 @@ export default function MyDashboard() {
       }
       return next;
     });
-  }, [activeTabId, updateUrl, dirtyTabs]);
+  }, [activeTabId, updateUrl, dirtyTabs, navigate]);
 
   // Switch to a tab
   const handleSwitchTab = useCallback((tabId: string) => {
@@ -295,6 +299,13 @@ export default function MyDashboard() {
     });
   }, [activeTabId]);
 
+  // Workbench nav for pinning from open canvas
+  const { canvases: navCanvases, favoriteUpdatingIds: navFavUpdating, toggleCanvasFavorite } = useWorkbenchNav();
+  const activeCanvasFavorited = useMemo(() => {
+    if (!activeTabId || activeTabId.startsWith('new-')) return false;
+    return navCanvases.find((c) => c.id === activeTabId)?.favorited ?? false;
+  }, [activeTabId, navCanvases]);
+
   // If no tabs are open, show an empty state
   const showEmptyState = openTabs.length === 0;
 
@@ -321,6 +332,17 @@ export default function MyDashboard() {
         <div className="flex h-full">
           <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
             <div className="flex items-center border-b border-slate-200/70 dark:border-slate-700/50 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm px-1 shrink-0 min-h-[37px] z-10">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 shrink-0 rounded-md text-xs font-medium text-slate-500 hover:text-violet-600 dark:text-slate-400 dark:hover:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/30 gap-1 px-2 mr-1"
+                onClick={() => navigate('/workbench')}
+                title="Back to Workbench Hub"
+              >
+                <LayoutPanelLeft className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Hub</span>
+              </Button>
+              <div className="h-5 w-px bg-slate-200 dark:bg-slate-700 shrink-0 mr-1" />
               <div className="flex items-center gap-0 overflow-x-auto flex-1 min-w-0 scrollbar-none">
                 {openTabs.map((tabId) => (
                   <div
@@ -351,6 +373,18 @@ export default function MyDashboard() {
                   </div>
                 ))}
               </div>
+              {activeTabId && !activeTabId.startsWith('new-') && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 ml-1 shrink-0 rounded-md text-slate-500 hover:text-amber-500 dark:text-slate-400 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 disabled:opacity-50"
+                  onClick={() => void toggleCanvasFavorite(activeTabId, !activeCanvasFavorited)}
+                  disabled={navFavUpdating.has(activeTabId)}
+                  title={activeCanvasFavorited ? 'Unpin from favorites' : 'Pin to favorites'}
+                >
+                  {activeCanvasFavorited ? <PinOff className="h-3.5 w-3.5 text-amber-500" /> : <Pin className="h-3.5 w-3.5" />}
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="icon"

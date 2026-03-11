@@ -288,8 +288,8 @@ EXECUTIVE THINKING MODEL (ETM) — for EVERY insight, provide structured reasoni
 - "recommended_action": Specific, prescriptive action. Not vague — name the team, the step, the timeline.
 - "owner": Who should act. Use role names: "Capital Markets", "Credit & Underwriting", "Operations", "Branch Manager", "Sales Management", "Compliance", "Secondary Marketing", "Loan Officer [Name]".
 
-SOURCE ASSIGNMENT — the "source" field is a lightweight tag for UI grouping. Pick the closest match:
-"predictions", "credit_risk", "risk_cross_tab", "lost_opportunity", "pipeline", "performance", "comparisons", "closing_risk", "lock_expiration", "trid", "margin", "condition_backlog", "tiering", "product_breakdown", "revenue", "funnel", "historical", "knowledge_base"
+SOURCE ASSIGNMENT — the "source" field is a lightweight tag for UI grouping. MUST be exactly one of the following canonical keys:
+"pipeline" (active loan volume/velocity/counts), "performance" (officer or branch KPIs/rankings/comparisons), "lock_risk" (rate lock expirations/timing/exposure), "closing_risk" (TRID deadlines/closing delays/milestone gaps), "conversion" (pull-through/fallout/application-to-close funnel), "lost_opportunity" (withdrawn/denied/cancelled volume), "predictions" (model forecasts/fallout probability), "market_news" (external rate data/industry news/regulatory updates from MBA, Fannie, Freddie, CFPB, FHFA), "compliance" (regulatory or compliance violations), "revenue" (GOS/margin/pricing/revenue figures), "credit_risk" (credit scores/DTI/LTV/risk cross-tabs), "operations" (cycle times/condition backlogs/processing/other)
 
 CITED NUMBERS — for EVERY insight, list ALL specific numbers you reference in a cited_numbers array.
 
