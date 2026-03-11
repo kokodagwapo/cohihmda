@@ -1016,6 +1016,7 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(
               setSelectedOfficer(officer);
             }}
             selectedTenantId={selectedTenantId}
+            falloutStatus={falloutStatusMap?.get(selectedLoan.id)}
           />
         )}
       </div>

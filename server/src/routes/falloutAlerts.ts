@@ -317,8 +317,51 @@ router.get(
 );
 
 /**
+ * POST /api/fallout-alerts/resolve-lo
+ * Resolve the LO email for a loan without sending (used for the confirmation modal).
+ */
+router.post(
+  "/resolve-lo",
+  authenticateToken,
+  attachTenantContext,
+  requireFalloutAlertAdmin,
+  async (req: AuthRequest, res) => {
+    try {
+      const { tenantPool } = getTenantContext(req);
+      const loanId = req.body?.loan_id;
+      if (typeof loanId !== "string" || !loanId.trim()) {
+        return res.status(400).json({ error: "loan_id is required" });
+      }
+      const loResult = await tenantPool.query<{ email: string; full_name: string | null; encompass_user_id: string }>(
+        `SELECT eu.email, eu.full_name, eu.encompass_user_id
+         FROM public.loans l
+         JOIN public.encompass_users eu
+           ON eu.is_enabled = true
+           AND eu.email IS NOT NULL
+           AND (eu.encompass_user_id = l.loan_officer_id OR LOWER(eu.full_name) = LOWER(l.loan_officer))
+         WHERE l.loan_id = $1
+         LIMIT 1`,
+        [loanId.trim()],
+      );
+      const lo = loResult.rows[0];
+      const { redirectActive, allowedEmails } = await getFalloutDevMode();
+      res.json({
+        found: !!lo,
+        loEmail: lo?.email || null,
+        loName: lo?.full_name || null,
+        redirectActive,
+        redirectTo: redirectActive && allowedEmails.length > 0 ? allowedEmails[0] : null,
+      });
+    } catch (error: unknown) {
+      res.status(500).json({ error: getErrorMessage(error, "Failed to resolve LO") });
+    }
+  },
+);
+
+/**
  * POST /api/fallout-alerts/send-single
  * Send a fallout alert email for a single loan (used from the loan drilldown modal).
+ * Accepts optional additional_emails[] to CC extra recipients.
  */
 router.post(
   "/send-single",
@@ -332,6 +375,9 @@ router.post(
       if (typeof loanId !== "string" || !loanId.trim()) {
         return res.status(400).json({ error: "loan_id is required" });
       }
+      const additionalEmails = Array.isArray(req.body?.additional_emails)
+        ? req.body.additional_emails.filter((e: unknown) => typeof e === "string" && (e as string).includes("@")).map((e: string) => e.trim().toLowerCase())
+        : [];
       const appBaseUrl = process.env.APP_BASE_URL || resolveFrontendUrl();
       const result = await sendSingleFalloutAlert({
         tenantPool,
@@ -339,6 +385,7 @@ router.post(
         tenantSlug: tenantInfo.slug,
         loanId: loanId.trim(),
         appBaseUrl,
+        additionalEmails,
       });
       res.json(result);
     } catch (error: unknown) {
