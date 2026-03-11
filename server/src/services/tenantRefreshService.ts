@@ -9,6 +9,7 @@ import {
   buildAnonymizationMappings,
   copyConfigTables,
   copyEmployeesAnonymized,
+  copyEncompassUsersAnonymized,
   copyLoanRelatedData,
   copyLoansAnonymized,
   getTenantPoolById,
@@ -54,6 +55,7 @@ async function clearDemoTenantData(tenantPool: Pool): Promise<void> {
     ...new Set([
       "employees",
       "loans",
+      "encompass_users",
       ...LOAN_DATA_TABLES,
       ...CONFIG_TABLES,
     ]),
@@ -108,6 +110,7 @@ export async function refreshDemoTenant(
       mappings,
     );
     const loansCopied = await copyLoansAnonymized(src.pool, demoPool, mappings);
+    await copyEncompassUsersAnonymized(src.pool, demoPool, mappings);
     await copyLoanRelatedData(src.pool, demoPool);
 
     await managementPool.query(

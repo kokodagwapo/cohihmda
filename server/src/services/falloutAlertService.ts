@@ -955,6 +955,23 @@ export async function sendFalloutAlerts({
       managerQuery,
       managerParams,
     );
+    if (devMode) {
+      if (devAllowedEmails.length > 0) {
+        let mgrCardIdx = 0;
+        for (const mgr of managers.rows) {
+          const original = mgr.email;
+          mgr.email = devAllowedEmails[mgrCardIdx % devAllowedEmails.length];
+          mgr.full_name = `[DEV→${mgr.email}] ${mgr.full_name || original}`;
+          mgrCardIdx++;
+        }
+        console.log(
+          `[FalloutAlerts] DEV MODE: Redirected ${managers.rows.length} manager card emails to ${devAllowedEmails.join(", ")}`,
+        );
+      } else {
+        managers.rows.length = 0;
+        console.warn("[FalloutAlerts] DEV MODE: Blocked manager card emails (no FALLOUT_DEV_ALLOWED_EMAILS)");
+      }
+    }
     managerCardNotifications.attempted = managers.rows.length;
 
     const branchFilterSet = new Set(
