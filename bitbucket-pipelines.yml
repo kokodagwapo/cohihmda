@@ -328,6 +328,40 @@ definitions:
           - chmod +x ./scripts/bitbucket/deploy-infrastructure.sh
           - ./scripts/bitbucket/deploy-infrastructure.sh
 
+    - step: &test-e2e-all-dev
+        name: Test E2E All (Chromium)
+        image: *playwright_docker_image
+        deployment: dev
+        caches:
+          - npm
+        script:
+          - npm ci
+          - *e2e-env-preflight
+          - npm run test:e2e:all
+        artifacts:
+          - playwright-report/**
+          - test-results/**
+
+    - step: &run-migrations-dev-step
+        name: Run Migrations (Dev)
+        oidc: true
+        deployment: dev
+        script:
+          - *setup-oidc
+          - apt-get update && apt-get install -y curl
+          - chmod +x ./scripts/bitbucket/run-migrations.sh
+          - ./scripts/bitbucket/run-migrations.sh
+
+    - step: &run-migrations-prod-step
+        name: Run Migrations (Prod)
+        oidc: true
+        deployment: production
+        script:
+          - *setup-oidc
+          - apt-get update && apt-get install -y curl
+          - chmod +x ./scripts/bitbucket/run-migrations.sh
+          - ./scripts/bitbucket/run-migrations.sh
+
     - step: &deploy-all-dev-force
         name: Force Deploy All to Dev
         oidc: true
@@ -451,7 +485,8 @@ pipelines:
           - step: *test-backend
           - step: *test-backend-integration
       - step: *deploy-all-dev-force
-      - step: *test-e2e-critical
+      - step: *run-migrations-dev-step
+      - step: *test-e2e-all-dev
 
     deploy-all-prod:
       - parallel:
@@ -462,6 +497,10 @@ pipelines:
           - step: *test-backend
           - step: *test-backend-integration
       - step: *deploy-all-prod-force
+      - step: *run-migrations-prod-step
+
+    e2e-dev:
+      - step: *test-e2e-all-dev
 
     e2e-regression:
       - step: *test-e2e-regression
