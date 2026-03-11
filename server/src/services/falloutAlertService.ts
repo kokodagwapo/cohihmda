@@ -262,6 +262,18 @@ export async function upsertFalloutAlertConfig(
   return updateResult.rows[0];
 }
 
+/**
+ * Maximum age (in days) of a loan's application_date to be considered current pipeline.
+ * Loans older than this are treated as stale data and excluded from alerts.
+ */
+const PIPELINE_RECENCY_DAYS = 180;
+
+/**
+ * Loans whose estimated_closing_date is more than this many days in the past
+ * are considered overdue/stale and excluded from alerts.
+ */
+const OVERDUE_GRACE_DAYS = 30;
+
 export async function getHighRiskLoansForAlerts(
   tenantPool: Pool,
   config: Pick<FalloutAlertConfig, "min_risk_score" | "include_risk_levels">,
@@ -310,6 +322,10 @@ export async function getHighRiskLoansForAlerts(
       WHERE p.predicted_outcome IN ('withdraw', 'deny')
         AND l.current_loan_status = 'Active Loan'
         AND (l.is_archived IS DISTINCT FROM TRUE)
+        -- Pipeline recency: exclude loans with application_date older than threshold
+        AND (l.application_date IS NULL OR l.application_date >= CURRENT_DATE - $3)
+        -- Overdue filter: exclude loans whose estimated closing date is far in the past
+        AND (l.estimated_closing_date IS NULL OR l.estimated_closing_date >= CURRENT_DATE - $4)
     )
     SELECT
       loan_id,
@@ -339,7 +355,7 @@ export async function getHighRiskLoansForAlerts(
         END
       ) = ANY($2::text[])
     ORDER BY risk_score DESC`,
-    [minScore, allowedLevels],
+    [minScore, allowedLevels, PIPELINE_RECENCY_DAYS, OVERDUE_GRACE_DAYS],
   );
   return result.rows as RiskLoanRow[];
 }
