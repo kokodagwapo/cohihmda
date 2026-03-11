@@ -1013,7 +1013,9 @@ export const ClosingFalloutForecast = ({
     selectedChannel,
   );
   const [isAnimating, setIsAnimating] = useState(true);
-  const [insightsTab, setInsightsTab] = useState<"critical" | "officers">(
+  const [insightsTab, setInsightsTab] = useState<
+    "critical" | "officers" | "distribution"
+  >(
     "critical",
   );
   const [criticalOutcomeFilter, setCriticalOutcomeFilter] =
@@ -1141,9 +1143,15 @@ export const ClosingFalloutForecast = ({
   const [falloutLoanOfficerOptions, setFalloutLoanOfficerOptions] = useState<FalloutRecipientLoanOfficer[]>([]);
   const [falloutManagerOptions, setFalloutManagerOptions] = useState<FalloutRecipientManager[]>([]);
   const [falloutBranchOptions, setFalloutBranchOptions] = useState<string[]>([]);
-  const [distributionPanelExpanded, setDistributionPanelExpanded] = useState(false);
+  const [distributionSubTab, setDistributionSubTab] = useState<
+    "settings" | "responses"
+  >("settings");
   const [loSearchTerm, setLoSearchTerm] = useState("");
   const [loSortMode, setLoSortMode] = useState<"active_desc" | "name_asc">("active_desc");
+  const [responseSearchTerm, setResponseSearchTerm] = useState("");
+  const [responseTypeFilter, setResponseTypeFilter] = useState<
+    "all" | "acknowledged" | "working_on_it" | "need_help"
+  >("all");
   const [manualTestRecipientsInput, setManualTestRecipientsInput] = useState("");
   const [sendManagerCards, setSendManagerCards] = useState(false);
   const [managerCardScopeToSelectedLos, setManagerCardScopeToSelectedLos] = useState(true);
@@ -3444,7 +3452,7 @@ export const ClosingFalloutForecast = ({
   };
 
   const loadFalloutAlertAdminData = useCallback(async () => {
-    if (!canManageFalloutAlerts) return;
+    if (!canManageFalloutAlerts || insightsTab !== "distribution") return;
     try {
       setAlertsConfigLoading(true);
       const [configResult, responsesResult, optionsResult] = await Promise.all([
@@ -3494,7 +3502,7 @@ export const ClosingFalloutForecast = ({
     } finally {
       setAlertsConfigLoading(false);
     }
-  }, [canManageFalloutAlerts, selectedTenantId]);
+  }, [canManageFalloutAlerts, selectedTenantId, insightsTab]);
 
   useEffect(() => {
     loadFalloutAlertAdminData();
@@ -3531,15 +3539,31 @@ export const ClosingFalloutForecast = ({
         manager_card_scope_to_target_los: managerCardScopeToSelectedLos,
       });
       const baseMessage = `Sent ${result.sentCount}/${result.recipientsCount} fallout alert emails (${result.skippedLoansCount} loans skipped: no LO email match).`;
+      const failedRecipientsMessage = result.failedRecipients.length > 0
+        ? ` Failed recipients: ${result.failedRecipients
+            .slice(0, 5)
+            .map((entry) => `${entry.email} (${entry.error})`)
+            .join("; ")}${
+            result.failedRecipients.length > 5
+              ? `; +${result.failedRecipients.length - 5} more`
+              : ""
+          }.`
+        : "";
       const managerCardsMsg = result.managerCardNotifications.attempted > 0 || sendManagerCards
         ? ` Manager cards: ${result.managerCardNotifications.sent}/${result.managerCardNotifications.attempted} (loans scoped: ${result.managerCardNotifications.loanCount}).`
         : "";
+      const noMatchesMessage =
+        result.sentCount === 0 && result.recipientsCount === 0
+          ? " No emails sent - no LO email matches found for selected loan officers."
+          : "";
       if (result.testRecipients.attempted > 0) {
         setAlertsMessage(
-          `${baseMessage} Test recipients: ${result.testRecipients.sent}/${result.testRecipients.attempted}.${managerCardsMsg}`,
+          `${baseMessage} Test recipients: ${result.testRecipients.sent}/${result.testRecipients.attempted}.${managerCardsMsg}${failedRecipientsMessage}${noMatchesMessage}`,
         );
       } else {
-        setAlertsMessage(`${baseMessage}${managerCardsMsg}`);
+        setAlertsMessage(
+          `${baseMessage}${managerCardsMsg}${failedRecipientsMessage}${noMatchesMessage}`,
+        );
       }
       await loadFalloutAlertAdminData();
     } catch (error: unknown) {
@@ -3586,6 +3610,21 @@ export const ClosingFalloutForecast = ({
     falloutAlertConfig.notify_managers ||
     sendManagerCards ||
     manualTestRecipientCount > 0;
+  const filteredFalloutAlertResponses = useMemo(() => {
+    const query = responseSearchTerm.trim().toLowerCase();
+    return falloutAlertResponses.filter((row) => {
+      if (responseTypeFilter !== "all" && row.response !== responseTypeFilter) {
+        return false;
+      }
+      if (!query) return true;
+      return (
+        (row.loan_number || "").toLowerCase().includes(query) ||
+        row.loan_id.toLowerCase().includes(query) ||
+        (row.loan_officer || "").toLowerCase().includes(query) ||
+        (row.recipient_email || "").toLowerCase().includes(query)
+      );
+    });
+  }, [falloutAlertResponses, responseSearchTerm, responseTypeFilter]);
 
   return (
     <TooltipProvider>
@@ -3645,389 +3684,6 @@ export const ClosingFalloutForecast = ({
                       />
                     </div>
                   </div>
-
-                  {canManageFalloutAlerts && (
-                    <div className="mb-8 rounded-xl border border-slate-200 dark:border-slate-800 p-4 md:p-5 bg-slate-50/70 dark:bg-slate-900/50">
-                      <div className="flex items-center justify-between gap-3 mb-3">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                            Fallout Card Distribution
-                          </p>
-                          <p className="text-xs text-slate-600 dark:text-slate-400">
-                            Configure LO targeting, manager notifications, and one-click response emails.
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() => setDistributionPanelExpanded((prev) => !prev)}
-                            className="text-xs"
-                          >
-                            <ChevronDown
-                              className={`w-4 h-4 mr-1 transition-transform ${distributionPanelExpanded ? "rotate-180" : ""}`}
-                            />
-                            {distributionPanelExpanded ? "Collapse" : "Expand"}
-                          </Button>
-                        </div>
-                      </div>
-                      {distributionPanelExpanded && (
-                        <>
-                      <div className="flex items-center gap-2 mb-3">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={handleSendFalloutAlertsNow}
-                          disabled={alertsSending || alertsConfigLoading || !canSendFalloutAlerts}
-                          className="text-xs"
-                          title={
-                            !canSendFalloutAlerts
-                              ? "Select at least one LO, enable manager notifications, or add test recipient emails"
-                              : undefined
-                          }
-                        >
-                          {alertsSending ? "Sending..." : "Send Alerts Now"}
-                        </Button>
-                        <Button
-                          type="button"
-                          onClick={handleSaveFalloutAlertConfig}
-                          disabled={alertsConfigSaving || alertsConfigLoading}
-                          className="text-xs"
-                        >
-                          {alertsConfigSaving ? "Saving..." : "Save Settings"}
-                        </Button>
-                      </div>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <label className="flex items-center justify-between rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2">
-                          <span className="text-xs font-medium text-slate-700 dark:text-slate-300">Enabled</span>
-                          <Switch
-                            checked={falloutAlertConfig.enabled}
-                            onCheckedChange={(checked) =>
-                              setFalloutAlertConfig((prev) => ({ ...prev, enabled: checked }))
-                            }
-                          />
-                        </label>
-                        <label className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2">
-                          <span className="text-xs font-medium text-slate-700 dark:text-slate-300 block mb-1">
-                            Minimum Risk Score
-                          </span>
-                          <Input
-                            type="number"
-                            min={0}
-                            max={100}
-                            value={falloutAlertConfig.min_risk_score}
-                            onChange={(e) =>
-                              setFalloutAlertConfig((prev) => ({
-                                ...prev,
-                                min_risk_score: Math.max(0, Math.min(100, Number(e.target.value || 0))),
-                              }))
-                            }
-                            className="h-8 text-xs"
-                          />
-                        </label>
-                        <label className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2">
-                          <span className="text-xs font-medium text-slate-700 dark:text-slate-300 block mb-1">
-                            Frequency
-                          </span>
-                          <select
-                            value={falloutAlertConfig.frequency}
-                            onChange={(e) =>
-                              setFalloutAlertConfig((prev) => ({
-                                ...prev,
-                                frequency: e.target.value as "realtime" | "daily_digest" | "weekly_digest",
-                              }))
-                            }
-                            className="h-8 w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 text-xs"
-                          >
-                            <option value="realtime">Realtime</option>
-                            <option value="daily_digest">Daily Digest</option>
-                            <option value="weekly_digest">Weekly Digest</option>
-                          </select>
-                        </label>
-                      </div>
-
-                      <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-700 dark:text-slate-300">
-                        {["Very High", "High", "Medium", "Low"].map((level) => (
-                          <label key={level} className="flex items-center gap-1.5">
-                            <input
-                              type="checkbox"
-                              checked={falloutAlertConfig.include_risk_levels.includes(level)}
-                              onChange={(e) =>
-                                setFalloutAlertConfig((prev) => ({
-                                  ...prev,
-                                  include_risk_levels: e.target.checked
-                                    ? Array.from(new Set([...prev.include_risk_levels, level]))
-                                    : prev.include_risk_levels.filter((v) => v !== level),
-                                }))
-                              }
-                            />
-                            {level}
-                          </label>
-                        ))}
-                        <label className="flex items-center gap-1.5 ml-2">
-                          <span>Notify Managers</span>
-                          <Switch
-                            checked={falloutAlertConfig.notify_managers}
-                            onCheckedChange={(checked) =>
-                              setFalloutAlertConfig((prev) => ({ ...prev, notify_managers: checked }))
-                            }
-                          />
-                        </label>
-                      </div>
-
-                      <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <div className="rounded-md border border-slate-200 dark:border-slate-700 p-2">
-                          <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
-                            Target Loan Officers
-                          </p>
-                          <p className="text-[11px] text-slate-500 mb-2">
-                            Optional. If selected, LOs receive actionable card emails.
-                          </p>
-                          <div className="flex items-center gap-2 mb-2">
-                            <Input
-                              value={loSearchTerm}
-                              onChange={(e) => setLoSearchTerm(e.target.value)}
-                              placeholder="Search LO by name or email..."
-                              className="h-8 text-xs"
-                            />
-                            <select
-                              value={loSortMode}
-                              onChange={(e) =>
-                                setLoSortMode(e.target.value as "active_desc" | "name_asc")
-                              }
-                              className="h-8 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 text-xs"
-                              title="Sort loan officers"
-                            >
-                              <option value="active_desc">Most Active</option>
-                              <option value="name_asc">Name A-Z</option>
-                            </select>
-                          </div>
-                          <div className="flex items-center justify-between text-[11px] text-slate-500 mb-2">
-                            <span>
-                              Selected: {selectedLoCount}
-                            </span>
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                className="underline hover:text-slate-700 dark:hover:text-slate-300"
-                                onClick={() =>
-                                  setFalloutAlertConfig((prev) => ({
-                                    ...prev,
-                                    target_encompass_user_ids: Array.from(
-                                      new Set([
-                                        ...prev.target_encompass_user_ids,
-                                        ...visibleLoanOfficerOptions.map((lo) => lo.encompass_user_id),
-                                      ]),
-                                    ),
-                                  }))
-                                }
-                              >
-                                Select all visible
-                              </button>
-                              <button
-                                type="button"
-                                className="underline hover:text-slate-700 dark:hover:text-slate-300"
-                                onClick={() =>
-                                  setFalloutAlertConfig((prev) => ({
-                                    ...prev,
-                                    target_encompass_user_ids: [],
-                                  }))
-                                }
-                              >
-                                Clear
-                              </button>
-                            </div>
-                          </div>
-                          <div className="max-h-32 overflow-auto space-y-1">
-                            {visibleLoanOfficerOptions.map((lo) => (
-                              <label key={lo.encompass_user_id} className="flex items-center gap-2 text-xs">
-                                <input
-                                  type="checkbox"
-                                  checked={falloutAlertConfig.target_encompass_user_ids.includes(lo.encompass_user_id)}
-                                  onChange={(e) =>
-                                    setFalloutAlertConfig((prev) => ({
-                                      ...prev,
-                                      target_encompass_user_ids: e.target.checked
-                                        ? Array.from(
-                                            new Set([...prev.target_encompass_user_ids, lo.encompass_user_id]),
-                                          )
-                                        : prev.target_encompass_user_ids.filter(
-                                            (id) => id !== lo.encompass_user_id,
-                                          ),
-                                    }))
-                                  }
-                                />
-                                <span className="flex items-center gap-2">
-                                  <span>{lo.display_name} ({lo.email})</span>
-                                  <span className="rounded bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 text-[10px]">
-                                    {lo.active_loan_count || 0} active
-                                  </span>
-                                </span>
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div className="rounded-md border border-slate-200 dark:border-slate-700 p-2">
-                          <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
-                            Manager Recipients
-                          </p>
-                          <p className="text-[11px] text-slate-500 mb-2">
-                            Used when \"Notify Managers\" is enabled. If none selected, all managers/admins are notified.
-                          </p>
-                          <div className="max-h-32 overflow-auto space-y-1">
-                            {falloutManagerOptions.map((manager) => (
-                              <label key={manager.id} className="flex items-center gap-2 text-xs">
-                                <input
-                                  type="checkbox"
-                                  checked={falloutAlertConfig.manager_user_ids.includes(manager.id)}
-                                  onChange={(e) =>
-                                    setFalloutAlertConfig((prev) => ({
-                                      ...prev,
-                                      manager_user_ids: e.target.checked
-                                        ? Array.from(new Set([...prev.manager_user_ids, manager.id]))
-                                        : prev.manager_user_ids.filter((id) => id !== manager.id),
-                                    }))
-                                  }
-                                />
-                                <span>{manager.display_name} ({manager.role})</span>
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="mt-3 rounded-md border border-slate-200 dark:border-slate-700 p-3">
-                        <div className="flex items-center justify-between gap-3 mb-2">
-                          <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">
-                            Manager Card Delivery (Send Now)
-                          </p>
-                          <Switch
-                            checked={sendManagerCards}
-                            onCheckedChange={setSendManagerCards}
-                          />
-                        </div>
-                        <p className="text-[11px] text-slate-500 mb-2">
-                          Send managers a separate email with loan cards in addition to the summary report.
-                        </p>
-                        {sendManagerCards && (
-                          <>
-                            <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 mb-2">
-                              <input
-                                type="checkbox"
-                                checked={managerCardScopeToSelectedLos}
-                                onChange={(e) => setManagerCardScopeToSelectedLos(e.target.checked)}
-                              />
-                              Scope cards to selected target LOs
-                            </label>
-                            <p className="text-[11px] text-slate-500 mb-1">
-                              Optional branch filter
-                            </p>
-                            <div className="max-h-24 overflow-auto rounded border border-slate-200 dark:border-slate-700 p-2 space-y-1">
-                              {falloutBranchOptions.length === 0 ? (
-                                <p className="text-[11px] text-slate-500">No branches found.</p>
-                              ) : (
-                                falloutBranchOptions.map((branch) => (
-                                  <label key={branch} className="flex items-center gap-2 text-xs">
-                                    <input
-                                      type="checkbox"
-                                      checked={managerCardBranchFilters.includes(branch)}
-                                      onChange={(e) =>
-                                        setManagerCardBranchFilters((prev) =>
-                                          e.target.checked
-                                            ? Array.from(new Set([...prev, branch]))
-                                            : prev.filter((value) => value !== branch),
-                                        )
-                                      }
-                                    />
-                                    <span>{branch}</span>
-                                  </label>
-                                ))
-                              )}
-                            </div>
-                          </>
-                        )}
-                      </div>
-
-                      <div className="mt-3 rounded-md border border-slate-200 dark:border-slate-700 p-3">
-                        <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
-                          Manual Test Recipients
-                        </p>
-                        <p className="text-[11px] text-slate-500 mb-2">
-                          Send test loan cards to specific emails without selecting any LOs.
-                        </p>
-                        <Textarea
-                          rows={2}
-                          value={manualTestRecipientsInput}
-                          onChange={(e) => setManualTestRecipientsInput(e.target.value)}
-                          placeholder="name@company.com, qa@company.com"
-                          className="text-xs"
-                        />
-                        <p className="mt-1 text-[11px] text-slate-500">
-                          Parsed test recipients: {manualTestRecipientCount}
-                        </p>
-                      </div>
-
-                      <div className="mt-3">
-                        <Textarea
-                          rows={2}
-                          value={falloutAlertConfig.custom_message || ""}
-                          onChange={(e) =>
-                            setFalloutAlertConfig((prev) => ({
-                              ...prev,
-                              custom_message: e.target.value,
-                            }))
-                          }
-                          placeholder="Optional message to include in LO emails..."
-                          className="text-xs"
-                        />
-                      </div>
-
-                      {alertsMessage && (
-                        <p className="mt-2 text-xs text-slate-600 dark:text-slate-300">
-                          {alertsMessage}
-                        </p>
-                      )}
-
-                      <div className="mt-4">
-                        <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-2">
-                          Recent Fallout Email Responses
-                        </p>
-                        <div className="max-h-40 overflow-auto rounded-md border border-slate-200 dark:border-slate-700">
-                          <table className="w-full text-xs">
-                            <thead className="bg-slate-100 dark:bg-slate-800">
-                              <tr>
-                                <th className="text-left p-2">Loan</th>
-                                <th className="text-left p-2">Officer</th>
-                                <th className="text-left p-2">Response</th>
-                                <th className="text-left p-2">When</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {falloutAlertResponses.length === 0 ? (
-                                <tr>
-                                  <td className="p-2 text-slate-500" colSpan={4}>
-                                    No responses yet.
-                                  </td>
-                                </tr>
-                              ) : (
-                                falloutAlertResponses.map((row) => (
-                                  <tr key={row.id} className="border-t border-slate-200 dark:border-slate-700">
-                                    <td className="p-2">{row.loan_number || row.loan_id}</td>
-                                    <td className="p-2">{row.loan_officer || row.recipient_email || "-"}</td>
-                                    <td className="p-2">{row.response}</td>
-                                    <td className="p-2">{new Date(row.responded_at).toLocaleString()}</td>
-                                  </tr>
-                                ))
-                              )}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                        </>
-                      )}
-                    </div>
-                  )}
 
                   {/* Main Metrics Grid - 4 KPIs centered */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 sm:gap-6 md:gap-8 lg:gap-12 mb-8 md:mb-12 max-w-5xl mx-auto">
@@ -4809,6 +4465,25 @@ export const ClosingFalloutForecast = ({
                 Critical Loans Table
               </span>
             </button>
+            {canManageFalloutAlerts && (
+              <button
+                onClick={() => setInsightsTab("distribution")}
+                className={`flex-1 py-4 lg:py-5 px-6 text-[10px] md:text-[11px] lg:text-xs font-semibold uppercase tracking-widest transition-all ${
+                  insightsTab === "distribution"
+                    ? isDarkMode
+                      ? "bg-slate-800/50 text-white border-b-2 border-emerald-500"
+                      : "bg-slate-50 text-slate-900 border-b-2 border-emerald-500"
+                    : isDarkMode
+                      ? "text-slate-400 hover:text-slate-300 hover:bg-slate-800/30"
+                      : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                <span className="flex items-center justify-center gap-2">
+                  <BarChart3 className="w-4 h-4" />
+                  Distribution
+                </span>
+              </button>
+            )}
           </div>
 
           <div className="py-2 md:p-3 lg:p-4 min-w-0 w-full overflow-hidden">
@@ -5318,6 +4993,437 @@ export const ClosingFalloutForecast = ({
                     )}
                   </div>
                 )}
+              </div>
+            )}
+
+            {insightsTab === "distribution" && canManageFalloutAlerts && (
+              <div className="w-full min-w-0 max-w-full overflow-hidden">
+                <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-4 md:p-5 bg-slate-50/70 dark:bg-slate-900/50">
+                  <div className="mb-3">
+                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                      Fallout Card Distribution
+                    </p>
+                    <p className="text-xs text-slate-600 dark:text-slate-400">
+                      Configure LO targeting, manager notifications, and one-click response emails.
+                    </p>
+                  </div>
+
+                  <div className="mb-3 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setDistributionSubTab("settings")}
+                      className={`px-3 py-1.5 text-xs font-semibold rounded-full transition-all ${
+                        distributionSubTab === "settings"
+                          ? isDarkMode
+                            ? "bg-emerald-600 text-white"
+                            : "bg-emerald-600 text-white"
+                          : isDarkMode
+                            ? "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                            : "bg-slate-200 text-slate-700 hover:bg-slate-300"
+                      }`}
+                    >
+                      Settings
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDistributionSubTab("responses")}
+                      className={`px-3 py-1.5 text-xs font-semibold rounded-full transition-all ${
+                        distributionSubTab === "responses"
+                          ? isDarkMode
+                            ? "bg-indigo-600 text-white"
+                            : "bg-indigo-600 text-white"
+                          : isDarkMode
+                            ? "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                            : "bg-slate-200 text-slate-700 hover:bg-slate-300"
+                      }`}
+                    >
+                      LO Responses
+                    </button>
+                  </div>
+
+                  {distributionSubTab === "settings" && (
+                    <>
+                      <div className="flex items-center gap-2 mb-3">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={handleSendFalloutAlertsNow}
+                          disabled={alertsSending || alertsConfigLoading || !canSendFalloutAlerts}
+                          className="text-xs"
+                          title={
+                            !canSendFalloutAlerts
+                              ? "Select at least one LO, enable manager notifications, or add test recipient emails"
+                              : undefined
+                          }
+                        >
+                          {alertsSending ? "Sending..." : "Send Alerts Now"}
+                        </Button>
+                        <Button
+                          type="button"
+                          onClick={handleSaveFalloutAlertConfig}
+                          disabled={alertsConfigSaving || alertsConfigLoading}
+                          className="text-xs"
+                        >
+                          {alertsConfigSaving ? "Saving..." : "Save Settings"}
+                        </Button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <label className="flex items-center justify-between rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2">
+                          <span className="text-xs font-medium text-slate-700 dark:text-slate-300">Enabled</span>
+                          <Switch
+                            checked={falloutAlertConfig.enabled}
+                            onCheckedChange={(checked) =>
+                              setFalloutAlertConfig((prev) => ({ ...prev, enabled: checked }))
+                            }
+                          />
+                        </label>
+                        <label className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2">
+                          <span className="text-xs font-medium text-slate-700 dark:text-slate-300 block mb-1">
+                            Minimum Risk Score
+                          </span>
+                          <Input
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={falloutAlertConfig.min_risk_score}
+                            onChange={(e) =>
+                              setFalloutAlertConfig((prev) => ({
+                                ...prev,
+                                min_risk_score: Math.max(0, Math.min(100, Number(e.target.value || 0))),
+                              }))
+                            }
+                            className="h-8 text-xs"
+                          />
+                        </label>
+                        <label className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2">
+                          <span className="text-xs font-medium text-slate-700 dark:text-slate-300 block mb-1">
+                            Frequency
+                          </span>
+                          <select
+                            value={falloutAlertConfig.frequency}
+                            onChange={(e) =>
+                              setFalloutAlertConfig((prev) => ({
+                                ...prev,
+                                frequency: e.target.value as "realtime" | "daily_digest" | "weekly_digest",
+                              }))
+                            }
+                            className="h-8 w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 text-xs"
+                          >
+                            <option value="realtime">Realtime</option>
+                            <option value="daily_digest">Daily Digest</option>
+                            <option value="weekly_digest">Weekly Digest</option>
+                          </select>
+                        </label>
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-700 dark:text-slate-300">
+                        {["Very High", "High", "Medium", "Low"].map((level) => (
+                          <label key={level} className="flex items-center gap-1.5">
+                            <input
+                              type="checkbox"
+                              checked={falloutAlertConfig.include_risk_levels.includes(level)}
+                              onChange={(e) =>
+                                setFalloutAlertConfig((prev) => ({
+                                  ...prev,
+                                  include_risk_levels: e.target.checked
+                                    ? Array.from(new Set([...prev.include_risk_levels, level]))
+                                    : prev.include_risk_levels.filter((v) => v !== level),
+                                }))
+                              }
+                            />
+                            {level}
+                          </label>
+                        ))}
+                        <label className="flex items-center gap-1.5 ml-2">
+                          <span>Notify Managers</span>
+                          <Switch
+                            checked={falloutAlertConfig.notify_managers}
+                            onCheckedChange={(checked) =>
+                              setFalloutAlertConfig((prev) => ({ ...prev, notify_managers: checked }))
+                            }
+                          />
+                        </label>
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div className="rounded-md border border-slate-200 dark:border-slate-700 p-2">
+                          <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
+                            Target Loan Officers
+                          </p>
+                          <p className="text-[11px] text-slate-500 mb-2">
+                            Optional. If selected, LOs receive actionable card emails.
+                          </p>
+                          <div className="flex items-center gap-2 mb-2">
+                            <Input
+                              value={loSearchTerm}
+                              onChange={(e) => setLoSearchTerm(e.target.value)}
+                              placeholder="Search LO by name or email..."
+                              className="h-8 text-xs"
+                            />
+                            <select
+                              value={loSortMode}
+                              onChange={(e) =>
+                                setLoSortMode(e.target.value as "active_desc" | "name_asc")
+                              }
+                              className="h-8 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 text-xs"
+                              title="Sort loan officers"
+                            >
+                              <option value="active_desc">Most Active</option>
+                              <option value="name_asc">Name A-Z</option>
+                            </select>
+                          </div>
+                          <div className="flex items-center justify-between text-[11px] text-slate-500 mb-2">
+                            <span>
+                              Selected: {selectedLoCount}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                className="underline hover:text-slate-700 dark:hover:text-slate-300"
+                                onClick={() =>
+                                  setFalloutAlertConfig((prev) => ({
+                                    ...prev,
+                                    target_encompass_user_ids: Array.from(
+                                      new Set([
+                                        ...prev.target_encompass_user_ids,
+                                        ...visibleLoanOfficerOptions.map((lo) => lo.encompass_user_id),
+                                      ]),
+                                    ),
+                                  }))
+                                }
+                              >
+                                Select all visible
+                              </button>
+                              <button
+                                type="button"
+                                className="underline hover:text-slate-700 dark:hover:text-slate-300"
+                                onClick={() =>
+                                  setFalloutAlertConfig((prev) => ({
+                                    ...prev,
+                                    target_encompass_user_ids: [],
+                                  }))
+                                }
+                              >
+                                Clear
+                              </button>
+                            </div>
+                          </div>
+                          <div className="max-h-32 overflow-auto space-y-1">
+                            {visibleLoanOfficerOptions.map((lo) => (
+                              <label key={lo.encompass_user_id} className="flex items-center gap-2 text-xs">
+                                <input
+                                  type="checkbox"
+                                  checked={falloutAlertConfig.target_encompass_user_ids.includes(lo.encompass_user_id)}
+                                  onChange={(e) =>
+                                    setFalloutAlertConfig((prev) => ({
+                                      ...prev,
+                                      target_encompass_user_ids: e.target.checked
+                                        ? Array.from(
+                                            new Set([...prev.target_encompass_user_ids, lo.encompass_user_id]),
+                                          )
+                                        : prev.target_encompass_user_ids.filter(
+                                            (id) => id !== lo.encompass_user_id,
+                                          ),
+                                    }))
+                                  }
+                                />
+                                <span className="flex items-center gap-2">
+                                  <span>{lo.display_name} ({lo.email})</span>
+                                  <span className="rounded bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 text-[10px]">
+                                    {lo.active_loan_count || 0} active
+                                  </span>
+                                </span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="rounded-md border border-slate-200 dark:border-slate-700 p-2">
+                          <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
+                            Manager Recipients
+                          </p>
+                          <p className="text-[11px] text-slate-500 mb-2">
+                            Used when \"Notify Managers\" is enabled. If none selected, all managers/admins are notified.
+                          </p>
+                          <div className="max-h-32 overflow-auto space-y-1">
+                            {falloutManagerOptions.map((manager) => (
+                              <label key={manager.id} className="flex items-center gap-2 text-xs">
+                                <input
+                                  type="checkbox"
+                                  checked={falloutAlertConfig.manager_user_ids.includes(manager.id)}
+                                  onChange={(e) =>
+                                    setFalloutAlertConfig((prev) => ({
+                                      ...prev,
+                                      manager_user_ids: e.target.checked
+                                        ? Array.from(new Set([...prev.manager_user_ids, manager.id]))
+                                        : prev.manager_user_ids.filter((id) => id !== manager.id),
+                                    }))
+                                  }
+                                />
+                                <span>{manager.display_name} ({manager.role})</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 rounded-md border border-slate-200 dark:border-slate-700 p-3">
+                        <div className="flex items-center justify-between gap-3 mb-2">
+                          <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                            Manager Card Delivery (Send Now)
+                          </p>
+                          <Switch
+                            checked={sendManagerCards}
+                            onCheckedChange={setSendManagerCards}
+                          />
+                        </div>
+                        <p className="text-[11px] text-slate-500 mb-2">
+                          Send managers a separate email with loan cards in addition to the summary report.
+                        </p>
+                        {sendManagerCards && (
+                          <>
+                            <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 mb-2">
+                              <input
+                                type="checkbox"
+                                checked={managerCardScopeToSelectedLos}
+                                onChange={(e) => setManagerCardScopeToSelectedLos(e.target.checked)}
+                              />
+                              Scope cards to selected target LOs
+                            </label>
+                            <p className="text-[11px] text-slate-500 mb-1">
+                              Optional branch filter
+                            </p>
+                            <div className="max-h-24 overflow-auto rounded border border-slate-200 dark:border-slate-700 p-2 space-y-1">
+                              {falloutBranchOptions.length === 0 ? (
+                                <p className="text-[11px] text-slate-500">No branches found.</p>
+                              ) : (
+                                falloutBranchOptions.map((branch) => (
+                                  <label key={branch} className="flex items-center gap-2 text-xs">
+                                    <input
+                                      type="checkbox"
+                                      checked={managerCardBranchFilters.includes(branch)}
+                                      onChange={(e) =>
+                                        setManagerCardBranchFilters((prev) =>
+                                          e.target.checked
+                                            ? Array.from(new Set([...prev, branch]))
+                                            : prev.filter((value) => value !== branch),
+                                        )
+                                      }
+                                    />
+                                    <span>{branch}</span>
+                                  </label>
+                                ))
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+
+                      <div className="mt-3 rounded-md border border-slate-200 dark:border-slate-700 p-3">
+                        <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
+                          Manual Test Recipients
+                        </p>
+                        <p className="text-[11px] text-slate-500 mb-2">
+                          Send test loan cards to specific emails without selecting any LOs.
+                        </p>
+                        <Textarea
+                          rows={2}
+                          value={manualTestRecipientsInput}
+                          onChange={(e) => setManualTestRecipientsInput(e.target.value)}
+                          placeholder="name@company.com, qa@company.com"
+                          className="text-xs"
+                        />
+                        <p className="mt-1 text-[11px] text-slate-500">
+                          Parsed test recipients: {manualTestRecipientCount}
+                        </p>
+                      </div>
+
+                      <div className="mt-3">
+                        <Textarea
+                          rows={2}
+                          value={falloutAlertConfig.custom_message || ""}
+                          onChange={(e) =>
+                            setFalloutAlertConfig((prev) => ({
+                              ...prev,
+                              custom_message: e.target.value,
+                            }))
+                          }
+                          placeholder="Optional message to include in LO emails..."
+                          className="text-xs"
+                        />
+                      </div>
+
+                      {alertsMessage && (
+                        <p className="mt-2 text-xs text-slate-600 dark:text-slate-300">
+                          {alertsMessage}
+                        </p>
+                      )}
+                    </>
+                  )}
+
+                  {distributionSubTab === "responses" && (
+                    <>
+                      <div className="mb-3 flex flex-col sm:flex-row gap-2">
+                        <Input
+                          value={responseSearchTerm}
+                          onChange={(e) => setResponseSearchTerm(e.target.value)}
+                          placeholder="Search loan number, LO, or recipient email..."
+                          className="h-8 text-xs"
+                        />
+                        <select
+                          value={responseTypeFilter}
+                          onChange={(e) =>
+                            setResponseTypeFilter(
+                              e.target.value as
+                                | "all"
+                                | "acknowledged"
+                                | "working_on_it"
+                                | "need_help",
+                            )
+                          }
+                          className="h-8 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 text-xs"
+                        >
+                          <option value="all">All responses</option>
+                          <option value="acknowledged">Acknowledged</option>
+                          <option value="working_on_it">Working on it</option>
+                          <option value="need_help">Need help</option>
+                        </select>
+                      </div>
+                      <div className="max-h-80 overflow-auto rounded-md border border-slate-200 dark:border-slate-700">
+                        <table className="w-full text-xs">
+                          <thead className="bg-slate-100 dark:bg-slate-800 sticky top-0">
+                            <tr>
+                              <th className="text-left p-2">Loan</th>
+                              <th className="text-left p-2">Officer</th>
+                              <th className="text-left p-2">Recipient</th>
+                              <th className="text-left p-2">Response</th>
+                              <th className="text-left p-2">When</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filteredFalloutAlertResponses.length === 0 ? (
+                              <tr>
+                                <td className="p-2 text-slate-500" colSpan={5}>
+                                  No responses match the current filters.
+                                </td>
+                              </tr>
+                            ) : (
+                              filteredFalloutAlertResponses.map((row) => (
+                                <tr key={row.id} className="border-t border-slate-200 dark:border-slate-700">
+                                  <td className="p-2">{row.loan_number || row.loan_id}</td>
+                                  <td className="p-2">{row.loan_officer || "-"}</td>
+                                  <td className="p-2">{row.recipient_email || "-"}</td>
+                                  <td className="p-2">{row.response}</td>
+                                  <td className="p-2">{new Date(row.responded_at).toLocaleString()}</td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             )}
           </div>

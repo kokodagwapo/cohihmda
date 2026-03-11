@@ -272,24 +272,33 @@ router.get(
       const limitRaw = Number(req.query.limit);
       const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(200, Math.round(limitRaw))) : 50;
       const result = await tenantPool.query(
-        `SELECT
-          r.id,
-          r.alert_batch_id,
-          r.loan_id,
-          l.loan_number,
-          l.loan_officer,
-          r.encompass_user_id,
-          r.recipient_email,
-          r.response,
-          r.response_note,
-          r.ip_address,
-          r.user_agent,
-          r.responded_at,
-          r.created_at
-        FROM public.fallout_alert_responses r
-        LEFT JOIN public.loans l ON l.loan_id = r.loan_id
-        ORDER BY r.responded_at DESC
-        LIMIT $1`,
+        `SELECT *
+         FROM (
+           SELECT DISTINCT ON (r.token_id)
+             r.id,
+             r.alert_batch_id,
+             r.loan_id,
+             l.loan_number,
+             COALESCE(
+               NULLIF(TRIM(eu.full_name), ''),
+               NULLIF(TRIM(l.loan_officer), ''),
+               r.recipient_email
+             ) AS loan_officer,
+             r.encompass_user_id,
+             r.recipient_email,
+             r.response,
+             r.response_note,
+             r.ip_address,
+             r.user_agent,
+             r.responded_at,
+             r.created_at
+           FROM public.fallout_alert_responses r
+           LEFT JOIN public.loans l ON l.loan_id = r.loan_id
+           LEFT JOIN public.encompass_users eu ON eu.encompass_user_id = r.encompass_user_id
+           ORDER BY r.token_id, r.responded_at DESC, r.created_at DESC
+         ) latest
+         ORDER BY latest.responded_at DESC, latest.created_at DESC
+         LIMIT $1`,
         [limit],
       );
       res.json({ responses: result.rows });
