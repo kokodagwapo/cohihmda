@@ -112,9 +112,31 @@ async function getDevAllowedEmails(): Promise<string[]> {
   return getDevAllowedEmailsFromEnv();
 }
 
-export async function getFalloutDevMode(): Promise<{ isDevMode: boolean; allowedEmails: string[] }> {
+async function isEmailRedirectEnabled(): Promise<boolean> {
+  try {
+    const dbValue = await getPlatformSetting("fallout_email_redirect_enabled");
+    if (dbValue !== null && dbValue !== undefined) {
+      return dbValue === "true";
+    }
+  } catch {
+    // fall through
+  }
+  // Safety net: if not production, implicitly redirect
+  return !isProductionEnv();
+}
+
+/**
+ * Returns the effective redirect mode for fallout emails.
+ * redirectActive = true means emails should go to the safe list, not real recipients.
+ * This can be triggered by:
+ *   1. The platform setting `fallout_email_redirect_enabled` being explicitly set to true
+ *   2. Running outside of production (NODE_ENV != "production") as a safety net
+ */
+export async function getFalloutDevMode(): Promise<{ isDevMode: boolean; redirectActive: boolean; allowedEmails: string[] }> {
   const isDevMode = !isProductionEnv();
-  return { isDevMode, allowedEmails: isDevMode ? await getDevAllowedEmails() : [] };
+  const redirectEnabled = await isEmailRedirectEnabled();
+  const allowedEmails = redirectEnabled ? await getDevAllowedEmails() : [];
+  return { isDevMode, redirectActive: redirectEnabled, allowedEmails };
 }
 
 const UUID_V4_OR_V1_REGEX =
@@ -428,11 +450,30 @@ function buildActionUrl(
   return `${trimmed}/api/fallout-response/${encodeURIComponent(tenantSlug)}/${encodeURIComponent(token)}?action=${encodeURIComponent(action)}`;
 }
 
+function riskBadgeColor(level: string): { bg: string; color: string } {
+  switch (level) {
+    case "Very High": return { bg: "#ef4444", color: "#ffffff" };
+    case "High": return { bg: "#f97316", color: "#ffffff" };
+    case "Medium": return { bg: "#eab308", color: "#ffffff" };
+    default: return { bg: "#22c55e", color: "#ffffff" };
+  }
+}
+
+function outcomeLabel(outcome: string): string {
+  switch (outcome) {
+    case "withdraw": return "Likely Withdraw";
+    case "deny": return "Likely Decline";
+    case "originate": return "Likely to Close";
+    default: return outcome;
+  }
+}
+
 function buildLoanRowsHtml(
   recipient: ResolvedRecipient,
   tokenByLoanId: Map<string, string>,
   appBaseUrl: string,
   tenantSlug: string,
+  isAppUser = false,
 ): string {
   const appBase = appBaseUrl.replace(/\/+$/, "");
   return recipient.loans
@@ -443,28 +484,95 @@ function buildLoanRowsHtml(
       const workingUrl = buildActionUrl(appBaseUrl, tenantSlug, token, "working_on_it");
       const helpUrl = buildActionUrl(appBaseUrl, tenantSlug, token, "need_help");
       const loanDetailUrl = `${appBase}/fallout-forecast/loan/${encodeURIComponent(loan.loanId)}`;
-      const reasons = loan.riskReasons.slice(0, 3).join(", ") || "Risk factors not specified";
+      const reasons = loan.riskReasons.slice(0, 3).join(" · ") || "Risk factors not specified";
+      const badge = riskBadgeColor(loan.riskLevel);
+
+      const appLinkHtml = isAppUser
+        ? `<tr><td style="padding:12px 16px 0 16px;">
+             <a href="${loanDetailUrl}" style="font-size:12px;color:#3b82f6;text-decoration:none;font-weight:500;">Open full coaching view ↗</a>
+           </td></tr>`
+        : "";
+
       return `
-      <div class="loan-card">
-        <div class="loan-header">
-          <strong>Loan #${loan.loanNumber}</strong>
-          <span class="pill">${loan.riskLevel} (${loan.riskScore})</span>
-        </div>
-        <div class="loan-meta">
-          <span>Amount: ${toCurrency(loan.amount)}</span>
-          <span>Outcome: ${loan.predictedOutcome}</span>
-          <span>Est. Close: ${toIsoDate(loan.estimatedClosingDate)}</span>
-        </div>
-        <div class="loan-reason">${reasons}</div>
-        <div class="actions">
-          <a href="${gotItUrl}" class="btn btn-ok">Got it</a>
-          <a href="${workingUrl}" class="btn btn-working">Working on it</a>
-          <a href="${helpUrl}" class="btn btn-help">Need help</a>
-        </div>
-        <div style="margin-top:10px;">
-          <a href="${loanDetailUrl}" style="font-size:13px;color:#2563eb;text-decoration:none;font-weight:500;">Open full loan coaching view</a>
-        </div>
-      </div>`;
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+             style="border:1px solid #e2e8f0;border-radius:10px;background:#ffffff;margin:0 0 14px 0;overflow:hidden;">
+        <!-- Loan header row -->
+        <tr style="background:#f8fafc;">
+          <td style="padding:12px 16px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td>
+                  <p style="margin:0;font-size:15px;font-weight:700;color:#0f172a;">
+                    Loan #${loan.loanNumber}
+                  </p>
+                  <p style="margin:3px 0 0;font-size:12px;color:#64748b;">
+                    ${loan.loanOfficerName}
+                  </p>
+                </td>
+                <td align="right" valign="top">
+                  <span style="display:inline-block;background:${badge.bg};color:${badge.color};border-radius:999px;padding:4px 12px;font-size:11px;font-weight:700;letter-spacing:0.3px;white-space:nowrap;">
+                    ${loan.riskLevel} · ${Math.round(loan.riskScore)}
+                  </span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <!-- Meta row -->
+        <tr>
+          <td style="padding:10px 16px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td width="33%" style="font-size:12px;color:#64748b;padding-bottom:4px;">
+                  <span style="font-weight:600;color:#475569;">Amount</span><br>${toCurrency(loan.amount)}
+                </td>
+                <td width="33%" style="font-size:12px;color:#64748b;padding-bottom:4px;">
+                  <span style="font-weight:600;color:#475569;">Outlook</span><br>${outcomeLabel(loan.predictedOutcome)}
+                </td>
+                <td width="34%" style="font-size:12px;color:#64748b;padding-bottom:4px;">
+                  <span style="font-weight:600;color:#475569;">Est. Close</span><br>${toIsoDate(loan.estimatedClosingDate)}
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <!-- Risk reasons row -->
+        <tr>
+          <td style="padding:0 16px 12px 16px;">
+            <p style="margin:0;font-size:12px;color:#64748b;line-height:1.5;border-left:3px solid #e2e8f0;padding-left:10px;">
+              ${reasons}
+            </p>
+          </td>
+        </tr>
+        <!-- Action buttons row -->
+        <tr style="background:#f8fafc;border-top:1px solid #e2e8f0;">
+          <td style="padding:12px 16px;">
+            <table role="presentation" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="padding-right:8px;">
+                  <a href="${gotItUrl}"
+                     style="display:inline-block;background:#0f766e;color:#ffffff;text-decoration:none;padding:8px 16px;border-radius:6px;font-size:12px;font-weight:600;letter-spacing:0.2px;">
+                    Got it ✓
+                  </a>
+                </td>
+                <td style="padding-right:8px;">
+                  <a href="${workingUrl}"
+                     style="display:inline-block;background:#1d4ed8;color:#ffffff;text-decoration:none;padding:8px 16px;border-radius:6px;font-size:12px;font-weight:600;letter-spacing:0.2px;">
+                    Working on it
+                  </a>
+                </td>
+                <td>
+                  <a href="${helpUrl}"
+                     style="display:inline-block;background:#b91c1c;color:#ffffff;text-decoration:none;padding:8px 16px;border-radius:6px;font-size:12px;font-weight:600;letter-spacing:0.2px;">
+                    Need help
+                  </a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        ${appLinkHtml}
+      </table>`;
     })
     .join("");
 }
@@ -677,28 +785,29 @@ export async function sendFalloutAlerts({
   );
 
   const devMode = !isProductionEnv();
-  const devAllowedEmails = await getDevAllowedEmails();
+  const redirectActive = await isEmailRedirectEnabled();
+  const devAllowedEmails = redirectActive ? await getDevAllowedEmails() : [];
 
-  if (devMode && devAllowedEmails.length === 0) {
+  if (redirectActive && devAllowedEmails.length === 0) {
     console.warn(
-      "[FalloutAlerts] DEV MODE: No FALLOUT_DEV_ALLOWED_EMAILS configured. " +
+      "[FalloutAlerts] EMAIL REDIRECT: Redirect is enabled but no safe email addresses configured. " +
       "Blocking all LO and manager emails to prevent sending to real users. " +
       "Only manual test recipients will be sent.",
     );
   }
 
-  if (devMode && devAllowedEmails.length > 0) {
+  if (redirectActive && devAllowedEmails.length > 0) {
     let redirectIdx = 0;
     for (const recipient of resolvedRecipients) {
       const originalEmail = recipient.email;
       recipient.email = devAllowedEmails[redirectIdx % devAllowedEmails.length];
-      recipient.fullName = `[DEV→${recipient.email}] ${recipient.fullName || originalEmail}`;
+      recipient.fullName = `[REDIRECTED→${recipient.email}] ${recipient.fullName || originalEmail}`;
       redirectIdx++;
     }
     console.log(
-      `[FalloutAlerts] DEV MODE: Redirected ${resolvedRecipients.length} LO recipients to ${devAllowedEmails.join(", ")}`,
+      `[FalloutAlerts] EMAIL REDIRECT: Redirected ${resolvedRecipients.length} LO recipients to ${devAllowedEmails.join(", ")}`,
     );
-  } else if (devMode) {
+  } else if (redirectActive) {
     resolvedRecipients.length = 0;
   }
 
@@ -746,6 +855,21 @@ export async function sendFalloutAlerts({
     failed: [] as Array<{ email: string; error: string }>,
   };
 
+  // Build set of app user emails to conditionally include app hyperlinks
+  const allRecipientEmails = recipients.map((r) => r.email.trim().toLowerCase()).filter(Boolean);
+  let appUserEmailSet = new Set<string>();
+  if (allRecipientEmails.length > 0) {
+    try {
+      const appUsersResult = await tenantPool.query<{ email: string }>(
+        `SELECT LOWER(email) AS email FROM public.users WHERE LOWER(email) = ANY($1::text[]) AND is_active = true`,
+        [allRecipientEmails],
+      );
+      appUserEmailSet = new Set(appUsersResult.rows.map((r) => r.email));
+    } catch {
+      // Non-critical — default to no app links if lookup fails
+    }
+  }
+
   for (const recipient of recipients) {
     const tokenByLoanId = new Map<string, string>();
     for (const loan of recipient.loans) {
@@ -760,11 +884,15 @@ export async function sendFalloutAlerts({
       tokenByLoanId.set(loan.loanId, token);
     }
 
-    const loansHtml = buildLoanRowsHtml(recipient, tokenByLoanId, appBaseUrl, tenantSlug);
+    const isAppUser = appUserEmailSet.has(recipient.email.trim().toLowerCase());
+    const loansHtml = buildLoanRowsHtml(recipient, tokenByLoanId, appBaseUrl, tenantSlug, isAppUser);
+    const customMessageHtml = config.custom_message
+      ? `<p style="margin:0 0 20px 0;padding:12px 16px;background:#f0f9ff;border-left:3px solid #3b82f6;font-size:14px;color:#1e40af;line-height:1.5;border-radius:0 6px 6px 0;">${config.custom_message}</p>`
+      : "";
     const placeholderData = {
       RECIPIENT_NAME: recipient.fullName || recipient.loans[0]?.loanOfficerName || "Loan Officer",
       LOAN_COUNT: String(recipient.loans.length),
-      CUSTOM_MESSAGE: config.custom_message || "",
+      CUSTOM_MESSAGE: customMessageHtml,
       ALERT_DATE: new Date().toISOString().split("T")[0],
       LOANS_HTML: loansHtml,
     };
@@ -833,21 +961,21 @@ export async function sendFalloutAlerts({
       managerQuery,
       managerParams,
     );
-    if (devMode) {
+    if (redirectActive) {
       if (devAllowedEmails.length > 0) {
         let mgrIdx = 0;
         for (const mgr of managers.rows) {
           const original = mgr.email;
           mgr.email = devAllowedEmails[mgrIdx % devAllowedEmails.length];
-          mgr.full_name = `[DEV→${mgr.email}] ${mgr.full_name || original}`;
+          mgr.full_name = `[REDIRECTED→${mgr.email}] ${mgr.full_name || original}`;
           mgrIdx++;
         }
         console.log(
-          `[FalloutAlerts] DEV MODE: Redirected ${managers.rows.length} manager emails to ${devAllowedEmails.join(", ")}`,
+          `[FalloutAlerts] EMAIL REDIRECT: Redirected ${managers.rows.length} manager emails to ${devAllowedEmails.join(", ")}`,
         );
       } else {
         managers.rows.length = 0;
-        console.warn("[FalloutAlerts] DEV MODE: Blocked manager emails (no FALLOUT_DEV_ALLOWED_EMAILS)");
+        console.warn("[FalloutAlerts] EMAIL REDIRECT: Blocked manager emails (no safe email addresses configured)");
       }
     }
     managerNotifications.attempted = managers.rows.length;
@@ -955,21 +1083,21 @@ export async function sendFalloutAlerts({
       managerQuery,
       managerParams,
     );
-    if (devMode) {
+    if (redirectActive) {
       if (devAllowedEmails.length > 0) {
         let mgrCardIdx = 0;
         for (const mgr of managers.rows) {
           const original = mgr.email;
           mgr.email = devAllowedEmails[mgrCardIdx % devAllowedEmails.length];
-          mgr.full_name = `[DEV→${mgr.email}] ${mgr.full_name || original}`;
+          mgr.full_name = `[REDIRECTED→${mgr.email}] ${mgr.full_name || original}`;
           mgrCardIdx++;
         }
         console.log(
-          `[FalloutAlerts] DEV MODE: Redirected ${managers.rows.length} manager card emails to ${devAllowedEmails.join(", ")}`,
+          `[FalloutAlerts] EMAIL REDIRECT: Redirected ${managers.rows.length} manager card emails to ${devAllowedEmails.join(", ")}`,
         );
       } else {
         managers.rows.length = 0;
-        console.warn("[FalloutAlerts] DEV MODE: Blocked manager card emails (no FALLOUT_DEV_ALLOWED_EMAILS)");
+        console.warn("[FalloutAlerts] EMAIL REDIRECT: Blocked manager card emails (no safe email addresses configured)");
       }
     }
     managerCardNotifications.attempted = managers.rows.length;
@@ -1045,11 +1173,181 @@ export async function sendFalloutAlerts({
     failedRecipients,
     skippedLoansCount,
     highRiskLoanCount: highRiskLoans.length,
-    devMode,
-    devRedirectedTo: devMode && devAllowedEmails.length > 0 ? devAllowedEmails : undefined,
+    devMode: redirectActive,
+    devRedirectedTo: redirectActive && devAllowedEmails.length > 0 ? devAllowedEmails : undefined,
     testRecipients,
     managerNotifications,
     managerCardNotifications,
+  };
+}
+
+/**
+ * Send a fallout alert email for a single loan.
+ * Resolves the LO via encompass_users, applies email redirect safeguards, and sends using the standard template.
+ */
+export async function sendSingleFalloutAlert({
+  tenantPool,
+  tenantId,
+  tenantSlug,
+  loanId,
+  appBaseUrl,
+}: {
+  tenantPool: Pool;
+  tenantId: string;
+  tenantSlug: string;
+  loanId: string;
+  appBaseUrl: string;
+}): Promise<{ sent: boolean; recipientEmail: string | null; message: string; devMode: boolean; devRedirectedTo?: string[] }> {
+  const loanResult = await tenantPool.query<RiskLoanRow>(
+    `SELECT
+       l.loan_id,
+       l.loan_number,
+       l.branch,
+       l.loan_amount,
+       COALESCE(NULLIF(TRIM(l.loan_officer), ''), eu.full_name) AS loan_officer,
+       l.loan_officer_id,
+       l.estimated_closing_date,
+       COALESCE(p.risk_score, 0)::float AS risk_score,
+       COALESCE(p.risk_level, 'Unknown') AS risk_level,
+       COALESCE(p.predicted_outcome, 'originate') AS predicted_outcome,
+       p.risk_factors
+     FROM public.loans l
+     LEFT JOIN public.loan_predictions p ON p.loan_id = l.loan_id
+     LEFT JOIN public.encompass_users eu ON eu.encompass_user_id = l.loan_officer_id
+     WHERE l.loan_id = $1
+     LIMIT 1`,
+    [loanId],
+  );
+
+  const loan = loanResult.rows[0];
+  if (!loan) {
+    return { sent: false, recipientEmail: null, message: `Loan ${loanId} not found.`, devMode: false };
+  }
+
+  const loResult = await tenantPool.query<{
+    encompass_user_id: string;
+    email: string;
+    full_name: string | null;
+  }>(
+    `SELECT encompass_user_id, email, full_name
+     FROM public.encompass_users
+     WHERE is_enabled = true
+       AND email IS NOT NULL
+       AND (
+         encompass_user_id = $1
+         OR LOWER(full_name) = LOWER($2)
+       )
+     LIMIT 1`,
+    [loan.loan_officer_id ?? "", loan.loan_officer ?? ""],
+  );
+
+  const loUser = loResult.rows[0];
+  if (!loUser?.email) {
+    return {
+      sent: false,
+      recipientEmail: null,
+      message: `No matching LO email found for loan ${loan.loan_number || loanId}.`,
+      devMode: false,
+    };
+  }
+
+  const redirectActive = await isEmailRedirectEnabled();
+  const devAllowedEmails = redirectActive ? await getDevAllowedEmails() : [];
+
+  let recipientEmail = loUser.email;
+  let recipientName = loUser.full_name || loan.loan_officer || "Loan Officer";
+  let devMode = redirectActive;
+
+  if (redirectActive) {
+    if (devAllowedEmails.length === 0) {
+      return {
+        sent: false,
+        recipientEmail: loUser.email,
+        message: "Email redirect is active but no safe email addresses configured. Email blocked.",
+        devMode: true,
+      };
+    }
+    recipientEmail = devAllowedEmails[0];
+    recipientName = `[REDIRECTED→${recipientEmail}] ${recipientName}`;
+  }
+
+  const config = await getFalloutAlertConfig(tenantPool);
+  const alertBatchId = crypto.randomUUID();
+  const token = crypto.randomBytes(32).toString("hex");
+  const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+
+  await tenantPool.query(
+    `INSERT INTO public.fallout_alert_tokens
+     (token_hash, alert_batch_id, loan_id, encompass_user_id, recipient_email, expires_at)
+     VALUES ($1, $2, $3, $4, $5, NOW() + interval '7 days')`,
+    [tokenHash, alertBatchId, loanId, loUser.encompass_user_id, recipientEmail],
+  );
+
+  const recipient: ResolvedRecipient = {
+    encompassUserId: loUser.encompass_user_id,
+    email: recipientEmail,
+    fullName: recipientName,
+    loans: [{
+      loanId: loan.loan_id,
+      loanNumber: loan.loan_number || loan.loan_id,
+      loanOfficerName: loan.loan_officer || loUser.full_name || "Loan Officer",
+      amount: loan.loan_amount,
+      riskScore: Number(loan.risk_score) || 0,
+      riskLevel: loan.risk_level || "Unknown",
+      predictedOutcome: (loan.predicted_outcome as "withdraw" | "deny" | "originate") || "originate",
+      estimatedClosingDate: loan.estimated_closing_date,
+      riskReasons: Array.isArray(loan.risk_factors) ? loan.risk_factors : [],
+    }],
+  };
+
+  const tokenByLoanId = new Map([[loanId, token]]);
+  const template = (await loadEmailTemplate("fallout-alert.html")) ?? null;
+
+  // Check if recipient is an app user to conditionally include app hyperlinks
+  let isAppUser = false;
+  try {
+    const appUserCheck = await tenantPool.query<{ email: string }>(
+      `SELECT LOWER(email) AS email FROM public.users WHERE LOWER(email) = $1 AND is_active = true LIMIT 1`,
+      [loUser.email.trim().toLowerCase()],
+    );
+    isAppUser = appUserCheck.rows.length > 0;
+  } catch {
+    // Non-critical
+  }
+
+  const loansHtml = buildLoanRowsHtml(recipient, tokenByLoanId, appBaseUrl, tenantSlug, isAppUser);
+  const customMessageHtml = config?.custom_message
+    ? `<p style="margin:0 0 20px 0;padding:12px 16px;background:#f0f9ff;border-left:3px solid #3b82f6;font-size:14px;color:#1e40af;line-height:1.5;border-radius:0 6px 6px 0;">${config.custom_message}</p>`
+    : "";
+  const placeholderData = {
+    RECIPIENT_NAME: recipientName,
+    LOAN_COUNT: "1",
+    CUSTOM_MESSAGE: customMessageHtml,
+    ALERT_DATE: new Date().toISOString().split("T")[0],
+    LOANS_HTML: loansHtml,
+  };
+  const html = template
+    ? replacePlaceholders(template, placeholderData)
+    : `<p>You have a high-risk loan requiring attention.</p>${loansHtml}`;
+
+  await sendEmail({
+    to: recipientEmail,
+    subject: `Coheus Fallout Alert — Loan ${loan.loan_number || loanId}`,
+    html,
+    emailType: "fallout_alert_distribution",
+    containsPii: true,
+    tenantId,
+    strict: true,
+  });
+
+  return {
+    sent: true,
+    recipientEmail,
+    message: devMode
+      ? `Email sent (redirected to ${recipientEmail})`
+      : `Fallout alert sent to ${recipientEmail}`,
+    devMode,
+    devRedirectedTo: devMode && devAllowedEmails.length > 0 ? devAllowedEmails : undefined,
   };
 }
 

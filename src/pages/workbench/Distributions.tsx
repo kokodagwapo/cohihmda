@@ -11,7 +11,7 @@
 
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   Mail,
   Plus,
@@ -23,7 +23,9 @@ import {
   Calendar,
   Users,
   FileText,
+  AlertTriangle,
 } from "lucide-react";
+import { FalloutDistribution } from "@/components/workbench/FalloutDistribution";
 import { WorkbenchTopBar } from "@/components/workbench/WorkbenchTopBar";
 import { IconBadge } from "@/components/workbench/IconBadge";
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
@@ -60,10 +62,7 @@ import { useTenantStore } from "@/stores/tenantStore";
 import { api } from "@/lib/api";
 
 const CONTENT_TYPES = [
-  { value: "report", label: "Report" },
   { value: "canvas", label: "Canvas / Workbench" },
-  { value: "insight_digest", label: "Insight Digest" },
-  { value: "dashboard", label: "Dashboard (coming soon)" },
 ] as const;
 
 const FREQUENCIES = [
@@ -111,6 +110,11 @@ export default function Distributions() {
   const { user } = useAuth();
   const { selectedTenantId } = useTenantStore();
   const tenantId = selectedTenantId || user?.tenant_id || null;
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = (searchParams.get("tab") === "fallout" ? "fallout" : "content") as "content" | "fallout";
+  const setActiveTab = (tab: "content" | "fallout") => {
+    setSearchParams(tab === "fallout" ? { tab: "fallout" } : {}, { replace: true });
+  };
   const tenantQs = useMemo(
     () => (tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : ""),
     [tenantId],
@@ -263,42 +267,59 @@ export default function Distributions() {
         <main className="flex-1 relative w-full min-h-0 overflow-hidden">
             <div className="h-full overflow-y-auto px-4 sm:px-6 py-4 sm:py-6">
               <div className="max-w-[1600px] mx-auto">
-                <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                {/* Page header */}
+                <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                   <div className="flex items-start gap-4">
-                    <IconBadge
-                      icon={Mail}
-                      variant="violet"
-                      size="xl"
-                      rounded="2xl"
-                    />
+                    <IconBadge icon={Mail} variant="violet" size="xl" rounded="2xl" />
                     <div>
                       <h1 className="text-2xl sm:text-3xl font-semibold text-slate-900 dark:text-slate-100 tracking-tight">
-                        Content distribution
+                        Communications Center
                       </h1>
                       <p className="mt-1.5 text-[15px] text-slate-600 dark:text-slate-400 max-w-xl">
-                        Schedule secure link-based delivery for canvases,
-                        reports, and insight digests.
+                        Manage canvas distribution schedules and fallout alert distribution.
                       </p>
-                      <Link
-                        to="/my-dashboard"
-                        className="inline-flex items-center gap-1.5 mt-4 text-sm font-medium text-violet-600 dark:text-violet-400 hover:text-violet-700"
-                      >
-                        Open My Workbench
-                        <ArrowRight className="h-4 w-4" />
-                      </Link>
                     </div>
                   </div>
-                  <Button
-                    onClick={() => setCreateOpen(true)}
-                    className="shrink-0"
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    New schedule
-                  </Button>
+                  {activeTab === "content" && (
+                    <Button onClick={() => setCreateOpen(true)} className="shrink-0">
+                      <Plus className="h-4 w-4 mr-2" />
+                      New schedule
+                    </Button>
+                  )}
                 </div>
 
+                {/* Top-level tabs */}
+                <div className="flex gap-1 mb-6 border-b border-slate-200 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("content")}
+                    className={`px-5 py-3 text-sm font-semibold border-b-2 transition-colors ${
+                      activeTab === "content"
+                        ? "border-violet-500 text-violet-700 dark:text-violet-400"
+                        : "border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                    }`}
+                  >
+                    Content Distribution
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("fallout")}
+                    className={`px-5 py-3 text-sm font-semibold border-b-2 transition-colors flex items-center gap-1.5 ${
+                      activeTab === "fallout"
+                        ? "border-emerald-500 text-emerald-700 dark:text-emerald-400"
+                        : "border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                    }`}
+                  >
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    Fallout Alerts
+                  </button>
+                </div>
+
+                {/* Content Distribution tab */}
+                {activeTab === "content" && (
+                  <>
                 <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-200 mb-3">
-                  Schedules
+                  Canvas Schedules
                 </h2>
                 <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/70 overflow-hidden">
                   {isLoading ? (
@@ -311,7 +332,7 @@ export default function Distributions() {
                         No distribution schedules yet
                       </p>
                       <p className="mt-1 text-sm">
-                        Create one to start sending reports on a schedule.
+                        Create one to start sending canvases on a schedule.
                       </p>
                       <Button
                         className="mt-4"
@@ -439,6 +460,30 @@ export default function Distributions() {
                   }
                   tenantId={tenantId}
                 />
+                  </>
+                )}
+
+                {/* Fallout Alerts tab */}
+                {activeTab === "fallout" && (
+                  <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/70 p-5">
+                    <div className="mb-4">
+                      <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                        Fallout Alert Distribution
+                      </h2>
+                      <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+                        Configure LO targeting, manager notifications, and one-click response emails for closing fallout risk alerts.
+                      </p>
+                      <Link
+                        to="/fallout-forecast"
+                        className="inline-flex items-center gap-1.5 mt-2 text-sm font-medium text-emerald-600 dark:text-emerald-400 hover:text-emerald-700"
+                      >
+                        View Closing Fallout Forecast
+                        <ArrowRight className="h-4 w-4" />
+                      </Link>
+                    </div>
+                    <FalloutDistribution selectedTenantId={tenantId} />
+                  </div>
+                )}
               </div>
             </div>
         </main>

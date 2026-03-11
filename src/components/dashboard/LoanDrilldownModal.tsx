@@ -1,8 +1,9 @@
 import React, { useState, useRef, memo, useCallback } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { X } from "lucide-react";
+import { X, Loader2 } from "lucide-react";
 import { Dialog } from "@/components/ui/dialog";
 import { LoanCardContent } from "./LoanCardContent";
+import { api } from "@/lib/api";
 
 interface RiskSummary {
   risks: string[];
@@ -205,6 +206,8 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(
     hideRiskScoreAndLabel = false,
   }) => {
     const [saveLoading, setSaveLoading] = useState(false);
+    const [emailSending, setEmailSending] = useState(false);
+    const [emailResult, setEmailResult] = useState<{ success: boolean; message: string } | null>(null);
     const cardRef = useRef<HTMLDivElement>(null);
 
   const captureCardAsBlob = useCallback(async (): Promise<Blob | null> => {
@@ -248,12 +251,25 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(
     }
   }, [isDarkMode]);
 
-  const handleEmail = () => {
+  const handleEmail = useCallback(async () => {
     if (!loan) return;
-    const subject = encodeURIComponent(`Loan Update: ${loan.id} - ${loan.officer || 'Unassigned'}`);
-    const body = encodeURIComponent(buildEmailBody(loan));
-    window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
-  };
+    try {
+      setEmailSending(true);
+      setEmailResult(null);
+      const result = await api.sendFalloutAlertSingle(loan.id, selectedTenantId);
+      setEmailResult({
+        success: result.sent,
+        message: result.message,
+      });
+    } catch (err: unknown) {
+      setEmailResult({
+        success: false,
+        message: err instanceof Error ? err.message : "Failed to send email",
+      });
+    } finally {
+      setEmailSending(false);
+    }
+  }, [loan, selectedTenantId]);
 
   const handleSave = async () => {
     if (!loan) return;
@@ -313,15 +329,25 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(
             )}
           </div>
         
+          {emailResult && (
+            <div className={`flex-shrink-0 px-4 sm:px-6 py-2 text-xs border-t ${emailResult.success ? "text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/20" : "text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/20"}`}>
+              {emailResult.message}
+            </div>
+          )}
           <div className="flex-shrink-0 flex items-center gap-2 px-4 sm:px-6 py-2.5 border-t border-slate-200/60 dark:border-slate-700 bg-white dark:bg-slate-900">
                 <button
-              className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-[13px] font-light transition-all active:scale-[0.98] text-slate-500 hover:text-slate-700 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800"
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-[13px] font-light transition-all active:scale-[0.98] text-slate-500 hover:text-slate-700 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800 ${emailSending ? "opacity-60 pointer-events-none" : ""}`}
               onClick={handleEmail}
+              disabled={emailSending}
             >
+              {emailSending ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                 </svg>
-              Email
+              )}
+              {emailSending ? "Sending..." : "Email Now"}
             </button>
             <div className="w-px h-10 bg-slate-200 dark:bg-slate-600 flex-shrink-0" aria-hidden />
             <button 
