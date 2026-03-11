@@ -1160,6 +1160,8 @@ export const ClosingFalloutForecast = ({
   const [alertsConfigSaving, setAlertsConfigSaving] = useState(false);
   const [alertsSending, setAlertsSending] = useState(false);
   const [alertsMessage, setAlertsMessage] = useState<string | null>(null);
+  const [falloutDevMode, setFalloutDevMode] = useState(false);
+  const [falloutDevAllowedEmails, setFalloutDevAllowedEmails] = useState<string[]>([]);
 
   const availableYears = useMemo(() => {
     // Prefer years from loaded loans (if available); otherwise provide a small recent range.
@@ -3477,6 +3479,10 @@ export const ClosingFalloutForecast = ({
             : [],
         }));
       }
+      setFalloutDevMode(configResult?.devMode === true);
+      setFalloutDevAllowedEmails(
+        Array.isArray(configResult?.devAllowedEmails) ? configResult.devAllowedEmails : [],
+      );
       setFalloutAlertResponses(
         Array.isArray(responsesResult?.responses)
           ? (responsesResult.responses as FalloutAlertResponseRow[])
@@ -3538,7 +3544,10 @@ export const ClosingFalloutForecast = ({
         manager_card_branch_filters: managerCardBranchFilters,
         manager_card_scope_to_target_los: managerCardScopeToSelectedLos,
       });
-      const baseMessage = `Sent ${result.sentCount}/${result.recipientsCount} fallout alert emails (${result.skippedLoansCount} loans skipped: no LO email match).`;
+      const devPrefix = result.devMode && result.devRedirectedTo?.length
+        ? `[DEV: redirected to ${result.devRedirectedTo.join(", ")}] `
+        : result.devMode ? "[DEV: LO/manager emails blocked] " : "";
+      const baseMessage = `${devPrefix}Sent ${result.sentCount}/${result.recipientsCount} fallout alert emails (${result.skippedLoansCount} loans skipped: no LO email match).`;
       const failedRecipientsMessage = result.failedRecipients.length > 0
         ? ` Failed recipients: ${result.failedRecipients
             .slice(0, 5)
@@ -5040,6 +5049,25 @@ export const ClosingFalloutForecast = ({
                       LO Responses
                     </button>
                   </div>
+
+                  {falloutDevMode && (
+                    <div className={`mb-3 rounded-lg border px-3 py-2.5 text-xs ${
+                      falloutDevAllowedEmails.length > 0
+                        ? "border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300"
+                        : "border-rose-300 bg-rose-50 dark:border-rose-700 dark:bg-rose-950/40 text-rose-800 dark:text-rose-300"
+                    }`}>
+                      <p className="font-semibold mb-0.5">
+                        {falloutDevAllowedEmails.length > 0
+                          ? "⚠ Dev Mode — Emails Redirected"
+                          : "🛑 Dev Mode — Emails Blocked"}
+                      </p>
+                      <p>
+                        {falloutDevAllowedEmails.length > 0
+                          ? `All LO and manager emails will be redirected to: ${falloutDevAllowedEmails.join(", ")}. No real users will be contacted.`
+                          : "No FALLOUT_DEV_ALLOWED_EMAILS configured. All LO/manager emails are blocked. Only manual test recipients will receive emails. Set the env var to enable redirected testing."}
+                      </p>
+                    </div>
+                  )}
 
                   {distributionSubTab === "settings" && (
                     <>

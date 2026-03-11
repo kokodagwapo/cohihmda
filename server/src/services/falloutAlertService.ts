@@ -2,6 +2,7 @@ import crypto from "crypto";
 import type { Pool } from "pg";
 import { loadEmailTemplate, replacePlaceholders } from "./emailTemplateLoader.js";
 import { sendEmail } from "./emailService.js";
+import { getPlatformSetting } from "./platformSettingsService.js";
 
 export type FalloutAlertResponseType =
   | "acknowledged"
@@ -63,6 +64,8 @@ export interface SendFalloutAlertsResult {
   failedRecipients: Array<{ email: string; error: string }>;
   skippedLoansCount: number;
   highRiskLoanCount: number;
+  devMode: boolean;
+  devRedirectedTo?: string[];
   testRecipients: {
     attempted: number;
     sent: number;
@@ -79,6 +82,39 @@ export interface SendFalloutAlertsResult {
     failed: Array<{ email: string; error: string }>;
     loanCount: number;
   };
+}
+
+function isProductionEnv(): boolean {
+  return process.env.NODE_ENV === "production";
+}
+
+function getDevAllowedEmailsFromEnv(): string[] {
+  const raw = process.env.FALLOUT_DEV_ALLOWED_EMAILS?.trim();
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+async function getDevAllowedEmails(): Promise<string[]> {
+  try {
+    const dbValue = await getPlatformSetting("fallout_dev_allowed_emails");
+    if (dbValue) {
+      const parsed = JSON.parse(dbValue);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.filter((e: unknown) => typeof e === "string" && e.trim()).map((e: string) => e.trim().toLowerCase());
+      }
+    }
+  } catch {
+    // DB read failed — fall through to env
+  }
+  return getDevAllowedEmailsFromEnv();
+}
+
+export async function getFalloutDevMode(): Promise<{ isDevMode: boolean; allowedEmails: string[] }> {
+  const isDevMode = !isProductionEnv();
+  return { isDevMode, allowedEmails: isDevMode ? await getDevAllowedEmails() : [] };
 }
 
 const UUID_V4_OR_V1_REGEX =
@@ -639,6 +675,33 @@ export async function sendFalloutAlerts({
   console.log(
     `[FalloutAlerts] Recipient resolution: ${resolvedRecipients.length} resolved, ${skippedLoansCount} skipped`,
   );
+
+  const devMode = !isProductionEnv();
+  const devAllowedEmails = await getDevAllowedEmails();
+
+  if (devMode && devAllowedEmails.length === 0) {
+    console.warn(
+      "[FalloutAlerts] DEV MODE: No FALLOUT_DEV_ALLOWED_EMAILS configured. " +
+      "Blocking all LO and manager emails to prevent sending to real users. " +
+      "Only manual test recipients will be sent.",
+    );
+  }
+
+  if (devMode && devAllowedEmails.length > 0) {
+    let redirectIdx = 0;
+    for (const recipient of resolvedRecipients) {
+      const originalEmail = recipient.email;
+      recipient.email = devAllowedEmails[redirectIdx % devAllowedEmails.length];
+      recipient.fullName = `[DEV→${recipient.email}] ${recipient.fullName || originalEmail}`;
+      redirectIdx++;
+    }
+    console.log(
+      `[FalloutAlerts] DEV MODE: Redirected ${resolvedRecipients.length} LO recipients to ${devAllowedEmails.join(", ")}`,
+    );
+  } else if (devMode) {
+    resolvedRecipients.length = 0;
+  }
+
   const manualTestRecipients = Array.from(
     new Set(
       (Array.isArray(testRecipientEmails) ? testRecipientEmails : [])
@@ -770,6 +833,23 @@ export async function sendFalloutAlerts({
       managerQuery,
       managerParams,
     );
+    if (devMode) {
+      if (devAllowedEmails.length > 0) {
+        let mgrIdx = 0;
+        for (const mgr of managers.rows) {
+          const original = mgr.email;
+          mgr.email = devAllowedEmails[mgrIdx % devAllowedEmails.length];
+          mgr.full_name = `[DEV→${mgr.email}] ${mgr.full_name || original}`;
+          mgrIdx++;
+        }
+        console.log(
+          `[FalloutAlerts] DEV MODE: Redirected ${managers.rows.length} manager emails to ${devAllowedEmails.join(", ")}`,
+        );
+      } else {
+        managers.rows.length = 0;
+        console.warn("[FalloutAlerts] DEV MODE: Blocked manager emails (no FALLOUT_DEV_ALLOWED_EMAILS)");
+      }
+    }
     managerNotifications.attempted = managers.rows.length;
     console.log(
       `📧 Manager notification: ${managers.rows.length} managers found (selectedIds=${selectedManagerIds.length}, highRiskLoans=${highRiskLoans.length})`,
@@ -948,6 +1028,8 @@ export async function sendFalloutAlerts({
     failedRecipients,
     skippedLoansCount,
     highRiskLoanCount: highRiskLoans.length,
+    devMode,
+    devRedirectedTo: devMode && devAllowedEmails.length > 0 ? devAllowedEmails : undefined,
     testRecipients,
     managerNotifications,
     managerCardNotifications,

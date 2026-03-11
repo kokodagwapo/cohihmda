@@ -173,4 +173,85 @@ router.get(
   }
 );
 
+// ── Fallout Dev Allowed Emails ──────────────────────────────────────────────
+
+const FALLOUT_DEV_EMAILS_KEY = "fallout_dev_allowed_emails";
+const emailSchema = z.string().email();
+
+function parseEmailList(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((e: unknown) => typeof e === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+router.get(
+  "/fallout-dev-emails",
+  authenticateToken,
+  requirePlatformAdmin,
+  async (_req, res) => {
+    try {
+      const raw = await getPlatformSetting(FALLOUT_DEV_EMAILS_KEY);
+      res.json({ emails: parseEmailList(raw) });
+    } catch (error: any) {
+      console.error("[PlatformSettings] Error fetching fallout dev emails:", error);
+      res.status(500).json({ error: "Failed to fetch dev email list" });
+    }
+  },
+);
+
+router.post(
+  "/fallout-dev-emails",
+  authenticateToken,
+  requirePlatformAdmin,
+  async (req, res) => {
+    try {
+      const { email } = req.body ?? {};
+      const validation = emailSchema.safeParse(email);
+      if (!validation.success) {
+        return res.status(400).json({ error: "Invalid email address" });
+      }
+      const normalizedEmail = validation.data.trim().toLowerCase();
+
+      const raw = await getPlatformSetting(FALLOUT_DEV_EMAILS_KEY);
+      const emails = parseEmailList(raw);
+      if (emails.includes(normalizedEmail)) {
+        return res.json({ emails, message: "Email already in list" });
+      }
+      emails.push(normalizedEmail);
+      await setPlatformSetting(FALLOUT_DEV_EMAILS_KEY, JSON.stringify(emails));
+      res.json({ emails, message: `Added ${normalizedEmail}` });
+    } catch (error: any) {
+      console.error("[PlatformSettings] Error adding fallout dev email:", error);
+      res.status(500).json({ error: "Failed to add email" });
+    }
+  },
+);
+
+router.delete(
+  "/fallout-dev-emails",
+  authenticateToken,
+  requirePlatformAdmin,
+  async (req, res) => {
+    try {
+      const { email } = req.body ?? {};
+      if (typeof email !== "string" || !email.trim()) {
+        return res.status(400).json({ error: "Email is required" });
+      }
+      const normalizedEmail = email.trim().toLowerCase();
+
+      const raw = await getPlatformSetting(FALLOUT_DEV_EMAILS_KEY);
+      const emails = parseEmailList(raw).filter((e) => e !== normalizedEmail);
+      await setPlatformSetting(FALLOUT_DEV_EMAILS_KEY, JSON.stringify(emails));
+      res.json({ emails, message: `Removed ${normalizedEmail}` });
+    } catch (error: any) {
+      console.error("[PlatformSettings] Error removing fallout dev email:", error);
+      res.status(500).json({ error: "Failed to remove email" });
+    }
+  },
+);
+
 export default router;
