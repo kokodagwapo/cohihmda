@@ -1207,13 +1207,15 @@ export async function sendSingleFalloutAlert({
   tenantSlug,
   loanId,
   appBaseUrl,
+  additionalEmails = [],
 }: {
   tenantPool: Pool;
   tenantId: string;
   tenantSlug: string;
   loanId: string;
   appBaseUrl: string;
-}): Promise<{ sent: boolean; recipientEmail: string | null; message: string; devMode: boolean; devRedirectedTo?: string[] }> {
+  additionalEmails?: string[];
+}): Promise<{ sent: boolean; recipientEmail: string | null; message: string; devMode: boolean; devRedirectedTo?: string[]; additionalSent?: number }> {
   const loanResult = await tenantPool.query<RiskLoanRow>(
     `SELECT
        l.loan_id,
@@ -1223,12 +1225,45 @@ export async function sendSingleFalloutAlert({
        COALESCE(NULLIF(TRIM(l.loan_officer), ''), eu.full_name) AS loan_officer,
        l.loan_officer_id,
        l.estimated_closing_date,
-       COALESCE(p.risk_score, 0)::float AS risk_score,
-       COALESCE(p.risk_level, 'Unknown') AS risk_level,
+       ROUND(COALESCE(
+         CASE
+           WHEN jsonb_typeof(p.loan_data->'riskSummary') = 'object'
+            AND (p.loan_data->'riskSummary'->>'riskScore') ~ '^[0-9]+(\\.[0-9]+)?$'
+           THEN (p.loan_data->'riskSummary'->>'riskScore')::numeric
+           ELSE NULL
+         END,
+         p.confidence_score,
+         p.confidence::numeric,
+         50
+       ))::int AS risk_score,
+       CASE
+         WHEN ROUND(COALESCE(
+           CASE WHEN jsonb_typeof(p.loan_data->'riskSummary') = 'object'
+                 AND (p.loan_data->'riskSummary'->>'riskScore') ~ '^[0-9]+(\\.[0-9]+)?$'
+                THEN (p.loan_data->'riskSummary'->>'riskScore')::numeric ELSE NULL END,
+           p.confidence_score, p.confidence::numeric, 50
+         )) >= 75 THEN 'Very High'
+         WHEN ROUND(COALESCE(
+           CASE WHEN jsonb_typeof(p.loan_data->'riskSummary') = 'object'
+                 AND (p.loan_data->'riskSummary'->>'riskScore') ~ '^[0-9]+(\\.[0-9]+)?$'
+                THEN (p.loan_data->'riskSummary'->>'riskScore')::numeric ELSE NULL END,
+           p.confidence_score, p.confidence::numeric, 50
+         )) >= 50 THEN 'High'
+         WHEN ROUND(COALESCE(
+           CASE WHEN jsonb_typeof(p.loan_data->'riskSummary') = 'object'
+                 AND (p.loan_data->'riskSummary'->>'riskScore') ~ '^[0-9]+(\\.[0-9]+)?$'
+                THEN (p.loan_data->'riskSummary'->>'riskScore')::numeric ELSE NULL END,
+           p.confidence_score, p.confidence::numeric, 50
+         )) >= 25 THEN 'Medium'
+         ELSE 'Low'
+       END AS risk_level,
        COALESCE(p.predicted_outcome, 'originate') AS predicted_outcome,
        p.risk_factors
      FROM public.loans l
-     LEFT JOIN public.loan_predictions p ON p.loan_id = l.loan_id
+     LEFT JOIN LATERAL (
+       SELECT * FROM public.loan_predictions lp
+       WHERE lp.loan_id = l.loan_id ORDER BY lp.created_at DESC LIMIT 1
+     ) p ON true
      LEFT JOIN public.encompass_users eu ON eu.encompass_user_id = l.loan_officer_id
      WHERE l.loan_id = $1
      LIMIT 1`,
@@ -1346,9 +1381,10 @@ export async function sendSingleFalloutAlert({
     ? replacePlaceholders(template, placeholderData)
     : `<p>You have a high-risk loan requiring attention.</p>${loansHtml}`;
 
+  const subject = `Coheus Fallout Alert — Loan ${loan.loan_number || loanId}`;
   await sendEmail({
     to: recipientEmail,
-    subject: `Coheus Fallout Alert — Loan ${loan.loan_number || loanId}`,
+    subject,
     html,
     emailType: "fallout_alert_distribution",
     containsPii: true,
@@ -1356,14 +1392,26 @@ export async function sendSingleFalloutAlert({
     strict: true,
   });
 
+  let additionalSent = 0;
+  const dedupedExtra = [...new Set(additionalEmails.map((e) => e.trim().toLowerCase()).filter((e) => e && e !== recipientEmail.toLowerCase()))];
+  for (const extra of dedupedExtra) {
+    try {
+      await sendEmail({ to: extra, subject, html, emailType: "fallout_alert_distribution", containsPii: true, tenantId, strict: true });
+      additionalSent++;
+    } catch (err) {
+      console.error(`[FalloutAlerts] Failed to send additional email to ${extra}:`, err instanceof Error ? err.message : err);
+    }
+  }
+
   return {
     sent: true,
     recipientEmail,
     message: devMode
-      ? `Email sent (redirected to ${recipientEmail})`
-      : `Fallout alert sent to ${recipientEmail}`,
+      ? `Email sent (redirected to ${recipientEmail})${additionalSent > 0 ? ` + ${additionalSent} additional` : ""}`
+      : `Fallout alert sent to ${recipientEmail}${additionalSent > 0 ? ` + ${additionalSent} additional` : ""}`,
     devMode,
     devRedirectedTo: devMode && devAllowedEmails.length > 0 ? devAllowedEmails : undefined,
+    additionalSent,
   };
 }
 

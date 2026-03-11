@@ -4887,6 +4887,8 @@ export const ClosingFalloutForecast = ({
             setSelectedLoanForDrilldown(null);
             setSelectedOfficer(officer);
           }}
+          selectedTenantId={selectedTenantId}
+          falloutStatus={selectedLoanForDrilldown ? falloutStatusMap.get(selectedLoanForDrilldown.id) : undefined}
         />
 
         {/* Loan Officer Modal */}

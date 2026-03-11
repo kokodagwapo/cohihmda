@@ -1501,16 +1501,30 @@ export class ApiClient {
     });
   }
 
-  async sendFalloutAlertSingle(loanId: string, tenantId?: string | null) {
+  async resolveLoanLo(loanId: string, tenantId?: string | null) {
+    return this.request<{
+      found: boolean;
+      loEmail: string | null;
+      loName: string | null;
+      redirectActive: boolean;
+      redirectTo: string | null;
+    }>(`/api/fallout-alerts/resolve-lo${this._falloutTq(tenantId)}`, {
+      method: "POST",
+      body: JSON.stringify({ loan_id: loanId }),
+    });
+  }
+
+  async sendFalloutAlertSingle(loanId: string, tenantId?: string | null, additionalEmails?: string[]) {
     return this.request<{
       sent: boolean;
       recipientEmail: string | null;
       message: string;
       devMode: boolean;
       devRedirectedTo?: string[];
+      additionalSent?: number;
     }>(`/api/fallout-alerts/send-single${this._falloutTq(tenantId)}`, {
       method: "POST",
-      body: JSON.stringify({ loan_id: loanId }),
+      body: JSON.stringify({ loan_id: loanId, additional_emails: additionalEmails }),
     });
   }
 }
