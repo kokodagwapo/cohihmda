@@ -227,6 +227,7 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(
     const [loInfo, setLoInfo] = useState<{ email: string | null; name: string | null; redirectActive: boolean; redirectTo: string | null } | null>(null);
     const [additionalEmails, setAdditionalEmails] = useState<string[]>([]);
     const [newEmail, setNewEmail] = useState("");
+    const [customMessage, setCustomMessage] = useState("");
     const cardRef = useRef<HTMLDivElement>(null);
 
   const captureCardAsBlob = useCallback(async (): Promise<Blob | null> => {
@@ -276,6 +277,7 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(
     setEmailResult(null);
     setAdditionalEmails([]);
     setNewEmail("");
+    setCustomMessage("");
     try {
       const info = await api.resolveLoanLo(loan.id, selectedTenantId);
       setLoInfo({
@@ -297,7 +299,12 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(
     try {
       setEmailSending(true);
       setEmailResult(null);
-      const result = await api.sendFalloutAlertSingle(loan.id, selectedTenantId, additionalEmails.length > 0 ? additionalEmails : undefined);
+      const result = await api.sendFalloutAlertSingle(
+        loan.id,
+        selectedTenantId,
+        additionalEmails.length > 0 ? additionalEmails : undefined,
+        customMessage.trim() || undefined,
+      );
       setEmailResult({ success: result.sent, message: result.message });
       setShowEmailConfirm(false);
     } catch (err: unknown) {
@@ -305,7 +312,7 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(
     } finally {
       setEmailSending(false);
     }
-  }, [loan, selectedTenantId, additionalEmails]);
+  }, [loan, selectedTenantId, additionalEmails, customMessage]);
 
   const addExtraEmail = useCallback(() => {
     const trimmed = newEmail.trim().toLowerCase();
@@ -322,6 +329,7 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(
       setEmailResult(null);
       setAdditionalEmails([]);
       setNewEmail("");
+      setCustomMessage("");
     }
   }, [isOpen]);
 
@@ -358,6 +366,8 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(
         <DialogPrimitive.Content
           className="fixed left-[50%] z-[90] flex flex-col w-full max-w-md sm:max-w-lg lg:max-w-2xl translate-x-[-50%] border border-slate-200/60 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xl duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 rounded-t-2xl sm:rounded-2xl max-h-[90vh] top-auto bottom-0 sm:top-28 sm:bottom-auto md:top-[50%] md:translate-y-[-50%] md:bottom-auto outline-none overflow-hidden"
         >
+          <DialogPrimitive.Title className="sr-only">Loan Details</DialogPrimitive.Title>
+
           <DialogPrimitive.Close className="absolute top-4 right-4 z-[95] rounded-lg p-2 bg-slate-50/80 dark:bg-slate-800/80 text-slate-600 dark:text-slate-400 border-0 shadow-sm opacity-70 ring-offset-background transition-all hover:opacity-100 hover:bg-slate-100 dark:hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 disabled:pointer-events-none">
             <X className="h-4 w-4" />
             <span className="sr-only">Close</span>
@@ -442,98 +452,107 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(
               Save
             </button>
           </div>
-        </DialogPrimitive.Content>
-      </DialogPrimitive.Portal>
 
-      {/* Email confirmation modal */}
-      {showEmailConfirm && (
-        <DialogPrimitive.Portal>
-          <div className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-sm flex items-center justify-center" onClick={() => setShowEmailConfirm(false)}>
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl w-full max-w-md mx-4 p-5" onClick={(e) => e.stopPropagation()}>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-medium text-slate-800 dark:text-slate-200">Send Fallout Alert</h3>
-                <button onClick={() => setShowEmailConfirm(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              <div className="space-y-3">
-                <div>
-                  <label className="text-[11px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">Primary Recipient (LO)</label>
-                  <div className="mt-1 text-sm text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-800 rounded-lg px-3 py-2 border border-slate-200 dark:border-slate-700">
-                    {loInfo?.redirectActive ? (
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400" />
-                          <span className="text-amber-600 dark:text-amber-400 text-[11px] font-medium">Redirect active</span>
-                        </div>
-                        <div className="mt-0.5">{loInfo.redirectTo || "No redirect email configured"}</div>
-                        {loInfo.email && (
-                          <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">Original: {loInfo.name ? `${loInfo.name} <${loInfo.email}>` : loInfo.email}</div>
-                        )}
-                      </div>
-                    ) : loInfo?.email ? (
-                      <span>{loInfo.name ? `${loInfo.name} — ` : ""}{loInfo.email}</span>
-                    ) : (
-                      <span className="text-slate-400 italic">No LO email found for this loan</span>
-                    )}
-                  </div>
+          {/* Email confirmation overlay — inside DialogPrimitive.Content to stay within Radix focus trap */}
+          {showEmailConfirm && (
+            <div className="absolute inset-0 z-[100] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl w-full max-w-md p-5 animate-in fade-in-0 zoom-in-95">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-medium text-slate-800 dark:text-slate-200">Send Fallout Alert</h3>
+                  <button onClick={() => setShowEmailConfirm(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 rounded-lg p-1 hover:bg-slate-100 dark:hover:bg-slate-800">
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
 
-                <div>
-                  <label className="text-[11px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">Additional Recipients</label>
-                  {additionalEmails.length > 0 && (
-                    <div className="mt-1 space-y-1">
-                      {additionalEmails.map((email) => (
-                        <div key={email} className="flex items-center justify-between bg-slate-50 dark:bg-slate-800 rounded-lg px-3 py-1.5 border border-slate-200 dark:border-slate-700">
-                          <span className="text-sm text-slate-700 dark:text-slate-300">{email}</span>
-                          <button onClick={() => setAdditionalEmails((prev) => prev.filter((e) => e !== email))} className="text-slate-400 hover:text-rose-500">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-[11px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">Primary Recipient (LO)</label>
+                    <div className="mt-1 text-sm text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-800 rounded-lg px-3 py-2 border border-slate-200 dark:border-slate-700">
+                      {loInfo?.redirectActive ? (
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400" />
+                            <span className="text-amber-600 dark:text-amber-400 text-[11px] font-medium">Redirect active</span>
+                          </div>
+                          <div className="mt-0.5">{loInfo.redirectTo || "No redirect email configured"}</div>
+                          {loInfo.email && (
+                            <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">Original: {loInfo.name ? `${loInfo.name} <${loInfo.email}>` : loInfo.email}</div>
+                          )}
                         </div>
-                      ))}
+                      ) : loInfo?.email ? (
+                        <span>{loInfo.name ? `${loInfo.name} — ` : ""}{loInfo.email}</span>
+                      ) : (
+                        <span className="text-slate-400 italic">No LO email found for this loan</span>
+                      )}
                     </div>
-                  )}
-                  <div className="mt-1.5 flex gap-2">
-                    <input
-                      type="email"
-                      value={newEmail}
-                      onChange={(e) => setNewEmail(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addExtraEmail())}
-                      placeholder="Add email address..."
-                      className="flex-1 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-slate-700 dark:text-slate-300 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">Additional Recipients</label>
+                    {additionalEmails.length > 0 && (
+                      <div className="mt-1 space-y-1">
+                        {additionalEmails.map((email) => (
+                          <div key={email} className="flex items-center justify-between bg-slate-50 dark:bg-slate-800 rounded-lg px-3 py-1.5 border border-slate-200 dark:border-slate-700">
+                            <span className="text-sm text-slate-700 dark:text-slate-300">{email}</span>
+                            <button onClick={() => setAdditionalEmails((prev) => prev.filter((e) => e !== email))} className="text-slate-400 hover:text-rose-500">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="mt-1.5 flex gap-2">
+                      <input
+                        type="email"
+                        value={newEmail}
+                        onChange={(e) => setNewEmail(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addExtraEmail())}
+                        placeholder="Add email address..."
+                        className="flex-1 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-slate-700 dark:text-slate-300 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
+                      />
+                      <button
+                        onClick={addExtraEmail}
+                        disabled={!newEmail.trim() || !newEmail.includes("@")}
+                        className="px-2.5 py-1.5 rounded-lg text-sm bg-sky-50 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/50 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                      >
+                        <Plus className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">Personal Message (optional)</label>
+                    <textarea
+                      value={customMessage}
+                      onChange={(e) => setCustomMessage(e.target.value)}
+                      placeholder="Add a note to include in the email..."
+                      rows={3}
+                      className="mt-1 w-full text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-slate-700 dark:text-slate-300 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-sky-400 resize-none"
                     />
-                    <button
-                      onClick={addExtraEmail}
-                      disabled={!newEmail.trim() || !newEmail.includes("@")}
-                      className="px-2.5 py-1.5 rounded-lg text-sm bg-sky-50 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/50 disabled:opacity-40 disabled:pointer-events-none transition-colors"
-                    >
-                      <Plus className="w-4 h-4" />
-                    </button>
                   </div>
                 </div>
-              </div>
 
-              <div className="flex gap-2 mt-5">
-                <button
-                  onClick={() => setShowEmailConfirm(false)}
-                  className="flex-1 py-2 rounded-lg text-sm text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSendConfirmed}
-                  disabled={emailSending || (!loInfo?.email && !loInfo?.redirectTo && additionalEmails.length === 0)}
-                  className="flex-1 py-2 rounded-lg text-sm font-medium bg-sky-600 hover:bg-sky-700 text-white disabled:opacity-50 disabled:pointer-events-none transition-colors flex items-center justify-center gap-2"
-                >
-                  {emailSending ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                  {emailSending ? "Sending..." : `Send${additionalEmails.length > 0 ? ` to ${1 + additionalEmails.length}` : ""}`}
-                </button>
+                <div className="flex gap-2 mt-5">
+                  <button
+                    onClick={() => setShowEmailConfirm(false)}
+                    className="flex-1 py-2 rounded-lg text-sm text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSendConfirmed}
+                    disabled={emailSending || (!loInfo?.email && !loInfo?.redirectTo && additionalEmails.length === 0)}
+                    className="flex-1 py-2 rounded-lg text-sm font-medium bg-sky-600 hover:bg-sky-700 text-white disabled:opacity-50 disabled:pointer-events-none transition-colors flex items-center justify-center gap-2"
+                  >
+                    {emailSending ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                    {emailSending ? "Sending..." : `Send${additionalEmails.length > 0 ? ` to ${1 + additionalEmails.length}` : ""}`}
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        </DialogPrimitive.Portal>
-      )}
+          )}
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
     </Dialog>
   );
 });

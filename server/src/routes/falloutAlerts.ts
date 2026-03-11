@@ -378,6 +378,7 @@ router.post(
       const additionalEmails = Array.isArray(req.body?.additional_emails)
         ? req.body.additional_emails.filter((e: unknown) => typeof e === "string" && (e as string).includes("@")).map((e: string) => e.trim().toLowerCase())
         : [];
+      const customMessage = typeof req.body?.custom_message === "string" ? req.body.custom_message.trim() : "";
       const appBaseUrl = process.env.APP_BASE_URL || resolveFrontendUrl();
       const result = await sendSingleFalloutAlert({
         tenantPool,
@@ -386,6 +387,7 @@ router.post(
         loanId: loanId.trim(),
         appBaseUrl,
         additionalEmails,
+        customMessage: customMessage || undefined,
       });
       res.json(result);
     } catch (error: unknown) {

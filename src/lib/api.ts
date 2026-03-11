@@ -1514,7 +1514,7 @@ export class ApiClient {
     });
   }
 
-  async sendFalloutAlertSingle(loanId: string, tenantId?: string | null, additionalEmails?: string[]) {
+  async sendFalloutAlertSingle(loanId: string, tenantId?: string | null, additionalEmails?: string[], customMessage?: string) {
     return this.request<{
       sent: boolean;
       recipientEmail: string | null;
@@ -1524,7 +1524,7 @@ export class ApiClient {
       additionalSent?: number;
     }>(`/api/fallout-alerts/send-single${this._falloutTq(tenantId)}`, {
       method: "POST",
-      body: JSON.stringify({ loan_id: loanId, additional_emails: additionalEmails }),
+      body: JSON.stringify({ loan_id: loanId, additional_emails: additionalEmails, custom_message: customMessage }),
     });
   }
 }
