@@ -42,7 +42,7 @@ export function getSidebarSearchTargets(): SidebarRouteSearchTarget[] {
     { id: 'route:fallout-forecast', label: 'Coheus Fallout Report', group: 'Pages', kind: 'route', path: '/fallout-forecast', keywords: ['fallout', 'forecast', 'risk', 'closing'] },
     { id: 'route:settings', label: 'Settings', group: 'Pages', kind: 'route', path: '/settings', keywords: ['profile', 'preferences'] },
     { id: 'route:help', label: 'Help Center', group: 'Pages', kind: 'route', path: '/help', keywords: ['support', 'docs'] },
-    { id: 'route:workbench-shared', label: 'Workbench: Shared With Me', group: 'Pages', kind: 'route', path: '/workbench/shared', keywords: ['workbench', 'shared'] },
+    { id: 'route:workbench-shared', label: 'Workbench: Shared', group: 'Pages', kind: 'route', path: '/workbench/shared', keywords: ['workbench', 'shared'] },
     { id: 'route:workbench-team', label: 'Workbench: Team Folders', group: 'Pages', kind: 'route', path: '/workbench/team-folders', keywords: ['workbench', 'team'] },
     { id: 'route:workbench-favorites', label: 'Workbench: Favorites', group: 'Pages', kind: 'route', path: '/workbench/favorites', keywords: ['workbench', 'favorites'] },
     { id: 'route:distribution-center', label: 'Communications Center', group: 'Pages', kind: 'route', path: '/workbench/distributions', keywords: ['communications', 'communications center', 'distribution', 'distribution center', 'workbench', 'schedules'] },

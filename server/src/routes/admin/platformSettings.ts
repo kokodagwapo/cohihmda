@@ -198,9 +198,16 @@ router.put(
   requirePlatformAdmin,
   async (req, res) => {
     try {
-      const { enabled } = req.body ?? {};
-      if (typeof enabled !== "boolean") {
-        return res.status(400).json({ error: "enabled must be a boolean" });
+      const raw = req.body?.enabled;
+      // Accept boolean true/false OR string "true"/"false" for robustness
+      let enabled: boolean;
+      if (typeof raw === "boolean") {
+        enabled = raw;
+      } else if (raw === "true" || raw === "false") {
+        enabled = raw === "true";
+      } else {
+        console.error("[PlatformSettings] Invalid fallout-redirect-toggle body:", JSON.stringify(req.body));
+        return res.status(400).json({ error: "enabled must be a boolean", received: typeof raw });
       }
       await setPlatformSetting(FALLOUT_REDIRECT_KEY, enabled ? "true" : "false");
       res.json({ enabled, message: `Fallout email redirect ${enabled ? "enabled" : "disabled"}` });
