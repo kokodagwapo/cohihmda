@@ -30,6 +30,8 @@ import {
   Download,
   FileUp,
   FileText,
+  Mail,
+  Plus,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
@@ -59,6 +61,69 @@ export function PlatformSettingsSection() {
     Record<string, { valid: boolean; message: string }>
   >({});
 
+  // Dev email safeguard state
+  const [devEmails, setDevEmails] = useState<string[]>([]);
+  const [devEmailInput, setDevEmailInput] = useState("");
+  const [devEmailLoading, setDevEmailLoading] = useState(false);
+  const [devEmailBusy, setDevEmailBusy] = useState(false);
+
+  const fetchDevEmails = useCallback(async () => {
+    try {
+      setDevEmailLoading(true);
+      const result = await api.request<{ emails: string[] }>(
+        "/api/admin/platform-settings/fallout-dev-emails",
+      );
+      setDevEmails(result.emails ?? []);
+    } catch {
+      // Non-critical — the setting may not exist yet
+    } finally {
+      setDevEmailLoading(false);
+    }
+  }, []);
+
+  const handleAddDevEmail = async () => {
+    const email = devEmailInput.trim().toLowerCase();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      toast({ title: "Invalid email", description: "Please enter a valid email address.", variant: "destructive" });
+      return;
+    }
+    if (devEmails.includes(email)) {
+      toast({ title: "Duplicate", description: "This email is already in the list." });
+      setDevEmailInput("");
+      return;
+    }
+    try {
+      setDevEmailBusy(true);
+      const result = await api.request<{ emails: string[] }>(
+        "/api/admin/platform-settings/fallout-dev-emails",
+        { method: "POST", body: JSON.stringify({ email }) },
+      );
+      setDevEmails(result.emails ?? []);
+      setDevEmailInput("");
+      toast({ title: "Email added", description: `${email} will now receive redirected fallout alerts in dev.` });
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message || "Failed to add email", variant: "destructive" });
+    } finally {
+      setDevEmailBusy(false);
+    }
+  };
+
+  const handleRemoveDevEmail = async (email: string) => {
+    try {
+      setDevEmailBusy(true);
+      const result = await api.request<{ emails: string[] }>(
+        "/api/admin/platform-settings/fallout-dev-emails",
+        { method: "DELETE", body: JSON.stringify({ email }) },
+      );
+      setDevEmails(result.emails ?? []);
+      toast({ title: "Email removed", description: `${email} removed from dev email list.` });
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message || "Failed to remove email", variant: "destructive" });
+    } finally {
+      setDevEmailBusy(false);
+    }
+  };
+
   const fetchSettings = useCallback(async () => {
     try {
       setLoading(true);
@@ -86,7 +151,8 @@ export function PlatformSettingsSection() {
 
   useEffect(() => {
     fetchSettings();
-  }, [fetchSettings]);
+    fetchDevEmails();
+  }, [fetchSettings, fetchDevEmails]);
 
   const handleEdit = (key: string) => {
     setEditingKey(key);
@@ -377,6 +443,101 @@ export function PlatformSettingsSection() {
                 Import JSON
               </Button>
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Dev Email Safeguard */}
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Mail className="h-5 w-5 text-amber-500" />
+                <div>
+                  <CardTitle className="text-base">Fallout Alert Dev Email Safeguard</CardTitle>
+                  <CardDescription className="text-sm mt-0.5">
+                    In non-production environments, all fallout alert emails to real LOs and managers are
+                    redirected to these addresses. If no emails are configured, LO/manager sends are blocked entirely.
+                  </CardDescription>
+                </div>
+              </div>
+              {devEmails.length > 0 ? (
+                <Badge variant="default" className="bg-emerald-500">
+                  <Check className="h-3 w-3 mr-1" />
+                  {devEmails.length} email{devEmails.length !== 1 ? "s" : ""}
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="text-amber-600 border-amber-300">
+                  <AlertCircle className="h-3 w-3 mr-1" />
+                  No Emails
+                </Badge>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {devEmailLoading ? (
+              <div className="flex items-center gap-2 text-sm text-slate-500">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading...
+              </div>
+            ) : (
+              <>
+                {devEmails.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {devEmails.map((email) => (
+                      <span
+                        key={email}
+                        className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 pl-3 pr-1.5 py-1 text-sm font-mono"
+                      >
+                        {email}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveDevEmail(email)}
+                          disabled={devEmailBusy}
+                          className="rounded-full p-0.5 hover:bg-rose-100 dark:hover:bg-rose-900/40 hover:text-rose-600 dark:hover:text-rose-400 transition-colors disabled:opacity-50"
+                          title={`Remove ${email}`}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <Input
+                    type="email"
+                    placeholder="Add email address..."
+                    value={devEmailInput}
+                    onChange={(e) => setDevEmailInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleAddDevEmail();
+                      }
+                    }}
+                    className="max-w-sm text-sm"
+                    disabled={devEmailBusy}
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleAddDevEmail}
+                    disabled={devEmailBusy || !devEmailInput.trim()}
+                  >
+                    {devEmailBusy ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                    ) : (
+                      <Plus className="h-4 w-4 mr-1" />
+                    )}
+                    Add
+                  </Button>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  These emails only apply when <code className="text-[11px] bg-slate-100 dark:bg-slate-800 px-1 rounded">NODE_ENV</code> is
+                  not <code className="text-[11px] bg-slate-100 dark:bg-slate-800 px-1 rounded">production</code>.
+                  In production, all fallout alerts go directly to their intended recipients.
+                </p>
+              </>
+            )}
           </CardContent>
         </Card>
 

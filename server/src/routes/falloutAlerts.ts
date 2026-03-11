@@ -6,6 +6,7 @@ import {
   getFalloutAlertConfig,
   sendFalloutAlerts,
   upsertFalloutAlertConfig,
+  getFalloutDevMode,
 } from "../services/falloutAlertService.js";
 import { resolveFrontendUrl } from "../utils/frontendUrl.js";
 
@@ -29,6 +30,7 @@ router.get(
     try {
       const { tenantPool } = getTenantContext(req);
       const config = await getFalloutAlertConfig(tenantPool);
+      const { isDevMode, allowedEmails } = await getFalloutDevMode();
       res.json({
         config: config ?? {
           enabled: false,
@@ -40,6 +42,8 @@ router.get(
           target_encompass_user_ids: [],
           manager_user_ids: [],
         },
+        devMode: isDevMode,
+        devAllowedEmails: isDevMode ? allowedEmails : undefined,
       });
     } catch (error: unknown) {
       res.status(500).json({ error: getErrorMessage(error, "Failed to load fallout alert config") });
