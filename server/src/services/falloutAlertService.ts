@@ -323,9 +323,9 @@ export async function getHighRiskLoansForAlerts(
         AND l.current_loan_status = 'Active Loan'
         AND (l.is_archived IS DISTINCT FROM TRUE)
         -- Pipeline recency: exclude loans with application_date older than threshold
-        AND (l.application_date IS NULL OR l.application_date >= CURRENT_DATE - $3)
+        AND (l.application_date IS NULL OR l.application_date >= CURRENT_DATE - ($3 || ' days')::interval)
         -- Overdue filter: exclude loans whose estimated closing date is far in the past
-        AND (l.estimated_closing_date IS NULL OR l.estimated_closing_date >= CURRENT_DATE - $4)
+        AND (l.estimated_closing_date IS NULL OR l.estimated_closing_date >= CURRENT_DATE - ($4 || ' days')::interval)
     )
     SELECT
       loan_id,
