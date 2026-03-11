@@ -293,10 +293,18 @@ export async function resolveLoanOfficerEmails(
 ): Promise<{ recipients: ResolvedRecipient[]; skippedLoansCount: number }> {
   if (loans.length === 0) return { recipients: [], skippedLoansCount: 0 };
   const loanOfficerIds = Array.from(
-    new Set(loans.map((loan) => loan.loan_officer_id).filter((v): v is string => Boolean(v))),
+    new Set(
+      loans
+        .map((loan) => loan.loan_officer_id?.trim())
+        .filter((v): v is string => Boolean(v)),
+    ),
   );
   const loanOfficerNames = Array.from(
-    new Set(loans.map((loan) => loan.loan_officer?.trim()).filter((v): v is string => Boolean(v))),
+    new Set(
+      loans
+        .map((loan) => loan.loan_officer?.trim().toLowerCase())
+        .filter((v): v is string => Boolean(v)),
+    ),
   );
 
   const usersResult = await tenantPool.query<{
@@ -310,7 +318,7 @@ export async function resolveLoanOfficerEmails(
        AND email IS NOT NULL
        AND (
          encompass_user_id = ANY($1::text[])
-         OR full_name = ANY($2::text[])
+        OR LOWER(full_name) = ANY($2::text[])
        )`,
     [loanOfficerIds, loanOfficerNames],
   );
@@ -318,8 +326,8 @@ export async function resolveLoanOfficerEmails(
   const byId = new Map<string, { encompass_user_id: string; email: string; full_name: string | null }>();
   const byName = new Map<string, { encompass_user_id: string; email: string; full_name: string | null }>();
   for (const user of usersResult.rows) {
-    byId.set(user.encompass_user_id, user);
-    if (user.full_name) byName.set(user.full_name.trim(), user);
+    byId.set(user.encompass_user_id.trim(), user);
+    if (user.full_name) byName.set(user.full_name.trim().toLowerCase(), user);
   }
 
   const recipientMap = new Map<string, ResolvedRecipient>();
@@ -334,10 +342,13 @@ export async function resolveLoanOfficerEmails(
 
   for (const loan of loans) {
     const matched =
-      (loan.loan_officer_id ? byId.get(loan.loan_officer_id) : undefined) ||
-      (loan.loan_officer ? byName.get(loan.loan_officer.trim()) : undefined);
+      (loan.loan_officer_id ? byId.get(loan.loan_officer_id.trim()) : undefined) ||
+      (loan.loan_officer ? byName.get(loan.loan_officer.trim().toLowerCase()) : undefined);
 
     if (!matched?.email) {
+      console.warn(
+        `[FalloutAlerts] Unable to resolve LO recipient for loan ${loan.loan_id} (loan_officer_id=${loan.loan_officer_id ?? "null"}, loan_officer=${loan.loan_officer ?? "null"})`,
+      );
       skippedLoansCount += 1;
       continue;
     }
@@ -613,10 +624,20 @@ export async function sendFalloutAlerts({
   };
 }): Promise<SendFalloutAlertsResult> {
   const highRiskLoans = await getHighRiskLoansForAlerts(tenantPool, config);
+  console.log(
+    `[FalloutAlerts] Found ${highRiskLoans.length} high-risk loans (minScore=${config.min_risk_score}, levels=${
+      Array.isArray(config.include_risk_levels)
+        ? config.include_risk_levels.join(",")
+        : ""
+    })`,
+  );
   const { recipients: resolvedRecipients, skippedLoansCount } = await resolveLoanOfficerEmails(
     tenantPool,
     highRiskLoans,
     config.target_encompass_user_ids,
+  );
+  console.log(
+    `[FalloutAlerts] Recipient resolution: ${resolvedRecipients.length} resolved, ${skippedLoansCount} skipped`,
   );
   const manualTestRecipients = Array.from(
     new Set(
@@ -980,7 +1001,13 @@ export async function saveFalloutTokenResponse({
   await tenantPool.query(
     `INSERT INTO public.fallout_alert_responses
      (token_id, alert_batch_id, loan_id, encompass_user_id, recipient_email, response, response_note, ip_address, user_agent)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     ON CONFLICT (token_id) DO UPDATE SET
+       response = EXCLUDED.response,
+       response_note = EXCLUDED.response_note,
+       ip_address = EXCLUDED.ip_address,
+       user_agent = EXCLUDED.user_agent,
+       responded_at = NOW()`,
     [
       row.id,
       row.alert_batch_id,
