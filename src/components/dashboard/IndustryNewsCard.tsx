@@ -227,6 +227,14 @@ function formatFredDateAsMonthYear(dateStr: string): string {
   return format(new Date(y, m - 1, d), "MMM ''yy");
 }
 
+/** Format a FRED YYYY-MM-DD string as "MMM d" using local calendar date (avoids UTC→local shift for chart labels). */
+function formatFredDateShort(dateStr: string): string {
+  const parts = dateStr.split("-").map(Number);
+  if (parts.length !== 3) return dateStr;
+  const [y, m, d] = parts;
+  return format(new Date(y, m - 1, d), "MMM d");
+}
+
 const parseNewsReleaseDate = (item: any): Date | null => {
   const directCandidates = [
     item?.publishedAt,
@@ -258,24 +266,14 @@ const parseNewsReleaseDate = (item: any): Date | null => {
 const OBMMI_WIDGET_URL = "https://www2.optimalblue.com/OBMMI/widgetConfig.php";
 
 function MarketIntelligenceTicker({
+  loading,
   seriesFromApi,
 }: {
-  seriesFromApi?: Record<string, { rate: number; delta: number; trend: string; priorRate: number | null }> | null;
+  loading?: boolean;
+  seriesFromApi?: Record<string, { rate: number | null; delta: number | null; trend: string; priorRate: number | null }> | null;
 }) {
   const [obModalOpen, setObModalOpen] = useState(false);
 
-  const FALLBACK_INDICES: Array<{ label: string; rate: number; delta: number; trend: "up" | "down" }> = [
-    { label: "30-Yr. Conforming", rate: 6.092, delta: 0.026, trend: "up" },
-    { label: "30-Yr. Jumbo", rate: 6.263, delta: 0.017, trend: "up" },
-    { label: "30-Yr. FHA", rate: 5.88, delta: -0.107, trend: "down" },
-    { label: "30-Yr. VA", rate: 5.692, delta: 0.054, trend: "up" },
-    { label: "30-Yr. USDA", rate: 6.035, delta: -0.027, trend: "down" },
-    { label: "15-Yr. Conforming", rate: 5.378, delta: -0.034, trend: "down" },
-  ];
-
-  const [rateIndices, setRateIndices] = useState(FALLBACK_INDICES);
-
-  // Map API series key -> ticker label (order matches FALLBACK_INDICES)
   const SERIES_TO_LABEL: Record<string, string> = {
     conforming: "30-Yr. Conforming",
     jumbo: "30-Yr. Jumbo",
@@ -285,27 +283,18 @@ function MarketIntelligenceTicker({
     conforming15yr: "15-Yr. Conforming",
   };
 
-  useEffect(() => {
-    if (!seriesFromApi) return;
-    const keys = ["conforming", "jumbo", "fha", "va", "usda", "conforming15yr"];
-    const next = keys.map((key) => {
-      const s = seriesFromApi[key];
-      const label = SERIES_TO_LABEL[key];
-      const fallback = FALLBACK_INDICES.find((i) => i.label === label)!;
-      if (s && s.rate != null) {
-        return {
-          label,
-          rate: s.rate,
-          delta: s.delta,
-          trend: (s.trend === "down" ? "down" : "up") as "up" | "down",
-        };
-      }
-      return fallback;
-    });
-    setRateIndices(next);
-  }, [seriesFromApi]);
-
-  const RATE_INDICES = rateIndices;
+  const keys = ["conforming", "jumbo", "fha", "va", "usda", "conforming15yr"] as const;
+  const RATE_INDICES = keys.map((key) => {
+    const label = SERIES_TO_LABEL[key];
+    if (loading || !seriesFromApi) {
+      return { label, rate: null, delta: null, trend: "flat" as const };
+    }
+    const s = seriesFromApi[key];
+    const rate = s?.rate ?? null;
+    const delta = s?.delta ?? null;
+    const trend = s?.trend === "down" ? "down" : s?.trend === "up" ? "up" : "flat";
+    return { label, rate, delta, trend };
+  });
 
   const renderSparkline = (trend: "up" | "down") => {
     const stroke = trend === "up" ? "#16a34a" : "#ef4444";
@@ -344,28 +333,30 @@ function MarketIntelligenceTicker({
           <div className="ticker-track">
             {[...RATE_INDICES, ...RATE_INDICES].map((item, idx) => {
               const isUp = item.trend === "up";
+              const isDown = item.trend === "down";
+              const hasRate = item.rate != null;
+              const hasDelta = item.delta != null;
               return (
                 <button
                   type="button"
                   key={`${item.label}-${idx}`}
                   onClick={() => setObModalOpen(true)}
                   className="flex items-center gap-3 px-6 h-full border-r border-slate-200/70 shrink-0 cursor-pointer hover:bg-slate-100/50 dark:hover:bg-slate-800/30 transition-colors duration-150 text-left touch-manipulation focus:outline-none focus:ring-2 focus:ring-inset focus:ring-slate-400/30 rounded-none"
-                  aria-label={`View rate details: ${item.label} ${item.rate.toFixed(3)}%`}
+                  aria-label={hasRate ? `View rate details: ${item.label} ${item.rate!.toFixed(3)}%` : `View rate details: ${item.label}`}
                 >
                   <span className="text-[11px] sm:text-xs md:text-[13px] font-medium text-slate-700 dark:text-slate-300">
                     {item.label}
                   </span>
-                  {renderSparkline(item.trend)}
+                  {hasRate && (isUp || isDown) ? renderSparkline(item.trend as "up" | "down") : <span className="w-[38px] text-slate-400">—</span>}
                   <span className="text-[11px] sm:text-xs md:text-[13px] font-semibold text-slate-800 dark:text-slate-200">
-                    {item.rate.toFixed(3)}%
+                    {hasRate ? `${item.rate!.toFixed(3)}%` : "—"}
                   </span>
                   <span
-                    className={`text-[10px] sm:text-[11px] md:text-[12px] font-medium ${
-                      isUp ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400"
+                    className={`text-[10px] sm:text-[11px] md:text-[12px] font-medium min-w-[2.5rem] ${
+                      !hasDelta ? "text-slate-400" : isUp ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400"
                     }`}
                   >
-                    {isUp ? "+" : ""}
-                    {item.delta.toFixed(3)}
+                    {hasDelta ? `${isUp ? "+" : ""}${item.delta!.toFixed(3)}` : "—"}
                   </span>
                 </button>
               );
@@ -500,8 +491,14 @@ export const IndustryNewsCard = () => {
 
   // OBMMI multi-series (conforming, jumbo, fha, va, conforming15yr, usda) for ticker + rate snapshot
   const [currentObmmiSeries, setCurrentObmmiSeries] = useState<
-    Record<string, { rate: number; delta: number; trend: string; priorRate: number | null }> | null
+    Record<string, { rate: number | null; delta: number | null; trend: string; priorRate: number | null }> | null
   >(null);
+  const [currentRatesLoading, setCurrentRatesLoading] = useState(true);
+  const [currentRatesFailed, setCurrentRatesFailed] = useState(false);
+  const [chartDataLoading, setChartDataLoading] = useState(true);
+  const [chartDataFailed, setChartDataFailed] = useState(false);
+  const [currentRatesRetryKey, setCurrentRatesRetryKey] = useState(0);
+  const [chartDataRetryKey, setChartDataRetryKey] = useState(0);
   
   // Initialize with government/GSE sources enabled by default
   // RSS feed sources (National Mortgage News, etc.) are disabled by default
@@ -612,7 +609,10 @@ export const IndustryNewsCard = () => {
     loadUserPreferences();
   }, []);
 
-  // Fetch FRED 30-Yr Fixed (MORTGAGE30US), 10-Yr Treasury (DGS10), and Existing Home Sales (EXHOSLUSM495S)
+  // Fetch FRED 30-Yr Fixed (OBMMI daily), 10-Yr Treasury (DGS10), and Existing Home Sales with retry (5 max, backoff 0/10/20/30s)
+  const RETRY_DELAYS_MS = [0, 10_000, 20_000, 30_000];
+  const MAX_RETRIES = 5;
+
   useEffect(() => {
     const end = new Date();
     const start = new Date();
@@ -620,45 +620,87 @@ export const IndustryNewsCard = () => {
     const observationEnd = end.toISOString().split("T")[0];
     const observationStart = start.toISOString().split("T")[0];
     const qs = `observation_start=${observationStart}&observation_end=${observationEnd}`;
+    const qsDaily = `${qs}&daily=1`;
 
     let cancelled = false;
-    Promise.all([
-      api.request<{ observations: Array<{ date: string; rate: number }> }>(
-        `/api/loans/market-rates/mortgage-30y?${qs}`
-      ),
-      api.request<{ observations: Array<{ date: string; yield: number }> }>(
-        `/api/loans/market-rates/treasury-10y?${qs}`
-      ),
-      api.request<{ observations: Array<{ date: string; value: number }> }>(
-        `/api/loans/market-rates/existing-home-sales?${qs}`
-      ),
-    ])
-      .then(([mort, treas, exHome]) => {
+    let attempt = 0;
+    setChartDataLoading(true);
+    setChartDataFailed(false);
+
+    const fetchCharts = (): Promise<void> =>
+      Promise.all([
+        api.request<{ observations: Array<{ date: string; rate: number }> }>(
+          `/api/loans/market-rates/mortgage-30y?${qsDaily}`
+        ),
+        api.request<{ observations: Array<{ date: string; yield: number }> }>(
+          `/api/loans/market-rates/treasury-10y?${qs}`
+        ),
+        api.request<{ observations: Array<{ date: string; value: number }> }>(
+          `/api/loans/market-rates/existing-home-sales?${qs}`
+        ),
+      ]).then(([mort, treas, exHome]) => {
         if (cancelled) return;
         if (mort?.observations?.length) setFixedRateObservations(mort.observations);
         if (treas?.observations?.length) setTreasuryObservations(treas.observations);
         if (exHome?.observations?.length) setExistingHomeSalesObservations(exHome.observations);
-      })
-      .catch(() => {
-        // Keep fallback static data on error
+        setChartDataLoading(false);
+        setChartDataFailed(false);
       });
-    return () => { cancelled = true; };
-  }, []);
 
-  // Fetch OBMMI current (all 6 series) for ticker and rate snapshot card
+    function run() {
+      if (cancelled || attempt >= MAX_RETRIES) {
+        if (!cancelled) setChartDataLoading(false);
+        if (!cancelled && attempt >= MAX_RETRIES) setChartDataFailed(true);
+        return;
+      }
+      attempt += 1;
+      fetchCharts().catch(() => {
+        if (cancelled) return;
+        const delay = RETRY_DELAYS_MS[Math.min(attempt - 1, RETRY_DELAYS_MS.length - 1)];
+        if (delay > 0) setTimeout(run, delay);
+        else run();
+      });
+    }
+    run();
+    return () => { cancelled = true; };
+  }, [chartDataRetryKey]);
+
+  // Fetch OBMMI current (all 6 series) for ticker and rate snapshot with retry (5 max, backoff 0/10/20/30s). Bypass cache on first load so refresh gets fresh data.
   useEffect(() => {
     let cancelled = false;
-    api
-      .request<{
+    let attempt = 0;
+    setCurrentRatesLoading(true);
+    setCurrentRatesFailed(false);
+
+    const fetchCurrent = (bypassCache: boolean) =>
+      api.request<{
         available?: boolean;
-        series?: Record<string, { rate: number; delta: number; trend: string; priorRate: number | null }>;
-      }>("/api/loans/market-rates/current")
-      .then((data) => {
-        if (!cancelled && data?.series) setCurrentObmmiSeries(data.series);
-      })
-      .catch(() => {});
+        series?: Record<string, { rate: number | null; delta: number | null; trend: string; priorRate: number | null }>;
+      }>(`/api/loans/market-rates/current${bypassCache ? "?bypassCache=1" : ""}`).then((data) => {
+        if (cancelled) return;
+        setCurrentObmmiSeries(data?.series ?? null);
+        setCurrentRatesLoading(false);
+        setCurrentRatesFailed(false);
+      });
+
+    function run() {
+      if (cancelled || attempt >= MAX_RETRIES) {
+        if (!cancelled) setCurrentRatesLoading(false);
+        if (!cancelled && attempt >= MAX_RETRIES) setCurrentRatesFailed(true);
+        return;
+      }
+      attempt += 1;
+      const bypassCache = attempt === 1;
+      fetchCurrent(bypassCache).catch(() => {
+        if (cancelled) return;
+        const delay = RETRY_DELAYS_MS[Math.min(attempt - 1, RETRY_DELAYS_MS.length - 1)];
+        if (delay > 0) setTimeout(run, delay);
+        else run();
+      });
+    }
+    run();
     return () => { cancelled = true; };
-  }, []);
+  }, [currentRatesRetryKey]);
 
   // Available news sources - Government/GSE sites (enabled by default) + RSS feeds (disabled by default)
   const availableSources = [
@@ -1259,26 +1301,39 @@ export const IndustryNewsCard = () => {
 
   const displayRateSnapshotData = useMemo(() => {
     const s = currentObmmiSeries;
-    if (!s) return RATE_SNAPSHOT_DATA;
-    const rows: Array<{ product: string; prior: number; today: number }> = [
-      { product: "30-Yr Fixed", prior: s.conforming?.priorRate ?? s.conforming?.rate ?? 0, today: s.conforming?.rate ?? 0 },
-      { product: "15-Yr Fixed", prior: s.conforming15yr?.priorRate ?? s.conforming15yr?.rate ?? 0, today: s.conforming15yr?.rate ?? 0 },
-      { product: "30-Yr FHA", prior: s.fha?.priorRate ?? s.fha?.rate ?? 0, today: s.fha?.rate ?? 0 },
-      { product: "30-Yr Jumbo", prior: s.jumbo?.priorRate ?? s.jumbo?.rate ?? 0, today: s.jumbo?.rate ?? 0 },
-      { product: "30-Yr VA", prior: s.va?.priorRate ?? s.va?.rate ?? 0, today: s.va?.rate ?? 0 },
-      { product: "30-Yr USDA", prior: s.usda?.priorRate ?? s.usda?.rate ?? 0, today: s.usda?.rate ?? 0 },
+    const products = [
+      { key: "conforming" as const, product: "30-Yr Fixed" },
+      { key: "conforming15yr" as const, product: "15-Yr Fixed" },
+      { key: "fha" as const, product: "30-Yr FHA" },
+      { key: "jumbo" as const, product: "30-Yr Jumbo" },
+      { key: "va" as const, product: "30-Yr VA" },
+      { key: "usda" as const, product: "30-Yr USDA" },
     ];
-    const hasAny = rows.some((r) => r.today > 0);
-    return hasAny ? rows : RATE_SNAPSHOT_DATA;
+    if (!s) return products.map((p) => ({ product: p.product, prior: null, today: null }));
+    return products.map((p) => ({
+      product: p.product,
+      prior: s[p.key]?.priorRate ?? null,
+      today: s[p.key]?.rate ?? null,
+    }));
   }, [currentObmmiSeries]);
 
+  const rateSnapshotChartData = useMemo(
+    () =>
+      displayRateSnapshotData.map((r) => ({
+        product: r.product,
+        prior: r.prior ?? 0,
+        today: r.today ?? 0,
+      })),
+    [displayRateSnapshotData]
+  );
+
   const displayExistingHomeSalesData = useMemo(() => {
-    if (!existingHomeSalesObservations?.length) return EXISTING_HOME_SALES_DATA;
+    if (chartDataLoading || !existingHomeSalesObservations?.length) return [];
     return existingHomeSalesObservations.map((o) => ({
       month: formatFredDateAsMonthYear(o.date),
       value: o.value,
     }));
-  }, [existingHomeSalesObservations]);
+  }, [existingHomeSalesObservations, chartDataLoading]);
 
   // Resolved drilldown data: use FRED API data for fixedRate/treasury/rateSnapshot/existingSales when available
   const resolvedDrilldownData = useMemo(() => {
@@ -1288,7 +1343,7 @@ export const IndustryNewsCard = () => {
         const start = rangeStartDates[range];
         return fixedRateObservations
           .filter((o) => o.date >= start)
-          .map((o) => ({ week: format(new Date(o.date), "MMM d"), rate: o.rate }));
+          .map((o) => ({ week: formatFredDateShort(o.date), rate: o.rate }));
       };
       base.fixedRate = {
         mtd: filter("mtd"),
@@ -1302,7 +1357,7 @@ export const IndustryNewsCard = () => {
         const start = rangeStartDates[range];
         return treasuryObservations
           .filter((o) => o.date >= start)
-          .map((o) => ({ date: format(new Date(o.date), "MMM d"), yield: o.yield }));
+          .map((o) => ({ date: formatFredDateShort(o.date), yield: o.yield }));
       };
       base.treasury = {
         mtd: filter("mtd"),
@@ -1311,12 +1366,12 @@ export const IndustryNewsCard = () => {
         "3y": filter("3y"),
       };
     }
-    if (displayRateSnapshotData.length > 0) {
+    if (displayRateSnapshotData.some((r) => r.today != null)) {
       base.rateSnapshot = {
-        mtd: displayRateSnapshotData,
-        qtr: displayRateSnapshotData,
-        ytd: displayRateSnapshotData,
-        "3y": displayRateSnapshotData,
+        mtd: rateSnapshotChartData,
+        qtr: rateSnapshotChartData,
+        ytd: rateSnapshotChartData,
+        "3y": rateSnapshotChartData,
       };
     }
     if (existingHomeSalesObservations?.length) {
@@ -1337,7 +1392,7 @@ export const IndustryNewsCard = () => {
       };
     }
     return base;
-  }, [fixedRateObservations, treasuryObservations, rangeStartDates, displayRateSnapshotData, existingHomeSalesObservations]);
+  }, [fixedRateObservations, treasuryObservations, rangeStartDates, displayRateSnapshotData, existingHomeSalesObservations, rateSnapshotChartData]);
 
   const availableDrilldownRanges = useMemo<DrilldownRange[]>(() => {
     if (!activeChart) return [];
@@ -1346,26 +1401,22 @@ export const IndustryNewsCard = () => {
     );
   }, [activeChart, resolvedDrilldownData]);
 
-  // Preview data for the 30-Yr Fixed and 10-Yr Treasury cards (last ~8 points when from API)
+  // Preview data for the 30-Yr Fixed and 10-Yr Treasury cards (last ~8 points when from API). No fallback when loading or no data.
   const displayFixedRateData = useMemo(() => {
-    if (fixedRateObservations?.length) {
-      return fixedRateObservations.slice(-8).map((o) => ({
-        week: format(new Date(o.date), "MMM d"),
-        rate: o.rate,
-      }));
-    }
-    return FIXED_RATE_DATA;
-  }, [fixedRateObservations]);
+    if (chartDataLoading || !fixedRateObservations?.length) return [];
+    return fixedRateObservations.slice(-8).map((o) => ({
+      week: formatFredDateShort(o.date),
+      rate: o.rate,
+    }));
+  }, [fixedRateObservations, chartDataLoading]);
 
   const displayTreasuryData = useMemo(() => {
-    if (treasuryObservations?.length) {
-      return treasuryObservations.slice(-8).map((o) => ({
-        date: format(new Date(o.date), "MMM d"),
-        yield: o.yield,
-      }));
-    }
-    return TREASURY_DATA;
-  }, [treasuryObservations]);
+    if (chartDataLoading || !treasuryObservations?.length) return [];
+    return treasuryObservations.slice(-8).map((o) => ({
+      date: formatFredDateShort(o.date),
+      yield: o.yield,
+    }));
+  }, [treasuryObservations, chartDataLoading]);
 
   useEffect(() => {
     if (!showChartDrilldown || !activeChart) return;
@@ -1401,6 +1452,17 @@ export const IndustryNewsCard = () => {
 
   const renderDrilldownChart = () => {
     if (!activeChart) return null;
+    const isLoading =
+      (activeChart === "fixedRate" || activeChart === "treasury" || activeChart === "existingSales") && chartDataLoading ||
+      (activeChart === "rateSnapshot" && currentRatesLoading);
+    if (isLoading) {
+      return (
+        <div className="h-full flex flex-col items-center justify-center gap-3 text-slate-500 dark:text-slate-400">
+          <Loader2 className="w-8 h-8 animate-spin" />
+          <span className="text-sm font-medium">Loading rates</span>
+        </div>
+      );
+    }
     const chartData = resolvedDrilldownData[activeChart][drilldownRange];
     if (!chartData || chartData.length === 0) {
       return (
@@ -1419,8 +1481,8 @@ export const IndustryNewsCard = () => {
             <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
             <XAxis dataKey="week" tick={{ fontSize: 12 }} />
             <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `${v}%`} />
-            <RechartsTooltip formatter={(v: number) => [`${v}%`, "Rate"]} />
-            <Line type="monotone" dataKey="rate" stroke="rgb(59, 130, 246)" strokeWidth={2.5} dot={{ r: 3 }} />
+            <RechartsTooltip formatter={(v: number) => [`${Number(v).toFixed(3)}%`, "Rate"]} />
+            <Line type="monotone" dataKey="rate" stroke="rgb(59, 130, 246)" strokeWidth={2.5} dot={false} />
           </LineChart>
         </ResponsiveContainer>
       );
@@ -1433,8 +1495,8 @@ export const IndustryNewsCard = () => {
             <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
             <XAxis dataKey="date" tick={{ fontSize: 12 }} />
             <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `${v}%`} />
-            <RechartsTooltip formatter={(v: number) => [`${v}%`, "Yield"]} />
-            <Line type="monotone" dataKey="yield" stroke="rgb(249, 115, 22)" strokeWidth={2.5} dot={{ r: 3 }} />
+            <RechartsTooltip formatter={(v: number) => [`${Number(v).toFixed(3)}%`, "Yield"]} />
+            <Line type="monotone" dataKey="yield" stroke="rgb(249, 115, 22)" strokeWidth={2.5} dot={false} />
           </LineChart>
         </ResponsiveContainer>
       );
@@ -1550,7 +1612,19 @@ export const IndustryNewsCard = () => {
 
         {/* Market Intelligence Ticker - rate strip */}
         <div className="mb-5 md:mb-6">
-          <MarketIntelligenceTicker seriesFromApi={currentObmmiSeries} />
+          <MarketIntelligenceTicker loading={currentRatesLoading} seriesFromApi={currentObmmiSeries} />
+          {currentRatesFailed && (
+            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400 text-center">
+              Unable to load rates.{" "}
+              <button
+                type="button"
+                onClick={() => setCurrentRatesRetryKey((k) => k + 1)}
+                className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
+              >
+                Retry
+              </button>
+            </p>
+          )}
         </div>
 
         {/* Charts Grid - 2 rows x 3 */}
@@ -1574,15 +1648,39 @@ export const IndustryNewsCard = () => {
               <ExternalLink className="w-3 h-3" />
             </button>
             <div className="h-[140px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={displayFixedRateData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
-                  <XAxis dataKey="week" tick={{ fontSize: 10 }} stroke="currentColor" className="fill-slate-500" />
-                  <YAxis domain={["dataMin - 0.2", "dataMax + 0.2"]} tick={{ fontSize: 10 }} width={28} tickFormatter={(v) => `${v}%`} />
-                  <RechartsTooltip formatter={(v: number) => [`${v}%`, "Rate"]} contentStyle={{ fontSize: 12 }} />
-                  <Line type="monotone" dataKey="rate" stroke="rgb(59, 130, 246)" strokeWidth={2} dot={{ r: 2 }} />
-                </LineChart>
-              </ResponsiveContainer>
+              {chartDataLoading ? (
+                <div className="h-full flex flex-col items-center justify-center gap-2 text-slate-500 dark:text-slate-400">
+                  <Loader2 className="w-6 h-6 animate-spin" />
+                  <span className="text-xs font-medium">Loading rates</span>
+                </div>
+              ) : displayFixedRateData.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center gap-2 text-slate-500 dark:text-slate-400 text-xs">
+                  {chartDataFailed ? (
+                    <>
+                      <span>Unable to load rates.</span>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setChartDataRetryKey((k) => k + 1); }}
+                        className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                      >
+                        Retry
+                      </button>
+                    </>
+                  ) : (
+                    "No data available"
+                  )}
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={displayFixedRateData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
+                    <XAxis dataKey="week" tick={{ fontSize: 10 }} stroke="currentColor" className="fill-slate-500" />
+                    <YAxis domain={["dataMin - 0.2", "dataMax + 0.2"]} tick={{ fontSize: 10 }} width={28} tickFormatter={(v) => `${v}%`} />
+                    <RechartsTooltip formatter={(v: number) => [`${Number(v).toFixed(3)}%`, "Rate"]} contentStyle={{ fontSize: 12 }} />
+                    <Line type="monotone" dataKey="rate" stroke="rgb(59, 130, 246)" strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
             </div>
           </div>
           {/* 10-Yr Treasury */}
@@ -1604,15 +1702,24 @@ export const IndustryNewsCard = () => {
               <ExternalLink className="w-3 h-3" />
             </button>
             <div className="h-[140px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={displayTreasuryData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
-                  <XAxis dataKey="date" tick={{ fontSize: 10 }} />
-                  <YAxis domain={["dataMin - 0.05", "dataMax + 0.05"]} tick={{ fontSize: 10 }} width={28} tickFormatter={(v) => `${v}%`} />
-                  <RechartsTooltip formatter={(v: number) => [`${v}%`, "Yield"]} contentStyle={{ fontSize: 12 }} />
-                  <Line type="monotone" dataKey="yield" stroke="rgb(249, 115, 22)" strokeWidth={2} dot={{ r: 2 }} />
-                </LineChart>
-              </ResponsiveContainer>
+              {chartDataLoading ? (
+                <div className="h-full flex flex-col items-center justify-center gap-2 text-slate-500 dark:text-slate-400">
+                  <Loader2 className="w-6 h-6 animate-spin" />
+                  <span className="text-xs font-medium">Loading rates</span>
+                </div>
+              ) : displayTreasuryData.length === 0 ? (
+                <div className="h-full flex items-center justify-center text-slate-500 dark:text-slate-400 text-xs">No data available</div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={displayTreasuryData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
+                    <XAxis dataKey="date" tick={{ fontSize: 10 }} />
+                    <YAxis domain={["dataMin - 0.05", "dataMax + 0.05"]} tick={{ fontSize: 10 }} width={28} tickFormatter={(v) => `${v}%`} />
+                    <RechartsTooltip formatter={(v: number) => [`${Number(v).toFixed(3)}%`, "Yield"]} contentStyle={{ fontSize: 12 }} />
+                    <Line type="monotone" dataKey="yield" stroke="rgb(249, 115, 22)" strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
             </div>
           </div>
           {/* MBA Application Index */}
@@ -1696,17 +1803,26 @@ export const IndustryNewsCard = () => {
               <ExternalLink className="w-3 h-3" />
             </button>
             <div className="h-[140px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={displayRateSnapshotData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }} layout="vertical" barCategoryGap="12%">
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
-                  <XAxis type="number" domain={["auto", "auto"]} tick={{ fontSize: 10 }} tickFormatter={(v) => `${v}%`} />
-                  <YAxis type="category" dataKey="product" tick={{ fontSize: 10 }} width={70} />
-                  <RechartsTooltip formatter={(v: number) => [`${v}%`, ""]} contentStyle={{ fontSize: 12 }} />
-                  <Legend wrapperStyle={{ fontSize: 10 }} />
-                  <Bar dataKey="prior" fill="rgb(148, 163, 184)" name="Prior Week" radius={[0, 2, 2, 0]} />
-                  <Bar dataKey="today" fill="rgb(59, 130, 246)" name="Today" radius={[0, 2, 2, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              {currentRatesLoading ? (
+                <div className="h-full flex flex-col items-center justify-center gap-2 text-slate-500 dark:text-slate-400">
+                  <Loader2 className="w-6 h-6 animate-spin" />
+                  <span className="text-xs font-medium">Loading rates</span>
+                </div>
+              ) : !displayRateSnapshotData.some((r) => r.today != null) ? (
+                <div className="h-full flex items-center justify-center text-slate-500 dark:text-slate-400 text-xs">No data available</div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={rateSnapshotChartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }} layout="vertical" barCategoryGap="12%">
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
+                    <XAxis type="number" domain={["auto", "auto"]} tick={{ fontSize: 10 }} tickFormatter={(v) => `${v}%`} />
+                    <YAxis type="category" dataKey="product" tick={{ fontSize: 10 }} width={70} />
+                    <RechartsTooltip formatter={(v: number) => [`${v}%`, ""]} contentStyle={{ fontSize: 12 }} />
+                    <Legend wrapperStyle={{ fontSize: 10 }} />
+                    <Bar dataKey="prior" fill="rgb(148, 163, 184)" name="Prior Week" radius={[0, 2, 2, 0]} />
+                    <Bar dataKey="today" fill="rgb(59, 130, 246)" name="Today" radius={[0, 2, 2, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
             </div>
           </div>
           {/* Existing Home Sales */}
@@ -1728,15 +1844,24 @@ export const IndustryNewsCard = () => {
               <ExternalLink className="w-3 h-3" />
             </button>
             <div className="h-[140px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={displayExistingHomeSalesData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
-                  <XAxis dataKey="month" tick={{ fontSize: 10 }} />
-                  <YAxis domain={["auto", "auto"]} tick={{ fontSize: 10 }} width={28} tickFormatter={(v) => `${v}M`} />
-                  <RechartsTooltip formatter={(v: number) => [`${v}M`, "Units"]} contentStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="value" fill="rgb(59, 130, 246)" radius={[2, 2, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              {chartDataLoading ? (
+                <div className="h-full flex flex-col items-center justify-center gap-2 text-slate-500 dark:text-slate-400">
+                  <Loader2 className="w-6 h-6 animate-spin" />
+                  <span className="text-xs font-medium">Loading rates</span>
+                </div>
+              ) : displayExistingHomeSalesData.length === 0 ? (
+                <div className="h-full flex items-center justify-center text-slate-500 dark:text-slate-400 text-xs">No data available</div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={displayExistingHomeSalesData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
+                    <XAxis dataKey="month" tick={{ fontSize: 10 }} />
+                    <YAxis domain={["auto", "auto"]} tick={{ fontSize: 10 }} width={28} tickFormatter={(v) => `${v}M`} />
+                    <RechartsTooltip formatter={(v: number) => [`${v}M`, "Units"]} contentStyle={{ fontSize: 12 }} />
+                    <Bar dataKey="value" fill="rgb(59, 130, 246)" radius={[2, 2, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
             </div>
           </div>
         </div>
