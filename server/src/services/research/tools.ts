@@ -162,7 +162,7 @@ export function getMetricDefinitions(): string {
 // Unified LLM Caller
 // ============================================================================
 
-const MAX_LLM_RETRIES = 2;
+const MAX_LLM_RETRIES = 3;
 
 export async function callLLM(
   messages: LLMMessage[],
@@ -188,18 +188,43 @@ export async function callLLM(
   }
 
   for (let attempt = 1; attempt <= MAX_LLM_RETRIES; attempt++) {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
+    let response: Response;
+    try {
+      response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+    } catch (networkErr: any) {
+      console.warn(`[LLM] Network error (attempt ${attempt}/${MAX_LLM_RETRIES}): ${networkErr.message}`);
+      if (attempt < MAX_LLM_RETRIES) {
+        await new Promise((r) => setTimeout(r, 1000 * attempt));
+        continue;
+      }
+      throw new Error(`OpenAI network error after ${MAX_LLM_RETRIES} attempts: ${networkErr.message}`);
+    }
+
+    // Retry on rate-limit (429) and server errors (500+)
+    if (response.status === 429 || response.status >= 500) {
+      const retryAfter = response.headers.get("retry-after");
+      const waitMs = retryAfter ? Math.min(parseInt(retryAfter, 10) * 1000, 15_000) : 1000 * attempt;
+      console.warn(`[LLM] HTTP ${response.status} (attempt ${attempt}/${MAX_LLM_RETRIES}), retrying in ${waitMs}ms`);
+      if (attempt < MAX_LLM_RETRIES) {
+        await new Promise((r) => setTimeout(r, waitMs));
+        continue;
+      }
+    }
 
     if (!response.ok) {
-      const error = (await response.json()) as { error?: { message?: string } };
-      throw new Error(`OpenAI API error: ${error.error?.message || response.statusText}`);
+      let errorMsg = response.statusText;
+      try {
+        const error = (await response.json()) as { error?: { message?: string } };
+        errorMsg = error.error?.message || errorMsg;
+      } catch { /* ignore parse failure */ }
+      throw new Error(`OpenAI API error (${response.status}): ${errorMsg}`);
     }
 
     const data = (await response.json()) as {
@@ -229,7 +254,7 @@ export async function callLLM(
     );
 
     if (attempt < MAX_LLM_RETRIES) {
-      await new Promise((r) => setTimeout(r, 1000 * attempt));
+      await new Promise((r) => setTimeout(r, 1500 * attempt));
     }
   }
 

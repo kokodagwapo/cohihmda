@@ -909,10 +909,30 @@ export async function runFollowUp(
       timestamp: Date.now(),
     });
 
+    // Re-synthesize the report with all findings (original + follow-ups)
+    if (session.plan && session.findings.length > 0) {
+      session.phase = "synthesizing" as SessionPhase;
+      emit({
+        type: "phase",
+        data: { phase: "synthesizing", message: "Updating report with new findings..." },
+        timestamp: Date.now(),
+      });
+
+      try {
+        const updatedReport = await runSynthesisAgent(
+          session.plan, session.findings, apiKey, session.topic, businessKnowledge
+        );
+        session.report = updatedReport;
+        emit({ type: "synthesis", data: updatedReport, timestamp: Date.now() });
+      } catch (synthErr: any) {
+        console.warn(`[Research] Follow-up re-synthesis failed (non-fatal): ${synthErr.message}`);
+      }
+    }
+
     session.phase = "complete";
     emit({
       type: "complete",
-      data: { message: "Follow-up investigation complete.", findingCount: 1 },
+      data: { message: "Follow-up investigation complete.", findingCount: session.findings.length },
       timestamp: Date.now(),
     });
 
