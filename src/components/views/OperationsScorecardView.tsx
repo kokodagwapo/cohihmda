@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -26,7 +26,7 @@ import {
   getTierColorClass,
   getTierDisplayName
 } from '@/hooks/useOperationsScorecardData';
-import { DatePeriodPicker, type PeriodSelection, type PeriodPreset } from '@/components/ui/DatePeriodPicker';
+import { DatePeriodPicker, computePresetDateRange, type PeriodSelection, type PeriodPreset } from '@/components/ui/DatePeriodPicker';
 
 type ScorecardActor = OperationsActorType;
 type DateRange = DateRangeType;
@@ -37,6 +37,25 @@ const mapPresetToOpsDateRange = (preset?: PeriodPreset): DateRangeType => {
   if (preset === 'rolling-12') return '12-months';
   return '3-months';
 };
+
+/** Map Operations dateRange + custom range to PeriodSelection so DatePeriodPicker stays in sync when data reloads */
+function opsDateRangeToPeriodSelection(
+  dateRange: DateRange,
+  opsCustomDateRange: { start: string; end: string } | undefined
+): PeriodSelection {
+  if (opsCustomDateRange) {
+    return {
+      type: 'custom',
+      dateRange: { start: opsCustomDateRange.start, end: opsCustomDateRange.end },
+    };
+  }
+  const preset: PeriodPreset = dateRange === '6-months' ? 'rolling-6' : dateRange === '12-months' ? 'rolling-12' : 'rolling-3';
+  return {
+    type: 'preset',
+    preset,
+    dateRange: computePresetDateRange(preset),
+  };
+}
 
 interface OperationsScorecardViewProps {
   selectedTenantId?: string | null;
@@ -276,6 +295,12 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
   useEffect(() => {
     localStorage.setItem('op-scorecard-dateRange', dateRange);
   }, [dateRange]);
+
+  // Derive PeriodSelection from dateRange/custom so DatePeriodPicker selection stays in sync when data reloads (same pattern as Sales Scorecard)
+  const periodSelectionForPicker = useMemo(
+    () => opsDateRangeToPeriodSelection(dateRange, opsCustomDateRange),
+    [dateRange, opsCustomDateRange]
+  );
 
   useEffect(() => {
     localStorage.setItem('op-scorecard-view', scorecardView);
@@ -791,6 +816,7 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                       onPeriodChange={handleOpsPeriodChange}
                       defaultPreset="rolling-3"
                       showLabel={false}
+                      periodSelectionFromStore={periodSelectionForPicker}
                     />
                   </div>
                 </div>

@@ -445,6 +445,7 @@ export function LoanComplexityView({
             presets={PERIOD_PRESETS}
             showYears={false}
             onPeriodChange={setPeriodSelection}
+            periodSelectionFromStore={periodSelection}
             defaultPreset="mtd"
             showLabel={false}
             size="sm"

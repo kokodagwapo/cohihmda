@@ -1374,7 +1374,7 @@ const SalesScorecard = () => {
                     >
                       <div className="flex items-center justify-between mb-4">
                         <TabsList
-                          className={`grid w-fit grid-cols-2 h-9 ${
+                          className={`grid w-fit grid-cols-2 h-11 sm:h-10 ${
                             isDarkMode
                               ? "bg-slate-800/60 border border-slate-700/50"
                               : "bg-blue-50/50 border border-blue-200/30"

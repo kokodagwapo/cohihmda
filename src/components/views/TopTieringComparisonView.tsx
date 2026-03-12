@@ -68,7 +68,7 @@ import {
   TopTieringActor as APIActorData,
   CustomDateRange,
 } from "@/hooks/useTopTieringComparisonData";
-import { DatePeriodPicker, type PeriodSelection, type PeriodPreset } from "@/components/ui/DatePeriodPicker";
+import { DatePeriodPicker, computePresetDateRange, type PeriodSelection, type PeriodPreset } from "@/components/ui/DatePeriodPicker";
 
 type TopTieringActor = "branch" | "loan-officer";
 type TimeFilter =
@@ -95,6 +95,18 @@ const mapPeriodToTopTiering = (selection: PeriodSelection): { timeFilter: TimeFi
   if (preset && directMap[preset]) return { timeFilter: directMap[preset] };
   return { timeFilter: 'last-year' };
 };
+
+/** Map TopTiering timeFilter + customDateRange back to PeriodSelection so DatePeriodPicker stays in sync when data reloads */
+function toptieringTimeToPeriodSelection(
+  timeFilter: TimeFilter,
+  customDateRange: CustomDateRange | undefined
+): PeriodSelection {
+  if (timeFilter === 'custom' && customDateRange) {
+    return { type: 'custom', dateRange: { start: customDateRange.start, end: customDateRange.end } };
+  }
+  const preset: PeriodPreset = timeFilter as PeriodPreset;
+  return { type: 'preset', preset, dateRange: computePresetDateRange(preset) };
+}
 type ChartSorting = "desc" | "asc";
 
 interface ActorData {
@@ -213,6 +225,11 @@ export function TopTieringComparisonView({
     selectedTenantId,
     selectedChannel,
     customDateRange
+  );
+
+  const periodSelectionForPicker = useMemo(
+    () => toptieringTimeToPeriodSelection(timeFilter, customDateRange),
+    [timeFilter, customDateRange]
   );
 
   // Determine if using real data or mock data
@@ -822,6 +839,7 @@ export function TopTieringComparisonView({
                     presets={['mtd', 'qtd', 'ytd', 'last-month', 'last-quarter', 'last-year', 'trailing-12']}
                     showYears={false}
                     onPeriodChange={handleTtcPeriodChange}
+                    periodSelectionFromStore={periodSelectionForPicker}
                     defaultPreset="last-year"
                     showLabel={false}
                     size="sm"
@@ -1611,18 +1629,18 @@ export function TopTieringComparisonView({
                               if (name === "Revenue") {
                                 const entry = props.payload;
                                 return [
-                                  `${formatCurrency(value)}\n${
+                                  `${formatCurrency(value)} revenue · ${formatNumber(
                                     entry.units
-                                  } units · ${formatCurrency(
+                                  )} units · ${formatCurrency(
                                     Math.round(entry.revenuePerLoan)
-                                  )}/loan\n${Math.round(
+                                  )}/loan · ${Math.round(
                                     entry.revenueBPS
                                   )} BPS · ${entry.tier} tier`,
                                   "Revenue",
                                 ];
                               }
                               if (name === "Accumulated %")
-                                return [`${value.toFixed(1)}%`, "Cumulative %"];
+                                return [`${Number(value).toFixed(1)}%`, "Cumulative %"];
                               return [value, name];
                             }}
                             labelFormatter={(label) => {
@@ -1640,6 +1658,7 @@ export function TopTieringComparisonView({
                           <Bar
                             yAxisId="left"
                             dataKey="revenue"
+                            name="Revenue"
                             radius={[4, 4, 0, 0]}
                             cursor="pointer"
                             onClick={(data: any) =>
@@ -1671,6 +1690,7 @@ export function TopTieringComparisonView({
                             yAxisId="right"
                             type="monotone"
                             dataKey="cumulativeRevenuePercent"
+                            name="Accumulated %"
                             stroke="#3b82f6"
                             strokeWidth={2}
                             dot={{ fill: "#3b82f6", r: 4 }}
@@ -2599,18 +2619,18 @@ export function TopTieringComparisonView({
                         if (name === "Revenue") {
                           const entry = props.payload;
                           return [
-                            `${formatCurrency(value)}\n${
+                            `${formatCurrency(value)} revenue · ${formatNumber(
                               entry.units
-                            } units · ${formatCurrency(
+                            )} units · ${formatCurrency(
                               Math.round(entry.revenuePerLoan)
-                            )}/loan\n${Math.round(entry.revenueBPS)} BPS · ${
+                            )}/loan · ${Math.round(entry.revenueBPS)} BPS · ${
                               entry.tier
                             } tier`,
                             "Revenue",
                           ];
                         }
                         if (name === "Accumulated %")
-                          return [`${value.toFixed(1)}%`, "Cumulative %"];
+                          return [`${Number(value).toFixed(1)}%`, "Cumulative %"];
                         return [value, name];
                       }}
                       labelFormatter={(label) => {

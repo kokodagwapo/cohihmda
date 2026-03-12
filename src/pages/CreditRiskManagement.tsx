@@ -64,7 +64,7 @@ export default function CreditRiskManagement() {
   const [applicationType, setApplicationType] = useState<ApplicationType>('Applications Taken');
   
   // Date selection using reusable hook
-  const { year: selectedYear, setYear: setSelectedYear, dateRange, setDateRange } = useDatePeriodState();
+  const { year: selectedYear, setYear: setSelectedYear, dateRange, setDateRange, periodSelection, setPeriodSelection } = useDatePeriodState();
   
   // Channel filter from global store (synced with header)
   const { selectedChannel } = useChannelStore();
@@ -445,6 +445,8 @@ export default function CreditRiskManagement() {
                   year={selectedYear}
                   onYearChange={setSelectedYear}
                   onDateRangeChange={setDateRange}
+                  onPeriodChange={setPeriodSelection}
+                  periodSelectionFromStore={periodSelection}
                   yearsToShow={4}
                   size="default"
                 />
