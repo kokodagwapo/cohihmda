@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -26,7 +26,7 @@ import {
   getTierColorClass,
   getTierDisplayName
 } from '@/hooks/useOperationsScorecardData';
-import { DatePeriodPicker, type PeriodSelection, type PeriodPreset } from '@/components/ui/DatePeriodPicker';
+import { DatePeriodPicker, computePresetDateRange, type PeriodSelection, type PeriodPreset } from '@/components/ui/DatePeriodPicker';
 
 type ScorecardActor = OperationsActorType;
 type DateRange = DateRangeType;
@@ -37,6 +37,25 @@ const mapPresetToOpsDateRange = (preset?: PeriodPreset): DateRangeType => {
   if (preset === 'rolling-12') return '12-months';
   return '3-months';
 };
+
+/** Map Operations dateRange + custom range to PeriodSelection so DatePeriodPicker stays in sync when data reloads */
+function opsDateRangeToPeriodSelection(
+  dateRange: DateRange,
+  opsCustomDateRange: { start: string; end: string } | undefined
+): PeriodSelection {
+  if (opsCustomDateRange) {
+    return {
+      type: 'custom',
+      dateRange: { start: opsCustomDateRange.start, end: opsCustomDateRange.end },
+    };
+  }
+  const preset: PeriodPreset = dateRange === '6-months' ? 'rolling-6' : dateRange === '12-months' ? 'rolling-12' : 'rolling-3';
+  return {
+    type: 'preset',
+    preset,
+    dateRange: computePresetDateRange(preset),
+  };
+}
 
 interface OperationsScorecardViewProps {
   selectedTenantId?: string | null;
@@ -276,6 +295,12 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
   useEffect(() => {
     localStorage.setItem('op-scorecard-dateRange', dateRange);
   }, [dateRange]);
+
+  // Derive PeriodSelection from dateRange/custom so DatePeriodPicker selection stays in sync when data reloads (same pattern as Sales Scorecard)
+  const periodSelectionForPicker = useMemo(
+    () => opsDateRangeToPeriodSelection(dateRange, opsCustomDateRange),
+    [dateRange, opsCustomDateRange]
+  );
 
   useEffect(() => {
     localStorage.setItem('op-scorecard-view', scorecardView);
@@ -791,6 +816,7 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                       onPeriodChange={handleOpsPeriodChange}
                       defaultPreset="rolling-3"
                       showLabel={false}
+                      periodSelectionFromStore={periodSelectionForPicker}
                     />
                   </div>
                 </div>
@@ -1843,31 +1869,35 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                           Average Days by Tier
                         </h4>
                         <div className="space-y-3">
-                          {[
-                            { name: 'Top', value: displayData.topTier.avgDays, color: 'top', delay: '' },
-                            { name: 'Second', value: displayData.secondTier.avgDays, color: 'second', delay: 'delay-150' },
-                            { name: 'Bottom', value: displayData.bottomTier.avgDays, color: 'bottom', delay: 'delay-300' },
-                          ].map((tier) => (
-                            <div key={tier.name} className="flex items-center gap-3">
-                              <div className={`w-20 text-sm font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                                {tier.name}
-                              </div>
-                              <div className="flex-1">
-                                <div className={`h-6 rounded-full ${isDarkMode ? 'bg-slate-700/60' : 'bg-slate-200/80'}`}>
-                                  <div 
-                                    className={`h-full rounded-full flex items-center justify-end px-2 text-xs font-bold transition-all duration-1000 ease-out animate-in slide-in-from-left ${tier.delay} ${
-                                      tier.color === 'top' ? 'bg-tier-top text-white shadow-md shadow-tier-top/30' :
-                                      tier.color === 'second' ? 'bg-tier-second text-white shadow-md shadow-tier-second/30' :
-                                      'bg-tier-bottom text-slate-800 shadow-md shadow-tier-bottom/30'
-                                    }`}
-                                    style={{ width: `${(tier.value / 10) * 100}%` }}
-                                  >
-                                    {tier.value.toFixed(2)}
+                          {(() => {
+                            const tiers = [
+                              { name: 'Top', value: displayData.topTier.avgDays, color: 'top', delay: '' },
+                              { name: 'Second', value: displayData.secondTier.avgDays, color: 'second', delay: 'delay-150' },
+                              { name: 'Bottom', value: displayData.bottomTier.avgDays, color: 'bottom', delay: 'delay-300' },
+                            ];
+                            const maxDays = Math.max(...tiers.map((t) => t.value), 1);
+                            return tiers.map((tier) => (
+                              <div key={tier.name} className="flex items-center gap-3">
+                                <div className={`w-20 text-sm font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                                  {tier.name}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className={`h-6 rounded-full overflow-hidden ${isDarkMode ? 'bg-slate-700/60' : 'bg-slate-200/80'}`}>
+                                    <div 
+                                      className={`h-full rounded-full flex items-center justify-end px-2 text-xs font-bold transition-all duration-1000 ease-out animate-in slide-in-from-left ${tier.delay} ${
+                                        tier.color === 'top' ? 'bg-tier-top text-white shadow-md shadow-tier-top/30' :
+                                        tier.color === 'second' ? 'bg-tier-second text-white shadow-md shadow-tier-second/30' :
+                                        'bg-tier-bottom text-slate-800 shadow-md shadow-tier-bottom/30'
+                                      }`}
+                                      style={{ width: `${Math.min(100, (tier.value / maxDays) * 100)}%` }}
+                                    >
+                                      {tier.value.toFixed(2)}
+                                    </div>
                                   </div>
                                 </div>
                               </div>
-                            </div>
-                          ))}
+                            ));
+                          })()}
                         </div>
                       </div>
 

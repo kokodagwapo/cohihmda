@@ -770,10 +770,22 @@ async function fetchLatestFromFred(seriesId: string): Promise<RateSnapshot> {
 /**
  * Fetch the most recent rate + delta + prior rate for all six OBMMI series
  * (30-Yr Conforming, Jumbo, FHA, VA, USDA, 15-Yr Conforming). Cached 10 min.
+ * Use cache only when all series have non-null rates; otherwise refetch.
+ * @param options.bypassCache - If true, clear cache and fetch fresh from FRED.
  */
-export async function getMultiSeriesSnapshot(): Promise<MultiSeriesSnapshot> {
-  if (multiSeriesCache && Date.now() < multiSeriesCacheExpiry) {
-    return multiSeriesCache;
+export async function getMultiSeriesSnapshot(options?: { bypassCache?: boolean }): Promise<MultiSeriesSnapshot> {
+  if (options?.bypassCache) {
+    multiSeriesCache = null;
+    multiSeriesCacheExpiry = 0;
+  }
+
+  const useCache =
+    multiSeriesCache &&
+    Date.now() < multiSeriesCacheExpiry &&
+    (Object.keys(OBMMI_SERIES) as RateType[]).every((k) => multiSeriesCache![k].rate != null);
+
+  if (useCache) {
+    return multiSeriesCache!;
   }
 
   const empty: RateSnapshot = { rate: null, delta: null, priorRate: null, asOf: null };
