@@ -363,7 +363,7 @@ export async function runDataAnalystAgent(
     // Call LLM
     const raw = await callLLM(conversationHistory, apiKey, {
       temperature: 0.2,
-      maxTokens: 2500,
+      maxTokens: 4096,
       jsonMode: true,
     });
 
@@ -496,7 +496,7 @@ export async function runDataAnalystAgent(
 
       const finalRaw = await callLLM(conversationHistory, apiKey, {
         temperature: 0.2,
-        maxTokens: 2000,
+        maxTokens: 4096,
         jsonMode: true,
       });
 

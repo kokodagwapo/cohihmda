@@ -180,7 +180,7 @@ export async function runPlannerAgent(
 
   const raw = await callLLM(messages, apiKey, {
     temperature: 0.7,
-    maxTokens: 3000,
+    maxTokens: 4096,
     jsonMode: true,
   });
 
