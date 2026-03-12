@@ -36,6 +36,17 @@ export interface InsightContext {
   chatHistory?: Array<{ role: string; content: string }>;
 }
 
+export interface ChartHint {
+  type?: 'bar' | 'horizontal_bar' | 'line' | 'area' | 'pie' | 'donut' | 'stacked_bar' | 'grouped_bar';
+  xKey?: string;
+  yKey?: string;
+  yKeys?: string[];
+  xLabel?: string;
+  yLabel?: string;
+  nameKey?: string;
+  valueKey?: string;
+}
+
 export interface EvidenceItem {
   sql: string;
   explanation: string;
@@ -43,6 +54,7 @@ export interface EvidenceItem {
   rowCount: number;
   fields: string[];
   columnFormats?: Record<string, string>;
+  chartHint?: ChartHint;
 }
 
 export interface Finding {
