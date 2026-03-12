@@ -16,7 +16,7 @@
 
 import pg from "pg";
 import crypto from "crypto";
-import { getOpenAIKey, getSchemaContext, getMetricDefinitions, getKnowledgeContext } from "./tools.js";
+import { getOpenAIKey, getSchemaContext, getMetricDefinitions, getKnowledgeContext, getDerivedMetricContext, getTrackedInsightContext } from "./tools.js";
 import { runPlannerAgent, type ResearchPlan, type InvestigationQuestion } from "./agents/plannerAgent.js";
 import {
   runDataAnalystAgent,
@@ -577,14 +577,16 @@ export async function runResearchPipeline(
 
   try {
     const apiKey = await getOpenAIKey(session.tenantId);
-    const [schemaContext, metricDefs, knowledgeContext, priorSessionSummaries] = await Promise.all([
+    const [schemaContext, metricDefs, knowledgeContext, priorSessionSummaries, businessKnowledge, trackedInsightContext] = await Promise.all([
       getSchemaContext(session.tenantId),
       Promise.resolve(getMetricDefinitions()),
       getKnowledgeContext(tenantPool, session.tenantId, session.topic),
       isQuickMode ? Promise.resolve("") : getPriorSessionSummaries(tenantPool, session.tenantId, session.id),
+      Promise.resolve(getDerivedMetricContext()),
+      getTrackedInsightContext(tenantPool),
     ]);
 
-    const enrichedKnowledgeContext = [knowledgeContext, priorSessionSummaries]
+    const enrichedKnowledgeContext = [knowledgeContext, priorSessionSummaries, trackedInsightContext]
       .filter(Boolean)
       .join("\n\n") || undefined;
 
@@ -636,7 +638,8 @@ export async function runResearchPipeline(
         onStep,
         getSteeringDirective,
         checkPause,
-        enrichedKnowledgeContext
+        enrichedKnowledgeContext,
+        businessKnowledge
       );
 
       session.plan = { summary: "Quick answer", questions: [quickQuestion] };
@@ -666,6 +669,9 @@ export async function runResearchPipeline(
     }
     if (priorSessionSummaries) {
       console.log(`[Research] Session ${sessionId}: Prior session context loaded (${priorSessionSummaries.length} chars)`);
+    }
+    if (trackedInsightContext) {
+      console.log(`[Research] Session ${sessionId}: Tracked insight context loaded (${trackedInsightContext.length} chars)`);
     }
 
     // ── Phase 1: Planning ──
@@ -699,6 +705,7 @@ export async function runResearchPipeline(
       knowledgeContext,
       priorInvestigationContext,
       priorSessionSummaries: priorSessionSummaries || undefined,
+      businessKnowledge,
     });
 
     session.plan = plan;
@@ -747,7 +754,7 @@ export async function runResearchPipeline(
 
           return runDataAnalystAgent(
             question, schemaContext, metricDefs, tenantPool, apiKey,
-            onStep, getSteeringDirective, checkPause, enrichedKnowledgeContext
+            onStep, getSteeringDirective, checkPause, enrichedKnowledgeContext, businessKnowledge
           );
         })
       );
@@ -780,7 +787,7 @@ export async function runResearchPipeline(
       timestamp: Date.now(),
     });
 
-    const report = await runSynthesisAgent(plan, allFindings, apiKey, session.topic);
+    const report = await runSynthesisAgent(plan, allFindings, apiKey, session.topic, businessKnowledge);
     session.report = report;
     emit({ type: "synthesis", data: report, timestamp: Date.now() });
 
@@ -840,11 +847,18 @@ export async function runFollowUp(
 
   try {
     const apiKey = await getOpenAIKey(session.tenantId);
-    const [schemaContext, metricDefs, knowledgeContext] = await Promise.all([
+    const [schemaContext, metricDefs, knowledgeContext, trackedInsightCtx] = await Promise.all([
       getSchemaContext(session.tenantId),
       Promise.resolve(getMetricDefinitions()),
       getKnowledgeContext(tenantPool, session.tenantId, question),
+      getTrackedInsightContext(tenantPool),
     ]);
+
+    const businessKnowledge = getDerivedMetricContext();
+
+    const enrichedFollowUpContext = [knowledgeContext, trackedInsightCtx]
+      .filter(Boolean)
+      .join("\n\n") || undefined;
 
     // Build context from existing findings
     const existingContext = session.findings
@@ -883,7 +897,7 @@ export async function runFollowUp(
 
     const finding = await runDataAnalystAgent(
       followUpQuestion, schemaContext, metricDefs, tenantPool, apiKey,
-      onStep, getSteeringDirective, checkPause, knowledgeContext
+      onStep, getSteeringDirective, checkPause, enrichedFollowUpContext, businessKnowledge
     );
 
     session.findings.push(finding);

@@ -1,142 +1,222 @@
 {
   "version": "1.0",
-  "exportedAt": "2026-03-09T00:00:00.000Z",
+  "exportedAt": "2026-03-11T00:00:00.000Z",
   "exportedBy": "release-notes-assistant",
   "notes": [
     {
-      "version": "2026.03.09",
-      "title": "Tenant & User Experience Update (Since Feb 25)",
+      "version": "2026.03.11",
+      "title": "Cohi Platform — Initial Release",
       "isDraft": true,
       "publishedAt": null,
       "emailSentAt": null,
       "entries": [
         {
-          "title": "Pricing Dashboard Is Now Live",
-          "description": "A dedicated Pricing Dashboard is now available with full page navigation and Workbench support, giving teams a centralized view into pricing drivers and performance.",
+          "title": "Workbench: Distributions & Scheduled Delivery",
+          "description": "Schedule automated delivery of Workbench canvases to recipients via email. Configure timezone, frequency, and recipient lists from the Communications Center. Resend and delivery reliability improvements ensure consistent delivery.",
           "category": "feature",
-          "link": "/pricing-dashboard",
-          "linkLabel": "Open Pricing Dashboard",
-          "sortOrder": 0
-        },
-        {
-          "title": "Pipeline Analysis Added to Product and Workbench",
-          "description": "Pipeline Analysis is now available as a full dashboard and as Workbench widgets, including historical snapshots and workflow-oriented analysis views.",
-          "category": "feature",
-          "link": "/pipeline-analysis",
-          "linkLabel": "View Pipeline Analysis",
-          "sortOrder": 1
-        },
-        {
-          "title": "Loan Complexity Dashboard and Widgets",
-          "description": "Loan Complexity now includes dedicated widgets and improved individual selection filtering so teams can isolate high-friction loans and monitor complexity shifts faster.",
-          "category": "feature",
-          "link": "/loan-complexity",
-          "linkLabel": "Analyze Loan Complexity",
+          "link": "/workbench/distributions",
+          "linkLabel": "Manage Distributions",
           "sortOrder": 2
         },
         {
-          "title": "Lock Stratification Added to Workbench",
-          "description": "Lock Stratification has been added to Workbench with dynamic filtering, making it easier to segment lock behavior and compare performance by custom dimensions.",
+          "title": "Workbench: Global Sharing",
+          "description": "Share Workbench canvases globally with other users in your organization so teams can collaborate on the same dashboard views and insights.",
           "category": "feature",
-          "link": "/lock-stratification",
-          "linkLabel": "Open Lock Stratification",
+          "link": "/my-dashboard",
+          "linkLabel": "Open Workbench",
           "sortOrder": 3
         },
         {
-          "title": "Workflow Conversion Milestones Persist on Save",
-          "description": "Workflow Conversion milestone settings now save with your canvas, so users do not lose milestone configuration when revisiting Workbench dashboards.",
-          "category": "improvement",
-          "link": "/workflow-conversion",
-          "linkLabel": "Go to Workflow Conversion",
-          "sortOrder": 4
-        },
-        {
-          "title": "Research Analyst Simple Mode and Better Reports",
-          "description": "Research Lab now supports a simpler interaction mode and improved reporting detail, including stronger finding drill-down for clearer actionability.",
-          "category": "improvement",
-          "link": "/research",
-          "linkLabel": "Try Research Analyst",
-          "sortOrder": 5
-        },
-        {
-          "title": "Standalone Data Chat Experience",
-          "description": "A dedicated Data Chat page is now available for users who want a focused AI conversation workflow outside full dashboard context.",
+          "title": "CohiChat AI Assistant",
+          "description": "An AI-powered conversational assistant embedded throughout the platform. Ask questions about your loan data, get metric explanations, and receive guidance — available in the Workbench sidebar and as a standalone Data Chat page.",
           "category": "feature",
           "link": "/data-chat",
           "linkLabel": "Open Data Chat",
-          "sortOrder": 6
+          "sortOrder": 4
         },
         {
-          "title": "Workbench Report Export (PDF and PowerPoint)",
-          "description": "Users can now generate polished PDF and PPT exports from Workbench canvases, helping teams share narrative-ready updates with stakeholders.",
+          "title": "Cohi Daily Briefings (AI Audio News Brief)",
+          "description": "Listen to an AI-generated audio briefing covering your organization's key metrics, market conditions, and pipeline highlights. Briefings can be generated on-demand or scheduled nightly. Ask follow-up questions by voice or text during playback.",
           "category": "feature",
-          "link": "/my-dashboard",
-          "linkLabel": "Open Workbench",
+          "link": "/insights",
+          "linkLabel": "Listen to Daily Briefing",
           "sortOrder": 7
         },
         {
-          "title": "Distributions: Scheduling, Timezone, and Resend Improvements",
-          "description": "Workbench Distributions received multiple reliability upgrades including timezone hardening, resend behavior improvements, and delivery flow fixes.",
-          "category": "improvement",
-          "link": "/workbench/distributions",
-          "linkLabel": "Manage Distributions",
+          "title": "Daily Brief Newsletter",
+          "description": "Subscribe to automated daily email newsletters featuring market snapshots, industry news (MBA, Freddie Mac, etc.), pipeline digests, and tracked metrics. Configure delivery schedule and preview content before sending.",
+          "category": "feature",
+          "link": "/insights",
+          "linkLabel": "View Daily Brief",
           "sortOrder": 8
         },
         {
-          "title": "Sidebar Navigation: Search, Pin/Unpin, and Sorting",
-          "description": "Navigation now supports route search plus pinned and sorted dashboard shortcuts, making it much faster for users to jump to frequently used pages.",
-          "category": "improvement",
-          "link": "/insights",
-          "linkLabel": "Go to Insights",
+          "title": "Research Lab Improvements",
+          "description": "An AI-powered research workspace for deep-dive analysis. Ask complex questions about your data and receive structured reports with findings and drill-downs. Includes a simplified interaction mode and guided onboarding tour for new users.",
+          "category": "Improvement",
+          "link": "/research",
+          "linkLabel": "Open Research Lab",
           "sortOrder": 9
         },
         {
-          "title": "Top Navigation and Layout Consolidation",
-          "description": "Dashboard navigation and top bar behavior were streamlined across scorecards and performance pages to reduce context switching and improve consistency.",
-          "category": "improvement",
-          "link": "/sales-scorecard",
-          "linkLabel": "View Dashboards",
-          "sortOrder": 10
-        },
-        {
-          "title": "Pricing Dashboard Filters Expanded",
-          "description": "Pricing Dashboard now supports more specific actor and entity filtering for tighter segmentation when analyzing margin and performance variance.",
-          "category": "improvement",
-          "link": "/pricing-dashboard",
-          "linkLabel": "Explore Pricing Filters",
+          "title": "Fallout Alerts with Email Notifications",
+          "description": "Automatically notify loan officers about high-risk loans via email. Configure minimum risk score thresholds, frequency (realtime, daily digest, weekly digest), and target specific loan officers or managers. Loan officers can respond directly from the email with Resolved, Working on it, or Need help — and admins can track all responses in the LO Responses tab.",
+          "category": "feature",
+          "link": "/workbench/distributions?tab=fallout",
+          "linkLabel": "Configure Fallout Alerts",
           "sortOrder": 11
         },
         {
-          "title": "Sales Scorecard Overview Enhancements",
-          "description": "Sales Scorecard Overview now includes improved naming consistency, custom date controls, and Workbench integration for deeper trend exploration.",
-          "category": "improvement",
-          "link": "/sales-scorecard-overview",
-          "linkLabel": "Open Sales Scorecard Overview",
+          "title": "Fallout Alert Single-Loan Sending",
+          "description": "Send a fallout alert for an individual loan directly from the Loan Drilldown modal. Add extra recipients and a personal message when alerting a loan officer about a specific high-risk loan.",
+          "category": "feature",
+          "link": "/fallout-forecast",
+          "linkLabel": "View Fallout Forecast",
           "sortOrder": 12
         },
         {
-          "title": "Workflow Conversion Filtering Improvements",
-          "description": "Workflow Conversion now supports additional filters and broader date handling, making historical comparisons and cohort slicing more accurate.",
-          "category": "improvement",
-          "link": "/workflow-conversion",
-          "linkLabel": "Analyze Workflow Conversion",
-          "sortOrder": 13
-        },
-        {
-          "title": "Canvas-Only User Access Mode",
-          "description": "Tenant admins can now support restricted canvas-only users who are limited to Workbench routes, improving safe collaboration for targeted stakeholders.",
+          "title": "Sales Scorecard Overview",
+          "description": "A high-level summary view of sales performance with custom date bar/column selection, trend analysis, and direct Workbench widget integration for tracking sales metrics over time.",
           "category": "feature",
-          "link": "/my-dashboard",
-          "linkLabel": "Open Workbench",
+          "link": "/sales-scorecard-overview",
+          "linkLabel": "View Sales Overview",
           "sortOrder": 14
         },
         {
-          "title": "Help Center and In-App Guidance Updates",
-          "description": "Help content and guided learning paths were refreshed with clearer folder and workflow documentation to improve first-run adoption for tenant teams.",
+          "title": "High Performers Dashboard",
+          "description": "Identify top-performing branches and loan officers ranked by funded loans, closed loans, or applications taken. Includes volume, units, and product mix breakdowns (government, conventional, refi, purchase) across multiple time periods.",
+          "category": "feature",
+          "link": "/high-performers",
+          "linkLabel": "View High Performers",
+          "sortOrder": 19
+        },
+        {
+          "title": "Actors Dashboard",
+          "description": "Configurable dashboard showing loan status distribution, KPIs, and up to four tables of actors (loan officers, processors, underwriters, closers, branches) with volume, turn times, and approval/denial rates.",
+          "category": "feature",
+          "link": "/actors",
+          "linkLabel": "View Actors",
+          "sortOrder": 20
+        },
+        {
+          "title": "Pricing Dashboard",
+          "description": "A dedicated Pricing Dashboard with full page navigation and Workbench widget support for analyzing pricing drivers, margin performance, and variance. Includes expanded actor and entity filtering, custom column configuration, and CSV export.",
+          "category": "feature",
+          "link": "/pricing-dashboard",
+          "linkLabel": "Open Pricing Dashboard",
+          "sortOrder": 21
+        },
+        {
+          "title": "Pipeline Analysis",
+          "description": "Full pipeline analysis dashboard and Workbench widgets including historical snapshots, workflow-oriented views, and 10-year Treasury rate overlay for contextualizing pipeline changes against rate movements.",
+          "category": "feature",
+          "link": "/pipeline-analysis",
+          "linkLabel": "View Pipeline Analysis",
+          "sortOrder": 22
+        },
+        {
+          "title": "Loan Complexity Dashboard",
+          "description": "Dedicated loan complexity widgets with individual selection filtering to isolate high-friction loans and monitor complexity shifts. Available as a standalone page and as Workbench widgets.",
+          "category": "feature",
+          "link": "/loan-complexity",
+          "linkLabel": "Analyze Loan Complexity",
+          "sortOrder": 23
+        },
+        {
+          "title": "Lock Stratification",
+          "description": "Segment lock behavior with dynamic filtering and compare performance by custom dimensions. Available as a standalone page and integrated into Workbench.",
+          "category": "feature",
+          "link": "/lock-stratification",
+          "linkLabel": "Open Lock Stratification",
+          "sortOrder": 24
+        },
+        {
+          "title": "Workflow Conversion",
+          "description": "Track loan progression through workflow milestones with conversion rate analysis. Supports additional filters, broader date handling, and loan detail drilldowns. Milestone settings persist when saving Workbench canvases.",
+          "category": "Improvement",
+          "link": "/workflow-conversion",
+          "linkLabel": "View Workflow Conversion",
+          "sortOrder": 25
+        },
+        {
+          "title": "Credit Risk Management",
+          "description": "Analyze FICO, LTV, and DTI distributions with loan mix breakdowns by type, purpose, and occupancy. Drill into individual risk buckets and export data. Includes modal-based loan detail cards for deeper investigation.",
+          "category": "feature",
+          "link": "/credit-risk",
+          "linkLabel": "View Credit Risk",
+          "sortOrder": 26
+        },
+        {
+          "title": "Loan Detail Table",
+          "description": "A searchable, sortable table of all loans with fully customizable columns — add, remove, and reorder fields like FICO, LTV, channel, branch, loan officer, and more. Filter by period and channel, drill into individual loans, and export to CSV.",
+          "category": "feature",
+          "link": "/loan-detail",
+          "linkLabel": "Open Loan Detail",
+          "sortOrder": 27
+        },
+        {
+          "title": "Loan Officer Drilldown Modal",
+          "description": "Click any loan officer name to view a detailed modal with total, active, and closed loan counts, pull-through rates, volume breakdowns, risk analysis, and their full loan list with optional AI insights.",
+          "category": "feature",
+          "link": "/sales-scorecard",
+          "linkLabel": "View Scorecards",
+          "sortOrder": 28
+        },
+        {
+          "title": "Sidebar Navigation: Search, Pin, and Sort",
+          "description": "The sidebar now supports route search to quickly find any page, plus pin and unpin dashboard shortcuts. Pinned items can be sorted for a personalized navigation experience.",
+          "category": "improvement",
+          "link": "/insights",
+          "linkLabel": "Try Sidebar Search",
+          "sortOrder": 29
+        },
+        {
+          "title": "Consolidated Top Navigation and Layout",
+          "description": "Dashboard navigation and top bar behavior have been streamlined across all scorecards and performance pages. All dashboards are consolidated into a unified navigation structure with a top bar search for faster page switching.",
+          "category": "improvement",
+          "link": "/sales-scorecard",
+          "linkLabel": "View Dashboards",
+          "sortOrder": 30
+        },
+        {
+          "title": "Canvas-Only User Access Mode",
+          "description": "Tenant admins can assign a canvas-only role that restricts users to Workbench routes only, enabling safe collaboration with stakeholders who only need to view shared dashboards.",
+          "category": "feature",
+          "link": "/my-dashboard",
+          "linkLabel": "Open Workbench",
+          "sortOrder": 31
+        },
+        {
+          "title": "Direction-Based Prediction Zones",
+          "description": "Fallout predictions now use direction-based zones for denied loans, differentiating between improving and deteriorating risk trajectories. VA loan rules have also been updated so that higher LTV is no longer treated as an automatic denial signal.",
+          "category": "improvement",
+          "link": "/fallout-forecast",
+          "linkLabel": "View Fallout Forecast",
+          "sortOrder": 35
+        },
+        {
+          "title": "Entity and Actor Selection Filters",
+          "description": "Dashboards now support specific entity and actor selection filters, allowing you to narrow views to individual loan officers, processors, branches, or other actors across scorecards and analytics pages.",
+          "category": "improvement",
+          "link": "/actors",
+          "linkLabel": "View Actors",
+          "sortOrder": 36
+        },
+        {
+          "title": "Multi-Factor Authentication Enforcement",
+          "description": "Tenant admins can now enforce multi-factor authentication (MFA) for all users in their organization, adding an additional layer of security to platform access.",
+          "category": "improvement",
+          "link": null,
+          "linkLabel": null,
+          "sortOrder": 37
+        },
+        {
+          "title": "Help Center and In-App Guidance",
+          "description": "A built-in Help Center with searchable articles organized by category, role-based learning paths, and guided tours for new users. Content covers navigation, dashboards, Workbench, Research Lab, and all major analytics features.",
           "category": "improvement",
           "link": "/help",
           "linkLabel": "Visit Help Center",
-          "sortOrder": 16
+          "sortOrder": 39
         }
       ]
     }
