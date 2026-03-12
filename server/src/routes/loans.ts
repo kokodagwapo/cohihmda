@@ -927,6 +927,7 @@ router.get(
         "fees_loan_discount_fee_borr",
         "rush_closing_on_file",
         "scrub_rating_of_file",
+        "is_archived",
       ];
       try {
         const additionalColsResult = await tenantPool.query(
