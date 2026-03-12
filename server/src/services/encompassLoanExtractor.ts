@@ -809,35 +809,41 @@ export class EncompassLoanExtractor {
         return typeof value === "number" ? value : null;
       }
 
-      // DATE types
+      // DATE types — extract date components directly to avoid timezone shift.
+      // NEVER use `new Date(str).toISOString()` for date-only values; the local→UTC
+      // conversion can shift the date ±1 day depending on server timezone.
       if (formatUpper === "DATE" || formatUpper === "MONTHDAY") {
         if (typeof value === "string") {
           const dateStr = value.trim();
-          if (!dateStr) return null; // Empty string = null
+          if (!dateStr) return null;
 
-          // Handle Encompass date format: "MM/dd/yyyy" or "MM/dd/yyyy HH:mm:ss AM/PM"
-          // Also handle ISO format: "yyyy-MM-dd"
-          let date = new Date(dateStr);
-          if (isNaN(date.getTime())) {
-            // Try Encompass format: "M/d/yyyy" or "MM/dd/yyyy"
-            const match = dateStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-            if (match) {
-              const [, month, day, year] = match;
-              date = new Date(
-                `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`
-              );
-            }
+          // ISO format: "YYYY-MM-DD" (with optional time portion — ignore it)
+          const isoMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+          if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+
+          // Encompass format: "M/d/yyyy" or "MM/dd/yyyy" (with optional time — ignore it)
+          const slashMatch = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+          if (slashMatch) {
+            const [, month, day, year] = slashMatch;
+            return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
           }
-          if (!isNaN(date.getTime())) {
-            return date.toISOString().split("T")[0]; // Return as DATE (YYYY-MM-DD)
+
+          // Last resort: parse but use UTC components to avoid day shift
+          const parsed = new Date(dateStr);
+          if (!isNaN(parsed.getTime())) {
+            const y = parsed.getUTCFullYear();
+            const m = String(parsed.getUTCMonth() + 1).padStart(2, "0");
+            const d = String(parsed.getUTCDate()).padStart(2, "0");
+            return `${y}-${m}-${d}`;
           }
-          // Return original string - let ETL handle conversion
           return dateStr;
         }
         if (value instanceof Date) {
-          return value.toISOString().split("T")[0];
+          const y = value.getUTCFullYear();
+          const m = String(value.getUTCMonth() + 1).padStart(2, "0");
+          const d = String(value.getUTCDate()).padStart(2, "0");
+          return `${y}-${m}-${d}`;
         }
-        // Return as-is - let ETL handle it
         return value;
       }
 
@@ -887,26 +893,29 @@ export class EncompassLoanExtractor {
       aliasLower.includes("completed")
     ) {
       if (typeof value === "string" && value.trim()) {
-        // Try to parse the date
         const dateStr = value.trim();
-        let date = new Date(dateStr);
 
-        // If direct parsing fails, try Encompass date format: "M/d/yyyy" or with time
-        if (isNaN(date.getTime())) {
-          const match = dateStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-          if (match) {
-            const [, month, day, year] = match;
-            date = new Date(
-              `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`
-            );
-          }
+        // ISO: "YYYY-MM-DD..." — extract date portion directly (no timezone shift)
+        const isoMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+
+        // Encompass: "M/d/yyyy..." — extract date portion directly
+        const slashMatch = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+        if (slashMatch) {
+          const [, month, day, year] = slashMatch;
+          return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
         }
 
-        if (!isNaN(date.getTime())) {
-          return date.toISOString().split("T")[0];
+        // Last resort: parse but use UTC components
+        const parsed = new Date(dateStr);
+        if (!isNaN(parsed.getTime())) {
+          const y = parsed.getUTCFullYear();
+          const m = String(parsed.getUTCMonth() + 1).padStart(2, "0");
+          const d = String(parsed.getUTCDate()).padStart(2, "0");
+          return `${y}-${m}-${d}`;
         }
       }
-      return value; // Return as-is if we can't parse it
+      return value;
     }
 
     // Handle numeric fields
@@ -994,34 +1003,34 @@ export class EncompassLoanExtractor {
         return typeof value === "number" ? value : null;
 
       case "date":
-        // Parse as date
+        // Extract date components directly — avoid timezone shift from new Date() + toISOString()
         if (typeof value === "string") {
           const dateStr = value.trim();
           if (!dateStr) return null;
 
-          // Try ISO format first
-          let date = new Date(dateStr);
+          const isoMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+          if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
 
-          // If that fails, try Encompass format: "M/d/yyyy"
-          if (isNaN(date.getTime())) {
-            const match = dateStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-            if (match) {
-              const [, month, day, year] = match;
-              date = new Date(
-                `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`
-              );
-            }
+          const slashMatch = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+          if (slashMatch) {
+            const [, month, day, year] = slashMatch;
+            return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
           }
 
-          if (!isNaN(date.getTime())) {
-            return date.toISOString().split("T")[0]; // Return as DATE (YYYY-MM-DD)
+          const parsed = new Date(dateStr);
+          if (!isNaN(parsed.getTime())) {
+            const y = parsed.getUTCFullYear();
+            const m = String(parsed.getUTCMonth() + 1).padStart(2, "0");
+            const d = String(parsed.getUTCDate()).padStart(2, "0");
+            return `${y}-${m}-${d}`;
           }
-
-          // Return original if can't parse
           return dateStr;
         }
         if (value instanceof Date) {
-          return value.toISOString().split("T")[0];
+          const y = value.getUTCFullYear();
+          const m = String(value.getUTCMonth() + 1).padStart(2, "0");
+          const d = String(value.getUTCDate()).padStart(2, "0");
+          return `${y}-${m}-${d}`;
         }
         return value;
 

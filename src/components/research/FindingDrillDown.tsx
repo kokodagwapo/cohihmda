@@ -825,6 +825,21 @@ interface ResolvedChartConfig {
 
 // ── Helper: score candidate label fields ────────────────────────────────────
 
+/**
+ * Strict numeric check. Uses Number() rather than parseFloat() so that
+ * period/timeframe tokens like "90D", "30D", "YTD", "Q1 2025" are NOT
+ * treated as numbers. parseFloat("90D") = 90 (wrong); Number("90D") = NaN.
+ * Currency/percent suffixes are stripped first so "$1,234" and "45.2%" still
+ * parse correctly.
+ */
+function isStrictlyNumeric(value: unknown): boolean {
+  if (typeof value === "number") return !isNaN(value);
+  if (typeof value === "boolean") return false;
+  const cleaned = String(value).replace(/[$,%\s]/g, "").trim();
+  if (cleaned === "") return false;
+  return !isNaN(Number(cleaned));
+}
+
 function scoreLabelCandidates(
   fields: string[],
   rows: Record<string, any>[],
@@ -836,9 +851,9 @@ function scoreLabelCandidates(
       if (/^(has_|is_|flag_|sort_)/.test(lower)) return null;
       const values = rows.map((r) => r[f]).filter((v) => v != null);
       if (values.length === 0) return null;
-      const isText = values.some(
-        (v) => typeof v === "string" && isNaN(parseFloat(String(v).replace(/[$,%]/g, "")))
-      );
+      // A field qualifies as a label candidate if at least one value is a
+      // non-numeric string (strict check — "90D", "YTD" are non-numeric here).
+      const isText = values.some((v) => typeof v === "string" && !isStrictlyNumeric(v));
       if (!isText) return null;
       const unique = new Set(values.map((v) => String(v)));
       if ([...unique].every((v) => BOOL_VALS.has(v.toLowerCase()))) return null;
@@ -857,7 +872,8 @@ function getNumericFields(fields: string[], rows: Record<string, any>[]): string
     const sample = rows.find((r) => r[f] != null);
     if (!sample) return false;
     const raw = sample[f];
-    return !isNaN(parseFloat(String(raw).replace(/[$,%]/g, ""))) && typeof raw !== "boolean";
+    // Use strict check so "90D", "YTD" etc. are not treated as numeric.
+    return isStrictlyNumeric(raw);
   });
 }
 
