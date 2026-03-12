@@ -84,11 +84,11 @@ function PhaseBadge({ phase }: { phase: string }) {
 
 const TOPIC_SUGGESTIONS = [
   "Overall pipeline health and conversion performance",
-  "Personnel performance and tier distribution",
-  "Risk patterns and credit exposure",
-  "Turn time trends and operational efficiency",
-  "Product mix and channel analysis",
-  "Revenue drivers and margin analysis",
+  "LO scorecard: compute TTS scores, tier distribution (Top/Second/Bottom), and identify performance outliers",
+  "Risk patterns and credit exposure: FICO, LTV, DTI distribution and high-risk concentrations",
+  "Turn time trends and operational efficiency by role (processor, underwriter, closer)",
+  "Product mix and channel analysis: loan type, purpose, and program breakdown",
+  "Revenue drivers: margin analysis, BPS by LO/channel, and revenue concentration",
 ];
 
 // ============================================================================
@@ -413,12 +413,19 @@ export default function ResearchAnalyst() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
 
-  // Switch to report tab when synthesis arrives (once) or quick answer (single finding, no report)
+  // Reset report tracking when a follow-up starts so the updated report auto-switches
+  useEffect(() => {
+    if (phase === "followup") {
+      lastReportRef.current = false;
+    }
+  }, [phase]);
+
+  // Switch to report tab when synthesis arrives (once per synthesis cycle)
   useEffect(() => {
     if (report && !lastReportRef.current) {
       lastReportRef.current = true;
       setActiveTab("report");
-    } else if (!report && findings.length === 1 && phase === "complete" && !lastReportRef.current) {
+    } else if (!report && findings.length >= 1 && phase === "complete" && !lastReportRef.current) {
       lastReportRef.current = true;
       setActiveTab("report");
     }
@@ -677,7 +684,7 @@ export default function ResearchAnalyst() {
                       </TabsTrigger>
                       <TabsTrigger
                         value="report"
-                        disabled={!report && !(findings.length === 1 && phase === "complete")}
+                        disabled={!report && !(findings.length >= 1 && phase === "complete")}
                       >
                         Report
                       </TabsTrigger>
@@ -849,13 +856,13 @@ export default function ResearchAnalyst() {
                         }}
                       />
                     </div>
-                  ) : findings.length === 1 && phase === "complete" ? (
+                  ) : findings.length >= 1 && phase === "complete" ? (
                     <div className="space-y-4 py-2">
                       {phase === "complete" && (
                         <SessionFeedback onSubmit={handleSessionFeedback} />
                       )}
                       <QuickAnswerView
-                        finding={findings[0]}
+                        finding={findings[findings.length - 1]}
                         onDrillDown={(f) => {
                           setDrillDownFinding(f);
                           setActiveTab("findings");

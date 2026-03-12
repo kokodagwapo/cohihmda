@@ -38,6 +38,17 @@ export interface Finding {
   keyMetricFormats?: Record<string, string>;
 }
 
+export interface ChartHint {
+  type?: 'bar' | 'horizontal_bar' | 'line' | 'area' | 'pie' | 'donut' | 'stacked_bar' | 'grouped_bar';
+  xKey?: string;
+  yKey?: string;
+  yKeys?: string[];
+  xLabel?: string;
+  yLabel?: string;
+  nameKey?: string;
+  valueKey?: string;
+}
+
 export interface EvidenceItem {
   sql: string;
   explanation: string;
@@ -45,6 +56,7 @@ export interface EvidenceItem {
   rowCount: number;
   fields: string[];
   columnFormats?: Record<string, string>;
+  chartHint?: ChartHint;
 }
 
 export type AgentStepType =
@@ -151,6 +163,33 @@ RULES:
 - Use multiple time windows for comparison: YTD, rolling 90D, rolling 30D, prior 90D
 - Include NULL handling: COALESCE, NULLIF where appropriate
 - When action is "query", include columnFormats mapping each SELECT alias to its display format: "number" (counts/integers), "currency" (dollar amounts), "percent" (rates/percentages), "days" (day counts), "date" (calendar dates), or "text" (labels/names).
+- When action is "query", include a chartHint object to guide visualization (see VISUALIZATION GUIDANCE below).
+
+VISUALIZATION GUIDANCE (include chartHint with every query action):
+- chartHint tells the frontend how to render the result as a chart. Always include it.
+- Chart type selection rules:
+  - Time series (result has a date/month/quarter/year/period column) → type "line". Use DATE_TRUNC + TO_CHAR to produce a formatted period column (e.g. 'Mon YYYY'). xKey = "period".
+  - Category comparison, single metric, ≤12 categories → type "bar". xKey = category column.
+  - Category comparison, single metric, >12 categories OR avg label length >20 chars → type "horizontal_bar".
+  - Multi-metric comparison (2+ numeric columns per category, e.g. funded_count + denied_count by branch) → type "grouped_bar". Use yKeys array listing ALL numeric column names. Do NOT use type "bar" for this case.
+  - Part-of-whole (proportional breakdown, ≤8 categories, values sum to ~100% or a total) → type "pie" or "donut". nameKey = category column, valueKey = numeric column.
+  - Trend over time with cumulative fill → type "area".
+- CRITICAL for multi-timeframe queries: If your SQL returns rows with (category, timeframe, value), restructure to return one row per category with each timeframe as a separate numeric column. Example: SELECT branch, SUM(CASE WHEN period='YTD' THEN amount END) AS ytd_amount, SUM(CASE WHEN period='90D' THEN amount END) AS rolling_90d_amount FROM ... GROUP BY branch. This enables grouped_bar with yKeys = ["ytd_amount", "rolling_90d_amount"].
+- Always include xLabel and yLabel as human-readable axis labels (e.g. xLabel: "Branch", yLabel: "Funded Volume ($)").
+- For grouped_bar and stacked_bar: yKeys must list every numeric column name to be plotted.
+- Maximum 30 rows per chart query; aggregate with GROUP BY and LIMIT if needed.
+
+chartHint schema (include inside each query action response):
+"chartHint": {
+  "type": "bar|horizontal_bar|line|area|pie|donut|grouped_bar|stacked_bar",
+  "xKey": "column_name_for_x_axis_or_categories",
+  "yKey": "primary_numeric_column (for single-series)",
+  "yKeys": ["col1", "col2"],
+  "xLabel": "Human-readable X axis label",
+  "yLabel": "Human-readable Y axis label",
+  "nameKey": "category_column (pie/donut only)",
+  "valueKey": "value_column (pie/donut only)"
+}
 
 ACTIVE PIPELINE DEFINITION (CRITICAL — READ BEFORE EVERY QUERY):
 - The active pipeline filter is: current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND (is_archived IS DISTINCT FROM TRUE). This is non-negotiable. EVERY query touching active loans MUST include all three conditions.
@@ -238,6 +277,22 @@ OUTPUT FORMAT (when outputHint is provided):
 - Your final query before the finding should be the one that produces the user's requested table. Earlier queries can explore the data structure.
 - If a query fails or returns unexpected results, try a different parsing approach. You have up to 5 iterations — use them to iterate on the SQL until it works.
 
+DERIVED METRICS AND TIERS (CRITICAL — READ BEFORE ANY PERSONNEL INVESTIGATION):
+- "Tier" is NEVER a stored column. Tiers must always be COMPUTED from composite scores.
+- When a user asks about "tier distribution", "personnel tiers", "scorecard", or "LO tiers":
+  1. Compute per-personnel metrics (funded volume, units, pull-through, avg cycle time, revenue BPS)
+  2. Compute company-wide averages for each metric
+  3. Calculate ratings as (actor_value / company_avg) * 100 — score of 100 = average
+  4. Average the ratings to get a TTS score
+  5. Rank personnel by TTS score descending and assign tiers by percentile:
+     - Top tier:    top 20% by count
+     - Second tier: next 30% (rank 21%-50%)
+     - Bottom tier: remaining 50%
+- The "Business Knowledge" section of your context (if present) contains the exact formulas
+  and a complete SQL recipe you can adapt. USE IT — do not guess or invent a simplified approach.
+- Revenue BPS = (rate_lock_buy_side_base_price_rate - 100) * 100 when rate > 100, else default 25
+- Turn-time and concession ratings are INVERSE: (company_avg / actor_value) * 100
+
 - CRITICAL: Your finding title MUST reflect what the data actually shows, NOT the original hypothesis. If your investigation disproved the hypothesis, the title must reflect the real finding.
 - Every key in keyMetrics MUST have a corresponding entry in keyMetricDescriptions AND keyMetricFormats.
 - keyMetricDescriptions: 1 sentence explaining what the metric measures in plain business language.
@@ -250,7 +305,17 @@ Respond in JSON format:
   "sql": "SELECT ... (only when action=query)",
   "explanation": "What this query investigates (only when action=query)",
   "columnFormats": { "column_alias": "number|currency|percent|days|date|text", ... },
-  "finding": {  // only when action=finding
+  "chartHint": {
+    "type": "bar|horizontal_bar|line|area|pie|donut|grouped_bar|stacked_bar",
+    "xKey": "category_or_date_column",
+    "yKey": "primary_value_column",
+    "yKeys": ["col1", "col2"],
+    "xLabel": "Human-readable X axis label",
+    "yLabel": "Human-readable Y axis label",
+    "nameKey": "category_column (pie/donut only)",
+    "valueKey": "value_column (pie/donut only)"
+  },
+  "finding": {
     "title": "Concise finding title — must reflect the actual evidence",
     "summary": "2-4 sentence summary of what you found, with specific numbers",
     "confidence": "high" | "medium" | "low",
@@ -275,7 +340,8 @@ export async function runDataAnalystAgent(
   onStep: OnStepCallback,
   getSteeringDirective: () => string | null,
   checkPause: () => Promise<void>,
-  knowledgeContext?: string
+  knowledgeContext?: string,
+  businessKnowledge?: string
 ): Promise<Finding> {
   const now = new Date();
   const todayStr = now.toISOString().split("T")[0];
@@ -289,6 +355,10 @@ export async function runDataAnalystAgent(
     `\n## Database Schema\n${schemaContext}`,
     `\n## Metric Definitions\n${metricDefinitions}`,
   ];
+
+  if (businessKnowledge) {
+    userContentParts.push(`\n${businessKnowledge}`);
+  }
 
   if (knowledgeContext) {
     userContentParts.push(`\n${knowledgeContext}`);
@@ -342,7 +412,7 @@ export async function runDataAnalystAgent(
     // Call LLM
     const raw = await callLLM(conversationHistory, apiKey, {
       temperature: 0.2,
-      maxTokens: 2500,
+      maxTokens: 4096,
       jsonMode: true,
     });
 
@@ -438,6 +508,7 @@ export async function runDataAnalystAgent(
         rowCount: queryResult.rowCount,
         fields: queryResult.fields,
         columnFormats: parsed.columnFormats || undefined,
+        chartHint: parsed.chartHint || undefined,
       });
 
       const formattedResults = formatResultsForLLM(queryResult);
@@ -475,7 +546,7 @@ export async function runDataAnalystAgent(
 
       const finalRaw = await callLLM(conversationHistory, apiKey, {
         temperature: 0.2,
-        maxTokens: 2000,
+        maxTokens: 4096,
         jsonMode: true,
       });
 

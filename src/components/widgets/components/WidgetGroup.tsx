@@ -234,6 +234,9 @@ const SECTION_FILTER_CONFIG: Partial<Record<SectionType, SectionFilterField[]>> 
   'sales-scorecard': [
     { key: 'actorType', label: 'View', allLabel: '', staticOptions: ACTOR_TYPE_OPTIONS },
   ],
+  'top-tiering-comparison': [
+    { key: 'actorType', label: 'View', allLabel: '', staticOptions: ACTOR_TYPE_OPTIONS },
+  ],
   'sales-scorecard-overview': [
     { key: 'salesScorecardOverviewMeasure', label: 'Measure', allLabel: '', staticOptions: [{ value: 'volume', label: 'Volume' }, { value: 'units', label: 'Units' }] },
     { key: 'salesScorecardOverviewTimeMeasure', label: 'Time', allLabel: '', staticOptions: [{ value: 'quarterly', label: 'Quarterly' }, { value: 'monthly', label: 'Monthly' }, { value: 'weekly', label: 'Weekly' }, { value: 'daily', label: 'Daily' }] },

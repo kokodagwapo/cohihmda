@@ -129,6 +129,14 @@ function heatmapClass(value: number | null, p35: number, p65: number): string {
   return "bg-yellow-100 dark:bg-yellow-950/50";
 }
 
+/** Returns Tailwind text color class for heatmap (red / yellow / green) to match table Units per LO. */
+function heatmapTextClass(value: number | null, p35: number, p65: number): string {
+  if (value == null || !Number.isFinite(p35) || !Number.isFinite(p65)) return "";
+  if (value <= p35) return "text-red-600 dark:text-red-400";
+  if (value >= p65) return "text-emerald-600 dark:text-emerald-400";
+  return "text-yellow-600 dark:text-yellow-500";
+}
+
 /** Ordinal suffix: 1 -> "1st", 2 -> "2nd", 3 -> "3rd", 13 -> "13th", etc. */
 function ordinal(n: number): string {
   const s = n % 10;
@@ -1981,24 +1989,43 @@ export function PipelineAnalysisView({
                       <Tooltip
                         content={({ active, payload }) => {
                           if (!active || !payload?.length) return null;
-                          const p = payload[0]?.payload;
+                          const p = payload[0]?.payload as Record<string, unknown>;
                           if (!p) return null;
                           const title = isMonthMode ? p.periodLabel : `${p.weekLabel} ${snapshotDayLabel}`;
+                          const heatmap = isMonthMode ? monthHeatmapAvgs : weekHeatmapAvgs;
                           return (
                             <div className="rounded-lg border border-border bg-background px-3 py-2 shadow-md text-xs">
                               <p className="font-medium text-foreground mb-1.5">{title}</p>
-                              {years.map((y) => (
-                                <div key={y} className="space-y-0.5 mb-1">
-                                  <div className="flex justify-between gap-4">
-                                    <span className="text-muted-foreground">{y} LO Count</span>
-                                    <span className="font-medium tabular-nums">{p[`${y} LO Count`] != null ? String(p[`${y} LO Count`]) : "-"}</span>
+                              {years.map((y) => {
+                                const loCount = p[`${y} LO Count`] as number | undefined;
+                                const units = p[`${y} Units`] as number | undefined;
+                                const unitsPerLO =
+                                  loCount != null && units != null && Number(loCount) > 0
+                                    ? units / Number(loCount)
+                                    : null;
+                                const textClass =
+                                  unitsPerLO != null
+                                    ? heatmapTextClass(unitsPerLO, heatmap.p35LO, heatmap.p65LO)
+                                    : "";
+                                return (
+                                  <div key={y} className="space-y-0.5 mb-1">
+                                    <div className="flex justify-between gap-4">
+                                      <span className="text-muted-foreground">{y} LO Count</span>
+                                      <span className="font-medium tabular-nums">{loCount != null ? String(loCount) : "-"}</span>
+                                    </div>
+                                    <div className="flex justify-between gap-4">
+                                      <span className="text-muted-foreground">{y} Units</span>
+                                      <span className="font-medium tabular-nums">{units != null ? String(units) : "-"}</span>
+                                    </div>
+                                    <div className="flex justify-between gap-4">
+                                      <span className="text-muted-foreground">{y} Units per LO</span>
+                                      <span className={cn("font-medium tabular-nums", textClass)}>
+                                        {unitsPerLO != null ? formatUnitsPerActor(Number(units), Number(loCount)) : "-"}
+                                      </span>
+                                    </div>
                                   </div>
-                                  <div className="flex justify-between gap-4">
-                                    <span className="text-muted-foreground">{y} Units</span>
-                                    <span className="font-medium tabular-nums">{p[`${y} Units`] != null ? String(p[`${y} Units`]) : "-"}</span>
-                                  </div>
-                                </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           );
                         }}

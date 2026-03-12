@@ -27,7 +27,7 @@ const CompanyScorecard = () => {
   const isDarkMode = theme === 'dark';
 
   // Use the reusable date period state hook
-  const { year: selectedYear, setYear: setSelectedYear, dateRange, setDateRange } = useDatePeriodState();
+  const { year: selectedYear, setYear: setSelectedYear, dateRange, setDateRange, periodSelection, setPeriodSelection } = useDatePeriodState();
   
   const [selectedBranch, setSelectedBranch] = useState<string>('all');
   const [selectedApplication, setSelectedApplication] = useState<string>('all');
@@ -677,6 +677,8 @@ const CompanyScorecard = () => {
                 year={selectedYear}
                 onYearChange={setSelectedYear}
                 onDateRangeChange={setDateRange}
+                onPeriodChange={setPeriodSelection}
+                periodSelectionFromStore={periodSelection}
                 yearsToShow={4}
                 size="default"
               />

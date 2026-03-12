@@ -838,6 +838,28 @@ router.get(
         }
       }
 
+      // KPI filter: applies the exact same SQL conditions as METRICS_CATALOG
+      // so that exported loan counts match the KPI card numbers precisely.
+      const kpiFilter = req.query.kpi_filter as string | undefined;
+      if (kpiFilter) {
+        switch (kpiFilter) {
+          case "active_loans":
+            conditions.push(
+              `(current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND application_date::text != '' AND (is_archived IS DISTINCT FROM TRUE))`,
+            );
+            break;
+          case "closed_loans":
+            conditions.push(`(funding_date IS NOT NULL)`);
+            break;
+          case "locked_loans":
+            conditions.push(`(lock_date IS NOT NULL)`);
+            break;
+          case "credit_pulls":
+            conditions.push(`(credit_pull_date IS NOT NULL)`);
+            break;
+        }
+      }
+
       const whereClause =
         conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
@@ -905,6 +927,7 @@ router.get(
         "fees_loan_discount_fee_borr",
         "rush_closing_on_file",
         "scrub_rating_of_file",
+        "is_archived",
       ];
       try {
         const additionalColsResult = await tenantPool.query(
@@ -7222,27 +7245,28 @@ router.post(
  * GET /api/loans/market-rates/current
  * Returns current OBMMI rates for ticker and rate snapshot (all 6 series from FRED).
  * Series: conforming, jumbo, fha, va, conforming15yr, usda. Each has rate, delta, trend, priorRate.
+ * Query: bypassCache=1 to skip 10-min cache (e.g. after refresh when previous load had missing data).
+ * Missing rates are returned as null so the UI can show "-" instead of 0.
  */
 router.get(
   "/market-rates/current",
   authenticateToken,
-  async (_req: AuthRequest, res) => {
+  async (req: AuthRequest, res) => {
     try {
+      const bypassCache = req.query.bypassCache === "1" || req.query.bypassCache === "true";
       const { getMultiSeriesSnapshot } =
         await import("../services/dashboard/marketRateService.js");
 
-      const snapshot = await getMultiSeriesSnapshot();
+      const snapshot = await getMultiSeriesSnapshot({ bypassCache });
 
       const toTrend = (delta: number | null) =>
         delta == null ? "flat" : delta > 0.001 ? "up" : delta < -0.001 ? "down" : "flat";
 
-      const series: Record<string, { rate: number; delta: number; trend: string; priorRate: number | null }> = {};
+      const series: Record<string, { rate: number | null; delta: number | null; trend: string; priorRate: number | null }> = {};
       for (const [key, snap] of Object.entries(snapshot)) {
-        const rate = snap.rate ?? 0;
-        const delta = snap.delta ?? 0;
         series[key] = {
-          rate,
-          delta: Math.round(delta * 1000) / 1000,
+          rate: snap.rate ?? null,
+          delta: snap.delta != null ? Math.round(snap.delta * 1000) / 1000 : null,
           trend: toTrend(snap.delta),
           priorRate: snap.priorRate ?? null,
         };
@@ -7270,9 +7294,10 @@ router.get(
 
 /**
  * GET /api/loans/market-rates/mortgage-30y
- * Returns 30-Year Fixed Mortgage Rate (FRED MORTGAGE30US - Freddie Mac PMMS) for a date range.
+ * Returns 30-Year Fixed Mortgage Rate for a date range.
+ * Default: FRED MORTGAGE30US (Freddie Mac PMMS, weekly).
+ * Query daily=1: use FRED OBMMIC30YF (Optimal Blue, daily) for up-to-date daily data.
  * Query: observation_start=YYYY-MM-DD, observation_end=YYYY-MM-DD.
- * On-demand FRED call; no DB storage.
  */
 router.get(
   "/market-rates/mortgage-30y",
@@ -7281,15 +7306,20 @@ router.get(
     try {
       const observationStart = req.query.observation_start as string | undefined;
       const observationEnd = req.query.observation_end as string | undefined;
+      const useDaily = req.query.daily === "1" || req.query.daily === "true";
       if (!observationStart || !observationEnd) {
         return res.status(400).json({
           error: "observation_start and observation_end query params required (YYYY-MM-DD)",
         });
       }
-      const { fetchFredSeriesObservations, FRED_SERIES_MORTGAGE30US } =
-        await import("../services/dashboard/marketRateService.js");
-      const observations = await fetchFredSeriesObservations(
+      const {
+        fetchFredSeriesObservations,
         FRED_SERIES_MORTGAGE30US,
+        OBMMI_SERIES,
+      } = await import("../services/dashboard/marketRateService.js");
+      const seriesId = useDaily ? OBMMI_SERIES.conforming : FRED_SERIES_MORTGAGE30US;
+      const observations = await fetchFredSeriesObservations(
+        seriesId,
         observationStart,
         observationEnd
       );
