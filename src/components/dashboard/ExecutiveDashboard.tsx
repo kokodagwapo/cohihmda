@@ -821,7 +821,9 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
     [fetchKpiMetrics]
   );
 
-  // Export loan-level detail for a KPI modal as CSV
+  // Export loan-level detail for a KPI modal as CSV.
+  // Uses the backend `kpi_filter` param which applies the EXACT same SQL
+  // conditions as METRICS_CATALOG, so exported row count matches the KPI card.
   const exportKpiLoanDetail = useCallback(
     async (kpiId: string) => {
       if (exportingKpi) return;
@@ -833,19 +835,63 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
         if (selectedChannel && selectedChannel !== "All")
           params.set("channel_group", selectedChannel);
 
-        // Compute date range for this KPI's current period
-        const period: PeriodValue =
-          kpiId === "activeLoans" ? "all" : kpiTimeframes[kpiId] || "mtd";
-        const customDates = kpiCustomDates[kpiId];
+        // Map frontend KPI id → backend kpi_filter value + the date field
+        // that METRICS_CATALOG uses as defaultDateField for each metric.
+        const KPI_EXPORT_CONFIG: Record<
+          string,
+          { kpiFilter: string; dateField: string; hasDateRange: boolean }
+        > = {
+          activeLoans: {
+            kpiFilter: "active_loans",
+            dateField: "application_date",
+            hasDateRange: false, // current state, no date range
+          },
+          closedLoans: {
+            kpiFilter: "closed_loans",
+            dateField: "funding_date",
+            hasDateRange: true,
+          },
+          lockedLoans: {
+            kpiFilter: "locked_loans",
+            dateField: "investor_lock_date",
+            hasDateRange: true,
+          },
+          cycleTime: {
+            kpiFilter: "closed_loans",
+            dateField: "funding_date",
+            hasDateRange: true,
+          },
+          pullThrough: {
+            kpiFilter: "", // no kpi_filter — all loans in date range
+            dateField: "application_date",
+            hasDateRange: true,
+          },
+          creditPulls: {
+            kpiFilter: "credit_pulls",
+            dateField: "credit_pull_date",
+            hasDateRange: true,
+          },
+        };
 
-        const setDateRange = (dateField: string, needsNotNull: boolean) => {
-          params.set("date_field", dateField);
-          if (period === "custom" && customDates?.start && customDates?.end) {
-            params.set("date_from", customDates.start.toISOString().split("T")[0]);
-            params.set("date_to", customDates.end.toISOString().split("T")[0]);
-          } else if (period === "all" && needsNotNull) {
-            params.set("date_from", "1900-01-01");
-            params.set("date_to", "2099-12-31");
+        const config = KPI_EXPORT_CONFIG[kpiId];
+        if (!config) return;
+
+        // Apply the exact METRICS_CATALOG filter via backend kpi_filter param
+        if (config.kpiFilter) {
+          params.set("kpi_filter", config.kpiFilter);
+        }
+
+        // Apply date range matching the KPI's selected timeframe
+        if (config.hasDateRange) {
+          const period: PeriodValue = kpiTimeframes[kpiId] || "mtd";
+          params.set("date_field", config.dateField);
+
+          if (period === "custom") {
+            const customDates = kpiCustomDates[kpiId];
+            if (customDates?.start && customDates?.end) {
+              params.set("date_from", customDates.start.toISOString().split("T")[0]);
+              params.set("date_to", customDates.end.toISOString().split("T")[0]);
+            }
           } else if (period !== "all") {
             const effectivePeriod =
               period === ("rolling_90_days" as PeriodValue) ? "ytd" : period;
@@ -855,26 +901,6 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
             if (range.end)
               params.set("date_to", range.end.toISOString().split("T")[0]);
           }
-        };
-
-        // Build filters matching each KPI's loan population
-        switch (kpiId) {
-          case "activeLoans":
-            params.set("current_loan_status", "Active Loan");
-            break;
-          case "closedLoans":
-          case "cycleTime":
-            setDateRange("funding_date", true);
-            break;
-          case "lockedLoans":
-            setDateRange("investor_lock_date", true);
-            break;
-          case "pullThrough":
-            setDateRange("application_date", false);
-            break;
-          case "creditPulls":
-            setDateRange("credit_pull_date", true);
-            break;
         }
 
         // Fetch all pages from the detail-list endpoint

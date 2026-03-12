@@ -838,6 +838,28 @@ router.get(
         }
       }
 
+      // KPI filter: applies the exact same SQL conditions as METRICS_CATALOG
+      // so that exported loan counts match the KPI card numbers precisely.
+      const kpiFilter = req.query.kpi_filter as string | undefined;
+      if (kpiFilter) {
+        switch (kpiFilter) {
+          case "active_loans":
+            conditions.push(
+              `(current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND application_date::text != '' AND (is_archived IS DISTINCT FROM TRUE))`,
+            );
+            break;
+          case "closed_loans":
+            conditions.push(`(funding_date IS NOT NULL)`);
+            break;
+          case "locked_loans":
+            conditions.push(`(lock_date IS NOT NULL)`);
+            break;
+          case "credit_pulls":
+            conditions.push(`(credit_pull_date IS NOT NULL)`);
+            break;
+        }
+      }
+
       const whereClause =
         conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
