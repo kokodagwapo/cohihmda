@@ -141,42 +141,50 @@ describe('getPeriodRange', () => {
     expect(end).toBeNull();
   });
 
-  it('should return today range', () => {
+  it('should return today range (inclusive)', () => {
     const { start, end } = getPeriodRange('today', now);
     expect(start!.getDate()).toBe(12);
-    expect(end!.getDate()).toBe(13);
+    expect(end!.getDate()).toBe(12);
   });
 
-  it('should return month-to-date range', () => {
+  it('should return month-to-date range (inclusive end = today)', () => {
     const { start, end } = getPeriodRange('mtd', now);
     expect(start!.getDate()).toBe(1);
     expect(start!.getMonth()).toBe(1); // Feb
+    expect(end!.getDate()).toBe(12);
+    expect(end!.getMonth()).toBe(1); // Feb
   });
 
-  it('should return year-to-date range', () => {
+  it('should return year-to-date range (inclusive end = today)', () => {
     const { start, end } = getPeriodRange('ytd', now);
     expect(start!.getMonth()).toBe(0); // Jan
     expect(start!.getDate()).toBe(1);
+    expect(end!.getDate()).toBe(12);
+    expect(end!.getMonth()).toBe(1); // Feb
   });
 
-  it('should return last month range', () => {
+  it('should return last month range (inclusive end = last day of prev month)', () => {
     const { start, end } = getPeriodRange('last_month', now);
     expect(start!.getMonth()).toBe(0); // Jan
-    expect(end!.getMonth()).toBe(1); // Feb 1
-    expect(end!.getDate()).toBe(1);
+    expect(end!.getMonth()).toBe(0); // Jan 31
+    expect(end!.getDate()).toBe(31);
   });
 
-  it('should return last year range', () => {
+  it('should return last year range (inclusive end = Dec 31)', () => {
     const { start, end } = getPeriodRange('last_year', now);
     expect(start!.getFullYear()).toBe(2025);
-    expect(end!.getFullYear()).toBe(2026);
+    expect(end!.getFullYear()).toBe(2025);
+    expect(end!.getMonth()).toBe(11); // Dec
+    expect(end!.getDate()).toBe(31);
   });
 
-  it('should parse year string as full year range', () => {
+  it('should parse year string as full year range (inclusive end = Dec 31)', () => {
     const { start, end } = getPeriodRange('2025', now);
     expect(start!.getFullYear()).toBe(2025);
     expect(start!.getMonth()).toBe(0);
-    expect(end!.getFullYear()).toBe(2026);
+    expect(end!.getFullYear()).toBe(2025);
+    expect(end!.getMonth()).toBe(11); // Dec
+    expect(end!.getDate()).toBe(31);
   });
 
   it('should handle rolling periods', () => {
