@@ -163,6 +163,7 @@ export function getMetricDefinitions(): string {
 // ============================================================================
 
 const MAX_LLM_RETRIES = 3;
+const MAX_TOKEN_CEILING = 16_384;
 
 export async function callLLM(
   messages: LLMMessage[],
@@ -176,18 +177,20 @@ export async function callLLM(
     jsonMode = false,
   } = options;
 
-  const body: any = {
-    model,
-    messages,
-    temperature,
-    max_completion_tokens: maxTokens,
-  };
-
-  if (jsonMode) {
-    body.response_format = { type: "json_object" };
-  }
+  let currentMaxTokens = maxTokens;
 
   for (let attempt = 1; attempt <= MAX_LLM_RETRIES; attempt++) {
+    const body: any = {
+      model,
+      messages,
+      temperature,
+      max_completion_tokens: currentMaxTokens,
+    };
+
+    if (jsonMode) {
+      body.response_format = { type: "json_object" };
+    }
+
     let response: Response;
     try {
       response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -210,7 +213,7 @@ export async function callLLM(
     // Retry on rate-limit (429) and server errors (500+)
     if (response.status === 429 || response.status >= 500) {
       const retryAfter = response.headers.get("retry-after");
-      const waitMs = retryAfter ? Math.min(parseInt(retryAfter, 10) * 1000, 15_000) : 1000 * attempt;
+      const waitMs = retryAfter ? Math.min(parseInt(retryAfter, 10) * 1000, 15_000) : 2000 * attempt;
       console.warn(`[LLM] HTTP ${response.status} (attempt ${attempt}/${MAX_LLM_RETRIES}), retrying in ${waitMs}ms`);
       if (attempt < MAX_LLM_RETRIES) {
         await new Promise((r) => setTimeout(r, waitMs));
@@ -237,20 +240,48 @@ export async function callLLM(
 
     const content = data.choices?.[0]?.message?.content;
     const finishReason = data.choices?.[0]?.finish_reason;
+    const completionTokens = data.usage?.completion_tokens ?? 0;
+    const promptTokens = data.usage?.prompt_tokens ?? 0;
 
+    // Successful complete response
+    if (content && finishReason === "stop") return content;
+
+    // Truncated response — finish_reason is "length" meaning the model ran out of output tokens.
+    // In JSON mode this produces invalid JSON, so content may be empty or unparseable.
+    // Retry with a larger token budget instead of blindly retrying with the same limit.
+    if (finishReason === "length") {
+      const escalatedTokens = Math.min(currentMaxTokens * 2, MAX_TOKEN_CEILING);
+      console.warn(
+        `[LLM] Truncated (finish_reason=length, attempt ${attempt}/${MAX_LLM_RETRIES}): ` +
+        `prompt=${promptTokens}, completion=${completionTokens}/${currentMaxTokens}. ` +
+        `Escalating max_tokens to ${escalatedTokens}.`
+      );
+      // If content exists despite truncation (non-JSON mode), return it as-is
+      if (content && !jsonMode) return content;
+      // Otherwise escalate and retry
+      if (attempt < MAX_LLM_RETRIES && escalatedTokens > currentMaxTokens) {
+        currentMaxTokens = escalatedTokens;
+        await new Promise((r) => setTimeout(r, 500));
+        continue;
+      }
+      // Last attempt with max tokens and still truncated — return partial content if available
+      if (content) return content;
+    }
+
+    // Content present with any other finish reason — accept it
     if (content) return content;
 
-    // Empty response — log details and retry
+    // Truly empty response — log and retry
     console.warn(
       `[LLM] Empty response (attempt ${attempt}/${MAX_LLM_RETRIES}):`,
-      {
+      JSON.stringify({
         model,
         finishReason,
-        promptTokens: data.usage?.prompt_tokens,
-        completionTokens: data.usage?.completion_tokens,
-        maxTokens,
+        promptTokens,
+        completionTokens,
+        maxTokens: currentMaxTokens,
         jsonMode,
-      }
+      })
     );
 
     if (attempt < MAX_LLM_RETRIES) {
@@ -546,13 +577,16 @@ Adapt date windows, add branch/team grouping, or swap components as the investig
  * Fetch active tracked insights and their most recent snapshot values.
  * Provides the agent with awareness of what the organization is actively
  * monitoring and any recently detected trends.
+ *
+ * Schema: tracked_insights(id, headline, understory, metric_signature JSONB, status, updated_at)
+ *         tracked_insight_snapshots(tracked_insight_id, metric_values JSONB, change_summary, trend, evaluated_at)
+ *
  * Graceful: returns empty string on any failure.
  */
 export async function getTrackedInsightContext(
   tenantPool: pg.Pool
 ): Promise<string> {
   try {
-    // Check if tracked_insights table exists
     const tableCheck = await tenantPool.query(`
       SELECT EXISTS (
         SELECT FROM information_schema.tables
@@ -561,21 +595,29 @@ export async function getTrackedInsightContext(
     `);
     if (!tableCheck.rows[0]?.exists) return "";
 
-    // Fetch active tracked insights with their latest snapshot
+    // Fetch active tracked insights joined with their latest snapshot
     const result = await tenantPool.query(`
       SELECT
         ti.id,
-        ti.metric_name,
-        ti.description,
-        ti.current_value,
-        ti.previous_value,
-        ti.trend,
-        ti.last_evaluated_at,
-        ti.metric_signature
+        ti.headline,
+        ti.understory,
+        ti.metric_signature,
+        ti.updated_at,
+        s.metric_values,
+        s.previous_values,
+        s.change_summary,
+        s.trend,
+        s.evaluated_at
       FROM tracked_insights ti
-      WHERE ti.is_active = true
-        OR ti.is_active IS NULL
-      ORDER BY ti.last_evaluated_at DESC NULLS LAST
+      LEFT JOIN LATERAL (
+        SELECT metric_values, previous_values, change_summary, trend, evaluated_at
+        FROM tracked_insight_snapshots
+        WHERE tracked_insight_id = ti.id
+        ORDER BY evaluated_at DESC
+        LIMIT 1
+      ) s ON true
+      WHERE ti.status = 'active'
+      ORDER BY s.evaluated_at DESC NULLS LAST
       LIMIT 15
     `);
 
@@ -585,16 +627,15 @@ export async function getTrackedInsightContext(
     context += "These are metrics the organization is actively watching. Reference them when relevant:\n\n";
 
     for (const row of result.rows) {
-      const current = row.current_value != null ? String(row.current_value) : "N/A";
-      const previous = row.previous_value != null ? String(row.previous_value) : null;
-      const trend = row.trend || "unknown";
-      const name = row.metric_name || row.description || "Unnamed metric";
+      const name = row.headline || "Unnamed metric";
+      const trend = row.trend || "new";
 
-      let line = `- **${name}**: current=${current}`;
-      if (previous) line += `, previous=${previous}`;
-      if (trend !== "unknown") line += ` (trend: ${trend})`;
-      if (row.last_evaluated_at) {
-        const evalDate = new Date(row.last_evaluated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+      let line = `- **${name}**`;
+      if (row.understory) line += `: ${row.understory.substring(0, 150)}`;
+      if (trend !== "new") line += ` (trend: ${trend})`;
+      if (row.change_summary) line += ` — ${row.change_summary.substring(0, 200)}`;
+      if (row.evaluated_at) {
+        const evalDate = new Date(row.evaluated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
         line += ` [as of ${evalDate}]`;
       }
       context += line + "\n";

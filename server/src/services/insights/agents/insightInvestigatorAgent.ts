@@ -191,7 +191,7 @@ export async function runInsightInvestigator(
   for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     const raw = await callLLM(conversation, apiKey, {
       temperature: 0.2,
-      maxTokens: 2500,
+      maxTokens: 4096,
       jsonMode: true,
     });
 

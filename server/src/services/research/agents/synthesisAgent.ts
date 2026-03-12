@@ -156,7 +156,7 @@ export async function runSynthesisAgent(
 
   const raw = await callLLM(messages, apiKey, {
     temperature: 0.4,
-    maxTokens: 4000,
+    maxTokens: 4096,
     jsonMode: true,
   });
 
