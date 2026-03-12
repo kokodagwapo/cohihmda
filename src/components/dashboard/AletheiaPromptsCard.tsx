@@ -29,12 +29,12 @@ import {
   MessageSquareText,
   Send,
   Tag,
-  Telescope,
   Bookmark,
   Bot,
   Loader2,
   FlaskConical,
 } from "lucide-react";
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { useAletheiaData, AletheiaInsight } from "@/hooks/useAletheiaData";
 import { useJobStatus } from "@/hooks/useJobStatus";
 import { useAuth } from "@/contexts/AuthContext";
@@ -170,41 +170,50 @@ const FEEDBACK_TAGS = [
   { id: "actionable", label: "Actionable" },
 ];
 
+// Canonical source keys -> chip labels.
+// Aliases below keep backward-compat with insights already persisted in the DB.
 const SOURCE_CHIP_LABELS: Record<string, string> = {
+  // --- canonical keys ---
   pipeline: "Pipeline",
-  pipeline_velocity: "Pipeline",
   performance: "Performance",
-  officer_performance: "Loan Officer Performance",
-  personnel: "Loan Officer Performance",
-  lock_risk: "Closing Risk",
+  lock_risk: "Lock Expiration",
   closing_risk: "Closing Risk",
-  trid_risk: "Closing Risk",
-  conversion_trends: "Conversion",
+  conversion: "Conversion",
   lost_opportunity: "Lost Opportunity",
   predictions: "Forecast",
   market_news: "Market & News",
   compliance: "Compliance",
+  revenue: "Revenue & Margin",
+  credit_risk: "Credit Risk",
+  operations: "Operations",
+  // --- legacy / alias keys (kept for already-persisted insights) ---
+  pipeline_velocity: "Pipeline",
+  officer_performance: "Performance",
+  personnel: "Performance",
+  conversion_trends: "Conversion",
+  lock_expiration: "Lock Expiration",
+  trid_risk: "Closing Risk",
+  trid: "Closing Risk",
+  margin: "Revenue & Margin",
+  product_breakdown: "Revenue & Margin",
+  tiering: "Performance",
+  comparisons: "Performance",
+  condition_backlog: "Operations",
+  funnel: "Pipeline",
+  loan_funnel: "Pipeline",
+  historical: "Operations",
+  knowledge_base: "Operations",
+  agent_coverage: "Operations",
+  industry_news: "Market & News",
+  leaderboard: "Performance",
+  business_overview: "Performance",
+  risk_cross_tab: "Credit Risk",
   other: "Insight",
 };
 
-function toTitleCase(value: string): string {
-  return value
-    .split(/[_\s-]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-    .join(" ");
-}
-
 function getInsightChipLabel(insight: AletheiaInsight): string {
   const source = (insight.source || "").trim().toLowerCase();
-  if (source && SOURCE_CHIP_LABELS[source]) {
-    return SOURCE_CHIP_LABELS[source];
-  }
-
-  if (source) {
-    return toTitleCase(source);
-  }
-  return "Insight";
+  return SOURCE_CHIP_LABELS[source] ?? "Insight";
 }
 
 interface BucketLaneProps {
@@ -222,10 +231,8 @@ interface BucketLaneProps {
   onGenerateMore?: () => Promise<void>;
   /** Admin-only: delete a single insight */
   onDeleteInsight?: (insightId: number) => Promise<void>;
-  /** Admin-only: submit feedback on an insight */
+  /** Submit feedback (thumbs up/down + optional tags/comment) on an insight — visible to all users */
   onSubmitFeedback?: (insightId: number, rating: -1 | 1, tags?: string[], comment?: string) => Promise<boolean>;
-  /** Deep-dive an insight in the workbench */
-  onInvestigate?: (insightId: number) => void;
   /** Track/pin an insight to the watchlist */
   onTrackInsight?: (insight: AletheiaInsight) => void;
   /** Whether the user is a platform admin */
@@ -243,7 +250,6 @@ function BucketLane({
   onGenerateMore,
   onDeleteInsight,
   onSubmitFeedback,
-  onInvestigate,
   onTrackInsight,
   isAdmin,
 }: BucketLaneProps) {
@@ -263,23 +269,6 @@ function BucketLane({
   const [feedbackTags, setFeedbackTags] = useState<string[]>([]);
   const [feedbackComment, setFeedbackComment] = useState("");
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
-  const feedbackPopoverRef = useRef<HTMLDivElement>(null);
-
-  // Close popover on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (feedbackPopoverRef.current && !feedbackPopoverRef.current.contains(e.target as Node)) {
-        setFeedbackPopoverInsightId(null);
-        setFeedbackTags([]);
-        setFeedbackComment("");
-      }
-    };
-    if (feedbackPopoverInsightId !== null) {
-      document.addEventListener("mousedown", handler);
-    }
-    return () => document.removeEventListener("mousedown", handler);
-  }, [feedbackPopoverInsightId]);
-
   // Handle quick thumbs click
   const handleQuickRating = useCallback(async (insightId: number, rating: -1 | 1) => {
     // Set optimistic state
@@ -377,187 +366,178 @@ function BucketLane({
               </p>
             </div>
           </div>
-          {/* Admin feedback + delete + investigate buttons */}
-          {isAdmin && insight.insightId && (
-            <div className="flex-shrink-0 flex items-center gap-0.5 opacity-0 group-hover/insight:opacity-100 transition-all">
-              {/* Track / pin to watchlist */}
-              {onTrackInsight && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onTrackInsight(insight);
-                  }}
-                  className="p-1 rounded-md hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-all"
-                  title="Track this insight"
-                >
-                  <Bookmark
-                    className="w-3 h-3 text-slate-400 hover:text-amber-600 dark:hover:text-amber-400"
-                    strokeWidth={2}
-                  />
-                </button>
-              )}
-              {/* Investigate (deep dive in workbench) */}
-              {onInvestigate && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onInvestigate(insight.insightId!);
-                  }}
-                  className="p-1 rounded-md hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-all"
-                  title="Deep dive in Workbench"
-                >
-                  <Telescope
-                    className="w-3 h-3 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400"
-                    strokeWidth={2}
-                  />
-                </button>
-              )}
-              {/* Thumbs Up */}
-              {onSubmitFeedback && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleQuickRating(insight.insightId!, 1);
-                  }}
-                  className={`p-1 rounded-md transition-all ${
+          {/* Feedback + admin action buttons — wrapped in Popover so the comment form
+              portals to document.body and is never clipped by overflow-hidden ancestors */}
+          {insight.insightId && (
+            <Popover
+              open={isPopoverOpen}
+              onOpenChange={(open) => {
+                if (!open) {
+                  setFeedbackPopoverInsightId(null);
+                  setFeedbackTags([]);
+                  setFeedbackComment("");
+                }
+              }}
+            >
+              <PopoverAnchor asChild>
+                <div className="flex-shrink-0 flex items-center gap-0.5 opacity-0 group-hover/insight:opacity-100 transition-all">
+                  {/* Track / pin to watchlist */}
+                  {onTrackInsight && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onTrackInsight(insight);
+                      }}
+                      className="p-1 rounded-md hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-all"
+                      title="Track this insight"
+                    >
+                      <Bookmark
+                        className="w-3 h-3 text-slate-400 hover:text-amber-600 dark:hover:text-amber-400"
+                        strokeWidth={2}
+                      />
+                    </button>
+                  )}
+                  {/* Thumbs Up — all users */}
+                  {onSubmitFeedback && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleQuickRating(insight.insightId!, 1);
+                      }}
+                      className={`p-1 rounded-md transition-all ${
+                        insightFeedback?.rating === 1
+                          ? "bg-green-100 dark:bg-green-900/40 opacity-100"
+                          : "hover:bg-green-100 dark:hover:bg-green-900/30"
+                      }`}
+                      title="Good insight"
+                    >
+                      <ThumbsUp
+                        className={`w-3 h-3 ${
+                          insightFeedback?.rating === 1
+                            ? "text-green-600 dark:text-green-400 fill-current"
+                            : "text-slate-400 hover:text-green-600 dark:hover:text-green-400"
+                        }`}
+                        strokeWidth={2}
+                      />
+                    </button>
+                  )}
+                  {/* Thumbs Down */}
+                  {onSubmitFeedback && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleQuickRating(insight.insightId!, -1);
+                      }}
+                      className={`p-1 rounded-md transition-all ${
+                        insightFeedback?.rating === -1
+                          ? "bg-red-100 dark:bg-red-900/40 opacity-100"
+                          : "hover:bg-red-100 dark:hover:bg-red-900/30"
+                      }`}
+                      title="Bad insight"
+                    >
+                      <ThumbsDown
+                        className={`w-3 h-3 ${
+                          insightFeedback?.rating === -1
+                            ? "text-red-600 dark:text-red-400 fill-current"
+                            : "text-slate-400 hover:text-red-600 dark:hover:text-red-400"
+                        }`}
+                        strokeWidth={2}
+                      />
+                    </button>
+                  )}
+                  {/* Delete button — admin only */}
+                  {isAdmin && onDeleteInsight && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteInsight(insight.insightId!);
+                      }}
+                      className="p-1 rounded-md hover:bg-red-100 dark:hover:bg-red-900/30 transition-all"
+                      title="Remove this insight"
+                    >
+                      <X className="w-3.5 h-3.5 text-red-400 hover:text-red-600 dark:text-red-500 dark:hover:text-red-400" strokeWidth={2} />
+                    </button>
+                  )}
+                </div>
+              </PopoverAnchor>
+
+              {/* Feedback form — rendered via Radix portal so it escapes overflow-hidden ancestors */}
+              <PopoverContent
+                align="end"
+                sideOffset={6}
+                className="w-72 p-3 space-y-2.5"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+                    <Tag className="w-3 h-3" />
+                    Optional tags & comment
+                  </span>
+                  <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
                     insightFeedback?.rating === 1
-                      ? "bg-green-100 dark:bg-green-900/40 opacity-100"
-                      : "hover:bg-green-100 dark:hover:bg-green-900/30"
-                  }`}
-                  title="Good insight"
-                >
-                  <ThumbsUp
-                    className={`w-3 h-3 ${
-                      insightFeedback?.rating === 1
-                        ? "text-green-600 dark:text-green-400 fill-current"
-                        : "text-slate-400 hover:text-green-600 dark:hover:text-green-400"
-                    }`}
-                    strokeWidth={2}
-                  />
-                </button>
-              )}
-              {/* Thumbs Down */}
-              {onSubmitFeedback && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleQuickRating(insight.insightId!, -1);
-                  }}
-                  className={`p-1 rounded-md transition-all ${
-                    insightFeedback?.rating === -1
-                      ? "bg-red-100 dark:bg-red-900/40 opacity-100"
-                      : "hover:bg-red-100 dark:hover:bg-red-900/30"
-                  }`}
-                  title="Bad insight"
-                >
-                  <ThumbsDown
-                    className={`w-3 h-3 ${
-                      insightFeedback?.rating === -1
-                        ? "text-red-600 dark:text-red-400 fill-current"
-                        : "text-slate-400 hover:text-red-600 dark:hover:text-red-400"
-                    }`}
-                    strokeWidth={2}
-                  />
-                </button>
-              )}
-              {/* Delete button */}
-              {onDeleteInsight && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDeleteInsight(insight.insightId!);
-                  }}
-                  className="p-1 rounded-md hover:bg-red-100 dark:hover:bg-red-900/30 transition-all"
-                  title="Remove this insight"
-                >
-                  <X className="w-3.5 h-3.5 text-red-400 hover:text-red-600 dark:text-red-500 dark:hover:text-red-400" strokeWidth={2} />
-                </button>
-              )}
-            </div>
+                      ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300"
+                      : "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"
+                  }`}>
+                    {insightFeedback?.rating === 1 ? <ThumbsUp className="w-2.5 h-2.5" /> : <ThumbsDown className="w-2.5 h-2.5" />}
+                    {insightFeedback?.rating === 1 ? "Good" : "Bad"}
+                  </span>
+                </div>
+                {/* Tags */}
+                <div className="flex flex-wrap gap-1.5">
+                  {FEEDBACK_TAGS.map((tag) => {
+                    const isActive = feedbackTags.includes(tag.id);
+                    return (
+                      <button
+                        key={tag.id}
+                        onClick={() =>
+                          setFeedbackTags((prev) =>
+                            isActive ? prev.filter((t) => t !== tag.id) : [...prev, tag.id]
+                          )
+                        }
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors ${
+                          isActive
+                            ? "bg-blue-100 dark:bg-blue-900/40 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300"
+                            : "bg-slate-50 dark:bg-slate-700/50 border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"
+                        }`}
+                      >
+                        {tag.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {/* Comment */}
+                <textarea
+                  value={feedbackComment}
+                  onChange={(e) => setFeedbackComment(e.target.value)}
+                  placeholder="Optional note..."
+                  className="w-full text-xs rounded-md border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/50 px-2.5 py-1.5 text-slate-700 dark:text-slate-300 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-400 resize-none"
+                  rows={2}
+                />
+                {/* Submit */}
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={() => {
+                      setFeedbackPopoverInsightId(null);
+                      setFeedbackTags([]);
+                      setFeedbackComment("");
+                    }}
+                    className="px-2.5 py-1 text-[11px] font-medium text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+                  >
+                    Skip
+                  </button>
+                  <button
+                    onClick={() => handleSubmitFeedback(insight.insightId!)}
+                    disabled={feedbackSubmitting}
+                    className="inline-flex items-center gap-1 px-3 py-1 text-[11px] font-medium rounded-md bg-blue-500 hover:bg-blue-600 text-white transition-colors disabled:opacity-50"
+                  >
+                    <Send className="w-3 h-3" />
+                    {feedbackSubmitting ? "Sending..." : "Submit"}
+                  </button>
+                </div>
+              </PopoverContent>
+            </Popover>
           )}
         </div>
-
-        {/* Feedback popover — appears after thumbs click */}
-        <AnimatePresence>
-          {isAdmin && isPopoverOpen && insight.insightId && (
-            <motion.div
-              ref={feedbackPopoverRef}
-              initial={{ opacity: 0, y: -4, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -4, scale: 0.95 }}
-              transition={{ duration: 0.15 }}
-              className="absolute right-0 top-full mt-1 z-30 w-72 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg p-3 space-y-2.5"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
-                  <Tag className="w-3 h-3" />
-                  Optional tags & comment
-                </span>
-                <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
-                  insightFeedback?.rating === 1
-                    ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300"
-                    : "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"
-                }`}>
-                  {insightFeedback?.rating === 1 ? <ThumbsUp className="w-2.5 h-2.5" /> : <ThumbsDown className="w-2.5 h-2.5" />}
-                  {insightFeedback?.rating === 1 ? "Good" : "Bad"}
-                </span>
-              </div>
-              {/* Tags */}
-              <div className="flex flex-wrap gap-1.5">
-                {FEEDBACK_TAGS.map((tag) => {
-                  const isActive = feedbackTags.includes(tag.id);
-                  return (
-                    <button
-                      key={tag.id}
-                      onClick={() =>
-                        setFeedbackTags((prev) =>
-                          isActive ? prev.filter((t) => t !== tag.id) : [...prev, tag.id]
-                        )
-                      }
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors ${
-                        isActive
-                          ? "bg-blue-100 dark:bg-blue-900/40 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300"
-                          : "bg-slate-50 dark:bg-slate-700/50 border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"
-                      }`}
-                    >
-                      {tag.label}
-                    </button>
-                  );
-                })}
-              </div>
-              {/* Comment */}
-              <textarea
-                value={feedbackComment}
-                onChange={(e) => setFeedbackComment(e.target.value)}
-                placeholder="Optional note..."
-                className="w-full text-xs rounded-md border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/50 px-2.5 py-1.5 text-slate-700 dark:text-slate-300 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-400 resize-none"
-                rows={2}
-              />
-              {/* Submit */}
-              <div className="flex justify-end gap-2">
-                <button
-                  onClick={() => {
-                    setFeedbackPopoverInsightId(null);
-                    setFeedbackTags([]);
-                    setFeedbackComment("");
-                  }}
-                  className="px-2.5 py-1 text-[11px] font-medium text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
-                >
-                  Skip
-                </button>
-                <button
-                  onClick={() => handleSubmitFeedback(insight.insightId!)}
-                  disabled={feedbackSubmitting}
-                  className="inline-flex items-center gap-1 px-3 py-1 text-[11px] font-medium rounded-md bg-blue-500 hover:bg-blue-600 text-white transition-colors disabled:opacity-50"
-                >
-                  <Send className="w-3 h-3" />
-                  {feedbackSubmitting ? "Sending..." : "Submit"}
-                </button>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
 
         <AnimatePresence>
           {isSelected && (insight.understory || insight.reasoning) && (
@@ -903,28 +883,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
     []
   );
 
-  // Deep-dive: create a workbench canvas from an insight and navigate to it
   const navigate = useNavigate();
-  const handleInvestigate = useCallback(
-    async (insightId: number) => {
-      try {
-        const tenantParam = selectedTenantId
-          ? `?tenant_id=${encodeURIComponent(selectedTenantId)}`
-          : "";
-        const result = await api.request<{ id: string }>(
-          `/api/workbench/canvases/from-insight${tenantParam}`,
-          {
-            method: "POST",
-            body: JSON.stringify({ insightId }),
-          }
-        );
-        navigate(`/my-dashboard?canvas=${result.id}`);
-      } catch (err) {
-        console.error("Error creating deep-dive canvas:", err);
-      }
-    },
-    [selectedTenantId, navigate]
-  );
 
   const [isCreatingResearch, setIsCreatingResearch] = useState(false);
 
@@ -1324,10 +1283,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                   onDeleteInsight={
                     isAdmin ? deleteInsight : undefined
                   }
-                  onSubmitFeedback={
-                    isAdmin ? submitFeedback : undefined
-                  }
-                  onInvestigate={isAdmin ? handleInvestigate : undefined}
+                  onSubmitFeedback={submitFeedback}
                   onTrackInsight={handleTrackInsight}
                   isAdmin={isAdmin}
                 />
