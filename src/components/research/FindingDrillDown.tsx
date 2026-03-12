@@ -16,12 +16,17 @@ import {
   Bar,
   LineChart,
   Line,
+  AreaChart,
+  Area,
+  PieChart,
+  Pie,
+  Cell,
   XAxis,
   YAxis,
   CartesianGrid,
   ResponsiveContainer,
   Tooltip as RechartsTooltip,
-  Cell,
+  Legend,
 } from "recharts";
 import {
   ChevronDown,
@@ -246,11 +251,6 @@ function InfoTip({ text }: { text: string }) {
 // ============================================================================
 // KPI Card
 // ============================================================================
-
-const CHART_COLORS = [
-  "#6366f1", "#8b5cf6", "#a78bfa", "#c4b5fd",
-  "#818cf8", "#7c3aed", "#6d28d9", "#5b21b6",
-];
 
 function KPICard({ metricKey, value, description, agentFormat }: { metricKey: string; value: string | number; description?: string; agentFormat?: string }) {
   const label = humanizeKey(metricKey);
@@ -796,6 +796,277 @@ export function EvidencePreviewTable({ evidence, maxRows = EVIDENCE_PREVIEW_MAX_
 // Auto Chart
 // ============================================================================
 
+/**
+ * Platform color palette — matches DynamicVisualization for cross-platform
+ * visual consistency. MULTI_SERIES_COLORS are used when 2+ series are present
+ * (each series gets a distinct color + a legend). SINGLE_SERIES_COLOR is used
+ * for single-series bar charts where individual bar colors carry no meaning.
+ */
+const MULTI_SERIES_COLORS = [
+  "#6366f1", "#f59e0b", "#10b981", "#ef4444",
+  "#8b5cf6", "#06b6d4", "#f97316", "#84cc16",
+];
+const SINGLE_SERIES_COLOR = "#6366f1";
+
+// ── Internal resolved chart config ──────────────────────────────────────────
+
+interface ResolvedChartConfig {
+  chartType: 'bar' | 'horizontal_bar' | 'line' | 'area' | 'pie' | 'donut' | 'stacked_bar' | 'grouped_bar';
+  xKey: string;
+  yKey: string;
+  yKeys?: string[];
+  isStacked: boolean;
+  isMultiSeries: boolean;
+  data: Record<string, any>[];
+  title: string;
+  xLabel?: string;
+  yLabel?: string;
+}
+
+// ── Helper: score candidate label fields ────────────────────────────────────
+
+function scoreLabelCandidates(
+  fields: string[],
+  rows: Record<string, any>[],
+): Array<{ field: string; uniqueCount: number; score: number }> {
+  const BOOL_VALS = new Set(["true", "false", "0", "1", "yes", "no", "t", "f"]);
+  return fields
+    .map((f) => {
+      const lower = f.toLowerCase();
+      if (/^(has_|is_|flag_|sort_)/.test(lower)) return null;
+      const values = rows.map((r) => r[f]).filter((v) => v != null);
+      if (values.length === 0) return null;
+      const isText = values.some(
+        (v) => typeof v === "string" && isNaN(parseFloat(String(v).replace(/[$,%]/g, "")))
+      );
+      if (!isText) return null;
+      const unique = new Set(values.map((v) => String(v)));
+      if ([...unique].every((v) => BOOL_VALS.has(v.toLowerCase()))) return null;
+      if (unique.size < 2) return null;
+      const c = unique.size;
+      const score = c >= 3 && c <= 15 ? 100 : c === 2 ? 50 : c > 15 && c <= rows.length * 0.8 ? 30 : 10;
+      return { field: f, uniqueCount: c, score };
+    })
+    .filter(Boolean) as Array<{ field: string; uniqueCount: number; score: number }>;
+}
+
+// ── Helper: identify numeric fields ─────────────────────────────────────────
+
+function getNumericFields(fields: string[], rows: Record<string, any>[]): string[] {
+  return fields.filter((f) => {
+    const sample = rows.find((r) => r[f] != null);
+    if (!sample) return false;
+    const raw = sample[f];
+    return !isNaN(parseFloat(String(raw).replace(/[$,%]/g, ""))) && typeof raw !== "boolean";
+  });
+}
+
+// ── Core adapter: evidence → resolved config ─────────────────────────────────
+/**
+ * evidenceToChartConfig
+ *
+ * Priority order:
+ *  1. Use chartHint from the AI agent when present — it has explicit axis keys
+ *     and chart type knowledge.
+ *  2. Multi-series fallback: if 2+ numeric fields coexist with a label field,
+ *     render a grouped_bar.
+ *  3. Duplicate-label fallback: if the best label has duplicates and a second
+ *     categorical field exists, attempt a client-side pivot to grouped_bar.
+ *  4. Single-series fallback: current behaviour (best label + best value).
+ */
+function evidenceToChartConfig(evidence: EvidenceItem): ResolvedChartConfig | null {
+  const { fields, rows, chartHint, columnFormats } = evidence;
+  if (rows.length < 2) return null;
+
+  const agentFmts = columnFormats || {};
+  const numericFields = getNumericFields(fields, rows);
+
+  // ── PATH 1: agent-provided chartHint ──────────────────────────────────────
+  if (chartHint) {
+    const hintType = chartHint.type ?? 'bar';
+    const xKey = chartHint.xKey ?? chartHint.nameKey ?? fields.find(f => !numericFields.includes(f)) ?? fields[0];
+    const yKey = chartHint.yKey ?? chartHint.valueKey ?? numericFields[0];
+    const yKeys = chartHint.yKeys?.filter(k => fields.includes(k) && numericFields.includes(k));
+    const isMulti = (yKeys?.length ?? 0) > 1;
+    const isStacked = hintType === 'stacked_bar';
+    const chartType = hintType === 'stacked_bar' ? 'stacked_bar'
+      : hintType === 'grouped_bar' ? 'grouped_bar'
+      : hintType;
+
+    const titleYLabel = isMulti
+      ? (yKeys ?? []).map(k => humanizeKey(k)).join(", ")
+      : humanizeKey(yKey ?? numericFields[0]);
+    const titleXLabel = humanizeKey(xKey ?? fields[0]);
+
+    const data = rows.slice(0, 30).map((row) => {
+      const entry: Record<string, any> = {};
+      entry[xKey] = rawLabel(row[xKey]);
+      if (isMulti && yKeys) {
+        for (const k of yKeys) {
+          entry[k] = parseNumeric(row[k]);
+        }
+      } else if (yKey) {
+        entry[yKey] = parseNumeric(row[yKey]);
+      }
+      // include remaining fields for tooltip richness
+      for (const f of fields) {
+        if (!(f in entry)) entry[f] = row[f];
+      }
+      return entry;
+    });
+
+    // Validate: at least 2 distinct x-values
+    const uniqueX = new Set(data.map(d => d[xKey]));
+    if (uniqueX.size < 2) return null;
+
+    return {
+      chartType,
+      xKey,
+      yKey: yKey ?? numericFields[0],
+      yKeys: isMulti ? yKeys : undefined,
+      isStacked,
+      isMultiSeries: isMulti,
+      data,
+      title: `${titleYLabel} by ${titleXLabel}`,
+      xLabel: chartHint.xLabel,
+      yLabel: chartHint.yLabel,
+    };
+  }
+
+  // ── PATH 2–4: auto-detection fallback ────────────────────────────────────
+
+  const labelCandidates = scoreLabelCandidates(fields, rows);
+  labelCandidates.sort((a, b) => b.score - a.score);
+  const labelField = labelCandidates[0]?.field;
+  if (!labelField || numericFields.length === 0) return null;
+
+  // PATH 2: multiple numeric fields → grouped_bar
+  if (numericFields.length >= 2) {
+    const preferredYKeys = numericFields.slice(0, 6); // cap to 6 series
+    const data = rows.slice(0, 30).map((row) => {
+      const entry: Record<string, any> = {};
+      entry[labelField] = rawLabel(row[labelField]);
+      for (const k of preferredYKeys) {
+        entry[k] = parseNumeric(row[k]);
+      }
+      return entry;
+    });
+
+    const uniqueLabels = new Set(data.map(d => d[labelField]));
+    if (uniqueLabels.size < 2) return null;
+
+    const avgLen = data.reduce((s, d) => s + String(d[labelField]).length, 0) / data.length;
+    const isHoriz = data.length > 10 || avgLen > 18;
+
+    return {
+      chartType: isHoriz ? 'horizontal_bar' : 'grouped_bar',
+      xKey: labelField,
+      yKey: preferredYKeys[0],
+      yKeys: preferredYKeys,
+      isStacked: false,
+      isMultiSeries: true,
+      data,
+      title: `${preferredYKeys.map(k => humanizeKey(k)).join(", ")} by ${humanizeKey(labelField)}`,
+    };
+  }
+
+  // PATH 3: duplicate labels + second categorical → client-side pivot
+  const bestField = numericFields.find((f) =>
+    /rate|count|total|amount|revenue|avg|sum|percent|volume/i.test(f)
+  ) ?? numericFields[0];
+
+  const labelValues = rows.map(r => String(r[labelField] ?? ""));
+  const hasDuplicateLabels = labelValues.length !== new Set(labelValues).size;
+
+  if (hasDuplicateLabels) {
+    const otherCategoricals = labelCandidates.slice(1);
+    const seriesField = otherCategoricals[0]?.field;
+    if (seriesField) {
+      const seriesValues = [...new Set(rows.map(r => String(r[seriesField] ?? "")))].slice(0, 6);
+      const categories = [...new Set(rows.map(r => String(r[labelField] ?? "")))];
+      // Build pivot: { labelField: cat, series1: val, series2: val, ... }
+      const pivot: Record<string, Record<string, any>> = {};
+      for (const cat of categories) pivot[cat] = { [labelField]: cat };
+      for (const row of rows) {
+        const cat = String(row[labelField] ?? "");
+        const ser = String(row[seriesField] ?? "");
+        if (seriesValues.includes(ser)) {
+          pivot[cat][ser] = parseNumeric(row[bestField]);
+        }
+      }
+      const pivotData = Object.values(pivot);
+      const uniqueLabelsAfterPivot = new Set(pivotData.map(d => d[labelField]));
+      if (uniqueLabelsAfterPivot.size >= 2) {
+        const avgLen = pivotData.reduce((s, d) => s + String(d[labelField]).length, 0) / pivotData.length;
+        const isHoriz = pivotData.length > 10 || avgLen > 18;
+        return {
+          chartType: isHoriz ? 'horizontal_bar' : 'grouped_bar',
+          xKey: labelField,
+          yKey: seriesValues[0],
+          yKeys: seriesValues,
+          isStacked: false,
+          isMultiSeries: true,
+          data: pivotData,
+          title: `${humanizeKey(bestField)} by ${humanizeKey(labelField)} (grouped by ${humanizeKey(seriesField)})`,
+        };
+      }
+    }
+  }
+
+  // PATH 4: single-series (current behaviour, improved)
+  const data = rows.slice(0, 30).map((row) => {
+    const entry: Record<string, any> = {};
+    entry[labelField] = rawLabel(row[labelField]);
+    entry[bestField] = parseNumeric(row[bestField]);
+    for (const f of fields) {
+      if (!(f in entry)) entry[f] = row[f];
+    }
+    return entry;
+  });
+
+  const uniqueLabels = new Set(data.map(d => d[labelField]));
+  if (uniqueLabels.size < 2) return null;
+
+  const labelFieldLower = labelField.toLowerCase();
+  const sampleLabel = String(data[0]?.[labelField] ?? "");
+  const isTimeSeries =
+    /date|month|quarter|year|period/.test(labelFieldLower) || /^\d{4}-\d{2}/.test(sampleLabel);
+  const avgLabelLength = data.reduce((s, d) => s + String(d[labelField]).length, 0) / data.length;
+  const isHorizontal = data.length > 12 || avgLabelLength > 20;
+
+  const inferredType = isTimeSeries ? 'line' : isHorizontal ? 'horizontal_bar' : 'bar';
+
+  const bestFormat = agentFormatToFieldFormat(agentFmts[bestField]) || inferFormat(bestField);
+  void bestFormat; // used below via evidence ref
+
+  return {
+    chartType: inferredType,
+    xKey: labelField,
+    yKey: bestField,
+    isStacked: false,
+    isMultiSeries: false,
+    data,
+    title: `${humanizeKey(bestField)} by ${humanizeKey(labelField)}`,
+  };
+}
+
+// ── Tiny helpers ─────────────────────────────────────────────────────────────
+
+function rawLabel(v: unknown): string {
+  if (v == null) return "N/A";
+  if (typeof v === "object") return JSON.stringify(v);
+  const s = String(v);
+  return s.length > 22 ? s.substring(0, 19) + "…" : s;
+}
+
+function parseNumeric(v: unknown): number {
+  if (v == null) return 0;
+  if (typeof v === "number") return v;
+  return parseFloat(String(v).replace(/[$,%]/g, "")) || 0;
+}
+
+// ── AutoChart props / component ───────────────────────────────────────────────
+
 export interface AutoChartProps {
   evidence: EvidenceItem;
   findingTitle?: string;
@@ -804,156 +1075,192 @@ export interface AutoChartProps {
 }
 
 export function AutoChart({ evidence, findingTitle, sessionId, onSaveToWorkbench }: AutoChartProps) {
-  const { fields, rows } = evidence;
-  if (rows.length < 2 || rows.length > 30) return null;
+  const config = evidenceToChartConfig(evidence);
+  if (!config) return null;
 
-  const numericFields = fields.filter((f) => {
-    const sample = rows.find((r) => r[f] != null);
-    if (!sample) return false;
-    const raw = sample[f];
-    const num = parseFloat(String(raw).replace(/[$,%]/g, ""));
-    return !isNaN(num) && typeof raw !== "boolean";
-  });
-
-  // Score candidate label fields by quality (prefer medium cardinality)
-  const labelCandidates = fields
-    .map((f) => {
-      const lower = f.toLowerCase();
-      // Skip boolean/flag columns
-      if (/^(has_|is_|flag_)/.test(lower)) return null;
-
-      const values = rows.map((r) => r[f]).filter((v) => v != null);
-      if (values.length === 0) return null;
-
-      // Must be non-numeric strings
-      const isText = values.some(
-        (v) => typeof v === "string" && isNaN(parseFloat(String(v).replace(/[$,%]/g, "")))
-      );
-      if (!isText) return null;
-
-      const unique = new Set(values.map((v) => String(v)));
-
-      // Skip if only boolean-like values
-      const boolVals = new Set(["true", "false", "0", "1", "yes", "no", "t", "f"]);
-      if ([...unique].every((v) => boolVals.has(v.toLowerCase()))) return null;
-
-      // Need at least 2 unique values for a meaningful chart
-      if (unique.size < 2) return null;
-
-      // Score: prefer medium cardinality (3-15 unique values)
-      const cardinality = unique.size;
-      let score = 0;
-      if (cardinality >= 3 && cardinality <= 15) score = 100;
-      else if (cardinality === 2) score = 50;
-      else if (cardinality > 15 && cardinality <= rows.length * 0.8) score = 30;
-      else score = 10; // near-unique (every row different) — poor label
-
-      return { field: f, uniqueCount: cardinality, score };
-    })
-    .filter(Boolean) as Array<{ field: string; uniqueCount: number; score: number }>;
-
-  // Pick the best label field
-  labelCandidates.sort((a, b) => b.score - a.score);
-  const labelField = labelCandidates[0]?.field;
-
-  if (!labelField || numericFields.length === 0) return null;
-
-  const bestField = numericFields.find((f) =>
-    /rate|count|total|amount|revenue|avg|sum|percent|volume/i.test(f)
-  ) || numericFields[0];
-
+  const { chartType, xKey, yKey, yKeys, isStacked, isMultiSeries, data, title } = config;
   const agentFmts = evidence.columnFormats || {};
-  const bestFormat = agentFormatToFieldFormat(agentFmts[bestField]) || inferFormat(bestField);
+  const bestFormat = agentFormatToFieldFormat(agentFmts[yKey]) || inferFormat(yKey);
 
-  const chartData = rows.slice(0, 20).map((row) => {
-    const labelRaw = row[labelField];
-    const valueRaw = row[bestField];
-    return {
-      name: truncateLabel(typeof labelRaw === 'object' && labelRaw !== null ? JSON.stringify(labelRaw) : String(labelRaw || "N/A")),
-      value: parseFloat((typeof valueRaw === 'object' && valueRaw !== null ? JSON.stringify(valueRaw) : String(valueRaw || 0)).replace(/[$,%]/g, "")),
-    };
-  });
+  // For tooltip value formatting
+  const tooltipFormatter = (value: number, name: string) => [
+    formatValue(value, bestFormat),
+    humanizeKey(name),
+  ];
 
-  // Final guard: if all chart labels are identical after building, skip
-  const uniqueLabels = new Set(chartData.map((d) => d.name));
-  if (uniqueLabels.size < 2) return null;
+  // Colors: single solid color for single-series, multi-color palette for multi
+  const seriesKeys = isMultiSeries && yKeys ? yKeys : [yKey];
+  const getSeriesColor = (i: number) =>
+    isMultiSeries ? MULTI_SERIES_COLORS[i % MULTI_SERIES_COLORS.length] : SINGLE_SERIES_COLOR;
 
-  // Chart type inference: time-series -> line; long/many labels -> horizontal bar; else vertical bar
-  const labelFieldLower = labelField.toLowerCase();
-  const sampleLabel = chartData[0]?.name ?? "";
-  const isTimeSeries =
-    /date|month|quarter|year/.test(labelFieldLower) || /^\d{4}-\d{2}/.test(sampleLabel);
-  const avgLabelLength =
-    chartData.reduce((sum, d) => sum + (d.name?.length ?? 0), 0) / chartData.length;
-  const isHorizontal = chartData.length > 12 || avgLabelLength > 20;
+  // ── Pie / Donut ───────────────────────────────────────────────────────────
+  if (chartType === 'pie' || chartType === 'donut') {
+    const pieData = data.map((row, i) => ({
+      name: String(row[xKey] ?? ""),
+      value: parseNumeric(row[yKey]),
+      fill: MULTI_SERIES_COLORS[i % MULTI_SERIES_COLORS.length],
+    }));
+    return (
+      <AutoChartShell title={title} findingTitle={findingTitle} evidence={evidence} sessionId={sessionId} onSaveToWorkbench={onSaveToWorkbench} xKey={xKey} yKey={yKey}>
+        <PieChart>
+          <Pie
+            data={pieData}
+            dataKey="value"
+            nameKey="name"
+            cx="50%"
+            cy="50%"
+            outerRadius={chartType === 'donut' ? 72 : 80}
+            innerRadius={chartType === 'donut' ? 36 : 0}
+          >
+            {pieData.map((entry, i) => (
+              <Cell key={i} fill={entry.fill} />
+            ))}
+          </Pie>
+          <RechartsTooltip contentStyle={{ fontSize: 11 }} formatter={tooltipFormatter} />
+          <Legend wrapperStyle={{ fontSize: 10 }} />
+        </PieChart>
+      </AutoChartShell>
+    );
+  }
 
-  const tooltipFormatter = (value: number) => [formatValue(value, bestFormat), humanizeKey(bestField)];
+  // ── Area chart ────────────────────────────────────────────────────────────
+  if (chartType === 'area') {
+    return (
+      <AutoChartShell title={title} findingTitle={findingTitle} evidence={evidence} sessionId={sessionId} onSaveToWorkbench={onSaveToWorkbench} xKey={xKey} yKey={yKey}>
+        <AreaChart data={data} margin={{ top: 5, right: 10, bottom: 5, left: 5 }}>
+          <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+          <XAxis dataKey={xKey} tick={{ fontSize: 10 }} angle={-25} textAnchor="end" height={44} />
+          <YAxis tick={{ fontSize: 10 }} width={55} />
+          <RechartsTooltip contentStyle={{ fontSize: 11 }} formatter={tooltipFormatter} />
+          {isMultiSeries && <Legend wrapperStyle={{ fontSize: 10 }} />}
+          {seriesKeys.map((k, i) => (
+            <Area
+              key={k}
+              type="monotone"
+              dataKey={k}
+              name={humanizeKey(k)}
+              stroke={getSeriesColor(i)}
+              fill={getSeriesColor(i)}
+              fillOpacity={0.15}
+              strokeWidth={2}
+              dot={false}
+              stackId={isStacked ? "stack" : undefined}
+            />
+          ))}
+        </AreaChart>
+      </AutoChartShell>
+    );
+  }
 
+  // ── Line chart ────────────────────────────────────────────────────────────
+  if (chartType === 'line') {
+    return (
+      <AutoChartShell title={title} findingTitle={findingTitle} evidence={evidence} sessionId={sessionId} onSaveToWorkbench={onSaveToWorkbench} xKey={xKey} yKey={yKey}>
+        <LineChart data={data} margin={{ top: 5, right: 10, bottom: 5, left: 5 }}>
+          <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+          <XAxis dataKey={xKey} tick={{ fontSize: 10 }} angle={-25} textAnchor="end" height={44} />
+          <YAxis tick={{ fontSize: 10 }} width={55} />
+          <RechartsTooltip contentStyle={{ fontSize: 11 }} formatter={tooltipFormatter} />
+          {isMultiSeries && <Legend wrapperStyle={{ fontSize: 10 }} />}
+          {seriesKeys.map((k, i) => (
+            <Line
+              key={k}
+              type="monotone"
+              dataKey={k}
+              name={humanizeKey(k)}
+              stroke={getSeriesColor(i)}
+              strokeWidth={2}
+              dot={{ r: 3 }}
+            />
+          ))}
+        </LineChart>
+      </AutoChartShell>
+    );
+  }
+
+  // ── Horizontal bar chart ──────────────────────────────────────────────────
+  if (chartType === 'horizontal_bar') {
+    const maxLabelLen = Math.max(...data.map(d => String(d[xKey] ?? "").length));
+    const yAxisWidth = Math.min(Math.max(maxLabelLen * 6, 60), 140);
+    return (
+      <AutoChartShell title={title} findingTitle={findingTitle} evidence={evidence} sessionId={sessionId} onSaveToWorkbench={onSaveToWorkbench} xKey={xKey} yKey={yKey}>
+        <BarChart layout="vertical" data={data} margin={{ top: 5, right: 30, bottom: 5, left: 5 }}>
+          <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+          <XAxis type="number" tick={{ fontSize: 10 }} />
+          <YAxis type="category" dataKey={xKey} tick={{ fontSize: 10 }} width={yAxisWidth} />
+          <RechartsTooltip contentStyle={{ fontSize: 11 }} formatter={tooltipFormatter} />
+          {isMultiSeries && <Legend wrapperStyle={{ fontSize: 10 }} />}
+          {isMultiSeries ? (
+            seriesKeys.map((k, i) => (
+              <Bar key={k} dataKey={k} name={humanizeKey(k)} fill={getSeriesColor(i)} radius={[0, 3, 3, 0]} stackId={isStacked ? "stack" : undefined} />
+            ))
+          ) : (
+            <Bar dataKey={yKey} radius={[0, 3, 3, 0]} fill={SINGLE_SERIES_COLOR} />
+          )}
+        </BarChart>
+      </AutoChartShell>
+    );
+  }
+
+  // ── Vertical bar / grouped_bar / stacked_bar ──────────────────────────────
+  return (
+    <AutoChartShell title={title} findingTitle={findingTitle} evidence={evidence} sessionId={sessionId} onSaveToWorkbench={onSaveToWorkbench} xKey={xKey} yKey={yKey}>
+      <BarChart data={data} margin={{ top: 5, right: 10, bottom: 5, left: 5 }}>
+        <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+        <XAxis
+          dataKey={xKey}
+          tick={{ fontSize: 10 }}
+          angle={-25}
+          textAnchor="end"
+          height={44}
+        />
+        <YAxis tick={{ fontSize: 10 }} width={55} />
+        <RechartsTooltip contentStyle={{ fontSize: 11 }} formatter={tooltipFormatter} />
+        {isMultiSeries && <Legend wrapperStyle={{ fontSize: 10 }} />}
+        {isMultiSeries ? (
+          seriesKeys.map((k, i) => (
+            <Bar key={k} dataKey={k} name={humanizeKey(k)} fill={getSeriesColor(i)} radius={[3, 3, 0, 0]} stackId={isStacked ? "stack" : undefined} />
+          ))
+        ) : (
+          <Bar dataKey={yKey} radius={[3, 3, 0, 0]} fill={SINGLE_SERIES_COLOR} />
+        )}
+      </BarChart>
+    </AutoChartShell>
+  );
+}
+
+// ── Shell wrapper (title + chart container + save button) ────────────────────
+
+interface AutoChartShellProps {
+  title: string;
+  findingTitle?: string;
+  evidence: EvidenceItem;
+  sessionId?: string | null;
+  onSaveToWorkbench?: (payload: SaveToWorkbenchPayload) => void;
+  xKey: string;
+  yKey: string;
+  children: React.ReactNode;
+}
+
+function AutoChartShell({
+  title,
+  findingTitle,
+  evidence,
+  sessionId,
+  onSaveToWorkbench,
+  xKey,
+  yKey,
+  children,
+}: AutoChartShellProps) {
   return (
     <div className="space-y-1">
       <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-        <BarChart3 className="h-3 w-3" />
-        {humanizeKey(bestField)} by {humanizeKey(labelField)}
+        <BarChart3 className="h-3 w-3 flex-shrink-0" />
+        <span className="truncate">{title}</span>
       </p>
-      <div className="h-48 w-full">
+      <div className="h-52 w-full">
         <ResponsiveContainer width="100%" height="100%">
-          {isTimeSeries ? (
-            <LineChart data={chartData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-              <XAxis
-                dataKey="name"
-                tick={{ fontSize: 10 }}
-                interval={0}
-                angle={-30}
-                textAnchor="end"
-                height={50}
-              />
-              <YAxis tick={{ fontSize: 10 }} width={55} />
-              <RechartsTooltip contentStyle={{ fontSize: 11 }} formatter={tooltipFormatter} />
-              <Line
-                type="monotone"
-                dataKey="value"
-                stroke={CHART_COLORS[0]}
-                strokeWidth={2}
-                dot={{ r: 3 }}
-              />
-            </LineChart>
-          ) : isHorizontal ? (
-            <BarChart
-              layout="vertical"
-              data={chartData}
-              margin={{ top: 5, right: 30, bottom: 5, left: 5 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-              <XAxis type="number" tick={{ fontSize: 10 }} width={50} />
-              <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={80} />
-              <RechartsTooltip contentStyle={{ fontSize: 11 }} formatter={tooltipFormatter} />
-              <Bar dataKey="value" radius={[0, 3, 3, 0]}>
-                {chartData.map((_, i) => (
-                  <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                ))}
-              </Bar>
-            </BarChart>
-          ) : (
-            <BarChart data={chartData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-              <XAxis
-                dataKey="name"
-                tick={{ fontSize: 10 }}
-                interval={0}
-                angle={-30}
-                textAnchor="end"
-                height={50}
-              />
-              <YAxis tick={{ fontSize: 10 }} width={55} />
-              <RechartsTooltip contentStyle={{ fontSize: 11 }} formatter={tooltipFormatter} />
-              <Bar dataKey="value" radius={[3, 3, 0, 0]}>
-                {chartData.map((_, i) => (
-                  <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                ))}
-              </Bar>
-            </BarChart>
-          )}
+          {children as React.ReactElement}
         </ResponsiveContainer>
       </div>
       {onSaveToWorkbench && (
@@ -964,13 +1271,13 @@ export function AutoChart({ evidence, findingTitle, sessionId, onSaveToWorkbench
           onClick={() =>
             onSaveToWorkbench({
               sql: evidence.sql,
-              title: [findingTitle, `${humanizeKey(bestField)} by ${humanizeKey(labelField)}`].filter(Boolean).join(" — ").slice(0, 120) || "Research chart",
+              title: [findingTitle, title].filter(Boolean).join(" — ").slice(0, 120) || "Research chart",
               vizConfig: {
                 type: "bar",
-                title: [findingTitle, humanizeKey(bestField)].filter(Boolean).join(" — ").slice(0, 80) || "Chart",
+                title: [findingTitle, title].filter(Boolean).join(" — ").slice(0, 80) || "Chart",
                 data: [],
-                xKey: labelField,
-                yKey: bestField,
+                xKey,
+                yKey,
               },
               explanation: evidence.explanation,
               sourceType: "research",
@@ -987,14 +1294,6 @@ export function AutoChart({ evidence, findingTitle, sessionId, onSaveToWorkbench
 }
 
 // ============================================================================
-// Helpers
-// ============================================================================
-
-function truncateLabel(s: string): string {
-  return s.length > 18 ? s.substring(0, 15) + "..." : s;
-}
-
-// ============================================================================
 // Main Component
 // ============================================================================
 
@@ -1004,7 +1303,7 @@ export function FindingDrillDown({ finding, onClose, sessionId }: FindingDrillDo
   const hasEvidence = finding.evidence.length > 0;
 
   const chartableEvidence = finding.evidence.filter(
-    (e) => e.rows.length >= 2 && e.rows.length <= 30 && e.fields.length >= 2
+    (e) => e.rows.length >= 2 && e.rows.length <= 50 && e.fields.length >= 2
   );
 
   return (
