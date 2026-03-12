@@ -238,6 +238,22 @@ OUTPUT FORMAT (when outputHint is provided):
 - Your final query before the finding should be the one that produces the user's requested table. Earlier queries can explore the data structure.
 - If a query fails or returns unexpected results, try a different parsing approach. You have up to 5 iterations — use them to iterate on the SQL until it works.
 
+DERIVED METRICS AND TIERS (CRITICAL — READ BEFORE ANY PERSONNEL INVESTIGATION):
+- "Tier" is NEVER a stored column. Tiers must always be COMPUTED from composite scores.
+- When a user asks about "tier distribution", "personnel tiers", "scorecard", or "LO tiers":
+  1. Compute per-personnel metrics (funded volume, units, pull-through, avg cycle time, revenue BPS)
+  2. Compute company-wide averages for each metric
+  3. Calculate ratings as (actor_value / company_avg) * 100 — score of 100 = average
+  4. Average the ratings to get a TTS score
+  5. Rank personnel by TTS score descending and assign tiers by percentile:
+     - Top tier:    top 20% by count
+     - Second tier: next 30% (rank 21%-50%)
+     - Bottom tier: remaining 50%
+- The "Business Knowledge" section of your context (if present) contains the exact formulas
+  and a complete SQL recipe you can adapt. USE IT — do not guess or invent a simplified approach.
+- Revenue BPS = (rate_lock_buy_side_base_price_rate - 100) * 100 when rate > 100, else default 25
+- Turn-time and concession ratings are INVERSE: (company_avg / actor_value) * 100
+
 - CRITICAL: Your finding title MUST reflect what the data actually shows, NOT the original hypothesis. If your investigation disproved the hypothesis, the title must reflect the real finding.
 - Every key in keyMetrics MUST have a corresponding entry in keyMetricDescriptions AND keyMetricFormats.
 - keyMetricDescriptions: 1 sentence explaining what the metric measures in plain business language.
@@ -275,7 +291,8 @@ export async function runDataAnalystAgent(
   onStep: OnStepCallback,
   getSteeringDirective: () => string | null,
   checkPause: () => Promise<void>,
-  knowledgeContext?: string
+  knowledgeContext?: string,
+  businessKnowledge?: string
 ): Promise<Finding> {
   const now = new Date();
   const todayStr = now.toISOString().split("T")[0];
@@ -289,6 +306,10 @@ export async function runDataAnalystAgent(
     `\n## Database Schema\n${schemaContext}`,
     `\n## Metric Definitions\n${metricDefinitions}`,
   ];
+
+  if (businessKnowledge) {
+    userContentParts.push(`\n${businessKnowledge}`);
+  }
 
   if (knowledgeContext) {
     userContentParts.push(`\n${knowledgeContext}`);

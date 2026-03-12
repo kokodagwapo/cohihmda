@@ -105,6 +105,12 @@ export const learningPaths: LearningPath[] = [
           },
           {
             id: "exec-w1-4",
+            title: "Read: Cohi Daily Audio Briefings",
+            type: "article",
+            link: "/help/insights/audio-briefings",
+          },
+          {
+            id: "exec-w1-5",
             title: "Track your first insight",
             type: "action",
             resourceId: "mission-track-insight",
@@ -122,8 +128,13 @@ export const learningPaths: LearningPath[] = [
             type: "article",
             link: "/help/insights/daily-briefings",
           },
-          ,
-          /*  { id: 'exec-w2-2', title: 'Read: Loan Funnel Analysis', type: 'article', link: '/help/toptiering/loan-funnel' } */ {
+          {
+            id: "exec-w2-2",
+            title: "Read: Closing & Fallout Forecast",
+            type: "article",
+            link: "/help/toptiering/fallout-forecast",
+          },
+          {
             id: "exec-w2-3",
             title: "Read: Company & Operations Scorecards",
             type: "article",
@@ -134,6 +145,12 @@ export const learningPaths: LearningPath[] = [
             title: "Read: Financial Modeling Sandbox",
             type: "article",
             link: "/help/toptiering/financial-modeling",
+          },
+          {
+            id: "exec-w2-5",
+            title: "Read: Leaderboard",
+            type: "article",
+            link: "/help/toptiering/leaderboard",
           },
         ],
       },
@@ -274,6 +291,18 @@ export const learningPaths: LearningPath[] = [
             type: "article",
             link: "/help/toptiering/sales-trends",
           },
+          {
+            id: "mgr-w2-5",
+            title: "Read: Closing & Fallout Forecast",
+            type: "article",
+            link: "/help/toptiering/fallout-forecast",
+          },
+          {
+            id: "mgr-w2-6",
+            title: "Read: Leaderboard",
+            type: "article",
+            link: "/help/toptiering/leaderboard",
+          },
         ],
       },
       {
@@ -335,6 +364,12 @@ export const learningPaths: LearningPath[] = [
             title: "Read: Distributing Canvases and Content",
             type: "article",
             link: "/help/workbench/distributing-content",
+          },
+          {
+            id: "mgr-w4-5",
+            title: "Read: Configuring Fallout Alerts",
+            type: "article",
+            link: "/help/workbench/fallout-alerts",
           },
           {
             id: "mgr-w4-4",
@@ -464,6 +499,12 @@ export const learningPaths: LearningPath[] = [
             title: "Read: Pipeline Analysis Dashboard",
             type: "article",
             link: "/help/toptiering/pipeline-analysis",
+          },
+          {
+            id: "ops-w2-1b",
+            title: "Read: Closing & Fallout Forecast",
+            type: "article",
+            link: "/help/toptiering/fallout-forecast",
           },
           {
             id: "ops-w2-2",

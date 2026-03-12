@@ -84,11 +84,11 @@ function PhaseBadge({ phase }: { phase: string }) {
 
 const TOPIC_SUGGESTIONS = [
   "Overall pipeline health and conversion performance",
-  "Personnel performance and tier distribution",
-  "Risk patterns and credit exposure",
-  "Turn time trends and operational efficiency",
-  "Product mix and channel analysis",
-  "Revenue drivers and margin analysis",
+  "LO scorecard: compute TTS scores, tier distribution (Top/Second/Bottom), and identify performance outliers",
+  "Risk patterns and credit exposure: FICO, LTV, DTI distribution and high-risk concentrations",
+  "Turn time trends and operational efficiency by role (processor, underwriter, closer)",
+  "Product mix and channel analysis: loan type, purpose, and program breakdown",
+  "Revenue drivers: margin analysis, BPS by LO/channel, and revenue concentration",
 ];
 
 // ============================================================================

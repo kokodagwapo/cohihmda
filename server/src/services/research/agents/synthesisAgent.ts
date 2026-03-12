@@ -98,7 +98,9 @@ RULES:
 - recommendedAction: Every high- or medium-impact insight MUST have a recommendedAction. Low-impact can omit or keep brief.
 - Themes: Group related findings; use severity consistently (critical / warning / info / positive).
 - Use specific numbers from the findings — do not generalize or invent data.
-- If findings conflict, note the discrepancy and explain possible reasons.`;
+- If findings conflict, note the discrepancy and explain possible reasons.
+- PLATFORM CONTEXT: This platform has a Sales Scorecard (TTS-based LO tiering), Operations Scorecard (processor/underwriter/closer tiering by units and turn time), and TopTiering Comparison (revenue-based Pareto). When findings relate to personnel performance or tiers, frame recommendations in terms of these existing platform features (e.g. "Review in the Sales Scorecard", "Investigate in TopTiering"). Tiers are always computed — Top / Second / Bottom — never stored as fields.
+- TIER FINDINGS: When findings include TTS scores or tier distributions, frame them clearly: state what percentage of LOs are in each tier, how the tier boundaries were calculated, and what the business impact is (e.g. top-tier LOs representing X% of volume).`;
 
 // ============================================================================
 // Agent Entry Point
@@ -108,7 +110,8 @@ export async function runSynthesisAgent(
   plan: ResearchPlan,
   findings: Finding[],
   apiKey: string,
-  userTopic?: string | null
+  userTopic?: string | null,
+  businessKnowledge?: string
 ): Promise<ResearchReport> {
   const planSummary = plan.questions
     .map((q) => `Q${q.id}: [${q.category}] ${q.topic}`)
@@ -136,6 +139,7 @@ export async function runSynthesisAgent(
 
   const userPrompt = [
     userTopic ? `## User's question / topic\n${userTopic}\n` : "",
+    businessKnowledge ? `${businessKnowledge}\n` : "",
     `## Research Plan`,
     planSummary,
     `\n## Findings from Data Analysts`,

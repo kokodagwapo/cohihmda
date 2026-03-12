@@ -714,6 +714,77 @@ The shared canvas opens in a read-only mode. If your organization updates the ca
 - If this is a first login, complete password setup before opening the canvas link`,
   },
 
+  {
+    id: "wb-fallout-alerts",
+    slug: "fallout-alerts",
+    title: "Configuring Fallout Alerts",
+    category: "Workbench",
+    categorySlug: "workbench",
+    summary: "Set up automated email alerts for high-risk loans and track loan officer responses.",
+    content: `# Configuring Fallout Alerts
+
+## What Are Fallout Alerts?
+Fallout Alerts automatically notify loan officers and managers when loans in the pipeline are at high risk of falling out. The system uses the Closing & Fallout Forecast risk scores to identify at-risk loans and sends actionable emails.
+
+## Where to Configure
+Navigate to **Workbench > Distributions** and select the **Fallout** tab, or go directly to \`/workbench/distributions?tab=fallout\`.
+
+## Settings Tab
+Configure how and when alerts are sent:
+
+### Alert Criteria
+- **Enable/Disable** — Turn fallout alerts on or off
+- **Minimum Risk Score** — Only include loans at or above this threshold (0–100)
+- **Risk Levels** — Choose which levels to include: Very High, High, Medium, Low
+
+### Delivery Options
+- **Frequency** — Realtime (immediate), Daily Digest, or Weekly Digest
+- **Target Loan Officers** — Select specific LOs or choose "All visible"
+- **Notify Managers** — Send a separate summary email to managers
+- **Manager Card Delivery** — Send managers a detailed email with individual loan cards
+- **Manager Recipients** — Specify which managers receive alerts
+- **Custom Message** — Add an optional message included in LO emails
+
+### Testing
+- **Manual Test Recipients** — Enter comma-separated emails to test alerts without selecting actual LOs
+- **Send Alerts Now** — Trigger an immediate alert run
+
+## LO Responses Tab
+After alerts are sent, track loan officer responses:
+- **Search** by loan number, LO name, or recipient
+- **Filter** by response type
+- **Response Types:**
+  - **Resolved** — LO has acknowledged and addressed the risk
+  - **Working on it** — LO is actively managing the loan
+  - **Need help** — LO is requesting assistance
+
+## What Loan Officers Receive
+Each alert email includes:
+- Personalized greeting
+- For each loan: loan number, risk level and score, loan amount, outlook, estimated close date, risk factors, and recommended actions
+- Three response buttons: **Resolved**, **Working on it**, **Need help**
+- Optional link to open the full coaching view in the platform
+- Response links expire after 7 days
+
+## Single-Loan Alerts
+From any **Loan Drilldown Modal** (in the Fallout Forecast), you can send an alert for a single loan:
+1. Open a loan card from the Critical Loans section
+2. Click **Email Now**
+3. The primary recipient is the loan officer on file
+4. Optionally add extra recipients and a personal message
+5. Send the alert
+
+## Manager Summary Emails
+When **Notify Managers** is enabled, managers receive:
+- A summary of all high-risk loans and breakdown by loan officer
+- Link to the dashboard for full details
+
+## Tips
+- Start with a higher minimum risk score (e.g., 70+) and lower it as your team adjusts
+- Use Daily Digest to avoid alert fatigue
+- Review the LO Responses tab weekly to identify patterns and coaching opportunities`,
+  },
+
   // ─── Research Lab ──────────────────────────────────────────────────
   {
     id: "rl-starting",
@@ -810,6 +881,79 @@ After the initial research completes, you can ask follow-up questions in the cha
 - Ask for summaries: "Summarize the key takeaways for an executive audience"`,
   },
 
+  // ─── Insights (continued) ───────────────────────────────────────────
+  {
+    id: "ins-audio-briefings",
+    slug: "audio-briefings",
+    title: "Cohi Daily Audio Briefings",
+    category: "Insights",
+    categorySlug: "insights",
+    summary: "Listen to AI-generated audio briefings about your pipeline and market.",
+    content: `# Cohi Daily Audio Briefings
+
+## What Are Audio Briefings?
+Audio Briefings are AI-generated spoken summaries of your organization's key metrics, market conditions, and pipeline highlights. Think of them as a personalized news broadcast for your lending operation.
+
+## Two Briefing Types
+
+### On-Demand Briefing (Cohi News Brief)
+Found in the **Cohi Daily Morning Brief** section on the Insights page:
+- Click the **radio icon** to generate a briefing in real time
+- The AI creates a ~90-second spoken summary from your latest data
+- Controls: Play, Pause, Mute, End
+- Ask follow-up questions by voice (microphone) or text during playback
+
+### Pre-Generated Briefing (Aletheia Briefing)
+Found in the **Cohi Daily Briefings** section on the Insights page:
+- A **Play** button appears when a pre-generated briefing is available
+- Briefings are ~2–3 minutes and cover deeper insight analysis
+- Adjust playback speed (0.75x to 1.5x) and use the seek bar to skip around
+- Ask follow-up questions by voice or text during playback
+
+## Nightly Scheduled Generation
+Your admin can enable nightly briefing generation so a fresh audio summary is ready every morning. When enabled, the briefing is generated overnight using the latest data and is available when you first open the Insights page.
+
+## Tips
+- Listen during your morning commute or while reviewing email
+- Use voice follow-ups for hands-free interaction
+- Briefings update as new data arrives — listen again later in the day for an updated view`,
+  },
+  {
+    id: "ins-newsletter",
+    slug: "daily-newsletter",
+    title: "Daily Brief Newsletter",
+    category: "Insights",
+    categorySlug: "insights",
+    summary: "Subscribe to daily email newsletters with market and pipeline updates.",
+    content: `# Daily Brief Newsletter
+
+## What Is It?
+The Daily Brief Newsletter is an automated email delivered to your inbox with a market snapshot, industry news, pipeline digest, and tracked metrics — all without needing to log into the platform.
+
+## What's Included
+Each newsletter can contain:
+- **Market Snapshot** — Key rate and market data
+- **Industry News** — Curated headlines from MBA, Freddie Mac, and other trusted sources
+- **Pipeline Digest** — Summary of your organization's pipeline changes
+- **Tracked Metrics** — Updates on metrics you're monitoring
+
+## Subscribing
+1. Navigate to the **Insights** page
+2. Look for the newsletter subscription controls in the Daily Brief section
+3. Enable delivery and configure your preferred schedule
+
+## Preview
+Before sending, you can preview the newsletter content to see exactly what recipients will receive. This is useful for admins who want to verify content before enabling delivery to the team.
+
+## Delivery Schedule
+Configure when newsletters are sent. Common options include:
+- Daily (morning delivery)
+- Custom schedule based on your organization's needs
+
+## Who Receives It
+Newsletter distribution can be configured by your admin. Individual users can opt in or out based on their preferences.`,
+  },
+
   // ─── TopTiering ────────────────────────────────────────────────────
   /*   {
     id: "tt-funnel",
@@ -847,6 +991,168 @@ Filter the funnel by:
 
 This helps identify where specific segments are underperforming.`,
   }, */
+  {
+    id: "tt-fallout-forecast",
+    slug: "fallout-forecast",
+    title: "Closing & Fallout Forecast",
+    category: "TopTiering Analytics",
+    categorySlug: "toptiering",
+    summary: "ML-powered predictions for loan closing, withdrawal, and denial risk.",
+    content: `# Closing & Fallout Forecast
+
+## What Is It?
+The Closing & Fallout Forecast uses machine learning to predict which loans in your pipeline are likely to close, withdraw, be denied, or close late. It helps teams prioritize follow-up actions on at-risk loans before they fall out.
+
+## Key Metrics
+The dashboard displays five primary KPIs:
+- **Active Loans** — Total loans currently in the pipeline
+- **Predicted Closing** — Loans the model expects to close successfully
+- **Likely Withdraw** — Loans showing withdrawal risk patterns
+- **Likely Deny** — Loans with denial risk indicators
+- **Likely Close Late** — Loans expected to close but past their target date
+
+## Critical Loans
+Below the KPIs, a **Critical Loans** section displays loan cards for the highest-risk files. Each card shows:
+- Loan number and borrower info
+- Risk level badge (Very High, High, Medium, Low)
+- Risk score (0–100)
+- Key risk factors driving the prediction
+- Loan officer and branch
+
+Click any loan card to open the **Loan Drilldown Modal** with full details, fallout alert history, and the option to send an alert.
+
+## Prediction Zones
+The model classifies loans into 6 prediction zones based on risk score and trajectory direction:
+- Zones differentiate between **improving** and **deteriorating** risk
+- For denied loans, direction-based zones distinguish between loans trending toward recovery vs those accelerating toward denial
+- VA loans use updated rules where higher LTV alone is not treated as an automatic denial signal
+
+## Filters
+- **Date range** — Focus on loans within a specific period
+- **Channel** — Filter by Retail, Wholesale, etc.
+- **Branch / LO** — Narrow to specific teams or individuals
+
+## Related Features
+- **Fallout Alerts** — Automatically email loan officers about high-risk loans (see: Configuring Fallout Alerts)
+- **Critical Loans Export** — Export the critical loans list to CSV for offline review`,
+  },
+  {
+    id: "tt-actors",
+    slug: "actors-dashboard",
+    title: "Actors Dashboard",
+    category: "TopTiering Analytics",
+    categorySlug: "toptiering",
+    summary: "Compare performance across loan officers, processors, underwriters, and other roles.",
+    content: `# Actors Dashboard
+
+## What Is It?
+The Actors Dashboard provides a configurable view of personnel performance across different roles in your lending operation — loan officers, processors, underwriters, closers, and branches.
+
+## What You Can See
+- **Loan Status Distribution** — Visual breakdown of loan statuses across the pipeline
+- **KPI Summary** — Key performance indicators for the selected actor type
+- **Up to Four Actor Tables** — Configure which roles to display and compare side by side
+
+## Actor Types
+Each table can show a different role:
+- **Loan Officers** — Volume, pull-through, revenue
+- **Processors** — Units processed, turn times, resubmission rates
+- **Underwriters** — Approval/denial rates, condition counts, turn times
+- **Closers** — Closing volume, turn times, on-time rates
+- **Branches** — Aggregated metrics at the branch level
+
+## Metrics Per Actor
+- Volume and unit counts
+- Turn times (average days per milestone)
+- Approval and denial rates
+- Loan status breakdown
+
+## Filters
+- Date range selection
+- Channel filtering
+- Entity/actor selection for targeted comparisons
+
+## Workbench Integration
+Actors widgets are available in the Workbench for inclusion in custom dashboards and recurring reports.`,
+  },
+  {
+    id: "tt-leaderboard",
+    slug: "leaderboard",
+    title: "Leaderboard",
+    category: "TopTiering Analytics",
+    categorySlug: "toptiering",
+    summary: "See rankings of loan officers and branches by key production metrics.",
+    content: `# Leaderboard
+
+## What Is It?
+The Leaderboard ranks your loan officers and branches by production metrics, making it easy to identify top performers and track competitive standings.
+
+## Ranking Criteria
+Rankings are available by:
+- **Closed Loans** — Number of loans that have closed
+- **Revenue** — Total revenue generated
+- **Pull-Through Rate** — Percentage of applications that fund
+
+## Time Periods
+View rankings for:
+- **WTD** — Week to Date
+- **MTD** — Month to Date
+- **QTD** — Quarter to Date
+- **LM** — Last Month
+- **LQ** — Last Quarter
+- **LY** — Last Year
+- **Custom** — Any date range you define
+
+## What You See
+Each entry in the leaderboard shows:
+- **Rank** — Position based on the selected metric
+- **Name** — Loan officer or branch name
+- **Units** — Number of loans
+- **Volume** — Total dollar amount
+- **Icons** — Top performers (ranks 1–5) are highlighted with visual indicators
+
+## Use Cases
+- Recognize and reward top-producing loan officers
+- Track ranking changes month over month
+- Compare branch-level production
+- Motivate teams with visible performance standings
+
+## Where to Find It
+The Leaderboard appears on the **Insights** dashboard and is also available as a standalone view under the Dashboard navigation.`,
+  },
+  {
+    id: "tt-sales-scorecard-overview",
+    slug: "sales-scorecard-overview",
+    title: "Sales Scorecard Overview",
+    category: "TopTiering Analytics",
+    categorySlug: "toptiering",
+    summary: "High-level sales performance summary with custom date controls and Workbench integration.",
+    content: `# Sales Scorecard Overview
+
+## What Is It?
+The Sales Scorecard Overview provides a high-level summary of sales performance across your organization, complementing the detailed Sales Scorecard with a broader perspective.
+
+## Key Features
+- **Custom Date Controls** — Select specific date ranges for bar and column comparisons
+- **Trend Analysis** — Visual trends showing how sales metrics change over time
+- **Tier Distribution** — See how loan officers and branches distribute across Top, Second, and Bottom tiers
+
+## Metrics Shown
+- Production volume (applications, closings, fundings)
+- Revenue and margin
+- Pull-through rates
+- Growth comparisons across periods
+
+## Workbench Integration
+Sales Scorecard Overview widgets can be added directly to Workbench canvases, allowing you to combine sales overview data with other analytics on a single custom dashboard.
+
+## Relationship to Other Scorecards
+- **Sales Scorecard** — Detailed individual and branch-level tiering with full metric breakdowns
+- **Sales Scorecard Overview** — Summary view optimized for quick review and trend spotting
+- **Sales Trends** — Historical trend analysis with momentum indicators
+
+Use the Overview for leadership check-ins and the detailed Scorecard for coaching conversations.`,
+  },
   {
     id: "tt-comparison",
     slug: "toptiering-comparison",
@@ -1412,8 +1718,14 @@ MFA adds a second layer of security beyond your password. Even if your password 
 ## Logging In with MFA
 After entering your password, you'll be prompted for a 6-digit code from your authenticator app.
 
+## MFA Enforcement
+Your organization's admin may enforce MFA for all users. When MFA is enforced:
+- All users are required to set up MFA on their next login
+- You cannot disable MFA while enforcement is active
+- This ensures consistent security across the entire organization
+
 ## Disabling MFA
-You can disable MFA from Settings, but we recommend keeping it enabled for security.`,
+If MFA is not enforced by your admin, you can disable it from Settings — but we recommend keeping it enabled for security.`,
   },
   {
     id: "set-preferences",
