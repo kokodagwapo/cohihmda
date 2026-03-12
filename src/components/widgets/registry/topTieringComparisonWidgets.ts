@@ -52,6 +52,11 @@ function tc(raw: unknown): TTCSource {
   return raw as TTCSource;
 }
 
+/** Actor label for titles when view is by branch vs by loan officer (from provider-injected _actorType). */
+function ttcActorLabel(raw: unknown): string {
+  return (raw as TTCSource & { _actorType?: string })._actorType === 'branch' ? 'Branch' : 'Loan Officer';
+}
+
 // ---------------------------------------------------------------------------
 // KPI Widgets
 // ---------------------------------------------------------------------------
@@ -150,7 +155,7 @@ const ttcRevenueChart: WidgetDefinition<ChartData> = {
       };
     });
     return {
-      title: 'Revenue by Actor',
+      title: `Revenue by ${ttcActorLabel(raw)}`,
       chartType: 'bar' as const,
       data,
       series: [{ dataKey: 'revenue', name: 'Revenue' }],
@@ -187,7 +192,7 @@ const ttcUnitsChart: WidgetDefinition<ChartData> = {
       };
     });
     return {
-      title: 'Units by Actor',
+      title: `Units by ${ttcActorLabel(raw)}`,
       chartType: 'bar' as const,
       data,
       series: [{ dataKey: 'units', name: 'Units' }],
@@ -224,7 +229,7 @@ const ttcBpsChart: WidgetDefinition<ChartData> = {
       };
     });
     return {
-      title: 'Revenue BPS by Actor',
+      title: `Revenue BPS by ${ttcActorLabel(raw)}`,
       chartType: 'bar' as const,
       data,
       series: [{ dataKey: 'bps', name: 'Revenue BPS' }],
@@ -270,7 +275,7 @@ const ttcDetailTable: WidgetDefinition<TableData> = {
       bps: +(a.revenueBPS ?? 0).toFixed(1),
       perLoan: a.revenuePerLoan,
     }));
-    return { title: 'Detail by Actor', columns, rows, stickyFirstColumn: true };
+    return { title: `Detail by ${ttcActorLabel(raw)}`, columns, rows, stickyFirstColumn: true };
   },
   defaultSize: { w: 500, h: 220 },
   minSize: { w: 250, h: 112 },

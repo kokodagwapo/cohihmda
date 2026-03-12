@@ -692,7 +692,9 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
       error: null,
     },
     'top-tiering-comparison': {
-      data: topTieringComparison.data,
+      data: topTieringComparison.data
+        ? { ...topTieringComparison.data, _actorType: ttcFilters?.actorType ?? 'loan_officer' }
+        : null,
       loading: topTieringComparison.loading,
       error: topTieringComparison.error,
     },
@@ -788,6 +790,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     salesTrends.data, salesTrends.loading, salesTrends.error,
     funnelData, funnelLoading,
     topTieringComparison.data, topTieringComparison.loading, topTieringComparison.error,
+    ttcFilters?.actorType,
     leaderboardData, leaderboardLoading,
     loanDetail.data, loanDetail.loading, loanDetail.error,
     highPerformersData, highPerformersLoading, highPerformersError,
