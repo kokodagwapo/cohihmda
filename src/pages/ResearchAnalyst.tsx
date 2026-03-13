@@ -39,6 +39,8 @@ import {
   ThumbsDown,
   MessageSquarePlus,
   Share2,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { ExportMenu } from "@/components/common/ExportMenu";
 import { UserSharePicker } from "@/components/common/UserSharePicker";
@@ -384,6 +386,7 @@ export default function ResearchAnalyst() {
   const [shareDialogVisibility, setShareDialogVisibility] = useState<"private" | "shared" | "global">("private");
   const [shareDialogSharedIds, setShareDialogSharedIds] = useState<string[]>([]);
   const [shareDialogSaving, setShareDialogSaving] = useState(false);
+  const [suggestionsExpanded, setSuggestionsExpanded] = useState(false);
 
   // ---- Tracked insights (watchlist) for research report ----
   // Map<normalizedHeadline, trackedInsightUUID> for both UI state and delete IDs.
@@ -1010,24 +1013,39 @@ export default function ResearchAnalyst() {
                     </Button>
                   </div>
                   {phase === "complete" && report?.furtherInvestigation && report.furtherInvestigation.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 mt-2">
-                      <span className="text-xs text-muted-foreground self-center mr-1">Suggested:</span>
-                      {report.furtherInvestigation.map((item, i) => (
-                        <Badge
-                          key={i}
-                          variant="secondary"
-                          className="cursor-pointer hover:bg-primary/20 hover:text-primary transition-colors py-1 px-2 text-xs font-normal"
-                          onClick={() => {
-                            reset();
-                            setTopicInput(item.question);
-                            lastReportRef.current = false;
-                            startSession(item.question);
-                            setActiveTab("timeline");
-                          }}
-                        >
-                          {item.question}
-                        </Badge>
-                      ))}
+                    <div className="mt-2">
+                      <button
+                        type="button"
+                        onClick={() => setSuggestionsExpanded(v => !v)}
+                        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        {suggestionsExpanded
+                          ? <ChevronUp className="h-3 w-3" />
+                          : <ChevronDown className="h-3 w-3" />
+                        }
+                        {suggestionsExpanded ? "Hide" : "Suggested follow-ups"} ({report.furtherInvestigation.length})
+                      </button>
+                      {suggestionsExpanded && (
+                        <div className="flex flex-wrap gap-1.5 mt-1.5">
+                          {report.furtherInvestigation.map((item, i) => (
+                            <Badge
+                              key={i}
+                              variant="secondary"
+                              className="cursor-pointer hover:bg-primary/20 hover:text-primary transition-colors py-1 px-2 text-xs font-normal"
+                              onClick={() => {
+                                reset();
+                                setTopicInput(item.question);
+                                lastReportRef.current = false;
+                                startSession(item.question);
+                                setActiveTab("timeline");
+                                setSuggestionsExpanded(false);
+                              }}
+                            >
+                              {item.question}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                   <p className="text-xs text-muted-foreground mt-1">
