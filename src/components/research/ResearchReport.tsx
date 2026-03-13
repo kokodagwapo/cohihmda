@@ -79,7 +79,7 @@ interface ResearchReportProps {
     targetId: string | null,
     rating: -1 | 1 | null,
     comment: string | null,
-    context?: any
+    context?: Record<string, unknown>
   ) => void;
   onDrillDown?: (finding: Finding) => void;
   /** Whether this insight is already on the watchlist (for research insights). */
@@ -433,51 +433,6 @@ function KpiSummaryStrip({ findings }: { findings: Finding[] }) {
   );
 }
 
-// ============================================================================
-// Section Navigation
-// ============================================================================
-
-const SECTIONS = [
-  { id: "summary", label: "Summary" },
-  { id: "themes", label: "Themes" },
-  { id: "insights", label: "Insights" },
-  { id: "next-steps", label: "Next Steps" },
-] as const;
-
-function SectionNav({
-  activeSection,
-  counts,
-  onNavigate,
-}: {
-  activeSection: string;
-  counts: Record<string, number>;
-  onNavigate: (id: string) => void;
-}) {
-  return (
-    <div className="flex gap-1 bg-muted/50 rounded-lg p-1 w-fit">
-      {SECTIONS.map((s) => {
-        const count = counts[s.id];
-        const isActive = activeSection === s.id;
-        return (
-          <button
-            key={s.id}
-            onClick={() => onNavigate(s.id)}
-            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
-              isActive
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {s.label}
-            {count != null && count > 0 && (
-              <span className="ml-1 text-[10px] opacity-60">({count})</span>
-            )}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
 
 // ============================================================================
 // Sub-components
@@ -902,11 +857,9 @@ const FURTHER_INITIAL_VISIBLE = 3;
 function FurtherInvestigationSection({
   items,
   onRun,
-  sectionRef,
 }: {
   items: { question: string; rationale: string }[];
   onRun?: (question: string) => void;
-  sectionRef?: React.RefObject<HTMLDivElement | null>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const visible = expanded ? items : items.slice(0, FURTHER_INITIAL_VISIBLE);
@@ -915,7 +868,7 @@ function FurtherInvestigationSection({
   return (
     <>
       <Separator />
-      <div ref={sectionRef}>
+      <div>
         <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
           <Search className="h-4 w-4" />
           Suggested Further Investigation
@@ -986,58 +939,7 @@ export function ResearchReport({
   onTrackInsight,
   onRunFurtherInvestigation,
 }: ResearchReportProps) {
-  const [viewMode, setViewMode] = useState<ViewMode>("brief");
-  const [activeSection, setActiveSection] = useState("summary");
   const [saveToWorkbenchPayload, setSaveToWorkbenchPayload] = useState<SaveToWorkbenchPayload | null>(null);
-
-  const summaryRef = useRef<HTMLDivElement>(null);
-  const themesRef = useRef<HTMLDivElement>(null);
-  const insightsRef = useRef<HTMLDivElement>(null);
-  const nextStepsRef = useRef<HTMLDivElement>(null);
-
-  const sectionRefs: Record<string, React.RefObject<HTMLDivElement | null>> = {
-    summary: summaryRef,
-    themes: themesRef,
-    insights: insightsRef,
-    "next-steps": nextStepsRef,
-  };
-
-  const sectionCounts = useMemo(
-    () => ({
-      summary: 0,
-      themes: report.themes?.length ?? 0,
-      insights: report.rankedInsights?.length ?? 0,
-      "next-steps": report.furtherInvestigation?.length ?? 0,
-    }),
-    [report]
-  );
-
-  // IntersectionObserver for active section highlighting
-  useEffect(() => {
-    const refs = [summaryRef, themesRef, insightsRef, nextStepsRef];
-    const ids = ["summary", "themes", "insights", "next-steps"];
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            const idx = refs.findIndex((r) => r.current === entry.target);
-            if (idx >= 0) setActiveSection(ids[idx]);
-          }
-        }
-      },
-      { threshold: 0.3 }
-    );
-
-    for (const ref of refs) {
-      if (ref.current) observer.observe(ref.current);
-    }
-    return () => observer.disconnect();
-  }, []);
-
-  const handleNavigate = useCallback((id: string) => {
-    sectionRefs[id]?.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, []);
 
   const handleFindingFeedback = useCallback(
     (id: string, rating: -1 | 1, comment: string) => {
@@ -1047,47 +949,9 @@ export function ResearchReport({
     [onSubmitFeedback]
   );
 
-  const isBrief = viewMode === "brief";
-  const displayInsights = isBrief
-    ? (report.rankedInsights || []).slice(0, 3)
-    : report.rankedInsights || [];
-
   return (
     <div className="space-y-4 py-2">
-      {/* ========== Top bar: Section Nav + View Toggle ========== */}
-      <div className="flex items-center justify-between gap-3 flex-wrap sticky top-0 z-10 bg-background/95 backdrop-blur-sm py-2 -mt-2">
-        <SectionNav
-          activeSection={activeSection}
-          counts={sectionCounts}
-          onNavigate={handleNavigate}
-        />
-        <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-0.5">
-          <button
-            onClick={() => setViewMode("brief")}
-            className={`flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md transition-all ${
-              isBrief
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <Eye className="h-3 w-3" />
-            Brief
-          </button>
-          <button
-            onClick={() => setViewMode("full")}
-            className={`flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md transition-all ${
-              !isBrief
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <FileText className="h-3 w-3" />
-            Full Report
-          </button>
-        </div>
-      </div>
-
-      {/* ========== Direct Answer (when user asked a specific question) ========== */}
+      {/* ========== Direct Answer — first thing visible ========== */}
       {report.directAnswer && (
         <div className="space-y-1">
           <h3 className="text-sm font-semibold flex items-center gap-2">
@@ -1099,12 +963,10 @@ export function ResearchReport({
       )}
 
       {/* ========== Executive Summary ========== */}
-      <div ref={summaryRef}>
-        <ExecutiveSummary summary={report.executiveSummary} />
-      </div>
+      <ExecutiveSummary summary={report.executiveSummary} />
 
-      {/* ========== Action priority summary (deep report only) ========== */}
-      {!isBrief && report.rankedInsights?.length > 0 && (
+      {/* ========== Action priority summary ========== */}
+      {report.rankedInsights?.length > 0 && (
         <Card className="rounded-lg border bg-muted/30">
           <CardContent className="pt-4 pb-3 px-4">
             <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
@@ -1156,9 +1018,9 @@ export function ResearchReport({
       {/* ========== KPI Summary Strip ========== */}
       {findings.length > 0 && <KpiSummaryStrip findings={findings} />}
 
-      {/* ========== Key Themes (Collapsible Accordion) ========== */}
-      {!isBrief && report.themes && report.themes.length > 0 && (
-        <div ref={themesRef}>
+      {/* ========== Key Themes ========== */}
+      {report.themes && report.themes.length > 0 && (
+        <div>
           <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
             <Target className="h-4 w-4" />
             Key Themes
@@ -1174,25 +1036,17 @@ export function ResearchReport({
       <Separator />
 
       {/* ========== Ranked Insights ========== */}
-      {displayInsights.length > 0 && (
-        <div ref={insightsRef}>
+      {(report.rankedInsights?.length ?? 0) > 0 && (
+        <div>
           <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
             Ranked Insights
             <InfoTip text="Findings ranked by business impact — highest priority first" />
             <span className="text-xs font-normal text-muted-foreground">
               ({report.rankedInsights?.length ?? 0})
             </span>
-            {isBrief && (report.rankedInsights?.length ?? 0) > 3 && (
-              <button
-                onClick={() => setViewMode("full")}
-                className="text-xs text-blue-600 dark:text-blue-400 hover:underline ml-auto"
-              >
-                Show all {report.rankedInsights?.length}
-              </button>
-            )}
           </h3>
           <div className="space-y-4">
-            {displayInsights.map((insight) => (
+            {(report.rankedInsights ?? []).map((insight) => (
               <InsightCard
                 key={insight.rank}
                 insight={insight}
@@ -1215,13 +1069,11 @@ export function ResearchReport({
       )}
 
       {/* ========== Further Investigation ========== */}
-      {!isBrief &&
-        report.furtherInvestigation &&
+      {report.furtherInvestigation &&
         report.furtherInvestigation.length > 0 && (
           <FurtherInvestigationSection
             items={report.furtherInvestigation}
             onRun={onRunFurtherInvestigation}
-            sectionRef={nextStepsRef}
           />
         )}
 

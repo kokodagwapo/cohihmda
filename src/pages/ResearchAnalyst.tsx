@@ -910,9 +910,6 @@ export default function ResearchAnalyst() {
                 <TabsContent value="report" className="flex-1 overflow-y-auto m-0 px-6 pb-4" data-tour="research-report">
                   {report ? (
                     <div ref={reportContainerRef} className="space-y-4 py-2">
-                      {phase === "complete" && (
-                        <SessionFeedback onSubmit={handleSessionFeedback} />
-                      )}
                       <ResearchReport
                         report={report}
                         findings={findings}
@@ -933,12 +930,12 @@ export default function ResearchAnalyst() {
                           setActiveTab("timeline");
                         }}
                       />
-                    </div>
-                  ) : findings.length >= 1 && phase === "complete" ? (
-                    <div className="space-y-4 py-2">
                       {phase === "complete" && (
                         <SessionFeedback onSubmit={handleSessionFeedback} />
                       )}
+                    </div>
+                  ) : findings.length >= 1 && phase === "complete" ? (
+                    <div className="space-y-4 py-2">
                       <QuickAnswerView
                         finding={findings[findings.length - 1]}
                         onDrillDown={(f) => {
@@ -948,6 +945,7 @@ export default function ResearchAnalyst() {
                         onSaveToWorkbench={setWorkbenchPayload}
                         sessionId={sessionId}
                       />
+                      <SessionFeedback onSubmit={handleSessionFeedback} />
                     </div>
                   ) : (
                     <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
