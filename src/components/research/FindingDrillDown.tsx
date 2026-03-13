@@ -670,6 +670,11 @@ const EVIDENCE_PREVIEW_MAX_ROWS = 20;
 export interface EvidencePreviewTableProps {
   evidence: EvidenceItem;
   maxRows?: number;
+  onSaveToWorkbench?: (payload: SaveToWorkbenchPayload) => void;
+  /** Title used for the workbench widget (e.g. finding/insight headline). */
+  saveTitle?: string;
+  /** Research session ID, forwarded to the workbench payload. */
+  sessionId?: string | null;
 }
 
 function EvidenceCell({
@@ -706,7 +711,7 @@ function EvidenceCell({
   );
 }
 
-export function EvidencePreviewTable({ evidence, maxRows = EVIDENCE_PREVIEW_MAX_ROWS }: EvidencePreviewTableProps) {
+export function EvidencePreviewTable({ evidence, maxRows = EVIDENCE_PREVIEW_MAX_ROWS, onSaveToWorkbench, saveTitle, sessionId }: EvidencePreviewTableProps) {
   const [expanded, setExpanded] = useState(false);
   const columnFormats = useMemo(() => {
     const formats: Record<string, FieldFormat> = {};
@@ -750,8 +755,74 @@ export function EvidencePreviewTable({ evidence, maxRows = EVIDENCE_PREVIEW_MAX_
 
   if (totalRows === 0) return null;
 
+  const handleExportCSV = () => {
+    const header = evidence.fields.map(humanizeKey).join(",");
+    const rows = evidence.rows.map((r) => evidence.fields.map((f) => {
+      const v = r[f]; return v == null ? "" : typeof v === "string" && v.includes(",") ? `"${v}"` : String(v);
+    }).join(","));
+    const blob = new Blob([header + "\n" + rows.join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = "evidence.csv"; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportExcel = () => {
+    exportDataAsExcel(evidence.rows, evidence.fields, saveTitle || "Evidence");
+  };
+
   return (
     <div className="rounded-md border overflow-hidden" role="region" aria-label="Evidence preview table">
+      <div className="flex items-center justify-between px-2 py-1 bg-muted/30 border-b">
+        <span className="text-[10px] text-muted-foreground font-medium">
+          {totalRows} row{totalRows !== 1 ? "s" : ""}
+        </span>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-6 w-6">
+              <MoreHorizontal className="h-3.5 w-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-44">
+            <DropdownMenuItem onClick={handleExportCSV} className="gap-2 text-xs cursor-pointer">
+              <FileText className="h-3.5 w-3.5" />
+              Export CSV
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleExportExcel} className="gap-2 text-xs cursor-pointer">
+              <FileSpreadsheet className="h-3.5 w-3.5" />
+              Export Excel
+            </DropdownMenuItem>
+            {onSaveToWorkbench && (
+              <DropdownMenuItem
+                className="gap-2 text-xs cursor-pointer"
+                onClick={() =>
+                  onSaveToWorkbench({
+                    sql: evidence.sql,
+                    title: [saveTitle, evidence.explanation].filter(Boolean).join(" — ").slice(0, 120) || "Research table",
+                    vizConfig: {
+                      type: "table",
+                      title: [saveTitle, evidence.explanation].filter(Boolean).join(" — ").slice(0, 80) || "Table",
+                      data: [],
+                      tableConfig: {
+                        columns: evidence.fields.map((f) => ({
+                          key: f,
+                          label: humanizeKey(f),
+                          format: columnFormats[f] || "text",
+                        })),
+                      },
+                    },
+                    explanation: evidence.explanation,
+                    sourceType: "research",
+                    sourceSessionId: sessionId ?? undefined,
+                  })
+                }
+              >
+                <Bookmark className="h-3.5 w-3.5" />
+                Save to Workbench
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
       <div className="overflow-x-auto overflow-y-visible">
         <table className="w-full border-collapse text-xs" style={{ minWidth: `${evidence.fields.length * 90}px` }}>
           <thead>
@@ -1250,6 +1321,11 @@ export interface AutoChartProps {
   evidence: EvidenceItem;
   /** When true render at hero size (h-64, tick font 11). Default false = h-48, tick font 10. */
   hero?: boolean;
+  onSaveToWorkbench?: (payload: SaveToWorkbenchPayload) => void;
+  /** Title used for the workbench widget. */
+  saveTitle?: string;
+  /** Research session ID, forwarded to the workbench payload. */
+  sessionId?: string | null;
 }
 
 // Minimum pixel width per category group to ensure every label is readable
@@ -1275,7 +1351,7 @@ function calcMinWidthLine(numPoints: number): number | undefined {
   return computed > SCROLL_THRESHOLD_PX ? computed : undefined;
 }
 
-export function AutoChart({ evidence, hero = false }: AutoChartProps) {
+export function AutoChart({ evidence, hero = false, onSaveToWorkbench, saveTitle, sessionId }: AutoChartProps) {
   const config = evidenceToChartConfig(evidence);
   if (!config) return null;
 
@@ -1304,7 +1380,7 @@ export function AutoChart({ evidence, hero = false }: AutoChartProps) {
       fill: MULTI_SERIES_COLORS[i % MULTI_SERIES_COLORS.length],
     }));
     return (
-      <AutoChartShell title={title} hero={hero}>
+      <AutoChartShell title={title} hero={hero} onSaveToWorkbench={onSaveToWorkbench} evidence={evidence} sessionId={sessionId} saveTitle={saveTitle}>
         <PieChart>
           <Pie
             data={pieData}
@@ -1330,7 +1406,7 @@ export function AutoChart({ evidence, hero = false }: AutoChartProps) {
   if (chartType === 'area') {
     const minWidth = calcMinWidthLine(data.length);
     return (
-      <AutoChartShell title={title} hero={hero} minWidth={minWidth}>
+      <AutoChartShell title={title} hero={hero} minWidth={minWidth} onSaveToWorkbench={onSaveToWorkbench} evidence={evidence} sessionId={sessionId} saveTitle={saveTitle}>
         <AreaChart data={data} margin={{ top: 5, right: 10, bottom: 5, left: 5 }}>
           {grid}
           <XAxis dataKey={xKey} interval={0} tick={{ fontSize: tickFontSize }} angle={-30} textAnchor="end" height={48} axisLine={false} tickLine={false} />
@@ -1360,7 +1436,7 @@ export function AutoChart({ evidence, hero = false }: AutoChartProps) {
   if (chartType === 'line') {
     const minWidth = calcMinWidthLine(data.length);
     return (
-      <AutoChartShell title={title} hero={hero} minWidth={minWidth}>
+      <AutoChartShell title={title} hero={hero} minWidth={minWidth} onSaveToWorkbench={onSaveToWorkbench} evidence={evidence} sessionId={sessionId} saveTitle={saveTitle}>
         <LineChart data={data} margin={{ top: 5, right: 10, bottom: 5, left: 5 }}>
           {grid}
           <XAxis dataKey={xKey} interval={0} tick={{ fontSize: tickFontSize }} angle={-30} textAnchor="end" height={48} axisLine={false} tickLine={false} />
@@ -1393,7 +1469,7 @@ export function AutoChart({ evidence, hero = false }: AutoChartProps) {
     const baseH = hero ? 256 : 192;
     const minHeight = computedH > baseH ? computedH : undefined;
     return (
-      <AutoChartShell title={title} hero={hero} minHeight={minHeight}>
+      <AutoChartShell title={title} hero={hero} minHeight={minHeight} onSaveToWorkbench={onSaveToWorkbench} evidence={evidence} sessionId={sessionId} saveTitle={saveTitle}>
         <BarChart layout="vertical" data={data} margin={{ top: 5, right: 20, bottom: 5, left: 5 }}>
           {grid}
           <XAxis type="number" tick={{ fontSize: tickFontSize }} axisLine={false} tickLine={false} />
@@ -1415,7 +1491,7 @@ export function AutoChart({ evidence, hero = false }: AutoChartProps) {
   // ── Vertical bar / grouped_bar / stacked_bar ──────────────────────────────
   const minWidth = calcMinWidth(data.length, seriesKeys.length, isMultiSeries);
   return (
-    <AutoChartShell title={title} hero={hero} minWidth={minWidth}>
+    <AutoChartShell title={title} hero={hero} minWidth={minWidth} onSaveToWorkbench={onSaveToWorkbench} evidence={evidence} sessionId={sessionId} saveTitle={saveTitle}>
       <BarChart data={data} margin={{ top: 5, right: 10, bottom: 8, left: 5 }}>
         {grid}
         <XAxis
@@ -1453,9 +1529,14 @@ interface AutoChartShellProps {
   /** Minimum pixel height for the chart canvas — triggers vertical scroll when set (horizontal bars) */
   minHeight?: number;
   children: React.ReactNode;
+  onSaveToWorkbench?: (payload: SaveToWorkbenchPayload) => void;
+  /** Evidence data for building the workbench save payload. */
+  evidence?: EvidenceItem;
+  sessionId?: string | null;
+  saveTitle?: string;
 }
 
-function AutoChartShell({ title, hero = false, minWidth, minHeight, children }: AutoChartShellProps) {
+function AutoChartShell({ title, hero = false, minWidth, minHeight, children, onSaveToWorkbench, evidence, sessionId, saveTitle }: AutoChartShellProps) {
   const [maximized, setMaximized] = useState(false);
   const baseHeight = hero ? 256 : 192;
   // For horizontal bar: grow vertically up to 2× base, then scroll
@@ -1491,14 +1572,50 @@ function AutoChartShell({ title, hero = false, minWidth, minHeight, children }: 
             <BarChart3 className="h-3 w-3 flex-shrink-0" />
             <span className="truncate">{title}</span>
           </p>
-          <button
-            type="button"
-            onClick={() => setMaximized(true)}
-            className="flex-shrink-0 rounded p-0.5 text-muted-foreground/50 hover:text-muted-foreground transition-colors"
-            title="Maximize chart"
-          >
-            <Maximize2 className="h-3.5 w-3.5" />
-          </button>
+          <div className="flex items-center gap-0.5 flex-shrink-0">
+            {onSaveToWorkbench && evidence && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="rounded p-0.5 text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+                  >
+                    <MoreHorizontal className="h-3.5 w-3.5" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-44">
+                  <DropdownMenuItem
+                    className="gap-2 text-xs cursor-pointer"
+                    onClick={() =>
+                      onSaveToWorkbench({
+                        sql: evidence.sql,
+                        title: [saveTitle, title].filter(Boolean).join(" — ").slice(0, 120) || "Research chart",
+                        vizConfig: {
+                          type: "table",
+                          title: title || "Chart",
+                          data: [],
+                        },
+                        explanation: evidence.explanation,
+                        sourceType: "research",
+                        sourceSessionId: sessionId ?? undefined,
+                      })
+                    }
+                  >
+                    <Bookmark className="h-3.5 w-3.5" />
+                    Save to Workbench
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            <button
+              type="button"
+              onClick={() => setMaximized(true)}
+              className="rounded p-0.5 text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+              title="Maximize chart"
+            >
+              <Maximize2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
         {renderChart(false)}
       </div>

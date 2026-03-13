@@ -57,6 +57,7 @@ import { cn } from "@/lib/utils";
 import { renderMarkdownText } from "@/utils/renderMarkdown";
 import { InsightChat } from "@/components/dashboard/InsightChat";
 import { AutoChart, EvidencePreviewTable } from "@/components/research/FindingDrillDown";
+import { SaveToWorkbenchModal, type SaveToWorkbenchPayload } from "@/components/research/SaveToWorkbenchModal";
 import type {
   ResearchReport as ResearchReportType,
   ResearchTheme,
@@ -151,9 +152,13 @@ function humanizeKeyQuick(key: string): string {
 export function QuickAnswerView({
   finding,
   onDrillDown,
+  onSaveToWorkbench,
+  sessionId,
 }: {
   finding: Finding;
   onDrillDown?: (finding: Finding) => void;
+  onSaveToWorkbench?: (payload: SaveToWorkbenchPayload) => void;
+  sessionId?: string | null;
 }) {
   return (
     <div className="space-y-4 py-2">
@@ -208,7 +213,7 @@ export function QuickAnswerView({
                         {ev.explanation}
                       </p>
                     )}
-                    <EvidencePreviewTable evidence={ev} maxRows={20} />
+                    <EvidencePreviewTable evidence={ev} maxRows={20} onSaveToWorkbench={onSaveToWorkbench} saveTitle={finding.title} sessionId={sessionId} />
                   </div>
                 ))}
               </div>
@@ -607,6 +612,8 @@ function InsightCard({
   onTrackInsight,
   selectedTenantId,
   defaultEvidenceOpen = false,
+  onSaveToWorkbench,
+  sessionId,
 }: {
   insight: RankedInsight;
   findings: Finding[];
@@ -616,8 +623,9 @@ function InsightCard({
   onToggleTrack?: (headline: string, detail: string) => void;
   onTrackInsight?: (headline: string, detail: string) => void;
   selectedTenantId?: string | null;
-  /** Open the evidence (table/chart) by default for top insights. */
   defaultEvidenceOpen?: boolean;
+  onSaveToWorkbench?: (payload: SaveToWorkbenchPayload) => void;
+  sessionId?: string | null;
 }) {
   const [chatOpen, setChatOpen] = useState(false);
   const relatedFindings = findings.filter((f) =>
@@ -850,8 +858,8 @@ function InsightCard({
             return (
               <CollapsibleEvidence defaultOpen={defaultEvidenceOpen}>
                 <div className="space-y-3 pt-1 min-w-0">
-                  <EvidencePreviewTable evidence={firstEvidence} maxRows={defaultEvidenceOpen ? 20 : 12} />
-                  <AutoChart evidence={firstEvidence} />
+                  <EvidencePreviewTable evidence={firstEvidence} maxRows={defaultEvidenceOpen ? 20 : 12} onSaveToWorkbench={onSaveToWorkbench} saveTitle={insight.headline} sessionId={sessionId} />
+                  <AutoChart evidence={firstEvidence} onSaveToWorkbench={onSaveToWorkbench} saveTitle={insight.headline} sessionId={sessionId} />
                 </div>
               </CollapsibleEvidence>
             );
@@ -937,6 +945,7 @@ export function ResearchReport({
 }: ResearchReportProps) {
   const [viewMode, setViewMode] = useState<ViewMode>("brief");
   const [activeSection, setActiveSection] = useState("summary");
+  const [saveToWorkbenchPayload, setSaveToWorkbenchPayload] = useState<SaveToWorkbenchPayload | null>(null);
 
   const summaryRef = useRef<HTMLDivElement>(null);
   const themesRef = useRef<HTMLDivElement>(null);
@@ -1154,6 +1163,8 @@ export function ResearchReport({
                 onTrackInsight={onTrackInsight}
                 selectedTenantId={selectedTenantId}
                 defaultEvidenceOpen={insight.rank <= 2}
+                onSaveToWorkbench={setSaveToWorkbenchPayload}
+                sessionId={sessionId}
               />
             ))}
           </div>
@@ -1191,6 +1202,12 @@ export function ResearchReport({
           Report generated {new Date(report.generatedAt).toLocaleString()}
         </p>
       )}
+
+      <SaveToWorkbenchModal
+        open={saveToWorkbenchPayload != null}
+        onClose={() => setSaveToWorkbenchPayload(null)}
+        payload={saveToWorkbenchPayload}
+      />
     </div>
   );
 }
