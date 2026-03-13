@@ -9,7 +9,7 @@
  *   - SQL queries (collapsible, debug-mode only)
  */
 
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, cloneElement } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   BarChart,
@@ -38,10 +38,11 @@ import {
   HelpCircle,
   X,
   Search,
-  Download,
   FileSpreadsheet,
   FileText,
   Bookmark,
+  MoreHorizontal,
+  Maximize2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -59,6 +60,17 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { useDebugMode } from "@/contexts/DebugModeContext";
 import { exportDataAsExcel } from "@/utils/exportUtils";
@@ -259,15 +271,15 @@ function KPICard({ metricKey, value, description, agentFormat }: { metricKey: st
   const tip = description || SUMMARY_REGISTRY[metricKey]?.description;
 
   return (
-    <Card className="flex-1 min-w-[140px]">
-      <CardContent className="pt-3 pb-2 px-4">
+    <Card className="flex-1 min-w-[120px]">
+      <CardContent className="pt-2 pb-1.5 px-3">
         <div className="flex items-center gap-1">
-          <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide truncate">
+          <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide truncate">
             {label}
           </p>
           {tip && <InfoTip text={tip} />}
         </div>
-        <p className="text-lg font-bold tabular-nums mt-1">{formatted}</p>
+        <p className="text-base font-bold tabular-nums mt-0.5">{formatted}</p>
       </CardContent>
     </Card>
   );
@@ -446,55 +458,62 @@ function EvidenceTable({ evidence, index, findingTitle, sessionId, onSaveToWorkb
             {evidence.rowCount} rows
           </span>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={handleExportCSV}>
-            <FileText className="h-3 w-3" />
-            CSV
-          </Button>
-          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={handleExportExcel}>
-            <FileSpreadsheet className="h-3 w-3" />
-            Excel
-          </Button>
-          {onSaveToWorkbench && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 text-xs gap-1"
-              onClick={() =>
-                onSaveToWorkbench({
-                  sql: evidence.sql,
-                  title: [findingTitle, evidence.explanation].filter(Boolean).join(" — ").slice(0, 120) || "Research table",
-                  vizConfig: {
-                    type: "table",
-                    title: [findingTitle, evidence.explanation].filter(Boolean).join(" — ").slice(0, 80) || "Table",
-                    data: [],
-                    tableConfig: {
-                      columns: evidence.fields.map((f) => ({
-                        key: f,
-                        label: humanizeKey(f),
-                        format: columnFormats[f] || "text",
-                      })),
-                    },
-                  },
-                  explanation: evidence.explanation,
-                  sourceType: "research",
-                  sourceSessionId: sessionId ?? undefined,
-                })
-              }
-            >
-              <Bookmark className="h-3 w-3" />
-              Save to Workbench
-            </Button>
-          )}
+        <div className="flex items-center gap-1.5">
           <div className="relative">
             <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
             <Input
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               placeholder="Filter..."
-              className="h-7 text-xs pl-7 w-40"
+              className="h-7 text-xs pl-7 w-32"
             />
           </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-7 w-7">
+                <MoreHorizontal className="h-3.5 w-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44">
+              <DropdownMenuItem onClick={handleExportCSV} className="gap-2 text-xs cursor-pointer">
+                <FileText className="h-3.5 w-3.5" />
+                Export CSV
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleExportExcel} className="gap-2 text-xs cursor-pointer">
+                <FileSpreadsheet className="h-3.5 w-3.5" />
+                Export Excel
+              </DropdownMenuItem>
+              {onSaveToWorkbench && (
+                <DropdownMenuItem
+                  className="gap-2 text-xs cursor-pointer"
+                  onClick={() =>
+                    onSaveToWorkbench({
+                      sql: evidence.sql,
+                      title: [findingTitle, evidence.explanation].filter(Boolean).join(" — ").slice(0, 120) || "Research table",
+                      vizConfig: {
+                        type: "table",
+                        title: [findingTitle, evidence.explanation].filter(Boolean).join(" — ").slice(0, 80) || "Table",
+                        data: [],
+                        tableConfig: {
+                          columns: evidence.fields.map((f) => ({
+                            key: f,
+                            label: humanizeKey(f),
+                            format: columnFormats[f] || "text",
+                          })),
+                        },
+                      },
+                      explanation: evidence.explanation,
+                      sourceType: "research",
+                      sourceSessionId: sessionId ?? undefined,
+                    })
+                  }
+                >
+                  <Bookmark className="h-3.5 w-3.5" />
+                  Save to Workbench
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -877,18 +896,84 @@ function getNumericFields(fields: string[], rows: Record<string, any>[]): string
   });
 }
 
+// ── Shared data-normalisation helpers ────────────────────────────────────────
+
+/**
+ * Aggregate rows so there is exactly one entry per unique x-value.
+ * All numeric value keys are summed within each group.
+ * Rows are expected to already have rawLabel applied to xKey.
+ */
+function aggregateByX(
+  rows: Record<string, any>[],
+  xKey: string,
+  valueKeys: string[],
+): Record<string, any>[] {
+  const agg = new Map<string, Record<string, any>>();
+  for (const row of rows) {
+    const x = String(row[xKey] ?? "");
+    if (!agg.has(x)) {
+      const entry: Record<string, any> = { [xKey]: x };
+      for (const k of valueKeys) entry[k] = 0;
+      agg.set(x, entry);
+    }
+    const entry = agg.get(x)!;
+    for (const k of valueKeys) {
+      entry[k] = (entry[k] ?? 0) + parseNumeric(row[k]);
+    }
+  }
+  return [...agg.values()];
+}
+
+/**
+ * Pivot long-format rows to wide format.
+ * Each unique xKey value becomes one row; each unique seriesKey value becomes a
+ * column containing the parsed numeric value from valueKey.
+ *
+ * Returns null when the pivot produces fewer than 2 distinct x-categories or
+ * when no series values are actually present in the data.
+ */
+function pivotLongToWide(
+  rows: Record<string, any>[],
+  xKey: string,
+  seriesKey: string,
+  valueKey: string,
+): { data: Record<string, any>[]; seriesValues: string[] } | null {
+  const seriesValues = [...new Set(rows.map(r => String(r[seriesKey] ?? "")))].slice(0, 6);
+  if (seriesValues.length === 0) return null;
+  const categories = [...new Set(rows.map(r => String(r[xKey] ?? "")))];
+  if (categories.length < 2) return null;
+  const pivotMap: Record<string, Record<string, any>> = {};
+  for (const cat of categories) pivotMap[cat] = { [xKey]: rawLabel(cat) };
+  for (const row of rows) {
+    const cat = String(row[xKey] ?? "");
+    const ser = String(row[seriesKey] ?? "");
+    if (seriesValues.includes(ser)) {
+      pivotMap[cat][ser] = parseNumeric(row[valueKey]);
+    }
+  }
+  const data = Object.values(pivotMap);
+  // Require at least one series column with non-zero data across rows
+  const populated = seriesValues.filter(sv => data.some(d => d[sv] !== 0 && d[sv] !== undefined));
+  if (populated.length === 0) return null;
+  return { data, seriesValues: populated };
+}
+
 // ── Core adapter: evidence → resolved config ─────────────────────────────────
 /**
  * evidenceToChartConfig
  *
  * Priority order:
  *  1. Use chartHint from the AI agent when present — it has explicit axis keys
- *     and chart type knowledge.
+ *     and chart type knowledge. If the agent hinted a single-series chart but
+ *     the underlying data is long-format (duplicate x-values), we automatically
+ *     pivot to grouped_bar or aggregate to guarantee one bar per x-value.
  *  2. Multi-series fallback: if 2+ numeric fields coexist with a label field,
- *     render a grouped_bar.
+ *     render a grouped_bar. Deduplicates by aggregating per x-category.
  *  3. Duplicate-label fallback: if the best label has duplicates and a second
  *     categorical field exists, attempt a client-side pivot to grouped_bar.
- *  4. Single-series fallback: current behaviour (best label + best value).
+ *  4. Single-series fallback: best label + best value. Aggregates duplicates.
+ *
+ * KEY INVARIANT: every returned config has exactly one data row per x-value.
  */
 function evidenceToChartConfig(evidence: EvidenceItem): ResolvedChartConfig | null {
   const { fields, rows, chartHint, columnFormats } = evidence;
@@ -914,6 +999,71 @@ function evidenceToChartConfig(evidence: EvidenceItem): ResolvedChartConfig | nu
       : humanizeKey(yKey ?? numericFields[0]);
     const titleXLabel = humanizeKey(xKey ?? fields[0]);
 
+    // ── Duplicate x-value guard (long-format SQL data) ──────────────────────
+    // The agent may label the chart as single-series but issue a SQL query that
+    // returns multiple rows per x-category (e.g. program × period).  When that
+    // happens we must pivot or aggregate before rendering — otherwise Recharts
+    // gets two bars for "FHA Fixed Rate" both labelled with the same series name.
+    if (!isMulti) {
+      const uniqueRawX = new Set(rows.slice(0, 30).map(r => String(r[xKey] ?? "")));
+      const totalRows = Math.min(rows.length, 30);
+      if (uniqueRawX.size < totalRows) {
+        // There are duplicate x-values → try pivot first
+        const actualYKey = yKey ?? numericFields[0];
+        const seriesCandidates = fields.filter(f => {
+          if (f === xKey || numericFields.includes(f)) return false;
+          const vals = rows.map(r => r[f]).filter(v => v != null);
+          return vals.some(v => typeof v === "string" && !isStrictlyNumeric(v));
+        });
+
+        if (seriesCandidates.length > 0) {
+          // Try each categorical candidate as series dimension; use first that works
+          for (const seriesField of seriesCandidates) {
+            const result = pivotLongToWide(rows.slice(0, 30), xKey, seriesField, actualYKey);
+            if (result) {
+              const { data: pivotData, seriesValues } = result;
+              const avgLen = pivotData.reduce((s, d) => s + String(d[xKey]).length, 0) / pivotData.length;
+              return {
+                chartType: pivotData.length > 10 || avgLen > 18 ? 'horizontal_bar' : 'grouped_bar',
+                xKey,
+                yKey: seriesValues[0],
+                yKeys: seriesValues,
+                isStacked: false,
+                isMultiSeries: true,
+                data: pivotData,
+                title: `${humanizeKey(actualYKey)} by ${humanizeKey(xKey)} (by ${humanizeKey(seriesField)})`,
+                xLabel: chartHint.xLabel,
+                yLabel: chartHint.yLabel,
+              };
+            }
+          }
+        }
+
+        // No viable series field → aggregate (sum) per x-category
+        const labelledRows = rows.slice(0, 30).map(row => ({
+          ...row,
+          [xKey]: rawLabel(String(row[xKey] ?? "")),
+        }));
+        const aggData = aggregateByX(labelledRows, xKey, [actualYKey]);
+        if (aggData.length < 2) return null;
+        const avgLenAgg = aggData.reduce((s, d) => s + String(d[xKey]).length, 0) / aggData.length;
+        const resolvedType: ResolvedChartConfig['chartType'] =
+          chartType === 'bar' && (aggData.length > 12 || avgLenAgg > 20) ? 'horizontal_bar' : chartType as ResolvedChartConfig['chartType'];
+        return {
+          chartType: resolvedType,
+          xKey,
+          yKey: actualYKey,
+          isStacked,
+          isMultiSeries: false,
+          data: aggData,
+          title: `${titleYLabel} by ${titleXLabel}`,
+          xLabel: chartHint.xLabel,
+          yLabel: chartHint.yLabel,
+        };
+      }
+    }
+
+    // No duplicates: proceed with standard mapping
     const data = rows.slice(0, 30).map((row) => {
       const entry: Record<string, any> = {};
       entry[xKey] = rawLabel(row[xKey]);
@@ -924,14 +1074,12 @@ function evidenceToChartConfig(evidence: EvidenceItem): ResolvedChartConfig | nu
       } else if (yKey) {
         entry[yKey] = parseNumeric(row[yKey]);
       }
-      // include remaining fields for tooltip richness
       for (const f of fields) {
         if (!(f in entry)) entry[f] = row[f];
       }
       return entry;
     });
 
-    // Validate: at least 2 distinct x-values
     const uniqueX = new Set(data.map(d => d[xKey]));
     if (uniqueX.size < 2) return null;
 
@@ -959,7 +1107,7 @@ function evidenceToChartConfig(evidence: EvidenceItem): ResolvedChartConfig | nu
   // PATH 2: multiple numeric fields → grouped_bar
   if (numericFields.length >= 2) {
     const preferredYKeys = numericFields.slice(0, 6); // cap to 6 series
-    const data = rows.slice(0, 30).map((row) => {
+    const rawData = rows.slice(0, 30).map((row) => {
       const entry: Record<string, any> = {};
       entry[labelField] = rawLabel(row[labelField]);
       for (const k of preferredYKeys) {
@@ -968,8 +1116,15 @@ function evidenceToChartConfig(evidence: EvidenceItem): ResolvedChartConfig | nu
       return entry;
     });
 
-    const uniqueLabels = new Set(data.map(d => d[labelField]));
+    // Deduplicate: if the same labelField value appears more than once (e.g.
+    // the query has an extra grouping dimension we're not using as the x-axis),
+    // aggregate all numeric series by summing within each x-category.
+    const uniqueLabels = new Set(rawData.map(d => d[labelField]));
     if (uniqueLabels.size < 2) return null;
+
+    const data = uniqueLabels.size < rawData.length
+      ? aggregateByX(rawData, labelField, preferredYKeys)
+      : rawData;
 
     const avgLen = data.reduce((s, d) => s + String(d[labelField]).length, 0) / data.length;
     const isHoriz = data.length > 10 || avgLen > 18;
@@ -1030,7 +1185,10 @@ function evidenceToChartConfig(evidence: EvidenceItem): ResolvedChartConfig | nu
   }
 
   // PATH 4: single-series (current behaviour, improved)
-  const data = rows.slice(0, 30).map((row) => {
+  // Note: we may arrive here when hasDuplicateLabels=true but no second
+  // categorical field was found (PATH 3 fell through). In that case we MUST
+  // aggregate to avoid rendering duplicate bars per x-category.
+  const rawData4 = rows.slice(0, 30).map((row) => {
     const entry: Record<string, any> = {};
     entry[labelField] = rawLabel(row[labelField]);
     entry[bestField] = parseNumeric(row[bestField]);
@@ -1040,8 +1198,13 @@ function evidenceToChartConfig(evidence: EvidenceItem): ResolvedChartConfig | nu
     return entry;
   });
 
-  const uniqueLabels = new Set(data.map(d => d[labelField]));
-  if (uniqueLabels.size < 2) return null;
+  const uniqueLabels4 = new Set(rawData4.map(d => d[labelField]));
+  if (uniqueLabels4.size < 2) return null;
+
+  // Aggregate if duplicates survived into data (sum bestField per x-category)
+  const data = uniqueLabels4.size < rawData4.length
+    ? aggregateByX(rawData4, labelField, [bestField])
+    : rawData4;
 
   const labelFieldLower = labelField.toLowerCase();
   const sampleLabel = String(data[0]?.[labelField] ?? "");
@@ -1085,29 +1248,53 @@ function parseNumeric(v: unknown): number {
 
 export interface AutoChartProps {
   evidence: EvidenceItem;
-  findingTitle?: string;
-  sessionId?: string | null;
-  onSaveToWorkbench?: (payload: SaveToWorkbenchPayload) => void;
+  /** When true render at hero size (h-64, tick font 11). Default false = h-48, tick font 10. */
+  hero?: boolean;
 }
 
-export function AutoChart({ evidence, findingTitle, sessionId, onSaveToWorkbench }: AutoChartProps) {
+// Minimum pixel width per category group to ensure every label is readable
+const MIN_PX_PER_GROUP_SINGLE = 40;
+const MIN_PX_PER_GROUP_MULTI_BASE = 20;
+const MIN_PX_PER_SERIES = 18;
+const MIN_PX_PER_POINT_LINE = 42;
+const Y_AXIS_PX = 60;
+const H_MARGIN_PX = 20;
+// Threshold: if computed width exceeds this, enable horizontal scroll
+const SCROLL_THRESHOLD_PX = 540;
+
+function calcMinWidth(numPoints: number, numSeries: number, isMulti: boolean): number | undefined {
+  const perGroup = isMulti
+    ? Math.max(MIN_PX_PER_GROUP_MULTI_BASE + MIN_PX_PER_SERIES * numSeries, 48)
+    : MIN_PX_PER_GROUP_SINGLE;
+  const computed = Y_AXIS_PX + H_MARGIN_PX + numPoints * perGroup;
+  return computed > SCROLL_THRESHOLD_PX ? computed : undefined;
+}
+
+function calcMinWidthLine(numPoints: number): number | undefined {
+  const computed = Y_AXIS_PX + H_MARGIN_PX + numPoints * MIN_PX_PER_POINT_LINE;
+  return computed > SCROLL_THRESHOLD_PX ? computed : undefined;
+}
+
+export function AutoChart({ evidence, hero = false }: AutoChartProps) {
   const config = evidenceToChartConfig(evidence);
   if (!config) return null;
 
   const { chartType, xKey, yKey, yKeys, isStacked, isMultiSeries, data, title } = config;
   const agentFmts = evidence.columnFormats || {};
   const bestFormat = agentFormatToFieldFormat(agentFmts[yKey]) || inferFormat(yKey);
+  const tickFontSize = hero ? 11 : 10;
 
-  // For tooltip value formatting
   const tooltipFormatter = (value: number, name: string) => [
     formatValue(value, bestFormat),
     humanizeKey(name),
   ];
 
-  // Colors: single solid color for single-series, multi-color palette for multi
   const seriesKeys = isMultiSeries && yKeys ? yKeys : [yKey];
   const getSeriesColor = (i: number) =>
     isMultiSeries ? MULTI_SERIES_COLORS[i % MULTI_SERIES_COLORS.length] : SINGLE_SERIES_COLOR;
+
+  // Minimal grid: only horizontal reference lines, very faint
+  const grid = <CartesianGrid vertical={false} stroke="currentColor" strokeOpacity={0.08} />;
 
   // ── Pie / Donut ───────────────────────────────────────────────────────────
   if (chartType === 'pie' || chartType === 'donut') {
@@ -1117,7 +1304,7 @@ export function AutoChart({ evidence, findingTitle, sessionId, onSaveToWorkbench
       fill: MULTI_SERIES_COLORS[i % MULTI_SERIES_COLORS.length],
     }));
     return (
-      <AutoChartShell title={title} findingTitle={findingTitle} evidence={evidence} sessionId={sessionId} onSaveToWorkbench={onSaveToWorkbench} xKey={xKey} yKey={yKey}>
+      <AutoChartShell title={title} hero={hero}>
         <PieChart>
           <Pie
             data={pieData}
@@ -1141,12 +1328,13 @@ export function AutoChart({ evidence, findingTitle, sessionId, onSaveToWorkbench
 
   // ── Area chart ────────────────────────────────────────────────────────────
   if (chartType === 'area') {
+    const minWidth = calcMinWidthLine(data.length);
     return (
-      <AutoChartShell title={title} findingTitle={findingTitle} evidence={evidence} sessionId={sessionId} onSaveToWorkbench={onSaveToWorkbench} xKey={xKey} yKey={yKey}>
+      <AutoChartShell title={title} hero={hero} minWidth={minWidth}>
         <AreaChart data={data} margin={{ top: 5, right: 10, bottom: 5, left: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-          <XAxis dataKey={xKey} tick={{ fontSize: 10 }} angle={-25} textAnchor="end" height={44} />
-          <YAxis tick={{ fontSize: 10 }} width={55} />
+          {grid}
+          <XAxis dataKey={xKey} interval={0} tick={{ fontSize: tickFontSize }} angle={-30} textAnchor="end" height={48} axisLine={false} tickLine={false} />
+          <YAxis tick={{ fontSize: tickFontSize }} width={55} axisLine={false} tickLine={false} />
           <RechartsTooltip contentStyle={{ fontSize: 11 }} formatter={tooltipFormatter} />
           {isMultiSeries && <Legend wrapperStyle={{ fontSize: 10 }} />}
           {seriesKeys.map((k, i) => (
@@ -1157,7 +1345,7 @@ export function AutoChart({ evidence, findingTitle, sessionId, onSaveToWorkbench
               name={humanizeKey(k)}
               stroke={getSeriesColor(i)}
               fill={getSeriesColor(i)}
-              fillOpacity={0.15}
+              fillOpacity={0.12}
               strokeWidth={2}
               dot={false}
               stackId={isStacked ? "stack" : undefined}
@@ -1170,12 +1358,13 @@ export function AutoChart({ evidence, findingTitle, sessionId, onSaveToWorkbench
 
   // ── Line chart ────────────────────────────────────────────────────────────
   if (chartType === 'line') {
+    const minWidth = calcMinWidthLine(data.length);
     return (
-      <AutoChartShell title={title} findingTitle={findingTitle} evidence={evidence} sessionId={sessionId} onSaveToWorkbench={onSaveToWorkbench} xKey={xKey} yKey={yKey}>
+      <AutoChartShell title={title} hero={hero} minWidth={minWidth}>
         <LineChart data={data} margin={{ top: 5, right: 10, bottom: 5, left: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-          <XAxis dataKey={xKey} tick={{ fontSize: 10 }} angle={-25} textAnchor="end" height={44} />
-          <YAxis tick={{ fontSize: 10 }} width={55} />
+          {grid}
+          <XAxis dataKey={xKey} interval={0} tick={{ fontSize: tickFontSize }} angle={-30} textAnchor="end" height={48} axisLine={false} tickLine={false} />
+          <YAxis tick={{ fontSize: tickFontSize }} width={55} axisLine={false} tickLine={false} />
           <RechartsTooltip contentStyle={{ fontSize: 11 }} formatter={tooltipFormatter} />
           {isMultiSeries && <Legend wrapperStyle={{ fontSize: 10 }} />}
           {seriesKeys.map((k, i) => (
@@ -1186,7 +1375,7 @@ export function AutoChart({ evidence, findingTitle, sessionId, onSaveToWorkbench
               name={humanizeKey(k)}
               stroke={getSeriesColor(i)}
               strokeWidth={2}
-              dot={{ r: 3 }}
+              dot={{ r: hero ? 3.5 : 3 }}
             />
           ))}
         </LineChart>
@@ -1197,13 +1386,18 @@ export function AutoChart({ evidence, findingTitle, sessionId, onSaveToWorkbench
   // ── Horizontal bar chart ──────────────────────────────────────────────────
   if (chartType === 'horizontal_bar') {
     const maxLabelLen = Math.max(...data.map(d => String(d[xKey] ?? "").length));
-    const yAxisWidth = Math.min(Math.max(maxLabelLen * 6, 60), 140);
+    const yAxisWidth = Math.min(Math.max(maxLabelLen * 6, 60), 160);
+    // Each row needs ~26px; compute a minHeight so all labels are visible
+    const minRowPx = 26;
+    const computedH = data.length * minRowPx + 40;
+    const baseH = hero ? 256 : 192;
+    const minHeight = computedH > baseH ? computedH : undefined;
     return (
-      <AutoChartShell title={title} findingTitle={findingTitle} evidence={evidence} sessionId={sessionId} onSaveToWorkbench={onSaveToWorkbench} xKey={xKey} yKey={yKey}>
-        <BarChart layout="vertical" data={data} margin={{ top: 5, right: 30, bottom: 5, left: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-          <XAxis type="number" tick={{ fontSize: 10 }} />
-          <YAxis type="category" dataKey={xKey} tick={{ fontSize: 10 }} width={yAxisWidth} />
+      <AutoChartShell title={title} hero={hero} minHeight={minHeight}>
+        <BarChart layout="vertical" data={data} margin={{ top: 5, right: 20, bottom: 5, left: 5 }}>
+          {grid}
+          <XAxis type="number" tick={{ fontSize: tickFontSize }} axisLine={false} tickLine={false} />
+          <YAxis type="category" dataKey={xKey} interval={0} tick={{ fontSize: tickFontSize }} width={yAxisWidth} axisLine={false} tickLine={false} />
           <RechartsTooltip contentStyle={{ fontSize: 11 }} formatter={tooltipFormatter} />
           {isMultiSeries && <Legend wrapperStyle={{ fontSize: 10 }} />}
           {isMultiSeries ? (
@@ -1219,18 +1413,22 @@ export function AutoChart({ evidence, findingTitle, sessionId, onSaveToWorkbench
   }
 
   // ── Vertical bar / grouped_bar / stacked_bar ──────────────────────────────
+  const minWidth = calcMinWidth(data.length, seriesKeys.length, isMultiSeries);
   return (
-    <AutoChartShell title={title} findingTitle={findingTitle} evidence={evidence} sessionId={sessionId} onSaveToWorkbench={onSaveToWorkbench} xKey={xKey} yKey={yKey}>
-      <BarChart data={data} margin={{ top: 5, right: 10, bottom: 5, left: 5 }}>
-        <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+    <AutoChartShell title={title} hero={hero} minWidth={minWidth}>
+      <BarChart data={data} margin={{ top: 5, right: 10, bottom: 8, left: 5 }}>
+        {grid}
         <XAxis
           dataKey={xKey}
-          tick={{ fontSize: 10 }}
-          angle={-25}
+          interval={0}
+          tick={{ fontSize: tickFontSize }}
+          angle={-30}
           textAnchor="end"
-          height={44}
+          height={52}
+          axisLine={false}
+          tickLine={false}
         />
-        <YAxis tick={{ fontSize: 10 }} width={55} />
+        <YAxis tick={{ fontSize: tickFontSize }} width={55} axisLine={false} tickLine={false} />
         <RechartsTooltip contentStyle={{ fontSize: 11 }} formatter={tooltipFormatter} />
         {isMultiSeries && <Legend wrapperStyle={{ fontSize: 10 }} />}
         {isMultiSeries ? (
@@ -1245,67 +1443,76 @@ export function AutoChart({ evidence, findingTitle, sessionId, onSaveToWorkbench
   );
 }
 
-// ── Shell wrapper (title + chart container + save button) ────────────────────
+// ── Shell wrapper: title + responsive chart container ────────────────────────
 
 interface AutoChartShellProps {
   title: string;
-  findingTitle?: string;
-  evidence: EvidenceItem;
-  sessionId?: string | null;
-  onSaveToWorkbench?: (payload: SaveToWorkbenchPayload) => void;
-  xKey: string;
-  yKey: string;
+  hero?: boolean;
+  /** Minimum pixel width for the chart canvas — triggers horizontal scroll when set */
+  minWidth?: number;
+  /** Minimum pixel height for the chart canvas — triggers vertical scroll when set (horizontal bars) */
+  minHeight?: number;
   children: React.ReactNode;
 }
 
-function AutoChartShell({
-  title,
-  findingTitle,
-  evidence,
-  sessionId,
-  onSaveToWorkbench,
-  xKey,
-  yKey,
-  children,
-}: AutoChartShellProps) {
-  return (
-    <div className="space-y-1">
-      <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-        <BarChart3 className="h-3 w-3 flex-shrink-0" />
-        <span className="truncate">{title}</span>
-      </p>
-      <div className="h-52 w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          {children as React.ReactElement}
-        </ResponsiveContainer>
+function AutoChartShell({ title, hero = false, minWidth, minHeight, children }: AutoChartShellProps) {
+  const [maximized, setMaximized] = useState(false);
+  const baseHeight = hero ? 256 : 192;
+  // For horizontal bar: grow vertically up to 2× base, then scroll
+  const effectiveHeight = minHeight ? Math.min(minHeight, baseHeight * 2) : baseHeight;
+  const scrollsX = !!minWidth;
+  const scrollsY = !!minHeight && minHeight > effectiveHeight;
+
+  const renderChart = (forDialog: boolean) => {
+    const height = forDialog ? "calc(80vh - 6rem)" : effectiveHeight;
+    const minW = forDialog ? (minWidth ? Math.max(minWidth, 600) : undefined) : minWidth;
+    return (
+      <div
+        style={{
+          overflowX: scrollsX ? "auto" : undefined,
+          overflowY: (!forDialog && scrollsY) ? "auto" : undefined,
+          height: forDialog ? "calc(80vh - 6rem)" : effectiveHeight,
+        }}
+      >
+        <div style={{ minWidth: minW, height }}>
+          <ResponsiveContainer width="100%" height="100%">
+            {cloneElement(children as React.ReactElement)}
+          </ResponsiveContainer>
+        </div>
       </div>
-      {onSaveToWorkbench && (
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 text-xs gap-1 mt-1"
-          onClick={() =>
-            onSaveToWorkbench({
-              sql: evidence.sql,
-              title: [findingTitle, title].filter(Boolean).join(" — ").slice(0, 120) || "Research chart",
-              vizConfig: {
-                type: "bar",
-                title: [findingTitle, title].filter(Boolean).join(" — ").slice(0, 80) || "Chart",
-                data: [],
-                xKey,
-                yKey,
-              },
-              explanation: evidence.explanation,
-              sourceType: "research",
-              sourceSessionId: sessionId ?? undefined,
-            })
-          }
-        >
-          <Bookmark className="h-3 w-3" />
-          Save to Workbench
-        </Button>
-      )}
-    </div>
+    );
+  };
+
+  return (
+    <>
+      <div className="space-y-1">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 min-w-0">
+            <BarChart3 className="h-3 w-3 flex-shrink-0" />
+            <span className="truncate">{title}</span>
+          </p>
+          <button
+            type="button"
+            onClick={() => setMaximized(true)}
+            className="flex-shrink-0 rounded p-0.5 text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+            title="Maximize chart"
+          >
+            <Maximize2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+        {renderChart(false)}
+      </div>
+
+      <Dialog open={maximized} onOpenChange={setMaximized}>
+        <DialogContent className="max-w-[92vw] w-[92vw] p-6 gap-3">
+          <DialogTitle className="text-sm font-semibold flex items-center gap-2">
+            <BarChart3 className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+            {title}
+          </DialogTitle>
+          {renderChart(true)}
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -1313,8 +1520,14 @@ function AutoChartShell({
 // Main Component
 // ============================================================================
 
+const KPI_INITIAL_VISIBLE = 6;
+
 export function FindingDrillDown({ finding, onClose, sessionId }: FindingDrillDownProps) {
   const [saveToWorkbenchPayload, setSaveToWorkbenchPayload] = useState<SaveToWorkbenchPayload | null>(null);
+  const [kpiExpanded, setKpiExpanded] = useState(false);
+  const [extraChartsOpen, setExtraChartsOpen] = useState(false);
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
+
   const hasMetrics = Object.keys(finding.keyMetrics).length > 0;
   const hasEvidence = finding.evidence.length > 0;
 
@@ -1322,12 +1535,27 @@ export function FindingDrillDown({ finding, onClose, sessionId }: FindingDrillDo
     (e) => e.rows.length >= 2 && e.rows.length <= 50 && e.fields.length >= 2
   );
 
+  // Hero = last chartable evidence (agent's final, most complete query)
+  const heroEvidence = chartableEvidence.length > 0
+    ? chartableEvidence[chartableEvidence.length - 1]
+    : null;
+  const extraCharts = chartableEvidence.length > 1
+    ? chartableEvidence.slice(0, chartableEvidence.length - 1)
+    : [];
+
+  const allMetrics = Object.entries(finding.keyMetrics);
+  const visibleMetrics = kpiExpanded ? allMetrics : allMetrics.slice(0, KPI_INITIAL_VISIBLE);
+  const hiddenCount = allMetrics.length - KPI_INITIAL_VISIBLE;
+
+  // Primary evidence for the header Save to Workbench action
+  const primaryEvidence = finding.evidence[finding.evidence.length - 1] ?? null;
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             <h3 className="text-base font-semibold">{finding.title}</h3>
             <Badge
               variant={
@@ -1338,77 +1566,129 @@ export function FindingDrillDown({ finding, onClose, sessionId }: FindingDrillDo
                   : "outline"
               }
             >
-              {finding.confidence} confidence
+              {finding.confidence}
             </Badge>
           </div>
           <p className="text-sm text-muted-foreground leading-relaxed">
             {finding.summary}
           </p>
         </div>
-        <Button variant="ghost" size="icon" className="flex-shrink-0" onClick={onClose}>
-          <X className="h-4 w-4" />
-        </Button>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          {primaryEvidence && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() =>
+                      setSaveToWorkbenchPayload({
+                        sql: primaryEvidence.sql,
+                        title: finding.title.slice(0, 120),
+                        vizConfig: {
+                          type: "table",
+                          title: finding.title.slice(0, 80),
+                          data: [],
+                          tableConfig: {
+                            columns: primaryEvidence.fields.map((f) => ({ key: f, label: humanizeKey(f) })),
+                          },
+                        },
+                        explanation: primaryEvidence.explanation,
+                        sourceType: "research",
+                        sourceSessionId: sessionId ?? undefined,
+                      })
+                    }
+                  >
+                    <Bookmark className="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="left" className="text-xs">Save to Workbench</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
 
-      {/* KPI Cards */}
+      {/* Hero chart — full-width, prominent */}
+      {heroEvidence && (
+        <AutoChart evidence={heroEvidence} hero />
+      )}
+
+      {/* KPI strip */}
       {hasMetrics && (
-        <div>
-          <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-            Key Metrics
-          </h4>
-          <div className="flex flex-wrap gap-2">
-            {Object.entries(finding.keyMetrics).map(([k, v]) => (
-              <KPICard key={k} metricKey={k} value={v} description={finding.keyMetricDescriptions?.[k]} agentFormat={finding.keyMetricFormats?.[k]} />
-            ))}
-          </div>
+        <div className="flex flex-wrap gap-2 items-start">
+          {visibleMetrics.map(([k, v]) => (
+            <KPICard key={k} metricKey={k} value={v} description={finding.keyMetricDescriptions?.[k]} agentFormat={finding.keyMetricFormats?.[k]} />
+          ))}
+          {!kpiExpanded && hiddenCount > 0 && (
+            <button
+              onClick={() => setKpiExpanded(true)}
+              className="flex-1 min-w-[80px] h-full flex items-center justify-center text-xs text-muted-foreground hover:text-foreground transition-colors border border-dashed rounded-md px-3 py-2"
+            >
+              +{hiddenCount} more
+            </button>
+          )}
+          {kpiExpanded && hiddenCount > 0 && (
+            <button
+              onClick={() => setKpiExpanded(false)}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2"
+            >
+              show less
+            </button>
+          )}
         </div>
       )}
 
-      {/* Charts */}
-      {chartableEvidence.length > 0 && (
-        <div>
-          <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-            Visualizations
-          </h4>
-          <div className="grid gap-4 md:grid-cols-2">
-            {chartableEvidence.map((ev, i) => (
-              <Card key={i}>
-                <CardContent className="pt-4 pb-3">
-                  <AutoChart
-                    evidence={ev}
-                    findingTitle={finding.title}
-                    sessionId={sessionId}
-                    onSaveToWorkbench={setSaveToWorkbenchPayload}
-                  />
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
+      {/* Additional charts — collapsed by default */}
+      {extraCharts.length > 0 && (
+        <Collapsible open={extraChartsOpen} onOpenChange={setExtraChartsOpen}>
+          <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors w-full">
+            {extraChartsOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            {extraChartsOpen ? "Hide" : "Show"} {extraCharts.length} more visualization{extraCharts.length > 1 ? "s" : ""}
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <div className="grid gap-4 md:grid-cols-2 mt-3">
+              {extraCharts.map((ev, i) => (
+                <Card key={i} className="overflow-hidden">
+                  <CardContent className="pt-3 pb-3">
+                    <AutoChart evidence={ev} />
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
       )}
 
-      <Separator />
+      <Separator className="opacity-50" />
 
-      {/* Evidence Tables */}
+      {/* Evidence tables — collapsed by default */}
       {hasEvidence && (
-        <div>
-          <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1.5">
+        <Collapsible open={evidenceOpen} onOpenChange={setEvidenceOpen}>
+          <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors w-full">
+            {evidenceOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
             <Table2 className="h-3.5 w-3.5" />
-            Evidence Data ({finding.evidence.length} {finding.evidence.length === 1 ? "query" : "queries"})
-          </h4>
-          <div className="space-y-5">
-            {finding.evidence.map((ev, i) => (
-              <EvidenceTable
-                key={i}
-                evidence={ev}
-                index={i}
-                findingTitle={finding.title}
-                sessionId={sessionId}
-                onSaveToWorkbench={setSaveToWorkbenchPayload}
-              />
-            ))}
-          </div>
-        </div>
+            {evidenceOpen ? "Hide" : "View"} evidence data &mdash; {finding.evidence.length} {finding.evidence.length === 1 ? "query" : "queries"}
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <div className="space-y-5 mt-3">
+              {finding.evidence.map((ev, i) => (
+                <EvidenceTable
+                  key={i}
+                  evidence={ev}
+                  index={i}
+                  findingTitle={finding.title}
+                  sessionId={sessionId}
+                  onSaveToWorkbench={setSaveToWorkbenchPayload}
+                />
+              ))}
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
       )}
 
       <SaveToWorkbenchModal
