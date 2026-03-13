@@ -81,6 +81,11 @@ interface ResearchReportProps {
     context?: any
   ) => void;
   onDrillDown?: (finding: Finding) => void;
+  /** Whether this insight is already on the watchlist (for research insights). */
+  isTracked?: (headline: string, detail: string) => boolean;
+  /** Toggle track/untrack on the watchlist. */
+  onToggleTrack?: (headline: string, detail: string) => void;
+  /** @deprecated Use isTracked + onToggleTrack for toggle behavior. */
   onTrackInsight?: (headline: string, detail: string) => void;
   /** When user clicks "Run this investigation" on a further-investigation suggestion. */
   onRunFurtherInvestigation?: (question: string) => void;
@@ -597,6 +602,8 @@ function InsightCard({
   findings,
   onFeedback,
   onDrillDown,
+  isTracked,
+  onToggleTrack,
   onTrackInsight,
   selectedTenantId,
   defaultEvidenceOpen = false,
@@ -605,6 +612,8 @@ function InsightCard({
   findings: Finding[];
   onFeedback?: (id: string, rating: -1 | 1, comment: string) => void;
   onDrillDown?: (finding: Finding) => void;
+  isTracked?: (headline: string, detail: string) => boolean;
+  onToggleTrack?: (headline: string, detail: string) => void;
   onTrackInsight?: (headline: string, detail: string) => void;
   selectedTenantId?: string | null;
   /** Open the evidence (table/chart) by default for top insights. */
@@ -675,25 +684,43 @@ function InsightCard({
               {insight.headline}
             </p>
             <div className="flex items-center gap-1.5 flex-shrink-0">
-              {onTrackInsight && (
+              {(onToggleTrack ?? onTrackInsight) && (
                 <TooltipProvider delayDuration={200}>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
-                        onClick={() =>
-                          onTrackInsight(insight.headline, insight.detail)
+                        onClick={() => {
+                          if (onToggleTrack) {
+                            onToggleTrack(insight.headline, insight.detail);
+                          } else {
+                            onTrackInsight?.(insight.headline, insight.detail);
+                          }
+                        }}
+                        className={`p-1 rounded-md transition-all ${
+                          isTracked?.(insight.headline, insight.detail)
+                            ? "bg-amber-100 dark:bg-amber-900/30"
+                            : "hover:bg-amber-100 dark:hover:bg-amber-900/30"
+                        }`}
+                        title={
+                          isTracked?.(insight.headline, insight.detail)
+                            ? "Remove from watchlist"
+                            : "Track this insight on your watchlist"
                         }
-                        className="p-1 rounded-md hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-all"
-                        title="Track this insight"
                       >
                         <Bookmark
-                          className="h-3.5 w-3.5 text-muted-foreground hover:text-amber-600"
+                          className={`h-3.5 w-3.5 transition-colors ${
+                            isTracked?.(insight.headline, insight.detail)
+                              ? "text-amber-500 fill-amber-500 dark:text-amber-400 dark:fill-amber-400"
+                              : "text-muted-foreground hover:text-amber-600"
+                          }`}
                           strokeWidth={2}
                         />
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top" className="text-xs">
-                      Track this insight on your watchlist
+                      {isTracked?.(insight.headline, insight.detail)
+                        ? "Remove from watchlist"
+                        : "Track this insight on your watchlist"}
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
@@ -903,6 +930,8 @@ export function ResearchReport({
   selectedTenantId,
   onSubmitFeedback,
   onDrillDown,
+  isTracked,
+  onToggleTrack,
   onTrackInsight,
   onRunFurtherInvestigation,
 }: ResearchReportProps) {
@@ -1120,6 +1149,8 @@ export function ResearchReport({
                   onSubmitFeedback ? handleFindingFeedback : undefined
                 }
                 onDrillDown={onDrillDown}
+                isTracked={isTracked}
+                onToggleTrack={onToggleTrack}
                 onTrackInsight={onTrackInsight}
                 selectedTenantId={selectedTenantId}
                 defaultEvidenceOpen={insight.rank <= 2}

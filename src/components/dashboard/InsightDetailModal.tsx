@@ -46,6 +46,11 @@ interface InsightDetailModalProps {
     recommended_action?: string;
     owner?: string;
   };
+  /** Whether this insight is already on the watchlist (from parent). */
+  isTracked?: boolean;
+  /** Toggle track/untrack on the watchlist. */
+  onToggleTrack?: () => void;
+  /** @deprecated Use isTracked + onToggleTrack for toggle behavior. */
   onTrackInsight?: () => void;
 }
 
@@ -645,6 +650,8 @@ export const InsightDetailModal = ({
   selectedTenantId,
   isAdmin,
   etmData,
+  isTracked: isTrackedProp,
+  onToggleTrack,
   onTrackInsight,
 }: InsightDetailModalProps) => {
   const navigate = useNavigate();
@@ -655,7 +662,8 @@ export const InsightDetailModal = ({
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<DetailData | null>(null);
   const [isCreatingDeepDive, setIsCreatingDeepDive] = useState(false);
-  const [isTracked, setIsTracked] = useState(false);
+  const [localTracked, setLocalTracked] = useState(false);
+  const isTracked = onToggleTrack != null ? (isTrackedProp ?? false) : localTracked;
   const [activePeriod, setActivePeriod] = useState<'current' | 'prior'>('current');
   const [isAuditOpen, setIsAuditOpen] = useState(false);
   const [auditSection, setAuditSection] = useState<string | null>(null);
@@ -903,19 +911,23 @@ export const InsightDetailModal = ({
               </p>
             </div>
             <div className="flex items-center gap-2">
-              {onTrackInsight && (
+              {(onToggleTrack ?? onTrackInsight) && (
                 <button
                   onClick={() => {
-                    onTrackInsight();
-                    setIsTracked(true);
+                    if (onToggleTrack) {
+                      onToggleTrack();
+                    } else {
+                      onTrackInsight?.();
+                      setLocalTracked(true);
+                    }
                   }}
-                  disabled={isTracked}
+                  disabled={onToggleTrack == null && isTracked}
                   className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-all ${
                     isTracked
                       ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
                       : 'text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-amber-100 hover:text-amber-700 dark:hover:bg-amber-900/30 dark:hover:text-amber-300'
                   }`}
-                  title={isTracked ? 'Tracked' : 'Track this insight'}
+                  title={isTracked ? 'Remove from watchlist' : 'Track this insight'}
                 >
                   {isTracked ? <Check className="w-4 h-4" /> : <Bookmark className="w-4 h-4" />}
                   <span className="hidden sm:inline">{isTracked ? 'Tracked' : 'Track'}</span>

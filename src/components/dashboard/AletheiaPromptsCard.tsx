@@ -233,8 +233,10 @@ interface BucketLaneProps {
   onDeleteInsight?: (insightId: number) => Promise<void>;
   /** Submit feedback (thumbs up/down + optional tags/comment) on an insight — visible to all users */
   onSubmitFeedback?: (insightId: number, rating: -1 | 1, tags?: string[], comment?: string) => Promise<boolean>;
-  /** Track/pin an insight to the watchlist */
-  onTrackInsight?: (insight: AletheiaInsight) => void;
+  /** Whether this insight is already on the watchlist */
+  isTracked?: (insight: AletheiaInsight) => boolean;
+  /** Toggle track/untrack on the watchlist */
+  onToggleTrack?: (insight: AletheiaInsight) => void;
   /** Whether the user is a platform admin */
   isAdmin?: boolean;
 }
@@ -250,7 +252,8 @@ function BucketLane({
   onGenerateMore,
   onDeleteInsight,
   onSubmitFeedback,
-  onTrackInsight,
+  isTracked,
+  onToggleTrack,
   isAdmin,
 }: BucketLaneProps) {
   const [activeIdx, setActiveIdx] = useState(0);
@@ -380,84 +383,95 @@ function BucketLane({
               }}
             >
               <PopoverAnchor asChild>
-                <div className="flex-shrink-0 flex items-center gap-0.5 opacity-0 group-hover/insight:opacity-100 transition-all">
-                  {/* Track / pin to watchlist */}
-                  {onTrackInsight && (
+                <div className="flex-shrink-0 flex items-center gap-0.5">
+                  {/* Track / pin to watchlist — always visible when tracked, otherwise on hover */}
+                  {onToggleTrack && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        onTrackInsight(insight);
+                        onToggleTrack(insight);
                       }}
-                      className="p-1 rounded-md hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-all"
-                      title="Track this insight"
+                      className={`p-1 rounded-md transition-all ${
+                        isTracked?.(insight)
+                          ? "bg-amber-100 dark:bg-amber-900/30 opacity-100"
+                          : "opacity-0 group-hover/insight:opacity-100 hover:bg-amber-100 dark:hover:bg-amber-900/30"
+                      }`}
+                      title={isTracked?.(insight) ? "Remove from watchlist" : "Track this insight"}
                     >
                       <Bookmark
-                        className="w-3 h-3 text-slate-400 hover:text-amber-600 dark:hover:text-amber-400"
+                        className={`w-3 h-3 transition-colors ${
+                          isTracked?.(insight)
+                            ? "text-amber-500 fill-amber-500 dark:text-amber-400 dark:fill-amber-400"
+                            : "text-slate-400 hover:text-amber-600 dark:hover:text-amber-400"
+                        }`}
                         strokeWidth={2}
                       />
                     </button>
                   )}
-                  {/* Thumbs Up — all users */}
-                  {onSubmitFeedback && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleQuickRating(insight.insightId!, 1);
-                      }}
-                      className={`p-1 rounded-md transition-all ${
-                        insightFeedback?.rating === 1
-                          ? "bg-green-100 dark:bg-green-900/40 opacity-100"
-                          : "hover:bg-green-100 dark:hover:bg-green-900/30"
-                      }`}
-                      title="Good insight"
-                    >
-                      <ThumbsUp
-                        className={`w-3 h-3 ${
+                  {/* Hover-only action buttons */}
+                  <div className="flex items-center gap-0.5 opacity-0 group-hover/insight:opacity-100 transition-all">
+                    {/* Thumbs Up — all users */}
+                    {onSubmitFeedback && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleQuickRating(insight.insightId!, 1);
+                        }}
+                        className={`p-1 rounded-md transition-all ${
                           insightFeedback?.rating === 1
-                            ? "text-green-600 dark:text-green-400 fill-current"
-                            : "text-slate-400 hover:text-green-600 dark:hover:text-green-400"
+                            ? "bg-green-100 dark:bg-green-900/40 opacity-100"
+                            : "hover:bg-green-100 dark:hover:bg-green-900/30"
                         }`}
-                        strokeWidth={2}
-                      />
-                    </button>
-                  )}
-                  {/* Thumbs Down */}
-                  {onSubmitFeedback && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleQuickRating(insight.insightId!, -1);
-                      }}
-                      className={`p-1 rounded-md transition-all ${
-                        insightFeedback?.rating === -1
-                          ? "bg-red-100 dark:bg-red-900/40 opacity-100"
-                          : "hover:bg-red-100 dark:hover:bg-red-900/30"
-                      }`}
-                      title="Bad insight"
-                    >
-                      <ThumbsDown
-                        className={`w-3 h-3 ${
+                        title="Good insight"
+                      >
+                        <ThumbsUp
+                          className={`w-3 h-3 ${
+                            insightFeedback?.rating === 1
+                              ? "text-green-600 dark:text-green-400 fill-current"
+                              : "text-slate-400 hover:text-green-600 dark:hover:text-green-400"
+                          }`}
+                          strokeWidth={2}
+                        />
+                      </button>
+                    )}
+                    {/* Thumbs Down */}
+                    {onSubmitFeedback && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleQuickRating(insight.insightId!, -1);
+                        }}
+                        className={`p-1 rounded-md transition-all ${
                           insightFeedback?.rating === -1
-                            ? "text-red-600 dark:text-red-400 fill-current"
-                            : "text-slate-400 hover:text-red-600 dark:hover:text-red-400"
+                            ? "bg-red-100 dark:bg-red-900/40 opacity-100"
+                            : "hover:bg-red-100 dark:hover:bg-red-900/30"
                         }`}
-                        strokeWidth={2}
-                      />
-                    </button>
-                  )}
-                  {/* Delete button — admin only */}
-                  {isAdmin && onDeleteInsight && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDeleteInsight(insight.insightId!);
-                      }}
-                      className="p-1 rounded-md hover:bg-red-100 dark:hover:bg-red-900/30 transition-all"
-                      title="Remove this insight"
-                    >
-                      <X className="w-3.5 h-3.5 text-red-400 hover:text-red-600 dark:text-red-500 dark:hover:text-red-400" strokeWidth={2} />
-                    </button>
-                  )}
+                        title="Bad insight"
+                      >
+                        <ThumbsDown
+                          className={`w-3 h-3 ${
+                            insightFeedback?.rating === -1
+                              ? "text-red-600 dark:text-red-400 fill-current"
+                              : "text-slate-400 hover:text-red-600 dark:hover:text-red-400"
+                          }`}
+                          strokeWidth={2}
+                        />
+                      </button>
+                    )}
+                    {/* Delete button — admin only */}
+                    {isAdmin && onDeleteInsight && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteInsight(insight.insightId!);
+                        }}
+                        className="p-1 rounded-md hover:bg-red-100 dark:hover:bg-red-900/30 transition-all"
+                        title="Remove this insight"
+                      >
+                        <X className="w-3.5 h-3.5 text-red-400 hover:text-red-600 dark:text-red-500 dark:hover:text-red-400" strokeWidth={2} />
+                      </button>
+                    )}
+                  </div>
                 </div>
               </PopoverAnchor>
 
@@ -784,6 +798,30 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
   const [agentJobId, setAgentJobId] = useState<string | null>(null);
   const agentJob = useJobStatus(agentJobId);
 
+  // ---- Tracked insights (watchlist) for pipeline insights ----
+  // Map<source_insight_id, tracked_uuid> drives both UI and delete logic.
+  type TrackedInsightRow = { id: string; source_insight_id?: number | null; status?: string };
+  const [trackedPipelineMap, setTrackedPipelineMap] = useState<Map<number, string>>(new Map());
+  const [watchlistRefreshTrigger, setWatchlistRefreshTrigger] = useState(0);
+
+  const fetchAndBuildPipelineMap = useCallback(async (bustCache = false) => {
+    if (bustCache) api.invalidateCacheFor("/insights/tracked");
+    const data = ((await api.getTrackedInsights(selectedTenantId)) || []) as TrackedInsightRow[];
+    const map = new Map<number, string>();
+    for (const row of data) {
+      if (row.status === "active" && row.source_insight_id != null) {
+        map.set(row.source_insight_id, row.id);
+      }
+    }
+    return map;
+  }, [selectedTenantId]);
+
+  useEffect(() => {
+    fetchAndBuildPipelineMap().then(setTrackedPipelineMap).catch((err) =>
+      console.error("Failed to load tracked insights:", err)
+    );
+  }, [fetchAndBuildPipelineMap]);
+
   const isRefreshing = refreshJob.status === "processing";
   const isAgentGenerating = agentJob.status === "processing";
 
@@ -921,21 +959,52 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
     }
   }, [agentFinding, isCreatingResearch, selectedTenantId, navigate]);
 
-  const handleTrackInsight = useCallback(
+  const handleToggleTrack = useCallback(
     async (insight: AletheiaInsight) => {
+      if (insight.insightId == null) return;
+      const sourceId = insight.insightId;
+      const currentlyTracked = trackedPipelineMap.has(sourceId);
+
+      // Optimistic toggle
+      setTrackedPipelineMap((prev) => {
+        const next = new Map(prev);
+        if (currentlyTracked) next.delete(sourceId); else next.set(sourceId, "pending");
+        return next;
+      });
+
       try {
-        await api.trackInsight({
-          headline: insight.headline || insight.message,
-          understory: insight.understory || insight.reasoning,
-          metric_signature: insight.evidence || { sql: "", keyFields: [] },
-          source_insight_id: insight.insightId,
-          source_type: "pipeline",
-        }, selectedTenantId);
+        if (currentlyTracked) {
+          let trackedId = trackedPipelineMap.get(sourceId);
+          if (!trackedId || trackedId === "pending") {
+            const freshMap = await fetchAndBuildPipelineMap(true);
+            trackedId = freshMap.get(sourceId);
+          }
+          if (trackedId && trackedId !== "pending") {
+            await api.deleteTrackedInsight(trackedId, selectedTenantId);
+          }
+        } else {
+          await api.trackInsight({
+            headline: insight.headline || insight.message,
+            understory: insight.understory || insight.reasoning,
+            metric_signature: insight.evidence || { sql: "", keyFields: [] },
+            source_insight_id: sourceId,
+            source_type: "pipeline",
+          }, selectedTenantId);
+        }
+        const freshMap = await fetchAndBuildPipelineMap(true);
+        setTrackedPipelineMap(freshMap);
+        setWatchlistRefreshTrigger((t) => t + 1);
       } catch (err) {
-        console.error("Error tracking insight:", err);
+        console.error("Error toggling tracked insight:", err);
+        // Revert on failure
+        setTrackedPipelineMap((prev) => {
+          const reverted = new Map(prev);
+          if (currentlyTracked) reverted.set(sourceId, "reverted"); else reverted.delete(sourceId);
+          return reverted;
+        });
       }
     },
-    [selectedTenantId]
+    [selectedTenantId, trackedPipelineMap, fetchAndBuildPipelineMap]
   );
 
   const isDrillable = useCallback(
@@ -1157,7 +1226,13 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
 
         {/* ===== Watchlist Tab ===== */}
         {activeTab === "watchlist" && (
-          <TrackedInsightsWatchlist selectedTenantId={selectedTenantId} />
+          <TrackedInsightsWatchlist
+            selectedTenantId={selectedTenantId}
+            refreshTrigger={watchlistRefreshTrigger}
+            onInsightRemoved={() => {
+              fetchAndBuildPipelineMap(true).then(setTrackedPipelineMap).catch(() => {});
+            }}
+          />
         )}
 
         {/* ===== Job Progress ===== */}
@@ -1284,7 +1359,8 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                     isAdmin ? deleteInsight : undefined
                   }
                   onSubmitFeedback={submitFeedback}
-                  onTrackInsight={handleTrackInsight}
+                  isTracked={(i) => i.insightId != null && trackedPipelineMap.has(i.insightId)}
+                  onToggleTrack={handleToggleTrack}
                   isAdmin={isAdmin}
                 />
               );
@@ -1314,7 +1390,8 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
           recommended_action: selectedInsight.recommended_action,
           owner: selectedInsight.owner,
         } : undefined}
-        onTrackInsight={selectedInsight ? () => handleTrackInsight(selectedInsight) : undefined}
+        isTracked={selectedInsight != null && selectedInsight.insightId != null && trackedPipelineMap.has(selectedInsight.insightId)}
+        onToggleTrack={selectedInsight ? () => handleToggleTrack(selectedInsight) : undefined}
       />
 
       {/* Agent Finding Drilldown Modal */}
@@ -1353,13 +1430,16 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                   </button>
                   {agentFindingInsight && (
                     <button
-                      onClick={() => {
-                        handleTrackInsight(agentFindingInsight);
-                      }}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors"
+                      onClick={() => handleToggleTrack(agentFindingInsight)}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                        agentFindingInsight.insightId != null && trackedPipelineMap.has(agentFindingInsight.insightId)
+                          ? "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
+                          : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-amber-100 dark:hover:bg-amber-900/30 hover:text-amber-700 dark:hover:text-amber-300"
+                      }`}
+                      title={agentFindingInsight.insightId != null && trackedPipelineMap.has(agentFindingInsight.insightId) ? "Remove from watchlist" : "Track this insight"}
                     >
-                      <Bookmark className="w-3.5 h-3.5" />
-                      Track This Insight
+                      <Bookmark className={`w-3.5 h-3.5 ${agentFindingInsight.insightId != null && trackedPipelineMap.has(agentFindingInsight.insightId) ? "text-amber-500 fill-amber-500 dark:text-amber-400 dark:fill-amber-400" : ""}`} />
+                      {agentFindingInsight.insightId != null && trackedPipelineMap.has(agentFindingInsight.insightId) ? "Tracked" : "Track This Insight"}
                     </button>
                   )}
                 </div>

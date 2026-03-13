@@ -231,6 +231,23 @@ export class ApiClient {
   }
 
   /**
+   * Invalidate cached GET responses whose key contains the given substring.
+   * Useful after mutations that should bust a related GET cache.
+   */
+  invalidateCacheFor(endpointSubstring: string) {
+    for (const key of this.requestCache.keys()) {
+      if (key.includes(endpointSubstring)) {
+        this.requestCache.delete(key);
+      }
+    }
+    for (const key of this.pendingRequests.keys()) {
+      if (key.includes(endpointSubstring)) {
+        this.pendingRequests.delete(key);
+      }
+    }
+  }
+
+  /**
    * Attempt to refresh the auth token using the stored Cognito refresh token.
    * Returns true if refresh succeeded, false otherwise.
    * Deduplicates concurrent refresh attempts.
