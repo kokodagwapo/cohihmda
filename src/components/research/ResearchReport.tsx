@@ -897,6 +897,49 @@ function InsightCard({
   );
 }
 
+const FURTHER_INITIAL_VISIBLE = 3;
+
+function FurtherInvestigationSection({
+  items,
+  onRun,
+  sectionRef,
+}: {
+  items: { question: string; rationale: string }[];
+  onRun?: (question: string) => void;
+  sectionRef?: React.RefObject<HTMLDivElement | null>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? items : items.slice(0, FURTHER_INITIAL_VISIBLE);
+  const hiddenCount = items.length - FURTHER_INITIAL_VISIBLE;
+
+  return (
+    <>
+      <Separator />
+      <div ref={sectionRef}>
+        <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+          <Search className="h-4 w-4" />
+          Suggested Further Investigation
+          <InfoTip text="Topics that may warrant deeper analysis based on this research" />
+        </h3>
+        <div className="space-y-2">
+          {visible.map((item, i) => (
+            <FurtherInvestigationCard key={i} item={item} onRun={onRun} />
+          ))}
+        </div>
+        {hiddenCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setExpanded(v => !v)}
+            className="mt-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {expanded ? "Show less" : `+${hiddenCount} more suggestion${hiddenCount > 1 ? "s" : ""}`}
+          </button>
+        )}
+      </div>
+    </>
+  );
+}
+
 function FurtherInvestigationCard({
   item,
   onRun,
@@ -1175,25 +1218,11 @@ export function ResearchReport({
       {!isBrief &&
         report.furtherInvestigation &&
         report.furtherInvestigation.length > 0 && (
-          <>
-            <Separator />
-            <div ref={nextStepsRef}>
-              <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                <Search className="h-4 w-4" />
-                Suggested Further Investigation
-                <InfoTip text="Topics that may warrant deeper analysis based on this research" />
-              </h3>
-              <div className="space-y-2">
-                {report.furtherInvestigation.map((item, i) => (
-                  <FurtherInvestigationCard
-                    key={i}
-                    item={item}
-                    onRun={onRunFurtherInvestigation}
-                  />
-                ))}
-              </div>
-            </div>
-          </>
+          <FurtherInvestigationSection
+            items={report.furtherInvestigation}
+            onRun={onRunFurtherInvestigation}
+            sectionRef={nextStepsRef}
+          />
         )}
 
       {/* ========== Timestamp ========== */}
