@@ -57,6 +57,7 @@ import { cn } from "@/lib/utils";
 import { renderMarkdownText } from "@/utils/renderMarkdown";
 import { InsightChat } from "@/components/dashboard/InsightChat";
 import { AutoChart, EvidencePreviewTable } from "@/components/research/FindingDrillDown";
+import { SaveToWorkbenchModal, type SaveToWorkbenchPayload } from "@/components/research/SaveToWorkbenchModal";
 import type {
   ResearchReport as ResearchReportType,
   ResearchTheme,
@@ -78,9 +79,14 @@ interface ResearchReportProps {
     targetId: string | null,
     rating: -1 | 1 | null,
     comment: string | null,
-    context?: any
+    context?: Record<string, unknown>
   ) => void;
   onDrillDown?: (finding: Finding) => void;
+  /** Whether this insight is already on the watchlist (for research insights). */
+  isTracked?: (headline: string, detail: string) => boolean;
+  /** Toggle track/untrack on the watchlist. */
+  onToggleTrack?: (headline: string, detail: string) => void;
+  /** @deprecated Use isTracked + onToggleTrack for toggle behavior. */
   onTrackInsight?: (headline: string, detail: string) => void;
   /** When user clicks "Run this investigation" on a further-investigation suggestion. */
   onRunFurtherInvestigation?: (question: string) => void;
@@ -146,9 +152,13 @@ function humanizeKeyQuick(key: string): string {
 export function QuickAnswerView({
   finding,
   onDrillDown,
+  onSaveToWorkbench,
+  sessionId,
 }: {
   finding: Finding;
   onDrillDown?: (finding: Finding) => void;
+  onSaveToWorkbench?: (payload: SaveToWorkbenchPayload) => void;
+  sessionId?: string | null;
 }) {
   return (
     <div className="space-y-4 py-2">
@@ -203,7 +213,7 @@ export function QuickAnswerView({
                         {ev.explanation}
                       </p>
                     )}
-                    <EvidencePreviewTable evidence={ev} maxRows={20} />
+                    <EvidencePreviewTable evidence={ev} maxRows={20} onSaveToWorkbench={onSaveToWorkbench} saveTitle={finding.title} sessionId={sessionId} />
                   </div>
                 ))}
               </div>
@@ -552,18 +562,25 @@ function InsightCard({
   findings,
   onFeedback,
   onDrillDown,
+  isTracked,
+  onToggleTrack,
   onTrackInsight,
   selectedTenantId,
   defaultEvidenceOpen = false,
+  onSaveToWorkbench,
+  sessionId,
 }: {
   insight: RankedInsight;
   findings: Finding[];
   onFeedback?: (id: string, rating: -1 | 1, comment: string) => void;
   onDrillDown?: (finding: Finding) => void;
+  isTracked?: (headline: string, detail: string) => boolean;
+  onToggleTrack?: (headline: string, detail: string) => void;
   onTrackInsight?: (headline: string, detail: string) => void;
   selectedTenantId?: string | null;
-  /** Open the evidence (table/chart) by default for top insights. */
   defaultEvidenceOpen?: boolean;
+  onSaveToWorkbench?: (payload: SaveToWorkbenchPayload) => void;
+  sessionId?: string | null;
 }) {
   const [chatOpen, setChatOpen] = useState(false);
   const relatedFindings = findings.filter((f) =>
@@ -630,25 +647,43 @@ function InsightCard({
               {insight.headline}
             </p>
             <div className="flex items-center gap-1.5 flex-shrink-0">
-              {onTrackInsight && (
+              {(onToggleTrack ?? onTrackInsight) && (
                 <TooltipProvider delayDuration={200}>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
-                        onClick={() =>
-                          onTrackInsight(insight.headline, insight.detail)
+                        onClick={() => {
+                          if (onToggleTrack) {
+                            onToggleTrack(insight.headline, insight.detail);
+                          } else {
+                            onTrackInsight?.(insight.headline, insight.detail);
+                          }
+                        }}
+                        className={`p-1 rounded-md transition-all ${
+                          isTracked?.(insight.headline, insight.detail)
+                            ? "bg-amber-100 dark:bg-amber-900/30"
+                            : "hover:bg-amber-100 dark:hover:bg-amber-900/30"
+                        }`}
+                        title={
+                          isTracked?.(insight.headline, insight.detail)
+                            ? "Remove from watchlist"
+                            : "Track this insight on your watchlist"
                         }
-                        className="p-1 rounded-md hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-all"
-                        title="Track this insight"
                       >
                         <Bookmark
-                          className="h-3.5 w-3.5 text-muted-foreground hover:text-amber-600"
+                          className={`h-3.5 w-3.5 transition-colors ${
+                            isTracked?.(insight.headline, insight.detail)
+                              ? "text-amber-500 fill-amber-500 dark:text-amber-400 dark:fill-amber-400"
+                              : "text-muted-foreground hover:text-amber-600"
+                          }`}
                           strokeWidth={2}
                         />
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top" className="text-xs">
-                      Track this insight on your watchlist
+                      {isTracked?.(insight.headline, insight.detail)
+                        ? "Remove from watchlist"
+                        : "Track this insight on your watchlist"}
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
@@ -778,8 +813,8 @@ function InsightCard({
             return (
               <CollapsibleEvidence defaultOpen={defaultEvidenceOpen}>
                 <div className="space-y-3 pt-1 min-w-0">
-                  <EvidencePreviewTable evidence={firstEvidence} maxRows={defaultEvidenceOpen ? 20 : 12} />
-                  <AutoChart evidence={firstEvidence} />
+                  <EvidencePreviewTable evidence={firstEvidence} maxRows={defaultEvidenceOpen ? 20 : 12} onSaveToWorkbench={onSaveToWorkbench} saveTitle={insight.headline} sessionId={sessionId} />
+                  <AutoChart evidence={firstEvidence} onSaveToWorkbench={onSaveToWorkbench} saveTitle={insight.headline} sessionId={sessionId} />
                 </div>
               </CollapsibleEvidence>
             );
@@ -899,9 +934,13 @@ export function ResearchReport({
   selectedTenantId,
   onSubmitFeedback,
   onDrillDown,
+  isTracked,
+  onToggleTrack,
   onTrackInsight,
   onRunFurtherInvestigation,
 }: ResearchReportProps) {
+  const [saveToWorkbenchPayload, setSaveToWorkbenchPayload] = useState<SaveToWorkbenchPayload | null>(null);
+
   const handleFindingFeedback = useCallback(
     (id: string, rating: -1 | 1, comment: string) => {
       if (!onSubmitFeedback) return;
@@ -979,7 +1018,6 @@ export function ResearchReport({
       {/* ========== KPI Summary Strip ========== */}
       {findings.length > 0 && <KpiSummaryStrip findings={findings} />}
 
-      {/* ========== Key Themes (Collapsible Accordion) ========== */}
       {/* ========== Key Themes ========== */}
       {report.themes && report.themes.length > 0 && (
         <div>
@@ -1017,9 +1055,13 @@ export function ResearchReport({
                   onSubmitFeedback ? handleFindingFeedback : undefined
                 }
                 onDrillDown={onDrillDown}
+                isTracked={isTracked}
+                onToggleTrack={onToggleTrack}
                 onTrackInsight={onTrackInsight}
                 selectedTenantId={selectedTenantId}
                 defaultEvidenceOpen={insight.rank <= 2}
+                onSaveToWorkbench={setSaveToWorkbenchPayload}
+                sessionId={sessionId}
               />
             ))}
           </div>
@@ -1041,6 +1083,12 @@ export function ResearchReport({
           Report generated {new Date(report.generatedAt).toLocaleString()}
         </p>
       )}
+
+      <SaveToWorkbenchModal
+        open={saveToWorkbenchPayload != null}
+        onClose={() => setSaveToWorkbenchPayload(null)}
+        payload={saveToWorkbenchPayload}
+      />
     </div>
   );
 }
