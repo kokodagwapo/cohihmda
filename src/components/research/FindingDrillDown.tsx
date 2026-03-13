@@ -958,24 +958,42 @@ function pivotLongToWide(
   return { data, seriesValues: populated };
 }
 
+/**
+ * Guarantee that data has at most one entry per x-value.
+ * If duplicates are found, falls back to aggregateByX (summing all valueKeys).
+ * This is the universal safety net applied at the output boundary of
+ * evidenceToChartConfig so no path can produce duplicate x-labels.
+ */
+function ensureUniqueX(
+  data: Record<string, any>[],
+  xKey: string,
+  valueKeys: string[],
+): Record<string, any>[] {
+  const seen = new Set<string>();
+  let hasDupes = false;
+  for (const d of data) {
+    const x = String(d[xKey] ?? "");
+    if (seen.has(x)) { hasDupes = true; break; }
+    seen.add(x);
+  }
+  if (!hasDupes) return data;
+  return aggregateByX(data, xKey, valueKeys);
+}
+
 // ── Core adapter: evidence → resolved config ─────────────────────────────────
 /**
- * evidenceToChartConfig
+ * _computeConfig — inner implementation (never call directly).
  *
  * Priority order:
- *  1. Use chartHint from the AI agent when present — it has explicit axis keys
- *     and chart type knowledge. If the agent hinted a single-series chart but
- *     the underlying data is long-format (duplicate x-values), we automatically
- *     pivot to grouped_bar or aggregate to guarantee one bar per x-value.
- *  2. Multi-series fallback: if 2+ numeric fields coexist with a label field,
- *     render a grouped_bar. Deduplicates by aggregating per x-category.
- *  3. Duplicate-label fallback: if the best label has duplicates and a second
- *     categorical field exists, attempt a client-side pivot to grouped_bar.
- *  4. Single-series fallback: best label + best value. Aggregates duplicates.
- *
- * KEY INVARIANT: every returned config has exactly one data row per x-value.
+ *  1. Agent-provided chartHint: uses explicit axis keys + chart type.
+ *     When data has duplicate x-values and a categorical series candidate
+ *     exists, pivots to grouped_bar first (richer chart). Duplicate removal
+ *     is NOT done here — the outer evidenceToChartConfig wrapper handles it.
+ *  2. Multi-series fallback: 2+ numeric fields → grouped_bar.
+ *  3. Duplicate-label fallback: pivot via second categorical field.
+ *  4. Single-series fallback: best label + best numeric value.
  */
-function evidenceToChartConfig(evidence: EvidenceItem): ResolvedChartConfig | null {
+function _computeConfig(evidence: EvidenceItem): ResolvedChartConfig | null {
   const { fields, rows, chartHint, columnFormats } = evidence;
   if (rows.length < 2) return null;
 
@@ -999,78 +1017,48 @@ function evidenceToChartConfig(evidence: EvidenceItem): ResolvedChartConfig | nu
       : humanizeKey(yKey ?? numericFields[0]);
     const titleXLabel = humanizeKey(xKey ?? fields[0]);
 
-    // ── Duplicate x-value guard (long-format SQL data) ──────────────────────
-    // The agent may label the chart as single-series but issue a SQL query that
-    // returns multiple rows per x-category (e.g. program × period).  When that
-    // happens we must pivot or aggregate before rendering — otherwise Recharts
-    // gets two bars for "FHA Fixed Rate" both labelled with the same series name.
-    if (!isMulti) {
-      const uniqueRawX = new Set(rows.slice(0, 30).map(r => String(r[xKey] ?? "")));
-      const totalRows = Math.min(rows.length, 30);
-      if (uniqueRawX.size < totalRows) {
-        // There are duplicate x-values → try pivot first
-        const actualYKey = yKey ?? numericFields[0];
-        const seriesCandidates = fields.filter(f => {
-          if (f === xKey || numericFields.includes(f)) return false;
-          const vals = rows.map(r => r[f]).filter(v => v != null);
-          return vals.some(v => typeof v === "string" && !isStrictlyNumeric(v));
-        });
-
-        if (seriesCandidates.length > 0) {
-          // Try each categorical candidate as series dimension; use first that works
-          for (const seriesField of seriesCandidates) {
-            const result = pivotLongToWide(rows.slice(0, 30), xKey, seriesField, actualYKey);
-            if (result) {
-              const { data: pivotData, seriesValues } = result;
-              const avgLen = pivotData.reduce((s, d) => s + String(d[xKey]).length, 0) / pivotData.length;
-              return {
-                chartType: pivotData.length > 10 || avgLen > 18 ? 'horizontal_bar' : 'grouped_bar',
-                xKey,
-                yKey: seriesValues[0],
-                yKeys: seriesValues,
-                isStacked: false,
-                isMultiSeries: true,
-                data: pivotData,
-                title: `${humanizeKey(actualYKey)} by ${humanizeKey(xKey)} (by ${humanizeKey(seriesField)})`,
-                xLabel: chartHint.xLabel,
-                yLabel: chartHint.yLabel,
-              };
-            }
-          }
+    // ── Opportunistic pivot: long-format → grouped_bar ───────────────────────
+    // When raw data has more rows than unique x-values (any hint type), try to
+    // pivot using a categorical series dimension before falling back to the
+    // universal ensureUniqueX aggregator.  This gives a richer grouped chart
+    // instead of summing everything together.
+    const uniqueRawX = new Set(rows.slice(0, 30).map(r => String(r[xKey] ?? "")));
+    const totalRows = Math.min(rows.length, 30);
+    if (uniqueRawX.size < totalRows) {
+      const actualYKey = yKey ?? numericFields[0];
+      const seriesCandidates = fields.filter(f => {
+        if (f === xKey || numericFields.includes(f)) return false;
+        const vals = rows.map(r => r[f]).filter(v => v != null);
+        return vals.some(v => typeof v === "string" && !isStrictlyNumeric(v));
+      });
+      for (const seriesField of seriesCandidates) {
+        const result = pivotLongToWide(rows.slice(0, 30), xKey, seriesField, actualYKey);
+        if (result) {
+          const { data: pivotData, seriesValues } = result;
+          const avgLen = pivotData.reduce((s, d) => s + String(d[xKey]).length, 0) / pivotData.length;
+          return {
+            chartType: pivotData.length > 10 || avgLen > 18 ? 'horizontal_bar' : 'grouped_bar',
+            xKey,
+            yKey: seriesValues[0],
+            yKeys: seriesValues,
+            isStacked: false,
+            isMultiSeries: true,
+            data: pivotData,
+            title: `${humanizeKey(actualYKey)} by ${humanizeKey(xKey)} (by ${humanizeKey(seriesField)})`,
+            xLabel: chartHint.xLabel,
+            yLabel: chartHint.yLabel,
+          };
         }
-
-        // No viable series field → aggregate (sum) per x-category
-        const labelledRows = rows.slice(0, 30).map(row => ({
-          ...row,
-          [xKey]: rawLabel(String(row[xKey] ?? "")),
-        }));
-        const aggData = aggregateByX(labelledRows, xKey, [actualYKey]);
-        if (aggData.length < 2) return null;
-        const avgLenAgg = aggData.reduce((s, d) => s + String(d[xKey]).length, 0) / aggData.length;
-        const resolvedType: ResolvedChartConfig['chartType'] =
-          chartType === 'bar' && (aggData.length > 12 || avgLenAgg > 20) ? 'horizontal_bar' : chartType as ResolvedChartConfig['chartType'];
-        return {
-          chartType: resolvedType,
-          xKey,
-          yKey: actualYKey,
-          isStacked,
-          isMultiSeries: false,
-          data: aggData,
-          title: `${titleYLabel} by ${titleXLabel}`,
-          xLabel: chartHint.xLabel,
-          yLabel: chartHint.yLabel,
-        };
       }
+      // No pivot field found → fall through; ensureUniqueX will aggregate
     }
 
-    // No duplicates: proceed with standard mapping
+    // Standard row mapping — ensureUniqueX deduplicates the result
     const data = rows.slice(0, 30).map((row) => {
       const entry: Record<string, any> = {};
       entry[xKey] = rawLabel(row[xKey]);
       if (isMulti && yKeys) {
-        for (const k of yKeys) {
-          entry[k] = parseNumeric(row[k]);
-        }
+        for (const k of yKeys) entry[k] = parseNumeric(row[k]);
       } else if (yKey) {
         entry[yKey] = parseNumeric(row[yKey]);
       }
@@ -1106,26 +1094,18 @@ function evidenceToChartConfig(evidence: EvidenceItem): ResolvedChartConfig | nu
 
   // PATH 2: multiple numeric fields → grouped_bar
   if (numericFields.length >= 2) {
-    const preferredYKeys = numericFields.slice(0, 6); // cap to 6 series
-    const rawData = rows.slice(0, 30).map((row) => {
+    const preferredYKeys = numericFields.slice(0, 6);
+    const data = rows.slice(0, 30).map((row) => {
       const entry: Record<string, any> = {};
       entry[labelField] = rawLabel(row[labelField]);
-      for (const k of preferredYKeys) {
-        entry[k] = parseNumeric(row[k]);
-      }
+      for (const k of preferredYKeys) entry[k] = parseNumeric(row[k]);
       return entry;
     });
 
-    // Deduplicate: if the same labelField value appears more than once (e.g.
-    // the query has an extra grouping dimension we're not using as the x-axis),
-    // aggregate all numeric series by summing within each x-category.
-    const uniqueLabels = new Set(rawData.map(d => d[labelField]));
+    const uniqueLabels = new Set(data.map(d => d[labelField]));
     if (uniqueLabels.size < 2) return null;
 
-    const data = uniqueLabels.size < rawData.length
-      ? aggregateByX(rawData, labelField, preferredYKeys)
-      : rawData;
-
+    // ensureUniqueX handles dedup; avgLen computed after dedup for layout decision
     const avgLen = data.reduce((s, d) => s + String(d[labelField]).length, 0) / data.length;
     const isHoriz = data.length > 10 || avgLen > 18;
 
@@ -1155,7 +1135,6 @@ function evidenceToChartConfig(evidence: EvidenceItem): ResolvedChartConfig | nu
     if (seriesField) {
       const seriesValues = [...new Set(rows.map(r => String(r[seriesField] ?? "")))].slice(0, 6);
       const categories = [...new Set(rows.map(r => String(r[labelField] ?? "")))];
-      // Build pivot: { labelField: cat, series1: val, series2: val, ... }
       const pivot: Record<string, Record<string, any>> = {};
       for (const cat of categories) pivot[cat] = { [labelField]: cat };
       for (const row of rows) {
@@ -1184,11 +1163,10 @@ function evidenceToChartConfig(evidence: EvidenceItem): ResolvedChartConfig | nu
     }
   }
 
-  // PATH 4: single-series (current behaviour, improved)
-  // Note: we may arrive here when hasDuplicateLabels=true but no second
-  // categorical field was found (PATH 3 fell through). In that case we MUST
-  // aggregate to avoid rendering duplicate bars per x-category.
-  const rawData4 = rows.slice(0, 30).map((row) => {
+  // PATH 4: single-series fallback
+  // ensureUniqueX will aggregate any surviving duplicates (e.g. PATH 3 fell
+  // through because there was no second categorical field).
+  const data = rows.slice(0, 30).map((row) => {
     const entry: Record<string, any> = {};
     entry[labelField] = rawLabel(row[labelField]);
     entry[bestField] = parseNumeric(row[bestField]);
@@ -1198,13 +1176,8 @@ function evidenceToChartConfig(evidence: EvidenceItem): ResolvedChartConfig | nu
     return entry;
   });
 
-  const uniqueLabels4 = new Set(rawData4.map(d => d[labelField]));
+  const uniqueLabels4 = new Set(data.map(d => d[labelField]));
   if (uniqueLabels4.size < 2) return null;
-
-  // Aggregate if duplicates survived into data (sum bestField per x-category)
-  const data = uniqueLabels4.size < rawData4.length
-    ? aggregateByX(rawData4, labelField, [bestField])
-    : rawData4;
 
   const labelFieldLower = labelField.toLowerCase();
   const sampleLabel = String(data[0]?.[labelField] ?? "");
@@ -1216,7 +1189,7 @@ function evidenceToChartConfig(evidence: EvidenceItem): ResolvedChartConfig | nu
   const inferredType = isTimeSeries ? 'line' : isHorizontal ? 'horizontal_bar' : 'bar';
 
   const bestFormat = agentFormatToFieldFormat(agentFmts[bestField]) || inferFormat(bestField);
-  void bestFormat; // used below via evidence ref
+  void bestFormat;
 
   return {
     chartType: inferredType,
@@ -1227,6 +1200,22 @@ function evidenceToChartConfig(evidence: EvidenceItem): ResolvedChartConfig | nu
     data,
     title: `${humanizeKey(bestField)} by ${humanizeKey(labelField)}`,
   };
+}
+
+/**
+ * evidenceToChartConfig — public entry point.
+ *
+ * Calls _computeConfig then applies ensureUniqueX as a universal output-boundary
+ * guarantee: regardless of which path produced the data, the returned config will
+ * always have exactly one data entry per x-value. No per-path dedup needed.
+ */
+function evidenceToChartConfig(evidence: EvidenceItem): ResolvedChartConfig | null {
+  const config = _computeConfig(evidence);
+  if (!config) return null;
+  const allValueKeys = config.yKeys ?? [config.yKey];
+  config.data = ensureUniqueX(config.data, config.xKey, allValueKeys);
+  if (config.data.length < 2) return null;
+  return config;
 }
 
 // ── Tiny helpers ─────────────────────────────────────────────────────────────
