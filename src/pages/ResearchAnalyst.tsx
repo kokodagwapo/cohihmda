@@ -20,6 +20,7 @@ import { api } from "@/lib/api";
 import { AgentTimeline } from "@/components/research/AgentTimeline";
 import { ResearchReport, QuickAnswerView } from "@/components/research/ResearchReport";
 import { FindingDrillDown } from "@/components/research/FindingDrillDown";
+import { SaveToWorkbenchModal, type SaveToWorkbenchPayload } from "@/components/research/SaveToWorkbenchModal";
 import type { Finding, ResearchMode } from "@/hooks/useResearchSession";
 import {
   Play,
@@ -373,6 +374,7 @@ export default function ResearchAnalyst() {
   const [activeTab, setActiveTab] = useState<string>("timeline");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [drillDownFinding, setDrillDownFinding] = useState<Finding | null>(null);
+  const [workbenchPayload, setWorkbenchPayload] = useState<SaveToWorkbenchPayload | null>(null);
   const steerInputRef = useRef<HTMLInputElement>(null);
   const lastReportRef = useRef<boolean>(false);
   const reportContainerRef = useRef<HTMLDivElement>(null);
@@ -940,6 +942,8 @@ export default function ResearchAnalyst() {
                           setDrillDownFinding(f);
                           setActiveTab("findings");
                         }}
+                        onSaveToWorkbench={setWorkbenchPayload}
+                        sessionId={sessionId}
                       />
                     </div>
                   ) : (
@@ -1083,6 +1087,11 @@ export default function ResearchAnalyst() {
           </div>
         </DialogContent>
       </Dialog>
+      <SaveToWorkbenchModal
+        open={workbenchPayload != null}
+        onClose={() => setWorkbenchPayload(null)}
+        payload={workbenchPayload}
+      />
       </div>
     </DashboardLayout>
   );
