@@ -20,6 +20,7 @@ import { api } from "@/lib/api";
 import { AgentTimeline } from "@/components/research/AgentTimeline";
 import { ResearchReport, QuickAnswerView } from "@/components/research/ResearchReport";
 import { FindingDrillDown } from "@/components/research/FindingDrillDown";
+import { SaveToWorkbenchModal, type SaveToWorkbenchPayload } from "@/components/research/SaveToWorkbenchModal";
 import type { Finding, ResearchMode } from "@/hooks/useResearchSession";
 import {
   Play,
@@ -38,6 +39,8 @@ import {
   ThumbsDown,
   MessageSquarePlus,
   Share2,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { ExportMenu } from "@/components/common/ExportMenu";
 import { UserSharePicker } from "@/components/common/UserSharePicker";
@@ -373,6 +376,7 @@ export default function ResearchAnalyst() {
   const [activeTab, setActiveTab] = useState<string>("timeline");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [drillDownFinding, setDrillDownFinding] = useState<Finding | null>(null);
+  const [workbenchPayload, setWorkbenchPayload] = useState<SaveToWorkbenchPayload | null>(null);
   const steerInputRef = useRef<HTMLInputElement>(null);
   const lastReportRef = useRef<boolean>(false);
   const reportContainerRef = useRef<HTMLDivElement>(null);
@@ -382,6 +386,90 @@ export default function ResearchAnalyst() {
   const [shareDialogVisibility, setShareDialogVisibility] = useState<"private" | "shared" | "global">("private");
   const [shareDialogSharedIds, setShareDialogSharedIds] = useState<string[]>([]);
   const [shareDialogSaving, setShareDialogSaving] = useState(false);
+  const [suggestionsExpanded, setSuggestionsExpanded] = useState(false);
+
+  // ---- Tracked insights (watchlist) for research report ----
+  // Map<normalizedHeadline, trackedInsightUUID> for both UI state and delete IDs.
+  type TrackedRow = { id: string; headline: string; understory?: string; source_type?: string; status?: string };
+  const [trackedMap, setTrackedMap] = useState<Map<string, string>>(new Map());
+
+  const normalizeHL = (h: string) => (h || "").trim().toLowerCase();
+
+  const fetchAndBuildTrackedMap = useCallback(async (bustCache = false) => {
+    if (bustCache) api.invalidateCacheFor("/insights/tracked");
+    const data = ((await api.getTrackedInsights(effectiveTenantId)) || []) as TrackedRow[];
+    const map = new Map<string, string>();
+    for (const r of data) {
+      if (r.source_type === "research" && r.status === "active") {
+        map.set(normalizeHL(r.headline), r.id);
+      }
+    }
+    return map;
+  }, [effectiveTenantId]);
+
+  // Seed from server on mount + tenant change
+  useEffect(() => {
+    let cancelled = false;
+    fetchAndBuildTrackedMap().then((map) => {
+      if (!cancelled) setTrackedMap(map);
+    }).catch((err) => console.error("Failed to load tracked insights:", err));
+    return () => { cancelled = true; };
+  }, [fetchAndBuildTrackedMap]);
+
+  const isResearchInsightTracked = useCallback(
+    (_headline: string, _detail: string) => trackedMap.has(normalizeHL(_headline)),
+    [trackedMap]
+  );
+
+  const handleToggleTrackResearch = useCallback(
+    async (headline: string, detail: string) => {
+      const key = normalizeHL(headline);
+      const currentlyTracked = trackedMap.has(key);
+
+      // Optimistic update
+      setTrackedMap((prev) => {
+        const next = new Map(prev);
+        if (currentlyTracked) next.delete(key); else next.set(key, "pending");
+        return next;
+      });
+
+      try {
+        if (currentlyTracked) {
+          // Get the tracked UUID — prefer the map, fall back to a fresh server lookup
+          let trackedId = trackedMap.get(key);
+          if (!trackedId || trackedId === "pending") {
+            const freshMap = await fetchAndBuildTrackedMap(true);
+            trackedId = freshMap.get(key);
+          }
+          if (trackedId && trackedId !== "pending") {
+            await api.deleteTrackedInsight(trackedId, effectiveTenantId);
+          }
+        } else {
+          await api.trackInsight(
+            {
+              headline,
+              understory: detail,
+              metric_signature: { sql: "", keyFields: [] },
+              source_type: "research",
+            },
+            effectiveTenantId
+          );
+        }
+        // Re-sync from server with cache bust
+        const freshMap = await fetchAndBuildTrackedMap(true);
+        setTrackedMap(freshMap);
+      } catch (err) {
+        console.error("Error toggling tracked research insight:", err);
+        // Revert on failure
+        setTrackedMap((prev) => {
+          const reverted = new Map(prev);
+          if (currentlyTracked) reverted.set(key, "reverted"); else reverted.delete(key);
+          return reverted;
+        });
+      }
+    },
+    [effectiveTenantId, trackedMap, fetchAndBuildTrackedMap]
+  );
 
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -822,9 +910,6 @@ export default function ResearchAnalyst() {
                 <TabsContent value="report" className="flex-1 overflow-y-auto m-0 px-6 pb-4" data-tour="research-report">
                   {report ? (
                     <div ref={reportContainerRef} className="space-y-4 py-2">
-                      {phase === "complete" && (
-                        <SessionFeedback onSubmit={handleSessionFeedback} />
-                      )}
                       <ResearchReport
                         report={report}
                         findings={findings}
@@ -835,18 +920,8 @@ export default function ResearchAnalyst() {
                           setDrillDownFinding(f);
                           setActiveTab("findings");
                         }}
-                        onTrackInsight={async (headline, detail) => {
-                          try {
-                            await api.trackInsight({
-                              headline,
-                              understory: detail,
-                              metric_signature: { sql: "", keyFields: [] },
-                              source_type: "research",
-                            }, effectiveTenantId);
-                          } catch (err) {
-                            console.error("Error tracking insight:", err);
-                          }
-                        }}
+                        isTracked={isResearchInsightTracked}
+                        onToggleTrack={handleToggleTrackResearch}
                         onRunFurtherInvestigation={(question) => {
                           reset();
                           setTopicInput(question);
@@ -855,19 +930,22 @@ export default function ResearchAnalyst() {
                           setActiveTab("timeline");
                         }}
                       />
-                    </div>
-                  ) : findings.length >= 1 && phase === "complete" ? (
-                    <div className="space-y-4 py-2">
                       {phase === "complete" && (
                         <SessionFeedback onSubmit={handleSessionFeedback} />
                       )}
+                    </div>
+                  ) : findings.length >= 1 && phase === "complete" ? (
+                    <div className="space-y-4 py-2">
                       <QuickAnswerView
                         finding={findings[findings.length - 1]}
                         onDrillDown={(f) => {
                           setDrillDownFinding(f);
                           setActiveTab("findings");
                         }}
+                        onSaveToWorkbench={setWorkbenchPayload}
+                        sessionId={sessionId}
                       />
+                      <SessionFeedback onSubmit={handleSessionFeedback} />
                     </div>
                   ) : (
                     <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
@@ -933,24 +1011,39 @@ export default function ResearchAnalyst() {
                     </Button>
                   </div>
                   {phase === "complete" && report?.furtherInvestigation && report.furtherInvestigation.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 mt-2">
-                      <span className="text-xs text-muted-foreground self-center mr-1">Suggested:</span>
-                      {report.furtherInvestigation.map((item, i) => (
-                        <Badge
-                          key={i}
-                          variant="secondary"
-                          className="cursor-pointer hover:bg-primary/20 hover:text-primary transition-colors py-1 px-2 text-xs font-normal"
-                          onClick={() => {
-                            reset();
-                            setTopicInput(item.question);
-                            lastReportRef.current = false;
-                            startSession(item.question);
-                            setActiveTab("timeline");
-                          }}
-                        >
-                          {item.question}
-                        </Badge>
-                      ))}
+                    <div className="mt-2">
+                      <button
+                        type="button"
+                        onClick={() => setSuggestionsExpanded(v => !v)}
+                        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        {suggestionsExpanded
+                          ? <ChevronUp className="h-3 w-3" />
+                          : <ChevronDown className="h-3 w-3" />
+                        }
+                        {suggestionsExpanded ? "Hide" : "Suggested follow-ups"} ({report.furtherInvestigation.length})
+                      </button>
+                      {suggestionsExpanded && (
+                        <div className="flex flex-wrap gap-1.5 mt-1.5">
+                          {report.furtherInvestigation.map((item, i) => (
+                            <Badge
+                              key={i}
+                              variant="secondary"
+                              className="cursor-pointer hover:bg-primary/20 hover:text-primary transition-colors py-1 px-2 text-xs font-normal"
+                              onClick={() => {
+                                reset();
+                                setTopicInput(item.question);
+                                lastReportRef.current = false;
+                                startSession(item.question);
+                                setActiveTab("timeline");
+                                setSuggestionsExpanded(false);
+                              }}
+                            >
+                              {item.question}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                   <p className="text-xs text-muted-foreground mt-1">
@@ -1010,6 +1103,11 @@ export default function ResearchAnalyst() {
           </div>
         </DialogContent>
       </Dialog>
+      <SaveToWorkbenchModal
+        open={workbenchPayload != null}
+        onClose={() => setWorkbenchPayload(null)}
+        payload={workbenchPayload}
+      />
       </div>
     </DashboardLayout>
   );

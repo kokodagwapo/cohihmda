@@ -485,13 +485,32 @@ router.put(
 // DELETE /sessions/:id — Delete a session
 // ============================================================================
 
+/** Roles that may delete any session regardless of ownership */
+const FULL_SESSION_ACCESS_ROLES = ['super_admin', 'platform_admin'];
+
 router.delete(
   "/sessions/:id",
   authenticateToken,
   attachTenantContext,
   async (req: AuthRequest, res: Response) => {
     const id = req.params.id as string;
+    const userId = req.userId || "";
     const { tenantPool } = getTenantContext(req);
+
+    const hasFullAccess = FULL_SESSION_ACCESS_ROLES.includes(req.userRole || "");
+
+    if (!hasFullAccess) {
+      const session = getSession(id) || await loadSession(id, tenantPool);
+      if (!session) {
+        res.status(404).json({ error: "Session not found" });
+        return;
+      }
+      if (session.userId !== userId) {
+        res.status(403).json({ error: "You do not have permission to delete this session" });
+        return;
+      }
+    }
+
     const success = await deleteSession(id, tenantPool);
     if (success) {
       res.json({ deleted: true });

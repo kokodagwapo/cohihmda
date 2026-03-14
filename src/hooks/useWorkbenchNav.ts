@@ -152,6 +152,17 @@ export function useWorkbenchNav() {
     [canvases, effectiveTenantId, favoriteUpdatingIds],
   );
 
+  const deleteResearchSession = useCallback(
+    async (sessionId: string): Promise<void> => {
+      const tenantQuery = effectiveTenantId
+        ? `?tenant_id=${encodeURIComponent(effectiveTenantId)}`
+        : "";
+      await api.request(`/api/research/sessions/${sessionId}${tenantQuery}`, { method: "DELETE" });
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+    },
+    [effectiveTenantId],
+  );
+
   return {
     isLoading,
     canvases,
@@ -163,6 +174,7 @@ export function useWorkbenchNav() {
     sharedSessions,
     favoriteUpdatingIds,
     toggleCanvasFavorite,
+    deleteResearchSession,
     refetch,
   };
 }
