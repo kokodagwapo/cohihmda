@@ -12,6 +12,7 @@ import { attachTenantContext, getTenantContext } from '../../middleware/tenantCo
 import { handleDatabaseError } from '../../config/database.js';
 import { apiLimiter } from '../../middleware/rateLimiter.js';
 import { callLLM, getOpenAIKey, safeExecuteSQL, formatResultsForLLM, type LLMMessage } from '../../services/research/tools.js';
+import { loadDashboardInsightById } from '../../services/dashboardInsights/storage.js';
 
 const router = Router();
 
@@ -113,15 +114,70 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
       });
     }
 
-    const { detailData, generatedAt, etm } = await loadInsightDetail(tenantPool, Number(insightId));
+    const insightIdNum = Number(insightId);
+    const filterLabel: Record<string, string> = {
+      today: 'Today',
+      mtd: 'Month to Date',
+      ytd: 'Year to Date',
+    };
+
+    // Dashboard insights: load from dashboard_generated_insights by id
+    if (source === 'dashboard_insights') {
+      const row = await loadDashboardInsightById(tenantPool, insightIdNum);
+      if (!row) {
+        return res.status(404).json({
+          error: 'Insight not found',
+          message: 'Dashboard insight not found.',
+          source,
+          insightId: insightIdNum,
+        });
+      }
+      const detailData = row.detail_data as Record<string, any> | null | undefined;
+      if (!detailData || !detailData.title) {
+        console.warn(`[InsightDetails] source=dashboard_insights, insightId=${insightId} — no detail_data (regenerate insights)`);
+        return res.status(404).json({
+          error: 'No detail data available',
+          message: 'This insight does not have pre-hydrated detail data. Please regenerate insights to populate evidence tables.',
+          source: 'dashboard_insights',
+          insightId: insightIdNum,
+        });
+      }
+      const endDate = new Date();
+      const etm = detailData.etm ?? (row.what_changed || row.why || row.business_impact
+        ? {
+            what_changed: row.what_changed,
+            why: row.why,
+            business_impact: row.business_impact,
+            risk_if_ignored: row.risk_if_ignored,
+            recommended_action: row.recommended_action,
+            owner: row.owner,
+          }
+        : null);
+      console.log(`[InsightDetails] source=dashboard_insights, insightId=${insightId} — returning detail_data (${(detailData.rows || []).length} rows)`);
+      return res.json({
+        source: 'dashboard_insights',
+        dateFilter,
+        title: detailData.title || row.headline,
+        summary: detailData.summary || {},
+        rows: detailData.rows || [],
+        displayConfig: detailData.displayConfig || { columns: [], summaryMetrics: [] },
+        etm,
+        dateRange: {
+          label: filterLabel[String(dateFilter)] || 'Year to Date',
+          startDate: startDate.toISOString(),
+          endDate: endDate.toISOString(),
+        },
+        ...(row.generated_at ? { dataAsOf: row.generated_at } : {}),
+        comparison: detailData.comparison || null,
+        audit: detailData.audit || null,
+      });
+    }
+
+    // Pipeline insights: load from generated_insights
+    const { detailData, generatedAt, etm } = await loadInsightDetail(tenantPool, insightIdNum);
 
     if (detailData && detailData.title) {
       const endDate = new Date();
-      const filterLabel: Record<string, string> = {
-        today: 'Today',
-        mtd: 'Month to Date',
-        ytd: 'Year to Date',
-      };
 
       console.log(`[InsightDetails] source=${source}, insightId=${insightId} — returning pre-hydrated detail_data (${(detailData.rows as any[] || []).length} rows)`);
 
@@ -150,7 +206,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
       error: 'No detail data available',
       message: 'This insight does not have pre-hydrated detail data. Please regenerate insights to populate evidence tables.',
       source,
-      insightId: Number(insightId),
+      insightId: insightIdNum,
     });
 
   } catch (error: any) {

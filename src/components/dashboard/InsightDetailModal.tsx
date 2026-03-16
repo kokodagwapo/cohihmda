@@ -52,6 +52,8 @@ interface InsightDetailModalProps {
   onToggleTrack?: () => void;
   /** @deprecated Use isTracked + onToggleTrack for toggle behavior. */
   onTrackInsight?: () => void;
+  /** When details fetch fails (e.g. 404 no detail_data), call this so parent can show a fallback (e.g. DashboardInsightEvidenceModal). */
+  onDetailUnavailable?: () => void;
 }
 
 interface AuditSummaryDef {
@@ -376,6 +378,7 @@ const TABLE_CONTEXT: Record<string, string> = {
   tiering: 'Personnel ranked by performance tier with revenue and volume metrics.',
   product_breakdown: 'Loan products broken down by volume, pull-through, and fallout rates.',
   risk_cross_tab: 'Risk segments showing fallout rates across product, FICO, and DTI bands.',
+  dashboard_insights: 'Leaderboard and by-period metrics supporting this dashboard insight.',
 };
 
 // ============================================================================
@@ -396,6 +399,7 @@ const STARTER_QUESTIONS: Record<string, string[]> = {
   tiering: ['What separates top-tier from bottom-tier performers?', 'How has tiering changed from last month?'],
   product_breakdown: ['Which product has the worst pull-through?', 'Where is volume growing fastest?'],
   risk_cross_tab: ['Which risk segment has the highest fallout?', 'How large is the worst-performing segment?'],
+  dashboard_insights: ['How does this period compare to the previous one?', 'Who are the top performers by volume?'],
 };
 
 // ============================================================================
@@ -653,6 +657,7 @@ export const InsightDetailModal = ({
   isTracked: isTrackedProp,
   onToggleTrack,
   onTrackInsight,
+  onDetailUnavailable,
 }: InsightDetailModalProps) => {
   const navigate = useNavigate();
   const { isPlatformStaff } = useAuth();
@@ -689,6 +694,10 @@ export const InsightDetailModal = ({
     } catch (err: any) {
       console.error('Error fetching insight details see:', err);
       setError(err.message || 'Failed to load details');
+      const msg = err?.message ?? '';
+      if (onDetailUnavailable && (msg.includes('No detail data') || msg.includes('Insight not found'))) {
+        onDetailUnavailable();
+      }
     } finally {
       setLoading(false);
     }

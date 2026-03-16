@@ -1,0 +1,607 @@
+/**
+ * Dashboard Insights — 4-pass pipeline
+ *
+ * Pass 1: Generator → 3-5 candidates
+ * Pass 2a: Fact-check (programmatic)
+ * Pass 2b: Judge (LLM) → filter overall_score >= 5.5
+ * Pass 3: Curator → 1-3 final insights, set escalate for critical
+ * Pass 4: Evidence Agent → refine evidence_refs
+ * Persistence: saveDashboardInsights
+ */
+
+import type { Pool } from "pg";
+import { randomUUID } from "crypto";
+import { getPromptConfig } from "../promptConfigService.js";
+import { callLLM, getOpenAIKey } from "../research/tools.js";
+import type { LLMMessage } from "../research/tools.js";
+import { buildDetailFromSupportingData } from "./dashboardInsightDetailHydrator.js";
+import { saveDashboardInsights } from "./storage.js";
+import type {
+  DashboardPageContext,
+  DashboardInsight,
+  EvidenceRef,
+  SupportingData,
+  SupportingDataByPeriodRow,
+  WidgetCatalogEntry,
+} from "./types.js";
+
+// ---------------------------------------------------------------------------
+// Generator candidate (pre-curator shape)
+// ---------------------------------------------------------------------------
+
+export interface GeneratorCandidate {
+  headline: string;
+  understory: string;
+  sentiment: "positive" | "warning" | "critical" | "neutral";
+  severity_score: number;
+  cited_numbers: string[];
+  what_changed: string;
+  why: string;
+  business_impact: string;
+  risk_if_ignored: string;
+  recommended_action: string;
+  owner: string;
+  scope: "page" | "widget";
+  filter_context: Record<string, unknown>;
+  evidence_refs: EvidenceRef[];
+}
+
+interface FactCheckResult {
+  score: number;
+  issues: string[];
+}
+
+interface JudgeEvaluation {
+  insight_index: number;
+  overall_score: number;
+  keep: boolean;
+  issues?: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Pass 1: Generator
+// ---------------------------------------------------------------------------
+
+function buildGeneratorUserMessage(context: DashboardPageContext): string {
+  return JSON.stringify(
+    {
+      pageId: context.pageId,
+      pageName: context.pageName,
+      pageDescription: context.pageDescription,
+      filters: context.filters,
+      dimensions: context.dimensions,
+      data: context.data,
+      widget_catalog: context.widget_catalog,
+    },
+    null,
+    2
+  );
+}
+
+function parseGeneratorResponse(raw: string): GeneratorCandidate[] {
+  try {
+    const parsed = JSON.parse(raw) as { insights?: unknown[] };
+    const list = Array.isArray(parsed?.insights) ? parsed.insights : [];
+    const candidates: GeneratorCandidate[] = [];
+    for (const item of list) {
+      const o = item as Record<string, unknown>;
+      const refs = Array.isArray(o.evidence_refs)
+        ? (o.evidence_refs as EvidenceRef[])
+        : [];
+      candidates.push({
+        headline: String(o.headline ?? ""),
+        understory: String(o.understory ?? ""),
+        sentiment: validSentiment(o.sentiment),
+        severity_score: Number(o.severity_score) || 0,
+        cited_numbers: Array.isArray(o.cited_numbers) ? (o.cited_numbers as string[]) : [],
+        what_changed: String(o.what_changed ?? ""),
+        why: String(o.why ?? ""),
+        business_impact: String(o.business_impact ?? ""),
+        risk_if_ignored: String(o.risk_if_ignored ?? ""),
+        recommended_action: String(o.recommended_action ?? ""),
+        owner: String(o.owner ?? ""),
+        scope: o.scope === "widget" ? "widget" : "page",
+        filter_context: (o.filter_context as Record<string, unknown>) || {},
+        evidence_refs: refs,
+      });
+    }
+    return candidates;
+  } catch {
+    return [];
+  }
+}
+
+function validSentiment(v: unknown): GeneratorCandidate["sentiment"] {
+  if (v === "positive" || v === "warning" || v === "critical" || v === "neutral") return v;
+  return "neutral";
+}
+
+// ---------------------------------------------------------------------------
+// Pass 2a: Fact-check
+// ---------------------------------------------------------------------------
+
+function factCheckCandidates(
+  candidates: GeneratorCandidate[],
+  context: DashboardPageContext
+): FactCheckResult[] {
+  const catalogIds = new Set(context.widget_catalog.map((w) => w.id));
+  const dimensionValues = new Map<string, Set<string>>();
+  for (const d of context.dimensions) {
+    dimensionValues.set(d.id, new Set(d.values));
+  }
+
+  const results: FactCheckResult[] = [];
+  for (const c of candidates) {
+    const issues: string[] = [];
+
+    for (const ref of c.evidence_refs) {
+      if (!catalogIds.has(ref.widgetId)) {
+        issues.push(`widgetId "${ref.widgetId}" not in widget_catalog`);
+      }
+      if (ref.target?.label) {
+        const dim = context.widget_catalog.find((w) => w.id === ref.widgetId)?.dimension;
+        if (dim) {
+          const allowed = dimensionValues.get(dim);
+          if (allowed && !allowed.has(ref.target.label)) {
+            issues.push(`target label "${ref.target.label}" not in dimension "${dim}"`);
+          }
+        }
+      }
+    }
+
+    const filterKeys = Object.keys(c.filter_context || {});
+    const isPageLevel = Object.keys(context.filters || {}).length === 0;
+    if (filterKeys.length === 0 && !isPageLevel) {
+      issues.push("filter_context is empty");
+    }
+
+    const score = issues.length === 0 ? 1 : Math.max(0, 1 - issues.length * 0.25);
+    results.push({ score, issues });
+  }
+  return results;
+}
+
+// ---------------------------------------------------------------------------
+// Pass 2b: Judge
+// ---------------------------------------------------------------------------
+
+function buildJudgeUserMessage(
+  candidates: GeneratorCandidate[],
+  factCheckResults: FactCheckResult[]
+): string {
+  return JSON.stringify(
+    {
+      candidates: candidates.map((c, i) => ({
+        index: i,
+        headline: c.headline,
+        understory: c.understory,
+        sentiment: c.sentiment,
+        scope: c.scope,
+        filter_context: c.filter_context,
+        evidence_refs: c.evidence_refs,
+        fact_check: factCheckResults[i],
+      })),
+    },
+    null,
+    2
+  );
+}
+
+function parseJudgeResponse(raw: string): JudgeEvaluation[] {
+  try {
+    const parsed = JSON.parse(raw) as { evaluations?: unknown[] };
+    const list = Array.isArray(parsed?.evaluations) ? parsed.evaluations : [];
+    return list.map((e: Record<string, unknown>) => ({
+      insight_index: Number(e.insight_index) ?? 0,
+      overall_score: Number(e.overall_score) ?? 0,
+      keep: Boolean(e.keep),
+      issues: Array.isArray(e.issues) ? (e.issues as string[]) : undefined,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Pass 3: Curator
+// ---------------------------------------------------------------------------
+
+function buildCuratorUserMessage(
+  candidates: GeneratorCandidate[],
+  scores: JudgeEvaluation[]
+): string {
+  return JSON.stringify(
+    {
+      candidates: candidates.map((c, i) => ({
+        ...c,
+        judge_score: scores[i]?.overall_score,
+        judge_keep: scores[i]?.keep,
+      })),
+    },
+    null,
+    2
+  );
+}
+
+function parseCuratorResponse(
+  raw: string,
+  pageId: string,
+  pageName: string
+): DashboardInsight[] {
+  try {
+    const parsed = JSON.parse(raw) as { insights?: unknown[] };
+    const list = Array.isArray(parsed?.insights) ? parsed.insights : [];
+    const out: DashboardInsight[] = [];
+    for (const item of list) {
+      const o = item as Record<string, unknown>;
+      const refs = Array.isArray(o.evidence_refs) ? (o.evidence_refs as EvidenceRef[]) : [];
+      out.push({
+        headline: String(o.headline ?? ""),
+        understory: String(o.understory ?? ""),
+        sentiment: validSentiment(o.sentiment),
+        severity_score: Number(o.severity_score) || 0,
+        cited_numbers: Array.isArray(o.cited_numbers) ? (o.cited_numbers as string[]) : [],
+        what_changed: String(o.what_changed ?? ""),
+        why: String(o.why ?? ""),
+        business_impact: String(o.business_impact ?? ""),
+        risk_if_ignored: String(o.risk_if_ignored ?? ""),
+        recommended_action: String(o.recommended_action ?? ""),
+        owner: String(o.owner ?? ""),
+        scope: o.scope === "widget" ? "widget" : "page",
+        filter_context: (o.filter_context as DashboardInsight["filter_context"]) || {},
+        evidence_refs: refs,
+        escalate:
+          Boolean(o.escalate) ||
+          o.sentiment === "critical" ||
+          o.sentiment === "warning",
+        sourcePageId: pageId,
+        sourcePageName: pageName,
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Pass 4: Evidence Agent
+// ---------------------------------------------------------------------------
+
+function buildEvidenceAgentUserMessage(insight: DashboardInsight, catalog: WidgetCatalogEntry[]): string {
+  return JSON.stringify(
+    {
+      insight: {
+        headline: insight.headline,
+        understory: insight.understory,
+        scope: insight.scope,
+        filter_context: insight.filter_context,
+        evidence_refs: insight.evidence_refs,
+      },
+      widget_catalog: catalog,
+    },
+    null,
+    2
+  );
+}
+
+function parseEvidenceAgentResponse(raw: string): EvidenceRef[] | null {
+  try {
+    const parsed = JSON.parse(raw) as { evidence_refs?: unknown[] };
+    const list = Array.isArray(parsed?.evidence_refs) ? parsed.evidence_refs : [];
+    return list.map((r: Record<string, unknown>) => ({
+      widgetId: String(r.widgetId ?? ""),
+      role: r.role === "supporting" ? "supporting" : "primary",
+      target: r.target
+        ? {
+            type: (r.target as Record<string, unknown>).type === "series" ? "series" : "row",
+            label: String((r.target as Record<string, unknown>).label ?? ""),
+          }
+        : undefined,
+    }));
+  } catch {
+    return null;
+  }
+}
+
+const METRIC_LABELS = ["pullThroughRate", "pull-through", "pull through", "units", "volume"];
+
+function isAggregateMetricLabel(label: string): boolean {
+  const lower = label.toLowerCase();
+  return METRIC_LABELS.some((m) => lower.includes(m)) || /^\d+%$/.test(label) || lower === "leaderboard";
+}
+
+/**
+ * Enrich evidence refs with display values from page context (e.g. leaderboard KPIs and aggregate metrics).
+ */
+function enrichEvidenceRefsWithValues(
+  context: DashboardPageContext,
+  refs: EvidenceRef[]
+): EvidenceRef[] {
+  const byPeriod = context.data?.by_time_period as Record<
+    string,
+    {
+      periodLabel?: string;
+      summary?: {
+        topPerformerName?: string;
+        topPerformerUnits?: number;
+        topPerformerVolume?: number;
+        averagePullThrough?: number;
+        totalUnits?: number;
+        totalVolume?: number;
+      };
+      leaderboard?: Array<{
+        name?: string;
+        loansClosed?: number;
+        totalVolume?: number;
+        pullThroughRate?: number;
+      }>;
+    }
+  > | undefined;
+
+  if (!byPeriod || typeof byPeriod !== "object") return refs;
+
+  return refs.map((ref) => {
+    const label = ref.target?.label?.trim();
+    const parts: string[] = [];
+
+    if (ref.widgetId === "kpi-top-performer-units" && label) {
+      for (const [period, data] of Object.entries(byPeriod)) {
+        const summary = data?.summary;
+        if (summary?.topPerformerName === label && summary.topPerformerUnits != null) {
+          parts.push(`${period}: ${summary.topPerformerUnits} units`);
+        }
+      }
+    } else if (ref.widgetId === "kpi-top-performer-volume" && label) {
+      for (const [period, data] of Object.entries(byPeriod)) {
+        const summary = data?.summary;
+        if (summary?.topPerformerName === label && summary.topPerformerVolume != null) {
+          const v = summary.topPerformerVolume;
+          const fmt = v >= 1e6 ? `${(v / 1e6).toFixed(2)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}K` : String(v);
+          parts.push(`${period}: $${fmt}`);
+        }
+      }
+    } else if (ref.widgetId === "leaderboard-main-table") {
+      if (label && isAggregateMetricLabel(label)) {
+        // Aggregate metric (e.g. pull-through rate across all LOs): use summary per period
+        for (const [period, data] of Object.entries(byPeriod)) {
+          const summary = data?.summary;
+          const segs: string[] = [];
+          if (summary?.averagePullThrough != null) segs.push(`${summary.averagePullThrough}% pull-through`);
+          if (summary?.totalUnits != null) segs.push(`${summary.totalUnits} units`);
+          if (summary?.totalVolume != null) {
+            const v = summary.totalVolume;
+            segs.push(`$${v >= 1e6 ? (v / 1e6).toFixed(2) + "M" : v >= 1e3 ? (v / 1e3).toFixed(1) + "K" : v}`);
+          }
+          if (segs.length) parts.push(`${period}: ${segs.join(", ")}`);
+        }
+      } else if (label) {
+        // Row = specific person
+        for (const [period, data] of Object.entries(byPeriod)) {
+          const row = data?.leaderboard?.find((r) => r.name === label);
+          if (row) {
+            const u = row.loansClosed != null ? `${row.loansClosed} units` : "";
+            const vol = row.totalVolume != null ? `$${row.totalVolume >= 1e6 ? (row.totalVolume / 1e6).toFixed(2) + "M" : row.totalVolume >= 1e3 ? (row.totalVolume / 1e3).toFixed(1) + "K" : row.totalVolume}` : "";
+            const pt = row.pullThroughRate != null ? `${row.pullThroughRate}% pull-through` : "";
+            const seg = [u, vol, pt].filter(Boolean).join(", ");
+            if (seg) parts.push(`${period}: ${seg}`);
+          }
+        }
+      }
+    }
+
+    // Ref with no target (e.g. generic leaderboard): still show period summary
+    if (parts.length === 0 && ref.widgetId === "leaderboard-main-table" && !label) {
+      for (const [period, data] of Object.entries(byPeriod)) {
+        const summary = data?.summary;
+        const segs: string[] = [];
+        if (summary?.averagePullThrough != null) segs.push(`${summary.averagePullThrough}% pull-through`);
+        if (summary?.totalUnits != null) segs.push(`${summary.totalUnits} units`);
+        if (summary?.totalVolume != null) {
+          const v = summary.totalVolume;
+          segs.push(`$${v >= 1e6 ? (v / 1e6).toFixed(2) + "M" : v >= 1e3 ? (v / 1e3).toFixed(1) + "K" : v}`);
+        }
+        if (segs.length) parts.push(`${period}: ${segs.join(", ")}`);
+      }
+    }
+
+    const value = parts.length > 0 ? parts.join(" · ") : undefined;
+    return value ? { ...ref, value } : ref;
+  });
+}
+
+/**
+ * Build by-period supporting data from page context for the evidence table in the UI.
+ */
+function buildSupportingDataFromContext(context: DashboardPageContext): SupportingData | undefined {
+  const byPeriod = context.data?.by_time_period as Record<
+    string,
+    {
+      periodLabel?: string;
+      summary?: {
+        topPerformerName?: string;
+        topPerformerUnits?: number;
+        topPerformerVolume?: number;
+        averagePullThrough?: number;
+        totalUnits?: number;
+        totalVolume?: number;
+      };
+    }
+  > | undefined;
+
+  if (!byPeriod || typeof byPeriod !== "object") return undefined;
+
+  const byPeriodRows: SupportingDataByPeriodRow[] = [];
+  for (const [period, data] of Object.entries(byPeriod)) {
+    const summary = data?.summary;
+    if (!summary) continue;
+    const row: SupportingDataByPeriodRow = {
+      period,
+      periodLabel: data.periodLabel ?? period,
+    };
+    if (summary.averagePullThrough != null) row.averagePullThrough = summary.averagePullThrough;
+    if (summary.totalUnits != null) row.totalUnits = summary.totalUnits;
+    if (summary.totalVolume != null) row.totalVolume = summary.totalVolume;
+    if (summary.topPerformerName) row.topPerformerName = summary.topPerformerName;
+    if (summary.topPerformerUnits != null) row.topPerformerUnits = summary.topPerformerUnits;
+    if (summary.topPerformerVolume != null) row.topPerformerVolume = summary.topPerformerVolume;
+    byPeriodRows.push(row);
+  }
+  if (byPeriodRows.length === 0) return undefined;
+  return { byPeriod: byPeriodRows };
+}
+
+// ---------------------------------------------------------------------------
+// Main pipeline
+// ---------------------------------------------------------------------------
+
+export interface RunPipelineResult {
+  count: number;
+  pageId: string;
+  pageName: string;
+  generationBatch: string;
+}
+
+export async function runDashboardInsightsPipeline(
+  context: DashboardPageContext,
+  tenantPool: Pool,
+  tenantId: string,
+  options?: { skipPersistence?: boolean }
+): Promise<RunPipelineResult> {
+  const generationBatch = randomUUID();
+  const apiKey = await getOpenAIKey(tenantId);
+
+  // Pass 1: Generator
+  const genConfig = await getPromptConfig("dashboard_insights.generator");
+  const genUser = buildGeneratorUserMessage(context);
+  const genMessages: LLMMessage[] = [
+    { role: "system", content: genConfig.system_prompt },
+    { role: "user", content: genUser },
+  ];
+  const genRaw = await callLLM(genMessages, apiKey, {
+    model: genConfig.model,
+    temperature: genConfig.temperature,
+    maxTokens: genConfig.max_tokens,
+    jsonMode: genConfig.json_mode,
+  });
+  let candidates = parseGeneratorResponse(genRaw);
+  if (candidates.length === 0) {
+    return { count: 0, pageId: context.pageId, pageName: context.pageName, generationBatch };
+  }
+
+  // Pass 2a: Fact-check
+  const factCheckResults = factCheckCandidates(candidates, context);
+  const afterFactCheck: { candidate: GeneratorCandidate; factCheck: FactCheckResult }[] = [];
+  for (let i = 0; i < candidates.length; i++) {
+    if (factCheckResults[i].score >= 0.5) {
+      afterFactCheck.push({ candidate: candidates[i], factCheck: factCheckResults[i] });
+    }
+  }
+  if (afterFactCheck.length === 0) {
+    return { count: 0, pageId: context.pageId, pageName: context.pageName, generationBatch };
+  }
+  candidates = afterFactCheck.map((x) => x.candidate);
+  const factChecks = afterFactCheck.map((x) => x.factCheck);
+
+  // Pass 2b: Judge
+  const judgeConfig = await getPromptConfig("dashboard_insights.judge");
+  const judgeUser = buildJudgeUserMessage(candidates, factChecks);
+  const judgeMessages: LLMMessage[] = [
+    { role: "system", content: judgeConfig.system_prompt },
+    { role: "user", content: judgeUser },
+  ];
+  const judgeRaw = await callLLM(judgeMessages, apiKey, {
+    model: judgeConfig.model,
+    temperature: judgeConfig.temperature,
+    maxTokens: judgeConfig.max_tokens,
+    jsonMode: judgeConfig.json_mode,
+  });
+  const evaluations = parseJudgeResponse(judgeRaw);
+  const afterJudge: GeneratorCandidate[] = [];
+  const afterJudgeEvals: JudgeEvaluation[] = [];
+  for (let i = 0; i < candidates.length; i++) {
+    const ev = evaluations.find((e) => e.insight_index === i) ?? evaluations[i];
+    if (ev && ev.keep && ev.overall_score >= 5.5) {
+      afterJudge.push(candidates[i]);
+      afterJudgeEvals.push(ev);
+    }
+  }
+  if (afterJudge.length === 0) {
+    return { count: 0, pageId: context.pageId, pageName: context.pageName, generationBatch };
+  }
+
+  // Pass 3: Curator
+  const curatorConfig = await getPromptConfig("dashboard_insights.curator");
+  const curatorUser = buildCuratorUserMessage(afterJudge, afterJudgeEvals);
+  const curatorMessages: LLMMessage[] = [
+    { role: "system", content: curatorConfig.system_prompt },
+    { role: "user", content: curatorUser },
+  ];
+  const curatorRaw = await callLLM(curatorMessages, apiKey, {
+    model: curatorConfig.model,
+    temperature: curatorConfig.temperature,
+    maxTokens: curatorConfig.max_tokens,
+    jsonMode: curatorConfig.json_mode,
+  });
+  let insights = parseCuratorResponse(
+    curatorRaw,
+    context.pageId,
+    context.pageName
+  );
+  if (insights.length === 0) {
+    return { count: 0, pageId: context.pageId, pageName: context.pageName, generationBatch };
+  }
+
+  // Pass 4: Evidence Agent (refine evidence_refs per insight)
+  const evidenceConfig = await getPromptConfig("dashboard_insights.evidence_agent");
+  for (let i = 0; i < insights.length; i++) {
+    const insight = insights[i];
+    const evUser = buildEvidenceAgentUserMessage(insight, context.widget_catalog);
+    const evMessages: LLMMessage[] = [
+      { role: "system", content: evidenceConfig.system_prompt },
+      { role: "user", content: evUser },
+    ];
+    try {
+      const evRaw = await callLLM(evMessages, apiKey, {
+        model: evidenceConfig.model,
+        temperature: evidenceConfig.temperature,
+        maxTokens: evidenceConfig.max_tokens,
+        jsonMode: evidenceConfig.json_mode,
+      });
+      const refs = parseEvidenceAgentResponse(evRaw);
+      if (refs && refs.length > 0) {
+        const enriched = enrichEvidenceRefsWithValues(context, refs);
+        insights[i] = { ...insight, evidence_refs: enriched };
+      }
+    } catch {
+      // keep existing evidence_refs on failure
+    }
+  }
+
+  const supportingData = buildSupportingDataFromContext(context);
+  for (let i = 0; i < insights.length; i++) {
+    const insight = insights[i];
+    const detail_data = buildDetailFromSupportingData(insight, supportingData, {
+      generationBatch,
+      dateFilter: (insight.filter_context?.datePeriod as string) || undefined,
+    });
+    insights[i] = { ...insight, supporting_data: supportingData, detail_data: detail_data ?? undefined };
+  }
+
+  if (!options?.skipPersistence) {
+    await saveDashboardInsights(
+      tenantPool,
+      context.pageId,
+      context.pageName,
+      insights,
+      generationBatch
+    );
+  }
+
+  return {
+    count: insights.length,
+    pageId: context.pageId,
+    pageName: context.pageName,
+    generationBatch,
+  };
+}

@@ -33,6 +33,11 @@ import {
   LeaderboardTimeframe,
 } from "@/hooks/useLeaderboardData";
 import {
+  useDashboardInsights,
+  type DashboardInsightItem,
+} from "@/hooks/useDashboardInsights";
+import { DashboardInsightsStrip } from "@/components/dashboard/DashboardInsightsStrip";
+import {
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -42,6 +47,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ExportMenu } from "@/components/common/ExportMenu";
 import type { ExportData } from "@/utils/exportUtils";
+import { api } from "@/lib/api";
+import { Loader2 } from "lucide-react";
 
 /** Golden certificate seal icon (scalloped border, star ring, blank center) for rank badge */
 function CertificateSealIcon({
@@ -161,6 +168,8 @@ export const LeaderBoardSection = ({
   });
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [quarterYear, setQuarterYear] = useState(new Date().getFullYear());
+  const [generateLoading, setGenerateLoading] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
 
   // Calculate date range based on period selection
   const calculateDateRange = useCallback(
@@ -269,6 +278,66 @@ export const LeaderBoardSection = ({
       channelGroup: selectedChannel || undefined,
     }
   );
+
+  // Insights are page-level: independent of the leaderboard's selected time period or channel.
+  // We do not pass datePeriod/channelGroup so the strip always shows the same insights.
+  const dashboardInsightFilters = useMemo(() => ({}), []);
+  const {
+    insights: dashboardInsights,
+    generatedAt: dashboardInsightsGeneratedAt,
+    loading: dashboardInsightsLoading,
+    refresh: refreshDashboardInsights,
+  } = useDashboardInsights("leaderboard", dashboardInsightFilters, {
+    tenantId: selectedTenantId,
+  });
+
+  const handleGenerateInsights = useCallback(async () => {
+    setGenerateLoading(true);
+    setGenerateError(null);
+    try {
+      const tenantParam = selectedTenantId ? `?tenant_id=${encodeURIComponent(selectedTenantId)}` : "";
+      await api.request<{
+        insights: DashboardInsightItem[];
+        count: number;
+        pageId: string;
+        pageName: string;
+        generationBatch: string;
+      }>(`/api/dashboard-insights/generate${tenantParam}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pageId: "leaderboard",
+          filters: {},
+        }),
+      });
+      await refreshDashboardInsights();
+    } catch (err: unknown) {
+      setGenerateError(
+        err instanceof Error ? err.message : "We couldn't generate insights right now. Please try again later."
+      );
+    } finally {
+      setGenerateLoading(false);
+    }
+  }, [refreshDashboardInsights, selectedTenantId]);
+
+  const handleShowInsight = useCallback((insight: DashboardInsightItem) => {
+    const firstRef = insight.evidence_refs?.[0];
+    if (firstRef?.widgetId && typeof document !== "undefined") {
+      const el = document.getElementById(firstRef.widgetId);
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+      el?.classList.add("ring-2", "ring-amber-400", "ring-offset-2");
+      setTimeout(() => el?.classList.remove("ring-2", "ring-amber-400", "ring-offset-2"), 3000);
+    }
+  }, []);
+
+  const handleDashboardInsightFeedback = useCallback(async (insightId: number, rating: 1 | -1) => {
+    const tenantParam = selectedTenantId ? `?tenant_id=${encodeURIComponent(selectedTenantId)}` : "";
+    await api.request(`/api/dashboard-insights/feedback${tenantParam}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ insightId, rating }),
+    });
+  }, [selectedTenantId]);
 
   // Get the display label for current period
   const getPeriodDisplayLabel = () => {
@@ -448,6 +517,18 @@ export const LeaderBoardSection = ({
 
         {/* Period Picker - DatePeriodPicker style */}
         <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleGenerateInsights}
+            disabled={generateLoading}
+            className="text-xs gap-1.5"
+          >
+            {generateLoading ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : null}
+            Generate Insights
+          </Button>
           <ExportMenu
             title="Leaderboard"
             targetRef={sectionRef}
@@ -681,8 +762,28 @@ export const LeaderBoardSection = ({
         </div>
       </div>
 
-      {/* Top 5 Grid - Mobile First */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 sm:gap-3 md:gap-4">
+      {/* Dashboard Insights strip */}
+      <DashboardInsightsStrip
+        insights={dashboardInsights}
+        generatedAt={dashboardInsightsGeneratedAt}
+        loading={dashboardInsightsLoading}
+        generating={generateLoading}
+        generateError={generateError}
+        onClearGenerateError={() => setGenerateError(null)}
+        onShowInsight={handleShowInsight}
+        onGenerate={handleGenerateInsights}
+        showGenerateButton
+        showFeedback
+        onSubmitFeedback={handleDashboardInsightFeedback}
+        dateFilter={dateFilter}
+        selectedTenantId={selectedTenantId}
+      />
+
+      {/* Top 5 Grid - Mobile First (widget id for dashboard insights highlighting) */}
+      <div
+        id="leaderboard-main-table"
+        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 sm:gap-3 md:gap-4"
+      >
         {top5.map((leader, idx) => {
           const isFirst = idx === 0;
 

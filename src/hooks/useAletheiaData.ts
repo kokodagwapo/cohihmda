@@ -32,6 +32,15 @@ export interface AletheiaInsight {
   owner?: string;
   generation_method?: "pipeline" | "agent";
   detail_data?: any;
+  /** Dashboard insights: link back to originating page and restore filters */
+  sourcePageId?: string;
+  sourcePageName?: string;
+  filter_context?: Record<string, unknown>;
+  /** Dashboard insights: widget refs and cited numbers for evidence modal */
+  evidence_refs?: Array<{ widgetId: string; role: string; target?: { type: string; label: string }; value?: string }>;
+  cited_numbers?: string[];
+  /** Dashboard insights: by-period metrics for evidence table */
+  supporting_data?: { byPeriod?: Array<{ period: string; periodLabel?: string; averagePullThrough?: number; totalUnits?: number; totalVolume?: number; topPerformerName?: string; topPerformerUnits?: number; topPerformerVolume?: number }> };
 }
 
 export interface InsightsMetadata {
@@ -106,6 +115,12 @@ export const useAletheiaData = (
       owner: insight.owner,
       generation_method: insight.generation_method,
       detail_data: insight.detail_data || null,
+      sourcePageId: insight.sourcePageId,
+      sourcePageName: insight.sourcePageName,
+      filter_context: insight.filter_context,
+      evidence_refs: insight.evidence_refs,
+      cited_numbers: insight.cited_numbers,
+      supporting_data: insight.supporting_data,
     }));
   };
 
