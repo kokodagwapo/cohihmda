@@ -21,7 +21,7 @@ Dashboard Insights is a **separate** feature from the existing Aletheia/executiv
 
 - **Dimensions:** The axes along which a dashboard page can slice or view its data. This includes **user-selectable filters** (date period, branch, loan officer, channel, status) and **structural breakdowns** (e.g. a table that always breaks data out by product type, or a chart that shows data by month). Not all dimensions are filters — some are baked into the page's layout.
 - **Filters:** A subset of dimensions — the ones the user can actively change via dropdowns, pickers, etc. (e.g. date period, branch selector, channel selector).
-- **Page context:** The full data package the pipeline receives for one dashboard page: identity, available dimensions/filters, data summaries and breakdowns, and the widget catalog.
+- **Page context:** The full data package the pipeline receives for one dashboard page: identity, available dimensions/filters, data summaries and breakdowns, and the widget catalog. The **page identity** fields (`pageId`, `pageName`, `pageDescription`) are provided by code in the page adapter, not configured in the AI Prompts admin UI.
 - **Widget catalog:** A registry of all widgets (KPIs, tables, charts) on a dashboard page, each with a stable `id`, so evidence_refs can point at them.
 
 ---
@@ -34,8 +34,8 @@ Every pipeline run is keyed by **pageId** and **filter state** (the "view-level"
 
 ```typescript
 interface DashboardPageContext {
-  pageId: string;            // e.g. "loan-complexity", "operations-scorecard"
-  pageName: string;          // e.g. "Loan Complexity"
+  pageId: string;            // e.g. "leaderboard", "loan-complexity", "operations-scorecard"
+  pageName: string;          // e.g. "Leaderboard", "Loan Complexity"
   pageDescription?: string;
 
   // View-level filters that change the entire page's data
@@ -675,7 +675,9 @@ New category `dashboard_insights` in `defaultPromptConfigs.ts` with four prompts
 | `dashboard_insights.curator` | Dashboard Insights: Curator (Pass 3) | 3 |
 | `dashboard_insights.evidence_agent` | Dashboard Insights: Evidence Agent (Pass 4) | 4 |
 
-Seeded into `ai_prompt_configs` so they appear under **"Dashboard Insights"** in Admin → AI Prompts, separate from the regular "Insights" category.
+These prompts are **general** for all dashboard pages and are editable via the AI Prompts admin UI (category: `dashboard_insights`). They do **not** contain per-page descriptions; instead, they expect `pageId`, `pageName`, and `pageDescription` to be supplied at runtime via the page context built by each dashboard adapter.
+
+All four prompt configs are seeded into `ai_prompt_configs` so they appear under **"Dashboard Insights"** in Admin → AI Prompts, separate from the regular "Insights" category.
 
 ---
 
@@ -697,22 +699,22 @@ Before a dashboard page can support Dashboard Insights, it needs:
 
 ## 16. Phasing
 
-### Phase 1 — Foundation + Loan Complexity page
+### Phase 1 — Foundation + Leaderboard dashboard
 
 **Backend:**
 - Define `DashboardPageContext`, `DashboardInsight`, and adapter interface types.
 - Add 4 prompts to `defaultPromptConfigs.ts` under `dashboard_insights` category; seed DB.
 - Create `dashboard_generated_insights` migration and table.
 - Implement orchestrator with Pass 1 (3–5) → Pass 2 (fact-check + judge) → Pass 3 (curator, limit 1–3) → Pass 4 (evidence agent).
-- Implement generic adapter base and **Loan Complexity adapter**:
-  - Audit Loan Complexity page APIs: what endpoints exist, what data they return, what's missing.
-  - Build adapter: call existing APIs, construct page context with dimensions (date period, groupBy actor type, branch, status), data (summary + breakdowns), widget catalog.
+- Implement generic adapter base and **Leaderboard adapter**:
+  - Audit Leaderboard dashboard APIs: what endpoints exist, what data they return, what's missing (e.g. `/api/dashboard/leaderboard`, any supporting endpoints already in `analyticsService.ts`).
+  - Build adapter: call existing APIs, construct page context with dimensions (timeframe/time period, channel group, and structural dimensions like branch vs loan officer), data (summary + per-leader breakdowns), widget catalog (for the leaderboard table, any supporting charts/KPIs).
 - Add `dashboard-insight-generation` post-sync hook (priority 150).
 - Add GET and POST routes for `/api/dashboard-insights`.
 - Wire critical escalation: update Aletheia card query to also pull from `dashboard_generated_insights WHERE escalate = true`.
 
-**Frontend (Loan Complexity page):**
-- Add stable widget IDs to all widgets on LoanComplexityView.
+**Frontend (Leaderboard dashboard):**
+- Add stable widget IDs to all widgets on the Leaderboard dashboard view (e.g. main leaderboard table, supporting KPIs/charts).
 - Add `DashboardInsightsStrip` component (1–3 insights, expandable detail with what_changed/why/business_impact).
 - Implement "Show me" → scroll + highlight using evidence_refs.
 - Add "Generate Insights" button.
