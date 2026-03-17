@@ -26,7 +26,7 @@ import {
   type ChallengeNameType,
 } from "@aws-sdk/client-cognito-identity-provider";
 import crypto from "crypto";
-import { logError, logInfo, logDebug } from "../logger.js";
+import { logError, logInfo, logDebug, logWarn } from "../logger.js";
 
 const getCognitoUserPoolId = () => process.env.COGNITO_USER_POOL_ID || "";
 const getCognitoClientId = () => process.env.COGNITO_CLIENT_ID || "";
@@ -469,6 +469,21 @@ export async function confirmForgotPassword(
     });
     await getClient().send(command);
     logInfo("[CognitoAuth] Password reset confirmed", { email });
+
+    // ConfirmForgotPassword clears MFA preferences. Re-enable email MFA so
+    // the user isn't blocked by the app's MFA enforcement check on next login.
+    try {
+      const userInfo = await getUser(email);
+      if (!userInfo.mfaEnabled) {
+        await enableEmailMfa(email);
+        logInfo("[CognitoAuth] Re-enabled email MFA after password reset", { email });
+      }
+    } catch (mfaError: any) {
+      logWarn("[CognitoAuth] Failed to restore MFA after password reset — user may need to re-enroll", {
+        email,
+        error: mfaError.message,
+      });
+    }
   } catch (error: any) {
     logError("[CognitoAuth] Confirm forgot password failed", error, { email });
     throw mapCognitoError(error);
@@ -476,13 +491,19 @@ export async function confirmForgotPassword(
 }
 
 /**
- * Admin-initiated password reset. Uses AdminResetUserPasswordCommand which
- * invalidates the current password and triggers Cognito to send a verification
- * code email. The user then uses the standard forgot-password confirmation flow.
+ * Admin-initiated password reset. Tries AdminResetUserPasswordCommand first.
+ * If that fails because Cognito doesn't recognise the user's email as a verified
+ * recovery contact (happens for users created before AutoVerifiedAttributes was
+ * configured), falls back to deleting and recreating the Cognito user which
+ * sends a fresh invitation email and properly registers the verified contact.
+ *
+ * Returns `newCognitoSub` when the user was recreated so the caller can update
+ * the tenant database.
  */
 export async function adminResetUserPassword(
   email: string,
-): Promise<{ sent: boolean; reason?: string }> {
+  fullName?: string,
+): Promise<{ sent: boolean; reason?: string; newCognitoSub?: string }> {
   try {
     const command = new AdminResetUserPasswordCommand({
       UserPoolId: getCognitoUserPoolId(),
@@ -501,6 +522,32 @@ export async function adminResetUserPassword(
     if (error.name === "AccessDeniedException") {
       return { sent: false, reason: "access_denied" };
     }
+    if (error.name === "LimitExceededException") {
+      return { sent: false, reason: "rate_limited" };
+    }
+
+    const needsRecreate =
+      (error.name === "InvalidParameterException" &&
+        error.message?.includes("no registered/verified email")) ||
+      (error.name === "NotAuthorizedException" &&
+        error.message?.includes("password recovery mechanism"));
+
+    if (needsRecreate) {
+      logInfo("[CognitoAuth] Falling back to user recreate for password reset", { email });
+      try {
+        await deleteUser(email).catch(() => {});
+        const result = await createUser(email, undefined, fullName, true);
+        logInfo("[CognitoAuth] User recreated for password reset, invitation sent", {
+          email,
+          newCognitoSub: result.cognitoSub,
+        });
+        return { sent: true, newCognitoSub: result.cognitoSub };
+      } catch (recreateError: any) {
+        logError("[CognitoAuth] User recreate fallback failed", recreateError, { email });
+        return { sent: false, reason: "recreate_failed" };
+      }
+    }
+
     if (error.name === "NotAuthorizedException") {
       return { sent: false, reason: "not_authorized" };
     }
@@ -509,9 +556,6 @@ export async function adminResetUserPassword(
     }
     if (error.name === "InvalidParameterException") {
       return { sent: false, reason: "invalid_user_state" };
-    }
-    if (error.name === "LimitExceededException") {
-      return { sent: false, reason: "rate_limited" };
     }
     return { sent: false, reason: "unknown" };
   }
