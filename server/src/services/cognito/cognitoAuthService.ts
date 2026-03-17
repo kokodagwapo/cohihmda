@@ -498,6 +498,9 @@ export async function adminResetUserPassword(
       errorMessage: error.message,
     });
 
+    if (error.name === "AccessDeniedException") {
+      return { sent: false, reason: "access_denied" };
+    }
     if (error.name === "NotAuthorizedException") {
       return { sent: false, reason: "not_authorized" };
     }

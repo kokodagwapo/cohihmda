@@ -1435,6 +1435,7 @@ router.post(
 
       if (!result.sent) {
         const messages: Record<string, string> = {
+          access_denied: "The server does not have permission to reset passwords. The IAM policy needs the cognito-idp:AdminResetUserPassword action.",
           not_authorized: "This user cannot reset their password via email. They may need to complete their initial sign-in first.",
           user_not_found: "This user does not have a Cognito account. Try deleting and re-creating the user.",
           invalid_user_state: "This user's account state does not support password reset. They may need to complete their initial sign-in first.",
