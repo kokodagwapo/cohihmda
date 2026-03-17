@@ -15,7 +15,6 @@ export default function ForgotPassword() {
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [useCognitoFlow, setUseCognitoFlow] = useState(false);
-  const [accountReset, setAccountReset] = useState(false);
   const apiUrl = getApiUrl();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -45,16 +44,10 @@ export default function ForgotPassword() {
       }
 
       const data = await response.json().catch(() => ({}));
-      if (data.accountReset) {
-        setAccountReset(true);
-        setUseCognitoFlow(false);
-        sessionStorage.removeItem('reset_email');
-      } else if (data.useCognito) {
-        setAccountReset(false);
+      if (data.useCognito) {
         setUseCognitoFlow(true);
         sessionStorage.setItem('reset_email', email.trim());
       } else {
-        setAccountReset(false);
         setUseCognitoFlow(false);
         sessionStorage.removeItem('reset_email');
       }
@@ -63,7 +56,6 @@ export default function ForgotPassword() {
     } catch {
       // Always show success to avoid revealing if account exists
       setUseCognitoFlow(false);
-      setAccountReset(false);
       sessionStorage.removeItem('reset_email');
       setSubmitted(true);
     } finally {
@@ -96,12 +88,7 @@ export default function ForgotPassword() {
               </div>
               <div className="text-center space-y-2">
                 <p className="text-sm text-muted-foreground">
-                  {accountReset ? (
-                    <>
-                      We sent new login instructions to <span className="font-medium text-foreground">{email}</span>.
-                      Use the temporary password in that email to sign in, then set a new password.
-                    </>
-                  ) : useCognitoFlow ? (
+                  {useCognitoFlow ? (
                     <>
                       We sent a verification code to <span className="font-medium text-foreground">{email}</span>.
                       Enter it on the next screen to set a new password.
@@ -116,15 +103,7 @@ export default function ForgotPassword() {
                 <p className="text-xs text-muted-foreground">
                   Didn't receive an email? Check your spam folder or try again.
                 </p>
-                {accountReset && (
-                  <Link to="/login" className="w-full">
-                    <Button className="w-full">
-                      <ArrowLeft className="mr-2 h-4 w-4" />
-                      Go to Login
-                    </Button>
-                  </Link>
-                )}
-                {useCognitoFlow && !accountReset && (
+                {useCognitoFlow && (
                   <Link to={`/reset-password?email=${encodeURIComponent(email)}`} className="w-full">
                     <Button className="w-full">
                       <KeyRound className="mr-2 h-4 w-4" />

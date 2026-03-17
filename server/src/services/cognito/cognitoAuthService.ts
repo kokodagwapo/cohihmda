@@ -561,6 +561,26 @@ export async function adminResetUserPassword(
   }
 }
 
+export async function adminSetUserPassword(
+  email: string,
+  password: string,
+  permanent: boolean = true,
+): Promise<void> {
+  try {
+    const command = new AdminSetUserPasswordCommand({
+      UserPoolId: getCognitoUserPoolId(),
+      Username: email,
+      Password: password,
+      Permanent: permanent,
+    });
+    await getClient().send(command);
+    logInfo("[CognitoAuth] Admin set user password", { email, permanent });
+  } catch (error: any) {
+    logError("[CognitoAuth] Admin set user password failed", error, { email });
+    throw mapCognitoError(error);
+  }
+}
+
 export async function changePassword(
   accessToken: string,
   previousPassword: string,
