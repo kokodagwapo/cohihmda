@@ -51,8 +51,9 @@ export default function ResetPassword() {
   // Cognito code-based flow when email is present (no token)
   const isCognitoFlow = !token && !!emailParam;
 
+  const codeParam = searchParams.get('code') || '';
   const [email, setEmail] = useState(emailParam);
-  const [code, setCode] = useState('');
+  const [code, setCode] = useState(codeParam);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
