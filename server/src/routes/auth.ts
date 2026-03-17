@@ -945,7 +945,10 @@ router.post("/password-reset/request", authLimiter, async (req, res) => {
       });
     }
 
-    await cognitoAuth.forgotPassword(email);
+    const result = await cognitoAuth.forgotPassword(email);
+    if (!result.sent) {
+      logWarn("[Auth] ForgotPassword did not send code", { email, reason: result.reason });
+    }
     return res.json({
       message: successMsg,
       useCognito: true,

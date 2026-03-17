@@ -55,7 +55,8 @@ import {
   AlertCircle,
   Unlink,
   MoreHorizontal,
-  Folder
+  Folder,
+  KeyRound
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/lib/api';
@@ -433,6 +434,26 @@ export function UserManagementSection() {
         title: 'Error',
         description: error.message || 'Failed to update user status',
         variant: 'destructive'
+      });
+    }
+  };
+
+  const handleSendPasswordReset = async (user: UserDisplay) => {
+    if (!confirm(`Send a password reset email to ${user.email}?`)) return;
+
+    try {
+      await api.request(`/api/admin/tenants/${user.tenant_id}/users/${user.id}/reset-password`, {
+        method: 'POST',
+      });
+      toast({
+        title: 'Password Reset Sent',
+        description: `A password reset email has been sent to ${user.email}`,
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Password Reset Failed',
+        description: error.message || 'Failed to send password reset email',
+        variant: 'destructive',
       });
     }
   };
@@ -821,6 +842,10 @@ export function UserManagementSection() {
                                     <CheckCircle2 className="h-4 w-4 mr-2" />
                                   )}
                                   {user.is_active ? 'Deactivate' : 'Activate'}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleSendPasswordReset(user)}>
+                                  <KeyRound className="h-4 w-4 mr-2" />
+                                  Send password reset
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem
