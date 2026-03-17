@@ -13,6 +13,7 @@ import {
   AdminSetUserPasswordCommand,
   AdminSetUserMFAPreferenceCommand,
   AdminGetUserCommand,
+  AdminResetUserPasswordCommand,
   AssociateSoftwareTokenCommand,
   VerifySoftwareTokenCommand,
   ForgotPasswordCommand,
@@ -416,7 +417,7 @@ export async function getUser(
 
 // --- Password Reset ---
 
-export async function forgotPassword(email: string): Promise<void> {
+export async function forgotPassword(email: string): Promise<{ sent: boolean; reason?: string }> {
   try {
     const secretHash = computeSecretHash(email);
 
@@ -427,11 +428,27 @@ export async function forgotPassword(email: string): Promise<void> {
     });
     await getClient().send(command);
     logInfo("[CognitoAuth] Password reset initiated", { email });
+    return { sent: true };
   } catch (error: any) {
-    logDebug("[CognitoAuth] ForgotPassword result", {
+    logError("[CognitoAuth] ForgotPassword failed", error, {
       email,
-      error: error.name,
+      errorName: error.name,
+      errorMessage: error.message,
     });
+
+    if (error.name === "NotAuthorizedException") {
+      return { sent: false, reason: "not_authorized" };
+    }
+    if (error.name === "UserNotFoundException") {
+      return { sent: false, reason: "user_not_found" };
+    }
+    if (error.name === "LimitExceededException") {
+      return { sent: false, reason: "rate_limited" };
+    }
+    if (error.name === "InvalidParameterException") {
+      return { sent: false, reason: "invalid_user_state" };
+    }
+    return { sent: false, reason: "unknown" };
   }
 }
 
@@ -455,6 +472,48 @@ export async function confirmForgotPassword(
   } catch (error: any) {
     logError("[CognitoAuth] Confirm forgot password failed", error, { email });
     throw mapCognitoError(error);
+  }
+}
+
+/**
+ * Admin-initiated password reset. Uses AdminResetUserPasswordCommand which
+ * invalidates the current password and triggers Cognito to send a verification
+ * code email. The user then uses the standard forgot-password confirmation flow.
+ */
+export async function adminResetUserPassword(
+  email: string,
+): Promise<{ sent: boolean; reason?: string }> {
+  try {
+    const command = new AdminResetUserPasswordCommand({
+      UserPoolId: getCognitoUserPoolId(),
+      Username: email,
+    });
+    await getClient().send(command);
+    logInfo("[CognitoAuth] Admin-initiated password reset sent", { email });
+    return { sent: true };
+  } catch (error: any) {
+    logError("[CognitoAuth] Admin password reset failed", error, {
+      email,
+      errorName: error.name,
+      errorMessage: error.message,
+    });
+
+    if (error.name === "AccessDeniedException") {
+      return { sent: false, reason: "access_denied" };
+    }
+    if (error.name === "NotAuthorizedException") {
+      return { sent: false, reason: "not_authorized" };
+    }
+    if (error.name === "UserNotFoundException") {
+      return { sent: false, reason: "user_not_found" };
+    }
+    if (error.name === "InvalidParameterException") {
+      return { sent: false, reason: "invalid_user_state" };
+    }
+    if (error.name === "LimitExceededException") {
+      return { sent: false, reason: "rate_limited" };
+    }
+    return { sent: false, reason: "unknown" };
   }
 }
 
