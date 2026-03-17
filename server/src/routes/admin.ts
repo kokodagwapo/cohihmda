@@ -1431,7 +1431,8 @@ router.post(
       }
 
       const targetEmail = userResult.rows[0].email;
-      const result = await cognitoAuth.adminResetUserPassword(targetEmail);
+      const targetName = userResult.rows[0].full_name;
+      const result = await cognitoAuth.adminResetUserPassword(targetEmail, targetName || undefined);
 
       if (!result.sent) {
         const messages: Record<string, string> = {
@@ -1440,10 +1441,22 @@ router.post(
           user_not_found: "This user does not have a Cognito account. Try deleting and re-creating the user.",
           invalid_user_state: "This user's account state does not support password reset. They may need to complete their initial sign-in first.",
           rate_limited: "Too many password reset attempts. Please try again later.",
+          recreate_failed: "Failed to reset this user's account. Try deleting and re-creating the user manually.",
         };
         return res.status(400).json({
           error: messages[result.reason || "unknown"] || "Failed to send password reset email",
           reason: result.reason,
+        });
+      }
+
+      if (result.newCognitoSub) {
+        await tenantPool.query(
+          "UPDATE users SET cognito_sub = $1 WHERE id = $2",
+          [result.newCognitoSub, userId],
+        );
+        logInfo("Updated cognito_sub after user recreate", {
+          userId,
+          newCognitoSub: result.newCognitoSub,
         });
       }
 
@@ -1454,7 +1467,7 @@ router.post(
         tenantId,
         action: "admin_password_reset",
         resource: "user",
-        description: `Admin initiated password reset for ${targetEmail}`,
+        description: `Admin initiated password reset for ${targetEmail}${result.newCognitoSub ? " (account recreated)" : ""}`,
         status: "success",
         ipAddress: req.ip,
         userAgent: req.get("user-agent"),
@@ -1464,10 +1477,13 @@ router.post(
         initiatedBy: req.userId,
         targetUser: targetEmail,
         tenantId,
+        recreated: !!result.newCognitoSub,
       });
 
       res.json({
-        message: `Password reset email sent to ${targetEmail}`,
+        message: result.newCognitoSub
+          ? `Account reset for ${targetEmail}. They will receive an email with new sign-in instructions.`
+          : `Password reset email sent to ${targetEmail}`,
       });
     } catch (error: any) {
       logError("Error in admin password reset", error, {

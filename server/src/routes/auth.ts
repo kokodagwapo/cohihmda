@@ -713,14 +713,14 @@ async function linkCognitoSub(
   try {
     if (isSuperAdmin) {
       await getManagementPool().query(
-        `UPDATE coheus_users SET cognito_sub = $1 WHERE id = $2 AND cognito_sub IS NULL`,
+        `UPDATE coheus_users SET cognito_sub = $1 WHERE id = $2 AND (cognito_sub IS NULL OR cognito_sub <> $1)`,
         [cognitoSub, user.id],
       );
     } else if ("tenant_slug" in user) {
       const tenantPool = await getTenantPool(user.tenant_slug);
       if (tenantPool) {
         await tenantPool.query(
-          `UPDATE users SET cognito_sub = $1 WHERE id = $2 AND cognito_sub IS NULL`,
+          `UPDATE users SET cognito_sub = $1 WHERE id = $2 AND (cognito_sub IS NULL OR cognito_sub <> $1)`,
           [cognitoSub, user.id],
         );
       }
@@ -946,12 +946,45 @@ router.post("/password-reset/request", authLimiter, async (req, res) => {
     }
 
     const result = await cognitoAuth.forgotPassword(email);
+
     if (!result.sent) {
       logWarn("[Auth] ForgotPassword did not send code", { email, reason: result.reason });
+
+      const canFallback =
+        result.reason === "not_authorized" || result.reason === "invalid_user_state";
+
+      if (canFallback) {
+        logInfo("[Auth] Falling back to admin reset for password recovery", { email });
+        const adminResult = await cognitoAuth.adminResetUserPassword(email);
+
+        if (adminResult.sent && adminResult.newCognitoSub) {
+          logInfo("[Auth] User recreated during password reset fallback", {
+            email,
+            newCognitoSub: adminResult.newCognitoSub,
+          });
+          // Best-effort: update cognito_sub in DB so next login links correctly
+          try {
+            const found = await findUserByEmail(email);
+            if (found) {
+              await linkCognitoSub(found.user, found.isSuperAdmin, adminResult.newCognitoSub);
+            }
+          } catch {}
+          return res.json({
+            message: successMsg,
+            accountReset: true,
+          });
+        } else if (adminResult.sent) {
+          return res.json({
+            message: successMsg,
+            useCognito: true,
+          });
+        }
+      }
     }
+
     return res.json({
       message: successMsg,
-      useCognito: true,
+      useCognito: result.sent,
     });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
