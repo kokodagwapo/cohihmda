@@ -679,6 +679,22 @@ These prompts are **general** for all dashboard pages and are editable via the A
 
 All four prompt configs are seeded into `ai_prompt_configs` so they appear under **"Dashboard Insights"** in Admin → AI Prompts, separate from the regular "Insights" category.
 
+### 14.1 Page-specific guidance (`pageGuidance`)
+
+Each page adapter can set an optional **`pageGuidance`** (array of strings) on `DashboardPageContext`. The generator prompt treats these as high-priority instructions for what patterns to surface on that page (e.g. cross-period comparisons, high-performer trend analysis). The leaderboard adapter sets guidance such as:
+
+- Prioritize insights that compare current period to the immediately prior comparable period (MTD vs LM, QTD vs LQ).
+- Highlight high performers whose metrics have changed significantly over time.
+- Call out both improvements and declines for top performers across periods.
+
+Other dashboard pages can define their own guidance in their adapter’s `buildContext` return value.
+
+### 14.2 Person-specific insights and evidence
+
+When an insight is about a **specific loan officer, branch, or other segment** (name appears in headline/understory/ETM), the evidence agent must set the primary `evidence_ref` to a widget whose rows represent that entity (e.g. dimension `"leader"`) with `target.label` equal to the entity’s exact name. The detail hydrator then uses that subject to build **person-focused evidence tables**: one row per time period showing that subject’s metrics (pull-through, units, volume, rank) instead of generic top-performer summaries. Subject detection prefers the primary evidence_ref’s `target.label` when the widget has dimension `"leader"`; fallbacks include `filter_context.leaderName` or parsing from the headline.
+
+Example: an insight "LQ vs MTD: High Performer Decline for Stanley Edward Obrecht Jr." with an evidence_ref `{ widgetId: "leaderboard-main-table", role: "primary", target: { type: "row", label: "Stanley Edward Obrecht Jr." } }` produces a detail table with one row per period (MTD, QTD, YTD, LQ, LM) containing Stanley’s pull-through, units, and volume for that period.
+
 ---
 
 ## 15. Dashboard page prep checklist

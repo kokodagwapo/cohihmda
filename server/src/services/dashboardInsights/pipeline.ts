@@ -68,6 +68,7 @@ function buildGeneratorUserMessage(context: DashboardPageContext): string {
       pageId: context.pageId,
       pageName: context.pageName,
       pageDescription: context.pageDescription,
+      pageGuidance: context.pageGuidance,
       filters: context.filters,
       dimensions: context.dimensions,
       data: context.data,
@@ -223,18 +224,25 @@ function buildCuratorUserMessage(
   );
 }
 
+/** Curator output insight with optional judge_score for deduplication. */
+type CuratorInsight = DashboardInsight & { judge_score?: number };
+
 function parseCuratorResponse(
   raw: string,
   pageId: string,
   pageName: string
-): DashboardInsight[] {
+): CuratorInsight[] {
   try {
     const parsed = JSON.parse(raw) as { insights?: unknown[] };
     const list = Array.isArray(parsed?.insights) ? parsed.insights : [];
-    const out: DashboardInsight[] = [];
+    const out: CuratorInsight[] = [];
     for (const item of list) {
       const o = item as Record<string, unknown>;
       const refs = Array.isArray(o.evidence_refs) ? (o.evidence_refs as EvidenceRef[]) : [];
+      const judge_score =
+        typeof o.judge_score === "number" && Number.isFinite(o.judge_score)
+          ? o.judge_score
+          : undefined;
       out.push({
         headline: String(o.headline ?? ""),
         understory: String(o.understory ?? ""),
@@ -256,6 +264,7 @@ function parseCuratorResponse(
           o.sentiment === "warning",
         sourcePageId: pageId,
         sourcePageName: pageName,
+        ...(judge_score !== undefined && { judge_score }),
       });
     }
     return out;
@@ -277,8 +286,18 @@ function buildEvidenceAgentUserMessage(insight: DashboardInsight, catalog: Widge
         scope: insight.scope,
         filter_context: insight.filter_context,
         evidence_refs: insight.evidence_refs,
+        what_changed: insight.what_changed,
+        why: insight.why,
+        business_impact: insight.business_impact,
       },
-      widget_catalog: catalog,
+      widget_catalog: catalog.map((w) => ({
+        id: w.id,
+        type: w.type,
+        label: w.label,
+        dimension: w.dimension,
+      })),
+      instruction:
+        "If the insight is about a specific loan officer (name appears in headline/understory), choose widgets with dimension \"leader\" and set target.label to that exact name. Same for branch or other segment dimensions.",
     },
     null,
     2
@@ -408,6 +427,97 @@ function enrichEvidenceRefsWithValues(
     const value = parts.length > 0 ? parts.join(" · ") : undefined;
     return value ? { ...ref, value } : ref;
   });
+}
+
+/**
+ * Subject key for deduplication: "leader:Name" or "branch:Name".
+ * Returns null if the insight is not about a specific loan officer or branch.
+ */
+function getSubjectKey(
+  insight: { evidence_refs?: EvidenceRef[]; filter_context?: Record<string, unknown> },
+  context: DashboardPageContext
+): string | null {
+  for (const ref of insight.evidence_refs ?? []) {
+    const label = ref.target?.label?.trim();
+    if (!label) continue;
+    const widget = context.widget_catalog.find((w) => w.id === ref.widgetId);
+    const dim = widget?.dimension;
+    if (dim === "leader") return `leader:${label}`;
+    if (dim === "branch") return `branch:${label}`;
+  }
+  const ctx = insight.filter_context as Record<string, unknown> | undefined;
+  if (ctx?.leaderName != null && typeof ctx.leaderName === "string")
+    return `leader:${String(ctx.leaderName).trim()}`;
+  if (ctx?.leader != null && typeof ctx.leader === "string")
+    return `leader:${String(ctx.leader).trim()}`;
+  if (ctx?.branch != null && typeof ctx.branch === "string")
+    return `branch:${String(ctx.branch).trim()}`;
+  return null;
+}
+
+/**
+ * Deduplicate insights by subject (loan officer or branch). When multiple insights
+ * feature the same LO or branch, keep only the one with the highest judge_score.
+ * Insights with no subject key are left as-is.
+ */
+function deduplicateBySubject(
+  insights: Array<DashboardInsight & { judge_score?: number }>,
+  context: DashboardPageContext
+): DashboardInsight[] {
+  const noSubject: DashboardInsight[] = [];
+  const byKey = new Map<string, DashboardInsight & { judge_score?: number }>();
+
+  for (const insight of insights) {
+    const key = getSubjectKey(insight, context);
+    const score = insight.judge_score ?? 0;
+    if (key == null) {
+      noSubject.push(insight);
+      continue;
+    }
+    const existing = byKey.get(key);
+    if (!existing || (existing.judge_score ?? 0) < score) {
+      byKey.set(key, insight);
+    }
+  }
+
+  const deduped: DashboardInsight[] = [];
+  for (const ins of noSubject) {
+    const { judge_score: _s, ...rest } = ins;
+    deduped.push(rest);
+  }
+  for (const ins of byKey.values()) {
+    const { judge_score: _s, ...rest } = ins;
+    deduped.push(rest);
+  }
+  return deduped;
+}
+
+/**
+ * Derive the subject name (e.g. loan officer) for person-focused evidence when the insight
+ * is about a specific entity. Used to build subject-focused detail tables.
+ */
+function getSubjectNameFromInsight(
+  insight: DashboardInsight,
+  context: DashboardPageContext
+): string | undefined {
+  // Prefer: primary evidence_ref with dimension "leader" and target.label
+  const primaryRef = insight.evidence_refs?.find((r) => r.role === "primary");
+  if (primaryRef?.target?.label) {
+    const widget = context.widget_catalog.find((w) => w.id === primaryRef.widgetId);
+    if (widget?.dimension === "leader") return primaryRef.target.label.trim();
+  }
+  // Any evidence_ref with dimension leader and target
+  for (const ref of insight.evidence_refs ?? []) {
+    if (ref.target?.label) {
+      const widget = context.widget_catalog.find((w) => w.id === ref.widgetId);
+      if (widget?.dimension === "leader") return ref.target.label.trim();
+    }
+  }
+  // Fallback: filter_context
+  const ctx = insight.filter_context as Record<string, unknown> | undefined;
+  if (ctx?.leaderName != null && typeof ctx.leaderName === "string") return ctx.leaderName.trim();
+  if (ctx?.leader != null && typeof ctx.leader === "string") return ctx.leader.trim();
+  return undefined;
 }
 
 /**
@@ -543,14 +653,17 @@ export async function runDashboardInsightsPipeline(
     maxTokens: curatorConfig.max_tokens,
     jsonMode: curatorConfig.json_mode,
   });
-  let insights = parseCuratorResponse(
+  let curatorInsights = parseCuratorResponse(
     curatorRaw,
     context.pageId,
     context.pageName
   );
-  if (insights.length === 0) {
+  if (curatorInsights.length === 0) {
     return { count: 0, pageId: context.pageId, pageName: context.pageName, generationBatch };
   }
+
+  // Deduplicate by subject (loan officer or branch): keep only the highest-scoring insight per subject
+  let insights = deduplicateBySubject(curatorInsights, context);
 
   // Pass 4: Evidence Agent (refine evidence_refs per insight)
   const evidenceConfig = await getPromptConfig("dashboard_insights.evidence_agent");
@@ -581,9 +694,12 @@ export async function runDashboardInsightsPipeline(
   const supportingData = buildSupportingDataFromContext(context);
   for (let i = 0; i < insights.length; i++) {
     const insight = insights[i];
+    const subjectName = getSubjectNameFromInsight(insight, context);
     const detail_data = buildDetailFromSupportingData(insight, supportingData, {
       generationBatch,
       dateFilter: (insight.filter_context?.datePeriod as string) || undefined,
+      subjectName: subjectName || undefined,
+      context,
     });
     insights[i] = { ...insight, supporting_data: supportingData, detail_data: detail_data ?? undefined };
   }

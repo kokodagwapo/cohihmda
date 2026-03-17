@@ -63,7 +63,7 @@ export const leaderboardAdapter: DashboardAdapter = {
   pageId: "leaderboard",
   pageName: "Leaderboard",
   pageDescription:
-    "Ranks loan officers and branches by funded units, volume, and pull-through. Data is provided for multiple time periods (MTD, QTD, YTD, Last Quarter, Last Month) so insights can compare periods.",
+    "Ranks loan officers and branches by funded units, volume, and pull-through. Units and volume reflect loans that FUNDED within each time period. Pull-through and turn time are cohort metrics based on loans whose application/started date falls within each period, even if those loans fund later. Data is provided for multiple time periods (MTD, QTD, YTD, Last Quarter, Last Month) so insights can compare periods.",
 
   /**
    * Single combination: insights are for the whole dashboard, not per time period.
@@ -158,6 +158,11 @@ export const leaderboardAdapter: DashboardAdapter = {
       pageId: "leaderboard",
       pageName: "Leaderboard",
       pageDescription: leaderboardAdapter.pageDescription,
+      pageGuidance: [
+        "Prioritize insights that compare the current period to the immediately prior comparable period (MTD vs LM, QTD vs LQ, YTD vs last year when available).",
+        "Highlight high performers whose metrics have changed significantly over time, including pull-through, units, and volume.",
+        "Call out any significant (+/- 20% or more) improvements and declines for any Loan Officer across periods.",
+      ],
       filters: channelGroup ? { channelGroup } : {},
       dimensions,
       data: {

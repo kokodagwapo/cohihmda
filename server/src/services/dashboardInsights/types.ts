@@ -29,6 +29,8 @@ export interface DashboardPageContext {
   pageId: string;
   pageName: string;
   pageDescription?: string;
+  /** Page-specific instructions for the generator (e.g. cross-period comparisons, high-performer trends). */
+  pageGuidance?: string[];
   filters: Record<string, unknown>;
   dimensions: DashboardDimension[];
   data: {

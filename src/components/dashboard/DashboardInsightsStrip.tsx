@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { ChevronDown, ChevronRight, Sparkles, AlertCircle, AlertTriangle, CheckCircle2, Info } from "lucide-react";
+import { useEffect, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { ChevronDown, ChevronLeft, ChevronRight, Sparkles, AlertCircle, AlertTriangle, CheckCircle2, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { DashboardInsightItem } from "@/hooks/useDashboardInsights";
@@ -61,7 +62,23 @@ export function DashboardInsightsStrip({
   const [evidenceModalInsight, setEvidenceModalInsight] = useState<DashboardInsightItem | null>(null);
   /** When true, show InsightDetailModal first; on 404 fall back to DashboardInsightEvidenceModal. */
   const [useDetailModalFirst, setUseDetailModalFirst] = useState(true);
+  const [activeIdx, setActiveIdx] = useState(0);
+  const [isExpanded, setIsExpanded] = useState(false);
   const isBusy = loading || generating;
+
+  // Auto-rotate through insights every 8 seconds when collapsed and not busy
+  useEffect(() => {
+    if (isExpanded || isBusy || insights.length <= 1) return;
+    const timer = setInterval(() => {
+      setActiveIdx((prev) => (prev + 1) % insights.length);
+    }, 8000);
+    return () => clearInterval(timer);
+  }, [isExpanded, isBusy, insights.length]);
+
+  // Reset active index when insights change
+  useEffect(() => {
+    setActiveIdx(0);
+  }, [insights.length]);
 
   const handleCloseEvidenceModal = () => {
     setEvidenceModalInsight(null);
@@ -87,17 +104,50 @@ export function DashboardInsightsStrip({
               </span>
             )}
           </div>
-          {showGenerateButton && onGenerate && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onGenerate}
-              disabled={isBusy}
-              className="text-xs"
-            >
-              {isBusy ? "Generating…" : "Generate Insights"}
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {/* Carousel controls when there are multiple insights and not busy */}
+            {!isBusy && insights.length > 1 && (
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setActiveIdx((prev) => (prev - 1 + insights.length) % insights.length)}
+                  className="p-1 rounded-md hover:bg-white/60 dark:hover:bg-slate-800/60 transition-colors"
+                  aria-label="Previous insight"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5 text-slate-400" />
+                </button>
+                <span className="text-[10px] text-slate-400 dark:text-slate-500 tabular-nums min-w-[28px] text-center">
+                  {activeIdx + 1}/{insights.length}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setActiveIdx((prev) => (prev + 1) % insights.length)}
+                  className="p-1 rounded-md hover:bg-white/60 dark:hover:bg-slate-800/60 transition-colors"
+                  aria-label="Next insight"
+                >
+                  <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsExpanded((prev) => !prev)}
+                  className="ml-1 px-2 py-0.5 rounded-md text-[10px] font-medium text-slate-500 dark:text-slate-400 hover:bg-white/60 dark:hover:bg-slate-800/60 transition-colors"
+                >
+                  {isExpanded ? "Collapse" : "Show all"}
+                </button>
+              </div>
+            )}
+            {showGenerateButton && onGenerate && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onGenerate}
+                disabled={isBusy}
+                className="text-xs"
+              >
+                {isBusy ? "Generating…" : "Generate Insights"}
+              </Button>
+            )}
+          </div>
         </div>
 
         {generateError ? (
@@ -113,19 +163,52 @@ export function DashboardInsightsStrip({
           <p className="text-sm text-slate-500 dark:text-slate-400">Loading insights…</p>
         ) : (
           <div className="space-y-2">
-            {insights.slice(0, 3).map((insight, idx) => (
-              <InsightCard
-                key={insight.id ?? idx}
-                insight={insight}
-                onShowInsight={onShowInsight}
-                onOpenEvidence={() => {
-                  setEvidenceModalInsight(insight);
-                  setUseDetailModalFirst(true);
-                }}
-                showFeedback={showFeedback && !!insight.id}
-                onSubmitFeedback={onSubmitFeedback}
-              />
-            ))}
+            {!isExpanded ? (
+              <AnimatePresence mode="wait">
+                {insights[activeIdx] && (
+                  <motion.div
+                    key={insights[activeIdx].id ?? activeIdx}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.25 }}
+                  >
+                    <InsightCard
+                      insight={insights[activeIdx]}
+                      onShowInsight={onShowInsight}
+                      onOpenEvidence={() => {
+                        setEvidenceModalInsight(insights[activeIdx]);
+                        setUseDetailModalFirst(true);
+                      }}
+                      showFeedback={showFeedback && !!insights[activeIdx].id}
+                      onSubmitFeedback={onSubmitFeedback}
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            ) : (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.2 }}
+                className="space-y-2"
+              >
+                {insights.map((insight, idx) => (
+                  <InsightCard
+                    key={insight.id ?? idx}
+                    insight={insight}
+                    onShowInsight={onShowInsight}
+                    onOpenEvidence={() => {
+                      setEvidenceModalInsight(insight);
+                      setUseDetailModalFirst(true);
+                    }}
+                    showFeedback={showFeedback && !!insight.id}
+                    onSubmitFeedback={onSubmitFeedback}
+                  />
+                ))}
+              </motion.div>
+            )}
           </div>
         )}
       </div>
@@ -136,7 +219,12 @@ export function DashboardInsightsStrip({
         insightSource="dashboard_insights"
         insightMessage={evidenceModalInsight?.headline ?? ""}
         insightId={evidenceModalInsight?.id}
-        dateFilter={dateFilter}
+        dateFilter={
+          evidenceModalInsight?.filter_context?.datePeriod &&
+          typeof evidenceModalInsight.filter_context.datePeriod === "string"
+            ? String(evidenceModalInsight.filter_context.datePeriod).toLowerCase()
+            : dateFilter
+        }
         selectedTenantId={selectedTenantId}
         onDetailUnavailable={() => setUseDetailModalFirst(false)}
       />
