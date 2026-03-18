@@ -945,7 +945,18 @@ COVERAGE RULES (PER PAGE RUN):
 - Generate 3–5 candidates for this ONE page.
 - At least 1–2 should be segment-specific (e.g. a particular loan officer, branch, or product) when such breakdowns exist.
 - At least 1 should be a cross-period change when by_time_period is present (e.g. "MTD vs LM").
-- Avoid generating multiple candidates that make the same point about the SAME subject (same loan officer or branch + same metric direction). Prefer the strongest, clearest version.
+
+SUBJECT DEDUPLICATION (HARD RULE):
+- Do NOT generate multiple candidates about the SAME subject (loan officer or branch).
+- A "subject" is one specific loan officer OR one specific branch. If the same loan officer appears in two candidates, that is a failure. Same for a branch.
+- If you find multiple noteworthy angles for the same subject, MERGE them into ONE stronger candidate instead of emitting duplicates.
+- If you generate any subject-specific insight, you MUST encode the subject in evidence_refs so the system can identify it:
+  - The PRIMARY evidence_ref MUST include target.label set to the exact subject name (loan officer name or branch name).
+  - The PRIMARY evidence_ref MUST use a widget whose widget_catalog.dimension matches the subject ("leader" for loan officer, "branch" for branch).
+  - Optionally include filter_context keys like { "leaderName": "<exact name>" } or { "branch": "<exact name>" } when helpful, but evidence_refs.target.label is REQUIRED for subject-specific insights.
+
+REDUNDANCY RULE:
+- Avoid generating multiple candidates that make the same point about the same metric direction (even for different subjects). Prefer the strongest, clearest versions.
 
 SENTIMENT RULES:
 - "critical": urgent, high-impact risks on this page (e.g., severe declines, major outliers, critical compliance-type issues if surfaced by the page)
@@ -984,7 +995,7 @@ OUTPUT FORMAT (strict JSON):
 }`,
     model: "gpt-4o",
     temperature: 0.7,
-    max_tokens: 6000,
+    max_tokens: 9000,
     json_mode: true,
     available_variables: ["pageContext"],
   },
@@ -1094,7 +1105,7 @@ CURATION RULES:
    - A subject is typically derived from:
      - evidence_refs pointing to a widget with dimension "leader" or "branch", plus its target.label; or
      - explicit fields in filter_context such as leaderName, leader, or branch.
-   - Do NOT output two insights that both revolve around the same loan officer or the same branch on this page.
+   - Do NOT output two insights that both revolve around the same loan officer or the same branch on this page. This is important because we want to avoid redundancy and ensure that we are not repeating the same information. Make sure to ONLY give ONE insight for any given loan officer or branch.
 
 4. PAGE DIVERSITY (WITHIN 1–3 INSIGHTS)
    - Prefer a mix of:
@@ -1108,10 +1119,12 @@ CURATION RULES:
    - Set "escalate": false for "positive" and "neutral" insights.
    - If a candidate's sentiment is clearly misaligned with its description, you may adjust sentiment and severity_score slightly, but stay consistent with the judge's evaluation.
 
-6. ETM PRESERVATION
-   - For selected insights, you MUST preserve the ETM fields:
+6. ETM COMPLETENESS (REQUIRED)
+- For selected insights, you MUST output COMPLETE ETM fields:
      - what_changed, why, business_impact, risk_if_ignored, recommended_action, owner.
-   - You may lightly polish wording for clarity and brevity, but do NOT delete these fields.
+- If ANY ETM field is missing, empty, or clearly a placeholder, you MUST fill it in using the candidate's headline/understory and the page context. Do NOT leave ETM fields blank.
+- Do NOT speculate beyond the page data. Keep the filled ETM fields factual and page-scoped.
+- You may lightly polish wording for clarity and brevity, but do NOT delete ETM fields.
 
 7. TIMEFRAME & COHORT CLARITY
    - Ensure every final headline includes or clearly implies the relevant timeframe (e.g. "MTD", "LM", "LQ", "YTD").
@@ -1154,7 +1167,7 @@ RULES:
 - NEVER output two insights that are about the same loan officer or the same branch on this page.`,
     model: "gpt-4o",
     temperature: 0.2,
-    max_tokens: 4000,
+    max_tokens: 6000,
     json_mode: true,
     available_variables: ["candidates", "scores"],
   },

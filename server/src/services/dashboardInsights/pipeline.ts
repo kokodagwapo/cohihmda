@@ -593,6 +593,7 @@ export async function runDashboardInsightsPipeline(
     temperature: genConfig.temperature,
     maxTokens: genConfig.max_tokens,
     jsonMode: genConfig.json_mode,
+    tag: "dashboard_insights.generator",
   });
   let candidates = parseGeneratorResponse(genRaw);
   if (candidates.length === 0) {
@@ -625,6 +626,7 @@ export async function runDashboardInsightsPipeline(
     temperature: judgeConfig.temperature,
     maxTokens: judgeConfig.max_tokens,
     jsonMode: judgeConfig.json_mode,
+    tag: "dashboard_insights.judge",
   });
   const evaluations = parseJudgeResponse(judgeRaw);
   const afterJudge: GeneratorCandidate[] = [];
@@ -652,6 +654,7 @@ export async function runDashboardInsightsPipeline(
     temperature: curatorConfig.temperature,
     maxTokens: curatorConfig.max_tokens,
     jsonMode: curatorConfig.json_mode,
+    tag: "dashboard_insights.curator",
   });
   let curatorInsights = parseCuratorResponse(
     curatorRaw,
@@ -680,6 +683,7 @@ export async function runDashboardInsightsPipeline(
         temperature: evidenceConfig.temperature,
         maxTokens: evidenceConfig.max_tokens,
         jsonMode: evidenceConfig.json_mode,
+        tag: "dashboard_insights.evidence_agent",
       });
       const refs = parseEvidenceAgentResponse(evRaw);
       if (refs && refs.length > 0) {
