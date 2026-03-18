@@ -1628,6 +1628,208 @@ router.get(
 );
 
 // =============================================================================
+// OPERATIONS ACTOR LOANS - GET /api/scorecard/operations-actor-loans
+// =============================================================================
+// Paginated loans for a single actor (underwriter/processor/closer) in the
+// same date window and filters as the operations scorecard.
+// =============================================================================
+
+/**
+ * GET /api/scorecard/operations-actor-loans
+ * Get paginated loans for one actor (e.g. one underwriter) in the scorecard date window.
+ *
+ * Query Parameters:
+ * - actor_type: 'processor' | 'underwriter' | 'closer' (default: 'underwriter')
+ * - actor_name: exact name from scorecard row (e.g. "Glenda Mooney")
+ * - date_range: '3-months' | '6-months' | '12-months'
+ * - start_date, end_date: optional custom range (YYYY-MM-DD)
+ * - tenant_id: optional
+ * - channel_group: optional
+ * - limit, offset: pagination (default limit 5000, max 10000 — single-page modal)
+ * - dimension filters: same as operations scorecard (branch, loan_type, etc.)
+ */
+router.get(
+  "/operations-actor-loans",
+  authenticateToken,
+  attachTenantContext,
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantPool = getTenantContext(req).tenantPool;
+
+      const actorType = (req.query.actor_type as string) || "underwriter";
+      const actorName = (req.query.actor_name as string) || "";
+      const dateRange = (req.query.date_range as string) || "3-months";
+      const channelGroup = req.query.channel_group as string | undefined;
+      const customStartDate = req.query.start_date as string | undefined;
+      const customEndDate = req.query.end_date as string | undefined;
+      const limit = Math.min(
+        Math.max(parseInt((req.query.limit as string) || "5000", 10) || 5000, 1),
+        10000
+      );
+      const offset = Math.max(parseInt((req.query.offset as string) || "0", 10) || 0, 0);
+
+      if (!["processor", "underwriter", "closer"].includes(actorType)) {
+        return res.status(400).json({
+          error: 'Invalid actor_type. Must be "processor", "underwriter", or "closer"',
+        });
+      }
+      if (!actorName || typeof actorName !== "string" || actorName.trim() === "") {
+        return res.status(400).json({
+          error: "actor_name is required and must be a non-empty string",
+        });
+      }
+
+      const monthsMap: Record<string, number> = {
+        "3-months": 3,
+        "6-months": 6,
+        "12-months": 12,
+      };
+      const monthsBack = monthsMap[dateRange] || 3;
+
+      const config = await loadOpsActorConfig(tenantPool, actorType);
+      const vMaxDate = await getVMaxDate(tenantPool);
+
+      let effectiveStartDate: Date;
+      let effectiveEndDate: Date;
+
+      if (customStartDate && customEndDate) {
+        effectiveStartDate = new Date(customStartDate);
+        effectiveEndDate = new Date(customEndDate);
+        if (isNaN(effectiveStartDate.getTime()) || isNaN(effectiveEndDate.getTime())) {
+          logWarn("[Scorecard/Operations-Actor-Loans] Invalid start_date/end_date, falling back to default", {
+            customStartDate,
+            customEndDate,
+          });
+          effectiveEndDate = new Date(vMaxDate);
+          effectiveStartDate = new Date(vMaxDate.getFullYear(), vMaxDate.getMonth() - monthsBack, 1);
+        }
+      } else {
+        effectiveEndDate = new Date(vMaxDate);
+        effectiveStartDate = new Date(vMaxDate.getFullYear(), vMaxDate.getMonth() - monthsBack, 1);
+      }
+
+      const channelClause = buildChannelWhereClause(channelGroup, "l");
+      const dimensionFilterClause = buildDimensionFilterWhereClause(req.query as Record<string, any>, "l", new Set(["channel_group", "tenant_id", "actor_type", "actor_name", "date_range", "start_date", "end_date", "limit", "offset"]));
+      const startDateStr = formatDateForSQL(effectiveStartDate);
+      const endDateStr = formatDateForSQL(effectiveEndDate);
+
+      const countQuery = `
+        SELECT COUNT(*)
+        FROM public.loans l
+        WHERE l.${config.outputDateField} IS NOT NULL
+          AND l.${config.outputDateField} >= $1
+          AND l.${config.outputDateField} < $2
+          AND l.${config.actorColumn} = $3
+          AND TRIM(l.${config.actorColumn}) != ''
+          AND UPPER(TRIM(l.${config.actorColumn})) != '99-MISSING'
+          ${channelClause}
+          ${dimensionFilterClause}
+      `;
+      const countParams: any[] = [startDateStr, endDateStr, actorName.trim()];
+      const countResult = await tenantPool.query(countQuery, countParams);
+      const total = parseInt(countResult.rows[0]?.count ?? "0", 10);
+
+      const loansQuery = `
+        SELECT
+          l.loan_id,
+          l.loan_number,
+          l.loan_amount,
+          l.current_loan_status,
+          l.loan_type,
+          l.loan_purpose,
+          l.channel,
+          l.branch,
+          l.loan_officer,
+          l.underwriter,
+          l.processor,
+          l.closer,
+          l.fico_score,
+          l.ltv_ratio,
+          l.be_dti_ratio,
+          l.application_date,
+          l.current_status_date,
+          l.lock_date,
+          l.closing_date,
+          l.funding_date
+        FROM public.loans l
+        WHERE l.${config.outputDateField} IS NOT NULL
+          AND l.${config.outputDateField} >= $1
+          AND l.${config.outputDateField} < $2
+          AND l.${config.actorColumn} = $3
+          AND TRIM(l.${config.actorColumn}) != ''
+          AND UPPER(TRIM(l.${config.actorColumn})) != '99-MISSING'
+          ${channelClause}
+          ${dimensionFilterClause}
+        ORDER BY l.${config.outputDateField} DESC NULLS LAST, l.loan_id
+        LIMIT $4 OFFSET $5
+      `;
+      const loansParams: any[] = [startDateStr, endDateStr, actorName.trim(), limit, offset];
+      const loansResult = await tenantPool.query(loansQuery, loansParams);
+      const rows = loansResult.rows as any[];
+
+      // Compute "Days" as:
+      // - non-active loans: application_date -> current_status_date
+      // - active loans (current_loan_status === "ACTIVE LOAN"): application_date -> today
+      const today = new Date();
+      const todayDateOnly = new Date(today.toISOString().slice(0, 10)); // avoid partial-day/tz drift
+
+      const loans = rows.map((l) => {
+        const appDate = l.application_date;
+        const status = (l.current_loan_status || "").toUpperCase().trim();
+        const isActiveLoan = status === "ACTIVE LOAN";
+
+        let turnTimeDays: number | null = null;
+        if (appDate) {
+          const start = new Date(appDate);
+          if (!isNaN(start.getTime())) {
+            const endDateStr = isActiveLoan ? null : l.current_status_date;
+            const end = isActiveLoan
+              ? todayDateOnly
+              : endDateStr
+                ? new Date(endDateStr)
+                : null;
+
+            if (end && !isNaN(end.getTime())) {
+              const days = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
+              if (days >= 0) turnTimeDays = Math.round(days * 10) / 10;
+            }
+          }
+        }
+
+        // Keep response payload clean (frontend doesn't use current_status_date)
+        const { current_status_date, ...rest } = l;
+        return { ...rest, turn_time_days: turnTimeDays };
+      });
+
+      const page = offset === 0 ? 1 : Math.floor(offset / limit) + 1;
+      const totalPages = Math.ceil(total / limit);
+
+      res.json({
+        loans,
+        total,
+        limit,
+        offset,
+        page,
+        totalPages,
+        dateRange: {
+          start: effectiveStartDate.toISOString(),
+          end: effectiveEndDate.toISOString(),
+          months: monthsBack,
+        },
+      });
+    } catch (error: any) {
+      logError("Error fetching operations actor loans", error, {
+        userId: req.userId,
+      });
+      res.status(500).json({
+        error: error.message || "Failed to fetch operations actor loans",
+      });
+    }
+  }
+);
+
+// =============================================================================
 // OPERATIONS TRENDS - GET /api/scorecard/operations-trends
 // =============================================================================
 // Migrated from: /api/loans/operations-scorecard-trends
