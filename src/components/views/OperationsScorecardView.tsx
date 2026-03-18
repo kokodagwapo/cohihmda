@@ -26,7 +26,10 @@ import {
   getTierColorClass,
   getTierDisplayName
 } from '@/hooks/useOperationsScorecardData';
+import { useOperationsScorecardActorLoans, type OperationsActorLoan } from '@/hooks/useOperationsScorecardActorLoans';
 import { DatePeriodPicker, computePresetDateRange, type PeriodSelection, type PeriodPreset } from '@/components/ui/DatePeriodPicker';
+import { format } from 'date-fns';
+import { exportDataAsExcel } from '@/utils/exportUtils';
 
 type ScorecardActor = OperationsActorType;
 type DateRange = DateRangeType;
@@ -261,6 +264,13 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
   const [detailsSortDirection, setDetailsSortDirection] = useState<'asc' | 'desc'>('desc');
   const [detailsSearchQuery, setDetailsSearchQuery] = useState('');
 
+  // Actor loans drilldown modal (click row in Details table) — all loans on one page
+  const [selectedActorForLoans, setSelectedActorForLoans] = useState<OperationsActor | null>(null);
+
+  // Actor loans modal sorting
+  const [actorLoansSortColumn, setActorLoansSortColumn] = useState<string>("turn_time_days");
+  const [actorLoansSortDirection, setActorLoansSortDirection] = useState<"asc" | "desc">("desc");
+
   // Fetch real data from API
   const { data: apiData, loading, error } = useOperationsScorecardData(
     selectedActor,
@@ -269,6 +279,108 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
     selectedChannel,
     opsCustomDateRange,
   );
+
+  // Fetch loans for the selected actor when drilldown modal is open
+  const {
+    loans: actorLoans,
+    total: actorLoansTotal,
+    dateRange: actorLoansDateRange,
+    loading: actorLoansLoading,
+    error: actorLoansError,
+  } = useOperationsScorecardActorLoans(
+    selectedActor,
+    selectedActorForLoans?.name ?? null,
+    dateRange,
+    opsCustomDateRange,
+    selectedTenantId,
+    selectedChannel,
+    10000,
+    0,
+  );
+
+  const sortedActorLoans = useMemo(() => {
+    const dir = actorLoansSortDirection === "asc" ? 1 : -1;
+
+    const toNumberOrNull = (v: unknown): number | null => {
+      if (v == null) return null;
+      const n = typeof v === "number" ? v : Number(String(v));
+      return Number.isFinite(n) ? n : null;
+    };
+
+    const toDateMsOrNull = (v: unknown): number | null => {
+      if (!v) return null;
+      const ms = new Date(String(v)).getTime();
+      return Number.isNaN(ms) ? null : ms;
+    };
+
+    const toStringOrEmpty = (v: unknown) => (v == null ? "" : String(v));
+
+    const sorted = [...actorLoans].sort((a, b) => {
+      const aStatus = (a.current_loan_status ?? "").toUpperCase().trim();
+      const bStatus = (b.current_loan_status ?? "").toUpperCase().trim();
+
+      let aVal: string | number | null = null;
+      let bVal: string | number | null = null;
+
+      switch (actorLoansSortColumn) {
+        case "loan_number":
+          aVal = toStringOrEmpty(a.loan_number ?? a.loan_id);
+          bVal = toStringOrEmpty(b.loan_number ?? b.loan_id);
+          break;
+        case "loan_amount":
+          aVal = toNumberOrNull(a.loan_amount);
+          bVal = toNumberOrNull(b.loan_amount);
+          break;
+        case "current_loan_status":
+          aVal = aStatus;
+          bVal = bStatus;
+          break;
+        case "loan_type":
+          aVal = toStringOrEmpty(a.loan_type);
+          bVal = toStringOrEmpty(b.loan_type);
+          break;
+        case "loan_purpose":
+          aVal = toStringOrEmpty(a.loan_purpose);
+          bVal = toStringOrEmpty(b.loan_purpose);
+          break;
+        case "fico_score":
+          aVal = toNumberOrNull(a.fico_score);
+          bVal = toNumberOrNull(b.fico_score);
+          break;
+        case "ltv_ratio":
+          aVal = toNumberOrNull(a.ltv_ratio);
+          bVal = toNumberOrNull(b.ltv_ratio);
+          break;
+        case "turn_time_days":
+          aVal = toNumberOrNull(a.turn_time_days);
+          bVal = toNumberOrNull(b.turn_time_days);
+          break;
+        case "application_date":
+          aVal = toDateMsOrNull(a.application_date);
+          bVal = toDateMsOrNull(b.application_date);
+          break;
+        case "closing_date":
+          aVal = toDateMsOrNull(a.closing_date);
+          bVal = toDateMsOrNull(b.closing_date);
+          break;
+        default:
+          aVal = toStringOrEmpty(a.loan_number ?? a.loan_id);
+          bVal = toStringOrEmpty(b.loan_number ?? b.loan_id);
+          break;
+      }
+
+      if (aVal == null && bVal == null) return 0;
+      if (aVal == null) return 1;
+      if (bVal == null) return -1;
+
+      if (typeof aVal === "string" && typeof bVal === "string") {
+        return dir * aVal.localeCompare(bVal);
+      }
+      return dir * ((aVal as number) - (bVal as number));
+    });
+
+    return sorted;
+  }, [actorLoans, actorLoansSortColumn, actorLoansSortDirection]);
 
   // Convert API data to view format, with fallback to empty structure
   // Add safety checks for potentially undefined nested properties
@@ -372,6 +484,17 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
     }
   };
 
+  // Actors that belong to the currently selected tier (for the modal team member list)
+  const tierActorsForModal = useMemo(() => {
+    if (!drilldownModal.tier) return [];
+    const actors = apiData?.actors ?? [];
+    return actors
+      .filter((a) => a.tier === drilldownModal.tier)
+      .sort((a, b) => (b.units ?? 0) - (a.units ?? 0));
+  }, [apiData?.actors, drilldownModal.tier]);
+
+  const selectedActorPluralLabel = `${getActorTypeDisplayName(selectedActor)}s`;
+
   // Export to Excel function
   const exportToExcel = () => {
     const timestamp = new Date().toISOString().split('T')[0];
@@ -403,6 +526,62 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
     link.href = URL.createObjectURL(blob);
     link.download = filename;
     link.click();
+  };
+
+  // Export the actor-loan drilldown table to .xlsx (all rows in the modal dataset)
+  const exportActorLoansToExcel = async () => {
+    if (!selectedActorForLoans) return;
+
+    const title = `Loans for ${getActorTypeDisplayName(selectedActor)}: ${selectedActorForLoans.name}`;
+    const rangeLabel = actorLoansDateRange
+      ? `${format(new Date(actorLoansDateRange.start), "MMM d, yyyy")} - ${format(new Date(actorLoansDateRange.end), "MMM d, yyyy")}`
+      : "";
+
+    const headers = [
+      "Loan #",
+      "Amount",
+      "Status",
+      "Type",
+      "Purpose",
+      "FICO",
+      "LTV",
+      "Days",
+      "Application Date",
+      "Closing",
+    ];
+
+    const toNumberOrBlank = (v: unknown) => {
+      if (v == null) return "";
+      const n = typeof v === "number" ? v : Number(String(v));
+      return Number.isFinite(n) ? n : String(v);
+    };
+
+    const rows = sortedActorLoans.map((loan) => [
+      loan.loan_number ?? loan.loan_id,
+      toNumberOrBlank(loan.loan_amount),
+      loan.current_loan_status ?? "",
+      loan.loan_type ?? "",
+      loan.loan_purpose ?? "",
+      loan.fico_score ?? "",
+      loan.ltv_ratio != null ? `${Number(loan.ltv_ratio).toFixed(1)}%` : "",
+      loan.turn_time_days != null ? safeFixed(loan.turn_time_days, 1) : "",
+      loan.application_date ? format(new Date(loan.application_date), "MMM d, yyyy") : "",
+      loan.closing_date ? format(new Date(loan.closing_date), "MMM d, yyyy") : "",
+    ]);
+
+    await exportDataAsExcel(
+      {
+        title: rangeLabel ? `${title} (${rangeLabel})` : title,
+        tables: [
+          {
+            name: "Loans",
+            headers,
+            rows,
+          },
+        ],
+      },
+      `operation-scorecard-actor-loans-${selectedActor}-${selectedActorForLoans.name}-${dateRange}`
+    );
   };
 
   // Show loading state
@@ -1750,7 +1929,16 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                             return (
                               <tr 
                                 key={actor.name} 
-                                className={`border-b transition-colors ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'} ${index % 2 === 0 ? '' : isDarkMode ? 'bg-slate-800/20' : 'bg-slate-50/50'}`}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => setSelectedActorForLoans(actor)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    setSelectedActorForLoans(actor);
+                                  }
+                                }}
+                                className={`border-b transition-colors cursor-pointer ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'} ${index % 2 === 0 ? '' : isDarkMode ? 'bg-slate-800/20' : 'bg-slate-50/50'}`}
                               >
                                 {/* Actor Name */}
                                 <td className={`py-3 px-4 text-sm font-medium sticky left-0 ${isDarkMode ? 'bg-slate-900/95 text-slate-200 border-r border-slate-700' : 'bg-white/95 text-slate-900 border-r border-slate-200'}`}>
@@ -1994,10 +2182,10 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
               <div className="grid grid-cols-3 gap-4">
                 <div className={`p-4 rounded-lg ${isDarkMode ? 'bg-slate-800' : 'bg-slate-50'}`}>
                   <p className={`text-xs font-medium mb-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                    Team Members
+                    {selectedActorPluralLabel}
                   </p>
                   <p className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-                    {getTierData(drilldownModal.tier).data.underwriterCount}
+                    {tierActorsForModal.length || getTierData(drilldownModal.tier).data.underwriterCount}
                   </p>
                 </div>
                 <div className={`p-4 rounded-lg ${isDarkMode ? 'bg-slate-800' : 'bg-slate-50'}`}>
@@ -2045,39 +2233,446 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                 </div>
               </div>
 
-              {/* Sample Team Members (Mock Data) */}
+              {/* Team Members - real data */}
               <div>
                 <h4 className={`text-sm font-semibold mb-3 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-                  Team Members ({getTierData(drilldownModal.tier).data.underwriterCount})
+                  {selectedActorPluralLabel} ({tierActorsForModal.length || getTierData(drilldownModal.tier).data.underwriterCount})
                 </h4>
                 <div className="space-y-2">
-                  {Array.from({ length: getTierData(drilldownModal.tier).data.underwriterCount }, (_, i) => (
-                    <div key={i} className={`p-3 rounded-lg flex items-center justify-between ${isDarkMode ? 'bg-slate-800' : 'bg-slate-50'}`}>
-                      <div className="flex items-center gap-3">
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-semibold text-white ${
-                          drilldownModal.tier === 'top' ? 'bg-teal-500' :
-                          drilldownModal.tier === 'second' ? 'bg-emerald-500' :
-                          'bg-lime-500'
-                        }`}>
-                          {String.fromCharCode(65 + i)}
+                  {tierActorsForModal.length === 0 ? (
+                    <p className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>No actors found in this tier.</p>
+                  ) : (
+                    tierActorsForModal.map((actor) => (
+                      <div
+                        key={actor.name}
+                        className={`p-3 rounded-lg flex items-center justify-between ${isDarkMode ? 'bg-slate-800' : 'bg-slate-50'}`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={`w-8 h-8 rounded-full flex items-center justify-center font-semibold text-white ${
+                              drilldownModal.tier === 'top'
+                                ? 'bg-teal-500'
+                                : drilldownModal.tier === 'second'
+                                  ? 'bg-emerald-500'
+                                  : 'bg-lime-500'
+                            }`}
+                          >
+                            {(actor.name?.charAt(0) || "A").toUpperCase()}
+                          </div>
+                          <div>
+                            <p className={`text-sm font-medium ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                              {actor.name}
+                            </p>
+                            <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                              {formatNumber(actor.units)} units
+                            </p>
+                          </div>
                         </div>
-                        <div>
-                          <p className={`text-sm font-medium ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-                            Team Member {i + 1}
-                          </p>
-                          <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                            {Math.round(getTierData(drilldownModal.tier).data.unitsOutput / getTierData(drilldownModal.tier).data.underwriterCount)} units
-                          </p>
-                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-xs"
+                          onClick={() => {
+                            setSelectedActorForLoans(actor);
+                            setDrilldownModal((prev) => ({ ...prev, isOpen: false }));
+                          }}
+                        >
+                          View Details
+                        </Button>
                       </div>
-                      <Button variant="ghost" size="sm" className="text-xs">
-                        View Details
-                      </Button>
-                    </div>
-                  ))}
+                    ))
+                  )}
                 </div>
               </div>
             </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Actor Loans Drilldown Modal - click row in Details table */}
+      <Dialog
+        open={!!selectedActorForLoans}
+        onOpenChange={(open) => {
+          if (!open) setSelectedActorForLoans(null);
+        }}
+      >
+        <DialogContent
+          className={`max-w-[95vw] w-full max-w-7xl max-h-[90vh] flex flex-col gap-4 ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-white'}`}
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center justify-between gap-4">
+              <span>
+                Loans for {getActorTypeDisplayName(selectedActor)}: {selectedActorForLoans?.name}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={exportActorLoansToExcel}
+                disabled={actorLoansLoading}
+                className={isDarkMode ? "border-slate-700 bg-slate-800/40" : "bg-white"}
+              >
+                <Download className="w-4 h-4 mr-2" />
+                Export to Excel
+              </Button>
+            </DialogTitle>
+            <DialogDescription>
+              {actorLoansDateRange
+                ? `${format(new Date(actorLoansDateRange.start), "MMM d, yyyy")} - ${format(new Date(actorLoansDateRange.end), "MMM d, yyyy")}${
+                    actorLoansDateRange.months ? ` [last ${actorLoansDateRange.months} months]` : ""
+                  }`
+                : dateRangeDisplay}
+            </DialogDescription>
+          </DialogHeader>
+
+          {actorLoansError && (
+            <p className={`text-sm ${isDarkMode ? 'text-red-400' : 'text-red-600'}`}>{actorLoansError}</p>
+          )}
+
+          {actorLoansLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+            </div>
+          ) : (
+            <>
+              <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700 flex-1 min-h-0">
+                <table className="w-full border-collapse text-sm">
+                  <thead>
+                    <tr className={isDarkMode ? 'bg-slate-800/80' : 'bg-slate-50'}>
+                      {/* Loan # */}
+                      <th
+                        className={`text-left py-3 px-4 text-sm font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors ${
+                          isDarkMode ? "text-slate-300" : "text-slate-700"
+                        }`}
+                        onClick={() => {
+                          if (actorLoansSortColumn === "loan_number") {
+                            setActorLoansSortDirection(actorLoansSortDirection === "asc" ? "desc" : "asc");
+                          } else {
+                            setActorLoansSortColumn("loan_number");
+                            setActorLoansSortDirection("asc");
+                          }
+                        }}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          Loan #
+                          {actorLoansSortColumn === "loan_number" ? (
+                            actorLoansSortDirection === "asc" ? (
+                              <ArrowUp className="w-3 h-3" />
+                            ) : (
+                              <ArrowDown className="w-3 h-3" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 opacity-40" />
+                          )}
+                        </div>
+                      </th>
+
+                      {/* Amount */}
+                      <th
+                        className={`text-right py-3 px-4 text-sm font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors ${
+                          isDarkMode ? "text-slate-300" : "text-slate-700"
+                        }`}
+                        onClick={() => {
+                          if (actorLoansSortColumn === "loan_amount") {
+                            setActorLoansSortDirection(actorLoansSortDirection === "asc" ? "desc" : "asc");
+                          } else {
+                            setActorLoansSortColumn("loan_amount");
+                            setActorLoansSortDirection("asc");
+                          }
+                        }}
+                      >
+                        <div className="flex items-center justify-end gap-1.5">
+                          Amount
+                          {actorLoansSortColumn === "loan_amount" ? (
+                            actorLoansSortDirection === "asc" ? (
+                              <ArrowUp className="w-3 h-3" />
+                            ) : (
+                              <ArrowDown className="w-3 h-3" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 opacity-40" />
+                          )}
+                        </div>
+                      </th>
+
+                      {/* Status */}
+                      <th
+                        className={`text-left py-3 px-4 text-sm font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors ${
+                          isDarkMode ? "text-slate-300" : "text-slate-700"
+                        }`}
+                        onClick={() => {
+                          if (actorLoansSortColumn === "current_loan_status") {
+                            setActorLoansSortDirection(actorLoansSortDirection === "asc" ? "desc" : "asc");
+                          } else {
+                            setActorLoansSortColumn("current_loan_status");
+                            setActorLoansSortDirection("asc");
+                          }
+                        }}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          Status
+                          {actorLoansSortColumn === "current_loan_status" ? (
+                            actorLoansSortDirection === "asc" ? (
+                              <ArrowUp className="w-3 h-3" />
+                            ) : (
+                              <ArrowDown className="w-3 h-3" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 opacity-40" />
+                          )}
+                        </div>
+                      </th>
+
+                      {/* Type */}
+                      <th
+                        className={`text-left py-3 px-4 text-sm font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors ${
+                          isDarkMode ? "text-slate-300" : "text-slate-700"
+                        }`}
+                        onClick={() => {
+                          if (actorLoansSortColumn === "loan_type") {
+                            setActorLoansSortDirection(actorLoansSortDirection === "asc" ? "desc" : "asc");
+                          } else {
+                            setActorLoansSortColumn("loan_type");
+                            setActorLoansSortDirection("asc");
+                          }
+                        }}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          Type
+                          {actorLoansSortColumn === "loan_type" ? (
+                            actorLoansSortDirection === "asc" ? (
+                              <ArrowUp className="w-3 h-3" />
+                            ) : (
+                              <ArrowDown className="w-3 h-3" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 opacity-40" />
+                          )}
+                        </div>
+                      </th>
+
+                      {/* Purpose */}
+                      <th
+                        className={`text-left py-3 px-4 text-sm font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors ${
+                          isDarkMode ? "text-slate-300" : "text-slate-700"
+                        }`}
+                        onClick={() => {
+                          if (actorLoansSortColumn === "loan_purpose") {
+                            setActorLoansSortDirection(actorLoansSortDirection === "asc" ? "desc" : "asc");
+                          } else {
+                            setActorLoansSortColumn("loan_purpose");
+                            setActorLoansSortDirection("asc");
+                          }
+                        }}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          Purpose
+                          {actorLoansSortColumn === "loan_purpose" ? (
+                            actorLoansSortDirection === "asc" ? (
+                              <ArrowUp className="w-3 h-3" />
+                            ) : (
+                              <ArrowDown className="w-3 h-3" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 opacity-40" />
+                          )}
+                        </div>
+                      </th>
+
+                      {/* FICO */}
+                      <th
+                        className={`text-right py-3 px-4 text-sm font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors ${
+                          isDarkMode ? "text-slate-300" : "text-slate-700"
+                        }`}
+                        onClick={() => {
+                          if (actorLoansSortColumn === "fico_score") {
+                            setActorLoansSortDirection(actorLoansSortDirection === "asc" ? "desc" : "asc");
+                          } else {
+                            setActorLoansSortColumn("fico_score");
+                            setActorLoansSortDirection("asc");
+                          }
+                        }}
+                      >
+                        <div className="flex items-center justify-end gap-1.5">
+                          FICO
+                          {actorLoansSortColumn === "fico_score" ? (
+                            actorLoansSortDirection === "asc" ? (
+                              <ArrowUp className="w-3 h-3" />
+                            ) : (
+                              <ArrowDown className="w-3 h-3" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 opacity-40" />
+                          )}
+                        </div>
+                      </th>
+
+                      {/* LTV */}
+                      <th
+                        className={`text-right py-3 px-4 text-sm font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors ${
+                          isDarkMode ? "text-slate-300" : "text-slate-700"
+                        }`}
+                        onClick={() => {
+                          if (actorLoansSortColumn === "ltv_ratio") {
+                            setActorLoansSortDirection(actorLoansSortDirection === "asc" ? "desc" : "asc");
+                          } else {
+                            setActorLoansSortColumn("ltv_ratio");
+                            setActorLoansSortDirection("asc");
+                          }
+                        }}
+                      >
+                        <div className="flex items-center justify-end gap-1.5">
+                          LTV
+                          {actorLoansSortColumn === "ltv_ratio" ? (
+                            actorLoansSortDirection === "asc" ? (
+                              <ArrowUp className="w-3 h-3" />
+                            ) : (
+                              <ArrowDown className="w-3 h-3" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 opacity-40" />
+                          )}
+                        </div>
+                      </th>
+
+                      {/* Days */}
+                      <th
+                        className={`text-right py-3 px-4 text-sm font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors ${
+                          isDarkMode ? "text-slate-300" : "text-slate-700"
+                        }`}
+                        onClick={() => {
+                          if (actorLoansSortColumn === "turn_time_days") {
+                            setActorLoansSortDirection(actorLoansSortDirection === "asc" ? "desc" : "asc");
+                          } else {
+                            setActorLoansSortColumn("turn_time_days");
+                            setActorLoansSortDirection("asc");
+                          }
+                        }}
+                      >
+                        <div className="flex items-center justify-end gap-1.5">
+                          Days
+                          {actorLoansSortColumn === "turn_time_days" ? (
+                            actorLoansSortDirection === "asc" ? (
+                              <ArrowUp className="w-3 h-3" />
+                            ) : (
+                              <ArrowDown className="w-3 h-3" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 opacity-40" />
+                          )}
+                        </div>
+                      </th>
+
+                      {/* Application Date */}
+                      <th
+                        className={`text-left py-3 px-4 text-sm font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors ${
+                          isDarkMode ? "text-slate-300" : "text-slate-700"
+                        }`}
+                        onClick={() => {
+                          if (actorLoansSortColumn === "application_date") {
+                            setActorLoansSortDirection(actorLoansSortDirection === "asc" ? "desc" : "asc");
+                          } else {
+                            setActorLoansSortColumn("application_date");
+                            setActorLoansSortDirection("asc");
+                          }
+                        }}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          Application Date
+                          {actorLoansSortColumn === "application_date" ? (
+                            actorLoansSortDirection === "asc" ? (
+                              <ArrowUp className="w-3 h-3" />
+                            ) : (
+                              <ArrowDown className="w-3 h-3" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 opacity-40" />
+                          )}
+                        </div>
+                      </th>
+
+                      {/* Closing */}
+                      <th
+                        className={`text-left py-3 px-4 text-sm font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors ${
+                          isDarkMode ? "text-slate-300" : "text-slate-700"
+                        }`}
+                        onClick={() => {
+                          if (actorLoansSortColumn === "closing_date") {
+                            setActorLoansSortDirection(actorLoansSortDirection === "asc" ? "desc" : "asc");
+                          } else {
+                            setActorLoansSortColumn("closing_date");
+                            setActorLoansSortDirection("asc");
+                          }
+                        }}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          Closing
+                          {actorLoansSortColumn === "closing_date" ? (
+                            actorLoansSortDirection === "asc" ? (
+                              <ArrowUp className="w-3 h-3" />
+                            ) : (
+                              <ArrowDown className="w-3 h-3" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 opacity-40" />
+                          )}
+                        </div>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {actorLoans.length === 0 ? (
+                      <tr>
+                        <td colSpan={10} className={`py-8 text-center ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                          No loans found for this period.
+                        </td>
+                      </tr>
+                    ) : (
+                      sortedActorLoans.map((loan: OperationsActorLoan) => (
+                        <tr
+                          key={loan.loan_id}
+                          className={`border-b ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'}`}
+                        >
+                          <td className="py-2 px-3 font-mono">{loan.loan_number ?? loan.loan_id}</td>
+                          <td className="py-2 px-3 text-right font-mono">
+                            {loan.loan_amount != null
+                              ? typeof loan.loan_amount === 'number'
+                                ? `$${Number(loan.loan_amount).toLocaleString()}`
+                                : `$${String(loan.loan_amount).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`
+                              : '—'}
+                          </td>
+                          <td className="py-2 px-3">{loan.current_loan_status ?? '—'}</td>
+                          <td className="py-2 px-3">{loan.loan_type ?? '—'}</td>
+                          <td className="py-2 px-3">{loan.loan_purpose ?? '—'}</td>
+                          <td className="py-2 px-3 text-right font-mono">{loan.fico_score ?? '—'}</td>
+                          <td className="py-2 px-3 text-right font-mono">
+                            {loan.ltv_ratio != null ? `${Number(loan.ltv_ratio).toFixed(1)}%` : '—'}
+                          </td>
+                          <td className="py-2 px-3 text-right font-mono">
+                            {loan.turn_time_days != null ? safeFixed(loan.turn_time_days, 1) : '—'}
+                          </td>
+                          <td className="py-2 px-3">
+                            {loan.application_date
+                              ? format(new Date(loan.application_date), 'MMM d, yyyy')
+                              : '—'}
+                          </td>
+                          <td className="py-2 px-3">
+                            {loan.closing_date
+                              ? format(new Date(loan.closing_date), 'MMM d, yyyy')
+                              : '—'}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className={`border-t pt-3 ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
+                <span className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                  {actorLoansTotal} loan{actorLoansTotal !== 1 ? 's' : ''} total
+                </span>
+              </div>
+            </>
           )}
         </DialogContent>
       </Dialog>
