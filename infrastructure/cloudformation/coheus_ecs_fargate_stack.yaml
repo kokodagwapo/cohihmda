@@ -773,6 +773,7 @@ Resources:
                     - cognito-idp:AdminSetUserPassword
                     - cognito-idp:AdminSetUserMFAPreference
                     - cognito-idp:AdminGetUser
+                    - cognito-idp:AdminResetUserPassword
                     - cognito-idp:AssociateSoftwareToken
                     - cognito-idp:VerifySoftwareToken
                     - cognito-idp:ForgotPassword
