@@ -905,6 +905,30 @@ LOAN COMPLEXITY PAGE (pageId "loan-complexity"):
 - For a specific loan officer, use a widget with dimension "complexity_loan_officer" and target.label = exact name from the data (bar or pivot-loan-officer).
 - filter_context: always set datePeriod to the main period in the headline as lowercase: mtd | qtd | ytd | lq | lm | ly. Add channelGroup when the story is channel-specific. Do NOT reference the Leaderboard or add leaderName for cross-page navigation—insights on this page are scoped to Loan Complexity only.
 
+COMPANY SCORECARD PAGE (pageId "company-scorecard"):
+- by_time_period keys are uppercase time windows derived from your adapter: L13M, L12M, YTD, plus full-year keys like Y_2025 / Y_2024 / Y_2023.
+- Widget evidence ids are:
+  - company-scorecard-summary-tier-table (tier-level summary rows; target.label is one of: Top Tier | Second Tier | Bottom Tier)
+  - company-scorecard-detail-branch-table (entity evidence; target.label is an exact branch name)
+  - company-scorecard-detail-loan-officer-table (entity evidence; target.label is an exact loan officer name)
+- Use the summary table metrics as your PRIMARY “good vs bad” reference:
+  - Applications Taken Units, Applications Taken Volume / Apps $, WAC, Originated Units, Originated %, plus tier-level differences in Withdrawn/Denied Units and their % when they help the story.
+- Pull-through and outcome mix (originated/withdrawn/denied) can be used as supporting context, but they must NOT be the only basis for good vs bad sentiment.
+- Every insight MUST reference tier context:
+  - Tier-focused insights MUST compare Top vs Second vs Bottom using tier summary metrics.
+  - Entity-focused insights MUST state which tier the named branch/loan officer belongs to and compare that entity’s story to other actors in the same tier using the tier summary + the entity’s detail metrics.
+- Always analyze differences between tiers explicitly:
+  - Example logic: if Originated % rises in Top Tier while Apps $ or WAC falls vs prior period, describe the mixed tier story and choose sentiment based on the strongest supported metric movement.
+  - Prefer tier-to-tier comparisons (Top vs Second vs Bottom) over only entity-by-entity narratives.
+- Entity tier movers (branches / loan officers):
+  - If you find multiple possible movers, select the one whose story is strongest per the tier-metric evidence (largest/clearest tier shift + most material improvement/deterioration in the tier-metric columns).
+  - Do NOT pre-fix the mover choice to pull-through/outcome mix; decide based on which tier-metric movement is most pronounced in the data.
+- filter_context:
+  - always set filter_context.datePeriod to the main period in the headline as lowercase keys from your adapter: l13m | l12m | ytd | y_YYYY
+  - for entity-focused insights, set filter_context.entityType to "branch" or "loan_officer" and set filter_context.branch or filter_context.loanOfficer to the exact name
+  - for tier-focused insights, set filter_context.tier to "Top Tier" | "Second Tier" | "Bottom Tier"
+  - for entity-focused insights, set filter_context.tier to the entity's assigned tier (when derivable from the provided tier data)
+
 WHAT TO LOOK FOR ON A DASHBOARD PAGE:
 - Cross-period trends in the page's key metrics (when by_time_period is present):
   - "MTD funded volume is down vs Last Month, while YTD is flat"
@@ -947,7 +971,7 @@ For EVERY dashboard insight candidate, you MUST produce:
   - owner: role or person responsible (e.g. "Branch Manager — Branch A", "Sales Management")
 - evidence_refs: array of widget references:
   - Each: { "widgetId": "<id from widget_catalog>", "role": "primary" | "supporting", "target"?: { "type": "row" | "series" | "cell", "label": "<dimension value>" } }
-  - For person/branch-specific insights, the primary evidence_ref MUST point at a widget whose dimension matches (e.g. "leader" for loan officer) and target.label MUST be the exact segment name.
+  - For person/branch-specific insights, the primary evidence_ref MUST point at a widget whose dimension matches the subject type for THIS page (e.g. "leader" for loan officer; "branch" for branch; "company_scorecard_branch" or "company_scorecard_loan_officer" for Company Scorecard) and target.label MUST be the exact segment name.
 
 COVERAGE RULES (PER PAGE RUN):
 - Generate 3–5 candidates for this ONE page.
@@ -958,13 +982,17 @@ SUBJECT DEDUPLICATION (HARD RULE):
 - Do NOT generate multiple candidates about the SAME subject (loan officer or branch).
 - A "subject" is one specific loan officer OR one specific branch. If the same loan officer appears in two candidates, that is a failure. Same for a branch.
 - If you find multiple noteworthy angles for the same subject, MERGE them into ONE stronger candidate instead of emitting duplicates.
+- For subject-specific candidates, NEVER emit two candidates that reference the same subject AND the same primary timeframe (datePeriod/period pair). Treat this as a hard duplicate and merge into one.
+- Before finalizing each candidate, compare it to all other drafted candidates for semantic overlap (same subject, same timeframe, same metric direction, or same takeaway). If overlap is high, keep only the strongest version.
 - If you generate any subject-specific insight, you MUST encode the subject in evidence_refs so the system can identify it:
   - The PRIMARY evidence_ref MUST include target.label set to the exact subject name (loan officer name or branch name).
-  - The PRIMARY evidence_ref MUST use a widget whose widget_catalog.dimension matches the subject ("leader" or "complexity_loan_officer" for loan officer, "branch" or "complexity_branch" for branch).
+  - The PRIMARY evidence_ref MUST use a widget whose widget_catalog.dimension matches the subject type for THIS page (e.g. "leader"/"complexity_loan_officer" for loan officer, "branch"/"complexity_branch" for branch, or "company_scorecard_loan_officer"/"company_scorecard_branch" for Company Scorecard).
   - Optionally include filter_context keys like { "leaderName": "<exact name>" } or { "branch": "<exact name>" } when helpful, but evidence_refs.target.label is REQUIRED for subject-specific insights.
 
 REDUNDANCY RULE:
 - Avoid generating multiple candidates that make the same point about the same metric direction (even for different subjects). Prefer the strongest, clearest versions.
+- Near-duplicates are not allowed: if two candidates would read as materially similar in plain English (same story with minor wording/number changes), output only one.
+- If two candidates share the same timeframe and business conclusion but differ only by weak details, keep the one with stronger evidence_refs and more specific cited_numbers.
 
 SENTIMENT RULES:
 - "critical": urgent, high-impact risks on this page (e.g., severe declines, major outliers, critical compliance-type issues if surfaced by the page)
@@ -1110,35 +1138,43 @@ CURATION RULES:
 3. SUBJECT DEDUPLICATION (CRITICAL)
    - When multiple candidates are about the SAME subject on this page (e.g. the same loan officer or the same branch), keep ONLY ONE for that subject.
    - The surviving insight for a subject MUST be the one with the highest judge overall_score among candidates for that subject.
+   - If multiple candidates reference the same subject AND the same primary timeframe, treat them as hard duplicates and keep only one.
    - A subject is typically derived from:
      - evidence_refs pointing to a widget with dimension "leader", "branch", "complexity_loan_officer", or "complexity_branch", plus its target.label; or
      - explicit fields in filter_context such as leaderName, leader, or branch.
    - Do NOT output two insights that both revolve around the same loan officer or the same branch on this page. This is important because we want to avoid redundancy and ensure that we are not repeating the same information. Make sure to ONLY give ONE insight for any given loan officer or branch.
+   - For Company Scorecard, apply the same rule to company_scorecard_loan_officer and company_scorecard_branch dimensions.
 
-4. PAGE DIVERSITY (WITHIN 1–3 INSIGHTS)
+4. NEAR-DUPLICATE COLLAPSE (CRITICAL)
+   - Remove near-duplicates even when subject differs.
+   - Treat insights as near-duplicates when they share most of: timeframe, metric movement direction, and business conclusion (e.g., "pull-through down vs LM" repeated with minor wording changes).
+   - Keep only the strongest version (highest judge score, clearest cited numbers, strongest evidence fit).
+   - Do NOT output two insights that are semantically similar in general; prefer diversity of story, not paraphrases.
+
+5. PAGE DIVERSITY (WITHIN 1–3 INSIGHTS)
    - Prefer a mix of:
      - At least one insight focused on a specific segment (loan officer, branch, product) WHEN such segments exist.
      - At least one insight focused on a cross-period trend WHEN by_time_period is present.
    - If the data does not support diversity (e.g. only one meaningful candidate), you may output a single strong insight.
 
-5. SENTIMENT & ESCALATION
+6. SENTIMENT & ESCALATION
    - sentiment must be one of: "positive", "warning", "critical", "neutral".
    - Set "escalate": true for BOTH "critical" and "warning" insights so they appear in Immediate Action Required.
    - Set "escalate": false for "positive" and "neutral" insights.
    - If a candidate's sentiment is clearly misaligned with its description, you may adjust sentiment and severity_score slightly, but stay consistent with the judge's evaluation.
 
-6. ETM COMPLETENESS (REQUIRED)
+7. ETM COMPLETENESS (REQUIRED)
 - For selected insights, you MUST output COMPLETE ETM fields:
      - what_changed, why, business_impact, risk_if_ignored, recommended_action, owner.
 - If ANY ETM field is missing, empty, or clearly a placeholder, you MUST fill it in using the candidate's headline/understory and the page context. Do NOT leave ETM fields blank.
 - Do NOT speculate beyond the page data. Keep the filled ETM fields factual and page-scoped.
 - You may lightly polish wording for clarity and brevity, but do NOT delete ETM fields.
 
-7. TIMEFRAME & COHORT CLARITY
+8. TIMEFRAME & COHORT CLARITY
    - Ensure every final headline includes or clearly implies the relevant timeframe (e.g. "MTD", "LM", "LQ", "YTD").
    - When the page mixes application-cohort metrics (pull-through, fallout) and funding-cohort metrics (units, volume, revenue), prefer insights whose wording makes that difference clear (e.g. "funded units this period" vs "applications started this period whose pull-through is 0% so far").
 
-8. POLISHING
+9. POLISHING
    - Tighten each headline to be as short and specific as possible (ideally <= ~45 words).
    - Ensure understory has 1–3 sentences and contains the key cited numbers.
    - Do NOT add new numbers that are not present in the candidate.

@@ -7,7 +7,7 @@
  */
 
 /** Registered dashboard insight page ids (extend when adding new insight-enabled dashboards). */
-export const DASHBOARD_INSIGHT_PAGE_IDS = ["leaderboard", "loan-complexity"] as const;
+export const DASHBOARD_INSIGHT_PAGE_IDS = ["leaderboard", "loan-complexity", "company-scorecard"] as const;
 export type DashboardInsightPageId = (typeof DASHBOARD_INSIGHT_PAGE_IDS)[number];
 
 export function isKnownDashboardInsightPageId(pageId: string): pageId is DashboardInsightPageId {
@@ -20,6 +20,7 @@ export function isKnownDashboardInsightPageId(pageId: string): pageId is Dashboa
 export function getDashboardInsightPath(pageId: string): string {
   if (!pageId) return "/insights";
   if (pageId === "loan-complexity") return "/loan-complexity";
+  if (pageId === "company-scorecard") return "/company-scorecard";
   return `/insights#${pageId}`;
 }
 
@@ -36,6 +37,10 @@ export function getDashboardInsightNavigateState(
   if (!pageId) return {};
 
   if (pageId === "loan-complexity") {
+    return {};
+  }
+
+  if (pageId === "company-scorecard") {
     return {};
   }
 

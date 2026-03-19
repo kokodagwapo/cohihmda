@@ -192,12 +192,17 @@ function parseJudgeResponse(raw: string): JudgeEvaluation[] {
   try {
     const parsed = JSON.parse(raw) as { evaluations?: unknown[] };
     const list = Array.isArray(parsed?.evaluations) ? parsed.evaluations : [];
-    return list.map((e: Record<string, unknown>) => ({
-      insight_index: Number(e.insight_index) ?? 0,
-      overall_score: Number(e.overall_score) ?? 0,
-      keep: Boolean(e.keep),
-      issues: Array.isArray(e.issues) ? (e.issues as string[]) : undefined,
-    }));
+    return list.map((e: Record<string, unknown>) => {
+      const idxRaw = Number(e.insight_index);
+      const scoreRaw = Number(e.overall_score);
+
+      return {
+        insight_index: Number.isFinite(idxRaw) ? idxRaw : 0,
+        overall_score: Number.isFinite(scoreRaw) ? scoreRaw : 0,
+        keep: Boolean(e.keep),
+        issues: Array.isArray(e.issues) ? (e.issues as string[]) : undefined,
+      };
+    });
   } catch {
     return [];
   }
@@ -363,6 +368,60 @@ type LoanComplexityPeriodData = {
   }>;
 };
 
+type CompanyScorecardTierAggregate = {
+  applicationsTakenUnits: number;
+  applicationsTakenDollar: number;
+  wac: number;
+  originatedUnits: number;
+  originatedUnitsPct: number;
+  withdrawnUnits: number;
+  withdrawnUnitsPct: number;
+  deniedUnits: number;
+  deniedUnitsPct: number;
+  waFico: number;
+  waLtv: number;
+  waDti: number;
+};
+
+type CompanyScorecardEntityForContext = {
+  name: string;
+  tier: string;
+  applicationsTakenUnits: number;
+  applicationsTakenDollar: number;
+  wac: number;
+  originatedUnits: number;
+  originatedUnitsPct: number;
+  withdrawnUnits: number;
+  withdrawnUnitsPct: number;
+  deniedUnits: number;
+  deniedUnitsPct: number;
+  waFico: number;
+  waLtv: number;
+  waDti: number;
+};
+
+type CompanyScorecardPeriodData = {
+  periodLabel?: string;
+  summary?: {
+    totalUnits?: number;
+    totalVolume?: number;
+    wac?: number;
+    averagePullThrough?: number;
+    originatedUnits?: number;
+    originatedUnitsPct?: number;
+    withdrawnUnits?: number;
+    withdrawnUnitsPct?: number;
+    deniedUnits?: number;
+    deniedUnitsPct?: number;
+    waFico?: number;
+    waLtv?: number;
+    waDti?: number;
+  };
+  tierAggregates?: Record<string, CompanyScorecardTierAggregate>;
+  branchesWithTier?: CompanyScorecardEntityForContext[];
+  loanOfficersWithTier?: CompanyScorecardEntityForContext[];
+};
+
 /**
  * Enrich evidence refs with display values from page context (e.g. leaderboard KPIs and aggregate metrics).
  */
@@ -370,9 +429,21 @@ function enrichEvidenceRefsWithValues(
   context: DashboardPageContext,
   refs: EvidenceRef[]
 ): EvidenceRef[] {
-  const byPeriod = context.data?.by_time_period as Record<string, LoanComplexityPeriodData> | undefined;
+  const byPeriod = context.data?.by_time_period as
+    | Record<string, LoanComplexityPeriodData>
+    | Record<string, CompanyScorecardPeriodData>
+    | undefined;
 
   if (!byPeriod || typeof byPeriod !== "object") return refs;
+
+  const currencyFmt = (v: number) =>
+    v >= 1e9
+      ? `$${(v / 1e9).toFixed(2)}B`
+      : v >= 1e6
+        ? `$${(v / 1e6).toFixed(2)}M`
+        : v >= 1e3
+          ? `$${(v / 1e3).toFixed(1)}K`
+          : `$${v}`;
 
   return refs.map((ref) => {
     const label = ref.target?.label?.trim();
@@ -423,6 +494,45 @@ function enrichEvidenceRefsWithValues(
           if (summary?.portfolioWaComplexity != null) segs.push(`portfolio WA ${summary.portfolioWaComplexity}`);
           if (summary?.portfolioPullThrough != null) segs.push(`${summary.portfolioPullThrough}% pull-through`);
           if (segs.length) parts.push(`${period}: ${segs.join(", ")}`);
+        }
+      }
+    }
+
+    // Company Scorecard — tier summary table
+    if (ref.widgetId === "company-scorecard-summary-tier-table" && label) {
+      for (const [period, data] of Object.entries(byPeriod)) {
+        const tierAgg = (data as CompanyScorecardPeriodData)?.tierAggregates?.[label];
+        if (!tierAgg) continue;
+        parts.push(
+          `${period}: ${tierAgg.applicationsTakenUnits} units, ${currencyFmt(
+            tierAgg.applicationsTakenDollar
+          )} apps $, WAC ${tierAgg.wac.toFixed(3)}, ${tierAgg.originatedUnits} originated (${tierAgg.originatedUnitsPct.toFixed(
+            1
+          )}%)`
+        );
+      }
+    }
+
+    // Company Scorecard — tiered detail tables (branch / loan officer)
+    if (
+      ref.widgetId === "company-scorecard-detail-branch-table" ||
+      ref.widgetId === "company-scorecard-detail-loan-officer-table"
+    ) {
+      const isBranch = ref.widgetId === "company-scorecard-detail-branch-table";
+      if (label) {
+        for (const [period, data] of Object.entries(byPeriod)) {
+          const list = isBranch
+            ? (data as CompanyScorecardPeriodData)?.branchesWithTier
+            : (data as CompanyScorecardPeriodData)?.loanOfficersWithTier;
+          const found = list?.find((e) => String(e.name).trim() === label);
+          if (!found) continue;
+          parts.push(
+            `${period}: ${found.applicationsTakenUnits} units, ${currencyFmt(
+              found.applicationsTakenDollar
+            )} apps $, WAC ${found.wac.toFixed(3)}, ${found.originatedUnits} originated (${found.originatedUnitsPct.toFixed(
+              1
+            )}%)`
+          );
         }
       }
     }
@@ -513,6 +623,10 @@ function getSubjectKey(
     if (dim === "complexity_underwriter") return `underwriter:${label}`;
     if (dim === "complexity_closer") return `closer:${label}`;
     if (dim === "complexity_current_loan_status") return `status:${label}`;
+
+    if (dim === "company_scorecard_branch") return `company_scorecard_branch:${label}`;
+    if (dim === "company_scorecard_loan_officer")
+      return `company_scorecard_loan_officer:${label}`;
   }
   const ctx = insight.filter_context as Record<string, unknown> | undefined;
   if (ctx?.leaderName != null && typeof ctx.leaderName === "string")
@@ -521,6 +635,13 @@ function getSubjectKey(
     return `leader:${String(ctx.leader).trim()}`;
   if (ctx?.branch != null && typeof ctx.branch === "string")
     return `branch:${String(ctx.branch).trim()}`;
+
+  if (ctx?.loanOfficer != null && typeof ctx.loanOfficer === "string")
+    return `company_scorecard_loan_officer:${String(ctx.loanOfficer).trim()}`;
+
+  if (ctx?.loan_officer != null && typeof ctx.loan_officer === "string")
+    return `company_scorecard_loan_officer:${String(ctx.loan_officer).trim()}`;
+
   return null;
 }
 
@@ -575,6 +696,8 @@ function getSubjectNameFromInsight(
     const widget = context.widget_catalog.find((w) => w.id === primaryRef.widgetId);
     const d = widget?.dimension;
     if (d === "leader" || d === "complexity_loan_officer") return primaryRef.target.label.trim();
+    if (d === "company_scorecard_loan_officer") return primaryRef.target.label.trim();
+    if (d === "company_scorecard_branch") return primaryRef.target.label.trim();
     if (d?.startsWith("complexity_")) return primaryRef.target.label.trim();
   }
   // Any evidence_ref with dimension leader and target
@@ -583,6 +706,8 @@ function getSubjectNameFromInsight(
       const widget = context.widget_catalog.find((w) => w.id === ref.widgetId);
       const d = widget?.dimension;
       if (d === "leader" || d === "complexity_loan_officer") return ref.target.label.trim();
+      if (d === "company_scorecard_loan_officer") return ref.target.label.trim();
+      if (d === "company_scorecard_branch") return ref.target.label.trim();
       if (d?.startsWith("complexity_")) return ref.target.label.trim();
     }
   }
@@ -590,6 +715,9 @@ function getSubjectNameFromInsight(
   const ctx = insight.filter_context as Record<string, unknown> | undefined;
   if (ctx?.leaderName != null && typeof ctx.leaderName === "string") return ctx.leaderName.trim();
   if (ctx?.leader != null && typeof ctx.leader === "string") return ctx.leader.trim();
+  if (ctx?.branch != null && typeof ctx.branch === "string") return ctx.branch.trim();
+  if (ctx?.loanOfficer != null && typeof ctx.loanOfficer === "string") return ctx.loanOfficer.trim();
+  if (ctx?.loan_officer != null && typeof ctx.loan_officer === "string") return ctx.loan_officer.trim();
   return undefined;
 }
 
@@ -597,7 +725,10 @@ function getSubjectNameFromInsight(
  * Build by-period supporting data from page context for the evidence table in the UI.
  */
 function buildSupportingDataFromContext(context: DashboardPageContext): SupportingData | undefined {
-  const byPeriod = context.data?.by_time_period as Record<string, LoanComplexityPeriodData> | undefined;
+  const byPeriod = context.data?.by_time_period as
+    | Record<string, LoanComplexityPeriodData>
+    | Record<string, CompanyScorecardPeriodData>
+    | undefined;
 
   if (!byPeriod || typeof byPeriod !== "object") return undefined;
 
@@ -619,6 +750,22 @@ function buildSupportingDataFromContext(context: DashboardPageContext): Supporti
         row.portfolioPullThrough = pt;
         row.averagePullThrough = pt;
       }
+      byPeriodRows.push(row);
+      continue;
+    }
+
+    if (context.pageId === "company-scorecard") {
+      const s = summary as CompanyScorecardPeriodData["summary"];
+      if (s?.totalUnits != null) row.totalUnits = Number(s.totalUnits);
+      if (s?.totalVolume != null) row.totalVolume = Number(s.totalVolume);
+      if (s?.wac != null) row.wac = Number(s.wac);
+      if (s?.averagePullThrough != null) row.averagePullThrough = Number(s.averagePullThrough);
+      if (s?.originatedUnits != null) row.originatedUnits = Number(s.originatedUnits);
+      if (s?.originatedUnitsPct != null) row.originatedUnitsPct = Number(s.originatedUnitsPct);
+      if (s?.withdrawnUnits != null) row.withdrawnUnits = Number(s.withdrawnUnits);
+      if (s?.withdrawnUnitsPct != null) row.withdrawnUnitsPct = Number(s.withdrawnUnitsPct);
+      if (s?.deniedUnits != null) row.deniedUnits = Number(s.deniedUnits);
+      if (s?.deniedUnitsPct != null) row.deniedUnitsPct = Number(s.deniedUnitsPct);
       byPeriodRows.push(row);
       continue;
     }
@@ -738,7 +885,7 @@ export async function runDashboardInsightsPipeline(
     jsonMode: curatorConfig.json_mode,
     tag: "dashboard_insights.curator",
   });
-  let curatorInsights = parseCuratorResponse(
+  const curatorInsights = parseCuratorResponse(
     curatorRaw,
     context.pageId,
     context.pageName
@@ -748,7 +895,7 @@ export async function runDashboardInsightsPipeline(
   }
 
   // Deduplicate by subject (loan officer or branch): keep only the highest-scoring insight per subject
-  let insights = deduplicateBySubject(curatorInsights, context);
+  const insights = deduplicateBySubject(curatorInsights, context);
 
   // Pass 4: Evidence Agent (refine evidence_refs per insight)
   const evidenceConfig = await getPromptConfig("dashboard_insights.evidence_agent");

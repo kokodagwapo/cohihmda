@@ -27,4 +27,14 @@ describe("dashboardInsightRoutes", () => {
       getDashboardInsightNavigateState("loan-complexity", { datePeriod: "mtd" })
     ).toEqual({});
   });
+
+  it("getDashboardInsightPath maps company-scorecard to standalone route", () => {
+    expect(getDashboardInsightPath("company-scorecard")).toBe("/company-scorecard");
+  });
+
+  it("getDashboardInsightNavigateState omits filter state for company-scorecard", () => {
+    expect(
+      getDashboardInsightNavigateState("company-scorecard", { datePeriod: "l13m", branch: "North" })
+    ).toEqual({});
+  });
 });

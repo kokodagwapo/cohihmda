@@ -5,8 +5,13 @@
 import type { DashboardAdapter } from "./baseDashboardAdapter.js";
 import { leaderboardAdapter } from "./leaderboardAdapter.js";
 import { loanComplexityAdapter } from "./loanComplexityAdapter.js";
+import { companyScorecardAdapter } from "./companyScorecardAdapter.js";
 
-const adapters: DashboardAdapter[] = [leaderboardAdapter, loanComplexityAdapter];
+const adapters: DashboardAdapter[] = [
+  leaderboardAdapter,
+  loanComplexityAdapter,
+  companyScorecardAdapter,
+];
 
 export function getDashboardAdapters(): DashboardAdapter[] {
   return adapters;

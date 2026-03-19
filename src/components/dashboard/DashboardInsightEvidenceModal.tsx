@@ -20,6 +20,10 @@ const WIDGET_LABELS: Record<string, string> = {
   "loan-complexity-pivot-closer": "Loan complexity pivot — Closer",
   "loan-complexity-pivot-branch": "Loan complexity pivot — Branch",
   "loan-complexity-pivot-current-loan-status": "Loan complexity pivot — Current loan status",
+
+  "company-scorecard-summary-tier-table": "Company scorecard tier summary",
+  "company-scorecard-detail-branch-table": "Company scorecard detail — Branch",
+  "company-scorecard-detail-loan-officer-table": "Company scorecard detail — Loan Officer",
 };
 
 function getWidgetLabel(widgetId: string): string {
@@ -78,6 +82,18 @@ export type DashboardInsightEvidenceModalInsight = Pick<
     topPerformerVolume?: number;
     portfolioWaComplexity?: number;
     portfolioPullThrough?: number;
+
+    // Company Scorecard
+    wac?: number;
+    originatedUnits?: number;
+    originatedUnitsPct?: number;
+    withdrawnUnits?: number;
+    withdrawnUnitsPct?: number;
+    deniedUnits?: number;
+    deniedUnitsPct?: number;
+    waFico?: number;
+    waLtv?: number;
+    waDti?: number;
   }> };
 };
 
@@ -275,6 +291,27 @@ export function DashboardInsightEvidenceModal({
                               {(insight.supporting_data.byPeriod.some((r) => r.totalVolume != null)) && (
                                 <th className="px-3 py-2 font-semibold text-slate-700 dark:text-slate-300">Volume</th>
                               )}
+                              {(insight.supporting_data.byPeriod.some((r) => r.wac != null)) && (
+                                <th className="px-3 py-2 font-semibold text-slate-700 dark:text-slate-300">WAC</th>
+                              )}
+                              {(insight.supporting_data.byPeriod.some((r) => r.originatedUnits != null)) && (
+                                <th className="px-3 py-2 font-semibold text-slate-700 dark:text-slate-300">Originated Units</th>
+                              )}
+                              {(insight.supporting_data.byPeriod.some((r) => r.originatedUnitsPct != null)) && (
+                                <th className="px-3 py-2 font-semibold text-slate-700 dark:text-slate-300">Originated %</th>
+                              )}
+                              {(insight.supporting_data.byPeriod.some((r) => r.withdrawnUnits != null)) && (
+                                <th className="px-3 py-2 font-semibold text-slate-700 dark:text-slate-300">Withdrawn Units</th>
+                              )}
+                              {(insight.supporting_data.byPeriod.some((r) => r.withdrawnUnitsPct != null)) && (
+                                <th className="px-3 py-2 font-semibold text-slate-700 dark:text-slate-300">Withdrawn %</th>
+                              )}
+                              {(insight.supporting_data.byPeriod.some((r) => r.deniedUnits != null)) && (
+                                <th className="px-3 py-2 font-semibold text-slate-700 dark:text-slate-300">Denied Units</th>
+                              )}
+                              {(insight.supporting_data.byPeriod.some((r) => r.deniedUnitsPct != null)) && (
+                                <th className="px-3 py-2 font-semibold text-slate-700 dark:text-slate-300">Denied %</th>
+                              )}
                               {(insight.supporting_data.byPeriod.some((r) => r.topPerformerName)) && (
                                 <th className="px-3 py-2 font-semibold text-slate-700 dark:text-slate-300">Top performer</th>
                               )}
@@ -288,6 +325,13 @@ export function DashboardInsightEvidenceModal({
                               const showWaComplexity = insight.supporting_data!.byPeriod!.some((r) => r.portfolioWaComplexity != null);
                               const showUnits = insight.supporting_data!.byPeriod!.some((r) => r.totalUnits != null);
                               const showVolume = insight.supporting_data!.byPeriod!.some((r) => r.totalVolume != null);
+                              const showWac = insight.supporting_data!.byPeriod!.some((r) => r.wac != null);
+                              const showOriginatedUnits = insight.supporting_data!.byPeriod!.some((r) => r.originatedUnits != null);
+                              const showOriginatedUnitsPct = insight.supporting_data!.byPeriod!.some((r) => r.originatedUnitsPct != null);
+                              const showWithdrawnUnits = insight.supporting_data!.byPeriod!.some((r) => r.withdrawnUnits != null);
+                              const showWithdrawnUnitsPct = insight.supporting_data!.byPeriod!.some((r) => r.withdrawnUnitsPct != null);
+                              const showDeniedUnits = insight.supporting_data!.byPeriod!.some((r) => r.deniedUnits != null);
+                              const showDeniedUnitsPct = insight.supporting_data!.byPeriod!.some((r) => r.deniedUnitsPct != null);
                               const showTopPerformer = insight.supporting_data!.byPeriod!.some((r) => r.topPerformerName);
                               const fmtVol = (v: number) =>
                                 v >= 1e6 ? `$${(v / 1e6).toFixed(2)}M` : v >= 1e3 ? `$${(v / 1e3).toFixed(1)}K` : `$${v}`;
@@ -322,6 +366,41 @@ export function DashboardInsightEvidenceModal({
                                   {showVolume && (
                                     <td className="px-3 py-2 text-slate-600 dark:text-slate-400">
                                       {row.totalVolume != null ? fmtVol(row.totalVolume) : "—"}
+                                    </td>
+                                  )}
+                                  {showWac && (
+                                    <td className="px-3 py-2 text-slate-600 dark:text-slate-400">
+                                      {row.wac != null ? row.wac.toFixed(3) : "—"}
+                                    </td>
+                                  )}
+                                  {showOriginatedUnits && (
+                                    <td className="px-3 py-2 text-slate-600 dark:text-slate-400">
+                                      {row.originatedUnits != null ? row.originatedUnits : "—"}
+                                    </td>
+                                  )}
+                                  {showOriginatedUnitsPct && (
+                                    <td className="px-3 py-2 text-slate-600 dark:text-slate-400">
+                                      {row.originatedUnitsPct != null ? `${row.originatedUnitsPct.toFixed(1)}%` : "—"}
+                                    </td>
+                                  )}
+                                  {showWithdrawnUnits && (
+                                    <td className="px-3 py-2 text-slate-600 dark:text-slate-400">
+                                      {row.withdrawnUnits != null ? row.withdrawnUnits : "—"}
+                                    </td>
+                                  )}
+                                  {showWithdrawnUnitsPct && (
+                                    <td className="px-3 py-2 text-slate-600 dark:text-slate-400">
+                                      {row.withdrawnUnitsPct != null ? `${row.withdrawnUnitsPct.toFixed(1)}%` : "—"}
+                                    </td>
+                                  )}
+                                  {showDeniedUnits && (
+                                    <td className="px-3 py-2 text-slate-600 dark:text-slate-400">
+                                      {row.deniedUnits != null ? row.deniedUnits : "—"}
+                                    </td>
+                                  )}
+                                  {showDeniedUnitsPct && (
+                                    <td className="px-3 py-2 text-slate-600 dark:text-slate-400">
+                                      {row.deniedUnitsPct != null ? `${row.deniedUnitsPct.toFixed(1)}%` : "—"}
                                     </td>
                                   )}
                                   {showTopPerformer && (

@@ -28,6 +28,60 @@ const LC_PIVOT_WIDGET_DIM: Record<string, string> = {
   "loan-complexity-pivot-current-loan-status": "current_loan_status",
 };
 
+const CS_ENTITY_WIDGET_DIM: Record<string, "branch" | "loan_officer"> = {
+  "company-scorecard-detail-branch-table": "branch",
+  "company-scorecard-detail-loan-officer-table": "loan_officer",
+};
+
+function getCompanyScorecardEntityTypeFromInsight(
+  insight: DashboardInsight
+): "branch" | "loan_officer" {
+  for (const r of insight.evidence_refs ?? []) {
+    const dim = CS_ENTITY_WIDGET_DIM[r.widgetId];
+    if (dim) return dim;
+  }
+  return "branch";
+}
+
+type CompanyScorecardTierAggregate = {
+  applicationsTakenUnits: number;
+  applicationsTakenDollar: number;
+  wac: number;
+  originatedUnits: number;
+  originatedUnitsPct: number;
+  withdrawnUnits: number;
+  withdrawnUnitsPct: number;
+  deniedUnits: number;
+  deniedUnitsPct: number;
+  waFico: number;
+  waLtv: number;
+  waDti: number;
+};
+
+type CompanyScorecardEntityRow = {
+  name: string;
+  tier: string;
+  applicationsTakenUnits: number;
+  applicationsTakenDollar: number;
+  wac: number;
+  originatedUnits: number;
+  originatedUnitsPct: number;
+  withdrawnUnits: number;
+  withdrawnUnitsPct: number;
+  deniedUnits: number;
+  deniedUnitsPct: number;
+  waFico: number;
+  waLtv: number;
+  waDti: number;
+};
+
+type CompanyScorecardPeriodData = {
+  periodLabel?: string;
+  tierAggregates?: Record<string, CompanyScorecardTierAggregate>;
+  branchesWithTier?: CompanyScorecardEntityRow[];
+  loanOfficersWithTier?: CompanyScorecardEntityRow[];
+};
+
 function getLoanComplexityPivotDimFromInsight(insight: DashboardInsight): string {
   for (const r of insight.evidence_refs ?? []) {
     const dim = LC_PIVOT_WIDGET_DIM[r.widgetId];
@@ -53,6 +107,22 @@ const COLUMN_DEFS: Record<string, { label: string; format: DashboardDetailSnapsh
   topPerformerVolume: { label: "Top performer volume", format: "currency" },
   name: { label: "Name", format: "text" },
   rank: { label: "Rank", format: "number" },
+
+  // Company Scorecard
+  tier: { label: "Tier", format: "text" },
+  applicationsTakenUnits: { label: "Apps Units", format: "number" },
+  applicationsTakenDollar: { label: "Apps $", format: "currency" },
+  wac: { label: "WAC", format: "number" },
+  originatedUnits: { label: "Originated Units", format: "number" },
+  originatedUnitsPct: { label: "Originated %", format: "percent" },
+  withdrawnUnits: { label: "Withdrawn Units", format: "number" },
+  withdrawnUnitsPct: { label: "Withdrawn %", format: "percent" },
+  deniedUnits: { label: "Denied Units", format: "number" },
+  deniedUnitsPct: { label: "Denied %", format: "percent" },
+  waFico: { label: "WA FICO", format: "number" },
+  waLtv: { label: "WA LTV", format: "percent" },
+  waDti: { label: "WA DTI", format: "percent" },
+  originatedRevenue: { label: "Originated Revenue", format: "currency" },
 };
 
 /** Leaderboard entry shape from context.data.by_time_period[period].leaderboard */
@@ -152,6 +222,84 @@ function buildLoanComplexitySubjectRows(
   return rows.length > 0 ? rows : null;
 }
 
+function buildCompanyScorecardAggregateRows(
+  context: DashboardPageContext
+): Array<Record<string, unknown>> | null {
+  const byPeriod = context.data?.by_time_period as Record<string, CompanyScorecardPeriodData> | undefined;
+  if (!byPeriod || typeof byPeriod !== "object") return null;
+
+  const TIER_ORDER = ["Top Tier", "Second Tier", "Bottom Tier"];
+  const rows: Array<Record<string, unknown>> = [];
+
+  for (const [period, data] of Object.entries(byPeriod)) {
+    const tierAggs = data?.tierAggregates;
+    if (!tierAggs || typeof tierAggs !== "object") continue;
+
+    for (const tier of TIER_ORDER) {
+      const agg = tierAggs[tier];
+      if (!agg) continue;
+      rows.push({
+        period,
+        periodLabel: data.periodLabel ?? period,
+        tier,
+        applicationsTakenUnits: agg.applicationsTakenUnits,
+        applicationsTakenDollar: agg.applicationsTakenDollar,
+        wac: agg.wac,
+        originatedUnits: agg.originatedUnits,
+        originatedUnitsPct: agg.originatedUnitsPct,
+        withdrawnUnits: agg.withdrawnUnits,
+        withdrawnUnitsPct: agg.withdrawnUnitsPct,
+        deniedUnits: agg.deniedUnits,
+        deniedUnitsPct: agg.deniedUnitsPct,
+        waFico: agg.waFico,
+        waLtv: agg.waLtv,
+        waDti: agg.waDti,
+      });
+    }
+  }
+
+  return rows.length > 0 ? rows : null;
+}
+
+function buildCompanyScorecardSubjectRows(
+  context: DashboardPageContext,
+  subjectName: string,
+  entityType: "branch" | "loan_officer"
+): Array<Record<string, unknown>> | null {
+  const byPeriod = context.data?.by_time_period as Record<string, CompanyScorecardPeriodData> | undefined;
+  if (!byPeriod || typeof byPeriod !== "object") return null;
+
+  const normalized = subjectName.trim();
+  const rows: Array<Record<string, unknown>> = [];
+
+  for (const [period, data] of Object.entries(byPeriod)) {
+    const list = entityType === "branch" ? data.branchesWithTier : data.loanOfficersWithTier;
+    const found = list?.find((e) => String(e.name).trim() === normalized);
+    if (!found) continue;
+
+    rows.push({
+      period,
+      periodLabel: data.periodLabel ?? period,
+      tier: found.tier,
+      name: found.name,
+      applicationsTakenUnits: found.applicationsTakenUnits,
+      applicationsTakenDollar: found.applicationsTakenDollar,
+      wac: found.wac,
+      originatedUnits: found.originatedUnits,
+      originatedUnitsPct: found.originatedUnitsPct,
+      withdrawnUnits: found.withdrawnUnits,
+      withdrawnUnitsPct: found.withdrawnUnitsPct,
+      deniedUnits: found.deniedUnits,
+      deniedUnitsPct: found.deniedUnitsPct,
+      waFico: found.waFico,
+      waLtv: found.waLtv,
+      waDti: found.waDti,
+    });
+  }
+
+  return rows.length > 0 ? rows : null;
+}
+
 const AGGREGATE_COLUMN_ORDER = [
   "period", "periodLabel", "averagePullThrough", "totalUnits", "totalVolume",
   "topPerformerName", "topPerformerUnits", "topPerformerVolume",
@@ -176,12 +324,54 @@ const SUBJECT_COMPLEXITY_COLUMN_ORDER = [
   "timeInMotionDays",
 ];
 
+const CS_AGG_COLUMN_ORDER = [
+  "period",
+  "periodLabel",
+  "tier",
+  "applicationsTakenUnits",
+  "applicationsTakenDollar",
+  "wac",
+  "originatedUnits",
+  "originatedUnitsPct",
+  "withdrawnUnits",
+  "withdrawnUnitsPct",
+  "deniedUnits",
+  "deniedUnitsPct",
+  "waFico",
+  "waLtv",
+  "waDti",
+];
+
+const CS_SUBJECT_COLUMN_ORDER = [
+  "period",
+  "periodLabel",
+  "tier",
+  "name",
+  "applicationsTakenUnits",
+  "applicationsTakenDollar",
+  "wac",
+  "originatedUnits",
+  "originatedUnitsPct",
+  "withdrawnUnits",
+  "withdrawnUnitsPct",
+  "deniedUnits",
+  "deniedUnitsPct",
+  "waFico",
+  "waLtv",
+  "waDti",
+];
+
 function buildSnapshotFromRows(
   insight: DashboardInsight,
   rows: Array<Record<string, unknown>>,
   options: { generationBatch?: string; dateFilter?: string } | undefined,
   isSubjectRows: boolean,
-  variant: "leaderboard" | "loan-complexity-aggregate" | "loan-complexity-subject" = "leaderboard"
+  variant:
+    | "leaderboard"
+    | "loan-complexity-aggregate"
+    | "loan-complexity-subject"
+    | "company-scorecard-aggregate"
+    | "company-scorecard-subject" = "leaderboard"
 ): DashboardDetailSnapshot {
   const allKeys = new Set<string>();
   rows.forEach((r) => Object.keys(r).forEach((k) => allKeys.add(k)));
@@ -190,6 +380,10 @@ function buildSnapshotFromRows(
       ? SUBJECT_COMPLEXITY_COLUMN_ORDER
       : variant === "loan-complexity-aggregate"
         ? AGGREGATE_COMPLEXITY_COLUMN_ORDER
+        : variant === "company-scorecard-subject"
+          ? CS_SUBJECT_COLUMN_ORDER
+          : variant === "company-scorecard-aggregate"
+            ? CS_AGG_COLUMN_ORDER
         : isSubjectRows
           ? SUBJECT_COLUMN_ORDER
           : AGGREGATE_COLUMN_ORDER;
@@ -337,7 +531,9 @@ function buildSnapshotFromRows(
   const defaultTitle =
     variant === "loan-complexity-aggregate" || variant === "loan-complexity-subject"
       ? "Loan complexity by period"
-      : "Leaderboard by period";
+      : variant === "company-scorecard-aggregate" || variant === "company-scorecard-subject"
+        ? "Company scorecard tier evolution"
+        : "Leaderboard by period";
 
   return {
     title: insight.headline || defaultTitle,
@@ -374,6 +570,13 @@ export function buildDetailFromSupportingData(
 
   // Person-focused: build rows from context.by_time_period leaderboards for the subject
   if (subjectName && context) {
+    if (context.pageId === "company-scorecard") {
+      const entityType = getCompanyScorecardEntityTypeFromInsight(insight);
+      const csRows = buildCompanyScorecardSubjectRows(context, subjectName, entityType);
+      if (csRows && csRows.length > 0) {
+        return buildSnapshotFromRows(insight, csRows, options, true, "company-scorecard-subject");
+      }
+    }
     if (context.pageId === "loan-complexity") {
       const pivotKey = getLoanComplexityPivotDimFromInsight(insight);
       const cxRows = buildLoanComplexitySubjectRows(context, subjectName, pivotKey);
@@ -385,6 +588,14 @@ export function buildDetailFromSupportingData(
       if (subjectRows && subjectRows.length > 0) {
         return buildSnapshotFromRows(insight, subjectRows, options, true, "leaderboard");
       }
+    }
+  }
+
+  // Aggregate: Company Scorecard tier evolution across periods.
+  if (context?.pageId === "company-scorecard") {
+    const csAggRows = buildCompanyScorecardAggregateRows(context);
+    if (csAggRows && csAggRows.length > 0) {
+      return buildSnapshotFromRows(insight, csAggRows, options, false, "company-scorecard-aggregate");
     }
   }
 

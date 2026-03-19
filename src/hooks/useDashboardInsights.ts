@@ -31,6 +31,18 @@ export interface SupportingDataByPeriodRow {
   portfolioWaComplexity?: number;
   /** Loan complexity: same cohort as complexity (application-date window) */
   portfolioPullThrough?: number;
+
+  // Company Scorecard (tier + entity metrics)
+  wac?: number;
+  originatedUnits?: number;
+  originatedUnitsPct?: number;
+  withdrawnUnits?: number;
+  withdrawnUnitsPct?: number;
+  deniedUnits?: number;
+  deniedUnitsPct?: number;
+  waFico?: number;
+  waLtv?: number;
+  waDti?: number;
 }
 
 export interface SupportingData {
