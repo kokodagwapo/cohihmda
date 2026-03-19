@@ -6,6 +6,10 @@ import React, {
   useRef,
 } from "react";
 import { useNavigate } from "react-router-dom";
+import {
+  getDashboardInsightPath,
+  getDashboardInsightNavigateState,
+} from "@/lib/dashboardInsightRoutes";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Zap,
@@ -99,14 +103,9 @@ function GoToDashboardPageButton({
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const path = sourcePageId ? `/insights#${sourcePageId}` : "/insights";
-    const state: Record<string, unknown> = {
-      scrollToSection: sourcePageId,
-      ...(filterContext
-        ? { dashboardInsightFilterContext: filterContext, sourcePageId }
-        : {}),
-    };
-    navigate(path, { state });
+    const path = getDashboardInsightPath(sourcePageId);
+    const state = getDashboardInsightNavigateState(sourcePageId, filterContext);
+    navigate(path, { state: Object.keys(state).length > 0 ? state : undefined });
   };
   return (
     <button

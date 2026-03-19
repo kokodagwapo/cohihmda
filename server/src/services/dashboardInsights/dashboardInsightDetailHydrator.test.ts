@@ -110,4 +110,77 @@ describe("dashboardInsightDetailHydrator", () => {
     expect(result!.rows[0].averagePullThrough).toBe(50);
     expect(result!.rows[0].totalUnits).toBe(100);
   });
+
+  it("buildDetailFromSupportingData loan-complexity aggregate uses WA complexity columns", () => {
+    const cxInsight: DashboardInsight = {
+      ...baseInsight,
+      sourcePageId: "loan-complexity",
+      sourcePageName: "Loan Complexity",
+    };
+    const supportingData: SupportingData = {
+      byPeriod: [
+        {
+          period: "QTD",
+          periodLabel: "Quarter-to-Date",
+          portfolioWaComplexity: 104.2,
+          portfolioPullThrough: 48,
+          averagePullThrough: 48,
+          totalUnits: 200,
+        },
+      ],
+    };
+    const result = buildDetailFromSupportingData(cxInsight, supportingData, {
+      context: { pageId: "loan-complexity" } as DashboardPageContext,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.rows[0].portfolioWaComplexity).toBe(104.2);
+    expect(result!.displayConfig.columns).toContain("portfolioWaComplexity");
+  });
+
+  it("buildDetailFromSupportingData loan-complexity subject uses pivot slice from primary widget", () => {
+    const cxInsight: DashboardInsight = {
+      ...baseInsight,
+      sourcePageId: "loan-complexity",
+      sourcePageName: "Loan Complexity",
+      evidence_refs: [
+        {
+          widgetId: "loan-complexity-pivot-branch",
+          role: "primary",
+          target: { type: "row", label: "North" },
+        },
+      ],
+    };
+    const context: DashboardPageContext = {
+      pageId: "loan-complexity",
+      pageName: "Loan Complexity",
+      filters: {},
+      dimensions: [],
+      data: {
+        summary: {},
+        by_dimension: {},
+        by_time_period: {
+          MTD: {
+            periodLabel: "Month-to-Date",
+            pivotSlices: {
+              branch: [{ groupName: "North", units: 5, waComplexity: 112, timeInMotionDays: 9 }],
+            },
+          },
+          LQ: {
+            periodLabel: "Last Quarter",
+            pivotSlices: {
+              branch: [{ groupName: "North", units: 40, waComplexity: 108, timeInMotionDays: 11 }],
+            },
+          },
+        },
+      },
+      widget_catalog: [],
+    };
+    const result = buildDetailFromSupportingData(cxInsight, undefined, {
+      subjectName: "North",
+      context,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.rows).toHaveLength(2);
+    expect(result!.rows.every((r) => r.name === "North")).toBe(true);
+  });
 });

@@ -330,6 +330,39 @@ function isAggregateMetricLabel(label: string): boolean {
   return METRIC_LABELS.some((m) => lower.includes(m)) || /^\d+%$/.test(label) || lower === "leaderboard";
 }
 
+/** Pivot widget id → pivotSlices key in loan-complexity adapter context */
+const LOAN_COMPLEXITY_PIVOT_WIDGET_DIM: Record<string, string> = {
+  "loan-complexity-pivot-loan-officer": "loan_officer",
+  "loan-complexity-pivot-processor": "processor",
+  "loan-complexity-pivot-underwriter": "underwriter",
+  "loan-complexity-pivot-closer": "closer",
+  "loan-complexity-pivot-branch": "branch",
+  "loan-complexity-pivot-current-loan-status": "current_loan_status",
+};
+
+type LoanComplexityPeriodData = {
+  periodLabel?: string;
+  /** Loan-complexity + optional leaderboard summary fields (same `by_time_period` shape is reused for enrichment). */
+  summary?: {
+    portfolioWaComplexity?: number | null;
+    totalUnits?: number | null;
+    portfolioPullThrough?: number | null;
+    topPerformerName?: string;
+    topPerformerUnits?: number;
+    topPerformerVolume?: number;
+    averagePullThrough?: number;
+    totalVolume?: number;
+  };
+  barLoanOfficer?: Array<{ groupName?: string; avgComplexity?: number; loanCount?: number }>;
+  pivotSlices?: Record<string, Array<{ groupName?: string; units?: number; waComplexity?: number | null }>>;
+  leaderboard?: Array<{
+    name?: string;
+    loansClosed?: number;
+    totalVolume?: number;
+    pullThroughRate?: number;
+  }>;
+};
+
 /**
  * Enrich evidence refs with display values from page context (e.g. leaderboard KPIs and aggregate metrics).
  */
@@ -337,32 +370,62 @@ function enrichEvidenceRefsWithValues(
   context: DashboardPageContext,
   refs: EvidenceRef[]
 ): EvidenceRef[] {
-  const byPeriod = context.data?.by_time_period as Record<
-    string,
-    {
-      periodLabel?: string;
-      summary?: {
-        topPerformerName?: string;
-        topPerformerUnits?: number;
-        topPerformerVolume?: number;
-        averagePullThrough?: number;
-        totalUnits?: number;
-        totalVolume?: number;
-      };
-      leaderboard?: Array<{
-        name?: string;
-        loansClosed?: number;
-        totalVolume?: number;
-        pullThroughRate?: number;
-      }>;
-    }
-  > | undefined;
+  const byPeriod = context.data?.by_time_period as Record<string, LoanComplexityPeriodData> | undefined;
 
   if (!byPeriod || typeof byPeriod !== "object") return refs;
 
   return refs.map((ref) => {
     const label = ref.target?.label?.trim();
     const parts: string[] = [];
+
+    // Loan complexity — bar chart (mean complexity by loan officer group)
+    if (ref.widgetId === "loan-complexity-bar-chart") {
+      if (label) {
+        for (const [period, data] of Object.entries(byPeriod)) {
+          const bars = data.barLoanOfficer;
+          if (!Array.isArray(bars)) continue;
+          const row = bars.find((b) => b.groupName === label);
+          if (row && row.avgComplexity != null && row.loanCount != null) {
+            parts.push(`${period}: mean complexity ${row.avgComplexity}, ${row.loanCount} loans`);
+          }
+        }
+      } else {
+        for (const [period, data] of Object.entries(byPeriod)) {
+          const summary = data.summary;
+          const segs: string[] = [];
+          if (summary?.portfolioWaComplexity != null) segs.push(`WA ${summary.portfolioWaComplexity}`);
+          if (summary?.portfolioPullThrough != null) segs.push(`${summary.portfolioPullThrough}% pull-through`);
+          if (summary?.totalUnits != null) segs.push(`${summary.totalUnits} units`);
+          if (segs.length) parts.push(`${period}: ${segs.join(", ")}`);
+        }
+      }
+    }
+
+    // Loan complexity — pivot sections
+    const pivotDim = LOAN_COMPLEXITY_PIVOT_WIDGET_DIM[ref.widgetId];
+    if (pivotDim) {
+      if (label) {
+        for (const [period, data] of Object.entries(byPeriod)) {
+          const slice = data.pivotSlices?.[pivotDim];
+          if (!Array.isArray(slice)) continue;
+          const row = slice.find((r) => r.groupName === label);
+          if (row) {
+            const wa = row.waComplexity != null ? `WA ${row.waComplexity}` : "";
+            const u = row.units != null ? `${row.units} units` : "";
+            const seg = [wa, u].filter(Boolean).join(", ");
+            if (seg) parts.push(`${period}: ${seg}`);
+          }
+        }
+      } else {
+        for (const [period, data] of Object.entries(byPeriod)) {
+          const summary = data.summary;
+          const segs: string[] = [];
+          if (summary?.portfolioWaComplexity != null) segs.push(`portfolio WA ${summary.portfolioWaComplexity}`);
+          if (summary?.portfolioPullThrough != null) segs.push(`${summary.portfolioPullThrough}% pull-through`);
+          if (segs.length) parts.push(`${period}: ${segs.join(", ")}`);
+        }
+      }
+    }
 
     if (ref.widgetId === "kpi-top-performer-units" && label) {
       for (const [period, data] of Object.entries(byPeriod)) {
@@ -444,6 +507,12 @@ function getSubjectKey(
     const dim = widget?.dimension;
     if (dim === "leader") return `leader:${label}`;
     if (dim === "branch") return `branch:${label}`;
+    if (dim === "complexity_loan_officer") return `leader:${label}`;
+    if (dim === "complexity_branch") return `branch:${label}`;
+    if (dim === "complexity_processor") return `processor:${label}`;
+    if (dim === "complexity_underwriter") return `underwriter:${label}`;
+    if (dim === "complexity_closer") return `closer:${label}`;
+    if (dim === "complexity_current_loan_status") return `status:${label}`;
   }
   const ctx = insight.filter_context as Record<string, unknown> | undefined;
   if (ctx?.leaderName != null && typeof ctx.leaderName === "string")
@@ -482,11 +551,11 @@ function deduplicateBySubject(
 
   const deduped: DashboardInsight[] = [];
   for (const ins of noSubject) {
-    const { judge_score: _s, ...rest } = ins;
+    const { judge_score: _s, ...rest } = ins as DashboardInsight & { judge_score?: number };
     deduped.push(rest);
   }
   for (const ins of byKey.values()) {
-    const { judge_score: _s, ...rest } = ins;
+    const { judge_score: _s, ...rest } = ins as DashboardInsight & { judge_score?: number };
     deduped.push(rest);
   }
   return deduped;
@@ -504,13 +573,17 @@ function getSubjectNameFromInsight(
   const primaryRef = insight.evidence_refs?.find((r) => r.role === "primary");
   if (primaryRef?.target?.label) {
     const widget = context.widget_catalog.find((w) => w.id === primaryRef.widgetId);
-    if (widget?.dimension === "leader") return primaryRef.target.label.trim();
+    const d = widget?.dimension;
+    if (d === "leader" || d === "complexity_loan_officer") return primaryRef.target.label.trim();
+    if (d?.startsWith("complexity_")) return primaryRef.target.label.trim();
   }
   // Any evidence_ref with dimension leader and target
   for (const ref of insight.evidence_refs ?? []) {
     if (ref.target?.label) {
       const widget = context.widget_catalog.find((w) => w.id === ref.widgetId);
-      if (widget?.dimension === "leader") return ref.target.label.trim();
+      const d = widget?.dimension;
+      if (d === "leader" || d === "complexity_loan_officer") return ref.target.label.trim();
+      if (d?.startsWith("complexity_")) return ref.target.label.trim();
     }
   }
   // Fallback: filter_context
@@ -524,20 +597,7 @@ function getSubjectNameFromInsight(
  * Build by-period supporting data from page context for the evidence table in the UI.
  */
 function buildSupportingDataFromContext(context: DashboardPageContext): SupportingData | undefined {
-  const byPeriod = context.data?.by_time_period as Record<
-    string,
-    {
-      periodLabel?: string;
-      summary?: {
-        topPerformerName?: string;
-        topPerformerUnits?: number;
-        topPerformerVolume?: number;
-        averagePullThrough?: number;
-        totalUnits?: number;
-        totalVolume?: number;
-      };
-    }
-  > | undefined;
+  const byPeriod = context.data?.by_time_period as Record<string, LoanComplexityPeriodData> | undefined;
 
   if (!byPeriod || typeof byPeriod !== "object") return undefined;
 
@@ -549,12 +609,34 @@ function buildSupportingDataFromContext(context: DashboardPageContext): Supporti
       period,
       periodLabel: data.periodLabel ?? period,
     };
-    if (summary.averagePullThrough != null) row.averagePullThrough = summary.averagePullThrough;
-    if (summary.totalUnits != null) row.totalUnits = summary.totalUnits;
-    if (summary.totalVolume != null) row.totalVolume = summary.totalVolume;
-    if (summary.topPerformerName) row.topPerformerName = summary.topPerformerName;
-    if (summary.topPerformerUnits != null) row.topPerformerUnits = summary.topPerformerUnits;
-    if (summary.topPerformerVolume != null) row.topPerformerVolume = summary.topPerformerVolume;
+
+    if (context.pageId === "loan-complexity") {
+      const s = summary as LoanComplexityPeriodData["summary"];
+      if (s?.portfolioWaComplexity != null) row.portfolioWaComplexity = Number(s.portfolioWaComplexity);
+      if (s?.totalUnits != null) row.totalUnits = Number(s.totalUnits);
+      if (s?.portfolioPullThrough != null) {
+        const pt = Number(s.portfolioPullThrough);
+        row.portfolioPullThrough = pt;
+        row.averagePullThrough = pt;
+      }
+      byPeriodRows.push(row);
+      continue;
+    }
+
+    const lbSummary = summary as {
+      topPerformerName?: string;
+      topPerformerUnits?: number;
+      topPerformerVolume?: number;
+      averagePullThrough?: number;
+      totalUnits?: number;
+      totalVolume?: number;
+    };
+    if (lbSummary.averagePullThrough != null) row.averagePullThrough = lbSummary.averagePullThrough;
+    if (lbSummary.totalUnits != null) row.totalUnits = lbSummary.totalUnits;
+    if (lbSummary.totalVolume != null) row.totalVolume = lbSummary.totalVolume;
+    if (lbSummary.topPerformerName) row.topPerformerName = lbSummary.topPerformerName;
+    if (lbSummary.topPerformerUnits != null) row.topPerformerUnits = lbSummary.topPerformerUnits;
+    if (lbSummary.topPerformerVolume != null) row.topPerformerVolume = lbSummary.topPerformerVolume;
     byPeriodRows.push(row);
   }
   if (byPeriodRows.length === 0) return undefined;

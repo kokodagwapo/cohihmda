@@ -18,11 +18,33 @@ import type {
 } from "./types.js";
 import type { DashboardPageContext } from "./types.js";
 
+/** Primary evidence widget → pivotSlices key (aligned with pipeline adapter) */
+const LC_PIVOT_WIDGET_DIM: Record<string, string> = {
+  "loan-complexity-pivot-loan-officer": "loan_officer",
+  "loan-complexity-pivot-processor": "processor",
+  "loan-complexity-pivot-underwriter": "underwriter",
+  "loan-complexity-pivot-closer": "closer",
+  "loan-complexity-pivot-branch": "branch",
+  "loan-complexity-pivot-current-loan-status": "current_loan_status",
+};
+
+function getLoanComplexityPivotDimFromInsight(insight: DashboardInsight): string {
+  for (const r of insight.evidence_refs ?? []) {
+    const dim = LC_PIVOT_WIDGET_DIM[r.widgetId];
+    if (dim) return dim;
+  }
+  return "loan_officer";
+}
+
 const COLUMN_DEFS: Record<string, { label: string; format: DashboardDetailSnapshotColumnDef["format"] }> = {
   period: { label: "Period", format: "text" },
   periodLabel: { label: "Period", format: "text" },
   averagePullThrough: { label: "Pull-through", format: "percent" },
   pullThroughRate: { label: "Pull-through", format: "percent" },
+  portfolioWaComplexity: { label: "WA complexity", format: "number" },
+  portfolioPullThrough: { label: "Pull-through", format: "percent" },
+  waComplexity: { label: "WA complexity", format: "number" },
+  timeInMotionDays: { label: "Time in motion (days)", format: "days" },
   totalUnits: { label: "Units", format: "number" },
   loansClosed: { label: "Units", format: "number" },
   totalVolume: { label: "Volume", format: "currency" },
@@ -82,23 +104,95 @@ function buildSubjectRows(
   return rows.length > 0 ? rows : null;
 }
 
+type LoanComplexityPivotSliceRow = {
+  groupName?: string;
+  units?: number;
+  waComplexity?: number | null;
+  timeInMotionDays?: number | null;
+};
+
+/**
+ * Subject-focused rows for loan complexity: WA complexity across periods for a pivot slice (e.g. loan_officer, branch).
+ */
+function buildLoanComplexitySubjectRows(
+  context: DashboardPageContext,
+  subjectName: string,
+  pivotKey: string = "loan_officer"
+): Array<Record<string, unknown>> | null {
+  const byPeriod = context.data?.by_time_period as
+    | Record<
+        string,
+        {
+          periodLabel?: string;
+          pivotSlices?: Record<string, LoanComplexityPivotSliceRow[]>;
+        }
+      >
+    | undefined;
+  if (!byPeriod || typeof byPeriod !== "object") return null;
+
+  const normalized = subjectName.trim();
+  const rows: Array<Record<string, unknown>> = [];
+
+  for (const [period, data] of Object.entries(byPeriod)) {
+    const slice = data.pivotSlices?.[pivotKey];
+    if (!Array.isArray(slice)) continue;
+    const entry = slice.find(
+      (e) => e?.groupName != null && String(e.groupName).trim() === normalized
+    );
+    if (!entry) continue;
+    rows.push({
+      period,
+      periodLabel: data.periodLabel ?? period,
+      name: entry.groupName,
+      waComplexity: entry.waComplexity ?? null,
+      units: entry.units ?? null,
+      timeInMotionDays: entry.timeInMotionDays ?? null,
+    });
+  }
+  return rows.length > 0 ? rows : null;
+}
+
 const AGGREGATE_COLUMN_ORDER = [
   "period", "periodLabel", "averagePullThrough", "totalUnits", "totalVolume",
   "topPerformerName", "topPerformerUnits", "topPerformerVolume",
 ];
+const AGGREGATE_COMPLEXITY_COLUMN_ORDER = [
+  "period",
+  "periodLabel",
+  "portfolioWaComplexity",
+  "averagePullThrough",
+  "portfolioPullThrough",
+  "totalUnits",
+];
 const SUBJECT_COLUMN_ORDER = [
   "period", "periodLabel", "name", "rank", "pullThroughRate", "loansClosed", "totalVolume",
+];
+const SUBJECT_COMPLEXITY_COLUMN_ORDER = [
+  "period",
+  "periodLabel",
+  "name",
+  "waComplexity",
+  "units",
+  "timeInMotionDays",
 ];
 
 function buildSnapshotFromRows(
   insight: DashboardInsight,
   rows: Array<Record<string, unknown>>,
   options: { generationBatch?: string; dateFilter?: string } | undefined,
-  isSubjectRows: boolean
+  isSubjectRows: boolean,
+  variant: "leaderboard" | "loan-complexity-aggregate" | "loan-complexity-subject" = "leaderboard"
 ): DashboardDetailSnapshot {
   const allKeys = new Set<string>();
   rows.forEach((r) => Object.keys(r).forEach((k) => allKeys.add(k)));
-  const columnOrder = isSubjectRows ? SUBJECT_COLUMN_ORDER : AGGREGATE_COLUMN_ORDER;
+  const columnOrder =
+    variant === "loan-complexity-subject"
+      ? SUBJECT_COMPLEXITY_COLUMN_ORDER
+      : variant === "loan-complexity-aggregate"
+        ? AGGREGATE_COMPLEXITY_COLUMN_ORDER
+        : isSubjectRows
+          ? SUBJECT_COLUMN_ORDER
+          : AGGREGATE_COLUMN_ORDER;
   const orderedKeys = columnOrder.filter((k) => allKeys.has(k));
   if (orderedKeys.length === 0) orderedKeys.push(...Array.from(allKeys));
 
@@ -114,14 +208,98 @@ function buildSnapshotFromRows(
 
   const first = rows[0] as Record<string, unknown>;
   const summaryDefs: DashboardDetailSnapshotSummaryDef[] = [];
-  if (isSubjectRows) {
-    if (first?.pullThroughRate != null) summaryDefs.push({ key: "pullThroughRate", label: "Pull-through", value: first.pullThroughRate, format: "percent", color: "blue" });
-    if (first?.loansClosed != null) summaryDefs.push({ key: "loansClosed", label: "Units", value: first.loansClosed, format: "number", color: "blue" });
-    if (first?.totalVolume != null) summaryDefs.push({ key: "totalVolume", label: "Volume", value: first.totalVolume, format: "currency", color: "blue" });
+  if (variant === "loan-complexity-subject" && isSubjectRows) {
+    if (first?.waComplexity != null)
+      summaryDefs.push({
+        key: "waComplexity",
+        label: "WA complexity",
+        value: Number(first.waComplexity),
+        format: "number",
+        color: "blue",
+      });
+    if (first?.units != null)
+      summaryDefs.push({
+        key: "units",
+        label: "Units",
+        value: Number(first.units),
+        format: "number",
+        color: "blue",
+      });
+  } else if (isSubjectRows) {
+    if (first?.pullThroughRate != null)
+      summaryDefs.push({
+        key: "pullThroughRate",
+        label: "Pull-through",
+        value: Number(first.pullThroughRate),
+        format: "percent",
+        color: "blue",
+      });
+    if (first?.loansClosed != null)
+      summaryDefs.push({
+        key: "loansClosed",
+        label: "Units",
+        value: Number(first.loansClosed),
+        format: "number",
+        color: "blue",
+      });
+    if (first?.totalVolume != null)
+      summaryDefs.push({
+        key: "totalVolume",
+        label: "Volume",
+        value: Number(first.totalVolume),
+        format: "currency",
+        color: "blue",
+      });
+  } else if (variant === "loan-complexity-aggregate") {
+    if (first?.portfolioWaComplexity != null)
+      summaryDefs.push({
+        key: "portfolioWaComplexity",
+        label: "WA complexity",
+        value: Number(first.portfolioWaComplexity),
+        format: "number",
+        color: "blue",
+      });
+    if (first?.averagePullThrough != null)
+      summaryDefs.push({
+        key: "averagePullThrough",
+        label: "Pull-through",
+        value: Number(first.averagePullThrough),
+        format: "percent",
+        color: "blue",
+      });
+    if (first?.totalUnits != null)
+      summaryDefs.push({
+        key: "totalUnits",
+        label: "Units",
+        value: Number(first.totalUnits),
+        format: "number",
+        color: "blue",
+      });
   } else {
-    if (first?.averagePullThrough != null) summaryDefs.push({ key: "averagePullThrough", label: "Pull-through", value: first.averagePullThrough, format: "percent", color: "blue" });
-    if (first?.totalUnits != null) summaryDefs.push({ key: "totalUnits", label: "Units", value: first.totalUnits, format: "number", color: "blue" });
-    if (first?.totalVolume != null) summaryDefs.push({ key: "totalVolume", label: "Volume", value: first.totalVolume, format: "currency", color: "blue" });
+    if (first?.averagePullThrough != null)
+      summaryDefs.push({
+        key: "averagePullThrough",
+        label: "Pull-through",
+        value: Number(first.averagePullThrough),
+        format: "percent",
+        color: "blue",
+      });
+    if (first?.totalUnits != null)
+      summaryDefs.push({
+        key: "totalUnits",
+        label: "Units",
+        value: Number(first.totalUnits),
+        format: "number",
+        color: "blue",
+      });
+    if (first?.totalVolume != null)
+      summaryDefs.push({
+        key: "totalVolume",
+        label: "Volume",
+        value: Number(first.totalVolume),
+        format: "currency",
+        color: "blue",
+      });
   }
   const summary: Record<string, unknown> = {};
   summaryDefs.forEach((s) => {
@@ -156,8 +334,13 @@ function buildSnapshotFromRows(
       : undefined,
   };
 
+  const defaultTitle =
+    variant === "loan-complexity-aggregate" || variant === "loan-complexity-subject"
+      ? "Loan complexity by period"
+      : "Leaderboard by period";
+
   return {
-    title: insight.headline || "Leaderboard by period",
+    title: insight.headline || defaultTitle,
     summary,
     rows,
     displayConfig: {
@@ -191,9 +374,17 @@ export function buildDetailFromSupportingData(
 
   // Person-focused: build rows from context.by_time_period leaderboards for the subject
   if (subjectName && context) {
-    const subjectRows = buildSubjectRows(context, subjectName);
-    if (subjectRows && subjectRows.length > 0) {
-      return buildSnapshotFromRows(insight, subjectRows, options, true);
+    if (context.pageId === "loan-complexity") {
+      const pivotKey = getLoanComplexityPivotDimFromInsight(insight);
+      const cxRows = buildLoanComplexitySubjectRows(context, subjectName, pivotKey);
+      if (cxRows && cxRows.length > 0) {
+        return buildSnapshotFromRows(insight, cxRows, options, true, "loan-complexity-subject");
+      }
+    } else {
+      const subjectRows = buildSubjectRows(context, subjectName);
+      if (subjectRows && subjectRows.length > 0) {
+        return buildSnapshotFromRows(insight, subjectRows, options, true, "leaderboard");
+      }
     }
   }
 
@@ -212,8 +403,12 @@ export function buildDetailFromSupportingData(
     if (row.topPerformerName != null) out.topPerformerName = row.topPerformerName;
     if (row.topPerformerUnits != null) out.topPerformerUnits = row.topPerformerUnits;
     if (row.topPerformerVolume != null) out.topPerformerVolume = row.topPerformerVolume;
+    if (row.portfolioWaComplexity != null) out.portfolioWaComplexity = row.portfolioWaComplexity;
+    if (row.portfolioPullThrough != null) out.portfolioPullThrough = row.portfolioPullThrough;
     return out;
   });
 
-  return buildSnapshotFromRows(insight, rows, options, false);
+  const aggVariant =
+    options?.context?.pageId === "loan-complexity" ? "loan-complexity-aggregate" : "leaderboard";
+  return buildSnapshotFromRows(insight, rows, options, false, aggVariant);
 }

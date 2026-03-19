@@ -253,6 +253,70 @@ export async function getLoanComplexityStatusOptions(
 }
 
 /**
+ * Portfolio pull-through for loans in the Loan Complexity cohort: application_date in [startDate, endDate].
+ * Numerator/denominator match leaderboard semantics (originated / completed among non-active pipeline),
+ * but the cohort is anchored on application_date only (not started_date), matching the complexity dashboard window.
+ */
+export async function getLoanComplexityPortfolioPullThrough(
+  tenantPool: pg.Pool,
+  options: LoanComplexityPivotOptions
+): Promise<{ pullThroughRate: number; unitsInCohort: number }> {
+  const {
+    startDate,
+    endDate,
+    channelGroup,
+    accessClause = "",
+    accessParams = [],
+    dimensionFilterClause = "",
+  } = options;
+
+  const conditions: string[] = [
+    "l.application_date IS NOT NULL",
+    "l.application_date::date >= $1::date",
+    "l.application_date::date <= $2::date",
+  ];
+  const params: unknown[] = [startDate, endDate];
+
+  const channelWhere = buildChannelWhereClause(channelGroup, "l");
+  if (channelWhere) {
+    conditions.push(channelWhere.replace(/^AND\s+/i, "").trim());
+  }
+  const accessCondition = sanitizeAndSqlClause(accessClause, "accessClause");
+  if (accessCondition) {
+    conditions.push(accessCondition);
+    params.push(...accessParams);
+  }
+  const dimensionCondition = sanitizeAndSqlClause(dimensionFilterClause, "dimensionFilterClause");
+  if (dimensionCondition) {
+    conditions.push(dimensionCondition);
+  }
+  const whereSql = conditions.join(" AND ");
+
+  const query = `
+    SELECT
+      COUNT(*)::int AS units_in_cohort,
+      (
+        COUNT(*) FILTER (
+          WHERE (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%')
+        )::float
+        / NULLIF(
+          COUNT(*) FILTER (
+            WHERE l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
+          ),
+          0
+        ) * 100
+      ) AS pull_through_rate
+    FROM public.loans l
+    WHERE ${whereSql}
+  `;
+  const result = await tenantPool.query(query, params);
+  const row = result.rows[0];
+  const unitsInCohort = parseInt(String(row?.units_in_cohort ?? "0"), 10) || 0;
+  const pullThroughRate = Math.round(parseFloat(String(row?.pull_through_rate ?? "0")) || 0);
+  return { pullThroughRate, unitsInCohort };
+}
+
+/**
  * Returns loan rows for a single group (one bar click): same filters as dashboard + groupName match.
  * Includes complexity_score computed per loan.
  */
@@ -691,8 +755,15 @@ export async function getLoanComplexityLoansInPeriod(
   return rows;
 }
 
-/** Pivot row dimensions (exclude current_loan_status). */
-const PIVOT_DIMENSION_KEYS: LoanComplexityGroupBy[] = ["loan_officer", "branch", "underwriter", "processor", "closer"];
+/** Pivot row dimensions (includes current loan status for breakdown + insights). */
+const PIVOT_DIMENSION_KEYS: LoanComplexityGroupBy[] = [
+  "loan_officer",
+  "branch",
+  "underwriter",
+  "processor",
+  "closer",
+  "current_loan_status",
+];
 const PIVOT_DIMENSION_LABELS: Record<LoanComplexityGroupBy, string> = {
   loan_officer: "Loan Officer",
   branch: "Branch",

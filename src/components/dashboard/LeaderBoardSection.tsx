@@ -1,4 +1,5 @@
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   ChevronUp,
   Medal,
@@ -49,6 +50,7 @@ import { ExportMenu } from "@/components/common/ExportMenu";
 import type { ExportData } from "@/utils/exportUtils";
 import { api } from "@/lib/api";
 import { Loader2 } from "lucide-react";
+import { useChannelStore } from "@/stores/channelStore";
 
 /** Golden certificate seal icon (scalloped border, star ring, blank center) for rank badge */
 function CertificateSealIcon({
@@ -121,19 +123,31 @@ function CertificateSealIcon({
 }
 
 // Period types for the leaderboard
-type PeriodType = "wtd" | "mtd" | "qtd" | "lw" | "lm" | "lq" | "ly" | "custom";
+type PeriodType = "wtd" | "mtd" | "qtd" | "ytd" | "lw" | "lm" | "lq" | "ly" | "custom";
 
 // Period display labels
 const periodLabels: Record<PeriodType, { short: string; long: string }> = {
   wtd: { short: "WTD", long: "Week-to-Date" },
   mtd: { short: "MTD", long: "Month-to-Date" },
   qtd: { short: "QTD", long: "Quarter-to-Date" },
+  ytd: { short: "YTD", long: "Year-to-Date" },
   lw: { short: "LW", long: "Last Week" },
   lm: { short: "LM", long: "Last Month" },
   lq: { short: "LQ", long: "Last Quarter" },
   ly: { short: "LY", long: "Last Year" },
   custom: { short: "Custom", long: "Custom Range" },
 };
+
+const VALID_INSIGHT_PERIODS: PeriodType[] = [
+  "wtd",
+  "mtd",
+  "qtd",
+  "ytd",
+  "lw",
+  "lm",
+  "lq",
+  "ly",
+];
 
 interface LeaderBoardSectionProps {
   dateFilter: "today" | "mtd" | "ytd" | "custom";
@@ -151,6 +165,9 @@ export const LeaderBoardSection = ({
   selectedChannel,
 }: LeaderBoardSectionProps) => {
   const sectionRef = useRef<HTMLDivElement>(null);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { setSelectedChannel } = useChannelStore();
   // Default to Last Quarter (lq)
   const [period, setPeriod] = useState<PeriodType>("lq");
   const [scope, setScope] = useState<"All" | "Branch" | "Team">("All");
@@ -170,6 +187,40 @@ export const LeaderBoardSection = ({
   const [quarterYear, setQuarterYear] = useState(new Date().getFullYear());
   const [generateLoading, setGenerateLoading] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
+  /** LO name to select after leaderboard data loads (from dashboard insight navigation). */
+  const [pendingLeaderName, setPendingLeaderName] = useState<string | null>(null);
+
+  // Apply filters when navigating from a dashboard insight (e.g. Loan Complexity → Leaderboard).
+  useEffect(() => {
+    const state = location.state as Record<string, unknown> | null;
+    if (!state) return;
+    const ctx = state.dashboardInsightFilterContext as Record<string, unknown> | undefined;
+    if (!ctx || typeof ctx !== "object") return;
+
+    const dp = ctx.datePeriod;
+    if (typeof dp === "string") {
+      const normalized = dp.toLowerCase().trim() as PeriodType;
+      if (VALID_INSIGHT_PERIODS.includes(normalized)) {
+        setPeriod(normalized);
+      }
+    }
+
+    const cg = ctx.channelGroup;
+    if (typeof cg === "string" && cg.trim()) {
+      setSelectedChannel(cg.trim());
+    }
+
+    const ln = ctx.leaderName;
+    if (typeof ln === "string" && ln.trim()) {
+      setPendingLeaderName(ln.trim());
+    }
+
+    const { dashboardInsightFilterContext: _removed, ...rest } = state;
+    navigate(`${location.pathname}${location.search}${location.hash}`, {
+      replace: true,
+      state: Object.keys(rest).length > 0 ? rest : undefined,
+    });
+  }, [location.state, location.pathname, location.search, location.hash, navigate, setSelectedChannel]);
 
   // Calculate date range based on period selection
   const calculateDateRange = useCallback(
@@ -197,6 +248,13 @@ export const LeaderBoardSection = ({
           const quarterStart = startOfQuarter(today);
           return {
             startDate: format(quarterStart, "yyyy-MM-dd"),
+            endDate: format(today, "yyyy-MM-dd"),
+          };
+        }
+        case "ytd": {
+          const yearStart = startOfYear(today);
+          return {
+            startDate: format(yearStart, "yyyy-MM-dd"),
             endDate: format(today, "yyyy-MM-dd"),
           };
         }
@@ -435,6 +493,16 @@ export const LeaderBoardSection = ({
   const top5 = leadersData.slice(0, 5);
   const others = leadersData.slice(5);
 
+  useEffect(() => {
+    if (!pendingLeaderName || leadersData.length === 0) return;
+    const normalized = pendingLeaderName.trim().toLowerCase();
+    const match = leadersData.find((l) => l.name.trim().toLowerCase() === normalized);
+    if (match) {
+      setSelectedLeader(match.id);
+      setPendingLeaderName(null);
+    }
+  }, [pendingLeaderName, leadersData]);
+
   const getExportData = (): ExportData => {
     const headers = [
       "LO Name",
@@ -536,7 +604,7 @@ export const LeaderBoardSection = ({
           />
           {/* To-Date periods */}
           <div className="flex gap-0.5 sm:gap-1 p-0.5 sm:p-1 bg-slate-100/80 dark:bg-slate-800/50 rounded-lg">
-            {(["wtd", "mtd", "qtd"] as const).map((p) => (
+            {(["wtd", "mtd", "qtd", "ytd"] as const).map((p) => (
               <button
                 key={p}
                 onClick={() => setPeriod(p)}

@@ -652,6 +652,18 @@ Each page implements this interface. The orchestrator:
 3. Add stable widget IDs to the frontend view.
 4. That's it — the pipeline, prompts, API, and UI strip are all reusable.
 
+### Loan Complexity (`pageId: loan-complexity`)
+
+Implemented end-to-end alongside Leaderboard:
+
+- **Adapter** (`adapters/loanComplexityAdapter.ts`): Builds `by_time_period` for **MTD, QTD, YTD, LQ, LM, LY** using the same pivot/bar services as the UI. Includes **portfolio WA complexity**, **units**, **portfolio pull-through** on the **application_date** cohort (documented in `pageDescription`), pivot slices per actor/branch/current loan status, bar snapshot (loan officer), and **`status_catalog`** for the LLM.
+- **Pipeline** (`pipeline.ts`): Enriches evidence for `loan-complexity-bar-chart` and `loan-complexity-pivot-*` widgets; **supporting_data** rows include `portfolioWaComplexity` and pull-through; subject dedup recognizes **`complexity_*`** dimensions.
+- **Detail hydrator** (`dashboardInsightDetailHydrator.ts`): Aggregate tables show WA complexity + pull-through by period; subject tables resolve the pivot slice from the **primary** `evidence_ref` widget id (e.g. branch pivot → `branch` slice).
+- **Prompts** (`defaultPromptConfigs.ts`): Loan Complexity block uses **`filter_context`** for this page only (`datePeriod`, optional `channelGroup`); no Leaderboard cross-links or `leaderName` for navigation.
+- **Frontend** (`LoanComplexityView.tsx`): **`DashboardInsightsStrip`**, generate POST `pageId: loan-complexity`, evidence scroll/highlight to **`loan-complexity-bar-chart`** and **`loan-complexity-pivot-*`** (pivot section expands when targeting a pivot widget).
+- **Leaderboard deep-link** (`LeaderBoardSection.tsx`): Reads **`location.state.dashboardInsightFilterContext`** when navigating from **Leaderboard**-sourced insights (period/channel/LO). Loan Complexity insights do not pass this state—**one insight → one destination** via `sourcePageId`.
+- **Navigation helper** (`src/lib/dashboardInsightRoutes.ts`): **`getDashboardInsightPath`** / **`getDashboardInsightNavigateState`** centralize `pageId` → route; used by **`DashboardInsightEvidenceModal`** and **`AletheiaPromptsCard`** so critical/main-page “Go to dashboard” opens the correct URL (`/loan-complexity` vs `/insights#leaderboard`).
+
 ### Pre-computed signals
 
 The page adapter (or a shared `signals.ts` module) can pre-compute directional signals for the page data, similar to how `insightMetricsCollector.ts` computes signals for regular insights. Each signal tags a metric with direction (positive/negative/critical/neutral) and magnitude.

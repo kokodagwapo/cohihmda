@@ -75,6 +75,10 @@ export interface SupportingDataByPeriodRow {
   topPerformerName?: string;
   topPerformerUnits?: number;
   topPerformerVolume?: number;
+  /** Loan complexity: portfolio WA complexity for the period */
+  portfolioWaComplexity?: number;
+  /** Loan complexity: portfolio pull-through % (application-date cohort); also mirrored into averagePullThrough for evidence UI */
+  portfolioPullThrough?: number;
 }
 
 export interface SupportingData {

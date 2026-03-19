@@ -3,12 +3,23 @@ import { X, AlertCircle, AlertTriangle, CheckCircle2, Info, ChevronRight } from 
 import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import type { DashboardInsightItem } from "@/hooks/useDashboardInsights";
+import {
+  getDashboardInsightPath,
+  getDashboardInsightNavigateState,
+} from "@/lib/dashboardInsightRoutes";
 
 /** Static map: widgetId -> label (matches leaderboard adapter widget catalog) */
 const WIDGET_LABELS: Record<string, string> = {
   "leaderboard-main-table": "Leaderboard",
   "kpi-top-performer-units": "Top performer (units)",
   "kpi-top-performer-volume": "Top performer (volume)",
+  "loan-complexity-bar-chart": "Loan complexity (bar chart)",
+  "loan-complexity-pivot-loan-officer": "Loan complexity pivot — Loan Officer",
+  "loan-complexity-pivot-processor": "Loan complexity pivot — Processor",
+  "loan-complexity-pivot-underwriter": "Loan complexity pivot — Underwriter",
+  "loan-complexity-pivot-closer": "Loan complexity pivot — Closer",
+  "loan-complexity-pivot-branch": "Loan complexity pivot — Branch",
+  "loan-complexity-pivot-current-loan-status": "Loan complexity pivot — Current loan status",
 };
 
 function getWidgetLabel(widgetId: string): string {
@@ -65,6 +76,8 @@ export type DashboardInsightEvidenceModalInsight = Pick<
     topPerformerName?: string;
     topPerformerUnits?: number;
     topPerformerVolume?: number;
+    portfolioWaComplexity?: number;
+    portfolioPullThrough?: number;
   }> };
 };
 
@@ -85,14 +98,10 @@ export function DashboardInsightEvidenceModal({
     e.preventDefault();
     e.stopPropagation();
     if (!insight?.sourcePageId) return;
-    const path = insight.sourcePageId ? `/insights#${insight.sourcePageId}` : "/insights";
-    const state: Record<string, unknown> = {
-      scrollToSection: insight.sourcePageId,
-      ...(insight.filter_context
-        ? { dashboardInsightFilterContext: insight.filter_context, sourcePageId: insight.sourcePageId }
-        : {}),
-    };
-    navigate(path, { state });
+    const path = getDashboardInsightPath(insight.sourcePageId);
+    const fc = insight.filter_context as Record<string, unknown> | undefined;
+    const state = getDashboardInsightNavigateState(insight.sourcePageId, fc);
+    navigate(path, { state: Object.keys(state).length > 0 ? state : undefined });
     onClose();
   };
 
@@ -254,8 +263,11 @@ export function DashboardInsightEvidenceModal({
                           <thead>
                             <tr className="border-b border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/50">
                               <th className="px-3 py-2 font-semibold text-slate-700 dark:text-slate-300">Period</th>
-                              {(insight.supporting_data.byPeriod.some((r) => r.averagePullThrough != null)) && (
+                              {(insight.supporting_data.byPeriod.some((r) => r.averagePullThrough != null || r.portfolioPullThrough != null)) && (
                                 <th className="px-3 py-2 font-semibold text-slate-700 dark:text-slate-300">Pull-through</th>
+                              )}
+                              {(insight.supporting_data.byPeriod.some((r) => r.portfolioWaComplexity != null)) && (
+                                <th className="px-3 py-2 font-semibold text-slate-700 dark:text-slate-300">WA complexity</th>
                               )}
                               {(insight.supporting_data.byPeriod.some((r) => r.totalUnits != null)) && (
                                 <th className="px-3 py-2 font-semibold text-slate-700 dark:text-slate-300">Units</th>
@@ -270,12 +282,21 @@ export function DashboardInsightEvidenceModal({
                           </thead>
                           <tbody>
                             {insight.supporting_data.byPeriod.map((row, idx) => {
-                              const showPullThrough = insight.supporting_data!.byPeriod!.some((r) => r.averagePullThrough != null);
+                              const showPullThrough = insight.supporting_data!.byPeriod!.some(
+                                (r) => r.averagePullThrough != null || r.portfolioPullThrough != null
+                              );
+                              const showWaComplexity = insight.supporting_data!.byPeriod!.some((r) => r.portfolioWaComplexity != null);
                               const showUnits = insight.supporting_data!.byPeriod!.some((r) => r.totalUnits != null);
                               const showVolume = insight.supporting_data!.byPeriod!.some((r) => r.totalVolume != null);
                               const showTopPerformer = insight.supporting_data!.byPeriod!.some((r) => r.topPerformerName);
                               const fmtVol = (v: number) =>
                                 v >= 1e6 ? `$${(v / 1e6).toFixed(2)}M` : v >= 1e3 ? `$${(v / 1e3).toFixed(1)}K` : `$${v}`;
+                              const pullThroughDisplay =
+                                row.averagePullThrough != null
+                                  ? `${row.averagePullThrough}%`
+                                  : row.portfolioPullThrough != null
+                                    ? `${row.portfolioPullThrough}%`
+                                    : "—";
                               return (
                                 <tr key={idx} className="border-b border-slate-100 dark:border-slate-700/50 last:border-0">
                                   <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-300">
@@ -283,7 +304,14 @@ export function DashboardInsightEvidenceModal({
                                   </td>
                                   {showPullThrough && (
                                     <td className="px-3 py-2 text-slate-600 dark:text-slate-400">
-                                      {row.averagePullThrough != null ? `${row.averagePullThrough}%` : "—"}
+                                      {pullThroughDisplay}
+                                    </td>
+                                  )}
+                                  {showWaComplexity && (
+                                    <td className="px-3 py-2 text-slate-600 dark:text-slate-400">
+                                      {row.portfolioWaComplexity != null
+                                        ? row.portfolioWaComplexity.toFixed(1)
+                                        : "—"}
                                     </td>
                                   )}
                                   {showUnits && (

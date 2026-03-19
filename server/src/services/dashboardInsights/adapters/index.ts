@@ -4,8 +4,9 @@
 
 import type { DashboardAdapter } from "./baseDashboardAdapter.js";
 import { leaderboardAdapter } from "./leaderboardAdapter.js";
+import { loanComplexityAdapter } from "./loanComplexityAdapter.js";
 
-const adapters: DashboardAdapter[] = [leaderboardAdapter];
+const adapters: DashboardAdapter[] = [leaderboardAdapter, loanComplexityAdapter];
 
 export function getDashboardAdapters(): DashboardAdapter[] {
   return adapters;
@@ -16,4 +17,5 @@ export function getDashboardAdapterByPageId(pageId: string): DashboardAdapter | 
 }
 
 export { leaderboardAdapter } from "./leaderboardAdapter.js";
+export { loanComplexityAdapter } from "./loanComplexityAdapter.js";
 export type { DashboardAdapter } from "./baseDashboardAdapter.js";

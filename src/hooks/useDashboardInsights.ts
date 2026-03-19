@@ -12,6 +12,8 @@ export interface DashboardInsightEvidenceRef {
 export interface DashboardInsightFilterContext {
   datePeriod?: string;
   channelGroup?: string;
+  /** For Leaderboard deep-link from Loan Complexity (or other) insights */
+  leaderName?: string;
   [key: string]: unknown;
 }
 
@@ -25,6 +27,10 @@ export interface SupportingDataByPeriodRow {
   topPerformerName?: string;
   topPerformerUnits?: number;
   topPerformerVolume?: number;
+  /** Loan complexity: portfolio WA complexity */
+  portfolioWaComplexity?: number;
+  /** Loan complexity: same cohort as complexity (application-date window) */
+  portfolioPullThrough?: number;
 }
 
 export interface SupportingData {

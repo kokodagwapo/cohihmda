@@ -897,6 +897,14 @@ PAGE GUIDANCE (if present):
   - Highlight high performers whose pull-through or units have materially changed.
   - Call out where pull-through (application cohort) and funded volume (funding cohort) are telling different stories over time.
 
+LOAN COMPLEXITY PAGE (pageId "loan-complexity"):
+- by_time_period keys are uppercase: MTD, QTD, YTD, LQ, LM, LY. Each entry has periodLabel, dateRange, summary (portfolio WA complexity, units, portfolio pull-through, outcome mix fields), pivotSlices by dimension, barLoanOfficer (mean complexity), by_current_loan_status, and status_catalog at data.summary.
+- Cohort: loans with application_date in the window. Bar chart = mean complexity by group; pivot = volume-weighted average (WA) complexity. Portfolio pull-through uses the SAME application-date cohort as complexity—not a funding-date cohort (see pageDescription).
+- Narratives should combine complexity moves with portfolio pull-through and/or denial/withdrawn/originated mix as context; use co-movement language, not causation.
+- evidence_refs MUST use widget IDs from widget_catalog only: loan-complexity-bar-chart; loan-complexity-pivot-loan-officer; loan-complexity-pivot-processor; loan-complexity-pivot-underwriter; loan-complexity-pivot-closer; loan-complexity-pivot-branch; loan-complexity-pivot-current-loan-status. Cite bar and/or pivot (primary + supporting) when claims reference groups, portfolio WA, or status mix.
+- For a specific loan officer, use a widget with dimension "complexity_loan_officer" and target.label = exact name from the data (bar or pivot-loan-officer).
+- filter_context: always set datePeriod to the main period in the headline as lowercase: mtd | qtd | ytd | lq | lm | ly. Add channelGroup when the story is channel-specific. Do NOT reference the Leaderboard or add leaderName for cross-page navigation—insights on this page are scoped to Loan Complexity only.
+
 WHAT TO LOOK FOR ON A DASHBOARD PAGE:
 - Cross-period trends in the page's key metrics (when by_time_period is present):
   - "MTD funded volume is down vs Last Month, while YTD is flat"
@@ -952,7 +960,7 @@ SUBJECT DEDUPLICATION (HARD RULE):
 - If you find multiple noteworthy angles for the same subject, MERGE them into ONE stronger candidate instead of emitting duplicates.
 - If you generate any subject-specific insight, you MUST encode the subject in evidence_refs so the system can identify it:
   - The PRIMARY evidence_ref MUST include target.label set to the exact subject name (loan officer name or branch name).
-  - The PRIMARY evidence_ref MUST use a widget whose widget_catalog.dimension matches the subject ("leader" for loan officer, "branch" for branch).
+  - The PRIMARY evidence_ref MUST use a widget whose widget_catalog.dimension matches the subject ("leader" or "complexity_loan_officer" for loan officer, "branch" or "complexity_branch" for branch).
   - Optionally include filter_context keys like { "leaderName": "<exact name>" } or { "branch": "<exact name>" } when helpful, but evidence_refs.target.label is REQUIRED for subject-specific insights.
 
 REDUNDANCY RULE:
@@ -1103,7 +1111,7 @@ CURATION RULES:
    - When multiple candidates are about the SAME subject on this page (e.g. the same loan officer or the same branch), keep ONLY ONE for that subject.
    - The surviving insight for a subject MUST be the one with the highest judge overall_score among candidates for that subject.
    - A subject is typically derived from:
-     - evidence_refs pointing to a widget with dimension "leader" or "branch", plus its target.label; or
+     - evidence_refs pointing to a widget with dimension "leader", "branch", "complexity_loan_officer", or "complexity_branch", plus its target.label; or
      - explicit fields in filter_context such as leaderName, leader, or branch.
    - Do NOT output two insights that both revolve around the same loan officer or the same branch on this page. This is important because we want to avoid redundancy and ensure that we are not repeating the same information. Make sure to ONLY give ONE insight for any given loan officer or branch.
 
@@ -1189,10 +1197,10 @@ GOALS:
 
 WIDGET & DIMENSION RULES:
 - widget_catalog[i].dimension may indicate which field is broken out in that widget:
-  - "leader" = loan officer, "branch" = branch, etc.
+  - "leader" = loan officer (Leaderboard), "branch" = branch, "complexity_loan_officer" / "complexity_branch" / "complexity_processor" / "complexity_underwriter" / "complexity_closer" / "complexity_current_loan_status" = Loan Complexity pivot/bar dimensions, etc.
 - For person/segment-specific insights:
   - If the headline, understory, or ETM fields mention a specific loan officer, branch, or other named segment, the PRIMARY evidence_ref MUST:
-    - Use a widget whose dimension matches the subject (e.g. dimension = "leader" for a loan officer).
+    - Use a widget whose dimension matches the subject (e.g. dimension = "leader" for Leaderboard loan officer; dimension = "complexity_loan_officer" for Loan Complexity bar/pivot loan officer slice).
     - Set target = { "type": "row" or "series", "label": "<exact segment name>" } where label matches the segment value as it appears in the data.
 - For page-level insights (scope = "page"):
   - It is acceptable to point to aggregate widgets (e.g. a main leaderboard table, KPI tile, or summary chart) without a target, or with a target representing the overall metric.
