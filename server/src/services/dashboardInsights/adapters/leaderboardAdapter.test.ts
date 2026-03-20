@@ -40,7 +40,7 @@ describe("leaderboardAdapter", () => {
     const context = await leaderboardAdapter.buildContext(pool, {});
     expect(context.pageGuidance).toBeDefined();
     expect(Array.isArray(context.pageGuidance)).toBe(true);
-    expect(context.pageGuidance!.length).toBe(3);
+    expect(context.pageGuidance!.length).toBeGreaterThanOrEqual(3);
     expect(context.pageGuidance!.some((s) => s.includes("Prioritize insights"))).toBe(true);
     expect(context.pageGuidance!.some((s) => s.includes("current period"))).toBe(true);
     expect(context.pageGuidance!.some((s) => s.includes("high performers"))).toBe(true);

@@ -91,6 +91,8 @@ export interface SupportingDataByPeriodRow {
   waFico?: number;
   waLtv?: number;
   waDti?: number;
+  conventionalQualifiedPercent?: number;
+  governmentQualifiedPercent?: number;
 }
 
 export interface SupportingData {

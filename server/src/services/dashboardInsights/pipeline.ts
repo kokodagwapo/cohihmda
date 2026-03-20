@@ -422,6 +422,36 @@ type CompanyScorecardPeriodData = {
   loanOfficersWithTier?: CompanyScorecardEntityForContext[];
 };
 
+type CreditRiskPeriodApplicationData = {
+  kpis?: {
+    units?: number;
+    volume?: number;
+    wac?: number;
+    waFico?: number;
+    waLtv?: number;
+    waDti?: number;
+  };
+  creditRiskStory?: {
+    conventionalQualifiedPercent?: number;
+    governmentQualifiedPercent?: number;
+  };
+  distributions?: {
+    fico?: Array<{ range?: string; units?: number; percentage?: number; volume?: number }>;
+    ltv?: Array<{ range?: string; units?: number; percentage?: number; volume?: number }>;
+    dti?: Array<{ range?: string; units?: number; percentage?: number; volume?: number }>;
+  };
+  loanMix?: {
+    byType?: Array<{ category?: string; units?: number; unitsPercent?: number; volume?: number; volumePercent?: number }>;
+    byPurpose?: Array<{ category?: string; units?: number; unitsPercent?: number; volume?: number; volumePercent?: number }>;
+    byOccupancy?: Array<{ category?: string; units?: number; unitsPercent?: number; volume?: number; volumePercent?: number }>;
+  };
+};
+
+type CreditRiskPeriodData = {
+  periodLabel?: string;
+  byApplicationType?: Record<string, CreditRiskPeriodApplicationData>;
+};
+
 /**
  * Enrich evidence refs with display values from page context (e.g. leaderboard KPIs and aggregate metrics).
  */
@@ -510,6 +540,60 @@ function enrichEvidenceRefsWithValues(
             1
           )}%)`
         );
+      }
+    }
+
+    // Credit Risk Management — story + KPI + distribution + loan mix widgets
+    if (ref.widgetId.startsWith("credit-risk-")) {
+      const appTypeFromCtx =
+        typeof (context as { filters?: { applicationType?: unknown } }).filters?.applicationType === "string"
+          ? String((context as { filters?: { applicationType?: unknown } }).filters?.applicationType)
+          : "Applications Taken";
+      const insightDatePeriodRaw =
+        typeof (context as { filters?: { datePeriod?: unknown } }).filters?.datePeriod === "string"
+          ? String((context as { filters?: { datePeriod?: unknown } }).filters?.datePeriod).toUpperCase()
+          : null;
+
+      for (const [period, data] of Object.entries(byPeriod as Record<string, CreditRiskPeriodData>)) {
+        if (insightDatePeriodRaw && period !== insightDatePeriodRaw) continue;
+        const appData = data?.byApplicationType?.[appTypeFromCtx] ??
+          data?.byApplicationType?.["Applications Taken"];
+        if (!appData) continue;
+
+        if (ref.widgetId === "credit-risk-kpi-cards") {
+          const k = appData.kpis;
+          if (!k) continue;
+          parts.push(
+            `${period}: ${k.units ?? 0} units, ${currencyFmt(k.volume ?? 0)} volume, WAC ${(k.wac ?? 0).toFixed(3)}, WA FICO ${Math.round(k.waFico ?? 0)}, WA LTV ${(k.waLtv ?? 0).toFixed(1)}%, WA DTI ${(k.waDti ?? 0).toFixed(1)}%`
+          );
+        } else if (ref.widgetId === "credit-risk-story-panel") {
+          const s = appData.creditRiskStory;
+          if (!s) continue;
+          parts.push(
+            `${period}: Conventional qualified ${(s.conventionalQualifiedPercent ?? 0).toFixed(0)}%, Government qualified ${(s.governmentQualifiedPercent ?? 0).toFixed(0)}%`
+          );
+        } else if (ref.widgetId === "credit-risk-fico-distribution" && label) {
+          const row = appData.distributions?.fico?.find((r) => r.range === label);
+          if (!row) continue;
+          parts.push(`${period}: ${row.units ?? 0} units (${(row.percentage ?? 0).toFixed(1)}%), ${currencyFmt(row.volume ?? 0)}`);
+        } else if (ref.widgetId === "credit-risk-ltv-distribution" && label) {
+          const row = appData.distributions?.ltv?.find((r) => r.range === label);
+          if (!row) continue;
+          parts.push(`${period}: ${row.units ?? 0} units (${(row.percentage ?? 0).toFixed(1)}%), ${currencyFmt(row.volume ?? 0)}`);
+        } else if (ref.widgetId === "credit-risk-dti-distribution" && label) {
+          const row = appData.distributions?.dti?.find((r) => r.range === label);
+          if (!row) continue;
+          parts.push(`${period}: ${row.units ?? 0} units (${(row.percentage ?? 0).toFixed(1)}%), ${currencyFmt(row.volume ?? 0)}`);
+        } else if (ref.widgetId === "credit-risk-loan-mix-table" && label) {
+          const row =
+            appData.loanMix?.byType?.find((r) => r.category === label) ??
+            appData.loanMix?.byPurpose?.find((r) => r.category === label) ??
+            appData.loanMix?.byOccupancy?.find((r) => r.category === label);
+          if (!row) continue;
+          parts.push(
+            `${period}: ${row.units ?? 0} units (${(row.unitsPercent ?? 0).toFixed(1)}%), ${currencyFmt(row.volume ?? 0)} (${(row.volumePercent ?? 0).toFixed(1)}%)`
+          );
+        }
       }
     }
 
@@ -641,6 +725,8 @@ function getSubjectKey(
 
   if (ctx?.loan_officer != null && typeof ctx.loan_officer === "string")
     return `company_scorecard_loan_officer:${String(ctx.loan_officer).trim()}`;
+  if (ctx?.applicationType != null && typeof ctx.applicationType === "string")
+    return `credit_risk_application_type:${String(ctx.applicationType).trim()}`;
 
   return null;
 }
@@ -734,8 +820,6 @@ function buildSupportingDataFromContext(context: DashboardPageContext): Supporti
 
   const byPeriodRows: SupportingDataByPeriodRow[] = [];
   for (const [period, data] of Object.entries(byPeriod)) {
-    const summary = data?.summary;
-    if (!summary) continue;
     const row: SupportingDataByPeriodRow = {
       period,
       periodLabel: data.periodLabel ?? period,
@@ -769,6 +853,32 @@ function buildSupportingDataFromContext(context: DashboardPageContext): Supporti
       byPeriodRows.push(row);
       continue;
     }
+
+    if (context.pageId === "credit-risk-management") {
+      const periodData = data as CreditRiskPeriodData;
+      const appType = "Applications Taken";
+      const appData = periodData.byApplicationType?.[appType];
+      const k = appData?.kpis;
+      const s = appData?.creditRiskStory;
+      if (!k && !s) continue;
+      if (k?.units != null) row.totalUnits = Number(k.units);
+      if (k?.volume != null) row.totalVolume = Number(k.volume);
+      if (k?.wac != null) row.wac = Number(k.wac);
+      if (k?.waFico != null) row.waFico = Number(k.waFico);
+      if (k?.waLtv != null) row.waLtv = Number(k.waLtv);
+      if (k?.waDti != null) row.waDti = Number(k.waDti);
+      if (s?.conventionalQualifiedPercent != null) {
+        row.conventionalQualifiedPercent = Number(s.conventionalQualifiedPercent);
+      }
+      if (s?.governmentQualifiedPercent != null) {
+        row.governmentQualifiedPercent = Number(s.governmentQualifiedPercent);
+      }
+      byPeriodRows.push(row);
+      continue;
+    }
+
+    const summary = data?.summary;
+    if (!summary) continue;
 
     const lbSummary = summary as {
       topPerformerName?: string;

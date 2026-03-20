@@ -122,6 +122,8 @@ const COLUMN_DEFS: Record<string, { label: string; format: DashboardDetailSnapsh
   waFico: { label: "WA FICO", format: "number" },
   waLtv: { label: "WA LTV", format: "percent" },
   waDti: { label: "WA DTI", format: "percent" },
+  conventionalQualifiedPercent: { label: "Conventional Qualified %", format: "percent" },
+  governmentQualifiedPercent: { label: "Government Qualified %", format: "percent" },
   originatedRevenue: { label: "Originated Revenue", format: "currency" },
 };
 
@@ -361,6 +363,19 @@ const CS_SUBJECT_COLUMN_ORDER = [
   "waDti",
 ];
 
+const CREDIT_RISK_AGG_COLUMN_ORDER = [
+  "period",
+  "periodLabel",
+  "totalUnits",
+  "totalVolume",
+  "wac",
+  "waFico",
+  "waLtv",
+  "waDti",
+  "conventionalQualifiedPercent",
+  "governmentQualifiedPercent",
+];
+
 function buildSnapshotFromRows(
   insight: DashboardInsight,
   rows: Array<Record<string, unknown>>,
@@ -371,7 +386,8 @@ function buildSnapshotFromRows(
     | "loan-complexity-aggregate"
     | "loan-complexity-subject"
     | "company-scorecard-aggregate"
-    | "company-scorecard-subject" = "leaderboard"
+    | "company-scorecard-subject"
+    | "credit-risk-aggregate" = "leaderboard"
 ): DashboardDetailSnapshot {
   const allKeys = new Set<string>();
   rows.forEach((r) => Object.keys(r).forEach((k) => allKeys.add(k)));
@@ -384,6 +400,8 @@ function buildSnapshotFromRows(
           ? CS_SUBJECT_COLUMN_ORDER
           : variant === "company-scorecard-aggregate"
             ? CS_AGG_COLUMN_ORDER
+            : variant === "credit-risk-aggregate"
+              ? CREDIT_RISK_AGG_COLUMN_ORDER
         : isSubjectRows
           ? SUBJECT_COLUMN_ORDER
           : AGGREGATE_COLUMN_ORDER;
@@ -469,6 +487,31 @@ function buildSnapshotFromRows(
         format: "number",
         color: "blue",
       });
+  } else if (variant === "credit-risk-aggregate") {
+    if (first?.totalUnits != null)
+      summaryDefs.push({
+        key: "totalUnits",
+        label: "Units",
+        value: Number(first.totalUnits),
+        format: "number",
+        color: "blue",
+      });
+    if (first?.totalVolume != null)
+      summaryDefs.push({
+        key: "totalVolume",
+        label: "Volume",
+        value: Number(first.totalVolume),
+        format: "currency",
+        color: "blue",
+      });
+    if (first?.wac != null)
+      summaryDefs.push({
+        key: "wac",
+        label: "WAC",
+        value: Number(first.wac),
+        format: "number",
+        color: "blue",
+      });
   } else {
     if (first?.averagePullThrough != null)
       summaryDefs.push({
@@ -533,6 +576,8 @@ function buildSnapshotFromRows(
       ? "Loan complexity by period"
       : variant === "company-scorecard-aggregate" || variant === "company-scorecard-subject"
         ? "Company scorecard tier evolution"
+        : variant === "credit-risk-aggregate"
+          ? "Credit risk trend by period"
         : "Leaderboard by period";
 
   return {
@@ -599,6 +644,32 @@ export function buildDetailFromSupportingData(
     }
   }
 
+  if (context?.pageId === "credit-risk-management") {
+    const byPeriod = supportingData?.byPeriod;
+    if (byPeriod && byPeriod.length > 0) {
+      const rows: Array<Record<string, unknown>> = byPeriod.map((row) => {
+        const out: Record<string, unknown> = {
+          period: row.period,
+          periodLabel: row.periodLabel ?? row.period,
+        };
+        if (row.totalUnits != null) out.totalUnits = row.totalUnits;
+        if (row.totalVolume != null) out.totalVolume = row.totalVolume;
+        if (row.wac != null) out.wac = row.wac;
+        if (row.waFico != null) out.waFico = row.waFico;
+        if (row.waLtv != null) out.waLtv = row.waLtv;
+        if (row.waDti != null) out.waDti = row.waDti;
+        if (row.conventionalQualifiedPercent != null) {
+          out.conventionalQualifiedPercent = row.conventionalQualifiedPercent;
+        }
+        if (row.governmentQualifiedPercent != null) {
+          out.governmentQualifiedPercent = row.governmentQualifiedPercent;
+        }
+        return out;
+      });
+      return buildSnapshotFromRows(insight, rows, options, false, "credit-risk-aggregate");
+    }
+  }
+
   // Aggregate: use supportingData.byPeriod (top performer and period totals per period)
   const byPeriod = supportingData?.byPeriod;
   if (!byPeriod || byPeriod.length === 0) return null;
@@ -616,6 +687,12 @@ export function buildDetailFromSupportingData(
     if (row.topPerformerVolume != null) out.topPerformerVolume = row.topPerformerVolume;
     if (row.portfolioWaComplexity != null) out.portfolioWaComplexity = row.portfolioWaComplexity;
     if (row.portfolioPullThrough != null) out.portfolioPullThrough = row.portfolioPullThrough;
+    if (row.wac != null) out.wac = row.wac;
+    if (row.waFico != null) out.waFico = row.waFico;
+    if (row.waLtv != null) out.waLtv = row.waLtv;
+    if (row.waDti != null) out.waDti = row.waDti;
+    if (row.conventionalQualifiedPercent != null) out.conventionalQualifiedPercent = row.conventionalQualifiedPercent;
+    if (row.governmentQualifiedPercent != null) out.governmentQualifiedPercent = row.governmentQualifiedPercent;
     return out;
   });
 

@@ -14,6 +14,8 @@ import { apiLimiter } from '../../middleware/rateLimiter.js';
 import { callLLM, getOpenAIKey, safeExecuteSQL, formatResultsForLLM, type LLMMessage } from '../../services/research/tools.js';
 import { loadDashboardInsightById } from '../../services/dashboardInsights/storage.js';
 import { getDateRangeForTimeframe } from '../../services/dashboard/analyticsService.js';
+import { buildDetailFromSupportingData } from '../../services/dashboardInsights/dashboardInsightDetailHydrator.js';
+import type { DashboardInsight } from '../../services/dashboardInsights/types.js';
 
 const router = Router();
 
@@ -148,9 +150,46 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
           insightId: insightIdNum,
         });
       }
-      const detailData = row.detail_data as Record<string, any> | null | undefined;
+      let detailData = row.detail_data as Record<string, unknown> | null | undefined;
       if (!detailData || !detailData.title) {
-        console.warn(`[InsightDetails] source=dashboard_insights, insightId=${insightId} — no detail_data (regenerate insights)`);
+        // Backward-compat path for older dashboard insights that have supporting_data
+        // but were saved before detail_data hydration was added.
+        const synthesized = buildDetailFromSupportingData(
+          {
+            id: row.id,
+            headline: row.headline,
+            understory: row.understory ?? '',
+            sentiment: 'neutral',
+            severity_score: 0,
+            cited_numbers: Array.isArray(row.cited_numbers) ? (row.cited_numbers as string[]) : [],
+            what_changed: row.what_changed ?? '',
+            why: row.why ?? '',
+            business_impact: row.business_impact ?? '',
+            risk_if_ignored: row.risk_if_ignored ?? '',
+            recommended_action: row.recommended_action ?? '',
+            owner: row.owner ?? '',
+            scope: 'page',
+            filter_context: (row.filter_context ?? {}) as DashboardInsight['filter_context'],
+            evidence_refs: Array.isArray(row.evidence_refs) ? (row.evidence_refs as DashboardInsight['evidence_refs']) : [],
+            escalate: false,
+            sourcePageId: row.page_id ?? 'dashboard',
+            sourcePageName: row.page_name ?? 'Dashboard',
+            supporting_data: (row.supporting_data ?? undefined) as DashboardInsight['supporting_data'],
+          },
+          (row.supporting_data ?? undefined) as DashboardInsight['supporting_data'],
+          {
+            dateFilter: typeof row.filter_context?.datePeriod === 'string'
+              ? String(row.filter_context.datePeriod)
+              : undefined,
+          }
+        ) as Record<string, unknown> | null;
+        if (synthesized && synthesized.title) {
+          detailData = synthesized;
+          console.log(`[InsightDetails] source=dashboard_insights, insightId=${insightId} — synthesized detail_data from supporting_data`);
+        }
+      }
+      if (!detailData || !detailData.title) {
+        console.warn(`[InsightDetails] source=dashboard_insights, insightId=${insightId} — no detail_data/supporting_data`);
         return res.status(404).json({
           error: 'No detail data available',
           message: 'This insight does not have pre-hydrated detail data. Please regenerate insights to populate evidence tables.',

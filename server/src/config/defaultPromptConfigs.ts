@@ -897,38 +897,6 @@ PAGE GUIDANCE (if present):
   - Highlight high performers whose pull-through or units have materially changed.
   - Call out where pull-through (application cohort) and funded volume (funding cohort) are telling different stories over time.
 
-LOAN COMPLEXITY PAGE (pageId "loan-complexity"):
-- by_time_period keys are uppercase: MTD, QTD, YTD, LQ, LM, LY. Each entry has periodLabel, dateRange, summary (portfolio WA complexity, units, portfolio pull-through, outcome mix fields), pivotSlices by dimension, barLoanOfficer (mean complexity), by_current_loan_status, and status_catalog at data.summary.
-- Cohort: loans with application_date in the window. Bar chart = mean complexity by group; pivot = volume-weighted average (WA) complexity. Portfolio pull-through uses the SAME application-date cohort as complexity—not a funding-date cohort (see pageDescription).
-- Narratives should combine complexity moves with portfolio pull-through and/or denial/withdrawn/originated mix as context; use co-movement language, not causation.
-- evidence_refs MUST use widget IDs from widget_catalog only: loan-complexity-bar-chart; loan-complexity-pivot-loan-officer; loan-complexity-pivot-processor; loan-complexity-pivot-underwriter; loan-complexity-pivot-closer; loan-complexity-pivot-branch; loan-complexity-pivot-current-loan-status. Cite bar and/or pivot (primary + supporting) when claims reference groups, portfolio WA, or status mix.
-- For a specific loan officer, use a widget with dimension "complexity_loan_officer" and target.label = exact name from the data (bar or pivot-loan-officer).
-- filter_context: always set datePeriod to the main period in the headline as lowercase: mtd | qtd | ytd | lq | lm | ly. Add channelGroup when the story is channel-specific. Do NOT reference the Leaderboard or add leaderName for cross-page navigation—insights on this page are scoped to Loan Complexity only.
-
-COMPANY SCORECARD PAGE (pageId "company-scorecard"):
-- by_time_period keys are uppercase time windows derived from your adapter: L13M, L12M, YTD, plus full-year keys like Y_2025 / Y_2024 / Y_2023.
-- Widget evidence ids are:
-  - company-scorecard-summary-tier-table (tier-level summary rows; target.label is one of: Top Tier | Second Tier | Bottom Tier)
-  - company-scorecard-detail-branch-table (entity evidence; target.label is an exact branch name)
-  - company-scorecard-detail-loan-officer-table (entity evidence; target.label is an exact loan officer name)
-- Use the summary table metrics as your PRIMARY “good vs bad” reference:
-  - Applications Taken Units, Applications Taken Volume / Apps $, WAC, Originated Units, Originated %, plus tier-level differences in Withdrawn/Denied Units and their % when they help the story.
-- Pull-through and outcome mix (originated/withdrawn/denied) can be used as supporting context, but they must NOT be the only basis for good vs bad sentiment.
-- Every insight MUST reference tier context:
-  - Tier-focused insights MUST compare Top vs Second vs Bottom using tier summary metrics.
-  - Entity-focused insights MUST state which tier the named branch/loan officer belongs to and compare that entity’s story to other actors in the same tier using the tier summary + the entity’s detail metrics.
-- Always analyze differences between tiers explicitly:
-  - Example logic: if Originated % rises in Top Tier while Apps $ or WAC falls vs prior period, describe the mixed tier story and choose sentiment based on the strongest supported metric movement.
-  - Prefer tier-to-tier comparisons (Top vs Second vs Bottom) over only entity-by-entity narratives.
-- Entity tier movers (branches / loan officers):
-  - If you find multiple possible movers, select the one whose story is strongest per the tier-metric evidence (largest/clearest tier shift + most material improvement/deterioration in the tier-metric columns).
-  - Do NOT pre-fix the mover choice to pull-through/outcome mix; decide based on which tier-metric movement is most pronounced in the data.
-- filter_context:
-  - always set filter_context.datePeriod to the main period in the headline as lowercase keys from your adapter: l13m | l12m | ytd | y_YYYY
-  - for entity-focused insights, set filter_context.entityType to "branch" or "loan_officer" and set filter_context.branch or filter_context.loanOfficer to the exact name
-  - for tier-focused insights, set filter_context.tier to "Top Tier" | "Second Tier" | "Bottom Tier"
-  - for entity-focused insights, set filter_context.tier to the entity's assigned tier (when derivable from the provided tier data)
-
 WHAT TO LOOK FOR ON A DASHBOARD PAGE:
 - Cross-period trends in the page's key metrics (when by_time_period is present):
   - "MTD funded volume is down vs Last Month, while YTD is flat"
@@ -945,6 +913,9 @@ WHAT TO LOOK FOR ON A DASHBOARD PAGE:
 TIMEFRAME & COHORT CLARITY:
 - Every insight MUST clearly state the timeframe(s) it refers to in the headline or understory (e.g. "MTD", "Last Month (LM)", "Last Quarter (LQ)", "YTD").
 - When by_time_period is present, prefer recent and comparable pairs (e.g. MTD vs LM, QTD vs LQ, YTD vs LY).
+- Do NOT infer chronology from JSON/object key order. Determine earlier vs later from period semantics and/or dateRange.
+- For directional wording ("increased/decreased from A to B", "improved vs"), ensure A is earlier and B is later. If chronology is ambiguous, avoid "from/to" phrasing and use neutral comparisons ("X is lower in A than B").
+- Treat rolling windows (e.g., "Last N months", MTD/QTD/YTD windows) as running/current windows that typically end near "today"; treat explicit full-year windows (e.g., Y_2025) as historical closed periods.
 - When this page mixes APPLICATION COHORT metrics (e.g., pull-through, fallout) with FUNDING COHORT metrics (e.g., units funded, funded volume, revenue), be explicit:
   - Make it clear when you are discussing "loans that FUNDED in the period" vs "applications STARTED in the period whose pull-through/turn time completes later".
   - Do NOT claim that short MTD/WTD cohorts have "failed" simply because very few have completed yet.

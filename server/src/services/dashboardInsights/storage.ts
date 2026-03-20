@@ -186,6 +186,8 @@ export async function loadDashboardInsightById(
   insightId: number
 ): Promise<{
   id: number;
+  page_id: string;
+  page_name: string;
   headline: string;
   understory: string | null;
   generated_at: Date;
@@ -202,7 +204,7 @@ export async function loadDashboardInsightById(
   supporting_data: unknown;
 } | null> {
   const result = await tenantPool.query(
-    `SELECT id, headline, understory, generated_at, detail_data,
+    `SELECT id, page_id, page_name, headline, understory, generated_at, detail_data,
             what_changed, why, business_impact, risk_if_ignored, recommended_action, owner,
             filter_context, evidence_refs, cited_numbers, supporting_data
      FROM dashboard_generated_insights

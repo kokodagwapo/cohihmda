@@ -160,6 +160,8 @@ export const leaderboardAdapter: DashboardAdapter = {
       pageDescription: leaderboardAdapter.pageDescription,
       pageGuidance: [
         "Prioritize insights that compare the current period to the immediately prior comparable period (MTD vs LM, QTD vs LQ, YTD vs last year when available).",
+        "Chronology rule (critical): use period semantics/dateRange to determine earlier vs later; do not rely on key order in by_time_period.",
+        "Directional wording rule: any 'increased/decreased from A to B' claim must use earlier->later ordering.",
         "Highlight high performers whose metrics have changed significantly over time, including pull-through, units, and volume.",
         "Call out any significant (+/- 20% or more) improvements and declines for any Loan Officer across periods.",
       ],
