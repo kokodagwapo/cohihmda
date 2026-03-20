@@ -918,19 +918,21 @@ const CompanyScorecard = () => {
           </div>
 
           {/* Dashboard Insights strip */}
-          <DashboardInsightsStrip
-            insights={dashboardInsights}
-            generatedAt={dashboardInsightsGeneratedAt}
-            loading={dashboardInsightsLoading}
-            generating={generateLoading}
-            generateError={generateError}
-            onClearGenerateError={() => setGenerateError(null)}
-            onShowInsight={handleShowInsight}
-            onGenerate={handleGenerateInsights}
-            showGenerateButton
-            dateFilter="ytd"
-            selectedTenantId={selectedTenantId}
-          />
+          <div className="mb-4">
+            <DashboardInsightsStrip
+              insights={dashboardInsights}
+              generatedAt={dashboardInsightsGeneratedAt}
+              loading={dashboardInsightsLoading}
+              generating={generateLoading}
+              generateError={generateError}
+              onClearGenerateError={() => setGenerateError(null)}
+              onShowInsight={handleShowInsight}
+              onGenerate={handleGenerateInsights}
+              showGenerateButton
+              dateFilter="ytd"
+              selectedTenantId={selectedTenantId}
+            />
+          </div>
 
           {/* KPI Cards – shared widget components */}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3 mb-4">
