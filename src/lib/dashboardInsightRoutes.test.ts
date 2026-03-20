@@ -37,4 +37,17 @@ describe("dashboardInsightRoutes", () => {
       getDashboardInsightNavigateState("company-scorecard", { datePeriod: "l13m", branch: "North" })
     ).toEqual({});
   });
+
+  it("getDashboardInsightPath maps credit-risk-management to standalone route", () => {
+    expect(getDashboardInsightPath("credit-risk-management")).toBe("/credit-risk-management");
+  });
+
+  it("getDashboardInsightNavigateState omits filter state for credit-risk-management", () => {
+    expect(
+      getDashboardInsightNavigateState("credit-risk-management", {
+        datePeriod: "l13m",
+        applicationType: "Applications Taken",
+      })
+    ).toEqual({});
+  });
 });
