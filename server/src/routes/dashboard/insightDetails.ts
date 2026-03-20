@@ -12,6 +12,8 @@ import { attachTenantContext, getTenantContext } from '../../middleware/tenantCo
 import { handleDatabaseError } from '../../config/database.js';
 import { apiLimiter } from '../../middleware/rateLimiter.js';
 import { callLLM, getOpenAIKey, safeExecuteSQL, formatResultsForLLM, type LLMMessage } from '../../services/research/tools.js';
+import { loadDashboardInsightById } from '../../services/dashboardInsights/storage.js';
+import { getDateRangeForTimeframe } from '../../services/dashboard/analyticsService.js';
 
 const router = Router();
 
@@ -68,23 +70,43 @@ async function loadInsightDetail(
 }
 
 // ============================================================================
-// Helper: date range calculation
+// Helper: date range calculation (aligned with leaderboard/dashboard timeframes)
 // ============================================================================
 
-function calculateStartDate(dateFilter: string): Date {
-  const now = new Date();
-  switch (dateFilter) {
-    case 'today': {
-      const d = new Date();
-      d.setHours(0, 0, 0, 0);
-      return d;
-    }
-    case 'mtd':
-      return new Date(now.getFullYear(), now.getMonth(), 1);
-    case 'ytd':
-    default:
-      return new Date(now.getFullYear(), 0, 1);
+const DATE_FILTER_LABELS: Record<string, string> = {
+  today: 'Today',
+  wtd: 'Week to Date',
+  mtd: 'Month to Date',
+  qtd: 'Quarter to Date',
+  ytd: 'Year to Date',
+  lm: 'Last Month',
+  lq: 'Last Quarter',
+  ly: 'Last Year',
+};
+
+/** Timeframes supported by getDateRangeForTimeframe in analyticsService */
+type SupportedDateFilter = 'today' | 'wtd' | 'mtd' | 'qtd' | 'ytd' | 'lm' | 'lq' | 'ly';
+
+function getDateRangeForFilter(dateFilter: string): { startDate: Date; endDate: Date; label: string } {
+  const normalized = String(dateFilter).toLowerCase() as SupportedDateFilter;
+  const label = DATE_FILTER_LABELS[normalized] ?? 'Year to Date';
+
+  if (normalized === 'today') {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    const end = new Date();
+    return { startDate: d, endDate: end, label };
   }
+
+  const supported: SupportedDateFilter[] = ['wtd', 'mtd', 'qtd', 'ytd', 'lm', 'lq', 'ly'];
+  const timeframe = supported.includes(normalized) ? normalized : 'ytd';
+  const { start, end } = getDateRangeForTimeframe(timeframe);
+
+  return {
+    startDate: start,
+    endDate: end,
+    label: supported.includes(normalized) ? DATE_FILTER_LABELS[normalized] : label,
+  };
 }
 
 // ============================================================================
@@ -104,7 +126,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
     const tenantPool = tenantContext.tenantPool;
     const { source } = req.params;
     const { dateFilter = 'ytd', insightId } = req.query;
-    const startDate = calculateStartDate(String(dateFilter));
+    const { startDate, endDate, label: dateRangeLabel } = getDateRangeForFilter(String(dateFilter));
 
     if (!insightId) {
       return res.status(400).json({
@@ -113,16 +135,63 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
       });
     }
 
-    const { detailData, generatedAt, etm } = await loadInsightDetail(tenantPool, Number(insightId));
+    const insightIdNum = Number(insightId);
+
+    // Dashboard insights: load from dashboard_generated_insights by id
+    if (source === 'dashboard_insights') {
+      const row = await loadDashboardInsightById(tenantPool, insightIdNum);
+      if (!row) {
+        return res.status(404).json({
+          error: 'Insight not found',
+          message: 'Dashboard insight not found.',
+          source,
+          insightId: insightIdNum,
+        });
+      }
+      const detailData = row.detail_data as Record<string, any> | null | undefined;
+      if (!detailData || !detailData.title) {
+        console.warn(`[InsightDetails] source=dashboard_insights, insightId=${insightId} — no detail_data (regenerate insights)`);
+        return res.status(404).json({
+          error: 'No detail data available',
+          message: 'This insight does not have pre-hydrated detail data. Please regenerate insights to populate evidence tables.',
+          source: 'dashboard_insights',
+          insightId: insightIdNum,
+        });
+      }
+      const etm = detailData.etm ?? (row.what_changed || row.why || row.business_impact
+        ? {
+            what_changed: row.what_changed,
+            why: row.why,
+            business_impact: row.business_impact,
+            risk_if_ignored: row.risk_if_ignored,
+            recommended_action: row.recommended_action,
+            owner: row.owner,
+          }
+        : null);
+      console.log(`[InsightDetails] source=dashboard_insights, insightId=${insightId} — returning detail_data (${(detailData.rows || []).length} rows)`);
+      return res.json({
+        source: 'dashboard_insights',
+        dateFilter,
+        title: detailData.title || row.headline,
+        summary: detailData.summary || {},
+        rows: detailData.rows || [],
+        displayConfig: detailData.displayConfig || { columns: [], summaryMetrics: [] },
+        etm,
+        dateRange: {
+          label: dateRangeLabel,
+          startDate: startDate.toISOString(),
+          endDate: endDate.toISOString(),
+        },
+        ...(row.generated_at ? { dataAsOf: row.generated_at } : {}),
+        comparison: detailData.comparison || null,
+        audit: detailData.audit || null,
+      });
+    }
+
+    // Pipeline insights: load from generated_insights
+    const { detailData, generatedAt, etm } = await loadInsightDetail(tenantPool, insightIdNum);
 
     if (detailData && detailData.title) {
-      const endDate = new Date();
-      const filterLabel: Record<string, string> = {
-        today: 'Today',
-        mtd: 'Month to Date',
-        ytd: 'Year to Date',
-      };
-
       console.log(`[InsightDetails] source=${source}, insightId=${insightId} — returning pre-hydrated detail_data (${(detailData.rows as any[] || []).length} rows)`);
 
       return res.json({
@@ -134,7 +203,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
         displayConfig: detailData.displayConfig || { columns: [], summaryMetrics: [] },
         etm: etm || detailData.etm || null,
         dateRange: {
-          label: filterLabel[String(dateFilter)] || 'Year to Date',
+          label: dateRangeLabel,
           startDate: startDate.toISOString(),
           endDate: endDate.toISOString(),
         },
@@ -150,7 +219,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
       error: 'No detail data available',
       message: 'This insight does not have pre-hydrated detail data. Please regenerate insights to populate evidence tables.',
       source,
-      insightId: Number(insightId),
+      insightId: insightIdNum,
     });
 
   } catch (error: any) {

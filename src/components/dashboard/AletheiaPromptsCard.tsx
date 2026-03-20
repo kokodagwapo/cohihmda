@@ -6,6 +6,10 @@ import React, {
   useRef,
 } from "react";
 import { useNavigate } from "react-router-dom";
+import {
+  getDashboardInsightPath,
+  getDashboardInsightNavigateState,
+} from "@/lib/dashboardInsightRoutes";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Zap,
@@ -42,12 +46,78 @@ import { api } from "@/lib/api";
 import { JobProgress } from "@/components/ui/JobProgress";
 import { CohiBriefingControl } from "@/components/aletheia/CohiBriefingControl";
 import { InsightDetailModal } from "./InsightDetailModal";
+import { DashboardInsightEvidenceModal, type DashboardInsightEvidenceModalInsight } from "./DashboardInsightEvidenceModal";
 import { TrackedInsightsWatchlist } from "./TrackedInsightsWatchlist";
 import { FindingDrillDown } from "@/components/research/FindingDrillDown";
 import { InsightChat } from "./InsightChat";
 import { ExportMenu } from "@/components/common/ExportMenu";
 import type { ExportData } from "@/utils/exportUtils";
 import type { Finding } from "@/hooks/useResearchSession";
+
+// ============================================================================
+// Go to dashboard page (for escalated dashboard insights)
+// ============================================================================
+
+/** Map Aletheia insight (from API) to the shape expected by DashboardInsightEvidenceModal */
+function aletheiaInsightToEvidenceModalInsight(
+  i: AletheiaInsight
+): DashboardInsightEvidenceModalInsight {
+  const typeToSentiment = (
+    t: string
+  ): "positive" | "warning" | "critical" | "neutral" => {
+    if (t === "critical" || t === "error") return "critical";
+    if (t === "warning") return "warning";
+    if (t === "success") return "positive";
+    return "neutral";
+  };
+  return {
+    headline: i.headline ?? i.message ?? "",
+    understory: i.understory ?? "",
+    sentiment: typeToSentiment(i.type ?? "info"),
+    severity_score: i.severity_score ?? 0,
+    what_changed: i.what_changed ?? "",
+    why: i.why ?? "",
+    business_impact: i.business_impact ?? "",
+    risk_if_ignored: i.risk_if_ignored ?? "",
+    recommended_action: i.recommended_action ?? "",
+    owner: i.owner ?? "",
+    sourcePageId: i.sourcePageId ?? "",
+    sourcePageName: i.sourcePageName ?? "",
+    filter_context: i.filter_context ?? {},
+    evidence_refs: i.evidence_refs,
+    cited_numbers: i.cited_numbers,
+    supporting_data: i.supporting_data,
+  };
+}
+
+function GoToDashboardPageButton({
+  sourcePageId,
+  sourcePageName,
+  filterContext,
+}: {
+  sourcePageId: string;
+  sourcePageName: string;
+  filterContext?: Record<string, unknown>;
+}) {
+  const navigate = useNavigate();
+  const handleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const path = getDashboardInsightPath(sourcePageId);
+    const state = getDashboardInsightNavigateState(sourcePageId, filterContext);
+    navigate(path, { state: Object.keys(state).length > 0 ? state : undefined });
+  };
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
+    >
+      Go to {sourcePageName}
+      <ChevronRight className="w-3 h-3" />
+    </button>
+  );
+}
 
 // ============================================================================
 // Bucket configuration
@@ -208,6 +278,7 @@ const SOURCE_CHIP_LABELS: Record<string, string> = {
   leaderboard: "Performance",
   business_overview: "Performance",
   risk_cross_tab: "Credit Risk",
+  dashboard_insights: "Dashboard Insight",
   other: "Insight",
 };
 
@@ -368,6 +439,13 @@ function BucketLane({
                 {insight.headline || insight.message}
               </p>
             </div>
+            {insight.source === "dashboard_insights" && insight.sourcePageId && insight.sourcePageName && (
+              <GoToDashboardPageButton
+                sourcePageId={insight.sourcePageId}
+                sourcePageName={insight.sourcePageName}
+                filterContext={insight.filter_context}
+              />
+            )}
           </div>
           {/* Feedback + admin action buttons — wrapped in Popover so the comment form
               portals to document.body and is never clipped by overflow-hidden ancestors */}
@@ -756,6 +834,11 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedInsight, setSelectedInsight] =
     useState<AletheiaInsight | null>(null);
+  /** When true, show DashboardInsightEvidenceModal for dashboard_insights (fallback when details API returns 404). */
+  const [useDashboardEvidenceModalFallback, setUseDashboardEvidenceModalFallback] = useState(false);
+  useEffect(() => {
+    if (selectedInsight?.source === "dashboard_insights") setUseDashboardEvidenceModalFallback(false);
+  }, [selectedInsight?.source, selectedInsight?.insightId]);
   // Global expand/collapse state: null = uncontrolled (each lane manages itself),
   // true = all expanded, false = all collapsed. Resets to null on individual lane toggle.
   const [globalExpanded, setGlobalExpanded] = useState<boolean | null>(null);
@@ -1369,12 +1452,24 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
         )}
       </motion.div>
 
-      {/* Insight Detail Modal (pipeline insights) */}
-      <InsightDetailModal
-        isOpen={isModalOpen}
+      {/* Dashboard Insight Evidence Modal (fallback when details API returns 404 for dashboard_insights) */}
+      <DashboardInsightEvidenceModal
+        isOpen={isModalOpen && selectedInsight?.source === "dashboard_insights" && useDashboardEvidenceModalFallback}
         onClose={() => {
           setIsModalOpen(false);
           setSelectedInsight(null);
+          setUseDashboardEvidenceModalFallback(false);
+        }}
+        insight={selectedInsight?.source === "dashboard_insights" && selectedInsight ? aletheiaInsightToEvidenceModalInsight(selectedInsight) : null}
+      />
+
+      {/* Insight Detail Modal (pipeline + dashboard_insights; for dashboard_insights fallback to evidence modal on 404) */}
+      <InsightDetailModal
+        isOpen={isModalOpen && selectedInsight != null && (selectedInsight.source !== "dashboard_insights" || !useDashboardEvidenceModalFallback)}
+        onClose={() => {
+          setIsModalOpen(false);
+          setSelectedInsight(null);
+          setUseDashboardEvidenceModalFallback(false);
         }}
         insightSource={selectedInsight?.source || ""}
         insightMessage={selectedInsight?.message || ""}
@@ -1392,6 +1487,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
         } : undefined}
         isTracked={selectedInsight != null && selectedInsight.insightId != null && trackedPipelineMap.has(selectedInsight.insightId)}
         onToggleTrack={selectedInsight ? () => handleToggleTrack(selectedInsight) : undefined}
+        onDetailUnavailable={selectedInsight?.source === "dashboard_insights" ? () => setUseDashboardEvidenceModalFallback(true) : undefined}
       />
 
       {/* Agent Finding Drilldown Modal */}

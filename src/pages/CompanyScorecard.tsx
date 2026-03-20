@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { Navigation } from '@/components/layout/Navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -10,7 +10,7 @@ import { useTheme } from '@/components/theme-provider';
 import { TrendingUp, Trophy, AlertTriangle, Loader2, Maximize2 } from 'lucide-react';
 import { useCompanyScorecardData, ScorecardFilters } from '@/hooks/useCompanyScorecardData';
 import { useFilterOptions } from '@/hooks/useFilterOptions';
-import { DatePeriodPicker, useDatePeriodState, DateRange } from '@/components/ui/DatePeriodPicker';
+import { DatePeriodPicker, useDatePeriodState, DateRange, computePresetDateRange, type PeriodPreset, type PeriodSelection } from '@/components/ui/DatePeriodPicker';
 import { useChannelStore } from '@/stores/channelStore';
 import { useTenantStore } from '@/stores/tenantStore';
 import { useAuth } from '@/contexts/AuthContext';
@@ -20,6 +20,9 @@ import { ExportMenu } from '@/components/common/ExportMenu';
 import { CompanyScorecardDetailTable, SortKey } from '@/components/scorecard/CompanyScorecardDetailTable';
 import type { ExportData } from '@/utils/exportUtils';
 import { KPICard, formatKPIValue } from '@/components/widgets/components/KPICard';
+import { api } from '@/lib/api';
+import { DashboardInsightsStrip } from '@/components/dashboard/DashboardInsightsStrip';
+import { useDashboardInsights, type DashboardInsightItem } from '@/hooks/useDashboardInsights';
 
 const CompanyScorecard = () => {
   const pageRef = useRef<HTMLDivElement>(null);
@@ -80,18 +83,217 @@ const CompanyScorecard = () => {
     tenantId: tenantId // Tenant context (admins viewing other tenants, or user's own tenant)
   };
   const { data, loading, error } = useCompanyScorecardData(filters);
+  const prevCompanyScorecardLoadingRef = useRef<boolean>(loading);
+  const pendingExpectedLoadingRef = useRef<boolean>(false);
+
+  const dashboardInsightFilters = useMemo(() => ({}), []);
+  const {
+    insights: dashboardInsights,
+    generatedAt: dashboardInsightsGeneratedAt,
+    loading: dashboardInsightsLoading,
+    refresh: refreshDashboardInsights,
+  } = useDashboardInsights("company-scorecard", dashboardInsightFilters, { tenantId });
+
+  const [generateLoading, setGenerateLoading] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const [pendingInsightWidgetId, setPendingInsightWidgetId] = useState<string | null>(null);
 
   // Get display label for date period
   const getDatePeriodLabel = () => {
     const today = new Date();
     const currentYear = today.getFullYear();
-    const isYTD = dateRange.end === today.toISOString().split('T')[0];
-    
-    if (isYTD && selectedYear === currentYear) {
-      return 'Year-to-Date';
+    const todayYmd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(
+      today.getDate()
+    ).padStart(2, "0")}`;
+
+    if (periodSelection?.type === "preset" && periodSelection.preset) {
+      if (periodSelection.preset === "rolling-13") return "L13M";
+      if (periodSelection.preset === "rolling-12") return "L12M";
+      return periodSelection.preset;
     }
-    return 'Full Year';
+
+    const effectiveYear = periodSelection?.type === "year" && periodSelection.year != null ? periodSelection.year : selectedYear;
+    const isYtd = effectiveYear === currentYear && dateRange.end === todayYmd;
+    return isYtd ? "Year-to-Date" : "Full Year";
   };
+
+  const handleGenerateInsights = useCallback(async () => {
+    setGenerateLoading(true);
+    setGenerateError(null);
+    try {
+      const tenantParam = selectedTenantId ? `?tenant_id=${encodeURIComponent(selectedTenantId)}` : "";
+      await api.request<{
+        insights: DashboardInsightItem[];
+        count: number;
+        pageId: string;
+        pageName: string;
+        generationBatch: string;
+      }>(`/api/dashboard-insights/generate${tenantParam}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pageId: "company-scorecard",
+          filters: {},
+        }),
+      });
+      await refreshDashboardInsights();
+    } catch (err: unknown) {
+      setGenerateError(
+        err instanceof Error ? err.message : "We couldn't generate insights right now. Please try again later."
+      );
+    } finally {
+      setGenerateLoading(false);
+    }
+  }, [refreshDashboardInsights, selectedTenantId]);
+
+  const handleShowInsight = useCallback(
+    (insight: DashboardInsightItem) => {
+      const fc = insight.filter_context ?? {};
+      const datePeriodRaw = fc.datePeriod;
+      const datePeriod = typeof datePeriodRaw === "string" ? datePeriodRaw.toLowerCase() : null;
+
+      const primaryRef = insight.evidence_refs?.find((r) => r.role === "primary") ?? insight.evidence_refs?.[0];
+      const wid = primaryRef?.widgetId;
+      const targetLabel = primaryRef?.target?.label;
+
+      const today = new Date();
+      const currentYear = today.getFullYear();
+      const todayYmd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(
+        today.getDate()
+      ).padStart(2, "0")}`;
+
+      let expectedLoading = false;
+
+      // 1) Sync the date period picker to the insight timeframe
+      if (datePeriod === "l13m") {
+        expectedLoading =
+          periodSelection?.type !== "preset" || periodSelection.preset !== "rolling-13" || dateRange.end !== todayYmd ? true : false;
+        setPeriodSelection({
+          type: "preset",
+          preset: "rolling-13",
+          dateRange: computePresetDateRange("rolling-13"),
+        });
+      } else if (datePeriod === "l12m") {
+        expectedLoading =
+          periodSelection?.type !== "preset" || periodSelection.preset !== "rolling-12" ? true : false;
+        setPeriodSelection({
+          type: "preset",
+          preset: "rolling-12",
+          dateRange: computePresetDateRange("rolling-12"),
+        });
+      } else if (datePeriod === "ytd") {
+        expectedLoading =
+          periodSelection?.type !== "year" ||
+          periodSelection.year !== currentYear ||
+          dateRange.end !== todayYmd
+            ? true
+            : false;
+        setPeriodSelection({
+          type: "year",
+          year: currentYear,
+          dateRange: { start: `${currentYear}-01-01`, end: todayYmd },
+        });
+      } else if (datePeriod && datePeriod.startsWith("y_")) {
+        const parsedYear = Number(datePeriod.slice(2));
+        if (!Number.isNaN(parsedYear)) {
+          expectedLoading =
+            periodSelection?.type !== "year" ||
+            periodSelection.year !== parsedYear ||
+            dateRange.end !== (parsedYear === currentYear ? todayYmd : `${parsedYear}-12-31`)
+              ? true
+              : false;
+          setPeriodSelection({
+            type: "year",
+            year: parsedYear,
+            dateRange: { start: `${parsedYear}-01-01`, end: parsedYear === currentYear ? todayYmd : `${parsedYear}-12-31` },
+          });
+        }
+      }
+
+      // 2) Sync the entity focus (branch vs loan officer) based on the referenced widget
+      if (wid === "company-scorecard-detail-branch-table" && typeof targetLabel === "string") {
+        setDetailActor("branch");
+        setActiveTab("detail");
+        expectedLoading = expectedLoading || selectedBranch !== targetLabel || selectedLoanOfficer !== "all";
+        setSelectedBranch(targetLabel);
+        setSelectedLoanOfficer("all");
+        setPendingInsightWidgetId(wid);
+        pendingExpectedLoadingRef.current = expectedLoading;
+        return;
+      }
+
+      if (wid === "company-scorecard-detail-loan-officer-table" && typeof targetLabel === "string") {
+        setDetailActor("loan_officer");
+        setActiveTab("detail");
+        expectedLoading = expectedLoading || selectedLoanOfficer !== targetLabel || selectedBranch !== "all";
+        setSelectedLoanOfficer(targetLabel);
+        setSelectedBranch("all");
+        setPendingInsightWidgetId(wid);
+        pendingExpectedLoadingRef.current = expectedLoading;
+        return;
+      }
+
+      // Tier-level narratives live in the summary table.
+      if (wid === "company-scorecard-summary-tier-table") {
+        setDetailActor("branch");
+        setActiveTab("summary");
+        setSelectedBranch("all");
+        setSelectedLoanOfficer("all");
+        setPendingInsightWidgetId(wid);
+        pendingExpectedLoadingRef.current = expectedLoading;
+        return;
+      }
+
+      // 3) Fallback: try to use filter_context.entityType + branch/loanOfficer
+      const entityType = typeof fc.entityType === "string" ? fc.entityType : null;
+      if (entityType === "branch" && typeof fc.branch === "string") {
+        setDetailActor("branch");
+        setActiveTab("detail");
+        expectedLoading = expectedLoading || selectedBranch !== fc.branch || selectedLoanOfficer !== "all";
+        setSelectedBranch(fc.branch);
+        setSelectedLoanOfficer("all");
+        setPendingInsightWidgetId("company-scorecard-detail-branch-table");
+        pendingExpectedLoadingRef.current = expectedLoading;
+        return;
+      }
+      if (entityType === "loan_officer" && typeof (fc as { loanOfficer?: unknown }).loanOfficer === "string") {
+        const lo = (fc as { loanOfficer?: unknown }).loanOfficer as string;
+        setDetailActor("loan_officer");
+        setActiveTab("detail");
+        expectedLoading = expectedLoading || selectedLoanOfficer !== lo || selectedBranch !== "all";
+        setSelectedLoanOfficer(lo);
+        setSelectedBranch("all");
+        setPendingInsightWidgetId("company-scorecard-detail-loan-officer-table");
+        pendingExpectedLoadingRef.current = expectedLoading;
+        return;
+      }
+
+      // 4) Default: page-level / generic narrative
+      setDetailActor("branch");
+      setActiveTab("summary");
+      setSelectedBranch("all");
+      setSelectedLoanOfficer("all");
+      setPendingInsightWidgetId(wid ?? "company-scorecard-summary-tier-table");
+      pendingExpectedLoadingRef.current = expectedLoading;
+    },
+    [setPeriodSelection, periodSelection, dateRange.end, selectedBranch, selectedLoanOfficer]
+  );
+
+  useEffect(() => {
+    const prevLoading = prevCompanyScorecardLoadingRef.current;
+    prevCompanyScorecardLoadingRef.current = loading;
+
+    if (!pendingInsightWidgetId || loading || typeof document === "undefined") return;
+    // If we expected a reload (period/entity changed), only scroll after the loading cycle.
+    if (pendingExpectedLoadingRef.current && !prevLoading) return;
+    const el = document.getElementById(pendingInsightWidgetId);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("ring-2", "ring-amber-400", "ring-offset-2");
+    setTimeout(() => el.classList.remove("ring-2", "ring-amber-400", "ring-offset-2"), 3000);
+    setPendingInsightWidgetId(null);
+    pendingExpectedLoadingRef.current = false;
+  }, [pendingInsightWidgetId, loading]);
 
   // Compute top/bottom performers
   const insights = useMemo(() => {
@@ -715,6 +917,21 @@ const CompanyScorecard = () => {
             </div>
           </div>
 
+          {/* Dashboard Insights strip */}
+          <DashboardInsightsStrip
+            insights={dashboardInsights}
+            generatedAt={dashboardInsightsGeneratedAt}
+            loading={dashboardInsightsLoading}
+            generating={generateLoading}
+            generateError={generateError}
+            onClearGenerateError={() => setGenerateError(null)}
+            onShowInsight={handleShowInsight}
+            onGenerate={handleGenerateInsights}
+            showGenerateButton
+            dateFilter="ytd"
+            selectedTenantId={selectedTenantId}
+          />
+
           {/* KPI Cards – shared widget components */}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3 mb-4">
             <KPICard
@@ -776,7 +993,9 @@ const CompanyScorecard = () => {
             <CardContent>
               <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'summary' | 'detail')}>
                 <TabsContent value="summary" className="mt-0">
-                  <SummaryTable />
+                  <div id="company-scorecard-summary-tier-table">
+                    <SummaryTable />
+                  </div>
                 </TabsContent>
                 <TabsContent value="detail" className="mt-0">
                     <div className="space-y-2">
@@ -867,14 +1086,22 @@ const CompanyScorecard = () => {
                       </div>
                     </div>
                     {data?.totals && (
-                      <CompanyScorecardDetailTable
-                        rows={detailPagedRows}
-                        totals={data.totals}
-                        actor={detailActor}
-                        isDarkMode={isDarkMode}
-                        formatNumber={formatNumber}
-                        formatLargeNumber={formatLargeNumber}
-                      />
+                      <div
+                        id={
+                          detailActor === "branch"
+                            ? "company-scorecard-detail-branch-table"
+                            : "company-scorecard-detail-loan-officer-table"
+                        }
+                      >
+                        <CompanyScorecardDetailTable
+                          rows={detailPagedRows}
+                          totals={data.totals}
+                          actor={detailActor}
+                          isDarkMode={isDarkMode}
+                          formatNumber={formatNumber}
+                          formatLargeNumber={formatLargeNumber}
+                        />
+                      </div>
                     )}
                   </div>
                 </TabsContent>
