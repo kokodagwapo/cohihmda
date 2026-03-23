@@ -17,7 +17,20 @@ import { useTenantStore } from "@/stores/tenantStore";
 import { useTheme } from "@/components/theme-provider";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Loader2, Download, ArrowUp, ArrowDown } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { cn } from "@/lib/utils";
+import {
+  type ColumnFilterState,
+  type LoanDetailFilterKind,
+  type NumericFilterMode,
+  evaluateLoanDetailFilters,
+  isFilterActive,
+} from "@/utils/loanDetailFilters";
+import { Loader2, Download, ArrowUp, ArrowDown, Filter, X } from "lucide-react";
 
 const ROW_HEIGHT = 40;
 const HEADER_HEIGHT = 40;
@@ -125,6 +138,31 @@ export const UNPOPULATED_LOAN_DETAIL_COLUMNS = COLUMNS.filter((c) => c.field ===
 );
 
 const BLANK_PLACEHOLDER = "-";
+const NUMERIC_FIELD_SET = new Set([
+  "loan_amount",
+  "interest_rate",
+  "fico_score",
+  "ltv_ratio",
+  "be_dti_ratio",
+  "loan_term",
+  "lock_days",
+  "number_of_months_interest_only_payments",
+  "income_total_mo_income",
+  "origination_points",
+  "orig_fee_borr_pd",
+  "fees_va_fund_fee_borr",
+  "fees_loan_discount_fee",
+  "fees_loan_discount_fee_borr",
+]);
+const NUMERIC_COLUMN_ID_SET = new Set(["units", "wac", "volume", "fico", "ltv", "be_dti", "loan_term", "locked_days"]);
+const BOOLEAN_COLUMN_ID_SET = new Set(["locked_flag"]);
+
+function getColumnFilterKind(col: ColumnDef): LoanDetailFilterKind {
+  if (BOOLEAN_COLUMN_ID_SET.has(col.id)) return "boolean";
+  if (NUMERIC_COLUMN_ID_SET.has(col.id) || (col.field != null && NUMERIC_FIELD_SET.has(col.field))) return "number";
+  if (col.id.includes("date") || (col.field != null && col.field.includes("date"))) return "date";
+  return "text";
+}
 
 /** Format volume (loan amount) with commas and 2 decimals (e.g. 3,093,200.00). Used only for volume column. */
 function formatVolumeWithCommas(value: number | string | null): string {
@@ -454,16 +492,48 @@ export function LoanDetailView({
 
   const [sortColumnId, setSortColumnId] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const [showFilters, setShowFilters] = useState(false);
+  const [columnFilters, setColumnFilters] = useState<ColumnFilterState>({});
+  const [filterSearchByColumn, setFilterSearchByColumn] = useState<Record<string, string>>({});
 
+  const getFilterRawValue = useCallback((row: LoanDetailRow, col: ColumnDef): unknown => {
+    if (col.id === "units") return 1;
+    if (col.id === "wac") return row.interest_rate;
+    if (col.id === "locked_flag") return isLockedFlagYes(row) ? "Yes" : "No";
+    if (col.field) return (row as unknown as Record<string, unknown>)[col.field];
+    return null;
+  }, []);
+
+  const filteredLoans = useMemo(
+    () => evaluateLoanDetailFilters(loans, columnFilters, (row, columnId) => {
+      const col = columnsToUse.find((item) => item.id === columnId);
+      return col ? getFilterRawValue(row, col) : null;
+    }),
+    [loans, columnFilters, columnsToUse, getFilterRawValue],
+  );
+
+  const hasActiveFilters = useMemo(
+    () => Object.values(columnFilters).some((filter) => isFilterActive(filter)),
+    [columnFilters],
+  );
+  const activeFilterColumnIds = useMemo(() => (
+    new Set(
+      Object.entries(columnFilters)
+        .filter(([, filter]) => isFilterActive(filter))
+        .map(([columnId]) => columnId),
+    )
+  ), [columnFilters]);
+  const filteredCount = filteredLoans.length;
+  const baseCount = loans.length;
   // WAC = sum of (Loan Amount * Interest Rate), formatted as #,##0.000
-  const wacFormatted = useMemo(() => computeWacFormatted(loans), [loans]);
+  const wacFormatted = useMemo(() => computeWacFormatted(filteredLoans), [filteredLoans]);
 
   const sortedLoans = useMemo(
     () =>
       sortColumnId
-        ? sortLoans(loans, sortColumnId, sortDirection, wacFormatted, columnsToUse)
-        : loans,
-    [loans, sortColumnId, sortDirection, wacFormatted, columnsToUse],
+        ? sortLoans(filteredLoans, sortColumnId, sortDirection, wacFormatted, columnsToUse)
+        : filteredLoans,
+    [filteredLoans, sortColumnId, sortDirection, wacFormatted, columnsToUse],
   );
 
   const handleSort = useCallback((columnId: string) => {
@@ -477,16 +547,123 @@ export function LoanDetailView({
     });
   }, []);
 
+  const distinctValuesByColumn = useMemo(() => {
+    const result: Record<string, string[]> = {};
+    for (const col of columnsToUse) {
+      const values = new Set<string>();
+      for (const row of loans) {
+        const raw = getFilterRawValue(row, col);
+        if (raw == null) continue;
+        const value = String(raw).trim();
+        if (value) values.add(value);
+      }
+      result[col.id] = Array.from(values).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    }
+    return result;
+  }, [columnsToUse, loans, getFilterRawValue]);
+
+  const setColumnFilter = useCallback((columnId: string, next: ColumnFilterState[string]) => {
+    setColumnFilters((prev) => ({ ...prev, [columnId]: next }));
+  }, []);
+
+  const clearColumnFilter = useCallback((columnId: string) => {
+    setColumnFilters((prev) => {
+      const next = { ...prev };
+      delete next[columnId];
+      return next;
+    });
+  }, []);
+
+  const toggleTextSelection = useCallback((columnId: string, value: string, kind: LoanDetailFilterKind) => {
+    setColumnFilters((prev) => {
+      const current = prev[columnId];
+      if (kind === "number") {
+        const selected = current?.kind === "number" ? current.selectedValues : [];
+        const selectedValues = selected.includes(value)
+          ? selected.filter((item) => item !== value)
+          : [...selected, value];
+        return {
+          ...prev,
+          [columnId]: { kind: "number", mode: "all", selectedValues },
+        };
+      }
+      const selected = current?.kind === "text" ? current.selectedValues : [];
+      const selectedValues = selected.includes(value)
+        ? selected.filter((item) => item !== value)
+        : [...selected, value];
+      return { ...prev, [columnId]: { kind: "text", selectedValues } };
+    });
+  }, []);
+
+  const clearAllFilters = useCallback(() => setColumnFilters({}), []);
+
+  const activeFilterChips = useMemo(() => {
+    const chips: Array<{ key: string; label: string; onRemove: () => void }> = [];
+    for (const col of columnsToUse) {
+      const filter = columnFilters[col.id];
+      if (!isFilterActive(filter)) continue;
+      if (!filter) continue;
+      if (filter.kind === "text") {
+        for (const value of filter.selectedValues) {
+          chips.push({
+            key: `${col.id}:text:${value}`,
+            label: `${col.label}: ${value}`,
+            onRemove: () => toggleTextSelection(col.id, value, "text"),
+          });
+        }
+        continue;
+      }
+      if (filter.kind === "number") {
+        if (filter.mode === "all") {
+          for (const value of filter.selectedValues) {
+            chips.push({
+              key: `${col.id}:number:${value}`,
+              label: `${col.label}: ${value}`,
+              onRemove: () => toggleTextSelection(col.id, value, "number"),
+            });
+          }
+        } else if (filter.mode === "range") {
+          chips.push({
+            key: `${col.id}:range`,
+            label: `${col.label}: ${filter.min || ""}-${filter.max || ""}`,
+            onRemove: () => clearColumnFilter(col.id),
+          });
+        } else {
+          chips.push({
+            key: `${col.id}:${filter.mode}`,
+            label: `${col.label}: ${filter.mode === "min" ? "Greater Than" : "Less Than"} ${filter.value || ""}`,
+            onRemove: () => clearColumnFilter(col.id),
+          });
+        }
+        continue;
+      }
+      if (filter.kind === "date") {
+        chips.push({
+          key: `${col.id}:date`,
+          label: `${col.label}: ${filter.shortcut || `${filter.from || ""} to ${filter.to || ""}`}`,
+          onRemove: () => clearColumnFilter(col.id),
+        });
+        continue;
+      }
+      chips.push({
+        key: `${col.id}:boolean`,
+        label: `${col.label}: ${filter.value === "yes" ? "Yes" : "No"}`,
+        onRemove: () => clearColumnFilter(col.id),
+      });
+    }
+    return chips;
+  }, [columnsToUse, columnFilters, toggleTextSelection, clearColumnFilter]);
+
   // Size each column to fit header + all cell content (no truncation)
   const { gridColsStyle, totalTableWidth } = useMemo(() => {
-    const widths = columnsToUse.map((c) => getColumnWidthFromContent(c, loans, wacFormatted));
+    const widths = columnsToUse.map((c) => getColumnWidthFromContent(c, sortedLoans, wacFormatted));
     return {
       gridColsStyle: {
         gridTemplateColumns: widths.map((w) => `${w}px`).join(" "),
       },
       totalTableWidth: widths.reduce((a, b) => a + b, 0),
     };
-  }, [loans, wacFormatted, columnsToUse]);
+  }, [sortedLoans, wacFormatted, columnsToUse]);
   // Match sales scorecard details table: gray header row, horizontal row lines only (no vertical column lines)
   const borderTh = isDarkMode ? "border-slate-700" : "border-slate-200";
   const bgTh = isDarkMode ? "bg-slate-800/50 text-slate-300" : "bg-slate-50 text-slate-600";
@@ -507,8 +684,8 @@ export function LoanDetailView({
   const totalScrollHeight = HEADER_HEIGHT + TOTALS_ROW_HEIGHT + bodyHeight;
 
   const totalsByColumn = useMemo(
-    () => columnsToUse.map((c) => getColumnTotal(c, loans, wacFormatted)),
-    [loans, wacFormatted, columnsToUse],
+    () => columnsToUse.map((c) => getColumnTotal(c, sortedLoans, wacFormatted)),
+    [sortedLoans, wacFormatted, columnsToUse],
   );
 
   const exportToExcel = useCallback(() => {
@@ -520,7 +697,7 @@ export function LoanDetailView({
     const rows: string[][] = [];
     rows.push(columnsToUse.map((c) => escapeCsv(c.label)));
     if (sortedLoans.length > 0) {
-      rows.push(columnsToUse.map((c) => escapeCsv(getColumnTotal(c, loans, wacFormatted))));
+      rows.push(columnsToUse.map((c) => escapeCsv(getColumnTotal(c, sortedLoans, wacFormatted))));
       for (let i = 0; i < sortedLoans.length; i++) {
         rows.push(
           columnsToUse.map((c) => escapeCsv(getCellDisplay(c, sortedLoans[i], wacFormatted))),
@@ -534,7 +711,186 @@ export function LoanDetailView({
     link.download = `loan-detail-${new Date().toISOString().split("T")[0]}.csv`;
     link.click();
     URL.revokeObjectURL(link.href);
-  }, [loans, sortedLoans, wacFormatted, columnsToUse]);
+  }, [sortedLoans, wacFormatted, columnsToUse]);
+
+  const renderFilterContent = useCallback((col: ColumnDef) => {
+    const filterKind = getColumnFilterKind(col);
+    const allValues = distinctValuesByColumn[col.id] ?? [];
+    const search = (filterSearchByColumn[col.id] ?? "").toLowerCase();
+    const filteredOptions = search
+      ? allValues.filter((value) => value.toLowerCase().includes(search))
+      : allValues;
+    const filter = columnFilters[col.id];
+
+    if (filterKind === "boolean") {
+      const value = filter?.kind === "boolean" ? filter.value : "all";
+      return (
+        <div className="space-y-2">
+          {(["all", "yes", "no"] as const).map((option) => (
+            <Button
+              key={option}
+              type="button"
+              size="sm"
+              variant={value === option ? "default" : "outline"}
+              className="w-full justify-start"
+              onClick={() => setColumnFilter(col.id, { kind: "boolean", value: option })}
+            >
+              {option === "all" ? "All" : option === "yes" ? "Yes" : "No"}
+            </Button>
+          ))}
+        </div>
+      );
+    }
+
+    if (filterKind === "date") {
+      const dateFilter = filter?.kind === "date" ? filter : { kind: "date" as const };
+      return (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <Input
+              type="date"
+              value={dateFilter.from ?? ""}
+              onChange={(e) => setColumnFilter(col.id, { kind: "date", from: e.target.value, to: dateFilter.to })}
+            />
+            <Input
+              type="date"
+              value={dateFilter.to ?? ""}
+              onChange={(e) => setColumnFilter(col.id, { kind: "date", from: dateFilter.from, to: e.target.value })}
+            />
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            {["last 30 days", "ytd", String(new Date().getFullYear())].map((shortcut) => (
+              <Button
+                key={shortcut}
+                type="button"
+                size="sm"
+                variant={dateFilter.shortcut === shortcut ? "default" : "outline"}
+                onClick={() => setColumnFilter(col.id, { kind: "date", shortcut })}
+              >
+                {shortcut.toUpperCase() === "YTD" ? "YTD" : shortcut}
+              </Button>
+            ))}
+          </div>
+          <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearColumnFilter(col.id)}>
+            Clear
+          </Button>
+        </div>
+      );
+    }
+
+    if (filterKind === "number") {
+      const numberFilter = filter?.kind === "number" ? filter : { kind: "number" as const, mode: "all" as NumericFilterMode, selectedValues: [] };
+      return (
+        <Tabs
+          value={numberFilter.mode}
+          onValueChange={(mode) => setColumnFilter(col.id, { kind: "number", mode: mode as NumericFilterMode, selectedValues: [] })}
+        >
+          <TabsList className="grid w-full grid-cols-4">
+            <TabsTrigger value="all">All</TabsTrigger>
+            <TabsTrigger value="range">Range</TabsTrigger>
+            <TabsTrigger value="min">Greater Than</TabsTrigger>
+            <TabsTrigger value="max">Less Than</TabsTrigger>
+          </TabsList>
+          <TabsContent value="all" className="space-y-2">
+            <Command shouldFilter={false}>
+              <CommandInput
+                placeholder={`Search ${col.label}`}
+                value={filterSearchByColumn[col.id] ?? ""}
+                onValueChange={(value) => setFilterSearchByColumn((prev) => ({ ...prev, [col.id]: value }))}
+              />
+              <CommandList>
+                <CommandEmpty>No values found.</CommandEmpty>
+                {filteredOptions.map((value) => (
+                  <CommandItem key={value} onSelect={() => toggleTextSelection(col.id, value, "number")}>
+                    <span className="mr-2">
+                      {numberFilter.selectedValues.includes(value) ? "✓" : ""}
+                    </span>
+                    {value}
+                  </CommandItem>
+                ))}
+              </CommandList>
+            </Command>
+            <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearColumnFilter(col.id)}>
+              Clear
+            </Button>
+          </TabsContent>
+          <TabsContent value="range" className="space-y-2">
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+              <Input
+                type="number"
+                placeholder="Min"
+                value={numberFilter.min ?? ""}
+                onChange={(e) => setColumnFilter(col.id, { kind: "number", mode: "range", selectedValues: [], min: e.target.value, max: numberFilter.max })}
+              />
+              <span>-</span>
+              <Input
+                type="number"
+                placeholder="Max"
+                value={numberFilter.max ?? ""}
+                onChange={(e) => setColumnFilter(col.id, { kind: "number", mode: "range", selectedValues: [], min: numberFilter.min, max: e.target.value })}
+              />
+            </div>
+            <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearColumnFilter(col.id)}>
+              Clear
+            </Button>
+          </TabsContent>
+          <TabsContent value="min" className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-sm">{">="}</span>
+              <Input
+                type="number"
+                placeholder="Value"
+                value={numberFilter.value ?? ""}
+                onChange={(e) => setColumnFilter(col.id, { kind: "number", mode: "min", selectedValues: [], value: e.target.value })}
+              />
+            </div>
+            <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearColumnFilter(col.id)}>
+              Clear
+            </Button>
+          </TabsContent>
+          <TabsContent value="max" className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-sm">{"<="}</span>
+              <Input
+                type="number"
+                placeholder="Value"
+                value={numberFilter.value ?? ""}
+                onChange={(e) => setColumnFilter(col.id, { kind: "number", mode: "max", selectedValues: [], value: e.target.value })}
+              />
+            </div>
+            <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearColumnFilter(col.id)}>
+              Clear
+            </Button>
+          </TabsContent>
+        </Tabs>
+      );
+    }
+
+    const textFilter = filter?.kind === "text" ? filter : { kind: "text" as const, selectedValues: [] };
+    return (
+      <div className="space-y-2">
+        <Command shouldFilter={false}>
+          <CommandInput
+            placeholder={`Search ${col.label}`}
+            value={filterSearchByColumn[col.id] ?? ""}
+            onValueChange={(value) => setFilterSearchByColumn((prev) => ({ ...prev, [col.id]: value }))}
+          />
+          <CommandList>
+            <CommandEmpty>No values found.</CommandEmpty>
+            {filteredOptions.map((value) => (
+              <CommandItem key={value} onSelect={() => toggleTextSelection(col.id, value, "text")}>
+                <span className="mr-2">{textFilter.selectedValues.includes(value) ? "✓" : ""}</span>
+                {value}
+              </CommandItem>
+            ))}
+          </CommandList>
+        </Command>
+        <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearColumnFilter(col.id)}>
+          Clear
+        </Button>
+      </div>
+    );
+  }, [columnFilters, distinctValuesByColumn, filterSearchByColumn, setColumnFilter, clearColumnFilter, toggleTextSelection]);
 
   return (
     <div className={fillHeight ? "flex flex-1 flex-col min-h-0 min-w-0 h-full" : "space-y-4"}>
@@ -552,19 +908,45 @@ export function LoanDetailView({
               })()}
             </p>
           </div>
-          {!isControlled && (
+          <div className="ml-auto flex items-center gap-2">
             <Button
               variant="outline"
               size="sm"
-              onClick={exportToExcel}
-              disabled={loans.length === 0}
-              className="ml-auto gap-2 border-slate-300 hover:bg-slate-50 dark:border-slate-600 dark:hover:bg-slate-800"
+              onClick={() => setShowFilters((prev) => !prev)}
+              className="gap-2 border-slate-300 hover:bg-slate-50 dark:border-slate-600 dark:hover:bg-slate-800"
             >
-              <Download className="h-4 w-4" />
-              Export to Excel
+              <Filter className="h-4 w-4" />
+              {showFilters ? "Hide Filters" : "Show Filters"}
             </Button>
-          )}
+            {!isControlled && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={exportToExcel}
+                disabled={sortedLoans.length === 0}
+                className="gap-2 border-slate-300 hover:bg-slate-50 dark:border-slate-600 dark:hover:bg-slate-800"
+              >
+                <Download className="h-4 w-4" />
+                Export to Excel
+              </Button>
+            )}
+          </div>
         </div>
+        {hasActiveFilters && (
+          <div className="flex flex-wrap items-center gap-2 px-4 pb-3 border-b border-slate-200/60 dark:border-slate-700/60">
+            {activeFilterChips.map((chip) => (
+              <Badge key={chip.key} variant="outline" className="gap-1 border-emerald-300/80 bg-emerald-50 text-emerald-700 dark:border-emerald-700/80 dark:bg-emerald-900/30 dark:text-emerald-300">
+                <span>{chip.label}</span>
+                <button type="button" onClick={chip.onRemove} className="rounded-sm hover:bg-emerald-200/40 dark:hover:bg-emerald-800/50">
+                  <X className="h-3 w-3" />
+                </button>
+              </Badge>
+            ))}
+            <Button type="button" size="sm" variant="ghost" onClick={clearAllFilters} className="h-7 px-2">
+              Clear All Filters
+            </Button>
+          </div>
+        )}
 
         {error && (
           <div className="p-4 bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-800">
@@ -610,22 +992,60 @@ export function LoanDetailView({
                 {columnsToUse.map((col) => {
                   const isSorted = sortColumnId === col.id;
                   return (
-                    <button
+                    <div
                       key={col.id}
-                      type="button"
-                      onClick={() => handleSort(col.id)}
-                      className={`whitespace-nowrap py-2.5 px-4 text-xs font-semibold text-left flex items-center gap-1 w-full min-w-0 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-colors ${isDarkMode ? "text-slate-300" : "text-slate-600"}`}
+                      className={cn(
+                        "whitespace-nowrap py-2 px-2 text-xs font-semibold text-left flex items-center gap-1 w-full min-w-0 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-colors",
+                        isDarkMode ? "text-slate-300" : "text-slate-600",
+                        activeFilterColumnIds.has(col.id) && "border-b-2 border-emerald-500",
+                      )}
                       role="columnheader"
                       aria-sort={isSorted ? (sortDirection === "asc" ? "ascending" : "descending") : undefined}
                     >
-                      <span className="truncate">{col.label}</span>
-                      {isSorted &&
-                        (sortDirection === "asc" ? (
-                          <ArrowUp className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                        ) : (
-                          <ArrowDown className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                        ))}
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSort(col.id)}
+                        className="flex items-center gap-1 min-w-0 flex-1 px-2"
+                      >
+                        <span className="truncate">{col.label}</span>
+                        {isSorted &&
+                          (sortDirection === "asc" ? (
+                            <ArrowUp className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                          ) : (
+                            <ArrowDown className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                          ))}
+                      </button>
+                      {showFilters && (
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <button
+                              type="button"
+                              className={cn(
+                                "inline-flex items-center justify-center rounded p-1",
+                                activeFilterColumnIds.has(col.id)
+                                  ? "text-emerald-600 dark:text-emerald-400"
+                                  : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100",
+                              )}
+                              aria-label={`Filter ${col.label}`}
+                            >
+                              <Filter className="h-3.5 w-3.5" />
+                            </button>
+                          </PopoverTrigger>
+                          <PopoverContent
+                            align="start"
+                            className={cn(
+                              "p-3",
+                              getColumnFilterKind(col) === "number" ? "w-[420px]" : "w-80",
+                            )}
+                          >
+                            <div className="mb-2 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                              {col.label}
+                            </div>
+                            {renderFilterContent(col)}
+                          </PopoverContent>
+                        </Popover>
+                      )}
+                    </div>
                   );
                 })}
               </div>
@@ -711,7 +1131,9 @@ export function LoanDetailView({
 
         <div className={`flex items-center justify-between gap-4 px-4 py-3 border-t border-slate-200/60 dark:border-slate-700/60 bg-slate-50/50 dark:bg-slate-900/30 ${fillHeight ? "shrink-0" : ""}`}>
           <p className="text-xs text-slate-600 dark:text-slate-400">
-            {total.toLocaleString()} loans
+            {hasActiveFilters
+              ? `${filteredCount.toLocaleString()} of ${baseCount.toLocaleString()} loans`
+              : `${total.toLocaleString()} loans`}
           </p>
         </div>
       </Card>
