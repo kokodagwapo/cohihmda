@@ -584,15 +584,19 @@ export class ApiClient {
     // so only file uploads and chat streams need extended timeouts.
     const isFileUpload = options.body instanceof FormData;
     const isImportEndpoint = endpoint.includes("/import/");
+    const isInsightsGenerateEndpoint = endpoint.includes("/dashboard-insights/generate");
     const isSlowEndpoint =
       endpoint.includes("/loans/funnel") ||
-      endpoint.includes("/dashboard/analytics");
+      endpoint.includes("/dashboard/analytics") ||
+      isInsightsGenerateEndpoint;
     const isChatEndpoint = endpoint.includes("/cohi-chat/");
     const timeoutMs =
       isFileUpload || isImportEndpoint
         ? 600000   // 10 minutes for file uploads/imports
         : isChatEndpoint
         ? 300000   // 5 minutes for AI chat (streaming)
+      : isInsightsGenerateEndpoint
+        ? 180000   // 3 minutes for insight generation (LLM + evidence shaping)
         : 60000;   // 60s default — async job endpoints return 202 immediately
 
     // Create abort controller for timeout (more compatible than AbortSignal.timeout)
@@ -704,11 +708,10 @@ export class ApiClient {
 
       // Handle abort/timeout errors
       if (error.name === "AbortError" || error.message?.includes("timeout")) {
-        const timeoutDuration = isChatEndpoint
-          ? "2 minutes"
-          : isSlowEndpoint
-          ? "60 seconds"
-          : "30 seconds";
+        const timeoutDuration =
+          timeoutMs % 60000 === 0
+            ? `${timeoutMs / 60000} minute${timeoutMs / 60000 === 1 ? "" : "s"}`
+            : `${Math.round(timeoutMs / 1000)} seconds`;
         // Only retry GET requests on timeout — POST/PUT/DELETE are not idempotent
         if (isGetRequest && retries < 1) {
           console.warn(

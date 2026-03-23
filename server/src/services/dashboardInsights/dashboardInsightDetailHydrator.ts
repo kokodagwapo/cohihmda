@@ -125,6 +125,26 @@ const COLUMN_DEFS: Record<string, { label: string; format: DashboardDetailSnapsh
   conventionalQualifiedPercent: { label: "Conventional Qualified %", format: "percent" },
   governmentQualifiedPercent: { label: "Government Qualified %", format: "percent" },
   originatedRevenue: { label: "Originated Revenue", format: "currency" },
+  bucketLabel: { label: "Cohort", format: "text" },
+  cohortDimension: { label: "Dimension", format: "text" },
+  applicationType: { label: "Application Type", format: "text" },
+  unitsPercent: { label: "Units %", format: "percent" },
+  volumePercent: { label: "Volume %", format: "percent" },
+  originatedPercent: { label: "Originated %", format: "percent" },
+  deniedPercent: { label: "Denied %", format: "percent" },
+  withdrawnPercent: { label: "Withdrawn %", format: "percent" },
+  activePercent: { label: "Active %", format: "percent" },
+  loanNumber: { label: "Loan #", format: "text" },
+  borrower: { label: "Borrower", format: "text" },
+  officer: { label: "Officer", format: "text" },
+  loanAmount: { label: "Loan Amount", format: "currency" },
+  currentLoanStatus: { label: "Status", format: "text" },
+  currentMilestone: { label: "Milestone", format: "text" },
+  ficoScore: { label: "FICO", format: "number" },
+  ltvRatio: { label: "LTV", format: "percent" },
+  dtiRatio: { label: "DTI", format: "percent" },
+  applicationDate: { label: "Application Date", format: "date" },
+  closingDate: { label: "Closing Date", format: "date" },
 };
 
 /** Leaderboard entry shape from context.data.by_time_period[period].leaderboard */
@@ -375,6 +395,37 @@ const CREDIT_RISK_AGG_COLUMN_ORDER = [
   "conventionalQualifiedPercent",
   "governmentQualifiedPercent",
 ];
+const CREDIT_RISK_COHORT_TREND_COLUMN_ORDER = [
+  "period",
+  "periodLabel",
+  "applicationType",
+  "cohortDimension",
+  "bucketLabel",
+  "totalUnits",
+  "unitsPercent",
+  "totalVolume",
+  "volumePercent",
+  "waFico",
+  "waLtv",
+  "waDti",
+  "originatedPercent",
+  "deniedPercent",
+  "withdrawnPercent",
+  "activePercent",
+];
+const CREDIT_RISK_COHORT_DETAIL_COLUMN_ORDER = [
+  "loanNumber",
+  "borrower",
+  "officer",
+  "loanAmount",
+  "currentLoanStatus",
+  "currentMilestone",
+  "ficoScore",
+  "ltvRatio",
+  "dtiRatio",
+  "applicationDate",
+  "closingDate",
+];
 
 function buildSnapshotFromRows(
   insight: DashboardInsight,
@@ -387,7 +438,10 @@ function buildSnapshotFromRows(
     | "loan-complexity-subject"
     | "company-scorecard-aggregate"
     | "company-scorecard-subject"
-    | "credit-risk-aggregate" = "leaderboard"
+    | "credit-risk-aggregate"
+    | "credit-risk-cohort-trend"
+    | "credit-risk-cohort-kpis"
+    | "credit-risk-cohort-detail" = "leaderboard"
 ): DashboardDetailSnapshot {
   const allKeys = new Set<string>();
   rows.forEach((r) => Object.keys(r).forEach((k) => allKeys.add(k)));
@@ -402,6 +456,10 @@ function buildSnapshotFromRows(
             ? CS_AGG_COLUMN_ORDER
             : variant === "credit-risk-aggregate"
               ? CREDIT_RISK_AGG_COLUMN_ORDER
+              : variant === "credit-risk-cohort-trend" || variant === "credit-risk-cohort-kpis"
+                ? CREDIT_RISK_COHORT_TREND_COLUMN_ORDER
+                : variant === "credit-risk-cohort-detail"
+                  ? CREDIT_RISK_COHORT_DETAIL_COLUMN_ORDER
         : isSubjectRows
           ? SUBJECT_COLUMN_ORDER
           : AGGREGATE_COLUMN_ORDER;
@@ -512,6 +570,72 @@ function buildSnapshotFromRows(
         format: "number",
         color: "blue",
       });
+  } else if (variant === "credit-risk-cohort-trend" || variant === "credit-risk-cohort-kpis") {
+    if (first?.totalUnits != null)
+      summaryDefs.push({
+        key: "totalUnits",
+        label: "Units",
+        value: Number(first.totalUnits),
+        format: "number",
+        color: "blue",
+      });
+    if (first?.unitsPercent != null)
+      summaryDefs.push({
+        key: "unitsPercent",
+        label: "Units %",
+        value: Number(first.unitsPercent),
+        format: "percent",
+        color: "blue",
+      });
+    if (first?.totalVolume != null)
+      summaryDefs.push({
+        key: "totalVolume",
+        label: "Volume",
+        value: Number(first.totalVolume),
+        format: "currency",
+        color: "blue",
+      });
+    if (first?.waFico != null)
+      summaryDefs.push({
+        key: "waFico",
+        label: "WA FICO",
+        value: Number(first.waFico),
+        format: "number",
+        color: "blue",
+      });
+    if (first?.waLtv != null)
+      summaryDefs.push({
+        key: "waLtv",
+        label: "WA LTV",
+        value: Number(first.waLtv),
+        format: "percent",
+        color: "blue",
+      });
+    if (first?.waDti != null)
+      summaryDefs.push({
+        key: "waDti",
+        label: "WA DTI",
+        value: Number(first.waDti),
+        format: "percent",
+        color: "blue",
+      });
+  } else if (variant === "credit-risk-cohort-detail") {
+    summaryDefs.push({
+      key: "totalUnits",
+      label: "Loans",
+      value: rows.length,
+      format: "number",
+      color: "blue",
+    });
+    if (rows.some((r) => r.loanAmount != null)) {
+      summaryDefs.push({
+        key: "totalVolume",
+        label: "Volume",
+        value: rows.reduce((sum, r) => sum + (Number(r.loanAmount) || 0), 0),
+        format: "currency",
+        color: "blue",
+      });
+    }
   } else {
     if (first?.averagePullThrough != null)
       summaryDefs.push({
@@ -578,6 +702,10 @@ function buildSnapshotFromRows(
         ? "Company scorecard tier evolution"
         : variant === "credit-risk-aggregate"
           ? "Credit risk trend by period"
+        : variant === "credit-risk-cohort-detail"
+          ? "Credit risk cohort loan details"
+          : variant === "credit-risk-cohort-trend" || variant === "credit-risk-cohort-kpis"
+            ? "Credit risk cohort evidence"
         : "Leaderboard by period";
 
   return {
@@ -645,6 +773,23 @@ export function buildDetailFromSupportingData(
   }
 
   if (context?.pageId === "credit-risk-management") {
+    if (Array.isArray(supportingData?.detailRows) && supportingData.detailRows.length > 0) {
+      const profile = supportingData.profile;
+      const variant =
+        profile === "cohort_detail"
+          ? "credit-risk-cohort-detail"
+          : profile === "cohort_kpis"
+            ? "credit-risk-cohort-kpis"
+            : "credit-risk-cohort-trend";
+      return buildSnapshotFromRows(
+        insight,
+        supportingData.detailRows as Array<Record<string, unknown>>,
+        options,
+        false,
+        variant
+      );
+    }
+
     const byPeriod = supportingData?.byPeriod;
     if (byPeriod && byPeriod.length > 0) {
       const rows: Array<Record<string, unknown>> = byPeriod.map((row) => {
@@ -652,12 +797,21 @@ export function buildDetailFromSupportingData(
           period: row.period,
           periodLabel: row.periodLabel ?? row.period,
         };
+        if (row.applicationType != null) out.applicationType = row.applicationType;
+        if (row.cohortDimension != null) out.cohortDimension = row.cohortDimension;
+        if (row.bucketLabel != null) out.bucketLabel = row.bucketLabel;
         if (row.totalUnits != null) out.totalUnits = row.totalUnits;
+        if (row.unitsPercent != null) out.unitsPercent = row.unitsPercent;
         if (row.totalVolume != null) out.totalVolume = row.totalVolume;
+        if (row.volumePercent != null) out.volumePercent = row.volumePercent;
         if (row.wac != null) out.wac = row.wac;
         if (row.waFico != null) out.waFico = row.waFico;
         if (row.waLtv != null) out.waLtv = row.waLtv;
         if (row.waDti != null) out.waDti = row.waDti;
+        if (row.originatedPercent != null) out.originatedPercent = row.originatedPercent;
+        if (row.deniedPercent != null) out.deniedPercent = row.deniedPercent;
+        if (row.withdrawnPercent != null) out.withdrawnPercent = row.withdrawnPercent;
+        if (row.activePercent != null) out.activePercent = row.activePercent;
         if (row.conventionalQualifiedPercent != null) {
           out.conventionalQualifiedPercent = row.conventionalQualifiedPercent;
         }
@@ -666,7 +820,11 @@ export function buildDetailFromSupportingData(
         }
         return out;
       });
-      return buildSnapshotFromRows(insight, rows, options, false, "credit-risk-aggregate");
+      const variant =
+        supportingData.profile === "cohort_period_trend" || supportingData.profile === "cohort_kpis"
+          ? (supportingData.profile === "cohort_kpis" ? "credit-risk-cohort-kpis" : "credit-risk-cohort-trend")
+          : "credit-risk-aggregate";
+      return buildSnapshotFromRows(insight, rows, options, false, variant);
     }
   }
 

@@ -709,9 +709,9 @@ export default function CreditRiskManagement() {
                   { value: kpis.waLtv, label: 'WA LTV', format: 'percent', color: 'sky' },
                   { value: kpis.waDti, label: 'WA DTI', format: 'percent', color: 'rose' },
                 ];
-                return kpiItems.map((item, idx) => (
+                return kpiItems.map((item) => (
                   <KPICard
-                    key={idx}
+                    key={item.label}
                     data={{ value: item.value, label: item.label, format: item.format }}
                     loading={false}
                     error={null}
@@ -754,7 +754,11 @@ export default function CreditRiskManagement() {
                         'bg-gradient-to-r from-amber-500 to-amber-600',
                         'bg-gradient-to-r from-rose-500 to-rose-600',
                       ];
-                      return renderHorizontalBar(item, maxFicoUnits, colors[idx % colors.length], 'fico', idx);
+                      return (
+                        <div key={`fico-${item.range}`}>
+                          {renderHorizontalBar(item, maxFicoUnits, colors[idx % colors.length], 'fico', idx)}
+                        </div>
+                      );
                     })}
                     {(!data?.ficoDistribution || data.ficoDistribution.length === 0) && (
                       <div className="text-sm text-slate-500 dark:text-slate-400 text-center py-4">No FICO data available</div>
@@ -789,7 +793,11 @@ export default function CreditRiskManagement() {
                         'bg-gradient-to-r from-teal-500 to-teal-600',
                         'bg-gradient-to-r from-emerald-500 to-emerald-600',
                       ];
-                      return renderHorizontalBar(item, maxLtvUnits, colors[idx % colors.length], 'ltv', idx);
+                      return (
+                        <div key={`ltv-${item.range}`}>
+                          {renderHorizontalBar(item, maxLtvUnits, colors[idx % colors.length], 'ltv', idx)}
+                        </div>
+                      );
                     })}
                     {(!data?.ltvDistribution || data.ltvDistribution.length === 0) && (
                       <div className="text-sm text-slate-500 dark:text-slate-400 text-center py-4">No LTV data available</div>
@@ -824,7 +832,11 @@ export default function CreditRiskManagement() {
                         'bg-gradient-to-r from-red-500 to-red-600',
                         'bg-gradient-to-r from-rose-600 to-rose-700',
                       ];
-                      return renderHorizontalBar(item, maxDtiUnits, colors[idx % colors.length], 'dti', idx);
+                      return (
+                        <div key={`dti-${item.range}`}>
+                          {renderHorizontalBar(item, maxDtiUnits, colors[idx % colors.length], 'dti', idx)}
+                        </div>
+                      );
                     })}
                     {(!data?.dtiDistribution || data.dtiDistribution.length === 0) && (
                       <div className="text-sm text-slate-500 dark:text-slate-400 text-center py-4">No DTI data available</div>
@@ -916,12 +928,12 @@ export default function CreditRiskManagement() {
                       </tr>
                     </thead>
                     <tbody>
-                      {currentLoanMix.map((row, idx) => {
+                      {currentLoanMix.map((row) => {
                         const categoryKey = getRangeKey(loanMixTab.toLowerCase().replace(' ', '-'), row.category);
                         const isRowSelected = selectedRanges.has(categoryKey);
                         return (
                           <tr 
-                            key={idx} 
+                            key={`${loanMixTab}-${row.category}`}
                             onClick={(e) => {
                               if (e.ctrlKey || e.metaKey) {
                                 handleRangeToggle(loanMixTab.toLowerCase().replace(' ', '-'), row.category, e);
