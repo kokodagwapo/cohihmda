@@ -111,12 +111,18 @@ export function PricingDashboardColumnsModal({
         for (const f of additionalFields) {
           if (f.columnCreated && f.losFieldId) encompassIdByColumn.set(f.columnName, f.losFieldId);
         }
-        const fields: PricingDashboardColumnDef[] = columns.map((c) => {
-          const title = c.displayName ?? c.name;
-          const encompassId = encompassIdByColumn.get(c.name);
-          const label = encompassId ? `${title} (${encompassId})` : title;
-          return { key: c.name, label };
-        });
+        const HIDDEN_COLUMNS = new Set([
+          'loan_id', 'tenant_id',
+          'created_at', 'updated_at', 'deleted_at',
+        ]);
+        const fields: PricingDashboardColumnDef[] = columns
+          .filter((c) => !HIDDEN_COLUMNS.has(c.name))
+          .map((c) => {
+            const title = c.displayName ?? c.name;
+            const encompassId = encompassIdByColumn.get(c.name);
+            const label = encompassId ? `${title} (${encompassId})` : title;
+            return { key: c.name, label };
+          });
         setAvailableFields(fields);
       })
       .catch(() => {
