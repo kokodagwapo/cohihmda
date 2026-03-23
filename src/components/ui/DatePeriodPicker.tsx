@@ -294,7 +294,18 @@ export const DatePeriodPicker = ({
       start: `${year}-01-01`,
       end: isCurrentYear ? fmtDate(today) : `${year}-12-31`,
     };
-    notify({ type: 'year', year, dateRange });
+    // When year buttons are hidden (showYears=false), clear to a preset so a button stays visibly selected
+    if (!showYears && effectivePresets.length > 0) {
+      const preset = defaultPreset ?? effectivePresets[0];
+      setActiveType('preset');
+      setActivePreset(preset);
+      const presetRange = computePresetDateRange(preset);
+      const selection: PeriodSelection = { type: 'preset', preset, dateRange: presetRange };
+      pendingSelectionRef.current = selection;
+      notify(selection);
+    } else {
+      notify({ type: 'year', year, dateRange });
+    }
   };
 
   // ---- Styling helpers -----------------------------------------------------
@@ -309,9 +320,16 @@ export const DatePeriodPicker = ({
   // When "All" is selected in the store, only "All" should appear active (override year/preset/custom)
   const allSelected = Boolean(showAllOption && periodSelectionFromStore == null);
   // When controlled (periodSelectionFromStore provided), derive active state from prop so selection
-  // appears immediately when parent updates (e.g. after setState in onPeriodChange), matching Sales Trends.
+  // appears immediately when parent updates. Also treat pending selection as active so L13M/L12M
+  // appear selected right after click before the parent re-renders.
   const isActive = (type: 'year' | 'preset' | 'custom', value?: number | PeriodPreset) => {
     if (allSelected) return false;
+    const pending = pendingSelectionRef.current;
+    if (pending) {
+      if (type === 'year' && pending.type === 'year' && pending.year === value) return true;
+      if (type === 'preset' && pending.type === 'preset' && pending.preset === value) return true;
+      if (type === 'custom' && pending.type === 'custom') return true;
+    }
     if (periodSelectionFromStore != null) {
       const s = periodSelectionFromStore;
       if (type === 'year') return s.type === 'year' && s.year === value;

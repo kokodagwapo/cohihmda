@@ -8,7 +8,7 @@ $env:AWS_REGION = "us-east-2"
 
 # Project Configuration
 $PROJECT_NAME = "coheus"
-$ENVIRONMENT = "dev"  # Change to 'staging' or 'prod' as needed
+$ENVIRONMENT = "prod"  # Change to 'staging' or 'prod' as needed
 
 # ============================================================================
 # EXISTING VPC CONFIGURATION

@@ -2,6 +2,7 @@ import crypto from "crypto";
 import type { Pool } from "pg";
 import { loadEmailTemplate, replacePlaceholders } from "./emailTemplateLoader.js";
 import { sendEmail } from "./emailService.js";
+import { getPlatformSetting } from "./platformSettingsService.js";
 
 export type FalloutAlertResponseType =
   | "acknowledged"
@@ -35,6 +36,13 @@ interface RiskLoanRow {
   risk_level: string;
   predicted_outcome: "withdraw" | "deny" | "originate";
   risk_factors: string[] | null;
+  fico_score: number | null;
+  ltv_ratio: number | null;
+  dti_ratio: number | null;
+  interest_rate: number | null;
+  active_days: number | null;
+  current_milestone: string | null;
+  close_late_risk: boolean | null;
 }
 
 interface RecipientLoan {
@@ -47,6 +55,8 @@ interface RecipientLoan {
   predictedOutcome: "withdraw" | "deny" | "originate";
   estimatedClosingDate: string | null;
   riskReasons: string[];
+  loanMetrics: Record<string, string | number | null>;
+  closeLateRisk: boolean;
 }
 
 interface ResolvedRecipient {
@@ -63,6 +73,8 @@ export interface SendFalloutAlertsResult {
   failedRecipients: Array<{ email: string; error: string }>;
   skippedLoansCount: number;
   highRiskLoanCount: number;
+  devMode: boolean;
+  devRedirectedTo?: string[];
   testRecipients: {
     attempted: number;
     sent: number;
@@ -79,6 +91,61 @@ export interface SendFalloutAlertsResult {
     failed: Array<{ email: string; error: string }>;
     loanCount: number;
   };
+}
+
+function isProductionEnv(): boolean {
+  return process.env.NODE_ENV === "production";
+}
+
+function getDevAllowedEmailsFromEnv(): string[] {
+  const raw = process.env.FALLOUT_DEV_ALLOWED_EMAILS?.trim();
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+async function getDevAllowedEmails(): Promise<string[]> {
+  try {
+    const dbValue = await getPlatformSetting("fallout_dev_allowed_emails");
+    if (dbValue) {
+      const parsed = JSON.parse(dbValue);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.filter((e: unknown) => typeof e === "string" && e.trim()).map((e: string) => e.trim().toLowerCase());
+      }
+    }
+  } catch {
+    // DB read failed — fall through to env
+  }
+  return getDevAllowedEmailsFromEnv();
+}
+
+async function isEmailRedirectEnabled(): Promise<boolean> {
+  try {
+    const dbValue = await getPlatformSetting("fallout_email_redirect_enabled");
+    if (dbValue !== null && dbValue !== undefined) {
+      return dbValue === "true";
+    }
+  } catch {
+    // fall through
+  }
+  // Safety net: if not production, implicitly redirect
+  return !isProductionEnv();
+}
+
+/**
+ * Returns the effective redirect mode for fallout emails.
+ * redirectActive = true means emails should go to the safe list, not real recipients.
+ * This can be triggered by:
+ *   1. The platform setting `fallout_email_redirect_enabled` being explicitly set to true
+ *   2. Running outside of production (NODE_ENV != "production") as a safety net
+ */
+export async function getFalloutDevMode(): Promise<{ isDevMode: boolean; redirectActive: boolean; allowedEmails: string[] }> {
+  const isDevMode = !isProductionEnv();
+  const redirectEnabled = await isEmailRedirectEnabled();
+  const allowedEmails = redirectEnabled ? await getDevAllowedEmails() : [];
+  return { isDevMode, redirectActive: redirectEnabled, allowedEmails };
 }
 
 const UUID_V4_OR_V1_REGEX =
@@ -204,6 +271,18 @@ export async function upsertFalloutAlertConfig(
   return updateResult.rows[0];
 }
 
+/**
+ * Maximum age (in days) of a loan's application_date to be considered current pipeline.
+ * Loans older than this are treated as stale data and excluded from alerts.
+ */
+const PIPELINE_RECENCY_DAYS = 180;
+
+/**
+ * Loans whose estimated_closing_date is more than this many days in the past
+ * are considered overdue/stale and excluded from alerts.
+ */
+const OVERDUE_GRACE_DAYS = 30;
+
 export async function getHighRiskLoansForAlerts(
   tenantPool: Pool,
   config: Pick<FalloutAlertConfig, "min_risk_score" | "include_risk_levels">,
@@ -236,6 +315,15 @@ export async function getHighRiskLoansForAlerts(
         l.estimated_closing_date,
         p.predicted_outcome,
         p.risk_factors,
+        l.fico_score,
+        l.ltv_ratio,
+        l.be_dti_ratio AS dti_ratio,
+        l.interest_rate,
+        (CURRENT_DATE - l.application_date::date) AS active_days,
+        l.current_milestone,
+        CASE WHEN l.estimated_closing_date IS NOT NULL AND l.estimated_closing_date < CURRENT_DATE
+             AND p.predicted_outcome = 'originate'
+             THEN true ELSE false END AS close_late_risk,
         ROUND(COALESCE(
           CASE
             WHEN jsonb_typeof(p.loan_data->'riskSummary') = 'object'
@@ -252,6 +340,10 @@ export async function getHighRiskLoansForAlerts(
       WHERE p.predicted_outcome IN ('withdraw', 'deny')
         AND l.current_loan_status = 'Active Loan'
         AND (l.is_archived IS DISTINCT FROM TRUE)
+        -- Pipeline recency: exclude loans with application_date older than threshold
+        AND (l.application_date IS NULL OR l.application_date >= CURRENT_DATE - ($3 || ' days')::interval)
+        -- Overdue filter: exclude loans whose estimated closing date is far in the past
+        AND (l.estimated_closing_date IS NULL OR l.estimated_closing_date >= CURRENT_DATE - ($4 || ' days')::interval)
     )
     SELECT
       loan_id,
@@ -269,7 +361,14 @@ export async function getHighRiskLoansForAlerts(
         ELSE 'Low'
       END AS risk_level,
       predicted_outcome,
-      risk_factors
+      risk_factors,
+      fico_score,
+      ltv_ratio,
+      dti_ratio,
+      interest_rate,
+      active_days,
+      current_milestone,
+      close_late_risk
     FROM scored
     WHERE risk_score >= $1
       AND (
@@ -281,7 +380,7 @@ export async function getHighRiskLoansForAlerts(
         END
       ) = ANY($2::text[])
     ORDER BY risk_score DESC`,
-    [minScore, allowedLevels],
+    [minScore, allowedLevels, PIPELINE_RECENCY_DAYS, OVERDUE_GRACE_DAYS],
   );
   return result.rows as RiskLoanRow[];
 }
@@ -293,10 +392,18 @@ export async function resolveLoanOfficerEmails(
 ): Promise<{ recipients: ResolvedRecipient[]; skippedLoansCount: number }> {
   if (loans.length === 0) return { recipients: [], skippedLoansCount: 0 };
   const loanOfficerIds = Array.from(
-    new Set(loans.map((loan) => loan.loan_officer_id).filter((v): v is string => Boolean(v))),
+    new Set(
+      loans
+        .map((loan) => loan.loan_officer_id?.trim())
+        .filter((v): v is string => Boolean(v)),
+    ),
   );
   const loanOfficerNames = Array.from(
-    new Set(loans.map((loan) => loan.loan_officer?.trim()).filter((v): v is string => Boolean(v))),
+    new Set(
+      loans
+        .map((loan) => loan.loan_officer?.trim().toLowerCase())
+        .filter((v): v is string => Boolean(v)),
+    ),
   );
 
   const usersResult = await tenantPool.query<{
@@ -310,7 +417,7 @@ export async function resolveLoanOfficerEmails(
        AND email IS NOT NULL
        AND (
          encompass_user_id = ANY($1::text[])
-         OR full_name = ANY($2::text[])
+        OR LOWER(full_name) = ANY($2::text[])
        )`,
     [loanOfficerIds, loanOfficerNames],
   );
@@ -318,8 +425,8 @@ export async function resolveLoanOfficerEmails(
   const byId = new Map<string, { encompass_user_id: string; email: string; full_name: string | null }>();
   const byName = new Map<string, { encompass_user_id: string; email: string; full_name: string | null }>();
   for (const user of usersResult.rows) {
-    byId.set(user.encompass_user_id, user);
-    if (user.full_name) byName.set(user.full_name.trim(), user);
+    byId.set(user.encompass_user_id.trim(), user);
+    if (user.full_name) byName.set(user.full_name.trim().toLowerCase(), user);
   }
 
   const recipientMap = new Map<string, ResolvedRecipient>();
@@ -334,10 +441,13 @@ export async function resolveLoanOfficerEmails(
 
   for (const loan of loans) {
     const matched =
-      (loan.loan_officer_id ? byId.get(loan.loan_officer_id) : undefined) ||
-      (loan.loan_officer ? byName.get(loan.loan_officer.trim()) : undefined);
+      (loan.loan_officer_id ? byId.get(loan.loan_officer_id.trim()) : undefined) ||
+      (loan.loan_officer ? byName.get(loan.loan_officer.trim().toLowerCase()) : undefined);
 
     if (!matched?.email) {
+      console.warn(
+        `[FalloutAlerts] Unable to resolve LO recipient for loan ${loan.loan_id} (loan_officer_id=${loan.loan_officer_id ?? "null"}, loan_officer=${loan.loan_officer ?? "null"})`,
+      );
       skippedLoansCount += 1;
       continue;
     }
@@ -365,6 +475,8 @@ export async function resolveLoanOfficerEmails(
       predictedOutcome: loan.predicted_outcome,
       estimatedClosingDate: loan.estimated_closing_date,
       riskReasons: Array.isArray(loan.risk_factors) ? loan.risk_factors : [],
+      loanMetrics: buildLoanMetrics(loan),
+      closeLateRisk: loan.close_late_risk === true,
     });
   }
 
@@ -381,11 +493,164 @@ function buildActionUrl(
   return `${trimmed}/api/fallout-response/${encodeURIComponent(tenantSlug)}/${encodeURIComponent(token)}?action=${encodeURIComponent(action)}`;
 }
 
+function riskBadgeColor(level: string): { bg: string; color: string } {
+  switch (level) {
+    case "Very High": return { bg: "#ef4444", color: "#ffffff" };
+    case "High": return { bg: "#f97316", color: "#ffffff" };
+    case "Medium": return { bg: "#eab308", color: "#ffffff" };
+    default: return { bg: "#22c55e", color: "#ffffff" };
+  }
+}
+
+function outcomeLabel(loan: RecipientLoan): string {
+  if (loan.predictedOutcome === "deny") return "Likely Decline";
+  if (loan.predictedOutcome === "withdraw") return "Likely Withdraw";
+  if (loan.closeLateRisk) return "Likely Close Late";
+  if (loan.estimatedClosingDate) {
+    const ecd = new Date(loan.estimatedClosingDate);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    ecd.setHours(0, 0, 0, 0);
+    if (today > ecd) return "Past Est. Closing";
+  }
+  return "Likely to Close";
+}
+
+const RISK_FACTOR_LABELS: Record<string, string> = {
+  fico_score: "Credit Score",
+  ltv_ratio: "Loan-to-Value",
+  dti_ratio: "Debt-to-Income",
+  loan_amount: "Loan Amount",
+  interest_rate: "Interest Rate",
+  TurnTime: "Time in Pipeline",
+  turn_time: "Time in Pipeline",
+  active_days: "Days Active",
+  loan_purpose: "Loan Purpose",
+  loan_type: "Loan Type",
+  channel: "Channel",
+  lo_pullthrough: "LO Pull-Through",
+  lo_pullthrough_pct: "LO Pull-Through Rate",
+  uw_pullthrough_pct: "UW Pull-Through Rate",
+  closer_pullthrough_pct: "Closer Pull-Through Rate",
+  processor_pullthrough_pct: "Processor Pull-Through Rate",
+  current_milestone: "Current Milestone",
+  estimated_closing_date: "Est. Closing Date",
+  market_change_delta: "Rate vs Market",
+  lock_expiration_date: "Lock Expiration",
+  property_type: "Property Type",
+  occupancy_type: "Occupancy Type",
+  predicted_outcome: "Model Prediction",
+  confidence: "Model Confidence",
+  confidence_score: "Confidence Score",
+};
+
+function humanizeRiskFactor(raw: string): string {
+  if (RISK_FACTOR_LABELS[raw]) return RISK_FACTOR_LABELS[raw];
+  return raw
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function formatMetricValue(key: string, value: string | number | null): string {
+  if (value == null || value === "") return "";
+  const num = typeof value === "number" ? value : parseFloat(String(value));
+  if (Number.isNaN(num)) return String(value);
+  if (key === "fico_score") return String(Math.round(num));
+  if (key.includes("ratio") || key.includes("pullthrough") || key.includes("pct"))
+    return `${num.toFixed(1)}%`;
+  if (key === "interest_rate" || key === "market_change_delta")
+    return `${num.toFixed(3)}%`;
+  if (key === "loan_amount") return toCurrency(num);
+  if (key === "active_days" || key === "TurnTime" || key === "turn_time")
+    return `${Math.round(num)} days`;
+  return String(Math.round(num * 100) / 100);
+}
+
+function riskFactorWithValue(raw: string, metrics: Record<string, string | number | null>): string {
+  const label = humanizeRiskFactor(raw);
+  const val = metrics[raw];
+  if (val == null || val === "") return label;
+  const formatted = formatMetricValue(raw, val);
+  return formatted ? `${label}: ${formatted}` : label;
+}
+
+function buildLoanMetrics(loan: RiskLoanRow): Record<string, string | number | null> {
+  return {
+    fico_score: loan.fico_score ?? null,
+    ltv_ratio: loan.ltv_ratio ?? null,
+    dti_ratio: loan.dti_ratio ?? null,
+    interest_rate: loan.interest_rate ?? null,
+    active_days: loan.active_days ?? null,
+    TurnTime: loan.active_days ?? null,
+    turn_time: loan.active_days ?? null,
+    loan_amount: loan.loan_amount ?? null,
+    current_milestone: loan.current_milestone ?? null,
+    estimated_closing_date: loan.estimated_closing_date ?? null,
+  };
+}
+
+function generateEmailRecommendations(loan: RecipientLoan): string[] {
+  const recs: string[] = [];
+  const metrics = loan.loanMetrics;
+  const fico = metrics.fico_score != null ? Number(metrics.fico_score) : null;
+  const dti = metrics.dti_ratio != null ? Number(metrics.dti_ratio) : null;
+  const ltv = metrics.ltv_ratio != null ? Number(metrics.ltv_ratio) : null;
+  const activeDays = metrics.active_days != null ? Number(metrics.active_days) : null;
+  const milestone = String(metrics.current_milestone || "").toLowerCase();
+  const ecd = loan.estimatedClosingDate ? new Date(loan.estimatedClosingDate) : null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  if (loan.predictedOutcome === "withdraw") {
+    recs.push("High withdrawal risk — reach out to the borrower directly to confirm their intent to proceed and uncover any competing offers or hesitation.");
+  } else if (loan.predictedOutcome === "deny") {
+    recs.push("Elevated denial risk — review the latest AUS findings and identify any remaining approval paths. Prepare the adverse action framework.");
+  }
+
+  if (loan.closeLateRisk) {
+    recs.push("This loan is at risk of closing late. Confirm all clear-to-close conditions with the processor and establish a firm revised closing date with escrow.");
+  }
+
+  if (ecd && ecd < today) {
+    const overdue = Math.floor((today.getTime() - ecd.getTime()) / 86400000);
+    recs.push(`Estimated closing date passed ${overdue} day(s) ago. Immediately coordinate with title, escrow, and agents for a new closing date. Address lock extension if needed.`);
+  }
+
+  if (fico != null && fico < 640) {
+    recs.push(`FICO ${fico} is near program minimums — consider rapid rescoring and ensure borrower avoids new credit inquiries until closing.`);
+  }
+
+  if (dti != null && dti > 48) {
+    recs.push(`DTI at ${dti.toFixed(1)}% is elevated — review whether paying off a revolving balance or adding co-borrower income could improve qualification.`);
+  }
+
+  if (ltv != null && ltv > 95) {
+    recs.push(`LTV at ${ltv.toFixed(1)}% is near maximum — verify appraisal value is firm and discuss MI options with the borrower.`);
+  }
+
+  if (activeDays != null && activeDays > 45) {
+    recs.push(`Loan has been in pipeline ${activeDays} days — audit all outstanding conditions and assign clear owners with deadlines.`);
+  }
+
+  if (milestone.includes("suspend") || milestone.includes("hold")) {
+    recs.push("File is suspended — identify all suspense conditions and communicate daily with the processor until conditions are cleared.");
+  }
+
+  if (loan.riskReasons.some((r) => r === "TurnTime" || r === "turn_time" || r === "active_days")) {
+    if (!recs.some((r) => r.includes("pipeline"))) {
+      recs.push("Time in pipeline is a key risk signal. Confirm all vendor orders (appraisal, title, HOI) are in and escalate any outstanding items.");
+    }
+  }
+
+  return recs.slice(0, 3);
+}
+
 function buildLoanRowsHtml(
   recipient: ResolvedRecipient,
   tokenByLoanId: Map<string, string>,
   appBaseUrl: string,
   tenantSlug: string,
+  isAppUser = false,
 ): string {
   const appBase = appBaseUrl.replace(/\/+$/, "");
   return recipient.loans
@@ -396,28 +661,115 @@ function buildLoanRowsHtml(
       const workingUrl = buildActionUrl(appBaseUrl, tenantSlug, token, "working_on_it");
       const helpUrl = buildActionUrl(appBaseUrl, tenantSlug, token, "need_help");
       const loanDetailUrl = `${appBase}/fallout-forecast/loan/${encodeURIComponent(loan.loanId)}`;
-      const reasons = loan.riskReasons.slice(0, 3).join(", ") || "Risk factors not specified";
+      const reasons = loan.riskReasons.slice(0, 3).map((r) => riskFactorWithValue(r, loan.loanMetrics)).join(" · ") || "Risk factors not specified";
+      const badge = riskBadgeColor(loan.riskLevel);
+      const recommendations = generateEmailRecommendations(loan);
+
+      const appLinkHtml = isAppUser
+        ? `<tr><td style="padding:12px 16px 0 16px;">
+             <a href="${loanDetailUrl}" style="font-size:12px;color:#3b82f6;text-decoration:none;font-weight:500;">Open full coaching view ↗</a>
+           </td></tr>`
+        : "";
+
+      const recsHtml = recommendations.length > 0
+        ? `<tr>
+          <td style="padding:0 16px 12px 16px;">
+            <p style="margin:0 0 6px 0;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#475569;">Recommended Actions</p>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              ${recommendations.map((rec) => `
+              <tr>
+                <td style="padding:0 0 6px 0;font-size:12px;color:#334155;line-height:1.5;">
+                  <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#3b82f6;margin-right:8px;vertical-align:middle;"></span>
+                  ${rec.replace(/</g, "&lt;").replace(/>/g, "&gt;")}
+                </td>
+              </tr>`).join("")}
+            </table>
+          </td>
+        </tr>`
+        : "";
+
       return `
-      <div class="loan-card">
-        <div class="loan-header">
-          <strong>Loan #${loan.loanNumber}</strong>
-          <span class="pill">${loan.riskLevel} (${loan.riskScore})</span>
-        </div>
-        <div class="loan-meta">
-          <span>Amount: ${toCurrency(loan.amount)}</span>
-          <span>Outcome: ${loan.predictedOutcome}</span>
-          <span>Est. Close: ${toIsoDate(loan.estimatedClosingDate)}</span>
-        </div>
-        <div class="loan-reason">${reasons}</div>
-        <div class="actions">
-          <a href="${gotItUrl}" class="btn btn-ok">Got it</a>
-          <a href="${workingUrl}" class="btn btn-working">Working on it</a>
-          <a href="${helpUrl}" class="btn btn-help">Need help</a>
-        </div>
-        <div style="margin-top:10px;">
-          <a href="${loanDetailUrl}" style="font-size:13px;color:#2563eb;text-decoration:none;font-weight:500;">Open full loan coaching view</a>
-        </div>
-      </div>`;
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+             style="border:1px solid #e2e8f0;border-radius:10px;background:#ffffff;margin:0 0 14px 0;overflow:hidden;">
+        <!-- Loan header row -->
+        <tr style="background:#f8fafc;">
+          <td style="padding:12px 16px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td>
+                  <p style="margin:0;font-size:15px;font-weight:700;color:#0f172a;">
+                    Loan #${loan.loanNumber}
+                  </p>
+                  <p style="margin:3px 0 0;font-size:12px;color:#64748b;">
+                    ${loan.loanOfficerName}
+                  </p>
+                </td>
+                <td align="right" valign="top">
+                  <span style="display:inline-block;background:${badge.bg};color:${badge.color};border-radius:999px;padding:4px 12px;font-size:11px;font-weight:700;letter-spacing:0.3px;white-space:nowrap;">
+                    ${loan.riskLevel} · ${Math.round(loan.riskScore)}
+                  </span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <!-- Meta row -->
+        <tr>
+          <td style="padding:10px 16px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td width="33%" style="font-size:12px;color:#64748b;padding-bottom:4px;">
+                  <span style="font-weight:600;color:#475569;">Amount</span><br>${toCurrency(loan.amount)}
+                </td>
+                <td width="33%" style="font-size:12px;color:#64748b;padding-bottom:4px;">
+                  <span style="font-weight:600;color:#475569;">Outlook</span><br>${outcomeLabel(loan)}
+                </td>
+                <td width="34%" style="font-size:12px;color:#64748b;padding-bottom:4px;">
+                  <span style="font-weight:600;color:#475569;">Est. Close</span><br>${toIsoDate(loan.estimatedClosingDate)}
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <!-- Risk reasons row -->
+        <tr>
+          <td style="padding:0 16px 12px 16px;">
+            <p style="margin:0;font-size:12px;color:#64748b;line-height:1.5;border-left:3px solid #e2e8f0;padding-left:10px;">
+              ${reasons}
+            </p>
+          </td>
+        </tr>
+        <!-- Recommendations row -->
+        ${recsHtml}
+        <!-- Action buttons row -->
+        <tr style="background:#f8fafc;border-top:1px solid #e2e8f0;">
+          <td style="padding:12px 16px;">
+            <table role="presentation" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="padding-right:8px;">
+                  <a href="${gotItUrl}"
+                     style="display:inline-block;background:#0f766e;color:#ffffff;text-decoration:none;padding:8px 16px;border-radius:6px;font-size:12px;font-weight:600;letter-spacing:0.2px;">
+                    Resolved ✓
+                  </a>
+                </td>
+                <td style="padding-right:8px;">
+                  <a href="${workingUrl}"
+                     style="display:inline-block;background:#1d4ed8;color:#ffffff;text-decoration:none;padding:8px 16px;border-radius:6px;font-size:12px;font-weight:600;letter-spacing:0.2px;">
+                    Working on it
+                  </a>
+                </td>
+                <td>
+                  <a href="${helpUrl}"
+                     style="display:inline-block;background:#b91c1c;color:#ffffff;text-decoration:none;padding:8px 16px;border-radius:6px;font-size:12px;font-weight:600;letter-spacing:0.2px;">
+                    Need help
+                  </a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        ${appLinkHtml}
+      </table>`;
     })
     .join("");
 }
@@ -439,7 +791,7 @@ function buildManagerLoanCardsHtml({
     .map((loan) => {
       const loanDetailUrl = `${appBase}/fallout-forecast/loan/${encodeURIComponent(loan.loan_id)}`;
       const reasons = Array.isArray(loan.risk_factors)
-        ? loan.risk_factors.slice(0, 3).join(", ")
+        ? loan.risk_factors.slice(0, 3).map(humanizeRiskFactor).join(", ")
         : "Risk factors not specified";
       return `
         <div style="border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;margin:0 0 10px;">
@@ -613,11 +965,47 @@ export async function sendFalloutAlerts({
   };
 }): Promise<SendFalloutAlertsResult> {
   const highRiskLoans = await getHighRiskLoansForAlerts(tenantPool, config);
+  console.log(
+    `[FalloutAlerts] Found ${highRiskLoans.length} high-risk loans (minScore=${config.min_risk_score}, levels=${
+      Array.isArray(config.include_risk_levels)
+        ? config.include_risk_levels.join(",")
+        : ""
+    })`,
+  );
   const { recipients: resolvedRecipients, skippedLoansCount } = await resolveLoanOfficerEmails(
     tenantPool,
     highRiskLoans,
     config.target_encompass_user_ids,
   );
+  console.log(
+    `[FalloutAlerts] Recipient resolution: ${resolvedRecipients.length} resolved, ${skippedLoansCount} skipped`,
+  );
+
+  const devMode = !isProductionEnv();
+  const redirectActive = await isEmailRedirectEnabled();
+  const devAllowedEmails = redirectActive ? await getDevAllowedEmails() : [];
+
+  if (redirectActive && devAllowedEmails.length === 0) {
+    console.warn(
+      "[FalloutAlerts] EMAIL REDIRECT: Redirect is enabled but no safe email addresses configured. " +
+      "Blocking all LO and manager emails to prevent sending to real users. " +
+      "Only manual test recipients will be sent.",
+    );
+  }
+
+  if (redirectActive && devAllowedEmails.length > 0) {
+    let redirectIdx = 0;
+    for (const recipient of resolvedRecipients) {
+      recipient.email = devAllowedEmails[redirectIdx % devAllowedEmails.length];
+      redirectIdx++;
+    }
+    console.log(
+      `[FalloutAlerts] EMAIL REDIRECT: Redirected ${resolvedRecipients.length} LO recipients to ${devAllowedEmails.join(", ")}`,
+    );
+  } else if (redirectActive) {
+    resolvedRecipients.length = 0;
+  }
+
   const manualTestRecipients = Array.from(
     new Set(
       (Array.isArray(testRecipientEmails) ? testRecipientEmails : [])
@@ -638,6 +1026,8 @@ export async function sendFalloutAlerts({
       predictedOutcome: loan.predicted_outcome,
       estimatedClosingDate: loan.estimated_closing_date,
       riskReasons: Array.isArray(loan.risk_factors) ? loan.risk_factors : [],
+      loanMetrics: buildLoanMetrics(loan),
+      closeLateRisk: loan.close_late_risk === true,
     })),
   }));
   const loRecipientEmailSet = new Set(
@@ -662,6 +1052,21 @@ export async function sendFalloutAlerts({
     failed: [] as Array<{ email: string; error: string }>,
   };
 
+  // Build set of app user emails to conditionally include app hyperlinks
+  const allRecipientEmails = recipients.map((r) => r.email.trim().toLowerCase()).filter(Boolean);
+  let appUserEmailSet = new Set<string>();
+  if (allRecipientEmails.length > 0) {
+    try {
+      const appUsersResult = await tenantPool.query<{ email: string }>(
+        `SELECT LOWER(email) AS email FROM public.users WHERE LOWER(email) = ANY($1::text[]) AND is_active = true`,
+        [allRecipientEmails],
+      );
+      appUserEmailSet = new Set(appUsersResult.rows.map((r) => r.email));
+    } catch {
+      // Non-critical — default to no app links if lookup fails
+    }
+  }
+
   for (const recipient of recipients) {
     const tokenByLoanId = new Map<string, string>();
     for (const loan of recipient.loans) {
@@ -676,11 +1081,15 @@ export async function sendFalloutAlerts({
       tokenByLoanId.set(loan.loanId, token);
     }
 
-    const loansHtml = buildLoanRowsHtml(recipient, tokenByLoanId, appBaseUrl, tenantSlug);
+    const isAppUser = appUserEmailSet.has(recipient.email.trim().toLowerCase());
+    const loansHtml = buildLoanRowsHtml(recipient, tokenByLoanId, appBaseUrl, tenantSlug, isAppUser);
+    const customMessageHtml = config.custom_message
+      ? `<p style="margin:0 0 20px 0;padding:12px 16px;background:#f0f9ff;border-left:3px solid #3b82f6;font-size:14px;color:#1e40af;line-height:1.5;border-radius:0 6px 6px 0;">${config.custom_message}</p>`
+      : "";
     const placeholderData = {
-      RECIPIENT_NAME: recipient.fullName || recipient.loans[0]?.loanOfficerName || "Loan Officer",
+      RECIPIENT_NAME: recipient.loans[0]?.loanOfficerName || recipient.fullName || "Loan Officer",
       LOAN_COUNT: String(recipient.loans.length),
-      CUSTOM_MESSAGE: config.custom_message || "",
+      CUSTOM_MESSAGE: customMessageHtml,
       ALERT_DATE: new Date().toISOString().split("T")[0],
       LOANS_HTML: loansHtml,
     };
@@ -749,6 +1158,21 @@ export async function sendFalloutAlerts({
       managerQuery,
       managerParams,
     );
+    if (redirectActive) {
+      if (devAllowedEmails.length > 0) {
+        let mgrIdx = 0;
+        for (const mgr of managers.rows) {
+          mgr.email = devAllowedEmails[mgrIdx % devAllowedEmails.length];
+          mgrIdx++;
+        }
+        console.log(
+          `[FalloutAlerts] EMAIL REDIRECT: Redirected ${managers.rows.length} manager emails to ${devAllowedEmails.join(", ")}`,
+        );
+      } else {
+        managers.rows.length = 0;
+        console.warn("[FalloutAlerts] EMAIL REDIRECT: Blocked manager emails (no safe email addresses configured)");
+      }
+    }
     managerNotifications.attempted = managers.rows.length;
     console.log(
       `📧 Manager notification: ${managers.rows.length} managers found (selectedIds=${selectedManagerIds.length}, highRiskLoans=${highRiskLoans.length})`,
@@ -854,6 +1278,21 @@ export async function sendFalloutAlerts({
       managerQuery,
       managerParams,
     );
+    if (redirectActive) {
+      if (devAllowedEmails.length > 0) {
+        let mgrCardIdx = 0;
+        for (const mgr of managers.rows) {
+          mgr.email = devAllowedEmails[mgrCardIdx % devAllowedEmails.length];
+          mgrCardIdx++;
+        }
+        console.log(
+          `[FalloutAlerts] EMAIL REDIRECT: Redirected ${managers.rows.length} manager card emails to ${devAllowedEmails.join(", ")}`,
+        );
+      } else {
+        managers.rows.length = 0;
+        console.warn("[FalloutAlerts] EMAIL REDIRECT: Blocked manager card emails (no safe email addresses configured)");
+      }
+    }
     managerCardNotifications.attempted = managers.rows.length;
 
     const branchFilterSet = new Set(
@@ -927,9 +1366,242 @@ export async function sendFalloutAlerts({
     failedRecipients,
     skippedLoansCount,
     highRiskLoanCount: highRiskLoans.length,
+    devMode: redirectActive,
+    devRedirectedTo: redirectActive && devAllowedEmails.length > 0 ? devAllowedEmails : undefined,
     testRecipients,
     managerNotifications,
     managerCardNotifications,
+  };
+}
+
+/**
+ * Send a fallout alert email for a single loan.
+ * Resolves the LO via encompass_users, applies email redirect safeguards, and sends using the standard template.
+ */
+export async function sendSingleFalloutAlert({
+  tenantPool,
+  tenantId,
+  tenantSlug,
+  loanId,
+  appBaseUrl,
+  additionalEmails = [],
+  customMessage,
+}: {
+  tenantPool: Pool;
+  tenantId: string;
+  tenantSlug: string;
+  loanId: string;
+  appBaseUrl: string;
+  additionalEmails?: string[];
+  customMessage?: string;
+}): Promise<{ sent: boolean; recipientEmail: string | null; message: string; devMode: boolean; devRedirectedTo?: string[]; additionalSent?: number }> {
+  const loanResult = await tenantPool.query<RiskLoanRow>(
+    `SELECT
+       l.loan_id,
+       l.loan_number,
+       l.branch,
+       l.loan_amount,
+       COALESCE(NULLIF(TRIM(l.loan_officer), ''), eu.full_name) AS loan_officer,
+       l.loan_officer_id,
+       l.estimated_closing_date,
+       ROUND(COALESCE(
+         CASE
+           WHEN jsonb_typeof(p.loan_data->'riskSummary') = 'object'
+            AND (p.loan_data->'riskSummary'->>'riskScore') ~ '^[0-9]+(\\.[0-9]+)?$'
+           THEN (p.loan_data->'riskSummary'->>'riskScore')::numeric
+           ELSE NULL
+         END,
+         p.confidence_score,
+         p.confidence::numeric,
+         50
+       ))::int AS risk_score,
+       CASE
+         WHEN ROUND(COALESCE(
+           CASE WHEN jsonb_typeof(p.loan_data->'riskSummary') = 'object'
+                 AND (p.loan_data->'riskSummary'->>'riskScore') ~ '^[0-9]+(\\.[0-9]+)?$'
+                THEN (p.loan_data->'riskSummary'->>'riskScore')::numeric ELSE NULL END,
+           p.confidence_score, p.confidence::numeric, 50
+         )) >= 75 THEN 'Very High'
+         WHEN ROUND(COALESCE(
+           CASE WHEN jsonb_typeof(p.loan_data->'riskSummary') = 'object'
+                 AND (p.loan_data->'riskSummary'->>'riskScore') ~ '^[0-9]+(\\.[0-9]+)?$'
+                THEN (p.loan_data->'riskSummary'->>'riskScore')::numeric ELSE NULL END,
+           p.confidence_score, p.confidence::numeric, 50
+         )) >= 50 THEN 'High'
+         WHEN ROUND(COALESCE(
+           CASE WHEN jsonb_typeof(p.loan_data->'riskSummary') = 'object'
+                 AND (p.loan_data->'riskSummary'->>'riskScore') ~ '^[0-9]+(\\.[0-9]+)?$'
+                THEN (p.loan_data->'riskSummary'->>'riskScore')::numeric ELSE NULL END,
+           p.confidence_score, p.confidence::numeric, 50
+         )) >= 25 THEN 'Medium'
+         ELSE 'Low'
+       END AS risk_level,
+       COALESCE(p.predicted_outcome, 'originate') AS predicted_outcome,
+       p.risk_factors,
+       l.fico_score,
+       l.ltv_ratio,
+       l.be_dti_ratio AS dti_ratio,
+       l.interest_rate,
+       (CURRENT_DATE - l.application_date::date) AS active_days,
+       l.current_milestone,
+       CASE WHEN l.estimated_closing_date IS NOT NULL AND l.estimated_closing_date < CURRENT_DATE
+            AND COALESCE(p.predicted_outcome, 'originate') = 'originate'
+            THEN true ELSE false END AS close_late_risk
+     FROM public.loans l
+     LEFT JOIN LATERAL (
+       SELECT * FROM public.loan_predictions lp
+       WHERE lp.loan_id = l.loan_id ORDER BY lp.created_at DESC LIMIT 1
+     ) p ON true
+     LEFT JOIN public.encompass_users eu ON eu.encompass_user_id = l.loan_officer_id
+     WHERE l.loan_id = $1
+     LIMIT 1`,
+    [loanId],
+  );
+
+  const loan = loanResult.rows[0];
+  if (!loan) {
+    return { sent: false, recipientEmail: null, message: `Loan ${loanId} not found.`, devMode: false };
+  }
+
+  const loResult = await tenantPool.query<{
+    encompass_user_id: string;
+    email: string;
+    full_name: string | null;
+  }>(
+    `SELECT encompass_user_id, email, full_name
+     FROM public.encompass_users
+     WHERE is_enabled = true
+       AND email IS NOT NULL
+       AND (
+         encompass_user_id = $1
+         OR LOWER(full_name) = LOWER($2)
+       )
+     LIMIT 1`,
+    [loan.loan_officer_id ?? "", loan.loan_officer ?? ""],
+  );
+
+  const loUser = loResult.rows[0];
+  const redirectActive = await isEmailRedirectEnabled();
+  const devAllowedEmails = redirectActive ? await getDevAllowedEmails() : [];
+
+  if (!loUser?.email && !redirectActive) {
+    return {
+      sent: false,
+      recipientEmail: null,
+      message: `No matching LO email found for loan ${loan.loan_number || loanId}.`,
+      devMode: false,
+    };
+  }
+
+  let recipientEmail = loUser?.email ?? "";
+  const recipientName = loan.loan_officer || loUser?.full_name || "Loan Officer";
+  let devMode = redirectActive;
+
+  if (redirectActive) {
+    if (devAllowedEmails.length === 0) {
+      return {
+        sent: false,
+        recipientEmail: loUser?.email ?? null,
+        message: "Email redirect is active but no safe email addresses configured. Email blocked.",
+        devMode: true,
+      };
+    }
+    recipientEmail = devAllowedEmails[0];
+  }
+
+  const config = await getFalloutAlertConfig(tenantPool);
+  const alertBatchId = crypto.randomUUID();
+  const token = crypto.randomBytes(32).toString("hex");
+  const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+
+  await tenantPool.query(
+    `INSERT INTO public.fallout_alert_tokens
+     (token_hash, alert_batch_id, loan_id, encompass_user_id, recipient_email, expires_at)
+     VALUES ($1, $2, $3, $4, $5, NOW() + interval '7 days')`,
+    [tokenHash, alertBatchId, loanId, loUser?.encompass_user_id || loan.loan_officer_id || "unknown", recipientEmail],
+  );
+
+  const recipient: ResolvedRecipient = {
+    encompassUserId: loUser?.encompass_user_id ?? loan.loan_officer_id ?? "",
+    email: recipientEmail,
+    fullName: recipientName,
+    loans: [{
+      loanId: loan.loan_id,
+      loanNumber: loan.loan_number || loan.loan_id,
+      loanOfficerName: loan.loan_officer || loUser?.full_name || "Loan Officer",
+      amount: loan.loan_amount,
+      riskScore: Number(loan.risk_score) || 0,
+      riskLevel: loan.risk_level || "Unknown",
+      predictedOutcome: (loan.predicted_outcome as "withdraw" | "deny" | "originate") || "originate",
+      estimatedClosingDate: loan.estimated_closing_date,
+      riskReasons: Array.isArray(loan.risk_factors) ? loan.risk_factors : [],
+      loanMetrics: buildLoanMetrics(loan),
+      closeLateRisk: loan.close_late_risk === true,
+    }],
+  };
+
+  const tokenByLoanId = new Map([[loanId, token]]);
+  const template = (await loadEmailTemplate("fallout-alert.html")) ?? null;
+
+  // Check if recipient is an app user to conditionally include app hyperlinks
+  let isAppUser = false;
+  try {
+    const appUserCheck = await tenantPool.query<{ email: string }>(
+      `SELECT LOWER(email) AS email FROM public.users WHERE LOWER(email) = $1 AND is_active = true LIMIT 1`,
+      [(loUser?.email ?? recipientEmail).trim().toLowerCase()],
+    );
+    isAppUser = appUserCheck.rows.length > 0;
+  } catch {
+    // Non-critical
+  }
+
+  const loansHtml = buildLoanRowsHtml(recipient, tokenByLoanId, appBaseUrl, tenantSlug, isAppUser);
+  const msgText = customMessage || config?.custom_message || "";
+  const customMessageHtml = msgText
+    ? `<p style="margin:0 0 20px 0;padding:12px 16px;background:#f0f9ff;border-left:3px solid #3b82f6;font-size:14px;color:#1e40af;line-height:1.5;border-radius:0 6px 6px 0;">${msgText.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>")}</p>`
+    : "";
+  const placeholderData = {
+    RECIPIENT_NAME: recipientName,
+    LOAN_COUNT: "1",
+    CUSTOM_MESSAGE: customMessageHtml,
+    ALERT_DATE: new Date().toISOString().split("T")[0],
+    LOANS_HTML: loansHtml,
+  };
+  const html = template
+    ? replacePlaceholders(template, placeholderData)
+    : `<p>You have a high-risk loan requiring attention.</p>${loansHtml}`;
+
+  const subject = `Coheus Fallout Alert — Loan ${loan.loan_number || loanId}`;
+  await sendEmail({
+    to: recipientEmail,
+    subject,
+    html,
+    emailType: "fallout_alert_distribution",
+    containsPii: true,
+    tenantId,
+    strict: true,
+  });
+
+  let additionalSent = 0;
+  const dedupedExtra = [...new Set(additionalEmails.map((e) => e.trim().toLowerCase()).filter((e) => e && e !== recipientEmail.toLowerCase()))];
+  for (const extra of dedupedExtra) {
+    try {
+      await sendEmail({ to: extra, subject, html, emailType: "fallout_alert_distribution", containsPii: true, tenantId, strict: true });
+      additionalSent++;
+    } catch (err) {
+      console.error(`[FalloutAlerts] Failed to send additional email to ${extra}:`, err instanceof Error ? err.message : err);
+    }
+  }
+
+  return {
+    sent: true,
+    recipientEmail,
+    message: devMode
+      ? `Email sent (redirected to ${recipientEmail})${additionalSent > 0 ? ` + ${additionalSent} additional` : ""}`
+      : `Fallout alert sent to ${recipientEmail}${additionalSent > 0 ? ` + ${additionalSent} additional` : ""}`,
+    devMode,
+    devRedirectedTo: devMode && devAllowedEmails.length > 0 ? devAllowedEmails : undefined,
+    additionalSent,
   };
 }
 
@@ -980,7 +1652,13 @@ export async function saveFalloutTokenResponse({
   await tenantPool.query(
     `INSERT INTO public.fallout_alert_responses
      (token_id, alert_batch_id, loan_id, encompass_user_id, recipient_email, response, response_note, ip_address, user_agent)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     ON CONFLICT (token_id) DO UPDATE SET
+       response = EXCLUDED.response,
+       response_note = EXCLUDED.response_note,
+       ip_address = EXCLUDED.ip_address,
+       user_agent = EXCLUDED.user_agent,
+       responded_at = NOW()`,
     [
       row.id,
       row.alert_batch_id,

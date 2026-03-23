@@ -713,14 +713,14 @@ async function linkCognitoSub(
   try {
     if (isSuperAdmin) {
       await getManagementPool().query(
-        `UPDATE coheus_users SET cognito_sub = $1 WHERE id = $2 AND cognito_sub IS NULL`,
+        `UPDATE coheus_users SET cognito_sub = $1 WHERE id = $2 AND (cognito_sub IS NULL OR cognito_sub <> $1)`,
         [cognitoSub, user.id],
       );
     } else if ("tenant_slug" in user) {
       const tenantPool = await getTenantPool(user.tenant_slug);
       if (tenantPool) {
         await tenantPool.query(
-          `UPDATE users SET cognito_sub = $1 WHERE id = $2 AND cognito_sub IS NULL`,
+          `UPDATE users SET cognito_sub = $1 WHERE id = $2 AND (cognito_sub IS NULL OR cognito_sub <> $1)`,
           [cognitoSub, user.id],
         );
       }
@@ -923,7 +923,9 @@ const passwordResetRequestSchema = z.object({
 
 /**
  * Request Password Reset
- * Cognito-only password reset request flow.
+ * Generates a 6-digit code, stores its hash in the management DB, and sends
+ * the code to the user via SES. This bypasses Cognito's ForgotPassword API
+ * which is unreliable for users created via AdminCreateUser.
  */
 router.post("/password-reset/request", authLimiter, async (req, res) => {
   try {
@@ -934,22 +936,42 @@ router.post("/password-reset/request", authLimiter, async (req, res) => {
       "If an account exists with this email, you will receive password reset instructions.";
 
     if (!cognitoAuth.isCognitoAuthEnabled()) {
-      logError(
-        "[Auth] Cognito password auth is disabled while password reset was requested",
-        new Error("COGNITO_PASSWORD_AUTH_DISABLED"),
-        { email, tenantSlug: tenantSlug || "auto-detect" },
-      );
       return res.status(503).json({
         error:
           "Password reset is temporarily unavailable. Cognito password authentication is required.",
       });
     }
 
-    await cognitoAuth.forgotPassword(email);
-    return res.json({
-      message: successMsg,
-      useCognito: true,
-    });
+    // Only send if the user actually exists (but always return generic message)
+    const found = await findUserByEmail(email, tenantSlug);
+    if (!found) {
+      return res.json({ message: successMsg, useCognito: true });
+    }
+
+    const code = crypto.randomInt(100000, 999999).toString();
+    const tokenHash = crypto.createHash("sha256").update(code).digest("hex");
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    const mgmt = getManagementPool();
+    await mgmt.query(
+      `INSERT INTO password_reset_tokens (email, token_hash, tenant_slug, expires_at)
+       VALUES ($1, $2, $3, $4)`,
+      [email, tokenHash, tenantSlug || null, expiresAt],
+    );
+
+    try {
+      const { sendPasswordResetEmail } = await import("../services/emailService.js");
+      const { resolveFrontendUrl } = await import("../utils/frontendUrl.js");
+      const frontendUrl = resolveFrontendUrl();
+      const resetUrl = `${frontendUrl}/reset-password?email=${encodeURIComponent(email)}&code=${code}`;
+      const userName = found.user.full_name || undefined;
+      await sendPasswordResetEmail(email, resetUrl, userName, { strict: true });
+      logInfo("[Auth] Password reset email sent via SES", { email });
+    } catch (emailError: any) {
+      logError("[Auth] Failed to send password reset email via SES", emailError, { email });
+    }
+
+    return res.json({ message: successMsg, useCognito: true });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors[0].message });
@@ -961,19 +983,14 @@ router.post("/password-reset/request", authLimiter, async (req, res) => {
 
 /**
  * Confirm Password Reset
- * Cognito-only password reset confirmation flow (email + code + newPassword).
+ * Validates the 6-digit code against the management DB, then sets the new
+ * password in Cognito via AdminSetUserPassword. Re-enables email MFA afterwards.
  */
 router.post("/password-reset/confirm", authLimiter, async (req, res) => {
   try {
-    // Accept Cognito-style params only. Legacy token reset is intentionally disabled.
     const body = req.body;
 
     if (!cognitoAuth.isCognitoAuthEnabled()) {
-      logError(
-        "[Auth] Cognito password auth is disabled while password reset confirm was requested",
-        new Error("COGNITO_PASSWORD_AUTH_DISABLED"),
-        { hasEmail: !!body?.email, hasCode: !!body?.code },
-      );
       return res.status(503).json({
         error:
           "Password reset confirmation is temporarily unavailable. Cognito password authentication is required.",
@@ -982,7 +999,7 @@ router.post("/password-reset/confirm", authLimiter, async (req, res) => {
 
     if (!body?.email || !body?.code) {
       return res.status(400).json({
-        error: "email and code are required for Cognito password reset confirmation",
+        error: "email and code are required for password reset confirmation",
       });
     }
 
@@ -996,7 +1013,37 @@ router.post("/password-reset/confirm", authLimiter, async (req, res) => {
       })
       .parse(body);
 
-    await cognitoAuth.confirmForgotPassword(email, code, newPassword);
+    const tokenHash = crypto.createHash("sha256").update(code).digest("hex");
+    const mgmt = getManagementPool();
+    const tokenResult = await mgmt.query(
+      `UPDATE password_reset_tokens
+       SET used_at = NOW()
+       WHERE email = $1 AND token_hash = $2 AND used_at IS NULL AND expires_at > NOW()
+       RETURNING id`,
+      [email, tokenHash],
+    );
+
+    if (tokenResult.rows.length === 0) {
+      return res.status(400).json({
+        error: "Invalid or expired reset code. Please request a new one.",
+      });
+    }
+
+    await cognitoAuth.adminSetUserPassword(email, newPassword);
+
+    // Restore email MFA (AdminSetUserPassword may clear preferences)
+    try {
+      const userInfo = await cognitoAuth.getUser(email);
+      if (!userInfo.mfaEnabled) {
+        await cognitoAuth.enableEmailMfa(email);
+        logInfo("[Auth] Re-enabled email MFA after password reset", { email });
+      }
+    } catch (mfaError: any) {
+      logWarn("[Auth] Failed to restore MFA after password reset", {
+        email,
+        error: mfaError.message,
+      });
+    }
 
     await auditLog({
       userId: null,
@@ -1005,7 +1052,7 @@ router.post("/password-reset/confirm", authLimiter, async (req, res) => {
       tenantId: null,
       action: "password_reset",
       resource: "auth",
-      description: "Password reset completed via Cognito",
+      description: "Password reset completed via token + AdminSetUserPassword",
       status: "success",
       ipAddress: req.ip,
       userAgent: req.get("user-agent"),
@@ -1019,6 +1066,7 @@ router.post("/password-reset/confirm", authLimiter, async (req, res) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors[0].message });
     }
+    logError("[Auth] Password reset confirm error", error, { email: req.body?.email });
     const statusCode = error.statusCode || 500;
     return res
       .status(statusCode)

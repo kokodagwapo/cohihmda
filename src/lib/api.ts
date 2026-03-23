@@ -231,6 +231,23 @@ export class ApiClient {
   }
 
   /**
+   * Invalidate cached GET responses whose key contains the given substring.
+   * Useful after mutations that should bust a related GET cache.
+   */
+  invalidateCacheFor(endpointSubstring: string) {
+    for (const key of this.requestCache.keys()) {
+      if (key.includes(endpointSubstring)) {
+        this.requestCache.delete(key);
+      }
+    }
+    for (const key of this.pendingRequests.keys()) {
+      if (key.includes(endpointSubstring)) {
+        this.pendingRequests.delete(key);
+      }
+    }
+  }
+
+  /**
    * Attempt to refresh the auth token using the stored Cognito refresh token.
    * Returns true if refresh succeeded, false otherwise.
    * Deduplicates concurrent refresh attempts.
@@ -1480,6 +1497,52 @@ export class ApiClient {
       managers: Array<{ id: string; display_name: string; email: string; role: string }>;
       branches: string[];
     }>(`/api/fallout-alerts/recipient-options${this._falloutTq(tenantId)}`);
+  }
+
+  async getLoanFalloutStatuses(loanIds: string[], tenantId?: string | null) {
+    if (!loanIds.length) return { statuses: [] };
+    return this.request<{
+      statuses: Array<{
+        loan_id: string;
+        recipient_email: string | null;
+        encompass_user_id: string | null;
+        sent_at: string;
+        alert_batch_id: string;
+        response: "acknowledged" | "working_on_it" | "need_help" | null;
+        responded_at: string | null;
+        loan_officer_name: string | null;
+      }>;
+    }>(`/api/fallout-alerts/loan-statuses${tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : ""}`, {
+      method: "POST",
+      body: JSON.stringify({ loan_ids: loanIds }),
+    });
+  }
+
+  async resolveLoanLo(loanId: string, tenantId?: string | null) {
+    return this.request<{
+      found: boolean;
+      loEmail: string | null;
+      loName: string | null;
+      redirectActive: boolean;
+      redirectTo: string | null;
+    }>(`/api/fallout-alerts/resolve-lo${this._falloutTq(tenantId)}`, {
+      method: "POST",
+      body: JSON.stringify({ loan_id: loanId }),
+    });
+  }
+
+  async sendFalloutAlertSingle(loanId: string, tenantId?: string | null, additionalEmails?: string[], customMessage?: string) {
+    return this.request<{
+      sent: boolean;
+      recipientEmail: string | null;
+      message: string;
+      devMode: boolean;
+      devRedirectedTo?: string[];
+      additionalSent?: number;
+    }>(`/api/fallout-alerts/send-single${this._falloutTq(tenantId)}`, {
+      method: "POST",
+      body: JSON.stringify({ loan_id: loanId, additional_emails: additionalEmails, custom_message: customMessage }),
+    });
   }
 }
 

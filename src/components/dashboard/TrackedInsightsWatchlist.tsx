@@ -31,6 +31,7 @@ interface TrackedInsight {
   understory: string;
   status: "active" | "resolved" | "archived";
   source_type: string;
+  source_insight_id?: number | null;
   tags: string[];
   created_at: string;
   updated_at: string;
@@ -149,9 +150,13 @@ function timeAgo(dateStr: string): string {
 
 interface TrackedInsightsWatchlistProps {
   selectedTenantId?: string | null;
+  /** Increment to force a refetch (e.g. after track/untrack elsewhere). */
+  refreshTrigger?: number;
+  /** Called after an insight is removed or archived from this watchlist UI. */
+  onInsightRemoved?: () => void;
 }
 
-export function TrackedInsightsWatchlist({ selectedTenantId }: TrackedInsightsWatchlistProps = {}) {
+export function TrackedInsightsWatchlist({ selectedTenantId, refreshTrigger, onInsightRemoved }: TrackedInsightsWatchlistProps = {}) {
   const [insights, setInsights] = useState<TrackedInsight[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -171,7 +176,7 @@ export function TrackedInsightsWatchlist({ selectedTenantId }: TrackedInsightsWa
 
   useEffect(() => {
     fetchInsights();
-  }, [fetchInsights]);
+  }, [fetchInsights, refreshTrigger]);
 
   const loadHistory = useCallback(async (id: string) => {
     if (history[id]) return;
@@ -190,19 +195,23 @@ export function TrackedInsightsWatchlist({ selectedTenantId }: TrackedInsightsWa
     try {
       await api.updateTrackedInsight(id, { status: "archived" }, selectedTenantId);
       setInsights((prev) => prev.filter((i) => i.id !== id));
+      api.invalidateCacheFor("/insights/tracked");
+      onInsightRemoved?.();
     } catch (err) {
       console.error("Failed to archive tracked insight:", err);
     }
-  }, [selectedTenantId]);
+  }, [selectedTenantId, onInsightRemoved]);
 
   const handleDelete = useCallback(async (id: string) => {
     try {
       await api.deleteTrackedInsight(id, selectedTenantId);
       setInsights((prev) => prev.filter((i) => i.id !== id));
+      api.invalidateCacheFor("/insights/tracked");
+      onInsightRemoved?.();
     } catch (err) {
       console.error("Failed to delete tracked insight:", err);
     }
-  }, [selectedTenantId]);
+  }, [selectedTenantId, onInsightRemoved]);
 
   const activeInsights = insights.filter((i) => i.status === "active");
 

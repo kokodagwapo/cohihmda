@@ -69,6 +69,7 @@ export interface LoanDetailRow {
   fees_loan_discount_fee_borr: number | null;
   rush_closing_on_file: string | null;
   scrub_rating_of_file: string | null;
+  is_archived: boolean | null;
 }
 
 export interface LoanDetailListResponse {

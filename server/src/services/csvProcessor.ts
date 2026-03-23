@@ -69,11 +69,22 @@ export async function processCSVFile(
         // Ensure context.column is a string before using string methods
         const columnName = context?.column ? String(context.column).toLowerCase() : '';
         
-        // Try to parse dates
+        // Parse dates: extract YYYY-MM-DD directly to avoid timezone shift from new Date()
         if (columnName && columnName.includes('date')) {
-          const date = new Date(value);
+          const trimmed = String(value).trim();
+          const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+          if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+          const slashMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+          if (slashMatch) {
+            const [, m, d, y] = slashMatch;
+            return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+          }
+          const date = new Date(trimmed);
           if (!isNaN(date.getTime())) {
-            return date;
+            const y = date.getUTCFullYear();
+            const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+            const d = String(date.getUTCDate()).padStart(2, "0");
+            return `${y}-${m}-${d}`;
           }
         }
         // Try to parse numbers

@@ -1670,8 +1670,8 @@ export async function queryMetric(
       ${additionalFiltersClause.clause}
   `;
 
-  // Debug logging
-  if (process.env.NODE_ENV === "development") {
+  // Debug logging (SQL + params can be extremely noisy; enable explicitly)
+  if (process.env.METRICS_SQL_DEBUG === "true") {
     console.log(`[MetricsService] Querying ${metricId}:`, {
       dateRange: options.dateRange,
       dateField,
@@ -1686,7 +1686,7 @@ export async function queryMetric(
   const result = await tenantPool.query(query, params);
 
   // Additional debug: Check sample values for specific metrics
-  if (process.env.NODE_ENV === "development") {
+  if (process.env.METRICS_SQL_DEBUG === "true") {
     try {
       if (metricId === "active_loans") {
         const sampleQuery = `SELECT 
@@ -1981,7 +1981,7 @@ export async function queryMetricGroupedBy(
     ORDER BY ${metric.sqlQuery} DESC NULLS LAST
   `;
 
-  if (process.env.NODE_ENV === "development") {
+  if (process.env.METRICS_SQL_DEBUG === "true") {
     console.log(
       `[MetricsService] Querying ${metricId} grouped by ${effectiveGroupBy}${
         effectiveGroupBy !== groupBy

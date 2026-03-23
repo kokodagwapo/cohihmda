@@ -46,7 +46,14 @@ interface InsightDetailModalProps {
     recommended_action?: string;
     owner?: string;
   };
+  /** Whether this insight is already on the watchlist (from parent). */
+  isTracked?: boolean;
+  /** Toggle track/untrack on the watchlist. */
+  onToggleTrack?: () => void;
+  /** @deprecated Use isTracked + onToggleTrack for toggle behavior. */
   onTrackInsight?: () => void;
+  /** When details fetch fails (e.g. 404 no detail_data), call this so parent can show a fallback (e.g. DashboardInsightEvidenceModal). */
+  onDetailUnavailable?: () => void;
 }
 
 interface AuditSummaryDef {
@@ -371,6 +378,7 @@ const TABLE_CONTEXT: Record<string, string> = {
   tiering: 'Personnel ranked by performance tier with revenue and volume metrics.',
   product_breakdown: 'Loan products broken down by volume, pull-through, and fallout rates.',
   risk_cross_tab: 'Risk segments showing fallout rates across product, FICO, and DTI bands.',
+  dashboard_insights: 'Leaderboard and by-period metrics supporting this dashboard insight.',
 };
 
 // ============================================================================
@@ -391,6 +399,7 @@ const STARTER_QUESTIONS: Record<string, string[]> = {
   tiering: ['What separates top-tier from bottom-tier performers?', 'How has tiering changed from last month?'],
   product_breakdown: ['Which product has the worst pull-through?', 'Where is volume growing fastest?'],
   risk_cross_tab: ['Which risk segment has the highest fallout?', 'How large is the worst-performing segment?'],
+  dashboard_insights: ['How does this period compare to the previous one?', 'Who are the top performers by volume?'],
 };
 
 // ============================================================================
@@ -645,7 +654,10 @@ export const InsightDetailModal = ({
   selectedTenantId,
   isAdmin,
   etmData,
+  isTracked: isTrackedProp,
+  onToggleTrack,
   onTrackInsight,
+  onDetailUnavailable,
 }: InsightDetailModalProps) => {
   const navigate = useNavigate();
   const { isPlatformStaff } = useAuth();
@@ -655,7 +667,8 @@ export const InsightDetailModal = ({
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<DetailData | null>(null);
   const [isCreatingDeepDive, setIsCreatingDeepDive] = useState(false);
-  const [isTracked, setIsTracked] = useState(false);
+  const [localTracked, setLocalTracked] = useState(false);
+  const isTracked = onToggleTrack != null ? (isTrackedProp ?? false) : localTracked;
   const [activePeriod, setActivePeriod] = useState<'current' | 'prior'>('current');
   const [isAuditOpen, setIsAuditOpen] = useState(false);
   const [auditSection, setAuditSection] = useState<string | null>(null);
@@ -681,6 +694,10 @@ export const InsightDetailModal = ({
     } catch (err: any) {
       console.error('Error fetching insight details see:', err);
       setError(err.message || 'Failed to load details');
+      const msg = err?.message ?? '';
+      if (onDetailUnavailable && (msg.includes('No detail data') || msg.includes('Insight not found'))) {
+        onDetailUnavailable();
+      }
     } finally {
       setLoading(false);
     }
@@ -903,19 +920,23 @@ export const InsightDetailModal = ({
               </p>
             </div>
             <div className="flex items-center gap-2">
-              {onTrackInsight && (
+              {(onToggleTrack ?? onTrackInsight) && (
                 <button
                   onClick={() => {
-                    onTrackInsight();
-                    setIsTracked(true);
+                    if (onToggleTrack) {
+                      onToggleTrack();
+                    } else {
+                      onTrackInsight?.();
+                      setLocalTracked(true);
+                    }
                   }}
-                  disabled={isTracked}
+                  disabled={onToggleTrack == null && isTracked}
                   className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-all ${
                     isTracked
                       ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
                       : 'text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-amber-100 hover:text-amber-700 dark:hover:bg-amber-900/30 dark:hover:text-amber-300'
                   }`}
-                  title={isTracked ? 'Tracked' : 'Track this insight'}
+                  title={isTracked ? 'Remove from watchlist' : 'Track this insight'}
                 >
                   {isTracked ? <Check className="w-4 h-4" /> : <Bookmark className="w-4 h-4" />}
                   <span className="hidden sm:inline">{isTracked ? 'Tracked' : 'Track'}</span>

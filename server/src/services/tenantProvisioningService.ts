@@ -253,7 +253,7 @@ export async function getTenant(tenantId: string): Promise<TenantInfo | null> {
             t.last_refreshed_at, t.auto_refresh, st.name AS source_tenant_name
      FROM coheus_tenants t
      LEFT JOIN coheus_tenants st ON st.id = t.source_tenant_id
-     WHERE id = $1`,
+     WHERE t.id = $1`,
     [tenantId],
   );
 

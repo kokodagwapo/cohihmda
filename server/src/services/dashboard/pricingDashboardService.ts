@@ -211,31 +211,29 @@ function getDateRangeForPricing(
 
   switch (dateRange) {
     case "mtd":
-      // Same as getPeriodRange: [first of month, tomorrow) → application_date < end = through today
       start = new Date(targetYear, now.getMonth(), 1);
-      end = new Date(targetYear, now.getMonth(), now.getDate() + 1);
+      end = new Date(targetYear, now.getMonth(), now.getDate());
       break;
     case "lm":
-      // Last month: [first of last month, first of this month)
       start = new Date(targetYear, now.getMonth() - 1, 1);
-      end = new Date(targetYear, now.getMonth(), 1);
+      end = new Date(targetYear, now.getMonth(), 0);
       break;
     case "qtd": {
       const q = Math.floor(now.getMonth() / 3);
       start = new Date(targetYear, q * 3, 1);
-      end = new Date(targetYear, now.getMonth(), now.getDate() + 1);
+      end = new Date(targetYear, now.getMonth(), now.getDate());
       break;
     }
     case "ytd":
       start = new Date(targetYear, 0, 1);
       end =
         targetYear === now.getFullYear()
-          ? new Date(targetYear, now.getMonth(), now.getDate() + 1)
-          : new Date(targetYear + 1, 0, 1);
+          ? new Date(targetYear, now.getMonth(), now.getDate())
+          : new Date(targetYear, 11, 31);
       break;
     case "ly":
       start = new Date(targetYear - 1, 0, 1);
-      end = new Date(targetYear, 0, 1);
+      end = new Date(targetYear - 1, 11, 31);
       break;
     default:
       start = new Date(targetYear, now.getMonth(), 1);
@@ -321,7 +319,7 @@ function buildBaseWhere(
 
   const dateRange = getDateRangeForPricing(filters.dateRange);
   if (dateRange && filters.dateRange !== "all") {
-    // Use same convention as /api/loans/active-loans-count and getPeriodRange: [start, end) exclusive end
+    // Inclusive date range: [start, end] — both bounds included
     // Active loans: no funding_date → always application_date.
     // All statuses: application_date so we include all statuses.
     // Funded only: use loan_funding — funding_date or closing_date.
@@ -334,7 +332,7 @@ function buildBaseWhere(
     conditions.push(`(${l}${dateCol})::date >= $${idx}::date`);
     params.push(dateRange.start);
     idx++;
-    conditions.push(`(${l}${dateCol})::date < $${idx}::date`);
+    conditions.push(`(${l}${dateCol})::date <= $${idx}::date`);
     params.push(dateRange.end);
     idx++;
   }
