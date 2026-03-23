@@ -16,6 +16,7 @@ import { loadDashboardInsightById } from '../../services/dashboardInsights/stora
 import { getDateRangeForTimeframe } from '../../services/dashboard/analyticsService.js';
 import { buildDetailFromSupportingData } from '../../services/dashboardInsights/dashboardInsightDetailHydrator.js';
 import type { DashboardInsight } from '../../services/dashboardInsights/types.js';
+import type { DashboardDetailSnapshot } from '../../services/dashboardInsights/types.js';
 
 const router = Router();
 
@@ -150,7 +151,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
           insightId: insightIdNum,
         });
       }
-      let detailData = row.detail_data as Record<string, unknown> | null | undefined;
+      let detailData = row.detail_data as DashboardDetailSnapshot | null | undefined;
       if (!detailData || !detailData.title) {
         // Backward-compat path for older dashboard insights that have supporting_data
         // but were saved before detail_data hydration was added.
@@ -182,7 +183,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
               ? String(row.filter_context.datePeriod)
               : undefined,
           }
-        ) as Record<string, unknown> | null;
+        );
         if (synthesized && synthesized.title) {
           detailData = synthesized;
           console.log(`[InsightDetails] source=dashboard_insights, insightId=${insightId} — synthesized detail_data from supporting_data`);
@@ -207,7 +208,8 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
             owner: row.owner,
           }
         : null);
-      console.log(`[InsightDetails] source=dashboard_insights, insightId=${insightId} — returning detail_data (${(detailData.rows || []).length} rows)`);
+      const rowCount = Array.isArray(detailData.rows) ? detailData.rows.length : 0;
+      console.log(`[InsightDetails] source=dashboard_insights, insightId=${insightId} — returning detail_data (${rowCount} rows)`);
       return res.json({
         source: 'dashboard_insights',
         dateFilter,

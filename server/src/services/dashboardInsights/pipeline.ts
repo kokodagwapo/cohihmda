@@ -820,6 +820,7 @@ function buildSupportingDataFromContext(context: DashboardPageContext): Supporti
 
   const byPeriodRows: SupportingDataByPeriodRow[] = [];
   for (const [period, data] of Object.entries(byPeriod)) {
+    const summary = data?.summary;
     const row: SupportingDataByPeriodRow = {
       period,
       periodLabel: data.periodLabel ?? period,
@@ -877,7 +878,6 @@ function buildSupportingDataFromContext(context: DashboardPageContext): Supporti
       continue;
     }
 
-    const summary = data?.summary;
     if (!summary) continue;
 
     const lbSummary = summary as {
