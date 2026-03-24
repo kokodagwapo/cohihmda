@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, AlertTriangle, Loader2, Download, Calendar, Telescope, FlaskConical, Lightbulb, Target, ShieldAlert, Zap, User, ChevronDown, ChevronRight, Database, ArrowUpDown, ArrowUp, ArrowDown, Search, Bookmark, Check, HelpCircle, TrendingUp, TrendingDown, MessageSquare } from 'lucide-react';
@@ -878,13 +879,13 @@ export const InsightDetailModal = ({
 
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <AnimatePresence>
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+        className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
         onClick={onClose}
       >
         <motion.div
@@ -1517,7 +1518,8 @@ export const InsightDetailModal = ({
           </div>
         </motion.div>
       </motion.div>
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 };
 

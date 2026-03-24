@@ -10,6 +10,7 @@
 import { callLLM, type LLMMessage } from "../../research/tools.js";
 import type { InvestigationQuestion, ResearchPlan } from "../../research/agents/plannerAgent.js";
 import { pool as managementPool } from "../../../config/managementDatabase.js";
+import type { CategoryDefinition } from "./categoryDefinitions.js";
 
 export type { InvestigationQuestion, ResearchPlan };
 
@@ -56,10 +57,11 @@ RULES:
 - If a field has very low population (<20%), don't base questions on it — mention it as a data quality note instead
 - Categories should be descriptive (e.g., "pipeline_velocity", "officer_performance", "lock_expiration_risk"), NOT generic ("general", "other")
 - PostgreSQL syntax: DATE - DATE returns integer days. Use CURRENT_DATE for today.
-- Active loan status: current_loan_status = 'Active Loan' AND application_date IS NOT NULL (loans without application_date are data artifacts, not real pipeline)
-- Funded: current_loan_status ILIKE '%Originated%' OR ILIKE '%purchased%'
+- Active pipeline: current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND (is_archived IS DISTINCT FROM TRUE)
+- Originated/Funded (status-based): current_loan_status ILIKE '%Originated%' OR current_loan_status ILIKE '%purchased%'
 - Withdrawn: current_loan_status ILIKE '%Withdrawn%'
 - Denied: current_loan_status ILIKE '%Denied%'
+- Completed (all terminal — pull-through denominator): current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
 - NEVER suggest queries that modify data
 
 BALANCED COVERAGE — INCLUDE STRATEGIC REVIEW (POSITIVE SIGNALS):
@@ -151,6 +153,8 @@ export interface InsightPlannerContext {
   staleLoanContext?: string;
   /** When set, planner generates 4-6 questions targeting this bucket only. */
   bucketFocus?: string;
+  /** When set, planner generates questions scoped to this functional category only. */
+  categoryFocus?: CategoryDefinition;
 }
 
 function buildUserPrompt(ctx: InsightPlannerContext): string {
@@ -216,6 +220,14 @@ function buildUserPrompt(ctx: InsightPlannerContext): string {
     prompt += `Do NOT repeat existing insight headlines listed above.\n\n`;
   }
 
+  if (ctx.categoryFocus) {
+    const cat = ctx.categoryFocus;
+    prompt += `## CATEGORY SCOPE DIRECTIVE\nYou are generating questions ONLY for the "${cat.label}" functional category.\n`;
+    prompt += `Generate between ${cat.questionCount.min} and ${cat.questionCount.max} questions.\n`;
+    prompt += `Stay strictly within the domain described in the category instructions above.\n`;
+    prompt += `Do NOT repeat existing insight headlines listed above.\n\n`;
+  }
+
   prompt += `Produce your investigation plan as a JSON object with "summary" and "questions".`;
   return prompt;
 }
@@ -231,14 +243,19 @@ export async function runInsightPlannerAgent(
   const userPrompt = buildUserPrompt(context);
   const trainingSection = await fetchTrainingExamples();
 
+  // When scoped to a category, append its plannerSupplement to the system prompt
+  const categorySupplement = context.categoryFocus
+    ? `\n\n## FUNCTIONAL CATEGORY INSTRUCTIONS\n${context.categoryFocus.plannerSupplement}`
+    : "";
+
   const messages: LLMMessage[] = [
-    { role: "system", content: INSIGHT_PLANNER_PROMPT + trainingSection },
+    { role: "system", content: INSIGHT_PLANNER_PROMPT + trainingSection + categorySupplement },
     { role: "user", content: userPrompt },
   ];
 
   const raw = await callLLM(messages, apiKey, {
     temperature: 0.6,
-    maxTokens: 8000,
+    maxTokens: 12000,
     jsonMode: true,
   });
 

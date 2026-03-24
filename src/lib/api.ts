@@ -1286,6 +1286,7 @@ export class ApiClient {
     source_insight_id?: number;
     source_type?: string;
     tags?: string[];
+    display_metadata?: Record<string, any>;
   }, tenantId?: string | null) {
     const tenantParam = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
     return this.request(`/api/insights/tracked${tenantParam}`, { method: "POST", body: JSON.stringify(data) });
