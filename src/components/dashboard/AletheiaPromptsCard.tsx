@@ -5,6 +5,7 @@ import React, {
   useCallback,
   useRef,
 } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -278,6 +279,8 @@ interface BucketLaneProps {
   onInvestigate?: (insightId: number) => void;
   /** Track/pin an insight to the watchlist */
   onTrackInsight?: (insight: AletheiaInsight) => void;
+  /** Set of already-tracked insight IDs */
+  trackedInsightIds?: Set<number>;
   /** Whether the user is a platform admin */
   isAdmin?: boolean;
 }
@@ -295,6 +298,7 @@ function BucketLane({
   onSubmitFeedback,
   onInvestigate,
   onTrackInsight,
+  trackedInsightIds,
   isAdmin,
 }: BucketLaneProps) {
   const [activeIdx, setActiveIdx] = useState(0);
@@ -396,6 +400,7 @@ function BucketLane({
     const canDrill = isDrillable(insight);
     const isSelected = selectedInsightIdx === idx;
     const chipLabel = getInsightChipLabel(insight);
+    const isTracked = !!(insight.insightId && trackedInsightIds?.has(insight.insightId));
 
     const insightFeedback = insight.insightId ? feedbackMap[insight.insightId] : null;
     const isPopoverOpen = feedbackPopoverInsightId === insight.insightId;
@@ -427,25 +432,27 @@ function BucketLane({
               </p>
             </div>
           </div>
+          {/* Track / pin to watchlist — visible to all users */}
+          {onTrackInsight && insight.insightId && (
+            <div className="flex-shrink-0 opacity-0 group-hover/insight:opacity-100 transition-all">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onTrackInsight(insight);
+                }}
+                className="p-1 rounded-md hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-all"
+                title={isTracked ? "Already on watchlist" : "Track this insight on watchlist"}
+              >
+                <Bookmark
+                  className={`w-3 h-3 transition-colors ${isTracked ? "text-amber-500 fill-amber-500" : "text-slate-400 hover:text-amber-600 dark:hover:text-amber-400"}`}
+                  strokeWidth={2}
+                />
+              </button>
+            </div>
+          )}
           {/* Admin feedback + delete + investigate buttons */}
           {isAdmin && insight.insightId && (
             <div className="flex-shrink-0 flex items-center gap-0.5 opacity-0 group-hover/insight:opacity-100 transition-all">
-              {/* Track / pin to watchlist */}
-              {onTrackInsight && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onTrackInsight(insight);
-                  }}
-                  className="p-1 rounded-md hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-all"
-                  title="Track this insight"
-                >
-                  <Bookmark
-                    className="w-3 h-3 text-slate-400 hover:text-amber-600 dark:hover:text-amber-400"
-                    strokeWidth={2}
-                  />
-                </button>
-              )}
               {/* Investigate (deep dive in workbench) */}
               {onInvestigate && (
                 <button
@@ -1035,16 +1042,61 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
     }
   }, [agentFinding, isCreatingResearch, selectedTenantId, navigate]);
 
+  const [trackedInsightIds, setTrackedInsightIds] = useState<Set<number>>(new Set());
+
   const handleTrackInsight = useCallback(
     async (insight: AletheiaInsight) => {
+      if (!insight.insightId) return;
       try {
-        await api.trackInsight({
-          headline: insight.headline || insight.message,
-          understory: insight.understory || insight.reasoning,
-          metric_signature: insight.evidence || { sql: "", keyFields: [] },
-          source_insight_id: insight.insightId,
-          source_type: "pipeline",
-        }, selectedTenantId);
+        // Determine source type and extract metric_signature correctly
+        const isAgentInsight =
+          insight.generation_method === "agent" &&
+          insight.detail_data?.type === "agent_finding";
+
+        let metric_signature: { sql: string; keyFields: string[] };
+        let source_type: string;
+        let display_metadata: Record<string, any> | undefined;
+
+        if (isAgentInsight && insight.detail_data?.metricSignature?.sql) {
+          // Agent insight — use the SQL the investigator wrote to produce this finding
+          metric_signature = insight.detail_data.metricSignature;
+          source_type = "agent";
+          // Persist human-readable metric display hints for the detail modal
+          if (
+            insight.detail_data.keyMetricDescriptions ||
+            insight.detail_data.keyMetricFormats
+          ) {
+            display_metadata = {
+              keyMetricDescriptions: insight.detail_data.keyMetricDescriptions || {},
+              keyMetricFormats: insight.detail_data.keyMetricFormats || {},
+            };
+          }
+        } else {
+          // Pipeline insight — reshape the first evidenceQuery if available
+          const eq = (insight.evidence as any)?.evidenceQueries?.[0];
+          if (eq?.sql) {
+            metric_signature = {
+              sql: eq.sql,
+              keyFields: (insight.evidence as any)?.metrics?.map((m: any) => m.label) || [],
+            };
+          } else {
+            metric_signature = { sql: "", keyFields: [] };
+          }
+          source_type = "pipeline";
+        }
+
+        await api.trackInsight(
+          {
+            headline: insight.headline || insight.message,
+            understory: insight.understory || insight.reasoning,
+            metric_signature,
+            source_insight_id: insight.insightId,
+            source_type,
+            display_metadata,
+          },
+          selectedTenantId
+        );
+        setTrackedInsightIds((prev) => new Set(prev).add(insight.insightId!));
       } catch (err) {
         console.error("Error tracking insight:", err);
       }
@@ -1303,7 +1355,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
 
         {/* ===== Category Tab Row (Insights tab only) ===== */}
         {activeTab === "agent" && hasInsights && (
-          <div className="flex items-center gap-0.5 mb-4 overflow-x-auto scrollbar-none -mx-1 px-1 pb-1">
+          <div className="flex items-center gap-0.5 mb-4 overflow-x-auto scrollbar-none -mx-1 px-1 pt-1.5 pb-1">
             {CATEGORY_TABS.map((cat) => {
               const stats = categoryStats[cat.id];
               const isActive = activeCategoryId === cat.id;
@@ -1311,7 +1363,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                 <button
                   key={cat.id}
                   onClick={() => setActiveCategoryId(cat.id)}
-                  className={`relative flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                  className={`relative overflow-visible flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                     isActive
                       ? "bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 ring-1 ring-blue-200 dark:ring-blue-700/50"
                       : "text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-700 dark:hover:text-slate-300"
@@ -1319,7 +1371,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                 >
                   {/* Red dot for critical items */}
                   {stats?.hasCritical && !isActive && (
-                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-rose-500 ring-1 ring-white dark:ring-slate-900" />
+                    <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-rose-500 ring-1 ring-white dark:ring-slate-900" />
                   )}
                   {cat.label}
                   {stats && stats.total > 0 && (
@@ -1528,6 +1580,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                   }
                   onInvestigate={isAdmin ? handleInvestigate : undefined}
                   onTrackInsight={handleTrackInsight}
+                  trackedInsightIds={trackedInsightIds}
                   isAdmin={isAdmin}
                 />
               );
@@ -1560,15 +1613,16 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
         onTrackInsight={selectedInsight ? () => handleTrackInsight(selectedInsight) : undefined}
       />
 
-      {/* Agent Finding Drilldown Modal */}
-      <AnimatePresence>
-        {agentFinding && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
-            onClick={() => { setAgentFinding(null); setAgentFindingInsight(null); }}
+      {/* Agent Finding Drilldown Modal — portal to body to escape overflow-hidden parents */}
+      {createPortal(
+        <AnimatePresence>
+          {agentFinding && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+              onClick={() => { setAgentFinding(null); setAgentFindingInsight(null); }}
           >
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -1632,8 +1686,10 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
               </div>
             </motion.div>
           </motion.div>
-        )}
-      </AnimatePresence>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
     </div>
   );
 });

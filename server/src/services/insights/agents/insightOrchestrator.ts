@@ -368,6 +368,17 @@ export async function runInsightGeneration(
     await persistAgentInsights(tenantPool, allEvaluatedInsights, allFindingsGlobal, generationBatch);
     emit("persisting", "Done.");
 
+    // ----- Phase 5: Re-evaluate tracked insights -----
+    try {
+      const { evaluateTrackedInsights } = await import("../trackedInsightEvaluator.js");
+      const evalResult = await evaluateTrackedInsights(tenantId, tenantPool);
+      if (evalResult.evaluated > 0) {
+        emit("tracked", `Re-evaluated ${evalResult.evaluated} tracked insights`);
+      }
+    } catch (err: any) {
+      logWarn(`[InsightOrchestrator] Tracked insight evaluation failed: ${err.message}`);
+    }
+
     const duration = Date.now() - startTime;
     emit("complete", `Finished in ${Math.round(duration / 1000)}s — ${allEvaluatedInsights.length} insights across ${FUNCTIONAL_CATEGORIES.length} categories`);
     insightLogEnd(
