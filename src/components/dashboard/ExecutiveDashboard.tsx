@@ -7,6 +7,8 @@ import {
   X,
   ChevronDown,
   Calendar as CalendarIcon,
+  Download,
+  Loader2,
 } from "lucide-react";
 import { LOSFunnelData } from "@/lib/losSchema";
 import { BusinessDataTable } from "@/components/dashboard/BusinessDataTable";
@@ -89,6 +91,70 @@ const KPI_METRICS: Record<
   creditPulls: { primary: "credit_pulls" },
 };
 
+// Ordered field→label mapping for loan detail CSV export (matches LoanDetailView columns)
+const LOAN_DETAIL_CSV_FIELDS: Array<{ field: string; label: string }> = [
+  { field: "loan_number", label: "Loan Number" },
+  { field: "loan_amount", label: "Loan Amount" },
+  { field: "interest_rate", label: "Interest Rate" },
+  { field: "fico_score", label: "FICO Score" },
+  { field: "ltv_ratio", label: "LTV" },
+  { field: "be_dti_ratio", label: "BE DTI" },
+  { field: "channel", label: "Channel" },
+  { field: "branch", label: "Branch" },
+  { field: "loan_officer", label: "Loan Officer" },
+  { field: "processor", label: "Processor" },
+  { field: "underwriter", label: "Underwriter" },
+  { field: "closer", label: "Closer" },
+  { field: "investor", label: "Investor" },
+  { field: "property_street", label: "Property Street" },
+  { field: "property_city", label: "Property City" },
+  { field: "property_state", label: "Property State" },
+  { field: "property_county", label: "Property County" },
+  { field: "property_zip", label: "Property Zip" },
+  { field: "loan_term", label: "Loan Term" },
+  { field: "current_loan_status", label: "Current Loan Status" },
+  { field: "current_milestone", label: "Current Milestone" },
+  { field: "loan_folder", label: "Loan Folder" },
+  { field: "loan_type", label: "Loan Type" },
+  { field: "loan_program", label: "Loan Program" },
+  { field: "loan_purpose", label: "Loan Purpose" },
+  { field: "occupancy_type", label: "Occupancy Type" },
+  { field: "property_type", label: "Property Type" },
+  { field: "lien_position", label: "Lien Position" },
+  { field: "started_date", label: "Started Date" },
+  { field: "credit_pull_date", label: "Credit Pull Date" },
+  { field: "application_date", label: "Application Date" },
+  { field: "loan_estimate_sent_date", label: "Loan Estimate Sent" },
+  { field: "loan_estimate_received_date", label: "Loan Estimate Received" },
+  { field: "uw_final_approval_date", label: "UW Final Approval Date" },
+  { field: "uw_suspended_date", label: "UW Suspended Date" },
+  { field: "uw_denied_date", label: "UW Denied Date" },
+  { field: "denial_date", label: "Denial Date" },
+  { field: "investor_lock_date", label: "Investor Lock Date" },
+  { field: "lock_expiration_date", label: "Lock Expiration Date" },
+  { field: "lock_days", label: "Lock Days" },
+  { field: "estimated_closing_date", label: "Estimated Closing Date" },
+  { field: "ctc_date", label: "CTC Date" },
+  { field: "closing_disclosure_sent_date", label: "Closing Disclosure Sent" },
+  { field: "closing_disclosure_received_date", label: "Closing Disclosure Received" },
+  { field: "closing_date", label: "Closing Date" },
+  { field: "funding_date", label: "Funding Date" },
+  { field: "investor_purchase_date", label: "Investor Purchase Date" },
+  { field: "shipped_date", label: "Shipped Date" },
+  { field: "mers_min", label: "MERS MIN" },
+  { field: "number_of_months_interest_only_payments", label: "Interest Only Months" },
+  { field: "income_total_mo_income", label: "Total Monthly Income" },
+  { field: "origination_points", label: "Origination Points" },
+  { field: "orig_fee_borr_pd", label: "Orig Fee Borr Pd" },
+  { field: "subject_property_type_fannie_mae", label: "Subject Property Type (FNMA)" },
+  { field: "fees_va_fund_fee_borr", label: "VA Fund Fee Borr" },
+  { field: "fha_lender_id", label: "FHA Lender ID" },
+  { field: "fees_loan_discount_fee", label: "Loan Discount Fee" },
+  { field: "fees_loan_discount_fee_borr", label: "Loan Discount Fee Borr" },
+  { field: "rush_closing_on_file", label: "Rush Closing On File" },
+  { field: "scrub_rating_of_file", label: "Scrub Rating Of File" },
+];
+
 // Executive Dashboard - Business Overview Component (6 Cards with Modals)
 interface ExecutiveDashboardProps {
   dateFilter: "today" | "mtd" | "ytd" | "custom";
@@ -109,6 +175,7 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
     {}
   );
   const [isAnimating, setIsAnimating] = useState(false);
+  const [exportingKpi, setExportingKpi] = useState<string | null>(null);
 
   // Per-KPI timeframe state (Active Loans doesn't have timeframe - it's current state)
   const [kpiTimeframes, setKpiTimeframes] = useState<
@@ -752,6 +819,163 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
       }, 0);
     },
     [fetchKpiMetrics]
+  );
+
+  // Export loan-level detail for a KPI modal as CSV.
+  // Uses the backend `kpi_filter` param which applies the EXACT same SQL
+  // conditions as METRICS_CATALOG, so exported row count matches the KPI card.
+  const exportKpiLoanDetail = useCallback(
+    async (kpiId: string) => {
+      if (exportingKpi) return;
+      setExportingKpi(kpiId);
+
+      try {
+        const params = new URLSearchParams();
+        if (selectedTenantId) params.set("tenant_id", selectedTenantId);
+        if (selectedChannel && selectedChannel !== "All")
+          params.set("channel_group", selectedChannel);
+
+        // Map frontend KPI id → backend kpi_filter value + the date field
+        // that METRICS_CATALOG uses as defaultDateField for each metric.
+        const KPI_EXPORT_CONFIG: Record<
+          string,
+          { kpiFilter: string; dateField: string; hasDateRange: boolean }
+        > = {
+          activeLoans: {
+            kpiFilter: "active_loans",
+            dateField: "application_date",
+            hasDateRange: false, // current state, no date range
+          },
+          closedLoans: {
+            kpiFilter: "closed_loans",
+            dateField: "funding_date",
+            hasDateRange: true,
+          },
+          lockedLoans: {
+            kpiFilter: "locked_loans",
+            dateField: "investor_lock_date",
+            hasDateRange: true,
+          },
+          cycleTime: {
+            kpiFilter: "closed_loans",
+            dateField: "funding_date",
+            hasDateRange: true,
+          },
+          pullThrough: {
+            kpiFilter: "", // no kpi_filter — all loans in date range
+            dateField: "application_date",
+            hasDateRange: true,
+          },
+          creditPulls: {
+            kpiFilter: "credit_pulls",
+            dateField: "credit_pull_date",
+            hasDateRange: true,
+          },
+        };
+
+        const config = KPI_EXPORT_CONFIG[kpiId];
+        if (!config) return;
+
+        // Apply the exact METRICS_CATALOG filter via backend kpi_filter param
+        if (config.kpiFilter) {
+          params.set("kpi_filter", config.kpiFilter);
+        }
+
+        // Apply date range matching the KPI's selected timeframe
+        if (config.hasDateRange) {
+          const period: PeriodValue = kpiTimeframes[kpiId] || "mtd";
+          params.set("date_field", config.dateField);
+
+          if (period === "custom") {
+            const customDates = kpiCustomDates[kpiId];
+            if (customDates?.start && customDates?.end) {
+              params.set("date_from", customDates.start.toISOString().split("T")[0]);
+              params.set("date_to", customDates.end.toISOString().split("T")[0]);
+            }
+          } else if (period !== "all") {
+            const effectivePeriod =
+              period === ("rolling_90_days" as PeriodValue) ? "ytd" : period;
+            const range = getPeriodRange(effectivePeriod, new Date(), year);
+            if (range.start)
+              params.set("date_from", range.start.toISOString().split("T")[0]);
+            if (range.end)
+              params.set("date_to", range.end.toISOString().split("T")[0]);
+          }
+        }
+
+        // Fetch all pages from the detail-list endpoint
+        let allLoans: Record<string, unknown>[] = [];
+        let offset = 0;
+        const limit = 5000;
+        while (true) {
+          params.set("limit", String(limit));
+          params.set("offset", String(offset));
+          const resp = await api.request<{ loans: Record<string, unknown>[]; total: number }>(
+            `/api/loans/detail-list?${params.toString()}`
+          );
+          allLoans = allLoans.concat(resp.loans);
+          if (allLoans.length >= resp.total || resp.loans.length === 0) break;
+          offset += limit;
+        }
+
+        if (allLoans.length === 0) return;
+
+        // Determine columns: known fields + any additional fields from the response
+        const knownFieldSet = new Set(LOAN_DETAIL_CSV_FIELDS.map((c) => c.field));
+        const extraFields: string[] = [];
+        if (allLoans.length > 0) {
+          for (const key of Object.keys(allLoans[0])) {
+            if (key !== "loan_id" && !knownFieldSet.has(key)) {
+              extraFields.push(key);
+            }
+          }
+        }
+        const columns = [
+          ...LOAN_DETAIL_CSV_FIELDS,
+          ...extraFields.map((f) => ({
+            field: f,
+            label: f
+              .replace(/_/g, " ")
+              .replace(/\b\w/g, (c) => c.toUpperCase()),
+          })),
+        ];
+
+        const escapeCsv = (v: unknown) => {
+          const s = String(v ?? "");
+          if (s.includes(",") || s.includes('"') || s.includes("\n"))
+            return `"${s.replace(/"/g, '""')}"`;
+          return s;
+        };
+        const formatCell = (v: unknown) => {
+          if (v === null || v === undefined) return "";
+          if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v))
+            return v.slice(0, 10);
+          return String(v);
+        };
+
+        const headerRow = columns.map((c) => escapeCsv(c.label));
+        const dataRows = allLoans.map((loan) =>
+          columns.map((c) => escapeCsv(formatCell(loan[c.field])))
+        );
+
+        const csv = [headerRow, ...dataRows].map((r) => r.join(",")).join("\n");
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        const kpiName = kpiId.replace(/([A-Z])/g, "-$1").toLowerCase();
+        link.download = `${kpiName}-loan-detail-${new Date().toISOString().split("T")[0]}.csv`;
+        link.click();
+        URL.revokeObjectURL(link.href);
+      } catch (error) {
+        console.error(
+          `[ExecutiveDashboard] Error exporting loan detail for ${kpiId}:`,
+          error
+        );
+      } finally {
+        setExportingKpi(null);
+      }
+    },
+    [exportingKpi, selectedTenantId, selectedChannel, kpiTimeframes, kpiCustomDates, year]
   );
 
   // Single source of truth: fetch active loans count from same endpoint as ClosingFalloutForecast (no period = all time, no channel)
@@ -2110,7 +2334,7 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
                   </button>
 
                   {/* Modal Header - Mobile First */}
-                  <div className="px-3 sm:px-4 md:px-6 py-3 sm:py-3 md:py-4 pr-16 sm:pr-16 md:pr-16 border-b border-slate-200 dark:border-slate-700 flex items-center flex-shrink-0 bg-slate-50 dark:bg-slate-800/50 relative sticky top-0 backdrop-blur-sm">
+                  <div className="px-3 sm:px-4 md:px-6 py-3 sm:py-3 md:py-4 pr-16 sm:pr-16 md:pr-16 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2 flex-shrink-0 bg-slate-50 dark:bg-slate-800/50 relative sticky top-0 backdrop-blur-sm">
                     <div className="min-w-0 flex-1">
                       <h2
                         className={`text-base sm:text-base md:text-lg lg:text-xl font-semibold ${modalContent.accentColor} truncate`}
@@ -2121,6 +2345,24 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
                         {modalContent.subtitle}
                       </p>
                     </div>
+                    <button
+                      onClick={() => exportKpiLoanDetail(selectedCard!)}
+                      disabled={exportingKpi === selectedCard}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] sm:text-xs font-medium text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0 shadow-sm"
+                      title="Export individual loan detail as CSV"
+                    >
+                      {exportingKpi === selectedCard ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Download className="w-3.5 h-3.5" />
+                      )}
+                      <span className="hidden sm:inline">
+                        {exportingKpi === selectedCard ? "Exporting..." : "Export Loan Detail"}
+                      </span>
+                      <span className="sm:hidden">
+                        {exportingKpi === selectedCard ? "..." : "Export"}
+                      </span>
+                    </button>
                   </div>
 
                   {/* Modal Content - Mobile First */}

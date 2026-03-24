@@ -22,6 +22,11 @@ export type SidebarResearchSession = {
   isOwner?: boolean;
 };
 
+const WORKBENCH_NAV_UPDATED = "workbench-nav-updated";
+
+type FavoriteUpdate = { canvasId: string; favorited: boolean };
+const WORKBENCH_FAVORITE_CHANGED = "workbench-favorite-changed";
+
 export function useWorkbenchNav() {
   const { user } = useAuth();
   const { selectedTenantId } = useTenantStore();
@@ -62,6 +67,23 @@ export function useWorkbenchNav() {
     void refetch();
   }, [refetch]);
 
+  // Sync favorite changes across all hook instances immediately
+  useEffect(() => {
+    const handleFavoriteChanged = (e: Event) => {
+      const { canvasId, favorited } = (e as CustomEvent<FavoriteUpdate>).detail;
+      setCanvases((prev) =>
+        prev.map((c) => (c.id === canvasId ? { ...c, favorited } : c)),
+      );
+    };
+    const handleNavUpdated = () => { void refetch(); };
+    window.addEventListener(WORKBENCH_FAVORITE_CHANGED, handleFavoriteChanged);
+    window.addEventListener(WORKBENCH_NAV_UPDATED, handleNavUpdated);
+    return () => {
+      window.removeEventListener(WORKBENCH_FAVORITE_CHANGED, handleFavoriteChanged);
+      window.removeEventListener(WORKBENCH_NAV_UPDATED, handleNavUpdated);
+    };
+  }, [refetch]);
+
   const ownedCanvases = useMemo(
     () => canvases.filter((c) => c.is_owner !== false),
     [canvases],
@@ -96,6 +118,13 @@ export function useWorkbenchNav() {
         ),
       );
 
+      // Broadcast optimistic update so all instances (sidebar, nav, etc.) sync immediately
+      window.dispatchEvent(
+        new CustomEvent<FavoriteUpdate>(WORKBENCH_FAVORITE_CHANGED, {
+          detail: { canvasId, favorited: nextFavorited },
+        }),
+      );
+
       try {
         const tenantQuery = effectiveTenantId
           ? `?tenant_id=${encodeURIComponent(effectiveTenantId)}`
@@ -106,6 +135,12 @@ export function useWorkbenchNav() {
         });
       } catch {
         setCanvases(previous);
+        // Revert the broadcast
+        window.dispatchEvent(
+          new CustomEvent<FavoriteUpdate>(WORKBENCH_FAVORITE_CHANGED, {
+            detail: { canvasId, favorited: !nextFavorited },
+          }),
+        );
       } finally {
         setFavoriteUpdatingIds((prev) => {
           const next = new Set(prev);
@@ -115,6 +150,17 @@ export function useWorkbenchNav() {
       }
     },
     [canvases, effectiveTenantId, favoriteUpdatingIds],
+  );
+
+  const deleteResearchSession = useCallback(
+    async (sessionId: string): Promise<void> => {
+      const tenantQuery = effectiveTenantId
+        ? `?tenant_id=${encodeURIComponent(effectiveTenantId)}`
+        : "";
+      await api.request(`/api/research/sessions/${sessionId}${tenantQuery}`, { method: "DELETE" });
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+    },
+    [effectiveTenantId],
   );
 
   return {
@@ -128,7 +174,13 @@ export function useWorkbenchNav() {
     sharedSessions,
     favoriteUpdatingIds,
     toggleCanvasFavorite,
+    deleteResearchSession,
     refetch,
   };
+}
+
+/** Call from anywhere to make all useWorkbenchNav instances refetch data */
+export function notifyWorkbenchNavUpdated() {
+  window.dispatchEvent(new Event(WORKBENCH_NAV_UPDATED));
 }
 

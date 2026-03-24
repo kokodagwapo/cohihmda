@@ -13,6 +13,7 @@ import {
   AdminSetUserPasswordCommand,
   AdminSetUserMFAPreferenceCommand,
   AdminGetUserCommand,
+  AdminResetUserPasswordCommand,
   AssociateSoftwareTokenCommand,
   VerifySoftwareTokenCommand,
   ForgotPasswordCommand,
@@ -25,7 +26,7 @@ import {
   type ChallengeNameType,
 } from "@aws-sdk/client-cognito-identity-provider";
 import crypto from "crypto";
-import { logError, logInfo, logDebug } from "../logger.js";
+import { logError, logInfo, logDebug, logWarn } from "../logger.js";
 
 const getCognitoUserPoolId = () => process.env.COGNITO_USER_POOL_ID || "";
 const getCognitoClientId = () => process.env.COGNITO_CLIENT_ID || "";
@@ -416,7 +417,7 @@ export async function getUser(
 
 // --- Password Reset ---
 
-export async function forgotPassword(email: string): Promise<void> {
+export async function forgotPassword(email: string): Promise<{ sent: boolean; reason?: string }> {
   try {
     const secretHash = computeSecretHash(email);
 
@@ -427,11 +428,27 @@ export async function forgotPassword(email: string): Promise<void> {
     });
     await getClient().send(command);
     logInfo("[CognitoAuth] Password reset initiated", { email });
+    return { sent: true };
   } catch (error: any) {
-    logDebug("[CognitoAuth] ForgotPassword result", {
+    logError("[CognitoAuth] ForgotPassword failed", error, {
       email,
-      error: error.name,
+      errorName: error.name,
+      errorMessage: error.message,
     });
+
+    if (error.name === "NotAuthorizedException") {
+      return { sent: false, reason: "not_authorized" };
+    }
+    if (error.name === "UserNotFoundException") {
+      return { sent: false, reason: "user_not_found" };
+    }
+    if (error.name === "LimitExceededException") {
+      return { sent: false, reason: "rate_limited" };
+    }
+    if (error.name === "InvalidParameterException") {
+      return { sent: false, reason: "invalid_user_state" };
+    }
+    return { sent: false, reason: "unknown" };
   }
 }
 
@@ -452,8 +469,114 @@ export async function confirmForgotPassword(
     });
     await getClient().send(command);
     logInfo("[CognitoAuth] Password reset confirmed", { email });
+
+    // ConfirmForgotPassword clears MFA preferences. Re-enable email MFA so
+    // the user isn't blocked by the app's MFA enforcement check on next login.
+    try {
+      const userInfo = await getUser(email);
+      if (!userInfo.mfaEnabled) {
+        await enableEmailMfa(email);
+        logInfo("[CognitoAuth] Re-enabled email MFA after password reset", { email });
+      }
+    } catch (mfaError: any) {
+      logWarn("[CognitoAuth] Failed to restore MFA after password reset — user may need to re-enroll", {
+        email,
+        error: mfaError.message,
+      });
+    }
   } catch (error: any) {
     logError("[CognitoAuth] Confirm forgot password failed", error, { email });
+    throw mapCognitoError(error);
+  }
+}
+
+/**
+ * Admin-initiated password reset. Tries AdminResetUserPasswordCommand first.
+ * If that fails because Cognito doesn't recognise the user's email as a verified
+ * recovery contact (happens for users created before AutoVerifiedAttributes was
+ * configured), falls back to deleting and recreating the Cognito user which
+ * sends a fresh invitation email and properly registers the verified contact.
+ *
+ * Returns `newCognitoSub` when the user was recreated so the caller can update
+ * the tenant database.
+ */
+export async function adminResetUserPassword(
+  email: string,
+  fullName?: string,
+): Promise<{ sent: boolean; reason?: string; newCognitoSub?: string }> {
+  try {
+    const command = new AdminResetUserPasswordCommand({
+      UserPoolId: getCognitoUserPoolId(),
+      Username: email,
+    });
+    await getClient().send(command);
+    logInfo("[CognitoAuth] Admin-initiated password reset sent", { email });
+    return { sent: true };
+  } catch (error: any) {
+    logError("[CognitoAuth] Admin password reset failed", error, {
+      email,
+      errorName: error.name,
+      errorMessage: error.message,
+    });
+
+    if (error.name === "AccessDeniedException") {
+      return { sent: false, reason: "access_denied" };
+    }
+    if (error.name === "LimitExceededException") {
+      return { sent: false, reason: "rate_limited" };
+    }
+
+    const needsRecreate =
+      (error.name === "InvalidParameterException" &&
+        error.message?.includes("no registered/verified email")) ||
+      (error.name === "NotAuthorizedException" &&
+        error.message?.includes("password recovery mechanism"));
+
+    if (needsRecreate) {
+      logInfo("[CognitoAuth] Falling back to user recreate for password reset", { email });
+      try {
+        await deleteUser(email).catch(() => {});
+        const result = await createUser(email, undefined, fullName, true);
+        logInfo("[CognitoAuth] User recreated for password reset, invitation sent", {
+          email,
+          newCognitoSub: result.cognitoSub,
+        });
+        return { sent: true, newCognitoSub: result.cognitoSub };
+      } catch (recreateError: any) {
+        logError("[CognitoAuth] User recreate fallback failed", recreateError, { email });
+        return { sent: false, reason: "recreate_failed" };
+      }
+    }
+
+    if (error.name === "NotAuthorizedException") {
+      return { sent: false, reason: "not_authorized" };
+    }
+    if (error.name === "UserNotFoundException") {
+      return { sent: false, reason: "user_not_found" };
+    }
+    if (error.name === "InvalidParameterException") {
+      return { sent: false, reason: "invalid_user_state" };
+    }
+    return { sent: false, reason: "unknown" };
+  }
+}
+
+export async function adminSetUserPassword(
+  email: string,
+  password: string,
+  permanent: boolean = true,
+): Promise<void> {
+  try {
+    const command = new AdminSetUserPasswordCommand({
+      UserPoolId: getCognitoUserPoolId(),
+      Username: email,
+      Password: password,
+      Permanent: permanent,
+    });
+    await getClient().send(command);
+    logInfo("[CognitoAuth] Admin set user password", { email, permanent });
+  } catch (error: any) {
+    logError("[CognitoAuth] Admin set user password failed", error, { email });
     throw mapCognitoError(error);
   }
 }

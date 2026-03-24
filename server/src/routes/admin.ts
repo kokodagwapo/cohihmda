@@ -1395,6 +1395,111 @@ router.delete(
 );
 
 /**
+ * POST /api/admin/tenants/:tenantId/users/:userId/reset-password
+ * Admin-initiated password reset. Sends a Cognito password reset email to the user.
+ */
+router.post(
+  "/tenants/:tenantId/users/:userId/reset-password",
+  authenticateToken,
+  requireRole("super_admin", "platform_admin", "tenant_admin"),
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.params.tenantId as string;
+      const userId = req.params.userId as string;
+
+      if (req.userRole === "tenant_admin" && req.tenantId !== tenantId) {
+        return res.status(403).json({
+          error: "Forbidden",
+          message: "You can only manage users in your own organization",
+        });
+      }
+
+      if (!cognitoAuth.isCognitoAuthEnabled()) {
+        return res.status(503).json({
+          error: "Password reset requires Cognito to be enabled",
+        });
+      }
+
+      const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+      const userResult = await tenantPool.query(
+        "SELECT id, email, full_name FROM users WHERE id = $1",
+        [userId],
+      );
+
+      if (userResult.rows.length === 0) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const targetEmail = userResult.rows[0].email;
+      const targetName = userResult.rows[0].full_name;
+      const result = await cognitoAuth.adminResetUserPassword(targetEmail, targetName || undefined);
+
+      if (!result.sent) {
+        const messages: Record<string, string> = {
+          access_denied: "The server does not have permission to reset passwords. The IAM policy needs the cognito-idp:AdminResetUserPassword action.",
+          not_authorized: "This user cannot reset their password via email. They may need to complete their initial sign-in first.",
+          user_not_found: "This user does not have a Cognito account. Try deleting and re-creating the user.",
+          invalid_user_state: "This user's account state does not support password reset. They may need to complete their initial sign-in first.",
+          rate_limited: "Too many password reset attempts. Please try again later.",
+          recreate_failed: "Failed to reset this user's account. Try deleting and re-creating the user manually.",
+        };
+        return res.status(400).json({
+          error: messages[result.reason || "unknown"] || "Failed to send password reset email",
+          reason: result.reason,
+        });
+      }
+
+      if (result.newCognitoSub) {
+        await tenantPool.query(
+          "UPDATE users SET cognito_sub = $1 WHERE id = $2",
+          [result.newCognitoSub, userId],
+        );
+        logInfo("Updated cognito_sub after user recreate", {
+          userId,
+          newCognitoSub: result.newCognitoSub,
+        });
+      }
+
+      await auditLog({
+        userId: req.userId,
+        userEmail: req.userEmail || null,
+        userRole: req.userRole || null,
+        tenantId,
+        action: "admin_password_reset",
+        resource: "user",
+        description: `Admin initiated password reset for ${targetEmail}${result.newCognitoSub ? " (account recreated)" : ""}`,
+        status: "success",
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent"),
+      }).catch(() => {});
+
+      logInfo("Admin initiated password reset", {
+        initiatedBy: req.userId,
+        targetUser: targetEmail,
+        tenantId,
+        recreated: !!result.newCognitoSub,
+      });
+
+      res.json({
+        message: result.newCognitoSub
+          ? `Account reset for ${targetEmail}. They will receive an email with new sign-in instructions.`
+          : `Password reset email sent to ${targetEmail}`,
+      });
+    } catch (error: any) {
+      logError("Error in admin password reset", error, {
+        userId: req.userId,
+        tenantId: req.params.tenantId as string,
+        targetUserId: req.params.userId as string,
+      });
+      res.status(500).json({
+        error: "Failed to send password reset email",
+        details: error.message,
+      });
+    }
+  },
+);
+
+/**
  * GET /api/admin/tenants/:tenantId/usage
  * Get usage statistics for a specific tenant
  */

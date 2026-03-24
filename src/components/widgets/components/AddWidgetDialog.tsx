@@ -446,6 +446,10 @@ function AskCohiTab({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      if (e.key === ' ') {
+        // Prevent Radix Tabs from capturing Space (which would block inserting a space)
+        e.stopPropagation();
+      }
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         handleSubmit();

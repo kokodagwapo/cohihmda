@@ -109,40 +109,39 @@ export function getPeriodRange(
 
   if (typeof period === "string" && isYearString(period)) {
     const year = parseInt(period, 10);
-    return { start: new Date(year, 0, 1), end: new Date(year + 1, 0, 1) };
+    return { start: new Date(year, 0, 1), end: new Date(year, 11, 31) };
   }
 
   if (period === "today") {
     const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     return { start, end };
   }
 
   if (period === "mtd") {
     const start = new Date(targetYear, now.getMonth(), 1);
-    const end = new Date(targetYear, now.getMonth(), now.getDate() + 1);
+    const end = new Date(targetYear, now.getMonth(), now.getDate());
     return { start, end };
   }
 
   if (period === "last_month") {
     const start = new Date(targetYear, now.getMonth() - 1, 1);
-    const end = new Date(targetYear, now.getMonth(), 1);
+    const end = new Date(targetYear, now.getMonth(), 0);
     return { start, end };
   }
 
   if (period === "ytd") {
     const start = new Date(targetYear, 0, 1);
-    // For YTD, end should be today if targetYear is current year, or end of year if past year
     const end =
       targetYear === now.getFullYear()
-        ? new Date(targetYear, now.getMonth(), now.getDate() + 1)
-        : new Date(targetYear + 1, 0, 1);
+        ? new Date(targetYear, now.getMonth(), now.getDate())
+        : new Date(targetYear, 11, 31);
     return { start, end };
   }
 
   if (period === "last_year") {
     const start = new Date(targetYear - 1, 0, 1);
-    const end = new Date(targetYear, 0, 1);
+    const end = new Date(targetYear - 1, 11, 31);
     return { start, end };
   }
 
@@ -261,7 +260,7 @@ export function isDateInPeriod(
   const { start, end } = getPeriodRange(period, now);
   if (!start && !end) return true;
   if (start && date < start) return false;
-  if (end && date >= end) return false;
+  if (end && date > end) return false;
   return true;
 }
 

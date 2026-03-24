@@ -35,6 +35,7 @@ export type LeaderboardTimeframe =
   | "wtd"
   | "mtd"
   | "qtd"
+  | "ytd"
   | "lm"
   | "lq"
   | "ly"

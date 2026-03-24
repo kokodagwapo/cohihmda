@@ -555,6 +555,7 @@ export async function generateMoreForBucketAgent(
 
     emit("evaluating", "Running evaluator...");
     const evaluation = await runInsightEvaluator(allFindings, apiKey, previousHeadlines);
+    normalizeInsightSources(evaluation.insights);
     const forBucket = evaluation.insights.filter((ins) => ins.bucket === targetBucket);
 
     for (const ins of forBucket) {
@@ -1262,13 +1263,83 @@ function computeValueScore(
   return Math.min(1, Math.max(0, score));
 }
 
+// Canonical source keys. Any source value produced by either pipeline or the LLM
+// must resolve to one of these before being persisted or returned to the UI.
+export const CANONICAL_SOURCES = [
+  "pipeline",
+  "performance",
+  "lock_risk",
+  "closing_risk",
+  "conversion",
+  "lost_opportunity",
+  "predictions",
+  "market_news",
+  "compliance",
+  "revenue",
+  "credit_risk",
+  "operations",
+] as const;
+
+export type CanonicalSource = (typeof CANONICAL_SOURCES)[number];
+
+// Alias map: maps legacy / LLM-invented source strings -> canonical key.
+const SOURCE_ALIAS_MAP: Record<string, CanonicalSource> = {
+  // pipeline
+  pipeline_velocity: "pipeline",
+  funnel: "pipeline",
+  loan_funnel: "pipeline",
+  // performance
+  officer_performance: "performance",
+  personnel: "performance",
+  comparisons: "performance",
+  leaderboard: "performance",
+  business_overview: "performance",
+  tiering: "performance",
+  // lock / closing risk
+  lock_expiration: "lock_risk",
+  trid: "closing_risk",
+  trid_risk: "closing_risk",
+  condition_backlog: "operations",
+  // conversion / fallout
+  conversion_trends: "conversion",
+  // revenue / margin
+  margin: "revenue",
+  product_breakdown: "revenue",
+  // credit
+  credit_risk: "credit_risk",
+  risk_cross_tab: "credit_risk",
+  // operations / general
+  historical: "operations",
+  knowledge_base: "operations",
+  agent_coverage: "operations",
+  // market & news
+  industry_news: "market_news",
+};
+
+/**
+ * Normalise the source field on each insight to a canonical key.
+ * Uses the alias map first, then falls back to "operations" for any
+ * unrecognised value so the chip always shows something meaningful.
+ */
+export function normalizeInsightSources(insights: EvaluatedInsight[]): void {
+  for (const ins of insights) {
+    const raw = (ins.source || "").trim().toLowerCase();
+    if (CANONICAL_SOURCES.includes(raw as CanonicalSource)) {
+      ins.source = raw;
+    } else if (SOURCE_ALIAS_MAP[raw]) {
+      ins.source = SOURCE_ALIAS_MAP[raw];
+    } else {
+      ins.source = "operations";
+    }
+  }
+}
+
 function enforceCoverage(
   insights: EvaluatedInsight[],
   findings: InsightFinding[]
 ): void {
   const used = new Set(insights.map((i) => i.findingIndex));
   const hasWorking = insights.some((i) => i.bucket === "working");
-  const hasMarketOrNews = insights.some((i) => isMarketOrNewsText(`${i.headline} ${i.understory}`));
 
   if (!hasWorking) {
     const idx = findings.findIndex(
@@ -1278,20 +1349,6 @@ function enforceCoverage(
     );
     if (idx >= 0) {
       insights.push(buildCoverageInsight(findings[idx], idx, "working"));
-      used.add(idx);
-    }
-  }
-
-  if (!hasMarketOrNews) {
-    const idx = findings.findIndex(
-      (f, i) => !used.has(i) && isMarketOrNewsText(`${f.title} ${f.summary}`)
-    );
-    if (idx >= 0) {
-      const bucket =
-        findings[idx].suggestedBucket === "critical" || findings[idx].suggestedBucket === "attention"
-          ? findings[idx].suggestedBucket
-          : "attention";
-      insights.push(buildCoverageInsight(findings[idx], idx, bucket as any));
       used.add(idx);
     }
   }
@@ -1308,14 +1365,6 @@ function enforceCoverage(
       candidate.priority = "BLUE";
       candidate.insight_type = "success";
       if (candidate.severity_score > 0.75) candidate.severity_score = 0.75;
-    }
-  }
-
-  // Normalize a market/news source label when applicable so UI and filters can
-  // reliably identify these insights.
-  for (const ins of insights) {
-    if (isMarketOrNewsText(`${ins.headline} ${ins.understory}`)) {
-      ins.source = "market_news";
     }
   }
 }
@@ -1366,23 +1415,6 @@ function buildCoverageInsight(
   };
 }
 
-function isMarketOrNewsText(text: string): boolean {
-  const normalized = text.toLowerCase();
-  return [
-    "market",
-    "rate",
-    "obmmi",
-    "obmmic30yf",
-    "news",
-    "mortgage bankers association",
-    "mba",
-    "fannie",
-    "freddie",
-    "cfpb",
-    "fhfa",
-    "regulatory",
-  ].some((k) => normalized.includes(k));
-}
 
 function isPositiveFindingText(text: string): boolean {
   const normalized = text.toLowerCase();

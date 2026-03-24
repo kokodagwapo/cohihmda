@@ -812,9 +812,15 @@ function RegistryWidgetEmbed({
     payload.sectionId,
   );
 
-  // Report data to canvasDataStore when it loads
+  // Report data to canvasDataStore when it loads.
+  // Skip for embed-sentinel widgets (data === { ready: true }) — those components
+  // will report their own real data via canvasItemId passed through config.
   const itemId = canvasItemId || payload.definitionId;
+  const isEmbedSentinel = selectedData != null && typeof selectedData === 'object'
+    && Object.keys(selectedData as any).length <= 1 && (selectedData as any).ready === true;
+
   useEffect(() => {
+    if (isEmbedSentinel) return; // embed self-reports
     if (!loading && selectedData != null && !error) {
       reportWidgetData(itemId, {
         widgetName: definition.name,
@@ -822,13 +828,23 @@ function RegistryWidgetEmbed({
         data: selectedData,
       });
     }
-    return () => {
-      removeWidget(itemId);
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedData, loading, error, itemId]);
+  }, [selectedData, loading, error, itemId, isEmbedSentinel]);
+  useEffect(() => {
+    if (isEmbedSentinel) return;
+    return () => { removeWidget(itemId); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [itemId, isEmbedSentinel]);
 
   const Component = definition.component;
+
+  // Pass canvasItemId through config so embed components can report data to the store
+  const configWithItemId = useMemo(() => ({
+    ...payload.config,
+    canvasItemId: itemId,
+    definitionName: definition.name,
+    definitionCategory: definition.category,
+  }), [payload.config, itemId, definition.name, definition.category]);
 
   return (
     <div className={accentClass ? `h-full w-full border-l-[3px] ${accentClass} rounded-l-sm` : 'h-full w-full'}>
@@ -838,7 +854,7 @@ function RegistryWidgetEmbed({
         error={error}
         width={width ?? definition.defaultSize.w}
         height={height ?? definition.defaultSize.h}
-        config={payload.config}
+        config={configWithItemId}
       />
     </div>
   );
@@ -890,6 +906,152 @@ export function WidgetRenderer({
 }: WidgetRendererProps) {
   const { type, payload } = item;
   const style = { minHeight: height };
+
+  // ---- Report static widget data to canvasDataStore for PPTX/chat context ----
+  // registry_widget, cohi_widget, and widget_group inner items handle their own
+  // reporting via async data hooks. We handle the remaining "static" types here
+  // whose data lives directly in the payload (not fetched).
+  //
+  // We use a JSON-serialised key of the payload to avoid re-running (and
+  // triggering cleanup → re-report) on every render when the parent produces a
+  // new object reference with the same contents.
+  const reportWidgetData = useCanvasDataStore((s) => s.reportWidgetData);
+  const removeFromStore = useCanvasDataStore((s) => s.removeWidget);
+
+  const payloadKey = useMemo(() => {
+    if (['registry_widget', 'cohi_widget'].includes(item.type)) return null;
+    try { return JSON.stringify(item.payload); } catch { return item.i; }
+  }, [item.type, item.payload, item.i]);
+
+  useEffect(() => {
+    if (payloadKey === null) return; // registry/cohi self-manage
+    const id = item.i;
+    const p = item.payload;
+    switch (item.type) {
+      case 'chart':
+        if (p.type === 'chart') {
+          const cfg = p.config as any;
+          reportWidgetData(id, {
+            widgetName: cfg?.title || 'Chart',
+            category: 'chart',
+            data: {
+              vizType: cfg?.type,
+              chartType: cfg?.type,
+              data: cfg?.data ?? [],
+              xKey: cfg?.xKey,
+              yKey: cfg?.yKey,
+              yKeys: cfg?.yKeys,
+              colors: cfg?.colors,
+              title: cfg?.title,
+            },
+          });
+        }
+        break;
+      case 'kpi':
+        if (p.type === 'kpi') {
+          reportWidgetData(id, {
+            widgetName: p.label,
+            category: 'kpi',
+            data: { value: p.value, format: p.format, label: p.label },
+          });
+        }
+        break;
+      case 'table':
+        if (p.type === 'table') {
+          reportWidgetData(id, {
+            widgetName: 'Table',
+            category: 'table',
+            data: { columns: p.columns, rows: p.data },
+          });
+        }
+        break;
+      case 'text_block':
+        if (p.type === 'text_block') {
+          reportWidgetData(id, {
+            widgetName: p.title || 'Note',
+            category: 'other',
+            data: { widgetType: 'text_block', title: p.title, content: p.content },
+          });
+        }
+        break;
+      case 'rich_text':
+        if (p.type === 'rich_text') {
+          reportWidgetData(id, {
+            widgetName: 'Text',
+            category: 'other',
+            data: { widgetType: 'rich_text', html: p.html },
+          });
+        }
+        break;
+      case 'image':
+        if (p.type === 'image') {
+          reportWidgetData(id, {
+            widgetName: p.alt || 'Image',
+            category: 'other',
+            data: { widgetType: 'image', src: p.src, alt: p.alt },
+          });
+        }
+        break;
+      case 'pinned_insight':
+        if (p.type === 'pinned_insight') {
+          reportWidgetData(id, {
+            widgetName: p.title,
+            category: 'other',
+            data: { widgetType: 'pinned_insight', title: p.title, content: p.content, visualization: p.visualization },
+          });
+        }
+        break;
+      case 'news_card':
+        if (p.type === 'news_card') {
+          reportWidgetData(id, {
+            widgetName: p.title,
+            category: 'other',
+            data: { widgetType: 'news_card', title: p.title, summary: p.summary, link: p.link },
+          });
+        }
+        break;
+      case 'section_header':
+        if (p.type === 'section_header') {
+          reportWidgetData(id, {
+            widgetName: p.title,
+            category: 'other',
+            data: { widgetType: 'section_header', title: p.title, sectionType: p.sectionType },
+          });
+        }
+        break;
+      case 'dashboard_section':
+        if (p.type === 'dashboard_section') {
+          reportWidgetData(id, {
+            widgetName: p.title || p.sectionId,
+            category: 'embed',
+            data: { widgetType: 'dashboard_section', sectionId: p.sectionId, title: p.title },
+          });
+        }
+        break;
+      case 'widget_group':
+        if (p.type === 'widget_group') {
+          reportWidgetData(id, {
+            widgetName: p.title,
+            category: 'other',
+            data: { widgetType: 'widget_group', groupId: p.groupId, title: p.title, sectionType: p.sectionType, items: p.items },
+          });
+        }
+        break;
+      default:
+        break;
+    }
+  // payloadKey is a stable JSON string that changes only when the actual data changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item.i, item.type, payloadKey]);
+
+  // Separate unmount-only cleanup so data isn't removed from the store on re-renders
+  useEffect(() => {
+    if (['registry_widget', 'cohi_widget'].includes(item.type)) return;
+    const id = item.i;
+    return () => { removeFromStore(id); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item.i]);
+
   if (type === "chart" && payload.type === "chart")
     return (
       <div style={style}>

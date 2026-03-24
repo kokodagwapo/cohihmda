@@ -235,6 +235,7 @@ export function ActorsView({
             presets={PERIOD_PRESETS}
             showYears={false}
             onPeriodChange={setPeriodSelection}
+            periodSelectionFromStore={periodSelection}
             defaultPreset="mtd"
             showLabel={false}
             size="sm"

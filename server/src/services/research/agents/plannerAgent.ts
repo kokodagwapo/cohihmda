@@ -72,7 +72,12 @@ RULES:
 - Today's date context will be provided separately
 - DATA QUALITY: "Active Loan" status often includes stale records not properly closed out in the LOS. When planning pipeline-related questions, instruct the analyst to check for and segment stale active loans (application_date > 6 months old). Data quality issues (missing fields, stale statuses, impossible dates) are high-value findings — include them when relevant.
 - If the user's request implies a specific output format (e.g. "create a table showing...", "break down X by Y", "show me hours per loan per user"), include an outputHint on the relevant question describing that format. Be VERY specific in the outputHint — list every column the user mentioned. The data analyst will use it to shape the final query so the user gets the exact table or visualization they asked for.
-- When the user lists specific columns they want (e.g. "loan number, loan officer, state, FICO..."), copy that FULL column list verbatim into the outputHint. Do not summarize or abbreviate it.`;
+- When the user lists specific columns they want (e.g. "loan number, loan officer, state, FICO..."), copy that FULL column list verbatim into the outputHint. Do not summarize or abbreviate it.
+- PERSONNEL TIERS AND SCORECARDS: "Tier" is NEVER a stored column. When the topic mentions tiers, scorecard, tiering, personnel performance, or LO ranking, plan questions that COMPUTE tiers from composite scores (TTS). Do NOT suggest looking for a tier column. Instead plan questions like:
+  - "Calculate TTS scores for all active LOs using volume, units, pull-through, turn time, and margin ratings vs company averages"
+  - "Assign tiers by Pareto percentile (top 20% / second 30% / bottom 50%) and show distribution"
+  - "Identify top vs bottom tier LOs by TTS and compare key metrics"
+  The "Business Knowledge" context section (if present) provides the exact TTS formula and a ready-to-use SQL recipe.`;
 
 // ============================================================================
 // Training Examples
@@ -130,9 +135,9 @@ export async function runPlannerAgent(
   schemaContext: string,
   metricDefinitions: string,
   apiKey: string,
-  options: { topic?: string; knowledgeContext?: string; priorInvestigationContext?: string; priorSessionSummaries?: string } = {}
+  options: { topic?: string; knowledgeContext?: string; priorInvestigationContext?: string; priorSessionSummaries?: string; businessKnowledge?: string } = {}
 ): Promise<ResearchPlan> {
-  const { topic, knowledgeContext, priorInvestigationContext, priorSessionSummaries } = options;
+  const { topic, knowledgeContext, priorInvestigationContext, priorSessionSummaries, businessKnowledge } = options;
 
   const now = new Date();
   const todayStr = now.toISOString().split("T")[0];
@@ -141,6 +146,10 @@ export async function runPlannerAgent(
   let userPrompt = `Today: ${todayStr}. Current year: ${yearStr}.\n\n`;
   userPrompt += `## Database Schema\n${schemaContext}\n\n`;
   userPrompt += `## Metric Definitions\n${metricDefinitions}\n\n`;
+
+  if (businessKnowledge) {
+    userPrompt += `${businessKnowledge}\n\n`;
+  }
 
   if (topic) {
     userPrompt += `## User's Investigation Request\nThe user wants to investigate: "${topic}"\n\nCreate a research plan that prioritizes this topic while also covering other significant areas if relevant.\n`;
@@ -171,7 +180,7 @@ export async function runPlannerAgent(
 
   const raw = await callLLM(messages, apiKey, {
     temperature: 0.7,
-    maxTokens: 3000,
+    maxTokens: 4096,
     jsonMode: true,
   });
 

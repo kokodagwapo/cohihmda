@@ -7,6 +7,10 @@ import React, {
 } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
+import {
+  getDashboardInsightPath,
+  getDashboardInsightNavigateState,
+} from "@/lib/dashboardInsightRoutes";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Zap,
@@ -30,12 +34,13 @@ import {
   MessageSquareText,
   Send,
   Tag,
-  Telescope,
   Bookmark,
   Bot,
   Loader2,
   FlaskConical,
+  Telescope,
 } from "lucide-react";
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { useAletheiaData, AletheiaInsight } from "@/hooks/useAletheiaData";
 import { useJobStatus } from "@/hooks/useJobStatus";
 import { useAuth } from "@/contexts/AuthContext";
@@ -43,12 +48,78 @@ import { api } from "@/lib/api";
 import { JobProgress } from "@/components/ui/JobProgress";
 import { CohiBriefingControl } from "@/components/aletheia/CohiBriefingControl";
 import { InsightDetailModal } from "./InsightDetailModal";
+import { DashboardInsightEvidenceModal, type DashboardInsightEvidenceModalInsight } from "./DashboardInsightEvidenceModal";
 import { TrackedInsightsWatchlist } from "./TrackedInsightsWatchlist";
 import { FindingDrillDown } from "@/components/research/FindingDrillDown";
 import { InsightChat } from "./InsightChat";
 import { ExportMenu } from "@/components/common/ExportMenu";
 import type { ExportData } from "@/utils/exportUtils";
 import type { Finding } from "@/hooks/useResearchSession";
+
+// ============================================================================
+// Go to dashboard page (for escalated dashboard insights)
+// ============================================================================
+
+/** Map Aletheia insight (from API) to the shape expected by DashboardInsightEvidenceModal */
+function aletheiaInsightToEvidenceModalInsight(
+  i: AletheiaInsight
+): DashboardInsightEvidenceModalInsight {
+  const typeToSentiment = (
+    t: string
+  ): "positive" | "warning" | "critical" | "neutral" => {
+    if (t === "critical" || t === "error") return "critical";
+    if (t === "warning") return "warning";
+    if (t === "success") return "positive";
+    return "neutral";
+  };
+  return {
+    headline: i.headline ?? i.message ?? "",
+    understory: i.understory ?? "",
+    sentiment: typeToSentiment(i.type ?? "info"),
+    severity_score: i.severity_score ?? 0,
+    what_changed: i.what_changed ?? "",
+    why: i.why ?? "",
+    business_impact: i.business_impact ?? "",
+    risk_if_ignored: i.risk_if_ignored ?? "",
+    recommended_action: i.recommended_action ?? "",
+    owner: i.owner ?? "",
+    sourcePageId: i.sourcePageId ?? "",
+    sourcePageName: i.sourcePageName ?? "",
+    filter_context: i.filter_context ?? {},
+    evidence_refs: i.evidence_refs,
+    cited_numbers: i.cited_numbers,
+    supporting_data: i.supporting_data,
+  };
+}
+
+function GoToDashboardPageButton({
+  sourcePageId,
+  sourcePageName,
+  filterContext,
+}: {
+  sourcePageId: string;
+  sourcePageName: string;
+  filterContext?: Record<string, unknown>;
+}) {
+  const navigate = useNavigate();
+  const handleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const path = getDashboardInsightPath(sourcePageId);
+    const state = getDashboardInsightNavigateState(sourcePageId, filterContext);
+    navigate(path, { state: Object.keys(state).length > 0 ? state : undefined });
+  };
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
+    >
+      Go to {sourcePageName}
+      <ChevronRight className="w-3 h-3" />
+    </button>
+  );
+}
 
 // ============================================================================
 // Bucket configuration
@@ -221,41 +292,51 @@ const FEEDBACK_TAGS = [
   { id: "actionable", label: "Actionable" },
 ];
 
+// Canonical source keys -> chip labels.
+// Aliases below keep backward-compat with insights already persisted in the DB.
 const SOURCE_CHIP_LABELS: Record<string, string> = {
+  // --- canonical keys ---
   pipeline: "Pipeline",
-  pipeline_velocity: "Pipeline",
   performance: "Performance",
-  officer_performance: "Loan Officer Performance",
-  personnel: "Loan Officer Performance",
-  lock_risk: "Closing Risk",
+  lock_risk: "Lock Expiration",
   closing_risk: "Closing Risk",
-  trid_risk: "Closing Risk",
-  conversion_trends: "Conversion",
+  conversion: "Conversion",
   lost_opportunity: "Lost Opportunity",
   predictions: "Forecast",
   market_news: "Market & News",
   compliance: "Compliance",
+  revenue: "Revenue & Margin",
+  credit_risk: "Credit Risk",
+  operations: "Operations",
+  // --- legacy / alias keys (kept for already-persisted insights) ---
+  pipeline_velocity: "Pipeline",
+  officer_performance: "Performance",
+  personnel: "Performance",
+  conversion_trends: "Conversion",
+  lock_expiration: "Lock Expiration",
+  trid_risk: "Closing Risk",
+  trid: "Closing Risk",
+  margin: "Revenue & Margin",
+  product_breakdown: "Revenue & Margin",
+  tiering: "Performance",
+  comparisons: "Performance",
+  condition_backlog: "Operations",
+  funnel: "Pipeline",
+  loan_funnel: "Pipeline",
+  historical: "Operations",
+  knowledge_base: "Operations",
+  agent_coverage: "Operations",
+  industry_news: "Market & News",
+  leaderboard: "Performance",
+  business_overview: "Performance",
+  risk_cross_tab: "Credit Risk",
+  dashboard_insights: "Dashboard Insight",
   other: "Insight",
 };
 
-function toTitleCase(value: string): string {
-  return value
-    .split(/[_\s-]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-    .join(" ");
-}
-
 function getInsightChipLabel(insight: AletheiaInsight): string {
   const source = (insight.source || "").trim().toLowerCase();
-  if (source && SOURCE_CHIP_LABELS[source]) {
-    return SOURCE_CHIP_LABELS[source];
-  }
-
-  if (source) {
-    return toTitleCase(source);
-  }
-  return "Insight";
+  return SOURCE_CHIP_LABELS[source] ?? "Insight";
 }
 
 interface BucketLaneProps {
@@ -273,14 +354,14 @@ interface BucketLaneProps {
   onGenerateMore?: () => Promise<void>;
   /** Admin-only: delete a single insight */
   onDeleteInsight?: (insightId: number) => Promise<void>;
-  /** Admin-only: submit feedback on an insight */
+  /** Submit feedback (thumbs up/down + optional tags/comment) on an insight — visible to all users */
   onSubmitFeedback?: (insightId: number, rating: -1 | 1, tags?: string[], comment?: string) => Promise<boolean>;
-  /** Deep-dive an insight in the workbench */
+  /** Deep-dive an insight in the workbench (admin only) */
   onInvestigate?: (insightId: number) => void;
-  /** Track/pin an insight to the watchlist */
-  onTrackInsight?: (insight: AletheiaInsight) => void;
-  /** Set of already-tracked insight IDs */
-  trackedInsightIds?: Set<number>;
+  /** Whether this insight is already on the watchlist */
+  isTracked?: (insight: AletheiaInsight) => boolean;
+  /** Toggle track/untrack on the watchlist */
+  onToggleTrack?: (insight: AletheiaInsight) => void;
   /** Whether the user is a platform admin */
   isAdmin?: boolean;
 }
@@ -297,8 +378,8 @@ function BucketLane({
   onDeleteInsight,
   onSubmitFeedback,
   onInvestigate,
-  onTrackInsight,
-  trackedInsightIds,
+  isTracked,
+  onToggleTrack,
   isAdmin,
 }: BucketLaneProps) {
   const [activeIdx, setActiveIdx] = useState(0);
@@ -317,23 +398,6 @@ function BucketLane({
   const [feedbackTags, setFeedbackTags] = useState<string[]>([]);
   const [feedbackComment, setFeedbackComment] = useState("");
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
-  const feedbackPopoverRef = useRef<HTMLDivElement>(null);
-
-  // Close popover on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (feedbackPopoverRef.current && !feedbackPopoverRef.current.contains(e.target as Node)) {
-        setFeedbackPopoverInsightId(null);
-        setFeedbackTags([]);
-        setFeedbackComment("");
-      }
-    };
-    if (feedbackPopoverInsightId !== null) {
-      document.addEventListener("mousedown", handler);
-    }
-    return () => document.removeEventListener("mousedown", handler);
-  }, [feedbackPopoverInsightId]);
-
   // Handle quick thumbs click
   const handleQuickRating = useCallback(async (insightId: number, rating: -1 | 1) => {
     // Set optimistic state
@@ -400,8 +464,6 @@ function BucketLane({
     const canDrill = isDrillable(insight);
     const isSelected = selectedInsightIdx === idx;
     const chipLabel = getInsightChipLabel(insight);
-    const isTracked = !!(insight.insightId && trackedInsightIds?.has(insight.insightId));
-
     const insightFeedback = insight.insightId ? feedbackMap[insight.insightId] : null;
     const isPopoverOpen = feedbackPopoverInsightId === insight.insightId;
 
@@ -431,190 +493,213 @@ function BucketLane({
                 {insight.headline || insight.message}
               </p>
             </div>
+            {insight.source === "dashboard_insights" && insight.sourcePageId && insight.sourcePageName && (
+              <GoToDashboardPageButton
+                sourcePageId={insight.sourcePageId}
+                sourcePageName={insight.sourcePageName}
+                filterContext={insight.filter_context}
+              />
+            )}
           </div>
-          {/* Track / pin to watchlist — visible to all users */}
-          {onTrackInsight && insight.insightId && (
-            <div className="flex-shrink-0 opacity-0 group-hover/insight:opacity-100 transition-all">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onTrackInsight(insight);
-                }}
-                className="p-1 rounded-md hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-all"
-                title={isTracked ? "Already on watchlist" : "Track this insight on watchlist"}
+          {/* Feedback + action buttons — wrapped in Popover so the comment form
+              portals to document.body and is never clipped by overflow-hidden ancestors */}
+          {insight.insightId && (
+            <Popover
+              open={isPopoverOpen}
+              onOpenChange={(open) => {
+                if (!open) {
+                  setFeedbackPopoverInsightId(null);
+                  setFeedbackTags([]);
+                  setFeedbackComment("");
+                }
+              }}
+            >
+              <PopoverAnchor asChild>
+                <div className="flex-shrink-0 flex items-center gap-0.5">
+                  {/* Track / pin to watchlist — always visible when tracked, otherwise on hover */}
+                  {onToggleTrack && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onToggleTrack(insight);
+                      }}
+                      className={`p-1 rounded-md transition-all ${
+                        isTracked?.(insight)
+                          ? "bg-amber-100 dark:bg-amber-900/30 opacity-100"
+                          : "opacity-0 group-hover/insight:opacity-100 hover:bg-amber-100 dark:hover:bg-amber-900/30"
+                      }`}
+                      title={isTracked?.(insight) ? "Remove from watchlist" : "Track this insight"}
+                    >
+                      <Bookmark
+                        className={`w-3 h-3 transition-colors ${
+                          isTracked?.(insight)
+                            ? "text-amber-500 fill-amber-500 dark:text-amber-400 dark:fill-amber-400"
+                            : "text-slate-400 hover:text-amber-600 dark:hover:text-amber-400"
+                        }`}
+                        strokeWidth={2}
+                      />
+                    </button>
+                  )}
+                  {/* Hover-only action buttons */}
+                  <div className="flex items-center gap-0.5 opacity-0 group-hover/insight:opacity-100 transition-all">
+                    {/* Investigate (deep dive in workbench) — admin only */}
+                    {isAdmin && onInvestigate && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onInvestigate(insight.insightId!);
+                        }}
+                        className="p-1 rounded-md hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-all"
+                        title="Deep dive in Workbench"
+                      >
+                        <Telescope
+                          className="w-3 h-3 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400"
+                          strokeWidth={2}
+                        />
+                      </button>
+                    )}
+                    {/* Thumbs Up — all users */}
+                    {onSubmitFeedback && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleQuickRating(insight.insightId!, 1);
+                        }}
+                        className={`p-1 rounded-md transition-all ${
+                          insightFeedback?.rating === 1
+                            ? "bg-green-100 dark:bg-green-900/40 opacity-100"
+                            : "hover:bg-green-100 dark:hover:bg-green-900/30"
+                        }`}
+                        title="Good insight"
+                      >
+                        <ThumbsUp
+                          className={`w-3 h-3 ${
+                            insightFeedback?.rating === 1
+                              ? "text-green-600 dark:text-green-400 fill-current"
+                              : "text-slate-400 hover:text-green-600 dark:hover:text-green-400"
+                          }`}
+                          strokeWidth={2}
+                        />
+                      </button>
+                    )}
+                    {/* Thumbs Down */}
+                    {onSubmitFeedback && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleQuickRating(insight.insightId!, -1);
+                        }}
+                        className={`p-1 rounded-md transition-all ${
+                          insightFeedback?.rating === -1
+                            ? "bg-red-100 dark:bg-red-900/40 opacity-100"
+                            : "hover:bg-red-100 dark:hover:bg-red-900/30"
+                        }`}
+                        title="Bad insight"
+                      >
+                        <ThumbsDown
+                          className={`w-3 h-3 ${
+                            insightFeedback?.rating === -1
+                              ? "text-red-600 dark:text-red-400 fill-current"
+                              : "text-slate-400 hover:text-red-600 dark:hover:text-red-400"
+                          }`}
+                          strokeWidth={2}
+                        />
+                      </button>
+                    )}
+                    {/* Delete button — admin only */}
+                    {isAdmin && onDeleteInsight && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteInsight(insight.insightId!);
+                        }}
+                        className="p-1 rounded-md hover:bg-red-100 dark:hover:bg-red-900/30 transition-all"
+                        title="Remove this insight"
+                      >
+                        <X className="w-3.5 h-3.5 text-red-400 hover:text-red-600 dark:text-red-500 dark:hover:text-red-400" strokeWidth={2} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </PopoverAnchor>
+
+              {/* Feedback form — rendered via Radix portal so it escapes overflow-hidden ancestors */}
+              <PopoverContent
+                align="end"
+                sideOffset={6}
+                className="w-72 p-3 space-y-2.5"
+                onClick={(e) => e.stopPropagation()}
               >
-                <Bookmark
-                  className={`w-3 h-3 transition-colors ${isTracked ? "text-amber-500 fill-amber-500" : "text-slate-400 hover:text-amber-600 dark:hover:text-amber-400"}`}
-                  strokeWidth={2}
-                />
-              </button>
-            </div>
-          )}
-          {/* Admin feedback + delete + investigate buttons */}
-          {isAdmin && insight.insightId && (
-            <div className="flex-shrink-0 flex items-center gap-0.5 opacity-0 group-hover/insight:opacity-100 transition-all">
-              {/* Investigate (deep dive in workbench) */}
-              {onInvestigate && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onInvestigate(insight.insightId!);
-                  }}
-                  className="p-1 rounded-md hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-all"
-                  title="Deep dive in Workbench"
-                >
-                  <Telescope
-                    className="w-3 h-3 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400"
-                    strokeWidth={2}
-                  />
-                </button>
-              )}
-              {/* Thumbs Up */}
-              {onSubmitFeedback && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleQuickRating(insight.insightId!, 1);
-                  }}
-                  className={`p-1 rounded-md transition-all ${
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+                    <Tag className="w-3 h-3" />
+                    Optional tags & comment
+                  </span>
+                  <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
                     insightFeedback?.rating === 1
-                      ? "bg-green-100 dark:bg-green-900/40 opacity-100"
-                      : "hover:bg-green-100 dark:hover:bg-green-900/30"
-                  }`}
-                  title="Good insight"
-                >
-                  <ThumbsUp
-                    className={`w-3 h-3 ${
-                      insightFeedback?.rating === 1
-                        ? "text-green-600 dark:text-green-400 fill-current"
-                        : "text-slate-400 hover:text-green-600 dark:hover:text-green-400"
-                    }`}
-                    strokeWidth={2}
-                  />
-                </button>
-              )}
-              {/* Thumbs Down */}
-              {onSubmitFeedback && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleQuickRating(insight.insightId!, -1);
-                  }}
-                  className={`p-1 rounded-md transition-all ${
-                    insightFeedback?.rating === -1
-                      ? "bg-red-100 dark:bg-red-900/40 opacity-100"
-                      : "hover:bg-red-100 dark:hover:bg-red-900/30"
-                  }`}
-                  title="Bad insight"
-                >
-                  <ThumbsDown
-                    className={`w-3 h-3 ${
-                      insightFeedback?.rating === -1
-                        ? "text-red-600 dark:text-red-400 fill-current"
-                        : "text-slate-400 hover:text-red-600 dark:hover:text-red-400"
-                    }`}
-                    strokeWidth={2}
-                  />
-                </button>
-              )}
-              {/* Delete button */}
-              {onDeleteInsight && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDeleteInsight(insight.insightId!);
-                  }}
-                  className="p-1 rounded-md hover:bg-red-100 dark:hover:bg-red-900/30 transition-all"
-                  title="Remove this insight"
-                >
-                  <X className="w-3.5 h-3.5 text-red-400 hover:text-red-600 dark:text-red-500 dark:hover:text-red-400" strokeWidth={2} />
-                </button>
-              )}
-            </div>
+                      ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300"
+                      : "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"
+                  }`}>
+                    {insightFeedback?.rating === 1 ? <ThumbsUp className="w-2.5 h-2.5" /> : <ThumbsDown className="w-2.5 h-2.5" />}
+                    {insightFeedback?.rating === 1 ? "Good" : "Bad"}
+                  </span>
+                </div>
+                {/* Tags */}
+                <div className="flex flex-wrap gap-1.5">
+                  {FEEDBACK_TAGS.map((tag) => {
+                    const isActive = feedbackTags.includes(tag.id);
+                    return (
+                      <button
+                        key={tag.id}
+                        onClick={() =>
+                          setFeedbackTags((prev) =>
+                            isActive ? prev.filter((t) => t !== tag.id) : [...prev, tag.id]
+                          )
+                        }
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors ${
+                          isActive
+                            ? "bg-blue-100 dark:bg-blue-900/40 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300"
+                            : "bg-slate-50 dark:bg-slate-700/50 border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"
+                        }`}
+                      >
+                        {tag.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {/* Comment */}
+                <textarea
+                  value={feedbackComment}
+                  onChange={(e) => setFeedbackComment(e.target.value)}
+                  placeholder="Optional note..."
+                  className="w-full text-xs rounded-md border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/50 px-2.5 py-1.5 text-slate-700 dark:text-slate-300 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-400 resize-none"
+                  rows={2}
+                />
+                {/* Submit */}
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={() => {
+                      setFeedbackPopoverInsightId(null);
+                      setFeedbackTags([]);
+                      setFeedbackComment("");
+                    }}
+                    className="px-2.5 py-1 text-[11px] font-medium text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+                  >
+                    Skip
+                  </button>
+                  <button
+                    onClick={() => handleSubmitFeedback(insight.insightId!)}
+                    disabled={feedbackSubmitting}
+                    className="inline-flex items-center gap-1 px-3 py-1 text-[11px] font-medium rounded-md bg-blue-500 hover:bg-blue-600 text-white transition-colors disabled:opacity-50"
+                  >
+                    <Send className="w-3 h-3" />
+                    {feedbackSubmitting ? "Sending..." : "Submit"}
+                  </button>
+                </div>
+              </PopoverContent>
+            </Popover>
           )}
         </div>
-
-        {/* Feedback popover — appears after thumbs click */}
-        <AnimatePresence>
-          {isAdmin && isPopoverOpen && insight.insightId && (
-            <motion.div
-              ref={feedbackPopoverRef}
-              initial={{ opacity: 0, y: -4, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -4, scale: 0.95 }}
-              transition={{ duration: 0.15 }}
-              className="absolute right-0 top-full mt-1 z-30 w-72 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg p-3 space-y-2.5"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
-                  <Tag className="w-3 h-3" />
-                  Optional tags & comment
-                </span>
-                <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
-                  insightFeedback?.rating === 1
-                    ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300"
-                    : "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"
-                }`}>
-                  {insightFeedback?.rating === 1 ? <ThumbsUp className="w-2.5 h-2.5" /> : <ThumbsDown className="w-2.5 h-2.5" />}
-                  {insightFeedback?.rating === 1 ? "Good" : "Bad"}
-                </span>
-              </div>
-              {/* Tags */}
-              <div className="flex flex-wrap gap-1.5">
-                {FEEDBACK_TAGS.map((tag) => {
-                  const isActive = feedbackTags.includes(tag.id);
-                  return (
-                    <button
-                      key={tag.id}
-                      onClick={() =>
-                        setFeedbackTags((prev) =>
-                          isActive ? prev.filter((t) => t !== tag.id) : [...prev, tag.id]
-                        )
-                      }
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors ${
-                        isActive
-                          ? "bg-blue-100 dark:bg-blue-900/40 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300"
-                          : "bg-slate-50 dark:bg-slate-700/50 border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"
-                      }`}
-                    >
-                      {tag.label}
-                    </button>
-                  );
-                })}
-              </div>
-              {/* Comment */}
-              <textarea
-                value={feedbackComment}
-                onChange={(e) => setFeedbackComment(e.target.value)}
-                placeholder="Optional note..."
-                className="w-full text-xs rounded-md border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/50 px-2.5 py-1.5 text-slate-700 dark:text-slate-300 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-400 resize-none"
-                rows={2}
-              />
-              {/* Submit */}
-              <div className="flex justify-end gap-2">
-                <button
-                  onClick={() => {
-                    setFeedbackPopoverInsightId(null);
-                    setFeedbackTags([]);
-                    setFeedbackComment("");
-                  }}
-                  className="px-2.5 py-1 text-[11px] font-medium text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
-                >
-                  Skip
-                </button>
-                <button
-                  onClick={() => handleSubmitFeedback(insight.insightId!)}
-                  disabled={feedbackSubmitting}
-                  className="inline-flex items-center gap-1 px-3 py-1 text-[11px] font-medium rounded-md bg-blue-500 hover:bg-blue-600 text-white transition-colors disabled:opacity-50"
-                >
-                  <Send className="w-3 h-3" />
-                  {feedbackSubmitting ? "Sending..." : "Submit"}
-                </button>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
 
         <AnimatePresence>
           {isSelected && (insight.understory || insight.reasoning) && (
@@ -819,6 +904,11 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedInsight, setSelectedInsight] =
     useState<AletheiaInsight | null>(null);
+  /** When true, show DashboardInsightEvidenceModal for dashboard_insights (fallback when details API returns 404). */
+  const [useDashboardEvidenceModalFallback, setUseDashboardEvidenceModalFallback] = useState(false);
+  useEffect(() => {
+    if (selectedInsight?.source === "dashboard_insights") setUseDashboardEvidenceModalFallback(false);
+  }, [selectedInsight?.source, selectedInsight?.insightId]);
   // Global expand/collapse state: null = uncontrolled (each lane manages itself),
   // true = all expanded, false = all collapsed. Resets to null on individual lane toggle.
   const [globalExpanded, setGlobalExpanded] = useState<boolean | null>(null);
@@ -866,6 +956,30 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
   const [categoryJobId, setCategoryJobId] = useState<string | null>(null);
   const categoryJob = useJobStatus(categoryJobId);
   const isCategoryRefreshing = categoryJob.status === "processing";
+
+  // ---- Tracked insights (watchlist) for pipeline insights ----
+  // Map<source_insight_id, tracked_uuid> drives both UI and delete logic.
+  type TrackedInsightRow = { id: string; source_insight_id?: number | null; status?: string };
+  const [trackedPipelineMap, setTrackedPipelineMap] = useState<Map<number, string>>(new Map());
+  const [watchlistRefreshTrigger, setWatchlistRefreshTrigger] = useState(0);
+
+  const fetchAndBuildPipelineMap = useCallback(async (bustCache = false) => {
+    if (bustCache) api.invalidateCacheFor("/insights/tracked");
+    const data = ((await api.getTrackedInsights(selectedTenantId)) || []) as TrackedInsightRow[];
+    const map = new Map<number, string>();
+    for (const row of data) {
+      if (row.status === "active" && row.source_insight_id != null) {
+        map.set(row.source_insight_id, row.id);
+      }
+    }
+    return map;
+  }, [selectedTenantId]);
+
+  useEffect(() => {
+    fetchAndBuildPipelineMap().then(setTrackedPipelineMap).catch((err) =>
+      console.error("Failed to load tracked insights:", err)
+    );
+  }, [fetchAndBuildPipelineMap]);
 
   const isRefreshing = refreshJob.status === "processing";
   const isAgentGenerating = agentJob.status === "processing";
@@ -983,28 +1097,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
     []
   );
 
-  // Deep-dive: create a workbench canvas from an insight and navigate to it
   const navigate = useNavigate();
-  const handleInvestigate = useCallback(
-    async (insightId: number) => {
-      try {
-        const tenantParam = selectedTenantId
-          ? `?tenant_id=${encodeURIComponent(selectedTenantId)}`
-          : "";
-        const result = await api.request<{ id: string }>(
-          `/api/workbench/canvases/from-insight${tenantParam}`,
-          {
-            method: "POST",
-            body: JSON.stringify({ insightId }),
-          }
-        );
-        navigate(`/my-dashboard?canvas=${result.id}`);
-      } catch (err) {
-        console.error("Error creating deep-dive canvas:", err);
-      }
-    },
-    [selectedTenantId, navigate]
-  );
 
   const [isCreatingResearch, setIsCreatingResearch] = useState(false);
 
@@ -1042,66 +1135,100 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
     }
   }, [agentFinding, isCreatingResearch, selectedTenantId, navigate]);
 
-  const [trackedInsightIds, setTrackedInsightIds] = useState<Set<number>>(new Set());
-
-  const handleTrackInsight = useCallback(
+  const handleToggleTrack = useCallback(
     async (insight: AletheiaInsight) => {
-      if (!insight.insightId) return;
+      if (insight.insightId == null) return;
+      const sourceId = insight.insightId;
+      const currentlyTracked = trackedPipelineMap.has(sourceId);
+
+      // Optimistic toggle
+      setTrackedPipelineMap((prev) => {
+        const next = new Map(prev);
+        if (currentlyTracked) next.delete(sourceId); else next.set(sourceId, "pending");
+        return next;
+      });
+
       try {
-        // Determine source type and extract metric_signature correctly
-        const isAgentInsight =
-          insight.generation_method === "agent" &&
-          insight.detail_data?.type === "agent_finding";
-
-        let metric_signature: { sql: string; keyFields: string[] };
-        let source_type: string;
-        let display_metadata: Record<string, any> | undefined;
-
-        if (isAgentInsight && insight.detail_data?.metricSignature?.sql) {
-          // Agent insight — use the SQL the investigator wrote to produce this finding
-          metric_signature = insight.detail_data.metricSignature;
-          source_type = "agent";
-          // Persist human-readable metric display hints for the detail modal
-          if (
-            insight.detail_data.keyMetricDescriptions ||
-            insight.detail_data.keyMetricFormats
-          ) {
-            display_metadata = {
-              keyMetricDescriptions: insight.detail_data.keyMetricDescriptions || {},
-              keyMetricFormats: insight.detail_data.keyMetricFormats || {},
-            };
+        if (currentlyTracked) {
+          let trackedId = trackedPipelineMap.get(sourceId);
+          if (!trackedId || trackedId === "pending") {
+            const freshMap = await fetchAndBuildPipelineMap(true);
+            trackedId = freshMap.get(sourceId);
+          }
+          if (trackedId && trackedId !== "pending") {
+            await api.deleteTrackedInsight(trackedId, selectedTenantId);
           }
         } else {
-          // Pipeline insight — reshape the first evidenceQuery if available
-          const eq = (insight.evidence as any)?.evidenceQueries?.[0];
-          if (eq?.sql) {
-            metric_signature = {
-              sql: eq.sql,
-              keyFields: (insight.evidence as any)?.metrics?.map((m: any) => m.label) || [],
-            };
-          } else {
-            metric_signature = { sql: "", keyFields: [] };
-          }
-          source_type = "pipeline";
-        }
+          // Determine source type and extract metric_signature correctly
+          const isAgentInsight =
+            insight.generation_method === "agent" &&
+            insight.detail_data?.type === "agent_finding";
 
-        await api.trackInsight(
-          {
+          let metric_signature: { sql: string; keyFields: string[] };
+          let source_type: string;
+          let display_metadata: Record<string, any> | undefined;
+
+          if (isAgentInsight && insight.detail_data?.metricSignature?.sql) {
+            metric_signature = insight.detail_data.metricSignature;
+            source_type = "agent";
+            if (insight.detail_data.keyMetricDescriptions || insight.detail_data.keyMetricFormats) {
+              display_metadata = {
+                keyMetricDescriptions: insight.detail_data.keyMetricDescriptions || {},
+                keyMetricFormats: insight.detail_data.keyMetricFormats || {},
+              };
+            }
+          } else {
+            const eq = (insight.evidence as any)?.evidenceQueries?.[0];
+            metric_signature = eq?.sql
+              ? { sql: eq.sql, keyFields: (insight.evidence as any)?.metrics?.map((m: any) => m.label) || [] }
+              : { sql: "", keyFields: [] };
+            source_type = "pipeline";
+          }
+
+          await api.trackInsight({
             headline: insight.headline || insight.message,
             understory: insight.understory || insight.reasoning,
             metric_signature,
-            source_insight_id: insight.insightId,
+            source_insight_id: sourceId,
             source_type,
             display_metadata,
-          },
-          selectedTenantId
-        );
-        setTrackedInsightIds((prev) => new Set(prev).add(insight.insightId!));
+          }, selectedTenantId);
+        }
+        const freshMap = await fetchAndBuildPipelineMap(true);
+        setTrackedPipelineMap(freshMap);
+        setWatchlistRefreshTrigger((t) => t + 1);
       } catch (err) {
-        console.error("Error tracking insight:", err);
+        console.error("Error toggling tracked insight:", err);
+        // Revert on failure
+        setTrackedPipelineMap((prev) => {
+          const reverted = new Map(prev);
+          if (currentlyTracked) reverted.set(sourceId, "reverted"); else reverted.delete(sourceId);
+          return reverted;
+        });
       }
     },
-    [selectedTenantId]
+    [selectedTenantId, trackedPipelineMap, fetchAndBuildPipelineMap]
+  );
+
+  const handleInvestigate = useCallback(
+    async (insightId: number) => {
+      try {
+        const tenantParam = selectedTenantId
+          ? `?tenant_id=${encodeURIComponent(selectedTenantId)}`
+          : "";
+        const result = await api.request<{ id: string }>(
+          `/api/workbench/canvases/from-insight${tenantParam}`,
+          {
+            method: "POST",
+            body: JSON.stringify({ insightId }),
+          }
+        );
+        navigate(`/my-dashboard?canvas=${result.id}`);
+      } catch (err) {
+        console.error("Error creating deep-dive canvas:", err);
+      }
+    },
+    [selectedTenantId, navigate]
   );
 
   const isDrillable = useCallback(
@@ -1420,7 +1547,13 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
 
         {/* ===== Watchlist Tab ===== */}
         {activeTab === "watchlist" && (
-          <TrackedInsightsWatchlist selectedTenantId={selectedTenantId} />
+          <TrackedInsightsWatchlist
+            selectedTenantId={selectedTenantId}
+            refreshTrigger={watchlistRefreshTrigger}
+            onInsightRemoved={() => {
+              fetchAndBuildPipelineMap(true).then(setTrackedPipelineMap).catch(() => {});
+            }}
+          />
         )}
 
         {/* ===== Job Progress ===== */}
@@ -1575,12 +1708,10 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                   onDeleteInsight={
                     isAdmin ? deleteInsight : undefined
                   }
-                  onSubmitFeedback={
-                    isAdmin ? submitFeedback : undefined
-                  }
+                  onSubmitFeedback={submitFeedback}
                   onInvestigate={isAdmin ? handleInvestigate : undefined}
-                  onTrackInsight={handleTrackInsight}
-                  trackedInsightIds={trackedInsightIds}
+                  isTracked={(i) => i.insightId != null && trackedPipelineMap.has(i.insightId)}
+                  onToggleTrack={handleToggleTrack}
                   isAdmin={isAdmin}
                 />
               );
@@ -1589,12 +1720,24 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
         )}
       </motion.div>
 
-      {/* Insight Detail Modal (pipeline insights) */}
-      <InsightDetailModal
-        isOpen={isModalOpen}
+      {/* Dashboard Insight Evidence Modal (fallback when details API returns 404 for dashboard_insights) */}
+      <DashboardInsightEvidenceModal
+        isOpen={isModalOpen && selectedInsight?.source === "dashboard_insights" && useDashboardEvidenceModalFallback}
         onClose={() => {
           setIsModalOpen(false);
           setSelectedInsight(null);
+          setUseDashboardEvidenceModalFallback(false);
+        }}
+        insight={selectedInsight?.source === "dashboard_insights" && selectedInsight ? aletheiaInsightToEvidenceModalInsight(selectedInsight) : null}
+      />
+
+      {/* Insight Detail Modal (pipeline + dashboard_insights; for dashboard_insights fallback to evidence modal on 404) */}
+      <InsightDetailModal
+        isOpen={isModalOpen && selectedInsight != null && (selectedInsight.source !== "dashboard_insights" || !useDashboardEvidenceModalFallback)}
+        onClose={() => {
+          setIsModalOpen(false);
+          setSelectedInsight(null);
+          setUseDashboardEvidenceModalFallback(false);
         }}
         insightSource={selectedInsight?.source || ""}
         insightMessage={selectedInsight?.message || ""}
@@ -1610,7 +1753,9 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
           recommended_action: selectedInsight.recommended_action,
           owner: selectedInsight.owner,
         } : undefined}
-        onTrackInsight={selectedInsight ? () => handleTrackInsight(selectedInsight) : undefined}
+        isTracked={selectedInsight != null && selectedInsight.insightId != null && trackedPipelineMap.has(selectedInsight.insightId)}
+        onToggleTrack={selectedInsight ? () => handleToggleTrack(selectedInsight) : undefined}
+        onDetailUnavailable={selectedInsight?.source === "dashboard_insights" ? () => setUseDashboardEvidenceModalFallback(true) : undefined}
       />
 
       {/* Agent Finding Drilldown Modal — portal to body to escape overflow-hidden parents */}
@@ -1650,13 +1795,16 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                   </button>
                   {agentFindingInsight && (
                     <button
-                      onClick={() => {
-                        handleTrackInsight(agentFindingInsight);
-                      }}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors"
+                      onClick={() => handleToggleTrack(agentFindingInsight)}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                        agentFindingInsight.insightId != null && trackedPipelineMap.has(agentFindingInsight.insightId)
+                          ? "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
+                          : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-amber-100 dark:hover:bg-amber-900/30 hover:text-amber-700 dark:hover:text-amber-300"
+                      }`}
+                      title={agentFindingInsight.insightId != null && trackedPipelineMap.has(agentFindingInsight.insightId) ? "Remove from watchlist" : "Track this insight"}
                     >
-                      <Bookmark className="w-3.5 h-3.5" />
-                      Track This Insight
+                      <Bookmark className={`w-3.5 h-3.5 ${agentFindingInsight.insightId != null && trackedPipelineMap.has(agentFindingInsight.insightId) ? "text-amber-500 fill-amber-500 dark:text-amber-400 dark:fill-amber-400" : ""}`} />
+                      {agentFindingInsight.insightId != null && trackedPipelineMap.has(agentFindingInsight.insightId) ? "Tracked" : "Track This Insight"}
                     </button>
                   )}
                 </div>

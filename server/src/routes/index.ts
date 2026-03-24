@@ -5,6 +5,7 @@ import subscriptionsRoutes from "./subscriptions.js";
 import ragRoutes from "./rag.js";
 import metricsRoutes from "./metrics.js";
 import dashboardRoutes from "./dashboard.js";
+import dashboardInsightsRoutes from "./dashboardInsights.js";
 import adminRoutes from "./admin.js";
 import losRoutes from "./los.js";
 import synapseRoutes from "./synapse.js";
@@ -107,6 +108,7 @@ export function setupRoutes(app: Express) {
   app.use("/api/rag/knowledge-base", ragKnowledgeBaseRouter);
   app.use("/api/metrics", metricsRoutes);
   app.use("/api/dashboard", dashboardRoutes);
+  app.use("/api/dashboard-insights", dashboardInsightsRoutes);
   app.use("/api/admin", adminRoutes);
   app.use("/api/los", losRoutes);
   app.use("/api/synapse", synapseRoutes);

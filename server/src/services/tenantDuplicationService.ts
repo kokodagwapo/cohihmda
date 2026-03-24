@@ -325,6 +325,29 @@ export async function buildAnonymizationMappings(
     }
   }
 
+  // 3. Scan encompass_users for IDs, names, and emails
+  console.log("[TenantDuplication] Scanning encompass_users for anonymization mappings...");
+  try {
+    const encompassUsers = await srcPool.query(
+      `SELECT encompass_user_id, username, email, first_name, last_name
+       FROM public.encompass_users`,
+    );
+    for (const eu of encompassUsers.rows) {
+      if (eu.encompass_user_id && !personnelIdMap.has(eu.encompass_user_id)) {
+        personnelIdMap.set(eu.encompass_user_id, `PID-${String(personnelIdMap.size + 1).padStart(4, "0")}`);
+      }
+      const fullName = `${eu.first_name || ""} ${eu.last_name || ""}`.trim();
+      if (fullName) getOrCreateNameMapping(fullName);
+      if (eu.email && !emailMap.has(eu.email)) {
+        const pseudo = generatePseudonym(emailMap.size);
+        emailMap.set(eu.email, `${pseudo.first.toLowerCase()}.${pseudo.last.toLowerCase().replace(/\s+/g, "")}@example.com`);
+      }
+    }
+    console.log(`[TenantDuplication] encompass_users: ${encompassUsers.rows.length} rows scanned`);
+  } catch (err: any) {
+    console.warn(`[TenantDuplication] encompass_users scan skipped: ${err.message}`);
+  }
+
   console.log(
     `[TenantDuplication] Mappings built: ${nameMap.size} names, ${branchMap.size} branches, ` +
     `${orgIdMap.size} orgids, ${employeeIdMap.size} employee IDs, ${personnelIdMap.size} personnel IDs`
@@ -441,6 +464,91 @@ export async function copyEmployeesAnonymized(
   }
 
   console.log(`[TenantDuplication] employees: ${inserted}/${rows.length} rows copied (anonymized)`);
+  return inserted;
+}
+
+// ── Copy encompass_users with anonymization ───────────────────────────
+
+export async function copyEncompassUsersAnonymized(
+  srcPool: pg.Pool,
+  dstPool: pg.Pool,
+  mappings: AnonymizationMappings,
+): Promise<number> {
+  const GENERATED_COLS = new Set(["full_name"]);
+  const FK_NULL_COLS = new Set(["los_connection_id", "cohi_user_id"]);
+
+  let srcCols: string[];
+  let dstCols: Set<string>;
+  let dstJsonbCols: Set<string>;
+  try {
+    const src = await getCommonColumns(srcPool, dstPool, "encompass_users");
+    srcCols = src.columns;
+    dstCols = new Set(srcCols);
+    dstJsonbCols = src.jsonbColumns;
+  } catch {
+    console.log("[TenantDuplication] encompass_users: table not found in source or destination (skipped)");
+    return 0;
+  }
+
+  const columns = srcCols.filter((c) => !GENERATED_COLS.has(c));
+  if (columns.length === 0) return 0;
+
+  const colList = columns.map((c) => `"${c}"`).join(", ");
+  const srcColList = srcCols.filter((c) => !GENERATED_COLS.has(c)).map((c) => `"${c}"`).join(", ");
+  const { rows } = await srcPool.query(`SELECT ${srcColList} FROM public.encompass_users`);
+  if (rows.length === 0) {
+    console.log("[TenantDuplication] encompass_users: 0 rows (skipped)");
+    return 0;
+  }
+
+  const placeholders = columns.map((_, i) => `$${i + 1}`).join(", ");
+  let inserted = 0;
+
+  for (const row of rows) {
+    // Map encompass_user_id to same anonymized ID used in loans
+    if (row.encompass_user_id) {
+      row.encompass_user_id = mappings.personnelIdMap.get(row.encompass_user_id.trim()) || row.encompass_user_id;
+    }
+
+    // Anonymize username
+    if (row.username) {
+      const mapped = mappings.nameMap.get(row.username.trim());
+      row.username = mapped ? mapped.toLowerCase().replace(/\s+/g, ".") : `user-${inserted + 1}`;
+    }
+
+    // Anonymize name fields
+    const origFullName = `${row.first_name || ""} ${row.last_name || ""}`.trim();
+    const pseudoFull = origFullName ? (mappings.nameMap.get(origFullName) || generatePseudonym(inserted).full) : generatePseudonym(inserted).full;
+    const parts = pseudoFull.split(" ");
+    row.first_name = parts[0] || null;
+    row.last_name = parts.slice(1).join(" ") || null;
+
+    // Anonymize email
+    if (row.email) {
+      row.email = mappings.emailMap.get(row.email)
+        || `${(row.first_name || "user").toLowerCase()}.${(row.last_name || String(inserted + 1)).toLowerCase().replace(/\s+/g, "")}@example.com`;
+    }
+
+    // Null out FK columns that reference tables we don't copy
+    for (const col of FK_NULL_COLS) {
+      if (col in row) row[col] = null;
+    }
+
+    const values = columns.map((c) => serializeValue(row[c], c, dstJsonbCols));
+
+    try {
+      await dstPool.query(
+        `INSERT INTO public.encompass_users (${colList}) VALUES (${placeholders})
+         ON CONFLICT DO NOTHING`,
+        values,
+      );
+      inserted++;
+    } catch (err: any) {
+      console.warn(`[TenantDuplication] encompass_users: row insert error: ${err.message}`);
+    }
+  }
+
+  console.log(`[TenantDuplication] encompass_users: ${inserted}/${rows.length} rows copied (anonymized)`);
   return inserted;
 }
 
@@ -615,6 +723,7 @@ export interface DuplicateTenantResult {
     configTablesCopied: number;
     employeesCopied: number;
     loansCopied: number;
+    encompassUsersCopied: number;
     loanDataTablesCopied: number;
     anonymizationMappings: {
       names: number;
@@ -646,14 +755,13 @@ export async function duplicateTenantAnonymized(
   );
   if (existingSlug.rows.length > 0) {
     const existing = existingSlug.rows[0];
-    // If a previous duplication left a stale "provisioning" tenant, clean it up automatically
-    if (existing.status === "provisioning") {
-      console.log(`[TenantDuplication] Cleaning up stale provisioning tenant with slug "${newSlug}" (id: ${existing.id})`);
+    const canReuse = existing.status === "provisioning" || existing.status === "deleted";
+    if (canReuse) {
+      console.log(`[TenantDuplication] Cleaning up ${existing.status} tenant with slug "${newSlug}" (id: ${existing.id})`);
       await managementPool.query(
         `DELETE FROM coheus_tenants WHERE id = $1`,
         [existing.id]
       );
-      // Also drop the orphan database if it exists
       try {
         const dbName = `coheus_tenant_${newSlug.replace(/-/g, "_")}`;
         await managementPool.query(`DROP DATABASE IF EXISTS "${dbName}"`);
@@ -728,6 +836,10 @@ export async function duplicateTenantAnonymized(
       console.log("[TenantDuplication] Copying loans (anonymized)...");
       const loansCopied = await copyLoansAnonymized(src.pool, dst.pool, mappings);
 
+      // 7b. Copy encompass_users with anonymization
+      console.log("[TenantDuplication] Copying encompass_users (anonymized)...");
+      const encompassUsersCopied = await copyEncompassUsersAnonymized(src.pool, dst.pool, mappings);
+
       // 8. Copy loan-related data tables
       console.log("[TenantDuplication] Copying loan-related data tables...");
       await copyLoanRelatedData(src.pool, dst.pool);
@@ -742,6 +854,7 @@ export async function duplicateTenantAnonymized(
           configTablesCopied: CONFIG_TABLES.length,
           employeesCopied,
           loansCopied,
+          encompassUsersCopied,
           loanDataTablesCopied: LOAN_DATA_TABLES.length,
           anonymizationMappings: {
             names: mappings.nameMap.size,

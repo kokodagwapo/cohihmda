@@ -314,10 +314,11 @@ function TableElement({ config, scale }: { config: TableElementConfig; scale: nu
             {columns.map((col) => (
               <th
                 key={col.key}
-                className="px-1.5 py-1 text-left font-semibold text-white truncate"
+                className="px-1.5 py-1 font-semibold text-white truncate"
                 style={{
                   backgroundColor: config.headerStyle?.backgroundColor || '#1e3a5f',
                   fontSize: (config.headerStyle?.fontSize || config.fontSize || 9) * scale,
+                  textAlign: col.align || 'left',
                 }}
               >
                 {col.label}

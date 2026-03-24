@@ -71,7 +71,7 @@ Output JSON:
       "understory": "2-3 sentence detail with specific numbers and comparison. Answers: what changed, why it matters, what to do about it.",
       "bucket": "critical" | "attention" | "working" | "context",
       "severity_score": 0.00-1.00,
-      "source": "category string (e.g., pipeline_velocity, officer_performance, lock_risk, conversion_trends)",
+      "source": "MUST be exactly one of: pipeline | performance | lock_risk | closing_risk | conversion | lost_opportunity | predictions | market_news | compliance | revenue | credit_risk | operations — definitions: pipeline=active loan volume/velocity/counts; performance=officer or branch KPIs/rankings/comparisons; lock_risk=rate lock expirations/timing/exposure; closing_risk=TRID deadlines/closing delays/milestone gaps; conversion=pull-through/fallout/application-to-close funnel; lost_opportunity=withdrawn/denied/cancelled volume; predictions=model forecasts/fallout probability; market_news=external rate data/industry news/regulatory updates (MBA, Fannie, Freddie, CFPB, FHFA); compliance=regulatory or compliance violations; revenue=GOS/margin/pricing/revenue figures; credit_risk=credit scores/DTI/LTV/risk cross-tabs; operations=cycle times/condition backlogs/processing/other",
       "impact": { "type": "revenue_at_risk|operational|compliance|performance", "estimated_dollars": null, "units_affected": null },
       "confidence": "high" | "medium" | "low",
       "findingIndex": 0

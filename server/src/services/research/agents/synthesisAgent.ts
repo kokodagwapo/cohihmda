@@ -89,6 +89,10 @@ Your output is a JSON object:
   ]
 }
 
+LANGUAGE AND FORMATTING RULES:
+- Never write "pp" or "p.p." to mean percentage points. Write "ppts" or spell it out: "percentage points". Example: "pull-through fell 12 percentage points" not "fell 12pp".
+- Use "%" for rates and proportions (e.g. "pull-through is 74%"). Use "percentage points" or "ppts" only when describing the change between two rates (e.g. "improved 8 ppts YoY").
+
 RULES:
 - DATA BUILD requests: When the user asked for a specific output (a table, a breakdown, "show me X"), set directAnswer to a 1-2 sentence response. The finding that contains the user's requested table MUST be the basis for the rank-1 insight.
 - INVESTIGATION requests: Omit directAnswer or set to null; rank insights by business impact.
@@ -98,7 +102,10 @@ RULES:
 - recommendedAction: Every high- or medium-impact insight MUST have a recommendedAction. Low-impact can omit or keep brief.
 - Themes: Group related findings; use severity consistently (critical / warning / info / positive).
 - Use specific numbers from the findings — do not generalize or invent data.
-- If findings conflict, note the discrepancy and explain possible reasons.`;
+- If findings conflict, note the discrepancy and explain possible reasons.
+- PLATFORM CONTEXT: This platform has a Sales Scorecard (TTS-based LO tiering), Operations Scorecard (processor/underwriter/closer tiering by units and turn time), and TopTiering Comparison (revenue-based Pareto). When findings relate to personnel performance or tiers, frame recommendations in terms of these existing platform features (e.g. "Review in the Sales Scorecard", "Investigate in TopTiering"). Tiers are always computed — Top / Second / Bottom — never stored as fields.
+- TIER FINDINGS: When findings include TTS scores or tier distributions, frame them clearly: state what percentage of LOs are in each tier, how the tier boundaries were calculated, and what the business impact is (e.g. top-tier LOs representing X% of volume).
+- DATA QUALITY FLAGS: If any finding references a categorical value that looks like a data-entry artifact (CamelCase with no spaces, very low volume relative to the rest of the breakdown, or a known alias collision such as "FarmersHomeAdministration" alongside "FHA", or "USDA_RD" alongside "RD"), call it out explicitly in the relevant insight's detail field as a data quality note. Do not quietly omit it or treat it as a normal category.`;
 
 // ============================================================================
 // Agent Entry Point
@@ -108,7 +115,8 @@ export async function runSynthesisAgent(
   plan: ResearchPlan,
   findings: Finding[],
   apiKey: string,
-  userTopic?: string | null
+  userTopic?: string | null,
+  businessKnowledge?: string
 ): Promise<ResearchReport> {
   const planSummary = plan.questions
     .map((q) => `Q${q.id}: [${q.category}] ${q.topic}`)
@@ -136,6 +144,7 @@ export async function runSynthesisAgent(
 
   const userPrompt = [
     userTopic ? `## User's question / topic\n${userTopic}\n` : "",
+    businessKnowledge ? `${businessKnowledge}\n` : "",
     `## Research Plan`,
     planSummary,
     `\n## Findings from Data Analysts`,
@@ -152,7 +161,7 @@ export async function runSynthesisAgent(
 
   const raw = await callLLM(messages, apiKey, {
     temperature: 0.4,
-    maxTokens: 4000,
+    maxTokens: 4096,
     jsonMode: true,
   });
 

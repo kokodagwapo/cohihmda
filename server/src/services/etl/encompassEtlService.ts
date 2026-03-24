@@ -81,15 +81,32 @@ export class EncompassEtlService {
         return lower === "true" || lower === "yes" || lower === "y" || lower === "1" || lower === "x";
       }
       if (colType === "date" || colType === "timestamp" || colType === "timestamp with time zone") {
-        let date = new Date(trimmed);
-        if (isNaN(date.getTime())) {
-          const match = trimmed.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-          if (match) {
-            const [, month, day, year] = match;
-            date = new Date(`${year}-${(month as string).padStart(2, "0")}-${(day as string).padStart(2, "0")}`);
-          }
+        // Extract date components directly to avoid timezone-shift bugs.
+        // NEVER use `new Date(str).toISOString()` — local→UTC conversion shifts dates ±1 day.
+        const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (isoMatch) {
+          const dateOnly = `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+          if (colType === "date") return dateOnly;
+          return new Date(dateOnly + "T00:00:00Z"); // explicit UTC for timestamp cols
         }
-        if (!isNaN(date.getTime())) return colType === "date" ? date.toISOString().split("T")[0] : date;
+        const slashMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+        if (slashMatch) {
+          const [, month, day, year] = slashMatch;
+          const dateOnly = `${year}-${(month as string).padStart(2, "0")}-${(day as string).padStart(2, "0")}`;
+          if (colType === "date") return dateOnly;
+          return new Date(dateOnly + "T00:00:00Z");
+        }
+        // Last resort: parse with UTC components
+        const parsed = new Date(trimmed);
+        if (!isNaN(parsed.getTime())) {
+          if (colType === "date") {
+            const y = parsed.getUTCFullYear();
+            const m = String(parsed.getUTCMonth() + 1).padStart(2, "0");
+            const d = String(parsed.getUTCDate()).padStart(2, "0");
+            return `${y}-${m}-${d}`;
+          }
+          return parsed;
+        }
         return null;
       }
       return value;
@@ -101,7 +118,13 @@ export class EncompassEtlService {
         try {
           const date = value > 10000000000 ? new Date(value) : new Date(value * 1000);
           if (!isNaN(date.getTime()) && date.getFullYear() >= 1970 && date.getFullYear() <= 2100) {
-            return colType === "date" ? date.toISOString().split("T")[0] : date;
+            if (colType === "date") {
+              const y = date.getUTCFullYear();
+              const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+              const d = String(date.getUTCDate()).padStart(2, "0");
+              return `${y}-${m}-${d}`;
+            }
+            return date;
           }
         } catch {
           return null;
@@ -110,6 +133,19 @@ export class EncompassEtlService {
       }
       if (colType === "boolean") return value !== 0;
     }
+
+    // Date objects (e.g. from EncompassConnector.parseDate) → extract date-only safely
+    if (value instanceof Date && !isNaN(value.getTime())) {
+      if (colType === "date") {
+        // Use local components: the Date was created via new Date(localString),
+        // so local components represent the business-intended calendar date.
+        const y = value.getFullYear();
+        const m = String(value.getMonth() + 1).padStart(2, "0");
+        const d = String(value.getDate()).padStart(2, "0");
+        return `${y}-${m}-${d}`;
+      }
+    }
+
     return value;
   }
 
@@ -816,13 +852,15 @@ export class EncompassEtlService {
             // This ensures values match what PostgreSQL expects - CRITICAL for data integrity
             const colType = col.data_type;
 
-            // Convert string numbers to proper types based on column type
+            // Convert string values to proper types based on column type.
+            // IMPORTANT: use separate `if` blocks (not else-if) so that date
+            // strings like "2026-03-10" (which parseFloat reads as 2026) still
+            // reach the date handler. Matches convertValueForColumn logic.
             if (typeof value === "string") {
               const trimmed = value.trim();
               if (trimmed === "") {
                 value = null;
               } else {
-                // Check if it's a numeric string (handles "0.0000000000", "123", "-45.67", etc.)
                 const numValue = parseFloat(trimmed);
                 const isNumericString = !isNaN(numValue) && isFinite(numValue);
 
@@ -841,15 +879,15 @@ export class EncompassEtlService {
                   ) {
                     value = numValue;
                   }
-                } else if (
+                }
+                if (!isNumericString && (
                   colType === "integer" || colType === "bigint" || colType === "smallint" ||
                   colType === "numeric" || colType === "decimal" ||
                   colType === "double precision" || colType === "real"
-                ) {
-                  // Non-parseable string targeting a numeric column (e.g. Encompass "Y"/"N")
+                )) {
                   value = null;
-                } else if (colType === "boolean") {
-                  // Convert string to boolean
+                }
+                if (colType === "boolean") {
                   const lower = trimmed.toLowerCase();
                   value =
                     lower === "true" ||
@@ -857,54 +895,51 @@ export class EncompassEtlService {
                     lower === "y" ||
                     lower === "1" ||
                     lower === "x";
-                } else if (
+                }
+                if (
                   colType === "date" ||
                   colType === "timestamp" ||
                   colType === "timestamp with time zone"
                 ) {
-                  // Try to parse date string - handle Encompass format "M/d/yyyy HH:mm:ss AM/PM"
-                  let date = new Date(trimmed);
-                  if (isNaN(date.getTime())) {
-                    // Try parsing Encompass date format: "M/d/yyyy" or "M/d/yyyy HH:mm:ss AM/PM"
-                    const match = trimmed.match(
-                      /(\d{1,2})\/(\d{1,2})\/(\d{4})/
-                    );
-                    if (match) {
-                      const [, month, day, year] = match;
-                      date = new Date(
-                        `${year}-${month.padStart(2, "0")}-${day.padStart(
-                          2,
-                          "0"
-                        )}`
-                      );
-                    }
-                  }
-                  if (!isNaN(date.getTime())) {
-                    value =
-                      colType === "date"
-                        ? date.toISOString().split("T")[0]
-                        : date;
+                  const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+                  if (isoMatch) {
+                    const dateOnly = `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+                    value = colType === "date" ? dateOnly : new Date(dateOnly + "T00:00:00Z");
                   } else {
-                    value = null; // Invalid date
+                    const slashMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+                    if (slashMatch) {
+                      const [, month, day, year] = slashMatch;
+                      const dateOnly = `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+                      value = colType === "date" ? dateOnly : new Date(dateOnly + "T00:00:00Z");
+                    } else {
+                      const parsed = new Date(trimmed);
+                      if (!isNaN(parsed.getTime())) {
+                        if (colType === "date") {
+                          const y = parsed.getUTCFullYear();
+                          const m = String(parsed.getUTCMonth() + 1).padStart(2, "0");
+                          const d = String(parsed.getUTCDate()).padStart(2, "0");
+                          value = `${y}-${m}-${d}`;
+                        } else {
+                          value = parsed;
+                        }
+                      } else {
+                        value = null;
+                      }
+                    }
                   }
                 }
               }
             } else if (value === null || value === undefined) {
               value = null;
             } else if (typeof value === "number") {
-              // Handle number values going into date columns
-              // Small numbers (< 10000) are clearly not Unix timestamps and not dates
               if (
                 colType === "date" ||
                 colType === "timestamp" ||
                 colType === "timestamp with time zone"
               ) {
-                // Numbers < 100000 are too small to be valid Unix timestamps (would be before 1970)
-                // They're likely days/months counts, not dates
                 if (Math.abs(value) < 100000) {
-                  value = null; // Set to null - not a valid date
+                  value = null;
                 } else {
-                  // Might be a Unix timestamp (seconds or milliseconds)
                   try {
                     const date =
                       value > 10000000000
@@ -915,10 +950,14 @@ export class EncompassEtlService {
                       date.getFullYear() >= 1970 &&
                       date.getFullYear() <= 2100
                     ) {
-                      value =
-                        colType === "date"
-                          ? date.toISOString().split("T")[0]
-                          : date;
+                      if (colType === "date") {
+                        const y = date.getUTCFullYear();
+                        const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+                        const d = String(date.getUTCDate()).padStart(2, "0");
+                        value = `${y}-${m}-${d}`;
+                      } else {
+                        value = date;
+                      }
                     } else {
                       value = null;
                     }
@@ -931,6 +970,14 @@ export class EncompassEtlService {
                 value = value !== 0;
               }
               // Numbers going into numeric columns are fine as-is
+            } else if (value instanceof Date && !isNaN(value.getTime())) {
+              // Date objects (from connector parseDate): extract date-only safely
+              if (colType === "date") {
+                const y = value.getFullYear();
+                const m = String(value.getMonth() + 1).padStart(2, "0");
+                const d = String(value.getDate()).padStart(2, "0");
+                value = `${y}-${m}-${d}`;
+              }
             }
 
             columns.push(field);

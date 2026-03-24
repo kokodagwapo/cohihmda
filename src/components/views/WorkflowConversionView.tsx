@@ -265,6 +265,7 @@ export function WorkflowConversionView({
             presets={PERIOD_PRESETS}
             showYears={false}
             onPeriodChange={setPeriodSelection}
+            periodSelectionFromStore={periodSelection}
             defaultPreset="mtd"
             showLabel={false}
             size="sm"
@@ -700,8 +701,8 @@ function WorkflowSegmentCard({
                     return (
                       <div className="rounded-lg border border-slate-200 bg-white p-2 shadow dark:border-slate-700 dark:bg-slate-800">
                         <p className="text-xs font-medium text-slate-600 dark:text-slate-300">{periodLabel}</p>
-                        <p className="text-xs">Left: {p.leftCount}</p>
-                        <p className="text-xs">Right: {p.rightCount}</p>
+                        <p className="text-xs">{fromLabel}: {p.leftCount}</p>
+                        <p className="text-xs">{toLabel}: {p.rightCount}</p>
                         {calculationType === "conversion" && p.conversionPercent != null && (
                           <p className="text-xs">Conversion: {p.conversionPercent}%</p>
                         )}
@@ -712,8 +713,8 @@ function WorkflowSegmentCard({
                     );
                   }}
                 />
-                <Bar yAxisId="left" dataKey="leftCount" fill="rgb(30 64 175)" name="Left" stackId="a" radius={[0, 0, 0, 0]} />
-                <Bar yAxisId="left" dataKey="rightCount" fill="rgb(16 185 129)" name="Right" stackId="a" radius={[0, 0, 0, 0]} />
+                <Bar yAxisId="left" dataKey="leftCount" fill="rgb(30 64 175)" name={fromLabel} stackId="a" radius={[0, 0, 0, 0]} />
+                <Bar yAxisId="left" dataKey="rightCount" fill="rgb(16 185 129)" name={toLabel} stackId="a" radius={[0, 0, 0, 0]} />
                 {calculationType === "conversion" ? (
                   <Line
                     yAxisId="right"

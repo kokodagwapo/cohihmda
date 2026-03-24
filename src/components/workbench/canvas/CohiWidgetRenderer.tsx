@@ -1207,7 +1207,9 @@ export function CohiWidgetRenderer({
   // Compute compatible viz types based on actual data shape
   const compatibleTypes = useMemo(() => getCompatibleChartTypes(data || []), [data]);
 
-  // Report data to canvasDataStore for Cohi chat context
+  // Report data to canvasDataStore for Cohi chat context.
+  // Separate the cleanup into a mount-only effect so data isn't briefly
+  // removed from the store every time the data dependency changes.
   useEffect(() => {
     if (!canvasItemId) return;
     if (!loading && data != null && !error) {
@@ -1220,11 +1222,13 @@ export function CohiWidgetRenderer({
         data: { vizType, data, xKey: vizConfig.xKey, yKey: vizConfig.yKey },
       });
     }
-    return () => {
-      if (canvasItemId) removeWidgetFromStore(canvasItemId);
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, loading, error, canvasItemId]);
+  useEffect(() => {
+    if (!canvasItemId) return;
+    return () => { removeWidgetFromStore(canvasItemId); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvasItemId]);
 
   // ─── Handlers ───
   const handlePresetClick = useCallback((preset: PeriodPreset) => {
