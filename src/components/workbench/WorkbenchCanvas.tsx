@@ -4355,7 +4355,6 @@ Structure it as a narrative-first executive briefing:
               z-index: 20;
               width: 14px;
               height: 14px;
-              transition: opacity 0.2s ease;
             }
             .canvas-freeform .canvas-item:hover .react-resizable-handle {
               opacity: 1;

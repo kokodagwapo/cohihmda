@@ -50,7 +50,12 @@ import {
   isFilterActive,
 } from "@/utils/loanDetailFilters";
 import { useLoanDetailFilterBookmarks, type LoanDetailFilterBookmark } from "@/hooks/useLoanDetailFilterBookmarks";
-import { Loader2, Download, ArrowUp, ArrowDown, Filter, X, Check, Bookmark, Pencil, Trash2, Share2 } from "lucide-react";
+import { Loader2, Download, ArrowUp, ArrowDown, Filter, X, Check, Bookmark, Pencil, Trash2, Share2, SlidersHorizontal } from "lucide-react";
+import { LoanDetailColumnsModal } from "@/components/widgets/components/LoanDetailColumnsModal";
+import {
+  useLoanDetailColumnsStore,
+  savedColumnsToColumnDefs,
+} from "@/stores/loanDetailColumnsStore";
 
 const ROW_HEIGHT = 40;
 const HEADER_HEIGHT = 40;
@@ -77,6 +82,11 @@ export interface LoanDetailViewProps {
   filterSummary?: string | null;
   /** When set (workbench only), use these columns instead of default. Enables per-widget column editor. */
   columns?: ColumnDef[] | null;
+  /**
+   * When set (e.g. standalone Loan Detail page), load/save column layout under this id in loanDetailColumnsStore
+   * and show Edit Columns in the header. Independent from workbench widget keys.
+   */
+  columnsStoreId?: string;
 }
 
 export type ColumnDef = {
@@ -659,6 +669,7 @@ export function LoanDetailView({
   periodLabel,
   filterSummary,
   columns: columnsProp,
+  columnsStoreId,
 }: LoanDetailViewProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const { theme } = useTheme();
@@ -677,7 +688,22 @@ export function LoanDetailView({
   const data = isControlled ? dataProp ?? null : fetched.data;
   const loading = isControlled ? (loadingProp ?? false) : fetched.loading;
   const error = isControlled ? (errorProp ?? null) : fetched.error;
-  const baseColumns = columnsProp && columnsProp.length > 0 ? columnsProp : COLUMNS;
+
+  const savedColumnsFromStore = useLoanDetailColumnsStore((s) =>
+    columnsStoreId ? s.byItem[columnsStoreId] : undefined,
+  );
+  const storeColumnDefs = useMemo(
+    () => savedColumnsToColumnDefs(savedColumnsFromStore),
+    [savedColumnsFromStore],
+  );
+  const baseColumns = useMemo((): ColumnDef[] => {
+    if (columnsProp && columnsProp.length > 0) return columnsProp;
+    if (storeColumnDefs && storeColumnDefs.length > 0) {
+      return storeColumnDefs as ColumnDef[];
+    }
+    return COLUMNS;
+  }, [columnsProp, storeColumnDefs]);
+
   const columnsToUse = useMemo(
     () => buildEffectiveColumns(baseColumns, additionalColumns),
     [baseColumns, additionalColumns],
@@ -709,6 +735,7 @@ export function LoanDetailView({
   const [debouncedFilterSearchByColumn, setDebouncedFilterSearchByColumn] = useState<Record<string, string>>({});
   const searchDebounceTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const [bookmarksModalOpen, setBookmarksModalOpen] = useState(false);
+  const [loanDetailColumnsModalOpen, setLoanDetailColumnsModalOpen] = useState(false);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [overwriteModalOpen, setOverwriteModalOpen] = useState(false);
   const [saveModalInitialName, setSaveModalInitialName] = useState("");
@@ -1571,7 +1598,7 @@ export function LoanDetailView({
           return (
             <div
               key={row.loan_id}
-              className={`absolute left-0 border-b ${borderRow} hover:bg-slate-50 dark:hover:bg-slate-800/50 grid items-center transition-colors`}
+              className={`absolute left-0 border-b ${borderRow} hover:bg-slate-50 dark:hover:bg-slate-800/50 grid items-center`}
               style={{
                 ...gridColsStyle,
                 top: 0,
@@ -1606,7 +1633,7 @@ export function LoanDetailView({
                     type="button"
                     onClick={() => handleCellClickToDraft(row, col)}
                     className={cn(
-                      `whitespace-nowrap py-3 px-4 text-sm text-left transition-colors ${cellClass}`,
+                      `whitespace-nowrap py-3 px-4 text-sm text-left ${cellClass}`,
                       isSelectedCell && "bg-emerald-100/60 dark:bg-emerald-900/30",
                       hasFlash && "bg-emerald-100/70 dark:bg-emerald-900/40",
                     )}
@@ -1664,6 +1691,18 @@ export function LoanDetailView({
               <Filter className="h-4 w-4" />
               {showFilters ? "Hide Filters" : "Show Filters"}
             </Button>
+            {columnsStoreId && (
+              <Button
+                variant="outline"
+                size="sm"
+                type="button"
+                onClick={() => setLoanDetailColumnsModalOpen(true)}
+                className="gap-2 border-slate-300 hover:bg-slate-50 dark:border-slate-600 dark:hover:bg-slate-800"
+              >
+                <SlidersHorizontal className="h-4 w-4" />
+                Edit Columns
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"
@@ -1686,19 +1725,19 @@ export function LoanDetailView({
                 </button>
               </Badge>
             )}
-            {!isControlled && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={exportToExcel}
+          {!isControlled && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={exportToExcel}
                 disabled={sortedLoans.length === 0}
                 className="gap-2 border-slate-300 hover:bg-slate-50 dark:border-slate-600 dark:hover:bg-slate-800"
-              >
-                <Download className="h-4 w-4" />
-                Export to Excel
-              </Button>
-            )}
-          </div>
+            >
+              <Download className="h-4 w-4" />
+              Export to Excel
+            </Button>
+          )}
+        </div>
         </div>
         {(hasActiveFilters || hasBookmarkSelection || sharedBookmarkTitle || isApplyingFilters || filterFeedback) && (
           <div className="flex flex-wrap items-center gap-2 px-4 pb-3 border-b border-slate-200/60 dark:border-slate-700/60">
@@ -1794,7 +1833,7 @@ export function LoanDetailView({
                     <div
                       key={col.id}
                       className={cn(
-                        "whitespace-nowrap py-2 px-2 text-xs font-semibold text-left flex items-center gap-1 w-full min-w-0 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-colors",
+                        "whitespace-nowrap py-2 px-2 text-xs font-semibold text-left flex items-center gap-1 w-full min-w-0 hover:bg-slate-200/50 dark:hover:bg-slate-700/50",
                         isDarkMode ? "text-slate-300" : "text-slate-600",
                         activeFilterColumnIds.has(col.id) && "border-b-2 border-emerald-500",
                       )}
@@ -1805,15 +1844,15 @@ export function LoanDetailView({
                         type="button"
                         onClick={() => handleSort(col.id)}
                         className="flex items-center gap-1 min-w-0 flex-1 px-2"
-                      >
-                        <span className="truncate">{col.label}</span>
-                        {isSorted &&
-                          (sortDirection === "asc" ? (
-                            <ArrowUp className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                          ) : (
-                            <ArrowDown className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                          ))}
-                      </button>
+                    >
+                      <span className="truncate">{col.label}</span>
+                      {isSorted &&
+                        (sortDirection === "asc" ? (
+                          <ArrowUp className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                        ) : (
+                          <ArrowDown className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                        ))}
+                    </button>
                       {showFilters && (
                         <Popover
                           open={openFilterColumnId === col.id}
@@ -2006,8 +2045,8 @@ export function LoanDetailView({
                       >
                         <Trash2 className="h-4 w-4 text-red-500" />
                       </Button>
+                          </div>
                     </div>
-                  </div>
                   <ul className="space-y-1">
                     {summarizeFilterState(bookmark.filters).map((line) => (
                       <li key={`${bookmark.id}-${line}`} className="text-xs text-slate-600 dark:text-slate-400">
@@ -2015,7 +2054,7 @@ export function LoanDetailView({
                       </li>
                     ))}
                   </ul>
-                </div>
+              </div>
               ))
             )}
           </div>
@@ -2056,6 +2095,15 @@ export function LoanDetailView({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {columnsStoreId && (
+        <LoanDetailColumnsModal
+          open={loanDetailColumnsModalOpen}
+          onClose={() => setLoanDetailColumnsModalOpen(false)}
+          canvasItemId={columnsStoreId}
+          tenantId={tenantId}
+        />
+      )}
     </div>
   );
 }

@@ -110,7 +110,8 @@ export function CanvasWidgetCard({
         }
       }}
       className={cn(
-        'group relative h-full w-full rounded-2xl transition-all flex flex-col bg-white/95 dark:bg-slate-900/70 shadow-slate-200/60 dark:shadow-black/30',
+        // Shadow-only transition: avoid transition-all (animates every property on hover/layout).
+        'group relative h-full w-full rounded-2xl transition-shadow duration-200 ease-out flex flex-col bg-white/95 dark:bg-slate-900/70 shadow-slate-200/60 dark:shadow-black/30',
         selected ? 'shadow-xl' : 'shadow-lg',
         editing && 'ring-2 ring-indigo-500',
         className
@@ -122,7 +123,7 @@ export function CanvasWidgetCard({
         </div>
       )}
       {hasAnyMenuActions && (
-      <div className="absolute top-9 right-1 z-10 opacity-0 group-hover:opacity-100 focus-within:opacity-100 hover:opacity-100 transition-opacity">
+      <div className="absolute top-9 right-1 z-10 opacity-0 group-hover:opacity-100 focus-within:opacity-100 hover:opacity-100">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
