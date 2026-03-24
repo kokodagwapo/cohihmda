@@ -1110,9 +1110,12 @@ function GridCellRegistryWidget({
     definition?.dataSelector,
   );
 
-  // Report data to canvasDataStore for Cohi chat context
+  // Report data to canvasDataStore for Cohi chat context.
+  // Skip for embed-sentinel widgets ({ ready: true }) — those report their own data.
+  const isEmbedSentinel = selectedData != null && typeof selectedData === 'object'
+    && Object.keys(selectedData as any).length <= 1 && (selectedData as any).ready === true;
   useEffect(() => {
-    if (!definition) return;
+    if (!definition || isEmbedSentinel) return;
     if (!loading && selectedData != null && !error) {
       reportWidgetData(canvasItemId, {
         widgetName: definition.name,
@@ -1120,11 +1123,13 @@ function GridCellRegistryWidget({
         data: selectedData,
       });
     }
-    return () => {
-      removeWidget(canvasItemId);
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedData, loading, error, canvasItemId]);
+  }, [selectedData, loading, error, canvasItemId, isEmbedSentinel]);
+  useEffect(() => {
+    if (isEmbedSentinel) return;
+    return () => { removeWidget(canvasItemId); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvasItemId, isEmbedSentinel]);
 
   if (!definition) return null;
 
@@ -1305,6 +1310,9 @@ function GridCellRegistryWidget({
   const config = {
     ...definition.config,
     ...configProp,
+    canvasItemId,
+    definitionName: definition.name,
+    definitionCategory: definition.category,
     ...(periodLabel != null && { periodLabel }),
     ...(filterSummary != null && { filterSummary }),
     ...(customColumns != null && { customColumns }),

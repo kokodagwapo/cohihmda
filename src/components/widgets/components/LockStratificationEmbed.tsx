@@ -8,15 +8,29 @@
  * bypass that by threading the pixel height all the way through.
  */
 
-import React from 'react';
+import React, { useCallback } from 'react';
 import { LockStratificationView, type LockStratificationVariant } from '@/components/views/LockStratificationView';
 import type { WidgetRenderProps } from '../registry/types';
 import { useTenantStore } from '@/stores/tenantStore';
+import { useCanvasDataStore } from '@/stores/canvasDataStore';
 
 function LockStratificationEmbedInner({ width, height, config }: WidgetRenderProps) {
   const groupId = config?.groupId as string | undefined;
   const variant = (config?.variant as LockStratificationVariant) || 'full';
   const { selectedTenantId } = useTenantStore();
+  const canvasItemId = config?.canvasItemId as string | undefined;
+  const defName = (config?.definitionName as string) || 'Lock Stratification';
+  const defCategory = (config?.definitionCategory as string) || 'chart';
+  const reportWidgetData = useCanvasDataStore((s) => s.reportWidgetData);
+
+  const onDataReady = useCallback((data: unknown) => {
+    if (!canvasItemId) return;
+    reportWidgetData(canvasItemId, {
+      widgetName: defName,
+      category: defCategory as 'chart' | 'table' | 'kpi' | 'embed' | 'other',
+      data,
+    });
+  }, [canvasItemId, defName, defCategory, reportWidgetData]);
 
   return (
     <div
@@ -31,6 +45,7 @@ function LockStratificationEmbedInner({ width, height, config }: WidgetRenderPro
         variant={variant}
         embedHeight={height}
         embedWidth={width}
+        onDataReady={onDataReady}
       />
     </div>
   );

@@ -3017,12 +3017,40 @@ export function WorkbenchCanvas({
         description: "Building multi-slide presentation from canvas data.",
       });
       try {
-        const widgetData = snapshot.map((w) => ({
-          itemId: w.itemId,
-          widgetName: w.widgetName,
-          category: w.category,
-          data: w.data,
-        }));
+        // Build a lookup from itemId → layout item so we can attach position + widgetType
+        const layoutById = new Map(items.map((it) => [it.i, it]));
+
+        const widgetData = snapshot.map((w) => {
+          const layoutItem = layoutById.get(w.itemId);
+          return {
+            itemId: w.itemId,
+            widgetName: w.widgetName,
+            category: w.category,
+            data: w.data,
+            widgetType: layoutItem?.type ?? (w.data as any)?.widgetType,
+            layoutPosition: layoutItem
+              ? { x: layoutItem.x, y: layoutItem.y, w: layoutItem.w, h: layoutItem.h }
+              : undefined,
+          };
+        });
+
+        // Also include canvas items that are not yet in the store (e.g. widget_group containers)
+        // by synthesising an entry for any layout item with no matching snapshot entry
+        const snapshotIds = new Set(snapshot.map((w) => w.itemId));
+        for (const it of items) {
+          if (!snapshotIds.has(it.i)) {
+            // Provide a minimal stub so the server can at least order the slide correctly
+            widgetData.push({
+              itemId: it.i,
+              widgetName: (it.payload as any).title || (it.payload as any).label || it.type,
+              category: 'other',
+              data: { widgetType: it.type, ...(it.payload as any) },
+              widgetType: it.type,
+              layoutPosition: { x: it.x, y: it.y, w: it.w, h: it.h },
+            });
+          }
+        }
+
         const tenantParam = tenantId ? `?tenant_id=${tenantId}` : "";
         const blob = await fetchBlob(
           `/api/workbench/reports/from-canvas${tenantParam}`,
@@ -4192,53 +4220,73 @@ Structure it as a narrative-first executive briefing:
                 </Tooltip>
               )}
 
-              {/* Primary: Generate Report — one-click, AI-powered */}
+              {/* Primary: Open PowerPoint Builder — in-app preview/editor then export */}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     size="sm"
-                    className={cn(
-                      "h-8 gap-1.5 text-xs px-3 font-semibold shrink-0 shadow-sm",
-                      isGeneratingAiReport
-                        ? "bg-indigo-400 text-white cursor-wait"
-                        : "bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white",
-                    )}
-                    onClick={() => handleAiReport("pptx")}
-                    disabled
+                    className="h-8 gap-1.5 text-xs px-3 font-semibold shrink-0 shadow-sm bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white"
+                    onClick={() => {
+                      setAiReportDefinition(null);
+                      setShowReportBuilder(true);
+                    }}
+                    disabled={!hasItems}
                   >
-                    {isGeneratingAiReport ? (
-                      <>
-                        <svg
-                          className="h-3.5 w-3.5 animate-spin"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                        >
-                          <circle
-                            cx="12"
-                            cy="12"
-                            r="10"
-                            strokeDasharray="32"
-                            strokeDashoffset="12"
-                          />
-                        </svg>{" "}
-                        Preparing...
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="h-3.5 w-3.5" />{" "}
-                        {showReportBuilder
-                          ? "Regenerate Report"
-                          : "Generate Report (Coming Soon!)"}
-                      </>
-                    )}
+                    <Presentation className="h-3.5 w-3.5" />
+                    Export to PowerPoint
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">
-                  Cohi prepares an executive presentation from your canvas data
+                  Open the slide builder to preview, edit, and export a PowerPoint deck from canvas data
                 </TooltipContent>
               </Tooltip>
+
+              {/* Secondary: AI-powered report builder (future feature) */}
+              {!WORKBENCH_COHI_HIDDEN && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className={cn(
+                        "h-8 gap-1.5 text-xs px-2.5 font-medium shrink-0",
+                        isGeneratingAiReport ? "cursor-wait opacity-70" : "",
+                      )}
+                      onClick={() => handleAiReport("pptx")}
+                      disabled={isGeneratingAiReport || !hasItems}
+                    >
+                      {isGeneratingAiReport ? (
+                        <>
+                          <svg
+                            className="h-3.5 w-3.5 animate-spin"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                          >
+                            <circle
+                              cx="12"
+                              cy="12"
+                              r="10"
+                              strokeDasharray="32"
+                              strokeDashoffset="12"
+                            />
+                          </svg>{" "}
+                          Preparing...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="h-3.5 w-3.5" />{" "}
+                          {showReportBuilder ? "Regenerate Report" : "AI Report"}
+                        </>
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    Cohi prepares an executive presentation from your canvas data
+                  </TooltipContent>
+                </Tooltip>
+              )}
 
               {/* Report / Canvas view toggle */}
               {showReportBuilder ? (
@@ -4280,12 +4328,12 @@ Structure it as a narrative-first executive briefing:
             {/* Per-widget export is available in each widget's context menu */}
           </div>
 
-          {/* Inline Report Builder (mount only when active to avoid hidden background requests) */}
+          {/* Inline Report Builder (mount only when active to avoid hidden background requests).
+              The builder live-subscribes to canvasDataStore for real-time widget data. */}
           {showReportBuilder && (
             <div className="flex-1 min-h-0 overflow-hidden">
               <ReportBuilder
                 onClose={() => setShowReportBuilder(false)}
-                canvasWidgetData={useCanvasDataStore.getState().getSnapshot()}
                 canvasTitle={saveTitle || "Untitled Canvas"}
                 tenantId={tenantId}
                 initialDefinition={aiReportDefinition ?? undefined}
@@ -5285,6 +5333,19 @@ Structure it as a narrative-first executive briefing:
                   Export canvas
                 </div>
                 <div className="flex flex-col gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setAiReportDefinition(null);
+                      setShowReportBuilder(true);
+                      setShareDialogOpen(false);
+                    }}
+                    disabled={!hasItems}
+                    className="w-full gap-2"
+                  >
+                    <Presentation className="h-4 w-4" />
+                    Export to PowerPoint
+                  </Button>
                   <Button
                     variant="outline"
                     onClick={() => {
