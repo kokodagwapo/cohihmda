@@ -74,6 +74,11 @@ export function useLoanComplexityGroupLoans({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Stabilise array dependencies by serialising to JSON — avoids infinite
+  // re-render loops when the parent passes a new array reference each render.
+  const groupFiltersKey = JSON.stringify(groupFilters);
+  const groupNamesKey = JSON.stringify(groupNames);
+
   const fetchData = useCallback(async () => {
     if (enabled === false) {
       setLoading(false);
@@ -84,16 +89,19 @@ export function useLoanComplexityGroupLoans({
     try {
       setLoading(true);
       setError(null);
+      const parsedGroupFilters: { groupBy: LoanComplexityGroupBy; groupName: string }[] = JSON.parse(groupFiltersKey);
+      const parsedGroupNames: string[] = JSON.parse(groupNamesKey);
+
       const params = new URLSearchParams();
       params.set("startDate", startDate);
       params.set("endDate", endDate);
-      if (groupFilters.length > 0) {
-        groupFilters.forEach((f) => {
+      if (parsedGroupFilters.length > 0) {
+        parsedGroupFilters.forEach((f) => {
           params.append("groupBy", f.groupBy);
           params.append("groupName", f.groupName);
         });
-      } else if (groupBy && groupNames.length > 0) {
-        const trimmed = groupNames.map((n) => n.trim()).filter(Boolean);
+      } else if (groupBy && parsedGroupNames.length > 0) {
+        const trimmed = parsedGroupNames.map((n) => n.trim()).filter(Boolean);
         if (trimmed.length > 0) {
           params.set("groupBy", groupBy);
           trimmed.forEach((name) => params.append("groupName", name));
@@ -116,7 +124,7 @@ export function useLoanComplexityGroupLoans({
     } finally {
       setLoading(false);
     }
-  }, [startDate, endDate, groupFilters, groupBy, groupNames, selectedTenantId, channelGroup, currentLoanStatus, enabled]);
+  }, [startDate, endDate, groupFiltersKey, groupBy, groupNamesKey, selectedTenantId, channelGroup, currentLoanStatus, enabled]);
 
   useEffect(() => {
     fetchData();

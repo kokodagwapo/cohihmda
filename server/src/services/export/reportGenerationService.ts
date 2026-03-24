@@ -10,6 +10,12 @@
  */
 
 import pptxgen from "pptxgenjs";
+// pptxgenjs is a CommonJS module. Under tsx (ESM mode) the CJS default export is
+// sometimes double-wrapped as { default: Class }. Unwrap it at runtime so that
+// `new PptxGenCtor()` always works regardless of the tsx interop shim.
+// We keep the `pptxgen` name in scope for its type namespace (pptxgen.Slide, etc.).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const PptxGenCtor: typeof pptxgen = ((pptxgen as any).default ?? pptxgen) as typeof pptxgen;
 import pg from "pg";
 import {
   queryMetric,
@@ -240,7 +246,7 @@ export async function generatePptx(
   definition: ReportDefinition
 ): Promise<Buffer> {
   const theme = definition.theme || DEFAULT_THEME;
-  const pres = new pptxgen();
+  const pres = new PptxGenCtor();
 
   // Presentation metadata
   pres.author = definition.author || "Coheus";
@@ -477,6 +483,13 @@ function renderElement(
     case "shape":
       renderShapeElement(slide, pos, config, theme);
       break;
+    case "insight":
+    case "news":
+      renderInsightElement(slide, pos, config, theme);
+      break;
+    case "rich_text":
+      renderRichTextElement(slide, pos, config, theme);
+      break;
     default:
       // Fallback: render as text
       if (config.content || config.label) {
@@ -531,23 +544,39 @@ function renderChartElement(
   theme: ReportTheme
 ): void {
   const chartData = Array.isArray(data) ? data : config.data || [];
+  const chartType = config.chartType || config.type || "bar";
+
+  // treemap and pivot have no native pptxgenjs equivalent — fall back to table
+  if (chartType === "treemap" || chartType === "pivot") {
+    if (chartData.length) {
+      const cols = Object.keys(chartData[0]);
+      const autoColumns = cols.map((k) => ({ key: k, label: k }));
+      renderTableElement(
+        slide,
+        pos,
+        { type: "table", columns: autoColumns, data: chartData },
+        chartData,
+        theme
+      );
+    } else {
+      slide.addText(`${config.title || chartType} (no data)`, {
+        x: pos.x, y: pos.y, w: pos.w, h: pos.h,
+        fontSize: 11, color: "999999", align: "center", valign: "middle",
+        fontFace: theme.fontFamily,
+      });
+    }
+    return;
+  }
+
   if (!chartData.length) {
-    // No data - render placeholder
     slide.addText("No data available", {
-      x: pos.x,
-      y: pos.y,
-      w: pos.w,
-      h: pos.h,
-      fontSize: 14,
-      color: "999999",
-      align: "center",
-      valign: "middle",
+      x: pos.x, y: pos.y, w: pos.w, h: pos.h,
+      fontSize: 14, color: "999999", align: "center", valign: "middle",
       fontFace: theme.fontFamily,
     });
     return;
   }
 
-  const chartType = config.chartType || config.type || "bar";
   const xKey = config.xKey || Object.keys(chartData[0])[0];
   const yKey = config.yKey || Object.keys(chartData[0])[1];
   const yKeys = config.yKeys || (yKey ? [yKey] : []);
@@ -560,8 +589,7 @@ function renderChartElement(
   switch (chartType) {
     case "bar":
     case "stacked_bar":
-      pptxChartType = pptxgen.charts ? pptxgen.charts.BAR : "bar";
-      break;
+    case "grouped_bar":
     case "horizontal_bar":
       pptxChartType = pptxgen.charts ? pptxgen.charts.BAR : "bar";
       break;
@@ -625,6 +653,8 @@ function renderChartElement(
 
     if (chartType === "stacked_bar") {
       chartOpts.barGrouping = "stacked";
+    } else if (chartType === "grouped_bar") {
+      chartOpts.barGrouping = "clustered";
     }
     if (chartType === "horizontal_bar") {
       chartOpts.barDir = "bar"; // horizontal
@@ -641,14 +671,8 @@ function renderChartElement(
   } catch (err: any) {
     console.error(`[ReportGen] Chart render error:`, err.message);
     slide.addText(`Chart: ${config.title || "Error"}`, {
-      x: pos.x,
-      y: pos.y,
-      w: pos.w,
-      h: pos.h,
-      fontSize: 12,
-      color: "FF0000",
-      align: "center",
-      valign: "middle",
+      x: pos.x, y: pos.y, w: pos.w, h: pos.h,
+      fontSize: 12, color: "FF0000", align: "center", valign: "middle",
       fontFace: theme.fontFamily,
     });
   }
@@ -869,7 +893,8 @@ function renderImageElement(
   pos: { x: number; y: number; w: number; h: number },
   config: Record<string, any>
 ): void {
-  if (!config.src) return;
+  const src = config.src || config.data;
+  if (!src) return;
 
   const imgOpts: any = {
     x: pos.x,
@@ -883,10 +908,16 @@ function renderImageElement(
     },
   };
 
-  if (config.src.startsWith("data:")) {
-    imgOpts.data = config.src;
+  // Accept both data URLs (base64) and remote paths
+  if (src.startsWith("data:")) {
+    imgOpts.data = src;
+  } else if (src.startsWith("http://") || src.startsWith("https://")) {
+    imgOpts.path = src;
+  } else if (src.startsWith("/")) {
+    // Relative path — skip silently (server can't resolve client-side paths)
+    return;
   } else {
-    imgOpts.path = config.src;
+    imgOpts.data = src;
   }
 
   try {
@@ -951,6 +982,112 @@ function renderShapeElement(
         line,
       });
   }
+}
+
+// ---------------------------------------------------------------------------
+// Additional element renderers for canvas widget types
+// ---------------------------------------------------------------------------
+
+/** Strip HTML tags and convert common block elements to newlines */
+function htmlToPlainText(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<\/li>/gi, "\n")
+    .replace(/<\/tr>/gi, "\n")
+    .replace(/<\/h[1-6]>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function renderInsightElement(
+  slide: pptxgen.Slide,
+  pos: { x: number; y: number; w: number; h: number },
+  config: Record<string, any>,
+  theme: ReportTheme
+): void {
+  const ac = theme.accentColor.replace("#", "");
+  const tc = theme.textColor.replace("#", "");
+
+  // Accent left bar
+  slide.addShape("rect" as any, {
+    x: pos.x,
+    y: pos.y,
+    w: 0.06,
+    h: pos.h,
+    fill: { color: ac },
+  });
+
+  const textX = pos.x + 0.12;
+  const textW = pos.w - 0.12;
+
+  if (config.title) {
+    slide.addText(config.title, {
+      x: textX,
+      y: pos.y,
+      w: textW,
+      h: 0.35,
+      fontSize: 13,
+      bold: true,
+      color: tc,
+      fontFace: theme.headerFontFamily,
+    });
+  }
+
+  const bodyY = config.title ? pos.y + 0.38 : pos.y;
+  const bodyH = config.title ? pos.h - 0.38 : pos.h;
+  if (config.content || config.summary) {
+    slide.addText(config.content || config.summary || "", {
+      x: textX,
+      y: bodyY,
+      w: textW,
+      h: bodyH,
+      fontSize: 11,
+      color: tc,
+      fontFace: theme.fontFamily,
+      wrap: true,
+      valign: "top",
+    });
+  }
+
+  if (config.link) {
+    slide.addText(config.link, {
+      x: textX,
+      y: pos.y + pos.h - 0.2,
+      w: textW,
+      h: 0.2,
+      fontSize: 9,
+      color: ac,
+      fontFace: theme.fontFamily,
+      hyperlink: { url: config.link },
+    });
+  }
+}
+
+function renderRichTextElement(
+  slide: pptxgen.Slide,
+  pos: { x: number; y: number; w: number; h: number },
+  config: Record<string, any>,
+  theme: ReportTheme
+): void {
+  const plain = htmlToPlainText(config.html || config.content || "");
+  slide.addText(plain || "", {
+    x: pos.x,
+    y: pos.y,
+    w: pos.w,
+    h: pos.h,
+    fontSize: 11,
+    color: theme.textColor.replace("#", ""),
+    fontFace: theme.fontFamily,
+    wrap: true,
+    valign: "top",
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1084,11 +1221,269 @@ export interface CanvasWidgetForReport {
   category: "kpi" | "chart" | "table" | "embed" | "other";
   data: any;
   type?: string;
+  /** Pixel-based canvas position — used for spatial slide ordering */
+  layoutPosition?: { x: number; y: number; w: number; h: number };
+  /** CanvasWidgetType discriminant */
+  widgetType?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Spatial sort helpers
+// ---------------------------------------------------------------------------
+
+/** Sort widgets top-to-bottom, left-to-right by their canvas position */
+function sortBySpatialPosition(widgets: CanvasWidgetForReport[]): CanvasWidgetForReport[] {
+  return [...widgets].sort((a, b) => {
+    const ay = a.layoutPosition?.y ?? 0;
+    const by_ = b.layoutPosition?.y ?? 0;
+    if (ay !== by_) return ay - by_;
+    const ax = a.layoutPosition?.x ?? 0;
+    const bx = b.layoutPosition?.x ?? 0;
+    return ax - bx;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Determine the effective widget kind for slide routing
+// ---------------------------------------------------------------------------
+
+function resolveWidgetKind(
+  w: CanvasWidgetForReport
+): "kpi" | "chart" | "table" | "text" | "rich_text" | "image" | "insight" | "news" | "section_header" | "widget_group" | "embed" | "skip" {
+  const wt = w.widgetType || (w.data as any)?.widgetType;
+  // Primary routing by widgetType (the original CanvasWidgetType)
+  switch (wt) {
+    case "kpi": return "kpi";
+    case "chart": return "chart";
+    case "table": return "table";
+    case "cohi_widget": {
+      const vt = (w.data as any)?.vizType || (w.data as any)?.chartType;
+      if (vt === "kpi") return "kpi";
+      if (vt === "table") return "table";
+      return "chart";
+    }
+    case "text_block": return "text";
+    case "rich_text": return "rich_text";
+    case "image": return "image";
+    case "pinned_insight": return "insight";
+    case "news_card": return "news";
+    case "section_header": return "section_header";
+    case "widget_group": return "widget_group";
+    case "dashboard_section": return "embed";
+    case "registry_widget": {
+      // Fall through to category-based routing
+      break;
+    }
+    default:
+      break;
+  }
+  // Fall back to category
+  switch (w.category) {
+    case "kpi": return "kpi";
+    case "chart": return "chart";
+    case "table": return "table";
+    case "embed": return "embed";
+    default: return "text";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Slide builders per widget kind
+// ---------------------------------------------------------------------------
+
+function buildKpiSlide(
+  kpis: CanvasWidgetForReport[],
+  theme: ReportTheme,
+  slideId: string,
+  slideTitle = "Key Metrics"
+): SlideDefinition {
+  const batch = kpis.slice(0, 8);
+  const cols = Math.min(batch.length, 4);
+  const rows = Math.ceil(batch.length / cols);
+  const itemW = 8.5 / cols;
+  const itemH = Math.min(1.6, 4.5 / rows);
+  const startY = 1.0;
+
+  const elements: SlideElement[] = batch.map((kpi, idx) => {
+    const col = idx % cols;
+    const row = Math.floor(idx / cols);
+    const rawVal = kpi.data?.value ?? kpi.data ?? "--";
+    return {
+      id: `kpi-${slideId}-${idx}`,
+      type: "kpi" as const,
+      position: {
+        x: 0.5 + col * itemW + 0.05,
+        y: startY + row * itemH + 0.05,
+        w: itemW - 0.1,
+        h: itemH - 0.1,
+      },
+      config: {
+        type: "kpi",
+        label: kpi.widgetName,
+        value: rawVal,
+        format: kpi.data?.format || "number",
+        change: kpi.data?.change,
+        trend: kpi.data?.trend,
+        color: theme.accentColor,
+      },
+      dataSource: { type: "static" as const, staticData: kpi.data },
+    };
+  });
+
+  return { id: slideId, layout: "kpi-grid", title: slideTitle, elements };
+}
+
+function buildChartSlide(
+  w: CanvasWidgetForReport,
+  slideId: string,
+  theme: ReportTheme
+): SlideDefinition {
+  const norm = normalizeChartWidgetData(w.data);
+  return {
+    id: slideId,
+    layout: "chart-focus",
+    title: w.widgetName,
+    elements: [
+      {
+        id: `el-${slideId}`,
+        type: "chart",
+        position: { x: 0.5, y: 1.0, w: 9, h: 5.0 },
+        config: {
+          type: "chart",
+          chartType: norm.chartType,
+          title: norm.title || w.widgetName,
+          data: norm.data,
+          xKey: norm.xKey,
+          yKey: norm.yKey,
+          yKeys: norm.yKeys,
+          colors: norm.colors.length ? norm.colors : theme.chartColors,
+          showLegend: true,
+        },
+        dataSource: { type: "static" as const, staticData: norm.data },
+      },
+    ],
+  };
+}
+
+function buildTableSlide(
+  w: CanvasWidgetForReport,
+  slideId: string
+): SlideDefinition {
+  const norm = normalizeTableWidgetData(w.data);
+  return {
+    id: slideId,
+    layout: "table",
+    title: w.widgetName,
+    elements: [
+      {
+        id: `el-${slideId}`,
+        type: "table",
+        position: { x: 0.5, y: 1.0, w: 9, h: 5.5 },
+        config: {
+          type: "table",
+          columns: norm.columns,
+          data: norm.data,
+        },
+        dataSource: { type: "static" as const, staticData: norm.data },
+      },
+    ],
+  };
+}
+
+function buildTextSlide(
+  w: CanvasWidgetForReport,
+  slideId: string,
+  theme: ReportTheme
+): SlideDefinition {
+  const d = w.data as any;
+  const content = d?.content || d?.html || (typeof d === "string" ? d : "");
+  const isHtml = d?.widgetType === "rich_text" || (typeof content === "string" && /<[^>]+>/.test(content));
+  return {
+    id: slideId,
+    layout: "content",
+    title: w.widgetName,
+    elements: [
+      {
+        id: `el-${slideId}`,
+        type: isHtml ? "rich_text" : "text",
+        position: { x: 0.5, y: 1.0, w: 9, h: 5.0 },
+        config: isHtml
+          ? { type: "rich_text", html: content }
+          : { type: "text", content, fontSize: 13, color: theme.textColor, lineSpacing: 1.5 },
+        dataSource: { type: "static" as const, staticData: d },
+      },
+    ],
+  };
+}
+
+function buildInsightSlide(
+  w: CanvasWidgetForReport,
+  slideId: string,
+  theme: ReportTheme
+): SlideDefinition {
+  const d = w.data as any;
+  return {
+    id: slideId,
+    layout: "content",
+    title: d?.widgetType === "news_card" ? "News" : "Insight",
+    elements: [
+      {
+        id: `el-${slideId}`,
+        type: "insight",
+        position: { x: 0.5, y: 1.0, w: 9, h: 5.0 },
+        config: {
+          type: "insight",
+          title: d?.title || w.widgetName,
+          content: d?.content || d?.summary || "",
+          link: d?.link,
+        },
+        dataSource: { type: "static" as const, staticData: d },
+      },
+    ],
+  };
+}
+
+function buildImageSlide(
+  w: CanvasWidgetForReport,
+  slideId: string
+): SlideDefinition {
+  const d = w.data as any;
+  return {
+    id: slideId,
+    layout: "blank",
+    title: w.widgetName,
+    elements: [
+      {
+        id: `el-${slideId}`,
+        type: "image",
+        position: { x: 0.5, y: 1.0, w: 9, h: 5.0 },
+        config: {
+          type: "image",
+          src: d?.src || "",
+          alt: d?.alt || w.widgetName,
+          objectFit: "contain",
+        },
+        dataSource: { type: "static" as const, staticData: d },
+      },
+    ],
+  };
+}
+
+function buildSectionBreakSlide(
+  title: string,
+  slideId: string
+): SlideDefinition {
+  return { id: slideId, layout: "section-break", title, elements: [] };
 }
 
 /**
  * Convert canvas widget data into a multi-slide ReportDefinition.
- * Groups widgets by type and creates logical slides.
+ *
+ * Ordering: widgets are sorted spatially (top-to-bottom, left-to-right).
+ * KPIs that appear together near the top of the canvas are coalesced onto a
+ * single "Key Metrics" slide. Each chart and table gets its own slide.
+ * Text, insight, news, and image widgets each get their own content slide.
+ * widget_group containers produce a section-break slide.
  */
 export function canvasToReportDefinition(
   widgets: CanvasWidgetForReport[],
@@ -1097,7 +1492,6 @@ export function canvasToReportDefinition(
   const theme = options?.theme || DEFAULT_THEME;
   const title = options?.title || "Canvas Report";
   const now = new Date().toISOString();
-
   const slides: SlideDefinition[] = [];
 
   // Slide 1: Title
@@ -1105,154 +1499,49 @@ export function canvasToReportDefinition(
     id: "slide-title",
     layout: "title",
     title,
-    subtitle: `Generated from Cohi Workbench`,
+    subtitle: "Generated from Cohi Workbench",
     elements: [],
   });
 
-  // Group widgets by category
-  const kpis = widgets.filter((w) => w.category === "kpi");
-  const charts = widgets.filter((w) => w.category === "chart");
-  const tables = widgets.filter((w) => w.category === "table");
-  const others = widgets.filter(
-    (w) => !["kpi", "chart", "table"].includes(w.category)
-  );
+  // Sort by spatial position so slide order matches canvas reading order
+  const sorted = sortBySpatialPosition(widgets);
 
-  // Slide 2: KPIs (if any)
-  if (kpis.length > 0) {
-    const cols = Math.min(kpis.length, 4);
-    const kpiElements: SlideElement[] = kpis
-      .slice(0, 8)
-      .map((kpi, idx) => {
-        const col = idx % cols;
-        const row = Math.floor(idx / cols);
-        const itemW = 8.5 / cols;
-        return {
-          id: `kpi-${idx}`,
-          type: "kpi" as const,
-          position: {
-            x: 0.5 + col * itemW + 0.05,
-            y: 1.0 + row * 1.5 + 0.05,
-            w: itemW - 0.1,
-            h: 1.3,
-          },
-          config: {
-            type: "kpi",
-            label: kpi.widgetName,
-            value: kpi.data?.value ?? kpi.data ?? "--",
-            format: kpi.data?.format || "number",
-            change: kpi.data?.change,
-          },
-          dataSource: {
-            type: "static" as const,
-            staticData: kpi.data,
-          },
-        };
-      });
+  // Coalesce leading KPIs (before any chart/table) into a single summary slide
+  const leadingKpis: CanvasWidgetForReport[] = [];
+  const remaining: CanvasWidgetForReport[] = [];
+  let kpiPhase = true;
 
-    slides.push({
-      id: "slide-kpis",
-      layout: "kpi-grid",
-      title: "Key Metrics",
-      elements: kpiElements,
-    });
+  for (const w of sorted) {
+    const kind = resolveWidgetKind(w);
+    if (kpiPhase && kind === "kpi") {
+      leadingKpis.push(w);
+    } else {
+      kpiPhase = false;
+      remaining.push(w);
+    }
   }
 
-  // Slides for charts (1 per slide)
-  charts.forEach((chart, idx) => {
-    const norm = normalizeChartWidgetData(chart.data);
-    slides.push({
-      id: `slide-chart-${idx}`,
-      layout: "chart-focus",
-      title: chart.widgetName,
-      elements: [
-        {
-          id: `chart-${idx}`,
-          type: "chart",
-          position: { x: 0.5, y: 1.0, w: 9, h: 5.0 },
-          config: {
-            type: "chart",
-            chartType: norm.chartType,
-            title: chart.widgetName,
-            data: norm.data,
-            xKey: norm.xKey,
-            yKey: norm.yKey,
-            yKeys: norm.yKeys,
-            colors: norm.colors.length ? norm.colors : undefined,
-            showLegend: true,
-          },
-          dataSource: {
-            type: "static" as const,
-            staticData: norm.data,
-          },
-        },
-      ],
-    });
-  });
-
-  // Slides for tables (1 per slide)
-  tables.forEach((table, idx) => {
-    const norm = normalizeTableWidgetData(table.data);
-    slides.push({
-      id: `slide-table-${idx}`,
-      layout: "table",
-      title: table.widgetName,
-      elements: [
-        {
-          id: `table-${idx}`,
-          type: "table",
-          position: { x: 0.5, y: 1.0, w: 9, h: 5.5 },
-          config: {
-            type: "table",
-            columns: norm.columns,
-            data: norm.data,
-          },
-          dataSource: {
-            type: "static" as const,
-            staticData: norm.data,
-          },
-        },
-      ],
-    });
-  });
-
-  // Any other widgets as text summary
-  if (others.length > 0) {
-    slides.push({
-      id: "slide-other",
-      layout: "content",
-      title: "Additional Information",
-      elements: others.map((w, idx) => ({
-        id: `other-${idx}`,
-        type: "text" as const,
-        position: { x: 0.5, y: 1.0 + idx * 0.8, w: 9, h: 0.7 },
-        config: {
-          type: "text",
-          content: `${w.widgetName}: ${typeof w.data === "string" ? w.data : JSON.stringify(w.data || "")}`,
-          fontSize: 12,
-        },
-      })),
-    });
-  }
-
-  // Executive Summary slide (auto-generated from KPI data)
-  if (kpis.length > 0) {
-    const summaryLines = kpis.map((kpi) => {
+  // Build KPI summary slide first (if any leading KPIs)
+  if (leadingKpis.length > 0) {
+    // Build Executive Summary auto-text
+    const summaryLines = leadingKpis.map((kpi) => {
       const rawVal = kpi.data?.value ?? kpi.data ?? "--";
       const fmt = kpi.data?.format || "number";
       const val = formatDisplayValue(rawVal, fmt);
       const change = kpi.data?.change;
-      const changeStr = change != null
-        ? ` (${change >= 0 ? "+" : ""}${typeof change === "number" ? change.toFixed(1) : change}%)`
-        : "";
-      return `• ${kpi.widgetName}: ${val}${changeStr}`;
+      const changeStr =
+        change != null
+          ? ` (${change >= 0 ? "+" : ""}${typeof change === "number" ? change.toFixed(1) : change}%)`
+          : "";
+      return `\u2022 ${kpi.widgetName}: ${val}${changeStr}`;
     }).join("\n");
 
-    // Insert executive summary after title slide
-    slides.splice(1, 0, {
+    slides.push({
       id: "slide-exec-summary",
       layout: "content",
       title: "Executive Summary",
-      speakerNotes: "This slide provides a high-level overview of the key metrics from the canvas. Highlight the most important trends and any areas requiring attention.",
+      speakerNotes:
+        "High-level overview of key metrics from the canvas. Highlight the most important trends and any areas requiring attention.",
       elements: [
         {
           id: "exec-summary-text",
@@ -1260,7 +1549,7 @@ export function canvasToReportDefinition(
           position: { x: 0.5, y: 1.0, w: 9, h: 5.0 },
           config: {
             type: "text",
-            content: `Key Metrics Overview\n\n${summaryLines}\n\nReport generated from Cohi Workbench canvas on ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}.`,
+            content: `Key Metrics Overview\n\n${summaryLines}\n\nReport generated from Cohi Workbench on ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}.`,
             fontSize: 13,
             color: theme.textColor,
             lineSpacing: 1.5,
@@ -1268,18 +1557,115 @@ export function canvasToReportDefinition(
         },
       ],
     });
+
+    // KPI grid slide (batches of up to 8 per slide)
+    for (let i = 0; i < leadingKpis.length; i += 8) {
+      const batch = leadingKpis.slice(i, i + 8);
+      slides.push(buildKpiSlide(batch, theme, `slide-kpis-${i}`, i === 0 ? "Key Metrics" : "Key Metrics (cont.)"));
+    }
   }
 
-  // Key Takeaways slide (final slide)
+  // Now walk remaining widgets in spatial order
+  let slideIndex = 0;
+  let inlineKpiBuffer: CanvasWidgetForReport[] = [];
+  let inlineKpiGroupId: string | null = null; // track widget_group context
+
+  const flushInlineKpis = () => {
+    if (inlineKpiBuffer.length === 0) return;
+    for (let i = 0; i < inlineKpiBuffer.length; i += 8) {
+      slides.push(buildKpiSlide(inlineKpiBuffer.slice(i, i + 8), theme, `slide-inline-kpi-${slideIndex++}`, "Metrics"));
+    }
+    inlineKpiBuffer = [];
+  };
+
+  for (const w of remaining) {
+    const kind = resolveWidgetKind(w);
+
+    if (kind === "skip") continue;
+
+    if (kind === "section_header") {
+      flushInlineKpis();
+      slides.push(buildSectionBreakSlide(w.widgetName, `slide-section-${slideIndex++}`));
+      continue;
+    }
+
+    if (kind === "widget_group") {
+      flushInlineKpis();
+      const d = w.data as any;
+      slides.push(buildSectionBreakSlide(d?.title || w.widgetName, `slide-group-${slideIndex++}`));
+      continue;
+    }
+
+    if (kind === "embed") {
+      flushInlineKpis();
+      // Dashboard section embed: render as a titled text placeholder
+      const d = w.data as any;
+      slides.push({
+        id: `slide-embed-${slideIndex++}`,
+        layout: "content",
+        title: d?.title || w.widgetName,
+        elements: [
+          {
+            id: `embed-text-${slideIndex}`,
+            type: "text",
+            position: { x: 0.5, y: 1.2, w: 9, h: 4.5 },
+            config: {
+              type: "text",
+              content: `${d?.title || w.widgetName}\n\nThis section is a live dashboard embed. Open the Cohi Workbench canvas to view the full interactive data.`,
+              fontSize: 13,
+              color: theme.textColor,
+              align: "center",
+              verticalAlign: "middle",
+            },
+          },
+        ],
+      });
+      continue;
+    }
+
+    if (kind === "kpi") {
+      // Buffer KPIs — will be coalesced into a grid slide
+      inlineKpiBuffer.push(w);
+      continue;
+    }
+
+    // Non-KPI widgets flush any buffered KPIs first
+    flushInlineKpis();
+
+    switch (kind) {
+      case "chart":
+        slides.push(buildChartSlide(w, `slide-chart-${slideIndex++}`, theme));
+        break;
+      case "table":
+        slides.push(buildTableSlide(w, `slide-table-${slideIndex++}`));
+        break;
+      case "text":
+      case "rich_text":
+        slides.push(buildTextSlide(w, `slide-text-${slideIndex++}`, theme));
+        break;
+      case "insight":
+      case "news":
+        slides.push(buildInsightSlide(w, `slide-insight-${slideIndex++}`, theme));
+        break;
+      case "image":
+        slides.push(buildImageSlide(w, `slide-image-${slideIndex++}`));
+        break;
+    }
+  }
+
+  // Flush any trailing inline KPIs
+  flushInlineKpis();
+
+  // Key Takeaways slide (final)
+  const allKpis = [...leadingKpis, ...remaining.filter((w) => resolveWidgetKind(w) === "kpi")];
   const takeawayItems: string[] = [];
-  // Find noteworthy KPIs (significant changes)
-  for (const kpi of kpis) {
+  for (const kpi of allKpis) {
     const change = kpi.data?.change;
-    if (change != null && typeof change === "number") {
-      if (Math.abs(change) >= 5) {
-        const direction = change >= 0 ? "increased" : "decreased";
-        takeawayItems.push(`${kpi.widgetName} ${direction} by ${Math.abs(change).toFixed(1)}% — ${change >= 0 ? "positive trend to maintain" : "investigate root cause"}`);
-      }
+    if (change != null && typeof change === "number" && Math.abs(change) >= 5) {
+      const direction = change >= 0 ? "increased" : "decreased";
+      takeawayItems.push(
+        `${kpi.widgetName} ${direction} by ${Math.abs(change).toFixed(1)}% — ${change >= 0 ? "positive trend to maintain" : "investigate root cause"}`
+      );
     }
   }
   if (takeawayItems.length === 0) {
