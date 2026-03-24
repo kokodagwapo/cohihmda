@@ -1,14 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  EMPTY_FILTER_TOKEN,
   evaluateLoanDetailFilters,
   isFilterActive,
   type ColumnFilterState,
 } from "@/utils/loanDetailFilters";
 
 type Row = {
-  branch: string;
+  branch: string | null;
   status: string;
-  fico: number;
+  fico: number | null;
   closingDate: string;
   lockedFlag: "Yes" | "No";
 };
@@ -17,6 +18,7 @@ const rows: Row[] = [
   { branch: "2001", status: "Active Loan", fico: 620, closingDate: "2025-01-10", lockedFlag: "Yes" },
   { branch: "1000", status: "Active Loan", fico: 730, closingDate: "2025-02-15", lockedFlag: "No" },
   { branch: "2100", status: "Closed", fico: 580, closingDate: "2024-11-30", lockedFlag: "No" },
+  { branch: null, status: "Active Loan", fico: null, closingDate: "2025-03-01", lockedFlag: "No" },
 ];
 
 describe("loanDetailFilters", () => {
@@ -62,5 +64,17 @@ describe("loanDetailFilters", () => {
     expect(isFilterActive({ kind: "number", mode: "min", selectedValues: [], value: "600" })).toBe(true);
     expect(isFilterActive({ kind: "date", shortcut: "ytd" })).toBe(true);
     expect(isFilterActive({ kind: "boolean", value: "all" })).toBe(false);
+  });
+
+  it("supports blank token for text and numeric all filters", () => {
+    const blankBranch: ColumnFilterState = {
+      branch: { kind: "text", selectedValues: [EMPTY_FILTER_TOKEN] },
+    };
+    const blankFico: ColumnFilterState = {
+      fico: { kind: "number", mode: "all", selectedValues: [EMPTY_FILTER_TOKEN] },
+    };
+
+    expect(evaluateLoanDetailFilters(rows, blankBranch, (r, c) => r[c as keyof Row])).toHaveLength(1);
+    expect(evaluateLoanDetailFilters(rows, blankFico, (r, c) => r[c as keyof Row])).toHaveLength(1);
   });
 });

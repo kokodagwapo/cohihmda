@@ -1,6 +1,7 @@
 export type LoanDetailFilterKind = "text" | "number" | "date" | "boolean";
 export type NumericFilterMode = "all" | "range" | "min" | "max";
 export type BooleanFilterValue = "all" | "yes" | "no";
+export const EMPTY_FILTER_TOKEN = "__EMPTY__";
 
 export type TextColumnFilter = {
   kind: "text";
@@ -36,6 +37,42 @@ export type ColumnFilter =
 
 export type ColumnFilterState = Record<string, ColumnFilter | undefined>;
 
+function sortStringArray(values: string[]): string[] {
+  return [...values].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}
+
+export function normalizeFilterState(filters: ColumnFilterState): ColumnFilterState {
+  const normalized: ColumnFilterState = {};
+  const keys = Object.keys(filters).sort((a, b) => a.localeCompare(b));
+  for (const key of keys) {
+    const filter = filters[key];
+    if (!filter || !isFilterActive(filter)) continue;
+    if (filter.kind === "text") {
+      normalized[key] = { kind: "text", selectedValues: sortStringArray(filter.selectedValues) };
+      continue;
+    }
+    if (filter.kind === "number") {
+      normalized[key] =
+        filter.mode === "all"
+          ? { kind: "number", mode: "all", selectedValues: sortStringArray(filter.selectedValues) }
+          : filter.mode === "range"
+            ? { kind: "number", mode: "range", selectedValues: [], min: filter.min ?? "", max: filter.max ?? "" }
+            : { kind: "number", mode: filter.mode, selectedValues: [], value: filter.value ?? "" };
+      continue;
+    }
+    if (filter.kind === "date") {
+      normalized[key] = { kind: "date", from: filter.from ?? "", to: filter.to ?? "", shortcut: filter.shortcut ?? "" };
+      continue;
+    }
+    normalized[key] = { kind: "boolean", value: filter.value };
+  }
+  return normalized;
+}
+
+export function areFilterStatesEquivalent(a: ColumnFilterState, b: ColumnFilterState): boolean {
+  return JSON.stringify(normalizeFilterState(a)) === JSON.stringify(normalizeFilterState(b));
+}
+
 export function parseFilterDate(value: unknown): Date | null {
   if (value == null) return null;
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
@@ -65,6 +102,12 @@ export function parseNumericValue(value: unknown): number | null {
 
 function normalizeText(value: unknown): string {
   return String(value ?? "").trim().toLowerCase();
+}
+
+function isEmptyLike(value: unknown): boolean {
+  if (value == null) return true;
+  const normalized = normalizeText(value);
+  return normalized === "" || normalized === "-" || normalized === "–";
 }
 
 function getShortcutRange(shortcut: string): { start: Date | null; end: Date | null } {
@@ -103,16 +146,18 @@ export function isFilterActive(filter: ColumnFilter | undefined): boolean {
 
 function matchesTextFilter(filter: TextColumnFilter, rawValue: unknown): boolean {
   if (filter.selectedValues.length === 0) return true;
+  if (filter.selectedValues.includes(EMPTY_FILTER_TOKEN) && isEmptyLike(rawValue)) return true;
   const current = normalizeText(rawValue);
-  return filter.selectedValues.some((v) => normalizeText(v) === current);
+  return filter.selectedValues.some((v) => v !== EMPTY_FILTER_TOKEN && normalizeText(v) === current);
 }
 
 function matchesNumberFilter(filter: NumberColumnFilter, rawValue: unknown): boolean {
   const num = parseNumericValue(rawValue);
   if (filter.mode === "all") {
     if (filter.selectedValues.length === 0) return true;
+    if (filter.selectedValues.includes(EMPTY_FILTER_TOKEN) && isEmptyLike(rawValue)) return true;
     if (num == null) return false;
-    return filter.selectedValues.some((v) => parseNumericValue(v) === num);
+    return filter.selectedValues.some((v) => v !== EMPTY_FILTER_TOKEN && parseNumericValue(v) === num);
   }
   if (num == null) return false;
   if (filter.mode === "range") {
