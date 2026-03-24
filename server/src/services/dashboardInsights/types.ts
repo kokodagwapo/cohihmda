@@ -69,9 +69,17 @@ export interface DashboardInsightFilterContext {
 export interface SupportingDataByPeriodRow {
   period: string;
   periodLabel?: string;
+  /** Optional cohort/segment label (e.g. '>50.00', 'FHA') when rows are insight-scoped */
+  bucketLabel?: string;
+  /** Optional cohort dimension for insight-scoped evidence (e.g. dti, fico, ltv, loan_type) */
+  cohortDimension?: string;
+  /** Optional selected application type for insight-scoped evidence */
+  applicationType?: string;
   averagePullThrough?: number;
   totalUnits?: number;
+  unitsPercent?: number;
   totalVolume?: number;
+  volumePercent?: number;
   topPerformerName?: string;
   topPerformerUnits?: number;
   topPerformerVolume?: number;
@@ -93,10 +101,23 @@ export interface SupportingDataByPeriodRow {
   waDti?: number;
   conventionalQualifiedPercent?: number;
   governmentQualifiedPercent?: number;
+  originatedPercent?: number;
+  deniedPercent?: number;
+  withdrawnPercent?: number;
+  activePercent?: number;
+  [key: string]: unknown;
 }
 
 export interface SupportingData {
+  /** Generic profile chosen by evidence selector. */
+  profile?: string;
+  /** Optional cohort target metadata for dynamic evidence rendering. */
+  target?: { type?: string; label?: string };
   byPeriod?: SupportingDataByPeriodRow[];
+  /** Optional detail rows (e.g. loan-level cohort evidence). */
+  detailRows?: Array<Record<string, unknown>>;
+  /** Optional KPI summary for the selected evidence profile. */
+  summary?: Record<string, number | string>;
 }
 
 /**

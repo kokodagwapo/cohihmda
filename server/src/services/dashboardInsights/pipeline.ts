@@ -16,6 +16,7 @@ import { callLLM, getOpenAIKey } from "../research/tools.js";
 import type { LLMMessage } from "../research/tools.js";
 import { buildDetailFromSupportingData } from "./dashboardInsightDetailHydrator.js";
 import { saveDashboardInsights } from "./storage.js";
+import { buildCreditRiskSupportingDataForInsight } from "./creditRiskEvidence.js";
 import type {
   DashboardPageContext,
   DashboardInsight,
@@ -1034,9 +1035,12 @@ export async function runDashboardInsightsPipeline(
     }
   }
 
-  const supportingData = buildSupportingDataFromContext(context);
   for (let i = 0; i < insights.length; i++) {
     const insight = insights[i];
+    const supportingData =
+      context.pageId === "credit-risk-management"
+        ? await buildCreditRiskSupportingDataForInsight(context, insight, tenantPool)
+        : buildSupportingDataFromContext(context);
     const subjectName = getSubjectNameFromInsight(insight, context);
     const detail_data = buildDetailFromSupportingData(insight, supportingData, {
       generationBatch,

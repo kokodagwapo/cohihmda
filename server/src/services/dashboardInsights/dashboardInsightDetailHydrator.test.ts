@@ -183,4 +183,32 @@ describe("dashboardInsightDetailHydrator", () => {
     expect(result!.rows).toHaveLength(2);
     expect(result!.rows.every((r) => r.name === "North")).toBe(true);
   });
+
+  it("buildDetailFromSupportingData credit-risk cohort detail uses loan-level columns", () => {
+    const crInsight: DashboardInsight = {
+      ...baseInsight,
+      sourcePageId: "credit-risk-management",
+      sourcePageName: "Credit Risk Management",
+    };
+    const supportingData: SupportingData = {
+      profile: "cohort_detail",
+      detailRows: [
+        {
+          loanNumber: "1001",
+          borrower: "A Borrower",
+          officer: "Officer A",
+          loanAmount: 100000,
+          ficoScore: 660,
+          ltvRatio: 86,
+          dtiRatio: 52,
+        },
+      ],
+    };
+    const result = buildDetailFromSupportingData(crInsight, supportingData, {
+      context: { pageId: "credit-risk-management" } as DashboardPageContext,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.displayConfig.columns).toContain("loanNumber");
+    expect(result!.displayConfig.columns).toContain("dtiRatio");
+  });
 });

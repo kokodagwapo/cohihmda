@@ -4,7 +4,7 @@
  * Uses @tanstack/react-virtual for row virtualization (smooth scroll with large lists).
  */
 
-import { useEffect, useRef, useCallback, useState, useMemo } from "react";
+import { useEffect, useRef, useCallback, useState, useMemo, useTransition, memo } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   useLoanDetailData,
@@ -17,7 +17,40 @@ import { useTenantStore } from "@/stores/tenantStore";
 import { useTheme } from "@/components/theme-provider";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Loader2, Download, ArrowUp, ArrowDown } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
+import { useSearchParams } from "react-router-dom";
+import {
+  type ColumnFilterState,
+  type ColumnFilter,
+  type BooleanColumnFilter,
+  type DateColumnFilter,
+  type LoanDetailFilterKind,
+  type NumberColumnFilter,
+  type NumericFilterMode,
+  type TextColumnFilter,
+  EMPTY_FILTER_TOKEN,
+  areFilterStatesEquivalent,
+  normalizeFilterState,
+  parseFilterDate,
+  parseNumericValue,
+  evaluateLoanDetailFilters,
+  isFilterActive,
+} from "@/utils/loanDetailFilters";
+import { useLoanDetailFilterBookmarks, type LoanDetailFilterBookmark } from "@/hooks/useLoanDetailFilterBookmarks";
+import { Loader2, Download, ArrowUp, ArrowDown, Filter, X, Check, Bookmark, Pencil, Trash2, Share2 } from "lucide-react";
 
 const ROW_HEIGHT = 40;
 const HEADER_HEIGHT = 40;
@@ -51,6 +84,8 @@ export type ColumnDef = {
   label: string;
   /** DB field key (e.g. loan_amount, fico_score) or null for calculated/blank */
   field: string | null;
+  /** Optional explicit type discriminator used by filter UI. */
+  type?: LoanDetailFilterKind;
   /** Optional min width (px) for columns with long content (e.g. names, addresses) */
   minWidth?: number;
 };
@@ -125,6 +160,214 @@ export const UNPOPULATED_LOAN_DETAIL_COLUMNS = COLUMNS.filter((c) => c.field ===
 );
 
 const BLANK_PLACEHOLDER = "-";
+const NUMERIC_FIELD_SET = new Set([
+  "loan_amount",
+  "interest_rate",
+  "fico_score",
+  "ltv_ratio",
+  "be_dti_ratio",
+  "loan_term",
+  "lock_days",
+  "number_of_months_interest_only_payments",
+  "income_total_mo_income",
+  "origination_points",
+  "orig_fee_borr_pd",
+  "fees_va_fund_fee_borr",
+  "fees_loan_discount_fee",
+  "fees_loan_discount_fee_borr",
+]);
+const NUMERIC_COLUMN_ID_SET = new Set(["units", "wac", "volume", "fico", "ltv", "be_dti", "loan_term", "locked_days"]);
+const BOOLEAN_COLUMN_ID_SET = new Set(["locked_flag"]);
+
+function getColumnFilterKind(col: ColumnDef): LoanDetailFilterKind {
+  if (col.type) return col.type;
+  if (BOOLEAN_COLUMN_ID_SET.has(col.id)) return "boolean";
+  if (NUMERIC_COLUMN_ID_SET.has(col.id) || (col.field != null && NUMERIC_FIELD_SET.has(col.field))) return "number";
+  if (col.id.includes("date") || (col.field != null && col.field.includes("date"))) return "date";
+  return "text";
+}
+
+function cloneFilter(filter: ColumnFilter | undefined): ColumnFilter | undefined {
+  if (!filter) return undefined;
+  if (filter.kind === "text") return { ...filter, selectedValues: [...filter.selectedValues] };
+  if (filter.kind === "number") return { ...filter, selectedValues: [...filter.selectedValues] };
+  return { ...filter };
+}
+
+/** Green row preview while the popover is open: list/cell picks only, not typed bounds (range / greater / less). */
+function shouldPreviewDraftOnCells(filter: ColumnFilter | undefined): boolean {
+  if (!filter || !isFilterActive(filter)) return false;
+  if (filter.kind === "number" && filter.mode !== "all") return false;
+  return true;
+}
+
+function makeBookmarkId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `bookmark_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function encodeFilterStateToQuery(filters: ColumnFilterState): string {
+  return encodeURIComponent(JSON.stringify(normalizeFilterState(filters)));
+}
+
+function decodeFilterStateFromQuery(serialized: string | null): ColumnFilterState | null {
+  if (!serialized) return null;
+  try {
+    const parsed = JSON.parse(decodeURIComponent(serialized));
+    if (typeof parsed !== "object" || parsed == null) return null;
+    return parsed as ColumnFilterState;
+  } catch {
+    return null;
+  }
+}
+
+const SaveBookmarkDialog = memo(function SaveBookmarkDialog({
+  open,
+  onOpenChange,
+  initialName,
+  filterSummaryItems,
+  onSave,
+}: {
+  open: boolean;
+  onOpenChange: (nextOpen: boolean) => void;
+  initialName: string;
+  filterSummaryItems: string[];
+  onSave: (name: string) => Promise<void>;
+}) {
+  const [nameDraft, setNameDraft] = useState(initialName);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setNameDraft(initialName);
+    }
+  }, [open, initialName]);
+
+  const handleSave = useCallback(async () => {
+    const trimmed = nameDraft.trim();
+    if (!trimmed || isSaving) return;
+    setIsSaving(true);
+    try {
+      await onSave(trimmed);
+      onOpenChange(false);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [isSaving, nameDraft, onOpenChange, onSave]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Save Bookmark</DialogTitle>
+          <DialogDescription>Save the current active filters as a bookmark.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="rounded border border-slate-200 dark:border-slate-700 p-3 space-y-1 max-h-44 overflow-auto">
+            {filterSummaryItems.length === 0 ? (
+              <p className="text-xs text-slate-500 dark:text-slate-400">No active filters.</p>
+            ) : (
+              filterSummaryItems.map((line) => (
+                <p key={`save-${line}`} className="text-xs text-slate-600 dark:text-slate-400">{line}</p>
+              ))
+            )}
+          </div>
+          <Input
+            value={nameDraft}
+            onChange={(e) => setNameDraft(e.target.value)}
+            placeholder="Bookmark name"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleSave();
+            }}
+          />
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button type="button" onClick={handleSave} disabled={!nameDraft.trim() || isSaving}>
+            {isSaving ? "Saving..." : "Save"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+});
+
+function isEmptyTokenMatch(token: string, rawValue: unknown): boolean {
+  if (token !== EMPTY_FILTER_TOKEN) return false;
+  return rawValue == null || String(rawValue).trim() === "";
+}
+
+function matchesAppliedTextFilter(filter: TextColumnFilter, token: string, rawValue: unknown): boolean {
+  if (filter.selectedValues.length === 0) return false;
+  if (filter.selectedValues.includes(EMPTY_FILTER_TOKEN) && isEmptyTokenMatch(EMPTY_FILTER_TOKEN, rawValue)) {
+    return true;
+  }
+  return filter.selectedValues.some((value) => value !== EMPTY_FILTER_TOKEN && value === token);
+}
+
+function matchesAppliedNumberFilter(filter: NumberColumnFilter, token: string, rawValue: unknown): boolean {
+  const num = parseNumericValue(rawValue);
+  if (filter.mode === "all") {
+    if (filter.selectedValues.length === 0) return false;
+    if (filter.selectedValues.includes(EMPTY_FILTER_TOKEN) && isEmptyTokenMatch(EMPTY_FILTER_TOKEN, rawValue)) {
+      return true;
+    }
+    return filter.selectedValues.some((value) => value !== EMPTY_FILTER_TOKEN && value === token);
+  }
+  if (num == null) return false;
+  if (filter.mode === "range") {
+    const min = parseNumericValue(filter.min);
+    const max = parseNumericValue(filter.max);
+    if (min != null && num < min) return false;
+    if (max != null && num > max) return false;
+    return min != null || max != null;
+  }
+  const target = parseNumericValue(filter.value);
+  if (target == null) return false;
+  return filter.mode === "min" ? num >= target : num <= target;
+}
+
+function matchesAppliedDateFilter(filter: DateColumnFilter, rawValue: unknown): boolean {
+  const hasDateFilter = Boolean(filter.shortcut?.trim() || filter.from?.trim() || filter.to?.trim());
+  if (!hasDateFilter) return false;
+  const valueDate = parseFilterDate(rawValue);
+  if (!valueDate) return false;
+  valueDate.setHours(0, 0, 0, 0);
+
+  if (filter.shortcut?.trim()) {
+    const token = filter.shortcut.trim().toLowerCase();
+    const now = new Date();
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    let start: Date | null = null;
+    if (token === "ytd") start = new Date(end.getFullYear(), 0, 1);
+    else if (token === "last 30 days") start = new Date(end.getTime() - 29 * 24 * 60 * 60 * 1000);
+    else if (/^\d{4}$/.test(token)) start = new Date(Number(token), 0, 1);
+    if (!start) return false;
+    const shortcutEnd = /^\d{4}$/.test(token) ? new Date(Number(token), 11, 31) : end;
+    start.setHours(0, 0, 0, 0);
+    shortcutEnd.setHours(0, 0, 0, 0);
+    return valueDate >= start && valueDate <= shortcutEnd;
+  }
+  const from = parseFilterDate(filter.from);
+  const to = parseFilterDate(filter.to);
+  if (from) {
+    from.setHours(0, 0, 0, 0);
+    if (valueDate < from) return false;
+  }
+  if (to) {
+    to.setHours(0, 0, 0, 0);
+    if (valueDate > to) return false;
+  }
+  return Boolean(from || to);
+}
+
+function matchesAppliedBooleanFilter(filter: BooleanColumnFilter, rawValue: unknown): boolean {
+  if (filter.value === "all") return false;
+  const yes = String(rawValue ?? "").trim().toLowerCase() === "yes" || rawValue === true;
+  return filter.value === "yes" ? yes : !yes;
+}
 
 /** Format volume (loan amount) with commas and 2 decimals (e.g. 3,093,200.00). Used only for volume column. */
 function formatVolumeWithCommas(value: number | string | null): string {
@@ -417,6 +660,7 @@ export function LoanDetailView({
   filterSummary,
   columns: columnsProp,
 }: LoanDetailViewProps) {
+  const [searchParams, setSearchParams] = useSearchParams();
   const { theme } = useTheme();
   const { selectedTenantId: storeTenantId } = useTenantStore();
   const tenantId = selectedTenantIdProp ?? storeTenantId;
@@ -454,16 +698,69 @@ export function LoanDetailView({
 
   const [sortColumnId, setSortColumnId] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const [showFilters, setShowFilters] = useState(false);
+  const [appliedFilters, setAppliedFilters] = useState<ColumnFilterState>({});
+  const [draftFilters, setDraftFilters] = useState<ColumnFilterState>({});
+  const [openFilterColumnId, setOpenFilterColumnId] = useState<string | null>(null);
+  const [flashState, setFlashState] = useState<{ columnId: string; values: string[]; nonce: number } | null>(null);
+  const [isApplyingFilters, startFilterTransition] = useTransition();
+  const [filterFeedback, setFilterFeedback] = useState<{ message: string; nonce: number } | null>(null);
+  const [filterSearchByColumn, setFilterSearchByColumn] = useState<Record<string, string>>({});
+  const [debouncedFilterSearchByColumn, setDebouncedFilterSearchByColumn] = useState<Record<string, string>>({});
+  const searchDebounceTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const [bookmarksModalOpen, setBookmarksModalOpen] = useState(false);
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
+  const [overwriteModalOpen, setOverwriteModalOpen] = useState(false);
+  const [saveModalInitialName, setSaveModalInitialName] = useState("");
+  const [editingBookmarkId, setEditingBookmarkId] = useState<string | null>(null);
+  const [editingBookmarkName, setEditingBookmarkName] = useState("");
+  const [copiedBookmarkState, setCopiedBookmarkState] = useState<{ id: string; fading: boolean } | null>(null);
+  const [selectedBookmarkId, setSelectedBookmarkId] = useState<string | null>(null);
+  const [sharedBookmarkTitle, setSharedBookmarkTitle] = useState<string | null>(null);
+  const {
+    bookmarks,
+    isLoading: bookmarksLoading,
+    saveAll: saveAllBookmarks,
+  } = useLoanDetailFilterBookmarks();
 
+  const getFilterRawValue = useCallback((row: LoanDetailRow, col: ColumnDef): unknown => {
+    if (col.id === "units") return 1;
+    if (col.id === "wac") return row.interest_rate;
+    if (col.id === "locked_flag") return isLockedFlagYes(row) ? "Yes" : "No";
+    if (col.field) return (row as unknown as Record<string, unknown>)[col.field];
+    return null;
+  }, []);
+
+  const filteredLoans = useMemo(
+    () => evaluateLoanDetailFilters(loans, appliedFilters, (row, columnId) => {
+      const col = columnsToUse.find((item) => item.id === columnId);
+      return col ? getFilterRawValue(row, col) : null;
+    }),
+    [loans, appliedFilters, columnsToUse, getFilterRawValue],
+  );
+
+  const hasActiveFilters = useMemo(
+    () => Object.values(appliedFilters).some((filter) => isFilterActive(filter)),
+    [appliedFilters],
+  );
+  const activeFilterColumnIds = useMemo(() => (
+    new Set(
+      Object.entries(appliedFilters)
+        .filter(([, filter]) => isFilterActive(filter))
+        .map(([columnId]) => columnId),
+    )
+  ), [appliedFilters]);
+  const filteredCount = filteredLoans.length;
+  const baseCount = loans.length;
   // WAC = sum of (Loan Amount * Interest Rate), formatted as #,##0.000
-  const wacFormatted = useMemo(() => computeWacFormatted(loans), [loans]);
+  const wacFormatted = useMemo(() => computeWacFormatted(filteredLoans), [filteredLoans]);
 
   const sortedLoans = useMemo(
     () =>
       sortColumnId
-        ? sortLoans(loans, sortColumnId, sortDirection, wacFormatted, columnsToUse)
-        : loans,
-    [loans, sortColumnId, sortDirection, wacFormatted, columnsToUse],
+        ? sortLoans(filteredLoans, sortColumnId, sortDirection, wacFormatted, columnsToUse)
+        : filteredLoans,
+    [filteredLoans, sortColumnId, sortDirection, wacFormatted, columnsToUse],
   );
 
   const handleSort = useCallback((columnId: string) => {
@@ -477,16 +774,473 @@ export function LoanDetailView({
     });
   }, []);
 
-  // Size each column to fit header + all cell content (no truncation)
+  const distinctValuesByColumn = useMemo(() => {
+    const result: Record<string, string[]> = {};
+    for (const col of columnsToUse) {
+      const values = new Set<string>();
+      for (const row of loans) {
+        const raw = getFilterRawValue(row, col);
+        if (raw == null) continue;
+        const value = String(raw).trim();
+        if (value) values.add(value);
+      }
+      result[col.id] = Array.from(values).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    }
+    return result;
+  }, [columnsToUse, loans, getFilterRawValue]);
+
+  const beginDraft = useCallback((columnId: string) => {
+    setDraftFilters((prev) => {
+      if (prev[columnId] !== undefined) return prev;
+      return { ...prev, [columnId]: cloneFilter(appliedFilters[columnId]) };
+    });
+  }, [appliedFilters]);
+
+  const setDraftFilter = useCallback((columnId: string, next: ColumnFilterState[string]) => {
+    setDraftFilters((prev) => ({ ...prev, [columnId]: next }));
+  }, []);
+
+  const clearDraftFilter = useCallback((columnId: string) => {
+    setDraftFilters((prev) => {
+      const next = { ...prev };
+      delete next[columnId];
+      return next;
+    });
+  }, []);
+
+  const discardDraft = useCallback((columnId: string) => {
+    setDraftFilters((prev) => {
+      const next = { ...prev };
+      delete next[columnId];
+      return next;
+    });
+    setOpenFilterColumnId((current) => (current === columnId ? null : current));
+  }, []);
+
+  const closePopoverWithoutDiscard = useCallback((columnId: string) => {
+    setOpenFilterColumnId((current) => (current === columnId ? null : current));
+  }, []);
+
+  const commitDraft = useCallback((columnId: string) => {
+    let committedFilter: ColumnFilter | undefined;
+    setFilterFeedback({ message: "Applying filter...", nonce: Date.now() });
+    startFilterTransition(() => {
+      setAppliedFilters((prev) => {
+        const draft = draftFilters[columnId];
+        if (!draft || !isFilterActive(draft)) {
+          committedFilter = undefined;
+          const next = { ...prev };
+          delete next[columnId];
+          return next;
+        }
+        committedFilter = cloneFilter(draft);
+        return { ...prev, [columnId]: committedFilter };
+      });
+    });
+    setDraftFilters((prev) => {
+      const next = { ...prev };
+      delete next[columnId];
+      return next;
+    });
+    setOpenFilterColumnId((current) => (current === columnId ? null : current));
+    if (committedFilter && (committedFilter.kind === "text" || (committedFilter.kind === "number" && committedFilter.mode === "all"))) {
+      const values = committedFilter.selectedValues;
+      setFlashState({ columnId, values, nonce: Date.now() });
+    }
+  }, [draftFilters, startFilterTransition]);
+
+  useEffect(() => {
+    if (!flashState) return;
+    const timer = window.setTimeout(() => setFlashState(null), 650);
+    return () => window.clearTimeout(timer);
+  }, [flashState]);
+
+  useEffect(() => {
+    if (!filterFeedback) return;
+    if (isApplyingFilters) return;
+    setFilterFeedback(null);
+  }, [isApplyingFilters, filterFeedback]);
+
+  useEffect(() => {
+    return () => {
+      const timers = searchDebounceTimersRef.current;
+      for (const timer of Object.values(timers)) {
+        clearTimeout(timer);
+      }
+    };
+  }, []);
+
+  const updateFilterSearch = useCallback((columnId: string, value: string) => {
+    setFilterSearchByColumn((prev) => ({ ...prev, [columnId]: value }));
+    const timers = searchDebounceTimersRef.current;
+    if (timers[columnId]) clearTimeout(timers[columnId]);
+    timers[columnId] = setTimeout(() => {
+      setDebouncedFilterSearchByColumn((prev) => ({ ...prev, [columnId]: value }));
+    }, 200);
+  }, []);
+
+  const selectedBookmark = useMemo(
+    () => bookmarks.find((bookmark) => bookmark.id === selectedBookmarkId) ?? null,
+    [bookmarks, selectedBookmarkId],
+  );
+  const hasBookmarkSelection = Boolean(selectedBookmark);
+  const bookmarkInSync = useMemo(
+    () => (selectedBookmark ? areFilterStatesEquivalent(appliedFilters, selectedBookmark.filters) : false),
+    [appliedFilters, selectedBookmark],
+  );
+  const saveStatusLabel = bookmarkInSync ? "Saved" : "Save";
+  const saveStatusClass = bookmarkInSync
+    ? "bg-emerald-600 hover:bg-emerald-600 text-white"
+    : "bg-sky-600 hover:bg-sky-700 text-white";
+
+  const filterSummaryItems = useMemo(() => {
+    const summarize = (state: ColumnFilterState): string[] => {
+      const lines: string[] = [];
+      for (const col of columnsToUse) {
+        const filter = state[col.id];
+        if (!filter || !isFilterActive(filter)) continue;
+        if (filter.kind === "text") {
+          lines.push(`${col.label}: ${filter.selectedValues.map((v) => (v === EMPTY_FILTER_TOKEN ? "(Blank)" : v)).join(", ")}`);
+          continue;
+        }
+        if (filter.kind === "number") {
+          if (filter.mode === "all") {
+            lines.push(`${col.label}: ${filter.selectedValues.map((v) => (v === EMPTY_FILTER_TOKEN ? "(Blank)" : v)).join(", ")}`);
+          } else if (filter.mode === "range") {
+            lines.push(`${col.label}: ${filter.min || ""} - ${filter.max || ""}`);
+          } else {
+            lines.push(`${col.label}: ${filter.mode === "min" ? ">=" : "<="} ${filter.value || ""}`);
+          }
+          continue;
+        }
+        if (filter.kind === "date") {
+          lines.push(`${col.label}: ${filter.shortcut || `${filter.from || ""} to ${filter.to || ""}`}`);
+          continue;
+        }
+        lines.push(`${col.label}: ${filter.value === "yes" ? "Yes" : "No"}`);
+      }
+      return lines;
+    };
+    return summarize(appliedFilters);
+  }, [appliedFilters, columnsToUse]);
+
+  const summarizeFilterState = useCallback((state: ColumnFilterState): string[] => {
+    const lines: string[] = [];
+    for (const col of columnsToUse) {
+      const filter = state[col.id];
+      if (!filter || !isFilterActive(filter)) continue;
+      if (filter.kind === "text") {
+        lines.push(`${col.label}: ${filter.selectedValues.map((v) => (v === EMPTY_FILTER_TOKEN ? "(Blank)" : v)).join(", ")}`);
+        continue;
+      }
+      if (filter.kind === "number") {
+        if (filter.mode === "all") {
+          lines.push(`${col.label}: ${filter.selectedValues.map((v) => (v === EMPTY_FILTER_TOKEN ? "(Blank)" : v)).join(", ")}`);
+        } else if (filter.mode === "range") {
+          lines.push(`${col.label}: ${filter.min || ""} - ${filter.max || ""}`);
+        } else {
+          lines.push(`${col.label}: ${filter.mode === "min" ? ">=" : "<="} ${filter.value || ""}`);
+        }
+        continue;
+      }
+      if (filter.kind === "date") {
+        lines.push(`${col.label}: ${filter.shortcut || `${filter.from || ""} to ${filter.to || ""}`}`);
+        continue;
+      }
+      lines.push(`${col.label}: ${filter.value === "yes" ? "Yes" : "No"}`);
+    }
+    return lines;
+  }, [columnsToUse]);
+
+  const saveBookmarksAndMaybeSelect = useCallback(async (
+    nextBookmarks: LoanDetailFilterBookmark[],
+    selectedId?: string | null,
+  ) => {
+    await saveAllBookmarks(nextBookmarks);
+    if (selectedId !== undefined) setSelectedBookmarkId(selectedId);
+  }, [saveAllBookmarks]);
+
+  const handleCreateBookmark = useCallback(async (name: string) => {
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
+    const now = new Date().toISOString();
+    const bookmark: LoanDetailFilterBookmark = {
+      id: makeBookmarkId(),
+      name: trimmedName,
+      filters: normalizeFilterState(appliedFilters),
+      createdAt: now,
+      updatedAt: now,
+    };
+    await saveBookmarksAndMaybeSelect([...bookmarks, bookmark], bookmark.id);
+    setSharedBookmarkTitle(null);
+  }, [appliedFilters, bookmarks, saveBookmarksAndMaybeSelect]);
+
+  const handleOverwriteSelectedBookmark = useCallback(async () => {
+    if (!selectedBookmark) return;
+    const now = new Date().toISOString();
+    const next = bookmarks.map((bookmark) =>
+      bookmark.id === selectedBookmark.id
+        ? { ...bookmark, filters: normalizeFilterState(appliedFilters), updatedAt: now }
+        : bookmark,
+    );
+    await saveBookmarksAndMaybeSelect(next, selectedBookmark.id);
+    setOverwriteModalOpen(false);
+    setSharedBookmarkTitle(null);
+  }, [selectedBookmark, bookmarks, appliedFilters, saveBookmarksAndMaybeSelect]);
+
+  const applyBookmark = useCallback((bookmark: LoanDetailFilterBookmark) => {
+    setFilterFeedback({ message: "Applying filter...", nonce: Date.now() });
+    startFilterTransition(() => {
+      setAppliedFilters(normalizeFilterState(bookmark.filters));
+      setDraftFilters({});
+      setOpenFilterColumnId(null);
+      setSelectedBookmarkId(bookmark.id);
+      setSharedBookmarkTitle(null);
+    });
+    setBookmarksModalOpen(false);
+  }, [startFilterTransition]);
+
+  const handleDeleteBookmark = useCallback(async (bookmarkId: string) => {
+    const next = bookmarks.filter((bookmark) => bookmark.id !== bookmarkId);
+    const nextSelected = selectedBookmarkId === bookmarkId ? null : selectedBookmarkId;
+    await saveBookmarksAndMaybeSelect(next, nextSelected);
+  }, [bookmarks, selectedBookmarkId, saveBookmarksAndMaybeSelect]);
+
+  const handleRenameBookmark = useCallback(async (bookmarkId: string, nextName: string) => {
+    const trimmed = nextName.trim();
+    if (!trimmed) return;
+    const existing = bookmarks.find((bookmark) => bookmark.id === bookmarkId);
+    if (existing && existing.name.trim() === trimmed) {
+      setEditingBookmarkId(null);
+      setEditingBookmarkName("");
+      return;
+    }
+    const now = new Date().toISOString();
+    const next = bookmarks.map((bookmark) =>
+      bookmark.id === bookmarkId ? { ...bookmark, name: trimmed, updatedAt: now } : bookmark,
+    );
+    await saveBookmarksAndMaybeSelect(next);
+    setEditingBookmarkId(null);
+    setEditingBookmarkName("");
+  }, [bookmarks, saveBookmarksAndMaybeSelect]);
+
+  const clearAppliedBookmarkView = useCallback(() => {
+    setFilterFeedback({ message: "Removing filters...", nonce: Date.now() });
+    startFilterTransition(() => {
+      setAppliedFilters({});
+      setDraftFilters({});
+      setOpenFilterColumnId(null);
+      setSelectedBookmarkId(null);
+      setSharedBookmarkTitle(null);
+    });
+  }, [startFilterTransition]);
+
+  const copyBookmarkLink = useCallback(async (bookmark: LoanDetailFilterBookmark) => {
+    const params = new URLSearchParams(searchParams);
+    params.set("ldFilters", encodeFilterStateToQuery(bookmark.filters));
+    params.set("bookmarkName", bookmark.name);
+    const path = `${window.location.pathname}?${params.toString()}`;
+    const url = `${window.location.origin}${path}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setFilterFeedback({ message: `Copied link for "${bookmark.name}"`, nonce: Date.now() });
+      setCopiedBookmarkState({ id: bookmark.id, fading: false });
+      window.setTimeout(() => {
+        setCopiedBookmarkState((current) => (current && current.id === bookmark.id ? { ...current, fading: true } : current));
+      }, 1000);
+      window.setTimeout(() => {
+        setCopiedBookmarkState((current) => (current && current.id === bookmark.id ? null : current));
+      }, 1500);
+    } catch {
+      // ignore clipboard errors
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    const fromUrl = decodeFilterStateFromQuery(searchParams.get("ldFilters"));
+    if (fromUrl && Object.keys(fromUrl).length > 0) {
+      setAppliedFilters(normalizeFilterState(fromUrl));
+    }
+    const bookmarkName = searchParams.get("bookmarkName");
+    if (bookmarkName) setSharedBookmarkTitle(bookmarkName);
+    // one-time hydration from initial route state
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    if (Object.values(appliedFilters).some((filter) => isFilterActive(filter))) {
+      next.set("ldFilters", encodeFilterStateToQuery(appliedFilters));
+    } else {
+      next.delete("ldFilters");
+    }
+    const nameForUrl = selectedBookmark?.name ?? sharedBookmarkTitle;
+    if (nameForUrl) next.set("bookmarkName", nameForUrl);
+    else next.delete("bookmarkName");
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [appliedFilters, searchParams, selectedBookmark, sharedBookmarkTitle, setSearchParams]);
+
+  const toggleDraftValue = useCallback((columnId: string, value: string, kind: LoanDetailFilterKind) => {
+    setDraftFilters((prev) => {
+      const current = prev[columnId];
+      if (kind === "number") {
+        const selected = current?.kind === "number" ? current.selectedValues : [];
+        const selectedValues = selected.includes(value)
+          ? selected.filter((item) => item !== value)
+          : [...selected, value];
+        return {
+          ...prev,
+          [columnId]: { kind: "number", mode: "all", selectedValues },
+        };
+      }
+      const selected = current?.kind === "text" ? current.selectedValues : [];
+      const selectedValues = selected.includes(value)
+        ? selected.filter((item) => item !== value)
+        : [...selected, value];
+      return { ...prev, [columnId]: { kind: "text", selectedValues } };
+    });
+  }, []);
+
+  const clearAllFilters = useCallback(() => {
+    setFilterFeedback({ message: "Removing filters...", nonce: Date.now() });
+    startFilterTransition(() => {
+      setAppliedFilters({});
+      setDraftFilters({});
+      setOpenFilterColumnId(null);
+    });
+  }, [startFilterTransition]);
+
+  const activeFilterChips = useMemo(() => {
+    const chips: Array<{ key: string; label: string; onRemove: () => void }> = [];
+    for (const col of columnsToUse) {
+      const filter = appliedFilters[col.id];
+      if (!isFilterActive(filter)) continue;
+      if (!filter) continue;
+      if (filter.kind === "text") {
+        for (const value of filter.selectedValues) {
+          chips.push({
+            key: `${col.id}:text:${value}`,
+            label: `${col.label}: ${value === EMPTY_FILTER_TOKEN ? "(Blank)" : value}`,
+            onRemove: () => {
+              setFilterFeedback({ message: "Removing filter...", nonce: Date.now() });
+              startFilterTransition(() => {
+                setAppliedFilters((prev) => {
+                  const current = prev[col.id];
+                  if (!current || current.kind !== "text") return prev;
+                  const selectedValues = current.selectedValues.filter((item) => item !== value);
+                  const next = { ...prev };
+                  if (selectedValues.length === 0) delete next[col.id];
+                  else next[col.id] = { ...current, selectedValues };
+                  return next;
+                });
+              });
+            },
+          });
+        }
+        continue;
+      }
+      if (filter.kind === "number") {
+        if (filter.mode === "all") {
+          for (const value of filter.selectedValues) {
+            chips.push({
+              key: `${col.id}:number:${value}`,
+              label: `${col.label}: ${value === EMPTY_FILTER_TOKEN ? "(Blank)" : value}`,
+              onRemove: () => {
+                setFilterFeedback({ message: "Removing filter...", nonce: Date.now() });
+                startFilterTransition(() => {
+                  setAppliedFilters((prev) => {
+                    const current = prev[col.id];
+                    if (!current || current.kind !== "number" || current.mode !== "all") return prev;
+                    const selectedValues = current.selectedValues.filter((item) => item !== value);
+                    const next = { ...prev };
+                    if (selectedValues.length === 0) delete next[col.id];
+                    else next[col.id] = { ...current, selectedValues };
+                    return next;
+                  });
+                });
+              },
+            });
+          }
+        } else if (filter.mode === "range") {
+          chips.push({
+            key: `${col.id}:range`,
+            label: `${col.label}: ${filter.min || ""}-${filter.max || ""}`,
+            onRemove: () => {
+              setFilterFeedback({ message: "Removing filter...", nonce: Date.now() });
+              startFilterTransition(() => {
+                setAppliedFilters((prev) => {
+                  const next = { ...prev };
+                  delete next[col.id];
+                  return next;
+                });
+              });
+            },
+          });
+        } else {
+          chips.push({
+            key: `${col.id}:${filter.mode}`,
+            label: `${col.label}: ${filter.mode === "min" ? "Greater Than" : "Less Than"} ${filter.value || ""}`,
+            onRemove: () => {
+              setFilterFeedback({ message: "Removing filter...", nonce: Date.now() });
+              startFilterTransition(() => {
+                setAppliedFilters((prev) => {
+                  const next = { ...prev };
+                  delete next[col.id];
+                  return next;
+                });
+              });
+            },
+          });
+        }
+        continue;
+      }
+      if (filter.kind === "date") {
+        chips.push({
+          key: `${col.id}:date`,
+          label: `${col.label}: ${filter.shortcut || `${filter.from || ""} to ${filter.to || ""}`}`,
+          onRemove: () => {
+            setFilterFeedback({ message: "Removing filter...", nonce: Date.now() });
+            startFilterTransition(() => {
+              setAppliedFilters((prev) => {
+                const next = { ...prev };
+                delete next[col.id];
+                return next;
+              });
+            });
+          },
+        });
+        continue;
+      }
+      chips.push({
+        key: `${col.id}:boolean`,
+        label: `${col.label}: ${filter.value === "yes" ? "Yes" : "No"}`,
+        onRemove: () => {
+          setFilterFeedback({ message: "Removing filter...", nonce: Date.now() });
+          startFilterTransition(() => {
+            setAppliedFilters((prev) => {
+              const next = { ...prev };
+              delete next[col.id];
+              return next;
+            });
+          });
+        },
+      });
+    }
+    return chips;
+  }, [columnsToUse, appliedFilters, startFilterTransition]);
+
+  // Use a fixed column width to avoid expensive full-dataset width scans.
   const { gridColsStyle, totalTableWidth } = useMemo(() => {
-    const widths = columnsToUse.map((c) => getColumnWidthFromContent(c, loans, wacFormatted));
+    const widths = columnsToUse.map(() => 180);
     return {
       gridColsStyle: {
         gridTemplateColumns: widths.map((w) => `${w}px`).join(" "),
       },
       totalTableWidth: widths.reduce((a, b) => a + b, 0),
     };
-  }, [loans, wacFormatted, columnsToUse]);
+  }, [columnsToUse]);
   // Match sales scorecard details table: gray header row, horizontal row lines only (no vertical column lines)
   const borderTh = isDarkMode ? "border-slate-700" : "border-slate-200";
   const bgTh = isDarkMode ? "bg-slate-800/50 text-slate-300" : "bg-slate-50 text-slate-600";
@@ -507,8 +1261,8 @@ export function LoanDetailView({
   const totalScrollHeight = HEADER_HEIGHT + TOTALS_ROW_HEIGHT + bodyHeight;
 
   const totalsByColumn = useMemo(
-    () => columnsToUse.map((c) => getColumnTotal(c, loans, wacFormatted)),
-    [loans, wacFormatted, columnsToUse],
+    () => columnsToUse.map((c) => getColumnTotal(c, sortedLoans, wacFormatted)),
+    [sortedLoans, wacFormatted, columnsToUse],
   );
 
   const exportToExcel = useCallback(() => {
@@ -520,7 +1274,7 @@ export function LoanDetailView({
     const rows: string[][] = [];
     rows.push(columnsToUse.map((c) => escapeCsv(c.label)));
     if (sortedLoans.length > 0) {
-      rows.push(columnsToUse.map((c) => escapeCsv(getColumnTotal(c, loans, wacFormatted))));
+      rows.push(columnsToUse.map((c) => escapeCsv(getColumnTotal(c, sortedLoans, wacFormatted))));
       for (let i = 0; i < sortedLoans.length; i++) {
         rows.push(
           columnsToUse.map((c) => escapeCsv(getCellDisplay(c, sortedLoans[i], wacFormatted))),
@@ -534,7 +1288,355 @@ export function LoanDetailView({
     link.download = `loan-detail-${new Date().toISOString().split("T")[0]}.csv`;
     link.click();
     URL.revokeObjectURL(link.href);
-  }, [loans, sortedLoans, wacFormatted, columnsToUse]);
+  }, [sortedLoans, wacFormatted, columnsToUse]);
+
+  const renderFilterContent = useCallback((col: ColumnDef) => {
+    const filterKind = getColumnFilterKind(col);
+    const allValues = distinctValuesByColumn[col.id] ?? [];
+    const hasBlank = loans.some((row) => {
+      const raw = getFilterRawValue(row, col);
+      return raw == null || String(raw).trim() === "";
+    });
+    const valuesForList = hasBlank ? [EMPTY_FILTER_TOKEN, ...allValues] : allValues;
+    const search = (debouncedFilterSearchByColumn[col.id] ?? "").toLowerCase();
+    const filteredOptions = search
+      ? valuesForList.filter((value) => value === EMPTY_FILTER_TOKEN
+        ? "(blank)".includes(search)
+        : value.toLowerCase().includes(search))
+      : valuesForList;
+    const filter = draftFilters[col.id] ?? cloneFilter(appliedFilters[col.id]);
+    const selectedValues =
+      filter?.kind === "text"
+        ? filter.selectedValues
+        : filter?.kind === "number" && filter.mode === "all"
+          ? filter.selectedValues
+          : [];
+    const orderedOptions = [...filteredOptions].sort((a, b) => {
+      const aSelected = selectedValues.includes(a) ? 1 : 0;
+      const bSelected = selectedValues.includes(b) ? 1 : 0;
+      if (aSelected !== bSelected) return bSelected - aSelected;
+      if (a === EMPTY_FILTER_TOKEN) return -1;
+      if (b === EMPTY_FILTER_TOKEN) return 1;
+      return a.localeCompare(b, undefined, { numeric: true });
+    });
+
+    if (filterKind === "boolean") {
+      const value = filter?.kind === "boolean" ? filter.value : "all";
+      return (
+        <div className="space-y-2">
+          {(["all", "yes", "no"] as const).map((option) => (
+            <Button
+              key={option}
+              type="button"
+              size="sm"
+              variant={value === option ? "default" : "outline"}
+              className="w-full justify-start"
+              onClick={() => setDraftFilter(col.id, { kind: "boolean", value: option })}
+            >
+              {option === "all" ? "All" : option === "yes" ? "Yes" : "No"}
+            </Button>
+          ))}
+        </div>
+      );
+    }
+
+    if (filterKind === "date") {
+      const dateFilter = filter?.kind === "date" ? filter : { kind: "date" as const };
+      return (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <Input
+              type="date"
+              value={dateFilter.from ?? ""}
+              onChange={(e) => setDraftFilter(col.id, { kind: "date", from: e.target.value, to: dateFilter.to })}
+            />
+            <Input
+              type="date"
+              value={dateFilter.to ?? ""}
+              onChange={(e) => setDraftFilter(col.id, { kind: "date", from: dateFilter.from, to: e.target.value })}
+            />
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            {["last 30 days", "ytd", String(new Date().getFullYear())].map((shortcut) => (
+              <Button
+                key={shortcut}
+                type="button"
+                size="sm"
+                variant={dateFilter.shortcut === shortcut ? "default" : "outline"}
+                onClick={() => setDraftFilter(col.id, { kind: "date", shortcut })}
+              >
+                {shortcut.toUpperCase() === "YTD" ? "YTD" : shortcut}
+              </Button>
+            ))}
+          </div>
+          <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(col.id)}>
+            Clear
+          </Button>
+        </div>
+      );
+    }
+
+    if (filterKind === "number") {
+      const numberFilter = filter?.kind === "number" ? filter : { kind: "number" as const, mode: "all" as NumericFilterMode, selectedValues: [] };
+      return (
+        <Tabs
+          value={numberFilter.mode}
+          onValueChange={(mode) => setDraftFilter(col.id, { kind: "number", mode: mode as NumericFilterMode, selectedValues: [] })}
+        >
+          <TabsList className="grid w-full grid-cols-4">
+            <TabsTrigger value="all">All</TabsTrigger>
+            <TabsTrigger value="range">Range</TabsTrigger>
+            <TabsTrigger value="min">Greater Than</TabsTrigger>
+            <TabsTrigger value="max">Less Than</TabsTrigger>
+          </TabsList>
+          <TabsContent value="all" className="space-y-2">
+            <Command shouldFilter={false}>
+              <CommandInput
+                placeholder={`Search ${col.label}`}
+                value={filterSearchByColumn[col.id] ?? ""}
+                onValueChange={(value) => updateFilterSearch(col.id, value)}
+              />
+              <CommandList>
+                <CommandEmpty>No values found.</CommandEmpty>
+                {orderedOptions.map((value) => (
+                  <CommandItem key={value} onSelect={() => toggleDraftValue(col.id, value, "number")}>
+                    <span className="mr-2">
+                      {numberFilter.selectedValues.includes(value) ? "✓" : ""}
+                    </span>
+                    {value === EMPTY_FILTER_TOKEN ? "(Blank)" : value}
+                  </CommandItem>
+                ))}
+              </CommandList>
+            </Command>
+            <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(col.id)}>
+              Clear
+            </Button>
+          </TabsContent>
+          <TabsContent value="range" className="space-y-2">
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+              <Input
+                type="number"
+                placeholder="Min"
+                value={numberFilter.min ?? ""}
+                onChange={(e) => setDraftFilter(col.id, { kind: "number", mode: "range", selectedValues: [], min: e.target.value, max: numberFilter.max })}
+              />
+              <span>-</span>
+              <Input
+                type="number"
+                placeholder="Max"
+                value={numberFilter.max ?? ""}
+                onChange={(e) => setDraftFilter(col.id, { kind: "number", mode: "range", selectedValues: [], min: numberFilter.min, max: e.target.value })}
+              />
+            </div>
+            <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(col.id)}>
+              Clear
+            </Button>
+          </TabsContent>
+          <TabsContent value="min" className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-sm">{">="}</span>
+              <Input
+                type="number"
+                placeholder="Value"
+                value={numberFilter.value ?? ""}
+                onChange={(e) => setDraftFilter(col.id, { kind: "number", mode: "min", selectedValues: [], value: e.target.value })}
+              />
+            </div>
+            <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(col.id)}>
+              Clear
+            </Button>
+          </TabsContent>
+          <TabsContent value="max" className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-sm">{"<="}</span>
+              <Input
+                type="number"
+                placeholder="Value"
+                value={numberFilter.value ?? ""}
+                onChange={(e) => setDraftFilter(col.id, { kind: "number", mode: "max", selectedValues: [], value: e.target.value })}
+              />
+            </div>
+            <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(col.id)}>
+              Clear
+            </Button>
+          </TabsContent>
+        </Tabs>
+      );
+    }
+
+    const textFilter = filter?.kind === "text" ? filter : { kind: "text" as const, selectedValues: [] };
+    return (
+      <div className="space-y-2">
+        <Command shouldFilter={false}>
+          <CommandInput
+            placeholder={`Search ${col.label}`}
+            value={filterSearchByColumn[col.id] ?? ""}
+            onValueChange={(value) => updateFilterSearch(col.id, value)}
+          />
+          <CommandList>
+            <CommandEmpty>No values found.</CommandEmpty>
+            {orderedOptions.map((value) => (
+              <CommandItem key={value} onSelect={() => toggleDraftValue(col.id, value, "text")}>
+                <span className="mr-2">{textFilter.selectedValues.includes(value) ? "✓" : ""}</span>
+                {value === EMPTY_FILTER_TOKEN ? "(Blank)" : value}
+              </CommandItem>
+            ))}
+          </CommandList>
+        </Command>
+        <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(col.id)}>
+          Clear
+        </Button>
+      </div>
+    );
+  }, [appliedFilters, draftFilters, distinctValuesByColumn, debouncedFilterSearchByColumn, filterSearchByColumn, setDraftFilter, clearDraftFilter, toggleDraftValue, loans, getFilterRawValue, updateFilterSearch]);
+
+  const getValueToken = useCallback((row: LoanDetailRow, col: ColumnDef): string => {
+    const raw = getFilterRawValue(row, col);
+    if (raw == null || String(raw).trim() === "") return EMPTY_FILTER_TOKEN;
+    return String(raw).trim();
+  }, [getFilterRawValue]);
+
+  const handleCellClickToDraft = useCallback((row: LoanDetailRow, col: ColumnDef) => {
+    const kind = getColumnFilterKind(col);
+    const token = getValueToken(row, col);
+    setShowFilters(true);
+    beginDraft(col.id);
+    setOpenFilterColumnId(col.id);
+
+    if (kind === "number") {
+      toggleDraftValue(col.id, token, "number");
+      return;
+    }
+    if (kind === "text") {
+      toggleDraftValue(col.id, token, "text");
+      return;
+    }
+    if (kind === "boolean") {
+      const option = token.toLowerCase() === "yes" ? "yes" : "no";
+      setDraftFilters((prev) => {
+        const current = prev[col.id];
+        const currentValue = current?.kind === "boolean" ? current.value : "all";
+        return {
+          ...prev,
+          [col.id]: { kind: "boolean", value: currentValue === option ? "all" : option },
+        };
+      });
+      return;
+    }
+    setDraftFilters((prev) => {
+      const current = prev[col.id];
+      const currentFrom = current?.kind === "date" ? current.from : undefined;
+      const currentTo = current?.kind === "date" ? current.to : undefined;
+      if (currentFrom === token && currentTo === token) {
+        return { ...prev, [col.id]: { kind: "date" } };
+      }
+      return { ...prev, [col.id]: { kind: "date", from: token, to: token } };
+    });
+  }, [beginDraft, getValueToken, toggleDraftValue]);
+
+  const isCellSelectedByFilter = useCallback((row: LoanDetailRow, col: ColumnDef, filter: ColumnFilter | undefined): boolean => {
+    if (!filter || !isFilterActive(filter)) return false;
+    const rawValue = getFilterRawValue(row, col);
+    const token = getValueToken(row, col);
+    if (filter.kind === "text") return matchesAppliedTextFilter(filter, token, rawValue);
+    if (filter.kind === "number") return matchesAppliedNumberFilter(filter, token, rawValue);
+    if (filter.kind === "date") return matchesAppliedDateFilter(filter, rawValue);
+    return matchesAppliedBooleanFilter(filter, rawValue);
+  }, [getFilterRawValue, getValueToken]);
+
+  const isCellSelected = useCallback(
+    (row: LoanDetailRow, col: ColumnDef): boolean => {
+      const draft = draftFilters[col.id];
+      if (shouldPreviewDraftOnCells(draft)) {
+        return isCellSelectedByFilter(row, col, draft);
+      }
+      return isCellSelectedByFilter(row, col, appliedFilters[col.id]);
+    },
+    [appliedFilters, draftFilters, isCellSelectedByFilter],
+  );
+
+  const loanDetailVirtualizedRows = useMemo(
+    () => (
+      <div
+        style={{
+          height: `${bodyHeight}px`,
+          width: totalTableWidth,
+          minWidth: "100%",
+          position: "relative",
+        }}
+      >
+        {virtualItems.map((virtualRow) => {
+          const row = sortedLoans[virtualRow.index];
+          if (!row) return null;
+          return (
+            <div
+              key={row.loan_id}
+              className={`absolute left-0 border-b ${borderRow} hover:bg-slate-50 dark:hover:bg-slate-800/50 grid items-center transition-colors`}
+              style={{
+                ...gridColsStyle,
+                top: 0,
+                left: 0,
+                width: totalTableWidth,
+                minWidth: "100%",
+                height: `${virtualRow.size}px`,
+                transform: `translateY(${virtualRow.start}px)`,
+              }}
+              role="row"
+            >
+              {columnsToUse.map((col) => {
+                const display = getCellDisplay(col, row, wacFormatted);
+                const isAlert = shouldHighlightCellAsAlert(col, row);
+                const isFicoLow = shouldHighlightFicoLow(col, row);
+                const isLtvWarning = shouldHighlightLtvWarning(col, row);
+                const isDtiWarning = shouldHighlightDtiWarning(col, row);
+                const token = getValueToken(row, col);
+                const hasFlash =
+                  flashState?.columnId === col.id &&
+                  flashState.values.includes(token);
+                const isSelectedCell = isCellSelected(row, col);
+                const cellClass =
+                  isAlert
+                    ? "font-bold text-red-600 dark:text-red-400"
+                    : isFicoLow || isLtvWarning || isDtiWarning
+                      ? "text-red-600 dark:text-red-400"
+                      : textTd;
+                return (
+                  <button
+                    key={col.id}
+                    type="button"
+                    onClick={() => handleCellClickToDraft(row, col)}
+                    className={cn(
+                      `whitespace-nowrap py-3 px-4 text-sm text-left transition-colors ${cellClass}`,
+                      isSelectedCell && "bg-emerald-100/60 dark:bg-emerald-900/30",
+                      hasFlash && "bg-emerald-100/70 dark:bg-emerald-900/40",
+                    )}
+                    role="cell"
+                  >
+                    {display}
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+    ),
+    [
+      bodyHeight,
+      totalTableWidth,
+      gridColsStyle,
+      borderRow,
+      virtualItems,
+      sortedLoans,
+      wacFormatted,
+      textTd,
+      getValueToken,
+      flashState,
+      isCellSelected,
+      handleCellClickToDraft,
+      columnsToUse,
+    ],
+  );
 
   return (
     <div className={fillHeight ? "flex flex-1 flex-col min-h-0 min-w-0 h-full" : "space-y-4"}>
@@ -552,19 +1654,98 @@ export function LoanDetailView({
               })()}
             </p>
           </div>
-          {!isControlled && (
+          <div className="ml-auto flex items-center gap-2">
             <Button
               variant="outline"
               size="sm"
-              onClick={exportToExcel}
-              disabled={loans.length === 0}
-              className="ml-auto gap-2 border-slate-300 hover:bg-slate-50 dark:border-slate-600 dark:hover:bg-slate-800"
+              onClick={() => setShowFilters((prev) => !prev)}
+              className="gap-2 border-slate-300 hover:bg-slate-50 dark:border-slate-600 dark:hover:bg-slate-800"
             >
-              <Download className="h-4 w-4" />
-              Export to Excel
+              <Filter className="h-4 w-4" />
+              {showFilters ? "Hide Filters" : "Show Filters"}
             </Button>
-          )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setBookmarksModalOpen(true)}
+              className="gap-2 border-slate-300 hover:bg-slate-50 dark:border-slate-600 dark:hover:bg-slate-800"
+            >
+              <Bookmark className="h-4 w-4" />
+              Bookmarks
+            </Button>
+            {(selectedBookmark?.name || sharedBookmarkTitle) && (
+              <Badge className="bg-sky-600 text-white border-transparent gap-1 pr-1">
+                <span>{selectedBookmark?.name ?? sharedBookmarkTitle}</span>
+                <button
+                  type="button"
+                  onClick={clearAppliedBookmarkView}
+                  className="rounded-sm p-0.5 hover:bg-sky-500/70"
+                  aria-label="Clear applied bookmark filters"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </Badge>
+            )}
+            {!isControlled && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={exportToExcel}
+                disabled={sortedLoans.length === 0}
+                className="gap-2 border-slate-300 hover:bg-slate-50 dark:border-slate-600 dark:hover:bg-slate-800"
+              >
+                <Download className="h-4 w-4" />
+                Export to Excel
+              </Button>
+            )}
+          </div>
         </div>
+        {(hasActiveFilters || hasBookmarkSelection || sharedBookmarkTitle || isApplyingFilters || filterFeedback) && (
+          <div className="flex flex-wrap items-center gap-2 px-4 pb-3 border-b border-slate-200/60 dark:border-slate-700/60">
+            {hasActiveFilters && activeFilterChips.map((chip) => (
+              <Badge key={chip.key} variant="outline" className="gap-1 border-emerald-300/80 bg-emerald-50 text-emerald-700 dark:border-emerald-700/80 dark:bg-emerald-900/30 dark:text-emerald-300">
+                <span>{chip.label}</span>
+                <button type="button" onClick={chip.onRemove} className="rounded-sm hover:bg-emerald-200/40 dark:hover:bg-emerald-800/50">
+                  <X className="h-3 w-3" />
+                </button>
+              </Badge>
+            ))}
+            {hasActiveFilters && (
+              <Button type="button" size="sm" variant="ghost" onClick={clearAllFilters} className="h-7 px-2">
+                Clear All Filters
+              </Button>
+            )}
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => {
+                if (selectedBookmark && !bookmarkInSync) {
+                  setOverwriteModalOpen(true);
+                  return;
+                }
+                if (selectedBookmark && bookmarkInSync) return;
+                setSaveModalInitialName(selectedBookmark?.name ?? "");
+                setSaveModalOpen(true);
+              }}
+              disabled={isApplyingFilters || (selectedBookmark != null && bookmarkInSync)}
+              className={cn("h-7 px-3", saveStatusClass)}
+            >
+              {saveStatusLabel}
+            </Button>
+            {bookmarksLoading && (
+              <div className="inline-flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Loading bookmarks...
+              </div>
+            )}
+            {(isApplyingFilters || filterFeedback) && (
+              <div className="inline-flex items-center gap-2 text-xs text-slate-900 dark:text-slate-200">
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-sky-500" />
+                <span>{filterFeedback?.message ?? "Applying filter..."}</span>
+              </div>
+            )}
+          </div>
+        )}
 
         {error && (
           <div className="p-4 bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-800">
@@ -610,22 +1791,93 @@ export function LoanDetailView({
                 {columnsToUse.map((col) => {
                   const isSorted = sortColumnId === col.id;
                   return (
-                    <button
+                    <div
                       key={col.id}
-                      type="button"
-                      onClick={() => handleSort(col.id)}
-                      className={`whitespace-nowrap py-2.5 px-4 text-xs font-semibold text-left flex items-center gap-1 w-full min-w-0 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-colors ${isDarkMode ? "text-slate-300" : "text-slate-600"}`}
+                      className={cn(
+                        "whitespace-nowrap py-2 px-2 text-xs font-semibold text-left flex items-center gap-1 w-full min-w-0 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-colors",
+                        isDarkMode ? "text-slate-300" : "text-slate-600",
+                        activeFilterColumnIds.has(col.id) && "border-b-2 border-emerald-500",
+                      )}
                       role="columnheader"
                       aria-sort={isSorted ? (sortDirection === "asc" ? "ascending" : "descending") : undefined}
                     >
-                      <span className="truncate">{col.label}</span>
-                      {isSorted &&
-                        (sortDirection === "asc" ? (
-                          <ArrowUp className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                        ) : (
-                          <ArrowDown className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                        ))}
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSort(col.id)}
+                        className="flex items-center gap-1 min-w-0 flex-1 px-2"
+                      >
+                        <span className="truncate">{col.label}</span>
+                        {isSorted &&
+                          (sortDirection === "asc" ? (
+                            <ArrowUp className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                          ) : (
+                            <ArrowDown className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                          ))}
+                      </button>
+                      {showFilters && (
+                        <Popover
+                          open={openFilterColumnId === col.id}
+                          onOpenChange={(open) => {
+                            if (open) {
+                              beginDraft(col.id);
+                              setOpenFilterColumnId(col.id);
+                            } else {
+                              closePopoverWithoutDiscard(col.id);
+                            }
+                          }}
+                        >
+                          <PopoverTrigger asChild>
+                            <button
+                              type="button"
+                              className={cn(
+                                "inline-flex items-center justify-center rounded p-1",
+                                activeFilterColumnIds.has(col.id)
+                                  ? "text-emerald-600 dark:text-emerald-400"
+                                  : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100",
+                              )}
+                              aria-label={`Filter ${col.label}`}
+                            >
+                              <Filter className="h-3.5 w-3.5" />
+                            </button>
+                          </PopoverTrigger>
+                          <PopoverContent
+                            align="start"
+                            className={cn(
+                              "p-3",
+                              getColumnFilterKind(col) === "number" ? "w-[420px]" : "w-80",
+                            )}
+                            onInteractOutside={(event) => event.preventDefault()}
+                            onPointerDownOutside={(event) => event.preventDefault()}
+                            onEscapeKeyDown={(event) => event.preventDefault()}
+                          >
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                              <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                                {col.label}
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  className="rounded p-1 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
+                                  onClick={() => discardDraft(col.id)}
+                                  aria-label={`Cancel ${col.label} filter changes`}
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="rounded p-1 text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/30"
+                                  onClick={() => commitDraft(col.id)}
+                                  aria-label={`Apply ${col.label} filter changes`}
+                                >
+                                  <Check className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                            {renderFilterContent(col)}
+                          </PopoverContent>
+                        </Popover>
+                      )}
+                    </div>
                   );
                 })}
               </div>
@@ -652,69 +1904,158 @@ export function LoanDetailView({
                   </div>
                 ))}
               </div>
-              {/* Virtualized body */}
-              <div
-                style={{
-                  height: `${bodyHeight}px`,
-                  width: totalTableWidth,
-                  minWidth: "100%",
-                  position: "relative",
-                }}
-              >
-                {virtualItems.map((virtualRow) => {
-                  const row = sortedLoans[virtualRow.index];
-                  if (!row) return null;
-                  return (
-                    <div
-                      key={row.loan_id}
-                      className={`absolute left-0 border-b ${borderRow} hover:bg-slate-50 dark:hover:bg-slate-800/50 grid items-center transition-colors`}
-                      style={{
-                        ...gridColsStyle,
-                        top: 0,
-                        left: 0,
-                        width: totalTableWidth,
-                        minWidth: "100%",
-                        height: `${virtualRow.size}px`,
-                        transform: `translateY(${virtualRow.start}px)`,
-                      }}
-                      role="row"
-                    >
-                      {columnsToUse.map((col) => {
-                        const display = getCellDisplay(col, row, wacFormatted);
-                        const isAlert = shouldHighlightCellAsAlert(col, row);
-                        const isFicoLow = shouldHighlightFicoLow(col, row);
-                        const isLtvWarning = shouldHighlightLtvWarning(col, row);
-                        const isDtiWarning = shouldHighlightDtiWarning(col, row);
-                        const cellClass =
-                          isAlert
-                            ? "font-bold text-red-600 dark:text-red-400"
-                            : isFicoLow || isLtvWarning || isDtiWarning
-                              ? "text-red-600 dark:text-red-400"
-                              : textTd;
-                        return (
-                          <div
-                            key={col.id}
-                            className={`whitespace-nowrap py-3 px-4 text-sm ${cellClass}`}
-                            role="cell"
-                          >
-                            {display}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  );
-                })}
-              </div>
+              {loanDetailVirtualizedRows}
             </div>
           </div>
         )}
 
         <div className={`flex items-center justify-between gap-4 px-4 py-3 border-t border-slate-200/60 dark:border-slate-700/60 bg-slate-50/50 dark:bg-slate-900/30 ${fillHeight ? "shrink-0" : ""}`}>
           <p className="text-xs text-slate-600 dark:text-slate-400">
-            {total.toLocaleString()} loans
+            {hasActiveFilters
+              ? `${filteredCount.toLocaleString()} of ${baseCount.toLocaleString()} loans`
+              : `${total.toLocaleString()} loans`}
           </p>
         </div>
       </Card>
+
+      <Dialog open={bookmarksModalOpen} onOpenChange={setBookmarksModalOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Bookmarks</DialogTitle>
+            <DialogDescription>Saved Loan Detail filter bookmarks.</DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[50vh] overflow-auto space-y-2">
+            {bookmarks.length === 0 ? (
+              <p className="text-sm text-slate-500 dark:text-slate-400">No bookmarks saved yet.</p>
+            ) : (
+              bookmarks.map((bookmark) => (
+                <div
+                  key={bookmark.id}
+                  className="rounded-md border border-slate-200 dark:border-slate-700 p-3 space-y-2"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    {editingBookmarkId === bookmark.id ? (
+                      <Input
+                        value={editingBookmarkName}
+                        onChange={(e) => setEditingBookmarkName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleRenameBookmark(bookmark.id, editingBookmarkName);
+                          if (e.key === "Escape") {
+                            setEditingBookmarkId(null);
+                            setEditingBookmarkName("");
+                          }
+                        }}
+                        autoFocus
+                      />
+                    ) : (
+                      <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{bookmark.name}</p>
+                    )}
+                    <div className="flex items-center gap-1">
+                      {copiedBookmarkState?.id === bookmark.id && (
+                        <span
+                          className={cn(
+                            "text-xs text-slate-600 dark:text-slate-300 mr-1 transition-opacity duration-500",
+                            copiedBookmarkState.fading ? "opacity-0" : "opacity-100",
+                          )}
+                        >
+                          Link copied
+                        </span>
+                      )}
+                      <Button type="button" size="sm" variant="outline" onClick={() => applyBookmark(bookmark)}>
+                        Apply
+                      </Button>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => copyBookmarkLink(bookmark)}
+                        aria-label={`Copy link for ${bookmark.name}`}
+                      >
+                        <Share2 className="h-4 w-4" />
+                      </Button>
+                      {editingBookmarkId === bookmark.id ? (
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => handleRenameBookmark(bookmark.id, editingBookmarkName)}
+                          aria-label={`Save ${bookmark.name} name`}
+                        >
+                          <Check className="h-4 w-4 text-emerald-600" />
+                        </Button>
+                      ) : (
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => {
+                            setEditingBookmarkId(bookmark.id);
+                            setEditingBookmarkName(bookmark.name);
+                          }}
+                          aria-label={`Rename ${bookmark.name}`}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                      )}
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => handleDeleteBookmark(bookmark.id)}
+                        aria-label={`Delete ${bookmark.name}`}
+                      >
+                        <Trash2 className="h-4 w-4 text-red-500" />
+                      </Button>
+                    </div>
+                  </div>
+                  <ul className="space-y-1">
+                    {summarizeFilterState(bookmark.filters).map((line) => (
+                      <li key={`${bookmark.id}-${line}`} className="text-xs text-slate-600 dark:text-slate-400">
+                        {line}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))
+            )}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setBookmarksModalOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <SaveBookmarkDialog
+        open={saveModalOpen}
+        onOpenChange={setSaveModalOpen}
+        initialName={saveModalInitialName}
+        filterSummaryItems={filterSummaryItems}
+        onSave={handleCreateBookmark}
+      />
+
+      <Dialog open={overwriteModalOpen} onOpenChange={setOverwriteModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Update Bookmark?</DialogTitle>
+            <DialogDescription>
+              Filters changed from the selected bookmark. Update current bookmark or create a new one.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => {
+              setOverwriteModalOpen(false);
+              setSaveModalOpen(true);
+            }}>
+              Create New Bookmark
+            </Button>
+            <Button type="button" onClick={handleOverwriteSelectedBookmark}>
+              Update {selectedBookmark?.name ?? "Bookmark"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

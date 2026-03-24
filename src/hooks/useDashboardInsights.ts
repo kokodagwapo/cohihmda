@@ -45,6 +45,7 @@ export interface SupportingDataByPeriodRow {
   waDti?: number;
   conventionalQualifiedPercent?: number;
   governmentQualifiedPercent?: number;
+  activePercent?: number;
 }
 
 export interface SupportingData {
