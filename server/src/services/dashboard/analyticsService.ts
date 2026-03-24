@@ -135,6 +135,7 @@ export interface Insight {
   owner?: string;
   generation_method?: "pipeline" | "agent";
   detail_data?: any;
+  functional_category?: string;
 }
 
 /**
@@ -1436,6 +1437,7 @@ export async function getInsights(
             owner: ins.owner,
             generation_method: ins.generation_method || "pipeline",
             detail_data: (ins as any).detail_data || null,
+            functional_category: (ins as any).functional_category || null,
           })
         );
 
@@ -2455,6 +2457,7 @@ export async function refreshInsights(
       impact: ins.impact,
       evidence: ins.evidence,
       generation_method: ins.generation_method || "pipeline",
+      functional_category: (ins as any).functional_category || null,
     })
   );
 

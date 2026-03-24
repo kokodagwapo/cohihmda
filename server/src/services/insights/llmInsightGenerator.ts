@@ -204,6 +204,8 @@ export interface CategorizedInsight {
   detail_data?: InsightDetailSnapshot | null;
   /** 'pipeline' (old 3-pass) or 'agent' (new agent-driven engine) */
   generation_method?: "pipeline" | "agent";
+  /** Functional category this insight belongs to */
+  functional_category?: string | null;
 }
 
 /** Full response from a generation run. */
@@ -3001,6 +3003,7 @@ export async function loadStoredInsights(
         owner: ev.owner,
         generation_method: row.generation_method || "pipeline",
         detail_data: row.detail_data || null,
+        functional_category: row.functional_category || null,
       };
     });
 

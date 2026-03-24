@@ -32,6 +32,7 @@ export interface AletheiaInsight {
   owner?: string;
   generation_method?: "pipeline" | "agent";
   detail_data?: any;
+  functional_category?: string | null;
 }
 
 export interface InsightsMetadata {
@@ -106,6 +107,7 @@ export const useAletheiaData = (
       owner: insight.owner,
       generation_method: insight.generation_method,
       detail_data: insight.detail_data || null,
+      functional_category: insight.functional_category || null,
     }));
   };
 
@@ -295,6 +297,60 @@ export const useAletheiaData = (
       return jobId;
     },
     [dateFilter, selectedTenantId, selectedChannel, loadInsightsByMethod]
+  );
+
+  // Refresh insights for a single functional category (admin only)
+  const POLL_INTERVAL_MS_CAT = 2500;
+  const refreshByCategory = useCallback(
+    async (categoryId: string): Promise<string | null> => {
+      try {
+        const tenantParam = selectedTenantId
+          ? `?tenant_id=${selectedTenantId}`
+          : "";
+
+        const resp = await api.request<{ jobId: string }>(
+          `/api/dashboard/insights/refresh-category${tenantParam}`,
+          {
+            method: "POST",
+            body: JSON.stringify({ category: categoryId }),
+          }
+        );
+
+        const jobId = resp.jobId;
+        if (!jobId) return null;
+
+        const poll = (): Promise<void> =>
+          new Promise((resolve, reject) => {
+            const run = async () => {
+              try {
+                const data = await api.request<{ status: string; data?: any; error?: string }>(
+                  `/api/jobs/${jobId}`
+                );
+                if (data.status === "complete") {
+                  await loadInsightsByMethod("agent");
+                  resolve();
+                  return;
+                }
+                if (data.status === "failed") {
+                  reject(new Error(data.error || "Category refresh failed"));
+                  return;
+                }
+                setTimeout(run, POLL_INTERVAL_MS_CAT);
+              } catch (err: any) {
+                reject(err);
+              }
+            };
+            run();
+          });
+
+        await poll();
+        return jobId;
+      } catch (error: any) {
+        console.error("Error refreshing category insights:", error);
+        return null;
+      }
+    },
+    [selectedTenantId, loadInsightsByMethod]
   );
 
   // Submit feedback (thumbs up/down + optional tags/comment) for a specific insight
@@ -489,5 +545,6 @@ export const useAletheiaData = (
     submitFeedback,
     getFeedback,
     loadInsightsByMethod,
+    refreshByCategory,
   };
 };

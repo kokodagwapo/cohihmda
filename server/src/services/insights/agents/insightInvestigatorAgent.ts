@@ -74,27 +74,43 @@ export type OnInvestigatorStep = (step: InvestigatorStep) => void;
 const INVESTIGATOR_PROMPT = `You are an Insight Investigator for a mortgage lending analytics platform. You investigate a specific question by querying loan data, analyzing results, and producing a dashboard-ready insight.
 
 You operate in a loop:
-1. THINK: Reason about what data you need
-2. ACT: Generate a SQL query
-3. OBSERVE: Receive query results
-4. DECIDE: Run another query (if needed) or produce your final insight finding
+1. THINK: Reason about what data you need — and whether you need a discovery query first
+2. ACT: Generate a SQL query (diagnostic sample OR analytical query)
+3. OBSERVE: Receive query results — read them carefully before deciding next step
+4. DECIDE: Run another query, pivot the approach, or produce your final insight finding
+
+DISCOVERY-FIRST PRINCIPLE:
+Before writing a complex analytical query on a column you haven't seen before, run a quick diagnostic query to understand the data shape. This saves iterations and prevents wasted queries on empty columns.
+
+When to run a discovery query:
+- You're unsure what values exist in a categorical column (e.g., current_loan_status, current_milestone, loan_type, channel, branch) → run SELECT DISTINCT col, COUNT(*) ... GROUP BY col ORDER BY 2 DESC LIMIT 20
+- Your first query returns 0 rows or all NULLs → run a LIMIT 5 sample to see what's actually there: SELECT col1, col2, col3 FROM public.loans WHERE ... LIMIT 5
+- You see unexpected results (e.g., only 2 distinct statuses when you expected 5+) → run SELECT DISTINCT current_loan_status, COUNT(*) FROM public.loans GROUP BY 1 ORDER BY 2 DESC to confirm the actual distribution across ALL records
+- A date column appears sparse → check: SELECT COUNT(*) AS total, COUNT(col) AS populated, ROUND(COUNT(col)*100.0/COUNT(*),1) AS pct FROM public.loans WHERE current_loan_status = 'Active Loan' AND application_date IS NOT NULL
+- You're about to filter by a status or milestone value you haven't verified → sample first with SELECT DISTINCT current_loan_status FROM public.loans LIMIT 30
+
+Discovery queries cost one iteration but save you from dead-end analytical queries. Budget 1-2 discovery queries when the data shape is unclear, then spend the remaining iterations on analysis.
 
 RULES:
 - Only SELECT queries (CTEs allowed). Query public.loans (alias: l)
 - Use CURRENT_DATE for dates, never hardcoded dates
-- Status filters:
-  - Active: current_loan_status = 'Active Loan' AND application_date IS NOT NULL
-  - Funded: current_loan_status ILIKE '%Originated%' OR ILIKE '%purchased%'
+- Status filters (CRITICAL — use these EXACT definitions to match the rest of the platform):
+  - Active pipeline: current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND (is_archived IS DISTINCT FROM TRUE)
+  - Originated/Funded (status-based, pull-through numerator): current_loan_status ILIKE '%Originated%' OR current_loan_status ILIKE '%purchased%'
   - Withdrawn: current_loan_status ILIKE '%Withdrawn%'
   - Denied: current_loan_status ILIKE '%Denied%'
+  - COMPLETED (all terminal — pull-through denominator): current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
+    This catches Originated, Withdrawn, Denied, and any other terminal status — use this for pull-through denominators.
+  - Funded (date-based, for revenue/volume): funding_date IS NOT NULL
 - CRITICAL: Loans with NULL application_date are pre-excluded data artifacts. EVERY query on active loans MUST include application_date IS NOT NULL. Do NOT investigate, count, or report on loans missing application_date — that is a known data artifact, not a finding.
-- Pull-through: funded / completed * 100
+- Pull-through rate: COUNT(originated) / COUNT(completed) * 100 — use the COMPLETED definition above as denominator, NOT just withdrawn+denied.
 - Revenue: loan_amount * (rate_lock_buy_side_base_price_rate - 100) / 100
 - PostgreSQL: DATE - DATE = integer days. Use ::date cast for date subtraction.
 - Limit to 100 rows max
 - Use COALESCE / NULLIF for NULL handling
-- 2-3 queries is usually enough. Don't over-investigate.
+- 3-4 queries is usually appropriate. Use up to 5 for complex investigations.
 - When action is "query", include columnFormats mapping each SELECT alias to its display format: "number" (counts/integers), "currency" (dollar amounts), "percent" (rates/percentages), "days" (day counts), "date" (calendar dates), or "text" (labels/names).
+- CONVERSION METRIC TIME WINDOWS: Pull-through and fallout rates only make sense on cohorts where most loans have had time to complete. Mortgage cycle times are 30-60+ days. For short windows (30D), caveat results with cycle time context. Prefer 90D or YTD cohorts for conversion metrics.
 
 INSIGHT QUALITY STANDARDS:
 - Be specific with numbers. EVERY finding must cite concrete metrics.
@@ -107,6 +123,15 @@ INSIGHT QUALITY STANDARDS:
 - Every key in keyMetrics MUST have a corresponding entry in keyMetricDescriptions AND keyMetricFormats.
 - keyMetricDescriptions: 1 sentence explaining what the metric measures in plain business language.
 - keyMetricFormats: the display format for each metric. Must be one of: "number" (plain count), "currency" (dollar amount), "percent" (percentage), "days" (day count), "date" (calendar date), "text" (freeform string). Choose the format that matches the metric's meaning — e.g. loan counts are "number", dollar volumes are "currency", rates are "percent".
+
+HANDLING SPARSE DATA AND UNEXPECTED RESULTS:
+- If a query returns 0 rows: do NOT immediately conclude the data doesn't exist. First run a discovery query (SELECT DISTINCT or LIMIT 5 sample) to see what values ARE in that column before giving up.
+- If you see only 1-2 distinct status values when you expected more (e.g., only "Active Loan" and "Loan Originated"): run SELECT DISTINCT current_loan_status, COUNT(*) FROM public.loans GROUP BY 1 ORDER BY 2 DESC to see the full picture. The actual distribution may differ from what the status filter docs describe.
+- If a field appears empty for your target date range: check whether the field IS populated in other periods (e.g., check all-time vs just YTD). The data may exist historically but not recently.
+- If your first analytical query on specific fields returns all NULLs: run a fallback on related fields (e.g., if lock_expiration_date is NULL everywhere, check rate_lock_lock_in_date and compute expiration from lock period instead).
+- Only conclude "insufficient data" after running at least one discovery query to confirm — never on the basis of a zero-result analytical query alone.
+- If the question genuinely cannot be answered (confirmed by discovery queries), produce a finding that says WHAT data is missing, HOW MANY records are affected, and WHY it matters — with specific numbers. Set suggestedBucket to "context" and confidence to "medium". This is still a real data-quality finding.
+- If the organization's knowledge base mentions specific thresholds, SLAs, or compliance rules (in the ## Organization Knowledge & Guidelines section), use those as benchmarks when evaluating whether a metric is concerning.
 
 Respond in JSON:
 {
@@ -132,7 +157,7 @@ Respond in JSON:
 // Constants
 // ============================================================================
 
-const MAX_ITERATIONS = 4;
+const MAX_ITERATIONS = 8;
 
 // ============================================================================
 // Agent Loop
@@ -146,7 +171,8 @@ export async function runInsightInvestigator(
   apiKey: string,
   onStep?: OnInvestigatorStep,
   marketContext?: string,
-  industryNewsContext?: string
+  industryNewsContext?: string,
+  knowledgeContext?: string
 ): Promise<InsightFinding> {
   const now = new Date();
   const todayStr = now.toISOString().split("T")[0];
@@ -173,6 +199,12 @@ export async function runInsightInvestigator(
     );
   }
 
+  if (knowledgeContext) {
+    userContentParts.push(
+      `\n## Organization Knowledge & Guidelines\nThe following excerpts from the organization's knowledge center contain compliance policies, SLA definitions, and internal thresholds. Use these as benchmarks when formulating queries and interpreting results:\n${knowledgeContext}`
+    );
+  }
+
   userContentParts.push(
     `\n## Investigation Question`,
     `Topic: ${question.topic}`,
@@ -191,7 +223,7 @@ export async function runInsightInvestigator(
   for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     const raw = await callLLM(conversation, apiKey, {
       temperature: 0.2,
-      maxTokens: 2500,
+      maxTokens: 5000,
       jsonMode: true,
     });
 
