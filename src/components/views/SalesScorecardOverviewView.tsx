@@ -3,7 +3,7 @@
  * Can run standalone (local state) or embedded in workbench (reads group filters, supports drill-down via store).
  */
 
-import React, { useMemo, useCallback } from "react";
+import React, { useMemo, useCallback, useEffect } from "react";
 import {
   useSalesScorecardOverviewData,
   type SalesScorecardOverviewMeasure,
@@ -125,6 +125,8 @@ export interface SalesScorecardOverviewViewProps {
   groupId?: string | null;
   /** When set, render only the chart, only the table, or both (default). */
   variant?: "full" | "chart" | "table";
+  /** Callback for embed to capture chart data for reporting to canvasDataStore */
+  onDataReady?: (chartData: Record<string, unknown>[], milestoneLabels: string[], measure: SalesScorecardOverviewMeasure) => void;
 }
 
 const defaultPeriodSelection: PeriodSelection = (() => {
@@ -136,6 +138,7 @@ export function SalesScorecardOverviewView({
   embeddedInWorkbench = false,
   groupId = null,
   variant = "full",
+  onDataReady,
 }: SalesScorecardOverviewViewProps) {
   const { selectedTenantId } = useTenantStore();
   const getFilters = useWidgetSectionStore((s) => s.getFilters);
@@ -201,6 +204,11 @@ export function SalesScorecardOverviewView({
     error,
   } = useSalesScorecardOverviewData(filters, tenantId);
 
+  const milestoneLabels = useMemo(
+    () => selectedMilestoneColumns.slice(0, MAX_MILESTONE_DATES).map((col) => MILESTONE_LABELS[col] ?? col),
+    [selectedMilestoneColumns]
+  );
+
   const chartData = useMemo(
     () =>
       rows.map((r) => {
@@ -213,6 +221,13 @@ export function SalesScorecardOverviewView({
       }),
     [rows, selectedMilestoneColumns]
   );
+
+  // Report chart data to the embed wrapper for canvasDataStore
+  useEffect(() => {
+    if (onDataReady && chartData.length > 0 && !loading) {
+      onDataReady(chartData, milestoneLabels, measure);
+    }
+  }, [chartData, milestoneLabels, loading, onDataReady, measure]);
 
   const canDrillToWeek = timeMeasure === "monthly" || timeMeasure === "quarterly";
   const canDrillToDay = timeMeasure === "weekly";

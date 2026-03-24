@@ -121,7 +121,7 @@ export interface TextElementConfig {
 
 export interface ChartElementConfig {
   type: 'chart';
-  chartType: 'bar' | 'line' | 'pie' | 'area' | 'donut' | 'horizontal_bar' | 'stacked_bar';
+  chartType: 'bar' | 'line' | 'pie' | 'area' | 'donut' | 'horizontal_bar' | 'stacked_bar' | 'grouped_bar' | 'treemap' | 'pivot';
   title?: string;
   data: ChartDataPoint[];
   xKey?: string;
@@ -362,6 +362,10 @@ export interface CanvasWidgetData {
   category: 'kpi' | 'chart' | 'table' | 'embed' | 'other';
   data: unknown;
   type?: string;
+  /** Pixel-based layout position on the canvas, used for slide ordering */
+  layoutPosition?: { x: number; y: number; w: number; h: number };
+  /** Original CanvasWidgetType discriminant (chart, kpi, table, cohi_widget, etc.) */
+  widgetType?: string;
 }
 
 export interface AiGenerateReportRequest {
