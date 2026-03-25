@@ -366,10 +366,10 @@ export async function updateFieldSwapBackfillStatus(
     await tenantPool.query(
       `UPDATE public.encompass_field_swaps
        SET backfill_status = $2,
-           backfill_completed_at = CASE WHEN $2 = 'completed' THEN NOW() ELSE backfill_completed_at END,
+           backfill_completed_at = CASE WHEN $3 = 'completed' THEN NOW() ELSE backfill_completed_at END,
            updated_at = NOW()
        WHERE id = ANY($1::uuid[])`,
-      [swapIds, status]
+      [swapIds, status, status]
     );
   } catch (error: any) {
     console.error('[EncompassFieldMapper] Error updating backfill status:', error.message);
