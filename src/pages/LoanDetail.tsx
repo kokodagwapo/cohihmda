@@ -1,4 +1,5 @@
 import { LoanDetailView } from '@/components/views/LoanDetailView';
+import { LOAN_DETAIL_STANDALONE_COLUMNS_STORE_ID } from '@/stores/loanDetailColumnsStore';
 import { TopTieringLayout } from '@/components/layout/TopTieringLayout';
 import { TopTieringTopBar } from '@/components/layout/TopTieringTopBar';
 import { useChannelStore } from '@/stores/channelStore';
@@ -17,6 +18,7 @@ const LoanDetail = () => {
             <LoanDetailView
               selectedTenantId={selectedTenantId}
               selectedChannel={selectedChannel}
+              columnsStoreId={LOAN_DETAIL_STANDALONE_COLUMNS_STORE_ID}
             />
           </div>
         </main>

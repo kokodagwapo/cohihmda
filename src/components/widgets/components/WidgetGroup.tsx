@@ -1133,14 +1133,10 @@ function GridCellRegistryWidget({
 
   if (!definition) return null;
 
-  const getColumns = useLoanDetailColumnsStore((s) => s.getColumns);
   const isLoanDetail = definition.dataSource === 'loan-detail';
-  const savedColumns = isLoanDetail ? getColumns(canvasItemId) : undefined;
   const customColumns: ColumnDef[] | undefined =
-    savedColumns?.length
-      ? savedColumns
-          .filter((c) => c.field !== '__blank__')
-          .map((c) => ({ id: c.id, label: c.label, field: c.field }))
+    isLoanDetail && Array.isArray((configProp as any)?.customColumns)
+      ? ((configProp as any).customColumns as ColumnDef[])
       : undefined;
 
   const Component = definition.component;
@@ -2031,12 +2027,15 @@ export function WidgetGroup({
   const cohiCount = items.filter((i) => i.kind === 'cohi').length;
   const itemLabel = `${items.length} widget${items.length !== 1 ? 's' : ''}${cohiCount > 0 ? ` (${cohiCount} Cohi)` : ''}`;
 
-  // First Loan Detail table widget's canvas item id (for Edit Columns modal opened from group filter bar)
+  // Loan Detail table widget index + canvas item id (for Edit Columns modal opened from group filter bar)
+  const loanDetailTableIndex = useMemo(() => (
+    items.findIndex((i) => i.kind === 'registry' && (i as { defId?: string }).defId === 'loan-detail-table')
+  ), [items]);
   const loanDetailCanvasItemId = useMemo(() => {
-    const idx = items.findIndex((i) => i.kind === 'registry' && (i as { defId?: string }).defId === 'loan-detail-table');
+    const idx = loanDetailTableIndex;
     if (idx < 0) return null;
     return `${groupId}__${itemKey(items[idx], idx)}`;
-  }, [items, groupId]);
+  }, [items, groupId, loanDetailTableIndex]);
 
   return (
     <div
@@ -2972,12 +2971,36 @@ export function WidgetGroup({
       )}
 
       {/* Loan Detail columns modal (opened from group filter bar "Edit Columns") */}
-      {sectionType === 'loan-detail' && loanDetailCanvasItemId && (
+      {sectionType === 'loan-detail' && loanDetailCanvasItemId && loanDetailTableIndex >= 0 && (
         <LoanDetailColumnsModal
           open={loanDetailColumnsModalOpen}
           onClose={() => setLoanDetailColumnsModalOpen(false)}
           canvasItemId={loanDetailCanvasItemId}
           tenantId={selectedTenantId}
+          initialColumns={(() => {
+            const item = items[loanDetailTableIndex];
+            if (!item || item.kind !== 'registry') return null;
+            const cfg = (item.config ?? {}) as any;
+            // Prefer the full saved editor list (keeps ids/blank selections), else fall back to customColumns.
+            if (Array.isArray(cfg.loanDetailColumns)) return cfg.loanDetailColumns;
+            if (Array.isArray(cfg.customColumns)) {
+              return cfg.customColumns.map((c: any) => ({ id: c.id, label: c.label, field: c.field ?? null }));
+            }
+            return null;
+          })()}
+          onSaveColumns={(cols) => {
+            const item = items[loanDetailTableIndex];
+            if (!item || item.kind !== 'registry') return;
+            const prevCfg = (item.config ?? {}) as Record<string, unknown>;
+            const customColumns = cols
+              .filter((c) => c.field !== '__blank__')
+              .map((c) => ({ id: c.id, label: c.label, field: c.field }));
+            handleRegistryConfigChange(loanDetailTableIndex, {
+              ...prevCfg,
+              loanDetailColumns: cols,
+              customColumns,
+            } as any);
+          }}
         />
       )}
 
