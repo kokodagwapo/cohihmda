@@ -105,6 +105,10 @@ export function CanvasWidgetCard({
       onClick={onSelect}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
+          // When any input is focused (e.g., Radix Dialog text boxes), don't hijack
+          // keyboard interactions for widget selection.
+          const t = e.target as HTMLElement | null;
+          if (t?.closest?.('input, textarea, [contenteditable]')) return;
           e.preventDefault();
           onSelect();
         }

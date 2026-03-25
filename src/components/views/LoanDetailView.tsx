@@ -564,16 +564,6 @@ function sortLoans(
   });
 }
 
-/** Column ids that get no total (leave blank) */
-const TOTALS_BLANK_COLUMN_IDS = new Set([
-  "loan_term",
-  "locked_days",
-  "fees_va_fund_fee_borr",
-  "fees_loan_discount_fee_borr",
-  "borr_info_points_paid",
-  "income_total_mo_income",
-]);
-
 function getColumnTotal(
   col: ColumnDef,
   loans: LoanDetailRow[],
@@ -581,9 +571,20 @@ function getColumnTotal(
 ): string {
   if (loans.length === 0) return col.id === "loan_number" ? "Totals" : BLANK_PLACEHOLDER;
   if (col.id === "loan_number") return "Totals";
+
+  // Totals row is intentionally narrow for performance:
+  // Units, Volume (loan_amount), WAC, and averages for FICO/LTV/BE DTI only.
+  const shouldCompute =
+    col.id === "units" ||
+    col.id === "wac" ||
+    col.field === "loan_amount" ||
+    col.field === "fico_score" ||
+    col.field === "ltv_ratio" ||
+    col.field === "be_dti_ratio";
+  if (!shouldCompute) return BLANK_PLACEHOLDER;
+
   if (col.id === "units") return String(loans.length);
   if (col.id === "wac") return wacFormatted || BLANK_PLACEHOLDER;
-  if (TOTALS_BLANK_COLUMN_IDS.has(col.id)) return BLANK_PLACEHOLDER;
 
   // Volume: sum of loan_amount (ensure numeric) – match by field for custom "volume" label
   if (col.field === "loan_amount") {
@@ -801,20 +802,54 @@ export function LoanDetailView({
     });
   }, []);
 
-  const distinctValuesByColumn = useMemo(() => {
-    const result: Record<string, string[]> = {};
-    for (const col of columnsToUse) {
-      const values = new Set<string>();
-      for (const row of loans) {
-        const raw = getFilterRawValue(row, col);
-        if (raw == null) continue;
-        const value = String(raw).trim();
-        if (value) values.add(value);
+  // Lazy distinct-values cache: compute only for the column whose filter UI is opened.
+  // (Previously we computed distinct values for *all* columns on every relevant change.)
+  const [distinctCache, setDistinctCache] = useState<
+    Record<string, { values: string[]; hasBlank: boolean; version: number }>
+  >({});
+  const distinctCacheRef = useRef(distinctCache);
+  useEffect(() => {
+    distinctCacheRef.current = distinctCache;
+  }, [distinctCache]);
+
+  const loansVersionRef = useRef(0);
+  useEffect(() => {
+    loansVersionRef.current += 1;
+    setDistinctCache({});
+  }, [loans]);
+
+  useEffect(() => {
+    if (!openFilterColumnId) return;
+    const col = columnsToUse.find((c) => c.id === openFilterColumnId);
+    if (!col) return;
+
+    const version = loansVersionRef.current;
+    const cached = distinctCacheRef.current[openFilterColumnId];
+    if (cached && cached.version === version) return;
+
+    const values = new Set<string>();
+    let hasBlank = false;
+    for (const row of loans) {
+      const raw = getFilterRawValue(row, col);
+      if (raw == null) {
+        hasBlank = true;
+        continue;
       }
-      result[col.id] = Array.from(values).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      const v = String(raw).trim();
+      if (!v) {
+        hasBlank = true;
+        continue;
+      }
+      values.add(v);
     }
-    return result;
-  }, [columnsToUse, loans, getFilterRawValue]);
+    const sorted = Array.from(values).sort((a, b) =>
+      a.localeCompare(b, undefined, { numeric: true }),
+    );
+    setDistinctCache((prev) => ({
+      ...prev,
+      [openFilterColumnId]: { values: sorted, hasBlank, version },
+    }));
+  }, [openFilterColumnId, columnsToUse, loans, getFilterRawValue]);
 
   const beginDraft = useCallback((columnId: string) => {
     setDraftFilters((prev) => {
@@ -1319,11 +1354,9 @@ export function LoanDetailView({
 
   const renderFilterContent = useCallback((col: ColumnDef) => {
     const filterKind = getColumnFilterKind(col);
-    const allValues = distinctValuesByColumn[col.id] ?? [];
-    const hasBlank = loans.some((row) => {
-      const raw = getFilterRawValue(row, col);
-      return raw == null || String(raw).trim() === "";
-    });
+    const cached = distinctCache[col.id];
+    const allValues = cached?.values ?? [];
+    const hasBlank = cached?.hasBlank ?? false;
     const valuesForList = hasBlank ? [EMPTY_FILTER_TOKEN, ...allValues] : allValues;
     const search = (debouncedFilterSearchByColumn[col.id] ?? "").toLowerCase();
     const filteredOptions = search
@@ -1515,7 +1548,7 @@ export function LoanDetailView({
         </Button>
       </div>
     );
-  }, [appliedFilters, draftFilters, distinctValuesByColumn, debouncedFilterSearchByColumn, filterSearchByColumn, setDraftFilter, clearDraftFilter, toggleDraftValue, loans, getFilterRawValue, updateFilterSearch]);
+  }, [appliedFilters, draftFilters, distinctCache, debouncedFilterSearchByColumn, filterSearchByColumn, setDraftFilter, clearDraftFilter, toggleDraftValue, updateFilterSearch]);
 
   const getValueToken = useCallback((row: LoanDetailRow, col: ColumnDef): string => {
     const raw = getFilterRawValue(row, col);
