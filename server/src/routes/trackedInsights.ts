@@ -104,24 +104,30 @@ router.get(
       const ctx = getTenantContext(req);
       const userId = req.userId;
 
+      // Check if display_metadata column exists (migration 097 guard)
+      let hasDisplayMetaCol = false;
+      try {
+        const colCheck = await ctx.tenantPool.query(`
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'tracked_insights' AND column_name = 'display_metadata'
+        `);
+        hasDisplayMetaCol = colCheck.rows.length > 0;
+      } catch { /* pre-migration */ }
+
+      const displayMetaSelect = hasDisplayMetaCol ? "ti.display_metadata," : "NULL AS display_metadata,";
+
       const result = await ctx.tenantPool.query(
         `SELECT
            ti.id, ti.headline, ti.understory, ti.status, ti.source_type,
            ti.source_insight_id, ti.tags, ti.created_at, ti.updated_at,
            ti.alert_threshold, ti.metric_signature,
-           CASE WHEN column_exists.exists THEN ti.display_metadata ELSE NULL END AS display_metadata,
+           ${displayMetaSelect}
            s.metric_values AS latest_values,
            s.previous_values AS latest_previous,
            s.change_summary AS latest_change,
            s.trend AS latest_trend,
            s.evaluated_at AS last_evaluated
          FROM tracked_insights ti
-         CROSS JOIN LATERAL (
-           SELECT EXISTS (
-             SELECT 1 FROM information_schema.columns
-             WHERE table_name = 'tracked_insights' AND column_name = 'display_metadata'
-           ) AS exists
-         ) column_exists
          LEFT JOIN LATERAL (
            SELECT metric_values, previous_values, change_summary, trend, evaluated_at
            FROM tracked_insight_snapshots
