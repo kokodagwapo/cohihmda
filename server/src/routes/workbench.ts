@@ -15,6 +15,7 @@ import {
   attachTenantContext,
   getTenantContext,
 } from '../middleware/tenantContext.js';
+import { buildDashboardInsightDeepDiveCanvas } from '../services/workbench/fromDashboardInsightCanvas.js';
 
 const router = Router();
 
@@ -813,6 +814,76 @@ router.post(
     } catch (error: any) {
       console.error('[Workbench] Error creating deep-dive canvas:', error.message);
       res.status(500).json({ error: 'Failed to create deep-dive canvas', message: error.message });
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// POST /from-dashboard-insight  — Create a deep-dive canvas from a dashboard insight
+// ---------------------------------------------------------------------------
+
+function isPlatformStaffRoleWorkbench(role: unknown): boolean {
+  return role === 'super_admin' || role === 'platform_admin' || role === 'support';
+}
+
+router.post(
+  '/from-dashboard-insight',
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const role = (req as any).userRole || (req as any).role;
+      const isPlatformStaff = typeof (req as any).isPlatformStaff === 'function' ? (req as any).isPlatformStaff() : false;
+      if (!isPlatformStaff && !isPlatformStaffRoleWorkbench(role)) {
+        return res.status(403).json({ error: 'Platform staff access required' });
+      }
+
+      const { dashboardInsightId } = req.body || {};
+      if (!dashboardInsightId) {
+        return res.status(400).json({ error: 'dashboardInsightId is required' });
+      }
+
+      const { tenantPool } = getTenantContext(req);
+      const insightId = Number(dashboardInsightId);
+      if (Number.isNaN(insightId) || insightId <= 0) {
+        return res.status(400).json({ error: 'Invalid dashboardInsightId' });
+      }
+
+      const rowRes = await tenantPool.query(
+        `SELECT id, page_id, page_name, headline, understory, scope, filter_context, evidence_refs
+         FROM public.dashboard_generated_insights
+         WHERE id = $1`,
+        [insightId],
+      );
+      if (rowRes.rows.length === 0) {
+        return res.status(404).json({ error: 'Insight not found' });
+      }
+      const row = rowRes.rows[0];
+
+      let content: Record<string, unknown>;
+      let canvasTitle: string;
+      try {
+        const built = buildDashboardInsightDeepDiveCanvas(row);
+        content = built.content;
+        canvasTitle = built.canvasTitle;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Invalid dashboard insight for deep dive';
+        return res.status(400).json({ error: msg });
+      }
+
+      const createRes = await tenantPool.query(
+        `INSERT INTO public.workbench_canvases
+           (user_id, title, layout_version, content, created_by_role)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id, title, created_at, updated_at`,
+        [req.userId, canvasTitle, 'freeform-v1', JSON.stringify(content), req.userRole || 'user'],
+      );
+
+      console.log(`[Workbench] Created dashboard deep-dive canvas ${createRes.rows[0].id} for dashboard insight ${insightId}`);
+      return res.json(createRes.rows[0]);
+    } catch (error: any) {
+      console.error('[Workbench] Error creating dashboard deep-dive canvas:', error.message);
+      return res.status(500).json({ error: 'Failed to create dashboard deep-dive canvas', message: error.message });
     }
   },
 );
