@@ -48,6 +48,7 @@ export type PeriodPreset =
   | 'rolling-6'
   | 'rolling-12'
   | 'rolling-13'
+  | 'last-30-days'
   | 'mtd'
   | 'qtd'
   | 'ytd'
@@ -77,10 +78,11 @@ interface PresetMeta {
 const fmtDate = (d: Date) => format(d, 'yyyy-MM-dd');
 
 const PRESET_META: Record<PeriodPreset, PresetMeta> = {
-  'rolling-3':  { label: '3 Mo',  title: 'Rolling 3 months',  computeRange: () => ({ start: fmtDate(startOfMonth(subMonths(new Date(), 3))),  end: fmtDate(new Date()) }) },
-  'rolling-6':  { label: '6 Mo',  title: 'Rolling 6 months',  computeRange: () => ({ start: fmtDate(startOfMonth(subMonths(new Date(), 6))),  end: fmtDate(new Date()) }) },
-  'rolling-12': { label: 'L12M',  title: 'Rolling 12 months', computeRange: () => ({ start: fmtDate(startOfMonth(subMonths(new Date(), 12))), end: fmtDate(new Date()) }) },
-  'rolling-13': { label: 'L13M',  title: 'Rolling 13 months (Qlik default for TTS)', computeRange: () => ({ start: fmtDate(startOfMonth(subMonths(new Date(), 13))), end: fmtDate(new Date()) }) },
+  'rolling-3':  { label: '3 Mo',  title: 'Last 3 Months',  computeRange: () => ({ start: fmtDate(startOfMonth(subMonths(new Date(), 3))),  end: fmtDate(new Date()) }) },
+  'rolling-6':  { label: '6 Mo',  title: 'Last 6 Months',  computeRange: () => ({ start: fmtDate(startOfMonth(subMonths(new Date(), 6))),  end: fmtDate(new Date()) }) },
+  'rolling-12': { label: 'L12M',  title: 'Last 12 Months', computeRange: () => ({ start: fmtDate(startOfMonth(subMonths(new Date(), 12))), end: fmtDate(new Date()) }) },
+  'rolling-13': { label: 'L13M',  title: 'Last 13 Months', computeRange: () => ({ start: fmtDate(startOfMonth(subMonths(new Date(), 13))), end: fmtDate(new Date()) }) },
+  'last-30-days': { label: 'L30D', title: 'Last 30 Days', computeRange: () => ({ start: fmtDate(new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate() - 29)), end: fmtDate(new Date()) }) },
   'mtd':          { label: 'MTD',   title: 'Month to date',     computeRange: () => ({ start: fmtDate(startOfMonth(new Date())),                               end: fmtDate(new Date()) }) },
   'qtd':          { label: 'QTD',   title: 'Quarter to date',   computeRange: () => ({ start: fmtDate(startOfQuarter(new Date())),                              end: fmtDate(new Date()) }) },
   'ytd':          { label: 'YTD',   title: 'Year to date',      computeRange: () => ({ start: fmtDate(startOfYear(new Date())),                                end: fmtDate(new Date()) }) },
@@ -93,6 +95,12 @@ const PRESET_META: Record<PeriodPreset, PresetMeta> = {
 /** Compute the DateRange for a given preset */
 export function computePresetDateRange(preset: PeriodPreset): DateRange {
   return PRESET_META[preset].computeRange();
+}
+
+/** Shared preset metadata (label + title). */
+export function getPeriodPresetMeta(preset: PeriodPreset): { label: string; title: string } {
+  const m = PRESET_META[preset];
+  return { label: m.label, title: m.title };
 }
 
 /** Returns true if two period selections represent the same choice (for optimistic UI) */

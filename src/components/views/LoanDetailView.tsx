@@ -56,6 +56,7 @@ import {
   useLoanDetailColumnsStore,
   savedColumnsToColumnDefs,
 } from "@/stores/loanDetailColumnsStore";
+import { computePresetDateRange, getPeriodPresetMeta, type PeriodPreset } from "@/components/ui/DatePeriodPicker";
 
 const ROW_HEIGHT = 40;
 const HEADER_HEIGHT = 40;
@@ -362,17 +363,30 @@ function matchesAppliedDateFilter(filter: DateColumnFilter, rawValue: unknown): 
 
   if (filter.shortcut?.trim()) {
     const token = filter.shortcut.trim().toLowerCase();
-    const now = new Date();
-    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    let start: Date | null = null;
-    if (token === "ytd") start = new Date(end.getFullYear(), 0, 1);
-    else if (token === "last 30 days") start = new Date(end.getTime() - 29 * 24 * 60 * 60 * 1000);
-    else if (/^\d{4}$/.test(token)) start = new Date(Number(token), 0, 1);
-    if (!start) return false;
-    const shortcutEnd = /^\d{4}$/.test(token) ? new Date(Number(token), 11, 31) : end;
+    // Support Loan Detail shortcut tokens (including DatePeriodPicker presets).
+    if (/^\d{4}$/.test(token)) {
+      const year = Number(token);
+      const start = new Date(year, 0, 1);
+      const end = new Date(year, 11, 31);
+      start.setHours(0, 0, 0, 0);
+      end.setHours(0, 0, 0, 0);
+      return valueDate >= start && valueDate <= end;
+    }
+
+    const presetToken =
+      token === "last 30 days"
+        ? ("last-30-days" as const) // back-compat
+        : (token as PeriodPreset);
+    const supportedPresets: PeriodPreset[] = ["last-30-days", "mtd", "ytd", "last-month", "rolling-13", "rolling-12"];
+    if (!supportedPresets.includes(presetToken)) return false;
+
+    const range = computePresetDateRange(presetToken);
+    const start = new Date(range.start);
+    const end = new Date(range.end);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return false;
     start.setHours(0, 0, 0, 0);
-    shortcutEnd.setHours(0, 0, 0, 0);
-    return valueDate >= start && valueDate <= shortcutEnd;
+    end.setHours(0, 0, 0, 0);
+    return valueDate >= start && valueDate <= end;
   }
   const from = parseFilterDate(filter.from);
   const to = parseFilterDate(filter.to);
@@ -1498,6 +1512,17 @@ export function LoanDetailView({
 
     if (filterKind === "date") {
       const dateFilter = filter?.kind === "date" ? filter : { kind: "date" as const };
+      const yearToken = String(new Date().getFullYear());
+      const fixedYears = ["2025", "2024", "2023"];
+      const dateShortcutOptions: Array<{ token: string; label: string; kind: "preset" | "year" | "ytd" }> = [
+        { token: "last-30-days", label: "Last 30 Days", kind: "preset" },
+        { token: "mtd", label: "MTD", kind: "preset" },
+        { token: "last-month", label: "Last Month", kind: "preset" },
+        { token: "ytd", label: `${yearToken} YTD`, kind: "ytd" },
+        ...fixedYears.map((y) => ({ token: y, label: y, kind: "year" as const })),
+        { token: "rolling-13", label: getPeriodPresetMeta("rolling-13").label, kind: "preset" }, // L13M
+        { token: "rolling-12", label: getPeriodPresetMeta("rolling-12").label, kind: "preset" }, // L12M
+      ];
       return (
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-2">
@@ -1512,16 +1537,31 @@ export function LoanDetailView({
               onChange={(e) => setDraftFilter(col.id, { kind: "date", from: dateFilter.from, to: e.target.value })}
             />
           </div>
-          <div className="grid grid-cols-3 gap-2">
-            {["last 30 days", "ytd", String(new Date().getFullYear())].map((shortcut) => (
+          <div className="grid grid-cols-2 gap-2">
+            {dateShortcutOptions.map((opt) => (
               <Button
-                key={shortcut}
+                key={opt.token}
                 type="button"
                 size="sm"
-                variant={dateFilter.shortcut === shortcut ? "default" : "outline"}
-                onClick={() => setDraftFilter(col.id, { kind: "date", shortcut })}
+                variant={dateFilter.shortcut === opt.token ? "default" : "outline"}
+                onClick={() => {
+                  if (opt.kind === "year") {
+                    const from = `${opt.token}-01-01`;
+                    const to = `${opt.token}-12-31`;
+                    setDraftFilter(col.id, { kind: "date", shortcut: opt.token, from, to });
+                    return;
+                  }
+                  if (opt.kind === "ytd") {
+                    const range = computePresetDateRange("ytd");
+                    setDraftFilter(col.id, { kind: "date", shortcut: "ytd", from: range.start, to: range.end });
+                    return;
+                  }
+                  const preset = opt.token as PeriodPreset;
+                  const range = computePresetDateRange(preset);
+                  setDraftFilter(col.id, { kind: "date", shortcut: opt.token, from: range.start, to: range.end });
+                }}
               >
-                {shortcut.toUpperCase() === "YTD" ? "YTD" : shortcut}
+                {opt.label}
               </Button>
             ))}
           </div>
