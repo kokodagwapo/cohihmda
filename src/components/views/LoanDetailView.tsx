@@ -87,6 +87,20 @@ export interface LoanDetailViewProps {
    * and show Edit Columns in the header. Independent from workbench widget keys.
    */
   columnsStoreId?: string;
+  /** Standalone page uses URL query params for shareable filters. Workbench widgets should disable this. */
+  syncFiltersToUrl?: boolean;
+  /** Workbench-only: persisted column filter + bookmark selection state (stored in widget config). */
+  persistedWorkbenchState?: {
+    appliedFilters: ColumnFilterState;
+    selectedBookmarkId: string | null;
+    selectedBookmarkTitle: string | null;
+  } | null;
+  /** Workbench-only: callback to persist filter + bookmark selection state. */
+  onPersistedWorkbenchStateChange?: (next: {
+    appliedFilters: ColumnFilterState;
+    selectedBookmarkId: string | null;
+    selectedBookmarkTitle: string | null;
+  }) => void;
 }
 
 export type ColumnDef = {
@@ -671,6 +685,9 @@ export function LoanDetailView({
   filterSummary,
   columns: columnsProp,
   columnsStoreId,
+  syncFiltersToUrl = true,
+  persistedWorkbenchState = null,
+  onPersistedWorkbenchStateChange,
 }: LoanDetailViewProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const { theme } = useTheme();
@@ -757,6 +774,17 @@ export function LoanDetailView({
     isLoading: bookmarksLoading,
     saveAll: saveAllBookmarks,
   } = useLoanDetailFilterBookmarks();
+
+  // Workbench widgets can re-render frequently due to canvas interactions, which can keep transitions pending.
+  // When URL sync is disabled, apply filter updates synchronously so "Applying filter..." always settles.
+  const runFilterUpdate = useCallback((fn: () => void) => {
+    if (syncFiltersToUrl) startFilterTransition(fn);
+    else fn();
+  }, [syncFiltersToUrl, startFilterTransition]);
+
+  // Workbench persistence loop protection: avoid echoing our own persisted state back into hydration.
+  const lastPersistedWorkbenchStateJsonRef = useRef<string | null>(null);
+  const lastHydratedWorkbenchStateJsonRef = useRef<string | null>(null);
 
   const getFilterRawValue = useCallback((row: LoanDetailRow, col: ColumnDef): unknown => {
     if (col.id === "units") return 1;
@@ -893,7 +921,7 @@ export function LoanDetailView({
   const commitDraft = useCallback((columnId: string) => {
     let committedFilter: ColumnFilter | undefined;
     setFilterFeedback({ message: "Applying filter...", nonce: Date.now() });
-    startFilterTransition(() => {
+    runFilterUpdate(() => {
       setAppliedFilters((prev) => {
         const draft = draftFilters[columnId];
         if (!draft || !isFilterActive(draft)) {
@@ -916,7 +944,7 @@ export function LoanDetailView({
       const values = committedFilter.selectedValues;
       setFlashState({ columnId, values, nonce: Date.now() });
     }
-  }, [draftFilters, startFilterTransition]);
+  }, [draftFilters, runFilterUpdate]);
 
   useEffect(() => {
     if (!flashState) return;
@@ -1059,15 +1087,16 @@ export function LoanDetailView({
 
   const applyBookmark = useCallback((bookmark: LoanDetailFilterBookmark) => {
     setFilterFeedback({ message: "Applying filter...", nonce: Date.now() });
-    startFilterTransition(() => {
+    runFilterUpdate(() => {
       setAppliedFilters(normalizeFilterState(bookmark.filters));
       setDraftFilters({});
       setOpenFilterColumnId(null);
       setSelectedBookmarkId(bookmark.id);
-      setSharedBookmarkTitle(null);
+      // Keep a fallback title so the badge can restore even if the bookmark list changes.
+      setSharedBookmarkTitle(bookmark.name);
     });
     setBookmarksModalOpen(false);
-  }, [startFilterTransition]);
+  }, [runFilterUpdate]);
 
   const handleDeleteBookmark = useCallback(async (bookmarkId: string) => {
     const next = bookmarks.filter((bookmark) => bookmark.id !== bookmarkId);
@@ -1095,14 +1124,14 @@ export function LoanDetailView({
 
   const clearAppliedBookmarkView = useCallback(() => {
     setFilterFeedback({ message: "Removing filters...", nonce: Date.now() });
-    startFilterTransition(() => {
+    runFilterUpdate(() => {
       setAppliedFilters({});
       setDraftFilters({});
       setOpenFilterColumnId(null);
       setSelectedBookmarkId(null);
       setSharedBookmarkTitle(null);
     });
-  }, [startFilterTransition]);
+  }, [runFilterUpdate]);
 
   const copyBookmarkLink = useCallback(async (bookmark: LoanDetailFilterBookmark) => {
     const params = new URLSearchParams(searchParams);
@@ -1126,6 +1155,7 @@ export function LoanDetailView({
   }, [searchParams]);
 
   useEffect(() => {
+    if (!syncFiltersToUrl) return;
     const fromUrl = decodeFilterStateFromQuery(searchParams.get("ldFilters"));
     if (fromUrl && Object.keys(fromUrl).length > 0) {
       setAppliedFilters(normalizeFilterState(fromUrl));
@@ -1137,6 +1167,7 @@ export function LoanDetailView({
   }, []);
 
   useEffect(() => {
+    if (!syncFiltersToUrl) return;
     const next = new URLSearchParams(searchParams);
     if (Object.values(appliedFilters).some((filter) => isFilterActive(filter))) {
       next.set("ldFilters", encodeFilterStateToQuery(appliedFilters));
@@ -1149,7 +1180,65 @@ export function LoanDetailView({
     if (next.toString() !== searchParams.toString()) {
       setSearchParams(next, { replace: true });
     }
-  }, [appliedFilters, searchParams, selectedBookmark, sharedBookmarkTitle, setSearchParams]);
+  }, [appliedFilters, searchParams, selectedBookmark, sharedBookmarkTitle, setSearchParams, syncFiltersToUrl]);
+
+  // Workbench hydration from persisted widget config.
+  useEffect(() => {
+    if (syncFiltersToUrl) return;
+    if (!persistedWorkbenchState) return;
+    // Don't hydrate over an in-flight transition (commit/apply bookmark).
+    if (isApplyingFilters) return;
+    const nextFilters = normalizeFilterState(persistedWorkbenchState.appliedFilters ?? {});
+    const incomingJson = JSON.stringify({
+      appliedFilters: nextFilters,
+      selectedBookmarkId: persistedWorkbenchState.selectedBookmarkId ?? null,
+      selectedBookmarkTitle: persistedWorkbenchState.selectedBookmarkTitle ?? null,
+    });
+    // If this is the state we just persisted, ignore it to prevent feedback loops.
+    if (lastPersistedWorkbenchStateJsonRef.current === incomingJson) return;
+    // If we've already hydrated this exact persisted state, don't re-run on every render.
+    if (lastHydratedWorkbenchStateJsonRef.current === incomingJson) return;
+    lastHydratedWorkbenchStateJsonRef.current = incomingJson;
+    // Avoid clobbering in-session edits unless the incoming state truly differs.
+    if (!areFilterStatesEquivalent(appliedFilters, nextFilters)) {
+      setAppliedFilters(nextFilters);
+      setDraftFilters({});
+      setOpenFilterColumnId(null);
+    }
+    if (persistedWorkbenchState.selectedBookmarkId !== selectedBookmarkId) {
+      setSelectedBookmarkId(persistedWorkbenchState.selectedBookmarkId);
+    }
+    if ((persistedWorkbenchState.selectedBookmarkTitle ?? null) !== (sharedBookmarkTitle ?? null)) {
+      setSharedBookmarkTitle(persistedWorkbenchState.selectedBookmarkTitle ?? null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncFiltersToUrl, persistedWorkbenchState, isApplyingFilters, appliedFilters, selectedBookmarkId, sharedBookmarkTitle]);
+
+  // Workbench persistence to widget config (do not touch URL).
+  useEffect(() => {
+    if (syncFiltersToUrl) return;
+    if (!onPersistedWorkbenchStateChange) return;
+    // Don't persist while a transition is in flight; we only want settled appliedFilters.
+    if (isApplyingFilters) return;
+    const normalized = normalizeFilterState(appliedFilters);
+    const payload = {
+      appliedFilters: normalized,
+      selectedBookmarkId,
+      selectedBookmarkTitle: selectedBookmark?.name ?? sharedBookmarkTitle ?? null,
+    };
+    const json = JSON.stringify(payload);
+    if (lastPersistedWorkbenchStateJsonRef.current === json) return;
+    lastPersistedWorkbenchStateJsonRef.current = json;
+    onPersistedWorkbenchStateChange(payload);
+  }, [
+    syncFiltersToUrl,
+    appliedFilters,
+    selectedBookmarkId,
+    selectedBookmark?.name,
+    sharedBookmarkTitle,
+    onPersistedWorkbenchStateChange,
+    isApplyingFilters,
+  ]);
 
   const toggleDraftValue = useCallback((columnId: string, value: string, kind: LoanDetailFilterKind) => {
     setDraftFilters((prev) => {
@@ -1174,12 +1263,12 @@ export function LoanDetailView({
 
   const clearAllFilters = useCallback(() => {
     setFilterFeedback({ message: "Removing filters...", nonce: Date.now() });
-    startFilterTransition(() => {
+    runFilterUpdate(() => {
       setAppliedFilters({});
       setDraftFilters({});
       setOpenFilterColumnId(null);
     });
-  }, [startFilterTransition]);
+  }, [runFilterUpdate]);
 
   const activeFilterChips = useMemo(() => {
     const chips: Array<{ key: string; label: string; onRemove: () => void }> = [];
@@ -1194,7 +1283,7 @@ export function LoanDetailView({
             label: `${col.label}: ${value === EMPTY_FILTER_TOKEN ? "(Blank)" : value}`,
             onRemove: () => {
               setFilterFeedback({ message: "Removing filter...", nonce: Date.now() });
-              startFilterTransition(() => {
+              runFilterUpdate(() => {
                 setAppliedFilters((prev) => {
                   const current = prev[col.id];
                   if (!current || current.kind !== "text") return prev;
@@ -1218,7 +1307,7 @@ export function LoanDetailView({
               label: `${col.label}: ${value === EMPTY_FILTER_TOKEN ? "(Blank)" : value}`,
               onRemove: () => {
                 setFilterFeedback({ message: "Removing filter...", nonce: Date.now() });
-                startFilterTransition(() => {
+                runFilterUpdate(() => {
                   setAppliedFilters((prev) => {
                     const current = prev[col.id];
                     if (!current || current.kind !== "number" || current.mode !== "all") return prev;
@@ -1238,7 +1327,7 @@ export function LoanDetailView({
             label: `${col.label}: ${filter.min || ""}-${filter.max || ""}`,
             onRemove: () => {
               setFilterFeedback({ message: "Removing filter...", nonce: Date.now() });
-              startFilterTransition(() => {
+              runFilterUpdate(() => {
                 setAppliedFilters((prev) => {
                   const next = { ...prev };
                   delete next[col.id];
@@ -1253,7 +1342,7 @@ export function LoanDetailView({
             label: `${col.label}: ${filter.mode === "min" ? "Greater Than" : "Less Than"} ${filter.value || ""}`,
             onRemove: () => {
               setFilterFeedback({ message: "Removing filter...", nonce: Date.now() });
-              startFilterTransition(() => {
+              runFilterUpdate(() => {
                 setAppliedFilters((prev) => {
                   const next = { ...prev };
                   delete next[col.id];
@@ -1271,7 +1360,7 @@ export function LoanDetailView({
           label: `${col.label}: ${filter.shortcut || `${filter.from || ""} to ${filter.to || ""}`}`,
           onRemove: () => {
             setFilterFeedback({ message: "Removing filter...", nonce: Date.now() });
-            startFilterTransition(() => {
+            runFilterUpdate(() => {
               setAppliedFilters((prev) => {
                 const next = { ...prev };
                 delete next[col.id];
@@ -1287,7 +1376,7 @@ export function LoanDetailView({
         label: `${col.label}: ${filter.value === "yes" ? "Yes" : "No"}`,
         onRemove: () => {
           setFilterFeedback({ message: "Removing filter...", nonce: Date.now() });
-          startFilterTransition(() => {
+          runFilterUpdate(() => {
             setAppliedFilters((prev) => {
               const next = { ...prev };
               delete next[col.id];
@@ -1298,7 +1387,7 @@ export function LoanDetailView({
       });
     }
     return chips;
-  }, [columnsToUse, appliedFilters, startFilterTransition]);
+  }, [columnsToUse, appliedFilters, runFilterUpdate]);
 
   // Use a fixed column width to avoid expensive full-dataset width scans.
   const { gridColsStyle, totalTableWidth } = useMemo(() => {
