@@ -33,6 +33,10 @@ import {
   runInsightEvaluator,
   type EvaluatedInsight,
 } from "./insightEvaluatorAgent.js";
+import {
+  FUNCTIONAL_CATEGORIES,
+  type CategoryDefinition,
+} from "./categoryDefinitions.js";
 import { logInfo, logError, logWarn } from "../../logger.js";
 import {
   insightLogStart,
@@ -63,6 +67,13 @@ export interface InsightGenerationResult {
   findingsCount?: number;
   droppedCount?: number;
   error?: string;
+  categoryResults?: Array<{
+    categoryId: string;
+    insightCount: number;
+    questionsCount: number;
+    findingsCount: number;
+    error?: string;
+  }>;
 }
 
 export type OnProgress = (event: {
@@ -144,17 +155,13 @@ export async function runInsightGeneration(
 
     // Gather context
     emit("context", "Gathering schema, metrics, and tenant context...");
-    const [schemaContext, metricDefinitions, knowledgeContext, marketContext, industryNewsContext, staleLoanStats] = await Promise.all([
+    const [schemaContext, metricDefinitions, marketContext, industryNewsContext, staleLoanStats] = await Promise.all([
       getSchemaContext(tenantId),
       Promise.resolve(getMetricDefinitions()),
-      getKnowledgeContext(tenantPool, tenantId, "mortgage pipeline performance and risk analysis"),
       fetchMarketContext(),
       fetchIndustryNewsContext(),
       fetchStaleLoanStats(tenantPool),
     ]);
-    if (knowledgeContext) {
-      emit("context", `Knowledge base context loaded (${knowledgeContext.length} chars)`);
-    }
     if (marketContext) {
       emit("context", `Market rate context loaded (${marketContext.length} chars)`);
     }
@@ -178,140 +185,217 @@ export async function runInsightGeneration(
     // Fetch field population stats summary
     const fieldPopStats = await fetchFieldPopulationSummary(tenantPool);
 
-    // ----- Phase 1: Planning -----
-    emit("planning", "Running insight planner agent...");
-    const plannerContext: InsightPlannerContext = {
+    // Build shared planner base context (used by every category's planner)
+    // Note: knowledgeContext is fetched per-category inside the loop using category.knowledgeTopic
+    const basePlannerContext = {
       schemaContext,
       metricDefinitions,
       fieldPopulationStats: fieldPopStats,
       previousInsightHeadlines: previousHeadlines,
       trackedInsights,
-      knowledgeContext: knowledgeContext || undefined,
       marketContext: marketContext || undefined,
       industryNewsContext: industryNewsContext || undefined,
       staleLoanContext: staleLoanContext || undefined,
     };
 
-    const plan = await runInsightPlannerAgent(apiKey, plannerContext);
-    plan.questions = augmentPlanQuestions(
-      plan.questions,
-      !!marketContext,
-      !!industryNewsContext
-    );
-    emit("planning", `Plan: "${plan.summary}" — ${plan.questions.length} questions`);
+    // ----- Phase 1-3: Per-category pipelines -----
+    // Run categories sequentially to stay within LLM rate limits.
+    // Each category runs its own Planner -> Investigators -> Evaluator.
+    const allEvaluatedInsights: EvaluatedInsight[] = [];
+    const allFindingsGlobal: InsightFinding[] = [];
+    const categoryResults: InsightGenerationResult["categoryResults"] = [];
+    let totalQuestionsCount = 0;
+    let totalDroppedCount = 0;
+    let planSummaries: string[] = [];
 
-    // ----- Phase 2: Investigation (parallel batches) -----
-    emit("investigating", `Running ${plan.questions.length} investigator agents...`);
-    const allFindings: InsightFinding[] = [];
-    const questions = plan.questions;
+    for (const category of FUNCTIONAL_CATEGORIES) {
+      emit(`planning:${category.id}`, `Running ${category.label} planner...`);
 
-    for (let i = 0; i < questions.length; i += MAX_CONCURRENT_INVESTIGATORS) {
-      const batch = questions.slice(i, i + MAX_CONCURRENT_INVESTIGATORS);
-      const batchLabel = `batch ${Math.floor(i / MAX_CONCURRENT_INVESTIGATORS) + 1}`;
+      let catQuestions = 0;
+      let catFindings = 0;
+      let catError: string | undefined;
 
-      emit("investigating", `Running ${batchLabel}: ${batch.map((q) => q.topic).join(", ")}`);
-
-      const results = await Promise.allSettled(
-        batch.map((question) =>
-          runInsightInvestigator(
-            question,
-            schemaContext,
-            metricDefinitions,
-            tenantPool,
-            apiKey,
-            (step: InvestigatorStep) => {
-              if (step.type === "finding") {
-                emit("investigating", `Finding: ${step.content}`);
-              }
-            },
-            marketContext || undefined,
-            industryNewsContext || undefined
-          )
-        )
-      );
-
-      for (const result of results) {
-        if (result.status === "fulfilled") {
-          allFindings.push(result.value);
-        } else {
-          logWarn(`[InsightOrchestrator] Investigator failed: ${result.reason?.message}`);
+      try {
+        // Fetch category-specific knowledge context using the category's targeted RAG topic
+        const categoryKnowledgeContext = await getKnowledgeContext(tenantPool, tenantId, category.knowledgeTopic);
+        if (categoryKnowledgeContext) {
+          emit(`planning:${category.id}`, `KB context loaded for ${category.label} (${categoryKnowledgeContext.length} chars)`);
         }
+
+        // Phase 1: Category-scoped planning
+        const plannerContext: InsightPlannerContext = {
+          ...basePlannerContext,
+          knowledgeContext: categoryKnowledgeContext || undefined,
+          categoryFocus: category,
+        };
+
+        const plan = await runInsightPlannerAgent(apiKey, plannerContext);
+        const questions = plan.questions.slice(0, category.questionCount.max);
+        catQuestions = questions.length;
+        totalQuestionsCount += questions.length;
+        planSummaries.push(`[${category.label}] ${plan.summary}`);
+        emit(`planning:${category.id}`, `${category.label} plan: ${questions.length} questions`);
+
+        // Phase 2: Category-scoped investigation
+        emit(`investigating:${category.id}`, `Running ${questions.length} ${category.label} investigators...`);
+        const categoryFindings: InsightFinding[] = [];
+        const findingIndexOffset = allFindingsGlobal.length;
+
+        for (let i = 0; i < questions.length; i += MAX_CONCURRENT_INVESTIGATORS) {
+          const batch = questions.slice(i, i + MAX_CONCURRENT_INVESTIGATORS);
+          const results = await Promise.allSettled(
+            batch.map((question) =>
+              runInsightInvestigator(
+                question,
+                schemaContext,
+                metricDefinitions,
+                tenantPool,
+                apiKey,
+                (step: InvestigatorStep) => {
+                  if (step.type === "finding") {
+                    emit(`investigating:${category.id}`, `Finding: ${step.content}`);
+                  }
+                },
+                marketContext || undefined,
+                industryNewsContext || undefined,
+                categoryKnowledgeContext || undefined
+              )
+            )
+          );
+
+          for (const result of results) {
+            if (result.status === "fulfilled") {
+              categoryFindings.push(result.value);
+            } else {
+              logWarn(`[InsightOrchestrator] [${category.label}] Investigator failed: ${result.reason?.message}`);
+            }
+          }
+        }
+
+        catFindings = categoryFindings.length;
+        allFindingsGlobal.push(...categoryFindings);
+
+        if (categoryFindings.length === 0) {
+          emit(`evaluating:${category.id}`, `No findings for ${category.label} — skipping evaluation.`);
+          categoryResults.push({ categoryId: category.id, insightCount: 0, questionsCount: catQuestions, findingsCount: 0 });
+          continue;
+        }
+
+        // Phase 3: Category-scoped evaluation
+        // Re-index findings so findingIndex in EvaluatedInsight maps correctly into allFindingsGlobal
+        emit(`evaluating:${category.id}`, `Evaluating ${categoryFindings.length} ${category.label} findings...`);
+        const evaluation = await runInsightEvaluator(
+          categoryFindings,
+          apiKey,
+          previousHeadlines,
+          {
+            functionalCategory: category.id,
+            categorySupplement: category.evaluatorSupplement,
+            knowledgeContext: categoryKnowledgeContext || undefined,
+          }
+        );
+
+        // Remap findingIndex to global offset so persistence can retrieve original findings
+        const remappedInsights = evaluation.insights.map((ins) => ({
+          ...ins,
+          findingIndex: ins.findingIndex + findingIndexOffset,
+        }));
+
+        // Value scoring
+        for (const ins of remappedInsights) {
+          const finding = allFindingsGlobal[ins.findingIndex];
+          ins.value_score = finding ? computeValueScore(ins, finding) : ins.severity_score;
+        }
+
+        totalDroppedCount += evaluation.dropped.length;
+        allEvaluatedInsights.push(...remappedInsights);
+
+        const catBucketCounts = remappedInsights.reduce<Record<string, number>>((acc, ins) => {
+          acc[ins.bucket] = (acc[ins.bucket] || 0) + 1;
+          return acc;
+        }, {});
+        const funcCatCheck = remappedInsights.every(i => i.functional_category === category.id);
+        emit(
+          `evaluating:${category.id}`,
+          `${category.label}: ${remappedInsights.length} insights kept (${JSON.stringify(catBucketCounts)}), ${evaluation.dropped.length} dropped; functional_category tagged=${funcCatCheck ? "✓" : "✗ MISSING"}`
+        );
+
+        categoryResults.push({
+          categoryId: category.id,
+          insightCount: remappedInsights.length,
+          questionsCount: catQuestions,
+          findingsCount: catFindings,
+        });
+      } catch (catErr: any) {
+        catError = catErr.message;
+        logWarn(`[InsightOrchestrator] [${category.label}] Pipeline failed: ${catErr.message}`);
+        categoryResults.push({ categoryId: category.id, insightCount: 0, questionsCount: catQuestions, findingsCount: catFindings, error: catError });
       }
     }
 
-    emit("investigating", `Collected ${allFindings.length} findings from ${questions.length} questions`);
-
-    if (allFindings.length === 0) {
-      emit("complete", "No findings produced — skipping evaluation and persistence.");
+    if (allEvaluatedInsights.length === 0) {
+      emit("complete", "No insights produced across all categories.");
       return {
         success: true,
         insightCount: 0,
         generationBatch,
         durationMs: Date.now() - startTime,
-        planSummary: plan.summary,
-        questionsCount: questions.length,
-        findingsCount: 0,
-        droppedCount: 0,
+        planSummary: planSummaries.join(" | "),
+        questionsCount: totalQuestionsCount,
+        findingsCount: allFindingsGlobal.length,
+        droppedCount: totalDroppedCount,
+        categoryResults,
       };
     }
 
-    // ----- Phase 3: Evaluation -----
-    emit("evaluating", `Running evaluator on ${allFindings.length} findings...`);
-    const evaluation = await runInsightEvaluator(allFindings, apiKey, previousHeadlines);
-    enforceCoverage(evaluation.insights, allFindings);
-    normalizeInsightSources(evaluation.insights);
-
-    emit(
-      "evaluating",
-      `Evaluator: ${evaluation.insights.length} insights kept, ${evaluation.dropped.length} dropped`
-    );
-
-    // ----- Phase 3b: Value scoring -----
-    for (const ins of evaluation.insights) {
-      const finding = allFindings[ins.findingIndex];
-      if (finding) {
-        ins.value_score = computeValueScore(ins, finding);
-      } else {
-        ins.value_score = ins.severity_score;
-      }
-    }
-    // Re-sort insights by value_score descending within each bucket
-    evaluation.insights.sort((a, b) => {
+    // ----- Phase 3b: Global sort by bucket + value_score -----
+    allEvaluatedInsights.sort((a, b) => {
       const bucketOrder: Record<string, number> = { critical: 0, attention: 1, working: 2, context: 3 };
       const bucketDiff = (bucketOrder[a.bucket] ?? 4) - (bucketOrder[b.bucket] ?? 4);
       if (bucketDiff !== 0) return bucketDiff;
       return (b.value_score ?? b.severity_score) - (a.value_score ?? a.severity_score);
     });
-    const bucketCounts = evaluation.insights.reduce<Record<string, number>>((acc, ins) => {
+
+    const bucketCounts = allEvaluatedInsights.reduce<Record<string, number>>((acc, ins) => {
       acc[ins.bucket] = (acc[ins.bucket] || 0) + 1;
       return acc;
     }, {});
-    emit("evaluating", `Bucket distribution: ${JSON.stringify(bucketCounts)}`);
-    emit("evaluating", `Value scores computed (range: ${Math.min(...evaluation.insights.map(i => i.value_score ?? 0)).toFixed(2)} - ${Math.max(...evaluation.insights.map(i => i.value_score ?? 1)).toFixed(2)})`);
+    emit("evaluating", `Total insight distribution: ${JSON.stringify(bucketCounts)}`);
+    emit("evaluating", `Value scores computed (range: ${Math.min(...allEvaluatedInsights.map(i => i.value_score ?? 0)).toFixed(2)} - ${Math.max(...allEvaluatedInsights.map(i => i.value_score ?? 1)).toFixed(2)})`);
 
     // ----- Phase 4: Persist -----
-    if (evaluation.insights.length > 0) {
-      emit("persisting", `Persisting ${evaluation.insights.length} insights...`);
-      await persistAgentInsights(tenantPool, evaluation.insights, allFindings, generationBatch);
-      emit("persisting", "Done.");
+    emit("persisting", `Persisting ${allEvaluatedInsights.length} insights across ${FUNCTIONAL_CATEGORIES.length} categories...`);
+    await persistAgentInsights(tenantPool, allEvaluatedInsights, allFindingsGlobal, generationBatch);
+    emit("persisting", "Done.");
+
+    // ----- Phase 5: Re-evaluate tracked insights -----
+    try {
+      const { evaluateTrackedInsights } = await import("../trackedInsightEvaluator.js");
+      const evalResult = await evaluateTrackedInsights(tenantId, tenantPool);
+      if (evalResult.evaluated > 0) {
+        emit("tracked", `Re-evaluated ${evalResult.evaluated} tracked insights`);
+      }
+    } catch (err: any) {
+      logWarn(`[InsightOrchestrator] Tracked insight evaluation failed: ${err.message}`);
     }
 
     const duration = Date.now() - startTime;
-    emit("complete", `Finished in ${Math.round(duration / 1000)}s — ${evaluation.insights.length} insights`);
+    emit("complete", `Finished in ${Math.round(duration / 1000)}s — ${allEvaluatedInsights.length} insights across ${FUNCTIONAL_CATEGORIES.length} categories`);
     insightLogEnd(
-      `[Agent] Complete: ${evaluation.insights.length} insights persisted (batch: ${generationBatch}, durationMs: ${duration})`
+      `[Agent] Complete: ${allEvaluatedInsights.length} insights persisted (batch: ${generationBatch}, durationMs: ${duration})`
     );
 
     activeGenerations.delete(tenantId);
     return {
       success: true,
-      insightCount: evaluation.insights.length,
+      insightCount: allEvaluatedInsights.length,
       generationBatch,
       durationMs: duration,
-      planSummary: plan.summary,
-      questionsCount: questions.length,
-      findingsCount: allFindings.length,
-      droppedCount: evaluation.dropped.length,
+      planSummary: planSummaries.join(" | "),
+      questionsCount: totalQuestionsCount,
+      findingsCount: allFindingsGlobal.length,
+      droppedCount: totalDroppedCount,
+      categoryResults,
     };
   } catch (err: any) {
     activeGenerations.delete(tenantId);
@@ -443,7 +527,8 @@ export async function generateMoreForBucketAgent(
             apiKey,
             () => {},
             marketContext || undefined,
-            industryNewsContext || undefined
+            industryNewsContext || undefined,
+            knowledgeContext || undefined
           )
         )
       );
@@ -521,6 +606,209 @@ export async function generateMoreForBucketAgent(
 }
 
 // ============================================================================
+// Per-category refresh — replaces insights for a single functional category
+// ============================================================================
+
+// Per-tenant:category concurrency lock
+const activeCategoryGenerations = new Map<string, { startedAt: number; batch: string }>();
+
+export function isCategoryGenerationRunning(
+  tenantId: string,
+  categoryId: string
+): { running: boolean; startedAt?: number; batch?: string } {
+  const key = `${tenantId}:cat:${categoryId}`;
+  const active = activeCategoryGenerations.get(key);
+  if (!active) return { running: false };
+  if (Date.now() - active.startedAt > 15 * 60 * 1000) {
+    activeCategoryGenerations.delete(key);
+    return { running: false };
+  }
+  return { running: true, startedAt: active.startedAt, batch: active.batch };
+}
+
+export async function generateInsightsForCategory(
+  tenantId: string,
+  tenantPool: pg.Pool,
+  categoryId: string,
+  onProgress?: OnProgress
+): Promise<InsightGenerationResult> {
+  const category = FUNCTIONAL_CATEGORIES.find((c) => c.id === categoryId);
+  if (!category) {
+    return {
+      success: false,
+      insightCount: 0,
+      generationBatch: "",
+      durationMs: 0,
+      error: `Unknown category: ${categoryId}`,
+    };
+  }
+
+  const lockKey = `${tenantId}:cat:${categoryId}`;
+  const existing = activeCategoryGenerations.get(lockKey);
+  if (existing) {
+    const elapsed = Math.round((Date.now() - existing.startedAt) / 1000);
+    return {
+      success: false,
+      insightCount: 0,
+      generationBatch: existing.batch,
+      durationMs: 0,
+      error: `Generation for "${category.label}" already in progress (${elapsed}s)`,
+    };
+  }
+
+  const startTime = Date.now();
+  const generationBatch = uuidv4();
+  activeCategoryGenerations.set(lockKey, { startedAt: startTime, batch: generationBatch });
+
+  const emit = (phase: string, detail: string) => {
+    logInfo(`[InsightOrchestrator] [category:${categoryId}] [${phase}] ${detail}`);
+    onProgress?.({ phase, detail, timestamp: Date.now() });
+  };
+
+  try {
+    emit("init", `Refreshing ${category.label} insights for tenant ${tenantId}`);
+
+    const apiKey = await getOpenAIKey(tenantId);
+
+    emit("context", "Gathering context...");
+    const [schemaContext, metricDefinitions, categoryKnowledgeContext, marketContext, industryNewsContext, staleLoanStats] =
+      await Promise.all([
+        getSchemaContext(tenantId),
+        Promise.resolve(getMetricDefinitions()),
+        getKnowledgeContext(tenantPool, tenantId, category.knowledgeTopic),
+        fetchMarketContext(),
+        fetchIndustryNewsContext(),
+        fetchStaleLoanStats(tenantPool),
+      ]);
+
+    if (categoryKnowledgeContext) {
+      emit("context", `KB context loaded for ${category.label} (${categoryKnowledgeContext.length} chars)`);
+    }
+
+    const staleLoanContext = buildStaleLoanContext(staleLoanStats);
+    const previousHeadlines = await fetchPreviousHeadlines(tenantPool);
+    const trackedInsights = await fetchTrackedInsights(tenantPool);
+    const fieldPopStats = await fetchFieldPopulationSummary(tenantPool);
+
+    emit("planning", `Running ${category.label} planner...`);
+    const plannerContext: InsightPlannerContext = {
+      schemaContext,
+      metricDefinitions,
+      fieldPopulationStats: fieldPopStats,
+      previousInsightHeadlines: previousHeadlines,
+      trackedInsights,
+      knowledgeContext: categoryKnowledgeContext || undefined,
+      marketContext: marketContext || undefined,
+      industryNewsContext: industryNewsContext || undefined,
+      staleLoanContext: staleLoanContext || undefined,
+      categoryFocus: category,
+    };
+
+    const plan = await runInsightPlannerAgent(apiKey, plannerContext);
+    const questions = plan.questions.slice(0, category.questionCount.max);
+    emit("planning", `Plan: ${plan.summary} — ${questions.length} questions`);
+
+    emit("investigating", `Running ${questions.length} investigators...`);
+    const allFindings: InsightFinding[] = [];
+    for (let i = 0; i < questions.length; i += MAX_CONCURRENT_INVESTIGATORS) {
+      const batch = questions.slice(i, i + MAX_CONCURRENT_INVESTIGATORS);
+      const results = await Promise.allSettled(
+        batch.map((question) =>
+          runInsightInvestigator(
+            question,
+            schemaContext,
+            metricDefinitions,
+            tenantPool,
+            apiKey,
+            (step: InvestigatorStep) => {
+              if (step.type === "finding") {
+                emit("investigating", `Finding: ${step.content}`);
+              }
+            },
+            marketContext || undefined,
+            industryNewsContext || undefined,
+            categoryKnowledgeContext || undefined
+          )
+        )
+      );
+      for (const result of results) {
+        if (result.status === "fulfilled") allFindings.push(result.value);
+        else logWarn(`[InsightOrchestrator] [${category.label}] Investigator failed: ${(result as any).reason?.message}`);
+      }
+    }
+
+    emit("investigating", `Collected ${allFindings.length} findings`);
+
+    if (allFindings.length === 0) {
+      activeCategoryGenerations.delete(lockKey);
+      return {
+        success: true,
+        insightCount: 0,
+        generationBatch,
+        durationMs: Date.now() - startTime,
+        planSummary: plan.summary,
+        questionsCount: questions.length,
+        findingsCount: 0,
+        droppedCount: 0,
+      };
+    }
+
+    emit("evaluating", `Evaluating ${allFindings.length} findings...`);
+    const evaluation = await runInsightEvaluator(allFindings, apiKey, previousHeadlines, {
+      functionalCategory: category.id,
+      categorySupplement: category.evaluatorSupplement,
+      knowledgeContext: categoryKnowledgeContext || undefined,
+    });
+
+    for (const ins of evaluation.insights) {
+      const finding = allFindings[ins.findingIndex];
+      ins.value_score = finding ? computeValueScore(ins, finding) : ins.severity_score;
+    }
+    evaluation.insights.sort((a, b) => {
+      const bucketOrder: Record<string, number> = { critical: 0, attention: 1, working: 2, context: 3 };
+      const bd = (bucketOrder[a.bucket] ?? 4) - (bucketOrder[b.bucket] ?? 4);
+      if (bd !== 0) return bd;
+      return (b.value_score ?? b.severity_score) - (a.value_score ?? a.severity_score);
+    });
+
+    // Replace only this category's rows — leave other categories untouched
+    emit("persisting", `Replacing ${category.label} insights (${evaluation.insights.length} new)...`);
+    await tenantPool.query(
+      `DELETE FROM generated_insights WHERE generation_method = 'agent' AND functional_category = $1`,
+      [category.id]
+    );
+    if (evaluation.insights.length > 0) {
+      await appendAgentInsights(tenantPool, evaluation.insights, allFindings, generationBatch);
+    }
+
+    activeCategoryGenerations.delete(lockKey);
+    const duration = Date.now() - startTime;
+    emit("complete", `Done in ${Math.round(duration / 1000)}s — ${evaluation.insights.length} ${category.label} insights`);
+
+    return {
+      success: true,
+      insightCount: evaluation.insights.length,
+      generationBatch,
+      durationMs: duration,
+      planSummary: plan.summary,
+      questionsCount: questions.length,
+      findingsCount: allFindings.length,
+      droppedCount: evaluation.dropped.length,
+    };
+  } catch (err: any) {
+    activeCategoryGenerations.delete(lockKey);
+    logError(`[InsightOrchestrator] Category refresh for ${categoryId} failed: ${err.message}`, err);
+    return {
+      success: false,
+      insightCount: 0,
+      generationBatch,
+      durationMs: Date.now() - startTime,
+      error: err.message,
+    };
+  }
+}
+
+// ============================================================================
 // Persistence — writes to the same generated_insights table
 // ============================================================================
 
@@ -530,20 +818,39 @@ async function persistAgentInsights(
   findings: InsightFinding[],
   generationBatch: string
 ): Promise<void> {
-  // Check which columns exist
+  // Check which columns exist (and auto-migrate functional_category if missing)
   let hasDetailDataCol = false;
   let hasGenerationMethodCol = false;
   let hasValueScoreCol = false;
+  let hasFunctionalCategoryCol = false;
   try {
     const colCheck = await tenantPool.query(`
       SELECT column_name FROM information_schema.columns
       WHERE table_name = 'generated_insights'
-        AND column_name IN ('detail_data', 'generation_method', 'value_score')
+        AND column_name IN ('detail_data', 'generation_method', 'value_score', 'functional_category')
     `);
     for (const row of colCheck.rows) {
       if (row.column_name === "detail_data") hasDetailDataCol = true;
       if (row.column_name === "generation_method") hasGenerationMethodCol = true;
       if (row.column_name === "value_score") hasValueScoreCol = true;
+      if (row.column_name === "functional_category") hasFunctionalCategoryCol = true;
+    }
+    // Auto-migrate: create functional_category column if migration hasn't been applied yet
+    if (!hasFunctionalCategoryCol) {
+      try {
+        await tenantPool.query(`
+          ALTER TABLE generated_insights
+            ADD COLUMN IF NOT EXISTS functional_category TEXT
+        `);
+        await tenantPool.query(`
+          CREATE INDEX IF NOT EXISTS idx_generated_insights_category
+            ON generated_insights(functional_category)
+        `);
+        hasFunctionalCategoryCol = true;
+        logInfo("[InsightOrchestrator] Auto-migrated: added functional_category column to generated_insights");
+      } catch (migErr: any) {
+        logWarn(`[InsightOrchestrator] Could not auto-migrate functional_category column: ${migErr.message}`);
+      }
     }
   } catch { /* pre-migration tenant */ }
 
@@ -567,7 +874,10 @@ async function persistAgentInsights(
       : null;
 
     const baseCount = 16; // 15 standard + generation_method
-    const extraCount = (hasDetailDataCol ? 1 : 0) + (hasValueScoreCol ? 1 : 0);
+    const extraCount =
+      (hasDetailDataCol ? 1 : 0) +
+      (hasValueScoreCol ? 1 : 0) +
+      (hasFunctionalCategoryCol ? 1 : 0);
     const totalParams = baseCount + extraCount;
     const ph = Array.from({ length: totalParams }, () => `$${paramIdx++}`);
     placeholders.push(`(${ph.join(", ")})`);
@@ -597,6 +907,9 @@ async function persistAgentInsights(
     if (hasValueScoreCol) {
       values.push(ins.value_score ?? ins.severity_score);
     }
+    if (hasFunctionalCategoryCol) {
+      values.push(ins.functional_category ?? null);
+    }
   }
 
   let columnList = `bucket, priority, headline, understory, insight_type, source,
@@ -605,7 +918,14 @@ async function persistAgentInsights(
        generation_method`;
   if (hasDetailDataCol) columnList += `, detail_data`;
   if (hasValueScoreCol) columnList += `, value_score`;
+  if (hasFunctionalCategoryCol) columnList += `, functional_category`;
   const columns = `(${columnList})`;
+
+  // Diagnostic: log a sample of what's being persisted to confirm functional_category
+  const categorySample = insights.slice(0, 3).map(
+    (i) => `"${(i.headline || "").slice(0, 30)}" → ${JSON.stringify(i.functional_category)}`
+  ).join("; ");
+  logInfo(`[InsightOrchestrator] persistAgentInsights: hasFuncCat=${hasFunctionalCategoryCol}, total=${insights.length}, sample=[${categorySample}]`);
 
   await tenantPool.query(
     `INSERT INTO generated_insights ${columns}
@@ -630,16 +950,35 @@ async function appendAgentInsights(
   let hasDetailDataCol = false;
   let hasGenerationMethodCol = false;
   let hasValueScoreCol = false;
+  let hasFunctionalCategoryCol = false;
   try {
     const colCheck = await tenantPool.query(`
       SELECT column_name FROM information_schema.columns
       WHERE table_name = 'generated_insights'
-        AND column_name IN ('detail_data', 'generation_method', 'value_score')
+        AND column_name IN ('detail_data', 'generation_method', 'value_score', 'functional_category')
     `);
     for (const row of colCheck.rows) {
       if (row.column_name === "detail_data") hasDetailDataCol = true;
       if (row.column_name === "generation_method") hasGenerationMethodCol = true;
       if (row.column_name === "value_score") hasValueScoreCol = true;
+      if (row.column_name === "functional_category") hasFunctionalCategoryCol = true;
+    }
+    // Auto-migrate: create functional_category column if migration hasn't been applied yet
+    if (!hasFunctionalCategoryCol) {
+      try {
+        await tenantPool.query(`
+          ALTER TABLE generated_insights
+            ADD COLUMN IF NOT EXISTS functional_category TEXT
+        `);
+        await tenantPool.query(`
+          CREATE INDEX IF NOT EXISTS idx_generated_insights_category
+            ON generated_insights(functional_category)
+        `);
+        hasFunctionalCategoryCol = true;
+        logInfo("[InsightOrchestrator] Auto-migrated (append): added functional_category column to generated_insights");
+      } catch (migErr: any) {
+        logWarn(`[InsightOrchestrator] Could not auto-migrate functional_category column (append): ${migErr.message}`);
+      }
     }
   } catch { /* pre-migration tenant */ }
 
@@ -654,7 +993,10 @@ async function appendAgentInsights(
       : null;
 
     const baseCount = 16;
-    const extraCount = (hasDetailDataCol ? 1 : 0) + (hasValueScoreCol ? 1 : 0);
+    const extraCount =
+      (hasDetailDataCol ? 1 : 0) +
+      (hasValueScoreCol ? 1 : 0) +
+      (hasFunctionalCategoryCol ? 1 : 0);
     const totalParams = baseCount + extraCount;
     const ph = Array.from({ length: totalParams }, () => `$${paramIdx++}`);
     placeholders.push(`(${ph.join(", ")})`);
@@ -684,6 +1026,9 @@ async function appendAgentInsights(
     if (hasValueScoreCol) {
       values.push(ins.value_score ?? ins.severity_score);
     }
+    if (hasFunctionalCategoryCol) {
+      values.push(ins.functional_category ?? null);
+    }
   }
 
   let columnList = `bucket, priority, headline, understory, insight_type, source,
@@ -692,6 +1037,7 @@ async function appendAgentInsights(
        generation_method`;
   if (hasDetailDataCol) columnList += `, detail_data`;
   if (hasValueScoreCol) columnList += `, value_score`;
+  if (hasFunctionalCategoryCol) columnList += `, functional_category`;
   const columns = `(${columnList})`;
 
   await tenantPool.query(

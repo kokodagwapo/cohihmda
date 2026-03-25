@@ -21,10 +21,22 @@ interface TrackedInsight {
   id: string;
   headline: string;
   understory: string;
+  source_type: string;
+  source_insight_id: string | null;
+  alert_threshold: AlertThreshold | null;
   metric_signature: {
     sql: string;
     keyFields: string[];
+    polarities?: Record<string, "higher_better" | "lower_better">;
   };
+}
+
+interface AlertThreshold {
+  field: string;
+  operator: "gt" | "lt" | "gte" | "lte";
+  value: number;
+  triggered?: boolean;
+  last_triggered_at?: string | null;
 }
 
 interface PreviousSnapshot {
@@ -61,7 +73,7 @@ export async function evaluateTrackedInsights(
 
   // Fetch all active tracked insights
   const result = await tenantPool.query(
-    `SELECT id, headline, understory, metric_signature
+    `SELECT id, headline, understory, source_type, source_insight_id, metric_signature, alert_threshold
      FROM tracked_insights
      WHERE status = 'active'
      ORDER BY created_at`
@@ -106,8 +118,13 @@ export async function evaluateTrackedInsights(
         insight.id
       );
 
-      // Determine trend
-      const trend = determineTrend(metricValues, prevSnapshot?.metric_values);
+      // Determine trend with polarity awareness
+      const trend = determineTrend(
+        metricValues,
+        prevSnapshot?.metric_values,
+        insight.metric_signature.keyFields,
+        insight.metric_signature.polarities
+      );
 
       // Generate change summary
       let changeSummary: string;
@@ -116,17 +133,42 @@ export async function evaluateTrackedInsights(
       } else if (trend === "stable") {
         changeSummary = "No significant change since last evaluation.";
       } else {
+        if (!apiKey) {
+          try { apiKey = await getOpenAIKey(tenantId); } catch { /* will use fallback */ }
+        }
         changeSummary = await generateChangeSummary(
           tenantId,
           insight.headline,
+          insight.understory,
           metricValues,
           prevSnapshot.metric_values,
           trend,
+          insight.metric_signature.keyFields,
+          insight.metric_signature.polarities,
           apiKey
         );
-        if (!apiKey) {
-          // Cache the key after first use
-          try { apiKey = await getOpenAIKey(tenantId); } catch { /* fallback used */ }
+      }
+
+      // Check alert threshold
+      let alertTriggered = false;
+      if (insight.alert_threshold?.field && insight.alert_threshold.operator) {
+        alertTriggered = checkAlertThreshold(metricValues, insight.alert_threshold);
+        if (alertTriggered && !insight.alert_threshold.triggered) {
+          await tenantPool.query(
+            `UPDATE tracked_insights
+               SET alert_threshold = alert_threshold || $1::jsonb, updated_at = NOW()
+             WHERE id = $2`,
+            [JSON.stringify({ triggered: true, last_triggered_at: new Date().toISOString() }), insight.id]
+          );
+          logInfo(`[TrackedEvaluator] Alert triggered for "${insight.headline}" (${insight.alert_threshold.field} ${insight.alert_threshold.operator} ${insight.alert_threshold.value})`);
+        } else if (!alertTriggered && insight.alert_threshold.triggered) {
+          // Reset trigger once condition no longer holds
+          await tenantPool.query(
+            `UPDATE tracked_insights
+               SET alert_threshold = alert_threshold || $1::jsonb, updated_at = NOW()
+             WHERE id = $2`,
+            [JSON.stringify({ triggered: false }), insight.id]
+          );
         }
       }
 
@@ -212,13 +254,49 @@ function extractMetricValues(
   return result;
 }
 
+// ============================================================================
+// Metric polarity — lower values are BETTER for these field name patterns
+// ============================================================================
+
+const LOWER_IS_BETTER_PATTERNS = [
+  "cycle_time",
+  "days_in",
+  "dwell",
+  "aging",
+  "stale",
+  "fallout",
+  "backlog",
+  "expired",
+  "overdue",
+  "delinquent",
+  "condition",
+  "defect",
+  "error",
+  "exception",
+  "denied",
+  "withdrawn",
+  "cancell",
+];
+
+function inferPolarity(fieldName: string): "higher_better" | "lower_better" {
+  const normalized = fieldName.toLowerCase();
+  return LOWER_IS_BETTER_PATTERNS.some((p) => normalized.includes(p))
+    ? "lower_better"
+    : "higher_better";
+}
+
 function determineTrend(
   current: Record<string, any>,
-  previous?: Record<string, any>
+  previous?: Record<string, any>,
+  keyFields?: string[],
+  polarities?: Record<string, "higher_better" | "lower_better">
 ): "improving" | "worsening" | "stable" | "new" {
   if (!previous) return "new";
 
-  const currentKeys = Object.keys(current).filter((k) => !k.startsWith("_"));
+  const currentKeys = (keyFields && keyFields.length > 0)
+    ? keyFields.filter((k) => k in current)
+    : Object.keys(current).filter((k) => !k.startsWith("_"));
+
   if (currentKeys.length === 0) return "stable";
 
   let significantChanges = 0;
@@ -233,7 +311,11 @@ function determineTrend(
     const pctChange = Math.abs((curVal - prevVal) / prevVal) * 100;
     if (pctChange > 5) {
       significantChanges++;
-      if (curVal > prevVal) positiveChanges++;
+      const rawIncrease = curVal > prevVal;
+      // Apply polarity: if lower_is_better, an increase is actually worsening
+      const polarity = polarities?.[key] ?? inferPolarity(key);
+      const isImproving = polarity === "lower_better" ? !rawIncrease : rawIncrease;
+      if (isImproving) positiveChanges++;
       else negativeChanges++;
     }
   }
@@ -262,42 +344,83 @@ async function fetchPreviousSnapshot(
 async function generateChangeSummary(
   tenantId: string,
   headline: string,
+  understory: string,
   current: Record<string, any>,
   previous: Record<string, any>,
   trend: string,
-  cachedApiKey: string | null
+  keyFields?: string[],
+  polarities?: Record<string, "higher_better" | "lower_better">,
+  cachedApiKey?: string | null
 ): Promise<string> {
-  // Try LLM for nuanced summary; fall back to rule-based
+  // Build polarity context for the LLM
+  const polarityLines: string[] = [];
+  const relevantKeys = (keyFields && keyFields.length > 0)
+    ? keyFields
+    : Object.keys(current).filter((k) => !k.startsWith("_"));
+  for (const key of relevantKeys) {
+    const polarity = polarities?.[key] ?? inferPolarity(key);
+    polarityLines.push(`${key}: ${polarity === "lower_better" ? "lower is better" : "higher is better"}`);
+  }
+
+  // Build numeric change lines for the rule-based fallback and LLM context
+  const changeParts: string[] = [];
+  for (const key of relevantKeys) {
+    const cur = parseFloat(current[key]);
+    const prev = parseFloat(previous[key]);
+    if (!isNaN(cur) && !isNaN(prev) && prev !== 0) {
+      const pct = ((cur - prev) / Math.abs(prev) * 100).toFixed(1);
+      changeParts.push(`${key}: ${prev} → ${cur} (${parseFloat(pct) > 0 ? "+" : ""}${pct}%)`);
+    }
+  }
+
   try {
     const apiKey = cachedApiKey || (await getOpenAIKey(tenantId));
     const messages: LLMMessage[] = [
       {
         role: "system",
-        content:
-          "Generate a single concise sentence summarizing how a tracked metric has changed. Be specific with numbers. Do not use markdown.",
+        content: `You are an expert mortgage banking analyst reviewing tracked performance metrics for a mortgage lender. 
+Generate a single concise sentence (max 25 words) summarizing how the tracked metric has changed. 
+Rules:
+- Be specific with numbers and percentages
+- Interpret the change in terms of business impact (e.g. "improving pull-through" or "cycle time worsening")
+- Account for metric polarity: for lower-is-better metrics (cycle time, fallout, stale loans), a decrease is good news
+- Do NOT use markdown
+- Write from the perspective of an operations or risk manager`,
       },
       {
         role: "user",
-        content: `Insight: "${headline}"\nPrevious values: ${JSON.stringify(previous)}\nCurrent values: ${JSON.stringify(current)}\nTrend: ${trend}`,
+        content: [
+          `Tracked insight: "${headline}"`,
+          understory ? `Context: ${understory}` : "",
+          `Trend direction: ${trend}`,
+          changeParts.length > 0 ? `Metric changes: ${changeParts.join("; ")}` : "",
+          polarityLines.length > 0 ? `Metric polarity: ${polarityLines.join("; ")}` : "",
+        ].filter(Boolean).join("\n"),
       },
     ];
     return await callLLM(messages, apiKey, {
       temperature: 0.2,
-      maxTokens: 150,
+      maxTokens: 80,
     });
   } catch {
     // Rule-based fallback
-    const changes: string[] = [];
-    for (const key of Object.keys(current).filter((k) => !k.startsWith("_"))) {
-      const cur = parseFloat(current[key]);
-      const prev = parseFloat(previous[key]);
-      if (!isNaN(cur) && !isNaN(prev) && prev !== 0) {
-        const pct = ((cur - prev) / prev * 100).toFixed(1);
-        changes.push(`${key}: ${prev} → ${cur} (${parseFloat(pct) > 0 ? "+" : ""}${pct}%)`);
-      }
-    }
-    return changes.length > 0
-      ? `Changes: ${changes.join(", ")}`
+    return changeParts.length > 0
+      ? `Changes: ${changeParts.join(", ")}`
       : "Metric values updated.";
+  }
+}
+
+function checkAlertThreshold(
+  metricValues: Record<string, any>,
+  threshold: AlertThreshold
+): boolean {
+  const val = parseFloat(metricValues[threshold.field]);
+  if (isNaN(val)) return false;
+  switch (threshold.operator) {
+    case "gt":  return val > threshold.value;
+    case "lt":  return val < threshold.value;
+    case "gte": return val >= threshold.value;
+    case "lte": return val <= threshold.value;
+    default:    return false;
   }
 }

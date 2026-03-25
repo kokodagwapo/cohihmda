@@ -13,6 +13,7 @@
 
 import { callLLM, type LLMMessage } from "../../research/tools.js";
 import type { InsightFinding } from "./insightInvestigatorAgent.js";
+import { SOURCE_TO_CATEGORY } from "./categoryDefinitions.js";
 
 // ============================================================================
 // Types
@@ -27,6 +28,7 @@ export interface EvaluatedInsight {
   severity_score: number;
   value_score?: number;
   source: string;
+  functional_category?: string;
   impact: {
     type: string;
     estimated_dollars?: number;
@@ -48,7 +50,7 @@ export interface EvaluationResult {
 // System Prompt
 // ============================================================================
 
-const EVALUATOR_PROMPT = `You are an Insight Evaluator for a mortgage lending analytics platform. You receive raw findings from data analyst agents and decide which ones deserve to appear on the executive dashboard.
+const EVALUATOR_PROMPT_BASE = `You are an Insight Evaluator for a mortgage lending analytics platform. You receive raw findings from data analyst agents and decide which ones deserve to appear on the executive dashboard.
 
 Your job:
 1. SIGNIFICANCE FILTERING — Drop only findings that are genuine noise (completely trivial, zero-insight, or exact duplicates). Prefer keeping over dropping — an executive dashboard should be comprehensive, not sparse.
@@ -81,9 +83,10 @@ Output JSON:
 }
 
 RULES:
-- TARGET 12-18 insights across all buckets. A comprehensive dashboard should have broad coverage. Aim for at least 1 insight per bucket when findings support it, but do NOT force low-quality findings into a bucket just to fill a quota.
+__TARGET_RULE__
 - KEEP MORE THAN YOU DROP. When in doubt, KEEP the finding — put it in "context" (Informational) if it doesn't fit a higher bucket. Only drop findings that are truly redundant (near-duplicate of another finding) or completely uninformative (no specific numbers, zero confidence).
 - Positive findings (improving metrics, strong performance, good trends) go in "working" (Strategic Review). Do NOT drop positive findings just because they aren't problems.
+- AVOID NOISE FINDINGS: Drop findings whose headline or summary states that a topic "cannot be assessed", has "insufficient data", or reports only that fields are missing/unpopulated. These are not executive insights — they belong in the dropped list. Exception: if a finding can be reframed as a concrete data-quality issue with specific numbers (e.g., "HMDA ethnicity blank on 94% of active loans — fair lending analysis blocked"), keep it as a "context" insight with those specific numbers. If it cannot be reframed with real numbers, drop it.
 - AVOID NEGATIVE-FINDING INSIGHTS: If an investigator found that a problem does NOT exist (e.g., "no stale loans", "no lock expirations", "0 loans with missing milestones"), do NOT surface this as a standalone insight. An absence of a problem is not newsworthy by default. However, if the finding contains other substantive data alongside the absence (e.g., "no stale loans AND pipeline is 154 active loans worth $61M"), keep the substantive part and reframe the headline around the real finding.
 - PRIORITIZE DOLLAR IMPACT: Insights with quantified dollar impact (revenue at risk, lost opportunity volume, exposure) should rank higher than insights that are purely observational. When assigning severity_score, weight financial impact heavily.
 - MARKET RATE INSIGHTS: If any findings reference market rate trends, rate changes, lock-vs-market analysis, or borrower rate sensitivity, these are HIGH VALUE — keep them and bucket appropriately. Market-aware insights connecting rate movements to pipeline behavior are particularly valuable.
@@ -95,6 +98,20 @@ RULES:
 - De-duplicate only when two findings are nearly identical. Similar topics from different angles should BOTH be kept.
 - HEADLINE ACCURACY: Before writing the headline, read the finding's summary carefully. If the investigator's title contradicts the actual findings (e.g. title says "missing milestones" but summary says "0 loans have blank milestones"), you MUST rewrite the headline to reflect the TRUE finding. Never propagate a disproven hypothesis into the headline.
 - CONFIDENCE GROUNDING: When setting confidence, consider the evidence depth. "high" confidence requires 2+ SQL queries returning meaningful data. "medium" requires at least 1 query with clear results. "low" means speculative or based on thin data — these should generally not be in "critical" bucket.`;
+
+const FULL_PIPELINE_TARGET = `- TARGET 12-18 insights across all buckets. A comprehensive dashboard should have broad coverage. Aim for at least 1 insight per bucket when findings support it, but do NOT force low-quality findings into a bucket just to fill a quota.`;
+
+function buildPerCategoryTarget(findingCount: number): string {
+  return `- CATEGORY MODE — you are evaluating a focused batch of ${findingCount} findings for ONE functional category. Target: keep 5-8 insights from this batch (or more if all findings have real signal). Every finding that contains concrete numbers and a genuine signal should survive as at minimum a "context" insight. Only drop findings that are true duplicates of another finding in this batch, or that contain zero concrete data (no numbers, no specific result). Do NOT apply the full-pipeline "12-18" guidance here — that refers to the total across all five categories combined; the per-category target is higher.`;
+}
+
+function buildEvaluatorSystemPrompt(options?: { functionalCategory?: string; categorySupplement?: string }, findingCount = 0): string {
+  const targetRule = options?.functionalCategory
+    ? buildPerCategoryTarget(findingCount)
+    : FULL_PIPELINE_TARGET;
+  const base = EVALUATOR_PROMPT_BASE.replace("__TARGET_RULE__", targetRule);
+  return options?.categorySupplement ? `${base}\n\n${options.categorySupplement}` : base;
+}
 
 // ============================================================================
 // Agent Entry Point
@@ -117,7 +134,8 @@ const BUCKET_TO_TYPE: Record<string, string> = {
 export async function runInsightEvaluator(
   findings: InsightFinding[],
   apiKey: string,
-  previousHeadlines?: string[]
+  previousHeadlines?: string[],
+  options?: { functionalCategory?: string; categorySupplement?: string; knowledgeContext?: string }
 ): Promise<EvaluationResult> {
   if (findings.length === 0) {
     return { insights: [], dropped: [], summary: "No findings to evaluate." };
@@ -134,7 +152,12 @@ export async function runInsightEvaluator(
     evidenceCount: f.evidence.length,
   }));
 
-  let userPrompt = `## Findings to Evaluate\n\n${JSON.stringify(findingSummaries, null, 2)}\n\n`;
+  let userPrompt = "";
+
+  // Knowledge context first — shapes severity judgments before findings are seen
+  if (options?.knowledgeContext) {
+    userPrompt += `## Organization Knowledge & Guidelines\nThe following excerpts from the organization's knowledge center should inform how you assess severity, compliance relevance, and priority:\n${options.knowledgeContext}\n\n`;
+  }
 
   if (previousHeadlines && previousHeadlines.length > 0) {
     userPrompt += `## Previous Insight Headlines (avoid near-duplicates)\n`;
@@ -142,26 +165,41 @@ export async function runInsightEvaluator(
     userPrompt += "\n";
   }
 
+  if (options?.functionalCategory) {
+    userPrompt += `## FUNCTIONAL CATEGORY\nAll findings belong to the "${options.functionalCategory}" category. Every output insight must have functional_category = "${options.functionalCategory}".\n\n`;
+  }
+
+  userPrompt += `## Findings to Evaluate\n\n${JSON.stringify(findingSummaries, null, 2)}\n\n`;
   userPrompt += `Evaluate these findings and produce the final insight set. Respond with JSON.`;
 
+  // Build system prompt dynamically — per-category mode gets a different TARGET rule
+  const systemPrompt = buildEvaluatorSystemPrompt(options, findings.length);
+
   const messages: LLMMessage[] = [
-    { role: "system", content: EVALUATOR_PROMPT },
+    { role: "system", content: systemPrompt },
     { role: "user", content: userPrompt },
   ];
 
   const raw = await callLLM(messages, apiKey, {
     temperature: 0.3,
-    maxTokens: 6000,
+    maxTokens: 10000,
     jsonMode: true,
   });
 
   const parsed = JSON.parse(raw) as EvaluationResult;
 
-  // Post-process: enrich each evaluated insight with the correct priority/type mappings
-  // and attach metricSignature from the original finding
+  // Post-process: enrich each evaluated insight with the correct priority/type mappings,
+  // stamp functional_category (from options or source-based fallback), and attach metricSignature.
   parsed.insights = (parsed.insights || []).map((ins) => {
     const bucket = ins.bucket || "context";
     const originalFinding = findings[ins.findingIndex];
+
+    // Determine functional_category: explicit option > LLM output > source-based fallback
+    const functionalCategory =
+      options?.functionalCategory ||
+      ins.functional_category ||
+      SOURCE_TO_CATEGORY[ins.source] ||
+      undefined;
 
     return {
       ...ins,
@@ -169,6 +207,7 @@ export async function runInsightEvaluator(
       priority: (BUCKET_TO_PRIORITY[bucket] || "GRAY") as any,
       insight_type: (BUCKET_TO_TYPE[bucket] || "info") as any,
       severity_score: Math.min(1, Math.max(0, ins.severity_score || 0.5)),
+      functional_category: functionalCategory,
       metricSignature: originalFinding?.metricSignature || ins.metricSignature,
       evidence: originalFinding
         ? {
