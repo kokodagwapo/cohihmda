@@ -246,6 +246,13 @@ export interface LoanDetailColumnsModalProps {
   onClose: () => void;
   canvasItemId: string;
   tenantId?: string | null;
+  /**
+   * When provided, the modal is controlled by the caller:
+   * - draft initializes from these columns (instead of the Zustand store)
+   * - Save calls `onSaveColumns` (instead of writing to the store)
+   */
+  initialColumns?: SavedLoanDetailColumn[] | null;
+  onSaveColumns?: (columns: SavedLoanDetailColumn[]) => void;
 }
 
 export function LoanDetailColumnsModal({
@@ -253,6 +260,8 @@ export function LoanDetailColumnsModal({
   onClose,
   canvasItemId,
   tenantId,
+  initialColumns,
+  onSaveColumns,
 }: LoanDetailColumnsModalProps) {
   const getColumns = useLoanDetailColumnsStore((s) => s.getColumns);
   const setColumns = useLoanDetailColumnsStore((s) => s.setColumns);
@@ -284,7 +293,7 @@ export function LoanDetailColumnsModal({
   useEffect(() => {
     if (!open) return;
     setOrderDraftByRowId({});
-    const saved = getColumns(canvasItemId);
+    const saved = initialColumns ?? getColumns(canvasItemId);
     const baseDefs =
       defaultColumnsWithAdditional.length > 0
         ? defaultColumnsWithAdditional
@@ -295,7 +304,7 @@ export function LoanDetailColumnsModal({
         ? saved.map((c) => ({ ...c }))
         : defaultSaved.map((c) => ({ ...c }));
     setDraft(nextDraft);
-  }, [open, canvasItemId, getColumns, defaultColumnsWithAdditional]);
+  }, [open, canvasItemId, getColumns, defaultColumnsWithAdditional, initialColumns]);
 
   useEffect(() => {
     if (!open) return;
@@ -467,9 +476,14 @@ export function LoanDetailColumnsModal({
   const handleSave = useCallback(() => {
     const valid = draft.filter((r) => r.label.trim() !== '');
     if (valid.length === 0) return;
+    if (onSaveColumns) {
+      onSaveColumns(valid);
+      onClose();
+      return;
+    }
     setColumns(canvasItemId, valid);
     onClose();
-  }, [canvasItemId, draft, setColumns, onClose]);
+  }, [canvasItemId, draft, setColumns, onClose, onSaveColumns]);
 
   const hasValidColumns = useMemo(
     () => draft.some((r) => r.label.trim() !== ''),

@@ -705,9 +705,16 @@ export function LoanDetailView({
     return COLUMNS;
   }, [columnsProp, storeColumnDefs]);
 
+  // When the user is in "edited columns" mode (workbench `columns` or standalone saved columns),
+  // the table must reflect *exactly* what they selected in the editor.
+  //
+  // Otherwise `buildEffectiveColumns(baseColumns, additionalColumns)` will re-append any
+  // additional fields the user deleted, making it look like "remove" doesn't work.
+  const hasUserSelectedColumns = Boolean((columnsProp && columnsProp.length > 0) || (storeColumnDefs && storeColumnDefs.length > 0));
+
   const columnsToUse = useMemo(
-    () => buildEffectiveColumns(baseColumns, additionalColumns),
-    [baseColumns, additionalColumns],
+    () => (hasUserSelectedColumns ? baseColumns : buildEffectiveColumns(baseColumns, additionalColumns)),
+    [baseColumns, additionalColumns, hasUserSelectedColumns],
   );
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const [, setScrollReady] = useState(0);
