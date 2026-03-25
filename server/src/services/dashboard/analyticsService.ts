@@ -1376,6 +1376,7 @@ async function loadEscalatedDashboardInsightsAsInsights(
       evidence_refs: d.evidence_refs ?? [],
       cited_numbers: d.cited_numbers ?? [],
       supporting_data: d.supporting_data ?? undefined,
+      functional_category: d.functional_category,
     }));
   } catch (err) {
     console.warn("[Insights] Failed to load escalated dashboard insights:", err);

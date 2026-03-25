@@ -160,7 +160,7 @@ export async function runInsightEvaluator(
   }
 
   if (previousHeadlines && previousHeadlines.length > 0) {
-    userPrompt += `## Previous Insight Headlines (avoid near-duplicates)\n`;
+    userPrompt += `## Previous Insight Headlines (reference only — keep findings with updated numbers even if the topic was covered before; only drop if the finding adds nothing new)\n`;
     previousHeadlines.forEach((h) => (userPrompt += `- ${h}\n`));
     userPrompt += "\n";
   }
