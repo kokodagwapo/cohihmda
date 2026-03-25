@@ -375,22 +375,23 @@ function isEmbedSentinel(data: unknown): boolean {
  */
 function hasRenderableData(w: WidgetDataEntry): boolean {
   if (isEmbedSentinel(w.data)) return false;
+  const d = w.data as any;
   if (w.category === 'chart') {
-    const d = w.data as any;
-    // Shape A: ChartData (xAxisKey + series + data array)
     if (d?.data && Array.isArray(d.data) && d.data.length > 0) return true;
-    // Shape B: has xKey
     if (d?.xKey && d?.data) return true;
     return false;
   }
   if (w.category === 'kpi') {
-    const d = w.data as any;
-    return d?.value != null || d?.label != null;
+    if (d?.value != null || d?.label != null) return true;
+    if (Array.isArray(d?.kpis) && d.kpis.length > 0) return true;
+    return false;
   }
   if (w.category === 'table') {
-    const d = w.data as any;
     const rows = d?.rows || d?.data;
     return Array.isArray(rows) && rows.length > 0;
+  }
+  if (w.category === 'other') {
+    return typeof d?.content === 'string' && d.content.length > 0;
   }
   return true;
 }
@@ -426,23 +427,34 @@ function canvasWidgetsToSlides(
 
   // Separate widgets with real data from embed-style placeholders
   const withData = widgets.filter(hasRenderableData);
-  const embeds = widgets.filter((w) => !hasRenderableData(w) && w.widgetName);
 
   const kpis = withData.filter((w) => w.category === 'kpi');
   const charts = withData.filter((w) => w.category === 'chart');
   const tables = withData.filter((w) => w.category === 'table');
+  const others = withData.filter((w) => w.category === 'other');
 
   // Executive Summary slide with KPI overview
   if (kpis.length > 0) {
-    const summaryLines = kpis.map((kpi) => {
-      const rawVal = kpi.data?.value ?? kpi.data ?? '--';
-      const fmt = kpi.data?.format || 'number';
+    const summaryLines = kpis.flatMap((kpi) => {
+      const d = kpi.data as any;
+      // Handle { kpis: [{ label, value, ... }] } shape from ExecDashboard / ClosingForecast
+      if (Array.isArray(d?.kpis)) {
+        return d.kpis.map((k: any) => {
+          const changeStr = k.change && k.change !== '--'
+            ? ` (${typeof k.change === 'number' ? (k.change >= 0 ? '+' : '') + k.change.toFixed(1) + '%' : k.change})`
+            : '';
+          return `\u2022 ${k.label}: ${k.value}${changeStr}`;
+        });
+      }
+      // Single KPI shape
+      const rawVal = d?.value ?? d ?? '--';
+      const fmt = d?.format || 'number';
       const val = fmtKpi(rawVal, fmt);
-      const change = kpi.data?.change;
+      const change = d?.change;
       const changeStr = change != null
         ? ` (${change >= 0 ? '+' : ''}${typeof change === 'number' ? change.toFixed(1) : change}%)`
         : '';
-      return `\u2022 ${kpi.widgetName}: ${val}${changeStr}`;
+      return [`\u2022 ${kpi.widgetName}: ${val}${changeStr}`];
     }).join('\n');
 
     slides.push({
@@ -464,15 +476,32 @@ function canvasWidgetsToSlides(
     });
   }
 
-  // KPI grid slide
-  if (kpis.length > 0) {
-    const cols = Math.min(kpis.length, 4);
+  // KPI grid slides — flatten multi-KPI widgets (ExecDashboard, ClosingForecast)
+  const flatKpis: { label: string; value: string; change?: string; trend?: string }[] = [];
+  for (const kpi of kpis) {
+    const d = kpi.data as any;
+    if (Array.isArray(d?.kpis)) {
+      for (const k of d.kpis) {
+        flatKpis.push({ label: k.label, value: String(k.value ?? '--'), change: k.change, trend: k.trend });
+      }
+    } else {
+      flatKpis.push({
+        label: kpi.widgetName,
+        value: String(d?.value ?? d ?? '--'),
+        change: d?.change,
+      });
+    }
+  }
+  // Emit KPI grid slides (up to 8 per slide)
+  for (let page = 0; page < flatKpis.length; page += 8) {
+    const batch = flatKpis.slice(page, page + 8);
+    const cols = Math.min(batch.length, 4);
     slides.push({
       id: generateId('slide'),
       layout: 'kpi-grid',
-      title: 'Key Metrics',
+      title: page === 0 ? 'Key Metrics' : 'Key Metrics (cont.)',
       speakerNotes: 'Detailed KPI metrics from the canvas. Discuss trends and compare against targets.',
-      elements: kpis.slice(0, 8).map((kpi, idx) => {
+      elements: batch.map((kpi, idx) => {
         const col = idx % cols;
         const row = Math.floor(idx / cols);
         const itemW = 8.5 / cols;
@@ -482,19 +511,40 @@ function canvasWidgetsToSlides(
           position: { x: 0.5 + col * itemW + 0.05, y: 1.0 + row * 1.5 + 0.05, w: itemW - 0.1, h: 1.3 },
           config: {
             type: 'kpi',
-            label: kpi.widgetName,
-            value: kpi.data?.value ?? kpi.data ?? '--',
-            format: kpi.data?.format || 'number',
-            change: kpi.data?.change,
+            label: kpi.label,
+            value: kpi.value,
+            format: 'text',
+            change: kpi.change,
           } as KpiElementConfig,
         };
       }),
     });
   }
 
-  // Chart slides (1 per chart)
+  // Chart slides (1 per chart) — if data has columns+rows, treat as table instead
   charts.forEach((chart) => {
-    const norm = normalizeChartData(chart.data);
+    const d = chart.data as any;
+    if (d?.columns && d?.rows) {
+      const norm = normalizeTableData(d);
+      slides.push({
+        id: generateId('slide'),
+        layout: 'table',
+        title: d.title || chart.widgetName,
+        speakerNotes: `Data table: ${chart.widgetName}. Review the detailed data and highlight key rows.`,
+        elements: [{
+          id: generateId('table'),
+          type: 'table',
+          position: { x: 0.5, y: 1.0, w: 9, h: 5.5 },
+          config: {
+            type: 'table',
+            columns: norm.columns,
+            data: norm.data,
+          } as TableElementConfig,
+        }],
+      });
+      return;
+    }
+    const norm = normalizeChartData(d);
     slides.push({
       id: generateId('slide'),
       layout: 'chart-focus',
@@ -521,11 +571,12 @@ function canvasWidgetsToSlides(
 
   // Table slides (1 per table)
   tables.forEach((table) => {
-    const norm = normalizeTableData(table.data);
+    const d = table.data as any;
+    const norm = normalizeTableData(d);
     slides.push({
       id: generateId('slide'),
       layout: 'table',
-      title: table.widgetName,
+      title: d?.title || table.widgetName,
       speakerNotes: `Data table: ${table.widgetName}. Review the detailed data and highlight key rows.`,
       elements: [{
         id: generateId('table'),
@@ -540,35 +591,29 @@ function canvasWidgetsToSlides(
     });
   });
 
-  // Embed / interactive section placeholder slides
-  // Group embeds by their group name to avoid duplicate slides
-  const embedGroups = new Map<string, WidgetDataEntry[]>();
-  for (const e of embeds) {
-    const key = e.widgetName || 'Unnamed Section';
-    if (!embedGroups.has(key)) embedGroups.set(key, []);
-    embedGroups.get(key)!.push(e);
-  }
-  for (const [groupName] of embedGroups) {
+  // Text-content slides (news, briefings, etc.)
+  others.forEach((widget) => {
+    const d = widget.data as any;
+    const content = d?.content ?? '';
+    if (!content) return;
     slides.push({
       id: generateId('slide'),
-      layout: 'section-break',
-      title: groupName,
-      speakerNotes: `This section represents the "${groupName}" interactive dashboard view from the canvas. The live data is available in the Cohi Workbench.`,
+      layout: 'content',
+      title: d?.title || widget.widgetName,
+      speakerNotes: `${widget.widgetName}: text content from the canvas.`,
       elements: [{
         id: generateId('text'),
         type: 'text',
-        position: { x: 1.0, y: 2.0, w: 8, h: 3.5 },
+        position: { x: 0.5, y: 1.0, w: 9, h: 5.5 },
         config: {
           type: 'text',
-          content: `${groupName}\n\nThis is an interactive dashboard section.\nOpen the Cohi Workbench to view the live data, apply filters, and drill down into the details.`,
-          fontSize: 14,
-          align: 'center' as const,
-          color: '#64748b',
-          lineSpacing: 1.6,
+          content,
+          fontSize: 12,
+          lineSpacing: 1.4,
         } as TextElementConfig,
       }],
     });
-  }
+  });
 
   return slides;
 }
@@ -911,6 +956,7 @@ export function ReportBuilder({
         itemId: entry.itemId,
         widgetName: entry.widgetName,
         category: entry.category,
+        data: entry.data,
       }));
 
       const canvasState = {

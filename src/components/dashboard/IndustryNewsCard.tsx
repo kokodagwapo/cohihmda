@@ -439,7 +439,7 @@ function MarketIntelligenceTicker({
  * Displays industry news from various sources (MBA, Fannie Mae, Freddie Mac, CFPB, FHFA)
  * with source selection, filtering, and detailed article views
  */
-export const IndustryNewsCard = () => {
+export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unknown) => void } = {}) => {
   const cardRef = useRef<HTMLDivElement>(null);
   const warmedArticleLinksRef = useRef<Set<string>>(new Set());
   const [newsFeed, setNewsFeed] = useState<any[]>([]);
@@ -905,6 +905,20 @@ export const IndustryNewsCard = () => {
       setNewsFeed(getDefaultNewsFeed());
     }
   }, [newsLoading]);
+
+  useEffect(() => {
+    if (!onDataReady || newsLoading || newsFeed.length === 0) return;
+    const headlines: string[] = [];
+    for (const source of newsFeed) {
+      const srcName = source.source ?? 'Unknown';
+      for (const item of (source.items ?? []).slice(0, 3)) {
+        headlines.push(`[${srcName}] ${item.title ?? 'Untitled'}`);
+      }
+    }
+    if (headlines.length > 0) {
+      onDataReady({ content: headlines.slice(0, 15).join('\n'), title: 'Mortgage Industry News' });
+    }
+  }, [onDataReady, newsLoading, newsFeed]);
 
   // Filter news feed based on selected sources
   const filteredNewsFeed = useMemo(() => {
