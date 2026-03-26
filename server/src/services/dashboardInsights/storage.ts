@@ -334,12 +334,22 @@ export async function loadEscalatedDashboardInsights(
   tenantPool: pg.Pool
 ): Promise<DashboardInsight[]> {
   const result = await tenantPool.query(
-    `SELECT id, page_id, page_name, headline, understory, sentiment, severity_score, scope, escalate,
-            what_changed, why, business_impact, risk_if_ignored, recommended_action, owner,
-            filter_context, evidence_refs, cited_numbers, supporting_data, detail_data, functional_category, generation_batch, generated_at
-     FROM dashboard_generated_insights
-     WHERE escalate = true
-     ORDER BY generated_at DESC`
+    `WITH latest_batch_per_page AS (
+       SELECT DISTINCT ON (page_id)
+         page_id,
+         generation_batch
+       FROM dashboard_generated_insights
+       ORDER BY page_id, generated_at DESC
+     )
+     SELECT dgi.id, dgi.page_id, dgi.page_name, dgi.headline, dgi.understory, dgi.sentiment, dgi.severity_score, dgi.scope, dgi.escalate,
+            dgi.what_changed, dgi.why, dgi.business_impact, dgi.risk_if_ignored, dgi.recommended_action, dgi.owner,
+            dgi.filter_context, dgi.evidence_refs, dgi.cited_numbers, dgi.supporting_data, dgi.detail_data, dgi.functional_category, dgi.generation_batch, dgi.generated_at
+     FROM dashboard_generated_insights dgi
+     JOIN latest_batch_per_page lb
+       ON lb.page_id = dgi.page_id
+      AND lb.generation_batch = dgi.generation_batch
+     WHERE dgi.escalate = true
+     ORDER BY dgi.generated_at DESC`
   );
 
   const rows = result.rows as Array<{
