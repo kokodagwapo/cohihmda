@@ -67,6 +67,7 @@ const MIN_COL_WIDTH = 80;
 const CHARS_TO_PX = 8;
 /** Max width per column so one outlier doesn't make table huge; content still fits up to this */
 const MAX_COL_WIDTH = 800;
+const LOAN_NUMBER_FILTER_MAX_OPTIONS = 200;
 
 export interface LoanDetailViewProps {
   selectedTenantId?: string | null;
@@ -1469,10 +1470,15 @@ export function LoanDetailView({
     const hasBlank = cached?.hasBlank ?? false;
     const valuesForList = hasBlank ? [EMPTY_FILTER_TOKEN, ...allValues] : allValues;
     const search = (debouncedFilterSearchByColumn[col.id] ?? "").toLowerCase();
+    const isLoanNumberColumn = col.id === "loan_number";
     const filteredOptions = search
-      ? valuesForList.filter((value) => value === EMPTY_FILTER_TOKEN
-        ? "(blank)".includes(search)
-        : value.toLowerCase().includes(search))
+      ? valuesForList.filter((value) => {
+        if (value === EMPTY_FILTER_TOKEN) return "(blank)".includes(search);
+        const normalized = value.toLowerCase();
+        return isLoanNumberColumn
+          ? normalized.startsWith(search)
+          : normalized.includes(search);
+      })
       : valuesForList;
     const filter = draftFilters[col.id] ?? cloneFilter(appliedFilters[col.id]);
     const selectedValues =
@@ -1489,6 +1495,9 @@ export function LoanDetailView({
       if (b === EMPTY_FILTER_TOKEN) return 1;
       return a.localeCompare(b, undefined, { numeric: true });
     });
+    const displayedOptions = isLoanNumberColumn
+      ? orderedOptions.slice(0, LOAN_NUMBER_FILTER_MAX_OPTIONS)
+      : orderedOptions;
 
     if (filterKind === "boolean") {
       const value = filter?.kind === "boolean" ? filter.value : "all";
@@ -1594,7 +1603,7 @@ export function LoanDetailView({
               />
               <CommandList>
                 <CommandEmpty>No values found.</CommandEmpty>
-                {orderedOptions.map((value) => (
+                {displayedOptions.map((value) => (
                   <CommandItem key={value} onSelect={() => toggleDraftValue(col.id, value, "number")}>
                     <span className="mr-2">
                       {numberFilter.selectedValues.includes(value) ? "✓" : ""}
@@ -1604,6 +1613,11 @@ export function LoanDetailView({
                 ))}
               </CommandList>
             </Command>
+            {isLoanNumberColumn && orderedOptions.length > displayedOptions.length && (
+              <p className="px-1 text-xs text-slate-500 dark:text-slate-400">
+                Showing first {LOAN_NUMBER_FILTER_MAX_OPTIONS} matches. Keep typing to narrow results.
+              </p>
+            )}
             <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(col.id)}>
               Clear
             </Button>
@@ -1671,7 +1685,7 @@ export function LoanDetailView({
           />
           <CommandList>
             <CommandEmpty>No values found.</CommandEmpty>
-            {orderedOptions.map((value) => (
+            {displayedOptions.map((value) => (
               <CommandItem key={value} onSelect={() => toggleDraftValue(col.id, value, "text")}>
                 <span className="mr-2">{textFilter.selectedValues.includes(value) ? "✓" : ""}</span>
                 {value === EMPTY_FILTER_TOKEN ? "(Blank)" : value}
@@ -1679,6 +1693,11 @@ export function LoanDetailView({
             ))}
           </CommandList>
         </Command>
+        {isLoanNumberColumn && orderedOptions.length > displayedOptions.length && (
+          <p className="px-1 text-xs text-slate-500 dark:text-slate-400">
+            Showing first {LOAN_NUMBER_FILTER_MAX_OPTIONS} matches. Keep typing to narrow results.
+          </p>
+        )}
         <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(col.id)}>
           Clear
         </Button>
