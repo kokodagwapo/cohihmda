@@ -8,6 +8,7 @@ import { loanComplexityAdapter } from "./loanComplexityAdapter.js";
 import { companyScorecardAdapter } from "./companyScorecardAdapter.js";
 import { creditRiskManagementAdapter } from "./creditRiskManagementAdapter.js";
 import { workflowConversionAdapter } from "./workflowConversionAdapter.js";
+import { topTieringComparisonAdapter } from "./topTieringComparisonAdapter.js";
 
 const adapters: DashboardAdapter[] = [
   leaderboardAdapter,
@@ -15,6 +16,7 @@ const adapters: DashboardAdapter[] = [
   companyScorecardAdapter,
   creditRiskManagementAdapter,
   workflowConversionAdapter,
+  topTieringComparisonAdapter,
 ];
 
 export function getDashboardAdapters(): DashboardAdapter[] {
@@ -29,4 +31,5 @@ export { leaderboardAdapter } from "./leaderboardAdapter.js";
 export { loanComplexityAdapter } from "./loanComplexityAdapter.js";
 export { creditRiskManagementAdapter } from "./creditRiskManagementAdapter.js";
 export { workflowConversionAdapter } from "./workflowConversionAdapter.js";
+export { topTieringComparisonAdapter } from "./topTieringComparisonAdapter.js";
 export type { DashboardAdapter } from "./baseDashboardAdapter.js";

@@ -12,6 +12,10 @@ Add end-to-end Dashboard Insights support for a new page:
 
 - Persisted insights per page/filter context
 - On-demand generation via `Generate Insights`
+- Display behavior aligned to current product rules:
+  - `GET /api/dashboard-insights` returns only the most recent generated batch for the page/filter slice
+  - Active tracked insights for that same source page are always included (even if filter_context differs)
+  - If a newly generated insight duplicates a tracked insight, tracked insight wins in UI payload
 - In-page display via `DashboardInsightsStrip`
 - "Show on dashboard" behavior that restores relevant filters and navigates/highlights the target widget
 - Evidence/detail hydration parity in modals
@@ -151,6 +155,10 @@ Confirm route behavior already supports the page:
 - `GET /api/dashboard-insights?pageId=<pageId>`
 - `POST /api/dashboard-insights/generate` body `{ pageId, filters }`
 - Error handling for missing migration (`42P01`) remains intact
+- `GET /api/dashboard-insights` payload semantics:
+  - generated insights come from the latest `generation_batch` for the requested page/filter slice
+  - active tracked dashboard insights are included for the same source page regardless of filter subset
+  - generated insights that duplicate tracked insights are excluded from response (tracked wins)
 
 No new endpoint is typically required for adding one page.
 
@@ -183,7 +191,8 @@ Follow Leaderboard pattern:
 Ensure existing strict duplicate and quality guardrails remain compatible:
 
 - Same subject + same timeframe dedupe
-- Near-duplicate collapse
+- Programmatic dedupe by dashboard-specific `filter_context` key sets (must have the same relevant category set to compare)
+- Near-duplicate headline collapse via high-similarity token-set Jaccard pass (used after filter-context pass)
 - Evidence fit and timeframe clarity checks
 
 ---
@@ -298,9 +307,10 @@ If new page needs insights route mapping, update route helper(s), e.g.:
 For every generated insight, enforce:
 
 - `filter_context.datePeriod` uses canonical lowercase adapter keys
-- Optional filter keys match page semantics (entity type, branch, loanOfficer, actorType, tier, etc.)
+- Optional filter keys match page semantics (entity name/branch/loanOfficer/actor/tier, etc.; avoid legacy ambiguous aliases where possible)
 - `evidence_refs[].widgetId` is from `widget_catalog`
 - For subject-level insights, `target.label` must be exact data label
+- Any key used for dedupe must be explicitly prompted in page guidance so generation and dedupe compare the same semantics
 
 ---
 
@@ -339,15 +349,19 @@ For all pages, ensure prompts/guidance enforce:
 1. Open dashboard page and confirm strip renders
 2. Generate insights succeeds and persists
 3. Insights reference only page-local concepts
-4. Show on dashboard:
+4. Display semantics are correct:
+   - non-tracked insights come from latest generation batch only
+   - tracked insights from this page remain visible across generation/filter changes
+   - generated duplicates of tracked insights are not shown
+5. Show on dashboard:
    - updates period/filter context correctly
    - navigates tab/actor mode as expected
    - scrolls to correct widget after load
-5. Evidence/detail modal shows valid supporting rows and columns
+6. Evidence/detail modal shows valid supporting rows and columns
    - Must open the same full Insight Detail modal used by other dashboard insights (not fallback evidence-only modal)
    - Verify older generated insights (without `detail_data`) still open full detail via `supporting_data` synthesis path
-6. Card chrome and actions (§6.3A): bucket badge/colors match `sentiment`; bookmark, thumbs, deep dive, and remove work from the **headline row** without expanding; dashboard feedback persists separately from Aletheia insight feedback
-7. Duplicate/near-duplicate insights not surfaced together
+7. Card chrome and actions (§6.3A): bucket badge/colors match `sentiment`; bookmark, thumbs, deep dive, and remove work from the **headline row** without expanding; dashboard feedback persists separately from Aletheia insight feedback
+8. Duplicate/near-duplicate insights not surfaced together
 
 ---
 
@@ -357,6 +371,8 @@ For all pages, ensure prompts/guidance enforce:
   - `npm run migrate:tenant -- <tenant-slug>` (or `--all`)
 - For **dashboard insight feedback** (thumbs/tags/comment on strip cards): tenant migration **`098_dashboard_insight_feedback`**
 - For **bookmark/watchlist on dashboard insights** (`source_type: dashboard_insights`): tenant migration **`099_tracked_insights_polymorphic_source_id`** (removes FK that forced `source_insight_id` to exist only in `generated_insights`)
+- For dashboard rows used by Cohi insights category chips/grouping: tenant migration **`098_dashboard_insights_functional_category`**
+- For dashboard-specific curated few-shot examples in management DB: management migration **`028_dashboard_insight_training_examples`**
 - Prompt defaults loaded (or admin overrides present)
 - Verify environment has required LLM credentials/config
 - Validate on dev tenant with real data and multiple period combinations

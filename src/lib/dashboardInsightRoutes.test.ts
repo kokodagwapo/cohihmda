@@ -58,4 +58,17 @@ describe("dashboardInsightRoutes", () => {
   it("getDashboardInsightNavigateState omits filter state for workflow-conversion", () => {
     expect(getDashboardInsightNavigateState("workflow-conversion", { datePeriod: "mtd" })).toEqual({});
   });
+
+  it("getDashboardInsightPath maps top-tiering-comparison to standalone route", () => {
+    expect(getDashboardInsightPath("top-tiering-comparison")).toBe("/top-tiering-comparison");
+  });
+
+  it("getDashboardInsightNavigateState omits filter state for top-tiering-comparison", () => {
+    expect(
+      getDashboardInsightNavigateState("top-tiering-comparison", {
+        datePeriod: "t12",
+        actorType: "branch",
+      })
+    ).toEqual({});
+  });
 });

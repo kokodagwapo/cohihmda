@@ -65,6 +65,20 @@ const DASHBOARD_DEEP_DIVE_BY_PAGE_ID: Record<string, DeepDiveGroupDef> = {
     groupTitle: "Leaderboard",
     widgetIds: ["leaderboard-embed"],
   },
+  "top-tiering-comparison": {
+    sectionType: "top-tiering-comparison",
+    groupTitle: "TopTiering Comparison",
+    widgetIds: [
+      "ttc-total-revenue",
+      "ttc-total-units",
+      "ttc-total-volume",
+      "ttc-avg-bps",
+      "ttc-revenue-chart",
+      "ttc-units-chart",
+      "ttc-bps-chart",
+      "ttc-detail-table",
+    ],
+  },
 };
 
 function pad2(n: number): string {
