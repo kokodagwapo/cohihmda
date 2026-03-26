@@ -52,6 +52,7 @@ import {
   initializeMarketRateCache,
 } from "../../dashboard/marketRateService.js";
 import { getIndustryNews } from "../../newsService.js";
+import { getTenantRevenueExpression } from "../../../utils/scorecard-utils.js";
 
 // ============================================================================
 // Types
@@ -87,6 +88,7 @@ export type OnProgress = (event: {
 // ============================================================================
 
 const MAX_CONCURRENT_INVESTIGATORS = 5;
+
 
 // Per-tenant concurrency lock — prevents duplicate runs
 const activeGenerations = new Map<string, { startedAt: number; batch: string }>();
@@ -155,12 +157,13 @@ export async function runInsightGeneration(
 
     // Gather context
     emit("context", "Gathering schema, metrics, and tenant context...");
-    const [schemaContext, metricDefinitions, marketContext, industryNewsContext, staleLoanStats] = await Promise.all([
+    const [schemaContext, metricDefinitions, marketContext, industryNewsContext, staleLoanStats, revenueFormula] = await Promise.all([
       getSchemaContext(tenantId),
       Promise.resolve(getMetricDefinitions()),
       fetchMarketContext(),
       fetchIndustryNewsContext(),
       fetchStaleLoanStats(tenantPool),
+      getTenantRevenueExpression(tenantPool).catch(() => undefined),
     ]);
     if (marketContext) {
       emit("context", `Market rate context loaded (${marketContext.length} chars)`);
@@ -258,7 +261,8 @@ export async function runInsightGeneration(
                 },
                 marketContext || undefined,
                 industryNewsContext || undefined,
-                categoryKnowledgeContext || undefined
+                categoryKnowledgeContext || undefined,
+                revenueFormula || undefined
               )
             )
           );
@@ -474,7 +478,7 @@ export async function generateMoreForBucketAgent(
     const apiKey = await getOpenAIKey(tenantId);
 
     emit("context", "Gathering context...");
-    const [schemaContext, metricDefinitions, knowledgeContext, marketContext, industryNewsContext, staleLoanStats] =
+    const [schemaContext, metricDefinitions, knowledgeContext, marketContext, industryNewsContext, staleLoanStats, revenueFormula] =
       await Promise.all([
         getSchemaContext(tenantId),
         Promise.resolve(getMetricDefinitions()),
@@ -482,6 +486,7 @@ export async function generateMoreForBucketAgent(
         fetchMarketContext(),
         fetchIndustryNewsContext(),
         fetchStaleLoanStats(tenantPool),
+        getTenantRevenueExpression(tenantPool).catch(() => undefined),
       ]);
 
     const staleLoanContext = buildStaleLoanContext(staleLoanStats);
@@ -528,7 +533,8 @@ export async function generateMoreForBucketAgent(
             () => {},
             marketContext || undefined,
             industryNewsContext || undefined,
-            knowledgeContext || undefined
+            knowledgeContext || undefined,
+            revenueFormula || undefined
           )
         )
       );
@@ -671,7 +677,7 @@ export async function generateInsightsForCategory(
     const apiKey = await getOpenAIKey(tenantId);
 
     emit("context", "Gathering context...");
-    const [schemaContext, metricDefinitions, categoryKnowledgeContext, marketContext, industryNewsContext, staleLoanStats] =
+    const [schemaContext, metricDefinitions, categoryKnowledgeContext, marketContext, industryNewsContext, staleLoanStats, revenueFormula] =
       await Promise.all([
         getSchemaContext(tenantId),
         Promise.resolve(getMetricDefinitions()),
@@ -679,6 +685,7 @@ export async function generateInsightsForCategory(
         fetchMarketContext(),
         fetchIndustryNewsContext(),
         fetchStaleLoanStats(tenantPool),
+        getTenantRevenueExpression(tenantPool).catch(() => undefined),
       ]);
 
     if (categoryKnowledgeContext) {
@@ -727,7 +734,8 @@ export async function generateInsightsForCategory(
             },
             marketContext || undefined,
             industryNewsContext || undefined,
-            categoryKnowledgeContext || undefined
+            categoryKnowledgeContext || undefined,
+            revenueFormula || undefined
           )
         )
       );
