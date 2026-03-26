@@ -60,6 +60,13 @@ export default function MyDashboard() {
   const navigate = useNavigate();
   const initialUrlCanvasIdRef = useRef<string | undefined>(urlCanvasId);
 
+  // Keep in sync when the route param changes (same component instance); hydration only re-runs on tenant change.
+  useEffect(() => {
+    if (urlCanvasId != null && urlCanvasId !== '') {
+      initialUrlCanvasIdRef.current = urlCanvasId;
+    }
+  }, [urlCanvasId]);
+
   const [canvasList, setCanvasList] = useState<CanvasListItem[]>([]);
   const [loadCanvasId, setLoadCanvasId] = useState<string | null>(null);
   const [canvasKey, setCanvasKey] = useState(0);
@@ -151,7 +158,11 @@ export default function MyDashboard() {
         return;
       }
 
-      const urlRequested = initialUrlCanvasId && availableIds.has(initialUrlCanvasId) ? initialUrlCanvasId : null;
+      // Prefer the URL canvas id whenever present — including brand-new canvases that are not
+      // in GET /api/workbench/canvases yet (that list is cached ~30s). Otherwise we fall through to
+      // persisted tabs and re-open the previous deep-dive canvas.
+      const urlRequested =
+        initialUrlCanvasId && initialUrlCanvasId !== 'new' ? initialUrlCanvasId : null;
 
       const nextTabs = [...persistedTabs];
       let nextActive: string | null = null;
@@ -196,7 +207,14 @@ export default function MyDashboard() {
     if (!urlCanvasId || urlCanvasId === 'new') return;
     if (urlCanvasId === activeTabId) return;
     const isAccessible = canvasList.some((c) => c.id === urlCanvasId);
-    if (!isAccessible) return;
+    // Allow opening newly-created canvases immediately, even before sidebar list refreshes.
+    if (!isAccessible) {
+      setOpenTabs((prev) => (prev.includes(urlCanvasId) ? prev : [...prev, urlCanvasId]));
+      setActiveTabId(urlCanvasId);
+      setLoadCanvasId(urlCanvasId);
+      void fetchCanvases();
+      return;
+    }
     setOpenTabs((prev) => (prev.includes(urlCanvasId) ? prev : [...prev, urlCanvasId]));
     setActiveTabId(urlCanvasId);
     // Only trigger a load if this is genuinely a different canvas being opened,

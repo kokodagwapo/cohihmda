@@ -928,7 +928,17 @@ const CompanyScorecard = () => {
               onClearGenerateError={() => setGenerateError(null)}
               onShowInsight={handleShowInsight}
               onGenerate={handleGenerateInsights}
+              onRefreshInsights={refreshDashboardInsights}
               showGenerateButton
+              showFeedback
+              onSubmitFeedback={async (insightId, rating, tags, comment) => {
+                try {
+                  await api.submitDashboardInsightFeedback(insightId, rating, tags, comment, selectedTenantId);
+                  return true;
+                } catch {
+                  return false;
+                }
+              }}
               dateFilter="ytd"
               selectedTenantId={selectedTenantId}
             />

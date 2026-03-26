@@ -217,11 +217,51 @@ Render strip in the page layout with:
 - `loading`, `generating`, `generateError`
 - `onGenerate`
 - `onShowInsight`
-- optional feedback props where used
+- **`showFeedback` + `onSubmitFeedback`** when the page should expose thumbs/tags/comment (see §6.3A); wire handlers to **`GET/POST /api/dashboard-insights/:id/feedback`** (dashboard-specific storage, not `generated_insights` feedback)
+- **`onRefreshInsights`** after admin delete or other mutations so the strip stays in sync
 
 Spacing/layout:
 
 - Keep visual rhythm with dashboard sections (strip spacing before KPI/data sections)
+
+### 6.3A Insight cards: bucket styling and headline-row actions (current implementation)
+
+Each insight is rendered by `InsightCard` inside `DashboardInsightsStrip`. Behavior matches the **Aletheia-style** criticality buckets and keeps **primary actions on the headline row** so users do not have to expand the card to track, rate, deep-dive, or remove.
+
+#### Bucket colors and labels (maps stored `sentiment`)
+
+The card uses `insight.sentiment` to drive **left accent strip**, **border**, **gradient icon tile**, and a **badge label** (bright styling, not muted paste):
+
+| `sentiment` | Badge label | Role |
+| --- | --- | --- |
+| `critical` | Immediate Action Required | Highest urgency (rose / red family) |
+| `warning` | Monitor Closely | Elevated attention (amber / orange) |
+| `positive` | Strategic Review | Positive / opportunity framing (blue / indigo) |
+| `neutral` | Informational | Default / low urgency (slate) |
+
+A secondary **“Dashboard Insight”** chip appears next to the bucket badge for context.
+
+#### Headline row (always visible when `insight.id` is present)
+
+These controls use **`stopPropagation`** so they do not toggle expand/collapse:
+
+1. **Bookmark (track)** — Toggles the user watchlist via **`POST /api/insights/tracked`** (pin) and **`DELETE /api/insights/tracked/:id`** (unpin). The body uses **`source_type: "dashboard_insights"`** and **`source_insight_id`** = `dashboard_generated_insights.id`. Tracked rows are resolved on load by filtering tracked insights where `source_type === "dashboard_insights"`.  
+   - **DB:** Tenant migration **`099_tracked_insights_polymorphic_source_id`** drops the old FK from `source_insight_id` to `generated_insights` so dashboard IDs are valid.
+2. **Feedback** — Shown when **`showFeedback`** is true. Thumbs open a popover for optional tags + comment, then submit via **`onSubmitFeedback`** or the client’s **`submitDashboardInsightFeedback`** → **`POST /api/dashboard-insights/:id/feedback`**. This is **separate** from Aletheia `generated_insights` feedback tables.
+3. **Deep dive (Workbench)** — Shown for **platform staff** (`useAuth().isPlatformStaff()`). Calls **`POST /api/workbench/canvases/from-dashboard-insight`** then navigates to **`/my-dashboard/:canvasId`** (full insight dashboard widget group + `savedFilters` from `filter_context`).
+4. **Remove insight** — Same admin gate; **`DELETE /api/dashboard-insights/:id`**, then **`onRefreshInsights`**.
+
+#### Expanded section
+
+- **ETM / understory** block (“Why this matters”) when expanded.
+- **Secondary actions** (below headline): **Show on dashboard** (`onShowInsight`), **View evidence** (detail/evidence modals), **Less**.
+
+#### Implementation reference
+
+- UI: `src/components/dashboard/DashboardInsightsStrip.tsx` (`BUCKET_STYLE`, `InsightCard`).
+- Feedback API: `server/src/routes/dashboardInsights.ts`, migration **`098_dashboard_insight_feedback.sql`**.
+- Watchlist FK: **`099_tracked_insights_polymorphic_source_id.sql`**.
+- Deep dive builder: `server/src/services/workbench/fromDashboardInsightCanvas.ts`.
 
 ### 6.4 Implement "Show on dashboard"
 
@@ -306,7 +346,8 @@ For all pages, ensure prompts/guidance enforce:
 5. Evidence/detail modal shows valid supporting rows and columns
    - Must open the same full Insight Detail modal used by other dashboard insights (not fallback evidence-only modal)
    - Verify older generated insights (without `detail_data`) still open full detail via `supporting_data` synthesis path
-6. Duplicate/near-duplicate insights not surfaced together
+6. Card chrome and actions (§6.3A): bucket badge/colors match `sentiment`; bookmark, thumbs, deep dive, and remove work from the **headline row** without expanding; dashboard feedback persists separately from Aletheia insight feedback
+7. Duplicate/near-duplicate insights not surfaced together
 
 ---
 
@@ -314,6 +355,8 @@ For all pages, ensure prompts/guidance enforce:
 
 - Tenant migration applied for dashboard insights table(s):
   - `npm run migrate:tenant -- <tenant-slug>` (or `--all`)
+- For **dashboard insight feedback** (thumbs/tags/comment on strip cards): tenant migration **`098_dashboard_insight_feedback`**
+- For **bookmark/watchlist on dashboard insights** (`source_type: dashboard_insights`): tenant migration **`099_tracked_insights_polymorphic_source_id`** (removes FK that forced `source_insight_id` to exist only in `generated_insights`)
 - Prompt defaults loaded (or admin overrides present)
 - Verify environment has required LLM credentials/config
 - Validate on dev tenant with real data and multiple period combinations
@@ -330,7 +373,7 @@ Use this task list when executing:
 4. [ ] Pipeline updated for new widget/dimension semantics
 5. [ ] Hydrator updated for detail/evidence parity
 6. [ ] Shared types updated (server + frontend)
-7. [ ] Frontend strip integrated on page
+7. [ ] Frontend strip integrated on page (including §6.3A: `showFeedback` / `onSubmitFeedback` / `onRefreshInsights` where required)
 8. [ ] Generate handler implemented
 9. [ ] Show-on-dashboard filter sync + deferred scroll implemented
 10. [ ] Route mapping updates/tests completed
@@ -348,7 +391,7 @@ A new dashboard insights rollout is done only when all criteria are true:
 2. Generator output for the page uses only page-local widgets/dimensions.
 3. `filter_context` contract is populated correctly for page/subject/tier insights.
 4. Evidence refs resolve to valid widget ids and exact target labels.
-5. Dashboard strip renders, loads stored insights, and generates on demand.
+5. Dashboard strip renders, loads stored insights, and generates on demand; cards use bucket styling and headline-row actions per §6.3A where enabled.
 6. "Show on dashboard" restores correct filter/tab/entity context.
 7. Scroll/highlight targets are stable and occur at correct timing.
 8. Detail/evidence modal rows and columns render with expected metrics.

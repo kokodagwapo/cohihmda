@@ -105,6 +105,12 @@ const COLUMN_DEFS: Record<string, { label: string; format: DashboardDetailSnapsh
   topPerformerName: { label: "Top performer", format: "text" },
   topPerformerUnits: { label: "Top performer units", format: "number" },
   topPerformerVolume: { label: "Top performer volume", format: "currency" },
+  segmentLabel: { label: "Segment", format: "text" },
+  leftCount: { label: "From milestone files", format: "number" },
+  rightCount: { label: "To milestone files", format: "number" },
+  conversionPercent: { label: "Conversion %", format: "percent" },
+  avgTurnTimeDays: { label: "Avg turn (days)", format: "days" },
+  workflowBrief: { label: "All segments (conv % / avg days)", format: "text" },
   name: { label: "Name", format: "text" },
   rank: { label: "Rank", format: "number" },
 
@@ -322,6 +328,47 @@ function buildCompanyScorecardSubjectRows(
   return rows.length > 0 ? rows : null;
 }
 
+type WorkflowConversionPeriodHydrate = {
+  periodLabel?: string;
+  summary?: {
+    defaultSegments?: Array<{
+      label?: string;
+      leftCount?: number;
+      rightCount?: number;
+      conversionPercent?: number | null;
+      avgTurnTimeDays?: number | null;
+    }>;
+  };
+};
+
+function buildWorkflowConversionSegmentRows(
+  context: DashboardPageContext,
+  segmentLabel: string
+): Array<Record<string, unknown>> | null {
+  const byPeriod = context.data?.by_time_period as Record<string, WorkflowConversionPeriodHydrate> | undefined;
+  if (!byPeriod || typeof byPeriod !== "object") return null;
+
+  const normalized = segmentLabel.trim();
+  const rows: Array<Record<string, unknown>> = [];
+
+  for (const [period, data] of Object.entries(byPeriod)) {
+    const segs = data.summary?.defaultSegments;
+    if (!Array.isArray(segs)) continue;
+    const seg = segs.find((s) => s.label != null && String(s.label).trim() === normalized);
+    if (!seg) continue;
+    rows.push({
+      period,
+      periodLabel: data.periodLabel ?? period,
+      segmentLabel: seg.label,
+      leftCount: seg.leftCount ?? null,
+      rightCount: seg.rightCount ?? null,
+      conversionPercent: seg.conversionPercent ?? null,
+      avgTurnTimeDays: seg.avgTurnTimeDays ?? null,
+    });
+  }
+  return rows.length > 0 ? rows : null;
+}
+
 const AGGREGATE_COLUMN_ORDER = [
   "period", "periodLabel", "averagePullThrough", "totalUnits", "totalVolume",
   "topPerformerName", "topPerformerUnits", "topPerformerVolume",
@@ -345,6 +392,16 @@ const SUBJECT_COMPLEXITY_COLUMN_ORDER = [
   "units",
   "timeInMotionDays",
 ];
+const WORKFLOW_SEGMENT_SUBJECT_COLUMN_ORDER = [
+  "period",
+  "periodLabel",
+  "segmentLabel",
+  "leftCount",
+  "rightCount",
+  "conversionPercent",
+  "avgTurnTimeDays",
+];
+const WORKFLOW_AGG_COLUMN_ORDER = ["period", "periodLabel", "workflowBrief"];
 
 const CS_AGG_COLUMN_ORDER = [
   "period",
@@ -436,6 +493,8 @@ function buildSnapshotFromRows(
     | "leaderboard"
     | "loan-complexity-aggregate"
     | "loan-complexity-subject"
+    | "workflow-conversion-aggregate"
+    | "workflow-conversion-segment"
     | "company-scorecard-aggregate"
     | "company-scorecard-subject"
     | "credit-risk-aggregate"
@@ -450,16 +509,20 @@ function buildSnapshotFromRows(
       ? SUBJECT_COMPLEXITY_COLUMN_ORDER
       : variant === "loan-complexity-aggregate"
         ? AGGREGATE_COMPLEXITY_COLUMN_ORDER
-        : variant === "company-scorecard-subject"
-          ? CS_SUBJECT_COLUMN_ORDER
-          : variant === "company-scorecard-aggregate"
-            ? CS_AGG_COLUMN_ORDER
-            : variant === "credit-risk-aggregate"
-              ? CREDIT_RISK_AGG_COLUMN_ORDER
-              : variant === "credit-risk-cohort-trend" || variant === "credit-risk-cohort-kpis"
-                ? CREDIT_RISK_COHORT_TREND_COLUMN_ORDER
-                : variant === "credit-risk-cohort-detail"
-                  ? CREDIT_RISK_COHORT_DETAIL_COLUMN_ORDER
+        : variant === "workflow-conversion-segment"
+          ? WORKFLOW_SEGMENT_SUBJECT_COLUMN_ORDER
+          : variant === "workflow-conversion-aggregate"
+            ? WORKFLOW_AGG_COLUMN_ORDER
+          : variant === "company-scorecard-subject"
+            ? CS_SUBJECT_COLUMN_ORDER
+            : variant === "company-scorecard-aggregate"
+              ? CS_AGG_COLUMN_ORDER
+              : variant === "credit-risk-aggregate"
+                ? CREDIT_RISK_AGG_COLUMN_ORDER
+                : variant === "credit-risk-cohort-trend" || variant === "credit-risk-cohort-kpis"
+                  ? CREDIT_RISK_COHORT_TREND_COLUMN_ORDER
+                  : variant === "credit-risk-cohort-detail"
+                    ? CREDIT_RISK_COHORT_DETAIL_COLUMN_ORDER
         : isSubjectRows
           ? SUBJECT_COLUMN_ORDER
           : AGGREGATE_COLUMN_ORDER;
@@ -543,6 +606,23 @@ function buildSnapshotFromRows(
         label: "Units",
         value: Number(first.totalUnits),
         format: "number",
+        color: "blue",
+      });
+  } else if (variant === "workflow-conversion-segment" && isSubjectRows) {
+    if (first?.conversionPercent != null)
+      summaryDefs.push({
+        key: "conversionPercent",
+        label: "Conversion %",
+        value: Number(first.conversionPercent),
+        format: "percent",
+        color: "blue",
+      });
+    if (first?.avgTurnTimeDays != null)
+      summaryDefs.push({
+        key: "avgTurnTimeDays",
+        label: "Avg turn (days)",
+        value: Number(first.avgTurnTimeDays),
+        format: "days",
         color: "blue",
       });
   } else if (variant === "credit-risk-aggregate") {
@@ -698,15 +778,17 @@ function buildSnapshotFromRows(
   const defaultTitle =
     variant === "loan-complexity-aggregate" || variant === "loan-complexity-subject"
       ? "Loan complexity by period"
-      : variant === "company-scorecard-aggregate" || variant === "company-scorecard-subject"
-        ? "Company scorecard tier evolution"
-        : variant === "credit-risk-aggregate"
-          ? "Credit risk trend by period"
-        : variant === "credit-risk-cohort-detail"
-          ? "Credit risk cohort loan details"
-          : variant === "credit-risk-cohort-trend" || variant === "credit-risk-cohort-kpis"
-            ? "Credit risk cohort evidence"
-        : "Leaderboard by period";
+      : variant === "workflow-conversion-segment" || variant === "workflow-conversion-aggregate"
+        ? "Workflow conversion by period"
+        : variant === "company-scorecard-aggregate" || variant === "company-scorecard-subject"
+          ? "Company scorecard tier evolution"
+          : variant === "credit-risk-aggregate"
+            ? "Credit risk trend by period"
+            : variant === "credit-risk-cohort-detail"
+              ? "Credit risk cohort loan details"
+              : variant === "credit-risk-cohort-trend" || variant === "credit-risk-cohort-kpis"
+                ? "Credit risk cohort evidence"
+                : "Leaderboard by period";
 
   return {
     title: insight.headline || defaultTitle,
@@ -755,6 +837,11 @@ export function buildDetailFromSupportingData(
       const cxRows = buildLoanComplexitySubjectRows(context, subjectName, pivotKey);
       if (cxRows && cxRows.length > 0) {
         return buildSnapshotFromRows(insight, cxRows, options, true, "loan-complexity-subject");
+      }
+    } else if (context.pageId === "workflow-conversion") {
+      const wfRows = buildWorkflowConversionSegmentRows(context, subjectName);
+      if (wfRows && wfRows.length > 0) {
+        return buildSnapshotFromRows(insight, wfRows, options, true, "workflow-conversion-segment");
       }
     } else {
       const subjectRows = buildSubjectRows(context, subjectName);
@@ -851,10 +938,15 @@ export function buildDetailFromSupportingData(
     if (row.waDti != null) out.waDti = row.waDti;
     if (row.conventionalQualifiedPercent != null) out.conventionalQualifiedPercent = row.conventionalQualifiedPercent;
     if (row.governmentQualifiedPercent != null) out.governmentQualifiedPercent = row.governmentQualifiedPercent;
+    if (row.workflowBrief != null) out.workflowBrief = row.workflowBrief;
     return out;
   });
 
   const aggVariant =
-    options?.context?.pageId === "loan-complexity" ? "loan-complexity-aggregate" : "leaderboard";
+    options?.context?.pageId === "loan-complexity"
+      ? "loan-complexity-aggregate"
+      : options?.context?.pageId === "workflow-conversion"
+        ? "workflow-conversion-aggregate"
+        : "leaderboard";
   return buildSnapshotFromRows(insight, rows, options, false, aggVariant);
 }

@@ -9,6 +9,7 @@ export type { RunPipelineResult, GeneratorCandidate } from "./pipeline.js";
 export {
   saveDashboardInsights,
   loadDashboardInsights,
+  loadTrackedDashboardInsightsForPage,
   loadEscalatedDashboardInsights,
 } from "./storage.js";
 export type {

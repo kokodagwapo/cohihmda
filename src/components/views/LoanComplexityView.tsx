@@ -396,13 +396,13 @@ export function LoanComplexityView({
   }, []);
 
   const handleDashboardInsightFeedback = useCallback(
-    async (insightId: number, rating: 1 | -1) => {
-      const tenantParam = selectedTenantId ? `?tenant_id=${encodeURIComponent(selectedTenantId)}` : "";
-      await api.request(`/api/dashboard-insights/feedback${tenantParam}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ insightId, rating }),
-      });
+    async (insightId: number, rating: 1 | -1, tags?: string[], comment?: string) => {
+      try {
+        await api.submitDashboardInsightFeedback(insightId, rating, tags, comment, selectedTenantId);
+        return true;
+      } catch {
+        return false;
+      }
     },
     [selectedTenantId]
   );
@@ -725,6 +725,7 @@ export function LoanComplexityView({
         onClearGenerateError={() => setGenerateError(null)}
         onShowInsight={handleShowInsight}
         onGenerate={handleGenerateInsights}
+        onRefreshInsights={refreshDashboardInsights}
         showGenerateButton
         showFeedback
         onSubmitFeedback={handleDashboardInsightFeedback}

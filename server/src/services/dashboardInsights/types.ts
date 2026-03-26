@@ -105,6 +105,8 @@ export interface SupportingDataByPeriodRow {
   deniedPercent?: number;
   withdrawnPercent?: number;
   activePercent?: number;
+  /** Workflow conversion: compact per-period summary of all default segments */
+  workflowBrief?: string;
   [key: string]: unknown;
 }
 

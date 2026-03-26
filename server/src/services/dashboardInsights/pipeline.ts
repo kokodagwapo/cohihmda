@@ -11,10 +11,12 @@
 
 import type { Pool } from "pg";
 import { randomUUID } from "crypto";
+import { pool as managementPool } from "../../config/managementDatabase.js";
 import { getPromptConfig } from "../promptConfigService.js";
 import { callLLM, getOpenAIKey } from "../research/tools.js";
 import type { LLMMessage } from "../research/tools.js";
 import { buildDetailFromSupportingData } from "./dashboardInsightDetailHydrator.js";
+import { deduplicateByFilterContextAndHeadline } from "./dashboardInsightDedup.js";
 import { saveDashboardInsights } from "./storage.js";
 import { buildCreditRiskSupportingDataForInsight } from "./creditRiskEvidence.js";
 import type {
@@ -57,6 +59,53 @@ interface JudgeEvaluation {
   overall_score: number;
   keep: boolean;
   issues?: string[];
+}
+
+async function fetchDashboardTrainingExamples(
+  promptId: string,
+  pageId: string
+): Promise<{
+  positive: Array<{ headline: string; admin_note?: string }>;
+  negative: Array<{ headline: string; admin_note?: string }>;
+}> {
+  try {
+    if (!managementPool) return { positive: [], negative: [] };
+
+    const tableCheck = await managementPool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'dashboard_insight_training_examples'
+      ) AS exists
+    `);
+    if (!tableCheck.rows[0]?.exists) return { positive: [], negative: [] };
+
+    const result = await managementPool.query(
+      `SELECT example_type, headline, admin_note
+       FROM dashboard_insight_training_examples
+       WHERE prompt_id = $1
+         AND is_active = true
+         AND (page_id IS NULL OR page_id = $2)
+       ORDER BY
+         CASE WHEN page_id = $2 THEN 0 ELSE 1 END,
+         created_at DESC`,
+      [promptId, pageId]
+    );
+
+    const positive = result.rows
+      .filter((r: any) => r.example_type === "positive")
+      .slice(0, 3)
+      .map((r: any) => ({ headline: r.headline, admin_note: r.admin_note ?? undefined }));
+
+    const negative = result.rows
+      .filter((r: any) => r.example_type === "negative")
+      .slice(0, 2)
+      .map((r: any) => ({ headline: r.headline, admin_note: r.admin_note ?? undefined }));
+
+    return { positive, negative };
+  } catch (error) {
+    console.warn("[DashboardPipeline] Failed to fetch dashboard training examples:", error);
+    return { positive: [], negative: [] };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -453,6 +502,22 @@ type CreditRiskPeriodData = {
   byApplicationType?: Record<string, CreditRiskPeriodApplicationData>;
 };
 
+type WorkflowConversionSegmentRow = {
+  label?: string;
+  leftCount?: number;
+  rightCount?: number;
+  conversionPercent?: number | null;
+  avgTurnTimeDays?: number | null;
+};
+
+type WorkflowConversionPeriodData = {
+  periodLabel?: string;
+  dateRange?: string;
+  summary?: {
+    defaultSegments?: WorkflowConversionSegmentRow[];
+  };
+};
+
 /**
  * Enrich evidence refs with display values from page context (e.g. leaderboard KPIs and aggregate metrics).
  */
@@ -463,6 +528,7 @@ function enrichEvidenceRefsWithValues(
   const byPeriod = context.data?.by_time_period as
     | Record<string, LoanComplexityPeriodData>
     | Record<string, CompanyScorecardPeriodData>
+    | Record<string, WorkflowConversionPeriodData>
     | undefined;
 
   if (!byPeriod || typeof byPeriod !== "object") return refs;
@@ -479,6 +545,26 @@ function enrichEvidenceRefsWithValues(
   return refs.map((ref) => {
     const label = ref.target?.label?.trim();
     const parts: string[] = [];
+
+    // Workflow conversion — milestone cards (default funnel segments)
+    if (context.pageId === "workflow-conversion" && ref.widgetId.startsWith("workflow-conversion-segment-")) {
+      const idx = parseInt(ref.widgetId.replace("workflow-conversion-segment-", ""), 10);
+      if (!Number.isNaN(idx)) {
+        for (const [period, data] of Object.entries(byPeriod)) {
+          const segs = (data as WorkflowConversionPeriodData)?.summary?.defaultSegments;
+          if (!Array.isArray(segs) || !segs[idx]) continue;
+          const s = segs[idx];
+          if (label && s.label && label !== s.label.trim()) continue;
+          const conv = s.conversionPercent != null ? `${s.conversionPercent}% conv` : "conv n/a";
+          const tt = s.avgTurnTimeDays != null ? `${s.avgTurnTimeDays}d turn` : "turn n/a";
+          const counts =
+            s.leftCount != null && s.rightCount != null ? `${s.leftCount}→${s.rightCount} files` : "counts n/a";
+          parts.push(`${period}: ${counts}, ${conv}, ${tt}`);
+        }
+      }
+      const value = parts.length > 0 ? parts.join(" · ") : undefined;
+      return value ? { ...ref, value } : ref;
+    }
 
     // Loan complexity — bar chart (mean complexity by loan officer group)
     if (ref.widgetId === "loan-complexity-bar-chart") {
@@ -712,6 +798,7 @@ function getSubjectKey(
     if (dim === "company_scorecard_branch") return `company_scorecard_branch:${label}`;
     if (dim === "company_scorecard_loan_officer")
       return `company_scorecard_loan_officer:${label}`;
+    if (dim === "workflow_segment") return `workflow_segment:${label}`;
   }
   const ctx = insight.filter_context as Record<string, unknown> | undefined;
   if (ctx?.leaderName != null && typeof ctx.leaderName === "string")
@@ -729,6 +816,10 @@ function getSubjectKey(
   if (ctx?.applicationType != null && typeof ctx.applicationType === "string")
     return `credit_risk_application_type:${String(ctx.applicationType).trim()}`;
 
+  if (context.pageId === "workflow-conversion" && ctx?.segmentLabel != null && typeof ctx.segmentLabel === "string") {
+    return `workflow_segment:${String(ctx.segmentLabel).trim()}`;
+  }
+
   return null;
 }
 
@@ -740,8 +831,8 @@ function getSubjectKey(
 function deduplicateBySubject(
   insights: Array<DashboardInsight & { judge_score?: number }>,
   context: DashboardPageContext
-): DashboardInsight[] {
-  const noSubject: DashboardInsight[] = [];
+): Array<DashboardInsight & { judge_score?: number }> {
+  const noSubject: Array<DashboardInsight & { judge_score?: number }> = [];
   const byKey = new Map<string, DashboardInsight & { judge_score?: number }>();
 
   for (const insight of insights) {
@@ -757,16 +848,17 @@ function deduplicateBySubject(
     }
   }
 
-  const deduped: DashboardInsight[] = [];
-  for (const ins of noSubject) {
-    const { judge_score: _s, ...rest } = ins as DashboardInsight & { judge_score?: number };
-    deduped.push(rest);
-  }
-  for (const ins of byKey.values()) {
-    const { judge_score: _s, ...rest } = ins as DashboardInsight & { judge_score?: number };
-    deduped.push(rest);
-  }
+  const deduped: Array<DashboardInsight & { judge_score?: number }> = [...noSubject, ...byKey.values()];
   return deduped;
+}
+
+function stripJudgeScoreFromInsights(
+  insights: Array<DashboardInsight & { judge_score?: number }>
+): DashboardInsight[] {
+  return insights.map((ins) => {
+    const { judge_score: _s, ...rest } = ins;
+    return rest as DashboardInsight;
+  });
 }
 
 /**
@@ -785,6 +877,7 @@ function getSubjectNameFromInsight(
     if (d === "leader" || d === "complexity_loan_officer") return primaryRef.target.label.trim();
     if (d === "company_scorecard_loan_officer") return primaryRef.target.label.trim();
     if (d === "company_scorecard_branch") return primaryRef.target.label.trim();
+    if (d === "workflow_segment") return primaryRef.target.label.trim();
     if (d?.startsWith("complexity_")) return primaryRef.target.label.trim();
   }
   // Any evidence_ref with dimension leader and target
@@ -795,6 +888,7 @@ function getSubjectNameFromInsight(
       if (d === "leader" || d === "complexity_loan_officer") return ref.target.label.trim();
       if (d === "company_scorecard_loan_officer") return ref.target.label.trim();
       if (d === "company_scorecard_branch") return ref.target.label.trim();
+      if (d === "workflow_segment") return ref.target.label.trim();
       if (d?.startsWith("complexity_")) return ref.target.label.trim();
     }
   }
@@ -805,6 +899,9 @@ function getSubjectNameFromInsight(
   if (ctx?.branch != null && typeof ctx.branch === "string") return ctx.branch.trim();
   if (ctx?.loanOfficer != null && typeof ctx.loanOfficer === "string") return ctx.loanOfficer.trim();
   if (ctx?.loan_officer != null && typeof ctx.loan_officer === "string") return ctx.loan_officer.trim();
+  if (context.pageId === "workflow-conversion" && ctx?.segmentLabel != null && typeof ctx.segmentLabel === "string") {
+    return ctx.segmentLabel.trim();
+  }
   return undefined;
 }
 
@@ -815,6 +912,7 @@ function buildSupportingDataFromContext(context: DashboardPageContext): Supporti
   const byPeriod = context.data?.by_time_period as
     | Record<string, LoanComplexityPeriodData>
     | Record<string, CompanyScorecardPeriodData>
+    | Record<string, WorkflowConversionPeriodData>
     | undefined;
 
   if (!byPeriod || typeof byPeriod !== "object") return undefined;
@@ -853,6 +951,28 @@ function buildSupportingDataFromContext(context: DashboardPageContext): Supporti
       if (s?.deniedUnits != null) row.deniedUnits = Number(s.deniedUnits);
       if (s?.deniedUnitsPct != null) row.deniedUnitsPct = Number(s.deniedUnitsPct);
       byPeriodRows.push(row);
+      continue;
+    }
+
+    if (context.pageId === "workflow-conversion") {
+      const wfd = data as WorkflowConversionPeriodData;
+      const segs = wfd.summary?.defaultSegments;
+      const brief =
+        Array.isArray(segs) && segs.length > 0
+          ? segs
+              .map((s) => {
+                const lab = s.label ?? "segment";
+                const c = s.conversionPercent != null ? `${s.conversionPercent}%` : "—";
+                const t = s.avgTurnTimeDays != null ? `${s.avgTurnTimeDays}d` : "—";
+                return `${lab}: ${c}, ${t}`;
+              })
+              .join(" | ")
+          : "";
+      byPeriodRows.push({
+        period,
+        periodLabel: wfd.periodLabel ?? period,
+        workflowBrief: brief || undefined,
+      });
       continue;
     }
 
@@ -923,9 +1043,32 @@ export async function runDashboardInsightsPipeline(
 
   // Pass 1: Generator
   const genConfig = await getPromptConfig("dashboard_insights.generator");
+  let generatorSystemPrompt = genConfig.system_prompt;
+  const trainingExamples = await fetchDashboardTrainingExamples(
+    "dashboard_insights.generator",
+    context.pageId
+  );
+  if (trainingExamples.positive.length > 0 || trainingExamples.negative.length > 0) {
+    let trainingSection = "\n\nLEARN FROM THESE EXAMPLES:";
+    if (trainingExamples.positive.length > 0) {
+      trainingSection += "\nGOOD (generate more like these):";
+      for (const ex of trainingExamples.positive) {
+        trainingSection += `\n- "${ex.headline}"`;
+        if (ex.admin_note) trainingSection += ` — ${ex.admin_note}`;
+      }
+    }
+    if (trainingExamples.negative.length > 0) {
+      trainingSection += "\nBAD (avoid these patterns):";
+      for (const ex of trainingExamples.negative) {
+        trainingSection += `\n- "${ex.headline}"`;
+        if (ex.admin_note) trainingSection += ` — ${ex.admin_note}`;
+      }
+    }
+    generatorSystemPrompt += trainingSection;
+  }
   const genUser = buildGeneratorUserMessage(context);
   const genMessages: LLMMessage[] = [
-    { role: "system", content: genConfig.system_prompt },
+    { role: "system", content: generatorSystemPrompt },
     { role: "user", content: genUser },
   ];
   const genRaw = await callLLM(genMessages, apiKey, {
@@ -1006,7 +1149,19 @@ export async function runDashboardInsightsPipeline(
   }
 
   // Deduplicate by subject (loan officer or branch): keep only the highest-scoring insight per subject
-  const insights = deduplicateBySubject(curatorInsights, context);
+  let insights = deduplicateBySubject(curatorInsights, context);
+
+  // -------------------------------------------------------------------------
+  // Filter context + headline deduplication (programmatic)
+  // General: Pass 1 compares only keys listed for this pageId; a key applies only
+  // when BOTH insights have a present value, then normalized values must match.
+  // Pass 2 merges remaining pairs with high token-set Jaccard on headlines.
+  // Dashboard-specific key lists live in dashboardInsightDedup.ts (DEDUP_FILTER_KEYS).
+  // judge_score is preserved through subject + filter dedup so the winning row is highest scored.
+  // -------------------------------------------------------------------------
+  insights = deduplicateByFilterContextAndHeadline(insights, context.pageId);
+
+  insights = stripJudgeScoreFromInsights(insights);
 
   // Pass 4: Evidence Agent (refine evidence_refs per insight)
   const evidenceConfig = await getPromptConfig("dashboard_insights.evidence_agent");
