@@ -882,6 +882,17 @@ async function persistAgentInsights(
     const ph = Array.from({ length: totalParams }, () => `$${paramIdx++}`);
     placeholders.push(`(${ph.join(", ")})`);
 
+    // Pack ETM fields into the evidence JSONB (same pattern as legacy pipeline)
+    const evidenceWithEtm = {
+      ...(ins.evidence || {}),
+      ...(ins.what_changed ? { what_changed: ins.what_changed } : {}),
+      ...(ins.why ? { why: ins.why } : {}),
+      ...(ins.business_impact ? { business_impact: ins.business_impact } : {}),
+      ...(ins.risk_if_ignored ? { risk_if_ignored: ins.risk_if_ignored } : {}),
+      ...(ins.recommended_action ? { recommended_action: ins.recommended_action } : {}),
+      ...(ins.owner ? { owner: ins.owner } : {}),
+    };
+
     values.push(
       ins.bucket,                                    // bucket
       ins.priority,                                  // priority
@@ -891,7 +902,7 @@ async function persistAgentInsights(
       ins.source,                                    // source
       ins.severity_score,                            // severity_score
       JSON.stringify(ins.impact || {}),              // impact
-      JSON.stringify(ins.evidence || {}),            // evidence
+      JSON.stringify(evidenceWithEtm),               // evidence (with ETM fields packed in)
       false,                                         // for_podcast
       "ytd",                                         // date_filter (agent insights are timeframe-agnostic)
       null,                                          // channel_group
@@ -1001,6 +1012,16 @@ async function appendAgentInsights(
     const ph = Array.from({ length: totalParams }, () => `$${paramIdx++}`);
     placeholders.push(`(${ph.join(", ")})`);
 
+    const evidenceWithEtm = {
+      ...(ins.evidence || {}),
+      ...(ins.what_changed ? { what_changed: ins.what_changed } : {}),
+      ...(ins.why ? { why: ins.why } : {}),
+      ...(ins.business_impact ? { business_impact: ins.business_impact } : {}),
+      ...(ins.risk_if_ignored ? { risk_if_ignored: ins.risk_if_ignored } : {}),
+      ...(ins.recommended_action ? { recommended_action: ins.recommended_action } : {}),
+      ...(ins.owner ? { owner: ins.owner } : {}),
+    };
+
     values.push(
       ins.bucket,
       ins.priority,
@@ -1010,7 +1031,7 @@ async function appendAgentInsights(
       ins.source,
       ins.severity_score,
       JSON.stringify(ins.impact || {}),
-      JSON.stringify(ins.evidence || {}),
+      JSON.stringify(evidenceWithEtm),
       false,
       "ytd",
       null,

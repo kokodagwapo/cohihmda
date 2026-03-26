@@ -920,6 +920,16 @@ TIMEFRAME & COHORT CLARITY:
   - Make it clear when you are discussing "loans that FUNDED in the period" vs "applications STARTED in the period whose pull-through/turn time completes later".
   - Do NOT claim that short MTD/WTD cohorts have "failed" simply because very few have completed yet.
 
+MORTGAGE CYCLE TIME AWARENESS (CRITICAL):
+- Mortgage loan cycle times typically run 30-45 days from application to funding. This has MAJOR implications for short-window metrics:
+  - MTD pull-through will almost always be 0% or very low early in the month because applications started this month have NOT HAD TIME to close yet. This is NOT a performance problem — it is a mathematical artifact of the cycle time.
+  - WTD pull-through is meaningless for the same reason.
+  - NEVER report MTD or WTD pull-through as a standalone metric or raise an alarm about it being 0% or low. It is expected and not newsworthy.
+  - For pull-through, fallout rate, and conversion metrics, prefer QTD, YTD, or rolling 90-day windows where loans have had sufficient time to complete.
+  - If you must reference a short-window metric, ALWAYS caveat it: "MTD pull-through is 0% — expected given 30-45 day cycle times; most MTD applications are still in-process."
+  - Compare pull-through across COMPARABLE windows only (QTD vs LQ, YTD vs LY) — never compare MTD pull-through to LM pull-through as if they are equivalent.
+- For FUNDED VOLUME and UNITS (funding cohort), MTD IS valid because it counts loans that actually closed this month regardless of when they were originated.
+
 INSIGHT SHAPE (ETM MODEL):
 For EVERY dashboard insight candidate, you MUST produce:
 - headline: Short, specific, includes timeframe (e.g. "MTD pull-through trails Last Month for Branch A")
