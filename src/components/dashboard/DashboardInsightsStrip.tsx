@@ -157,26 +157,34 @@ export function DashboardInsightsStrip({
     fetchTrackedMap().then(setTrackedMap).catch(() => {});
   }, [fetchTrackedMap]);
 
+  // While generating, keep only tracked insights visible.
+  const trackedInsights = useMemo(
+    () => insights.filter((ins) => ins.id != null && trackedMap.has(ins.id)),
+    [insights, trackedMap]
+  );
+  const visibleInsights = generating ? trackedInsights : insights;
+  const showLoadingOnly = loading || (generating && visibleInsights.length === 0);
+
   // Auto-rotate through insights every 8 seconds when collapsed and not busy
   useEffect(() => {
-    if (isExpanded || isBusy || insights.length <= 1) return;
+    if (isExpanded || isBusy || visibleInsights.length <= 1) return;
     const timer = setInterval(() => {
-      setActiveIdx((prev) => (prev + 1) % insights.length);
+      setActiveIdx((prev) => (prev + 1) % visibleInsights.length);
     }, 8000);
     return () => clearInterval(timer);
-  }, [isExpanded, isBusy, insights.length]);
+  }, [isExpanded, isBusy, visibleInsights.length]);
 
   // Reset active index when insights change
   useEffect(() => {
     setActiveIdx(0);
-  }, [insights.length]);
+  }, [visibleInsights.length]);
 
   const handleCloseEvidenceModal = () => {
     setEvidenceModalInsight(null);
     setUseDetailModalFirst(true);
   };
 
-  if (insights.length === 0 && !showGenerateButton && !isBusy && !generateError) {
+  if (visibleInsights.length === 0 && !showGenerateButton && !isBusy && !generateError) {
     return null;
   }
 
@@ -197,22 +205,22 @@ export function DashboardInsightsStrip({
           </div>
           <div className="flex items-center gap-2">
             {/* Carousel controls when there are multiple insights and not busy */}
-            {!isBusy && insights.length > 1 && (
+            {!isBusy && visibleInsights.length > 1 && (
               <div className="flex items-center gap-1">
                 <button
                   type="button"
-                  onClick={() => setActiveIdx((prev) => (prev - 1 + insights.length) % insights.length)}
+                  onClick={() => setActiveIdx((prev) => (prev - 1 + visibleInsights.length) % visibleInsights.length)}
                   className="p-1 rounded-md hover:bg-white/60 dark:hover:bg-slate-800/60 transition-colors"
                   aria-label="Previous insight"
                 >
                   <ChevronLeft className="w-3.5 h-3.5 text-slate-400" />
                 </button>
                 <span className="text-[10px] text-slate-400 dark:text-slate-500 tabular-nums min-w-[28px] text-center">
-                  {activeIdx + 1}/{insights.length}
+                  {activeIdx + 1}/{visibleInsights.length}
                 </span>
                 <button
                   type="button"
-                  onClick={() => setActiveIdx((prev) => (prev + 1) % insights.length)}
+                  onClick={() => setActiveIdx((prev) => (prev + 1) % visibleInsights.length)}
                   className="p-1 rounded-md hover:bg-white/60 dark:hover:bg-slate-800/60 transition-colors"
                   aria-label="Next insight"
                 >
@@ -250,28 +258,33 @@ export function DashboardInsightsStrip({
               </Button>
             )}
           </div>
-        ) : isBusy ? (
+        ) : showLoadingOnly ? (
           <p className="text-sm text-slate-500 dark:text-slate-400">Loading insights…</p>
         ) : (
           <div className="space-y-2">
+            {generating && visibleInsights.length > 0 && (
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Generating new insights… tracked insights remain visible.
+              </p>
+            )}
             {!isExpanded ? (
               <AnimatePresence mode="wait">
-                {insights[activeIdx] && (
+                {visibleInsights[activeIdx] && (
                   <motion.div
-                    key={insights[activeIdx].id ?? activeIdx}
+                    key={visibleInsights[activeIdx].id ?? activeIdx}
                     initial={{ opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -6 }}
                     transition={{ duration: 0.25 }}
                   >
                     <InsightCard
-                      insight={insights[activeIdx]}
+                      insight={visibleInsights[activeIdx]}
                       onShowInsight={onShowInsight}
                       onOpenEvidence={() => {
-                        setEvidenceModalInsight(insights[activeIdx]);
+                        setEvidenceModalInsight(visibleInsights[activeIdx]);
                         setUseDetailModalFirst(true);
                       }}
-                      showFeedback={showFeedback && !!insights[activeIdx].id}
+                      showFeedback={showFeedback && !!visibleInsights[activeIdx].id}
                       onSubmitFeedback={onSubmitFeedback}
                       onRefreshInsights={onRefreshInsights}
                       selectedTenantId={selectedTenantId}
@@ -299,8 +312,8 @@ export function DashboardInsightsStrip({
                           } else {
                             await api.trackInsight(
                               {
-                                headline: insights[activeIdx].headline,
-                                understory: insights[activeIdx].understory,
+                                headline: visibleInsights[activeIdx].headline,
+                                understory: visibleInsights[activeIdx].understory,
                                 metric_signature: { sql: "", keyFields: [] },
                                 source_insight_id: insightId,
                                 source_type: "dashboard_insights",
@@ -337,7 +350,7 @@ export function DashboardInsightsStrip({
                 transition={{ duration: 0.2 }}
                 className="space-y-2"
               >
-                {insights.map((insight, idx) => (
+                {visibleInsights.map((insight, idx) => (
                   <InsightCard
                     key={insight.id ?? idx}
                     insight={insight}

@@ -431,6 +431,250 @@ router.delete(
   }
 );
 
+// GET /api/admin/insight-feedback/dashboard-training-examples - List dashboard training examples
+router.get(
+  "/dashboard-training-examples",
+  authenticateToken,
+  requirePlatformAdmin,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!managementPool) {
+        return res.status(503).json({ error: "Management database not available" });
+      }
+
+      const tableCheck = await managementPool.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables
+          WHERE table_schema = 'public' AND table_name = 'dashboard_insight_training_examples'
+        ) as exists
+      `);
+
+      if (!tableCheck.rows[0]?.exists) {
+        return res.json({ examples: [], total: 0 });
+      }
+
+      const { prompt_id, page_id, example_type, active_only } = req.query;
+      let whereClause = "WHERE 1=1";
+      const params: any[] = [];
+      let paramIdx = 1;
+
+      if (prompt_id) {
+        whereClause += ` AND prompt_id = $${paramIdx++}`;
+        params.push(prompt_id);
+      }
+      if (page_id) {
+        whereClause += ` AND page_id = $${paramIdx++}`;
+        params.push(page_id);
+      }
+      if (example_type) {
+        whereClause += ` AND example_type = $${paramIdx++}`;
+        params.push(example_type);
+      }
+      if (active_only === "true") {
+        whereClause += ` AND is_active = true`;
+      }
+
+      const result = await managementPool.query(
+        `SELECT id, page_id, prompt_id, example_type, headline, understory, filter_context, evidence_refs,
+                source_dashboard_insight_id, source_tenant_id, feedback_rating, admin_note,
+                curated_by, is_active, created_at, updated_at
+         FROM dashboard_insight_training_examples
+         ${whereClause}
+         ORDER BY page_id NULLS FIRST, prompt_id, example_type, created_at DESC`,
+        params
+      );
+
+      res.json({
+        examples: result.rows,
+        total: result.rows.length,
+      });
+    } catch (error: any) {
+      console.error("[InsightFeedback] Error listing dashboard training examples:", error);
+      res.status(500).json({ error: error.message || "Failed to list dashboard training examples" });
+    }
+  }
+);
+
+// POST /api/admin/insight-feedback/dashboard-training-examples - Create dashboard training example
+router.post(
+  "/dashboard-training-examples",
+  authenticateToken,
+  requirePlatformAdmin,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!managementPool) {
+        return res.status(503).json({ error: "Management database not available" });
+      }
+
+      const createSchema = z.object({
+        page_id: z.string().min(1).optional(),
+        prompt_id: z.string().min(1),
+        example_type: z.enum(["positive", "negative"]),
+        headline: z.string().min(1),
+        understory: z.string().optional(),
+        filter_context: z.record(z.unknown()).optional(),
+        evidence_refs: z.array(z.record(z.unknown())).optional(),
+        source_dashboard_insight_id: z.number().int().positive().optional(),
+        source_tenant_id: z.string().optional(),
+        feedback_rating: z.union([z.literal(-1), z.literal(1)]).optional(),
+        admin_note: z.string().optional(),
+      });
+
+      const data = createSchema.parse(req.body);
+
+      const result = await managementPool.query(
+        `INSERT INTO dashboard_insight_training_examples
+         (page_id, prompt_id, example_type, headline, understory, filter_context, evidence_refs,
+          source_dashboard_insight_id, source_tenant_id, feedback_rating, admin_note, curated_by)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9, $10, $11, $12)
+         RETURNING *`,
+        [
+          data.page_id || null,
+          data.prompt_id,
+          data.example_type,
+          data.headline,
+          data.understory || null,
+          data.filter_context ? JSON.stringify(data.filter_context) : null,
+          data.evidence_refs ? JSON.stringify(data.evidence_refs) : null,
+          data.source_dashboard_insight_id || null,
+          data.source_tenant_id || null,
+          data.feedback_rating || null,
+          data.admin_note || null,
+          req.userId,
+        ]
+      );
+
+      res.json({ example: result.rows[0] });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid data", details: error.errors });
+      }
+      console.error("[InsightFeedback] Error creating dashboard training example:", error);
+      res.status(500).json({ error: error.message || "Failed to create dashboard training example" });
+    }
+  }
+);
+
+// PUT /api/admin/insight-feedback/dashboard-training-examples/:id - Update dashboard training example
+router.put(
+  "/dashboard-training-examples/:id",
+  authenticateToken,
+  requirePlatformAdmin,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!managementPool) {
+        return res.status(503).json({ error: "Management database not available" });
+      }
+
+      const id = req.params.id;
+      const updateSchema = z.object({
+        page_id: z.string().min(1).nullable().optional(),
+        headline: z.string().min(1).optional(),
+        understory: z.string().optional(),
+        filter_context: z.record(z.unknown()).nullable().optional(),
+        evidence_refs: z.array(z.record(z.unknown())).nullable().optional(),
+        admin_note: z.string().optional(),
+        is_active: z.boolean().optional(),
+        example_type: z.enum(["positive", "negative"]).optional(),
+      });
+
+      const data = updateSchema.parse(req.body);
+      const setClauses: string[] = [];
+      const values: any[] = [];
+      let paramIdx = 1;
+
+      if (data.page_id !== undefined) {
+        setClauses.push(`page_id = $${paramIdx++}`);
+        values.push(data.page_id);
+      }
+      if (data.headline !== undefined) {
+        setClauses.push(`headline = $${paramIdx++}`);
+        values.push(data.headline);
+      }
+      if (data.understory !== undefined) {
+        setClauses.push(`understory = $${paramIdx++}`);
+        values.push(data.understory);
+      }
+      if (data.filter_context !== undefined) {
+        setClauses.push(`filter_context = $${paramIdx++}::jsonb`);
+        values.push(data.filter_context == null ? null : JSON.stringify(data.filter_context));
+      }
+      if (data.evidence_refs !== undefined) {
+        setClauses.push(`evidence_refs = $${paramIdx++}::jsonb`);
+        values.push(data.evidence_refs == null ? null : JSON.stringify(data.evidence_refs));
+      }
+      if (data.admin_note !== undefined) {
+        setClauses.push(`admin_note = $${paramIdx++}`);
+        values.push(data.admin_note);
+      }
+      if (data.is_active !== undefined) {
+        setClauses.push(`is_active = $${paramIdx++}`);
+        values.push(data.is_active);
+      }
+      if (data.example_type !== undefined) {
+        setClauses.push(`example_type = $${paramIdx++}`);
+        values.push(data.example_type);
+      }
+
+      if (setClauses.length === 0) {
+        return res.status(400).json({ error: "No fields to update" });
+      }
+
+      setClauses.push(`updated_at = NOW()`);
+      values.push(id);
+
+      const result = await managementPool.query(
+        `UPDATE dashboard_insight_training_examples
+         SET ${setClauses.join(", ")}
+         WHERE id = $${paramIdx}
+         RETURNING *`,
+        values
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Dashboard training example not found" });
+      }
+
+      res.json({ example: result.rows[0] });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid data", details: error.errors });
+      }
+      console.error("[InsightFeedback] Error updating dashboard training example:", error);
+      res.status(500).json({ error: error.message || "Failed to update dashboard training example" });
+    }
+  }
+);
+
+// DELETE /api/admin/insight-feedback/dashboard-training-examples/:id - Delete dashboard training example
+router.delete(
+  "/dashboard-training-examples/:id",
+  authenticateToken,
+  requirePlatformAdmin,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!managementPool) {
+        return res.status(503).json({ error: "Management database not available" });
+      }
+
+      const id = req.params.id;
+      const result = await managementPool.query(
+        `DELETE FROM dashboard_insight_training_examples WHERE id = $1 RETURNING id`,
+        [id]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Dashboard training example not found" });
+      }
+
+      res.json({ success: true, deletedId: id });
+    } catch (error: any) {
+      console.error("[InsightFeedback] Error deleting dashboard training example:", error);
+      res.status(500).json({ error: error.message || "Failed to delete dashboard training example" });
+    }
+  }
+);
+
 // ============================================================================
 // Prompt Experiments CRUD
 // ============================================================================

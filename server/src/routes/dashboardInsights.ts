@@ -13,8 +13,10 @@ import { authenticateToken, AuthRequest } from "../middleware/auth.js";
 import { attachTenantContext, getTenantContext } from "../middleware/tenantContext.js";
 import {
   loadDashboardInsights,
+  loadTrackedDashboardInsightsForPage,
   runDashboardInsightsForPage,
 } from "../services/dashboardInsights/index.js";
+import { insightsMatchByFilterThenHeadline } from "../services/dashboardInsights/dashboardInsightDedup.js";
 
 const router = Router();
 
@@ -80,8 +82,31 @@ router.get(
         pageId,
         filterContext
       );
+
+      // Always include any active tracked dashboard insights for THIS page (source page),
+      // regardless of filter_context match (datePeriod/channelGroup/etc).
+      const trackedInsights = await loadTrackedDashboardInsightsForPage(
+        tenantContext.tenantPool,
+        (req as any).userId ?? (req as any).user_id,
+        pageId
+      );
+
+      // Tracked insights win over newly generated duplicates for this dashboard page.
+      // Duplicate comparison uses the same precedence as pipeline dedupe:
+      // filter_context first, headline similarity second.
+      const generatedWithoutTrackedDupes = result.insights.filter((generated) => {
+        return !trackedInsights.some((tracked) =>
+          insightsMatchByFilterThenHeadline(pageId, generated, tracked)
+        );
+      });
+
+      const existingIds = new Set(generatedWithoutTrackedDupes.map((i) => i.id));
+      const combinedInsights = [
+        ...generatedWithoutTrackedDupes,
+        ...trackedInsights.filter((t) => t.id != null && !existingIds.has(t.id)),
+      ];
       return res.json({
-        insights: result.insights,
+        insights: combinedInsights,
         generatedAt: result.generatedAt,
       });
     } catch (err: unknown) {

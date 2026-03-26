@@ -12,6 +12,7 @@ export const DASHBOARD_INSIGHT_PAGE_IDS = [
   "loan-complexity",
   "company-scorecard",
   "credit-risk-management",
+  "workflow-conversion",
 ] as const;
 export type DashboardInsightPageId = (typeof DASHBOARD_INSIGHT_PAGE_IDS)[number];
 
@@ -27,6 +28,7 @@ export function getDashboardInsightPath(pageId: string): string {
   if (pageId === "loan-complexity") return "/loan-complexity";
   if (pageId === "company-scorecard") return "/company-scorecard";
   if (pageId === "credit-risk-management") return "/credit-risk-management";
+  if (pageId === "workflow-conversion") return "/workflow-conversion";
   return `/insights#${pageId}`;
 }
 
@@ -51,6 +53,10 @@ export function getDashboardInsightNavigateState(
   }
 
   if (pageId === "credit-risk-management") {
+    return {};
+  }
+
+  if (pageId === "workflow-conversion") {
     return {};
   }
 
