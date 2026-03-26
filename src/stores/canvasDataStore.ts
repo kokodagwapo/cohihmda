@@ -30,6 +30,9 @@ interface CanvasDataStoreState {
   /** All widget data entries keyed by canvas item ID */
   widgets: Record<string, WidgetDataEntry>;
 
+  /** Monotonically increasing counter bumped on every reportWidgetData call */
+  dataVersion: number;
+
   /** Called by widgets when their data loads/updates */
   reportWidgetData: (
     itemId: string,
@@ -52,9 +55,11 @@ interface CanvasDataStoreState {
 
 export const useCanvasDataStore = create<CanvasDataStoreState>((set, get) => ({
   widgets: {},
+  dataVersion: 0,
 
   reportWidgetData: (itemId, entry) => {
     set((state) => ({
+      dataVersion: state.dataVersion + 1,
       widgets: {
         ...state.widgets,
         [itemId]: {

@@ -151,6 +151,8 @@ interface ProfitImprovementData {
 
 export interface FinancialModelingSandboxViewProps {
   selectedTenantId?: string | null;
+  /** Report data to canvasDataStore for PowerPoint export. */
+  onDataReady?: (payload: unknown) => void;
 }
 
 // Fallback constants when no tenant baseline data (demo/industry assumptions)
@@ -177,7 +179,7 @@ const DEFAULT_TARGET_UNDERWRITER = 45;
 const DEFAULT_TARGET_CLOSER = 85;
 const DEFAULT_TARGET_OTHER = 85;
 
-export function FinancialModelingSandboxView({ selectedTenantId }: FinancialModelingSandboxViewProps) {
+export function FinancialModelingSandboxView({ selectedTenantId, onDataReady }: FinancialModelingSandboxViewProps) {
   const { theme } = useTheme();
   const isDarkMode = theme === "dark";
 
@@ -659,6 +661,24 @@ export function FinancialModelingSandboxView({ selectedTenantId }: FinancialMode
       maximumFractionDigits: 0,
     }).format(value);
   };
+
+  useEffect(() => {
+    if (!onDataReady || baselineLoading || !baseline) return;
+    const fmtCur = (v: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(v);
+    const columns = [
+      { key: 'metric', label: 'Metric', align: 'left' as const },
+      { key: 'actual', label: 'Actual', align: 'right' as const },
+      { key: 'selected', label: 'Selected', align: 'right' as const },
+      { key: 'improvement', label: 'Profit Improvement', align: 'right' as const },
+    ];
+    const rows = profitImprovementData.map((r) => ({
+      metric: r.metric,
+      actual: r.actual,
+      selected: r.valueSelected,
+      improvement: fmtCur(r.profitImprovement),
+    }));
+    onDataReady({ columns, rows, title: 'Financial Modeling Sandbox' });
+  }, [onDataReady, baselineLoading, baseline, profitImprovementData]);
 
   if (baselineLoading) {
     return (

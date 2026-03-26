@@ -8,6 +8,7 @@
 
 import pg from "pg";
 import type { DashboardInsight } from "./types.js";
+import { DASHBOARD_PAGE_CATEGORY_MAP } from "./types.js";
 
 const MAX_INSIGHTS_PER_PAGE_FILTER = 10;
 
@@ -29,7 +30,7 @@ export async function saveDashboardInsights(
   let paramIdx = 1;
 
   for (const ins of insights) {
-    const ph = Array.from({ length: 21 }, () => `$${paramIdx++}`);
+    const ph = Array.from({ length: 22 }, () => `$${paramIdx++}`);
     placeholders.push(`(${ph.join(", ")})`);
     values.push(
       pageId,
@@ -51,6 +52,7 @@ export async function saveDashboardInsights(
       JSON.stringify(ins.cited_numbers ?? []),
       ins.supporting_data != null ? JSON.stringify(ins.supporting_data) : null,
       ins.detail_data != null ? JSON.stringify(ins.detail_data) : null,
+      ins.functional_category ?? DASHBOARD_PAGE_CATEGORY_MAP[pageId] ?? null,
       generationBatch,
       new Date().toISOString()
     );
@@ -58,7 +60,7 @@ export async function saveDashboardInsights(
 
   const columns = `(page_id, page_name, headline, understory, sentiment, severity_score, scope, escalate,
     what_changed, why, business_impact, risk_if_ignored, recommended_action, owner,
-    filter_context, evidence_refs, cited_numbers, supporting_data, detail_data, generation_batch, generated_at)`;
+    filter_context, evidence_refs, cited_numbers, supporting_data, detail_data, functional_category, generation_batch, generated_at)`;
   await tenantPool.query(
     `INSERT INTO dashboard_generated_insights ${columns} VALUES ${placeholders.join(", ")}`,
     values
@@ -108,7 +110,7 @@ export async function loadDashboardInsights(
     ? await tenantPool.query(
         `SELECT id, page_id, page_name, headline, understory, sentiment, severity_score, scope, escalate,
                 what_changed, why, business_impact, risk_if_ignored, recommended_action, owner,
-                filter_context, evidence_refs, cited_numbers, supporting_data, detail_data, generation_batch, generated_at
+                filter_context, evidence_refs, cited_numbers, supporting_data, detail_data, functional_category, generation_batch, generated_at
          FROM dashboard_generated_insights
          WHERE page_id = $1
            AND generation_batch = $2
@@ -119,7 +121,7 @@ export async function loadDashboardInsights(
     : await tenantPool.query(
         `SELECT id, page_id, page_name, headline, understory, sentiment, severity_score, scope, escalate,
                 what_changed, why, business_impact, risk_if_ignored, recommended_action, owner,
-                filter_context, evidence_refs, cited_numbers, supporting_data, detail_data, generation_batch, generated_at
+                filter_context, evidence_refs, cited_numbers, supporting_data, detail_data, functional_category, generation_batch, generated_at
          FROM dashboard_generated_insights
          WHERE page_id = $1
            AND generation_batch = $2
@@ -150,6 +152,7 @@ export async function loadDashboardInsights(
     cited_numbers: unknown;
     supporting_data: unknown;
     detail_data: unknown;
+    functional_category: string | null;
     generation_batch: string;
     generated_at: Date;
   }>;
@@ -187,6 +190,7 @@ export async function loadDashboardInsights(
     escalate: r.escalate,
     sourcePageId: r.page_id,
     sourcePageName: r.page_name,
+    functional_category: r.functional_category ?? DASHBOARD_PAGE_CATEGORY_MAP[r.page_id],
     supporting_data: r.supporting_data as DashboardInsight["supporting_data"],
     detail_data: r.detail_data as DashboardInsight["detail_data"],
   }));
@@ -332,7 +336,7 @@ export async function loadEscalatedDashboardInsights(
   const result = await tenantPool.query(
     `SELECT id, page_id, page_name, headline, understory, sentiment, severity_score, scope, escalate,
             what_changed, why, business_impact, risk_if_ignored, recommended_action, owner,
-            filter_context, evidence_refs, cited_numbers, supporting_data, detail_data, generation_batch, generated_at
+            filter_context, evidence_refs, cited_numbers, supporting_data, detail_data, functional_category, generation_batch, generated_at
      FROM dashboard_generated_insights
      WHERE escalate = true
      ORDER BY generated_at DESC`
@@ -359,6 +363,7 @@ export async function loadEscalatedDashboardInsights(
     cited_numbers: unknown;
     supporting_data: unknown;
     detail_data: unknown;
+    functional_category: string | null;
   }>;
 
   function normalizeCitedNumbers(raw: unknown): string[] {
@@ -394,6 +399,7 @@ export async function loadEscalatedDashboardInsights(
     escalate: r.escalate,
     sourcePageId: r.page_id,
     sourcePageName: r.page_name,
+    functional_category: r.functional_category ?? DASHBOARD_PAGE_CATEGORY_MAP[r.page_id],
     supporting_data: r.supporting_data as DashboardInsight["supporting_data"],
     detail_data: r.detail_data as DashboardInsight["detail_data"],
   }));

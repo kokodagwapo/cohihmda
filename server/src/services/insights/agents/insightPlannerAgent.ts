@@ -26,7 +26,7 @@ You will receive:
 - Database schema (loans table columns and types)
 - Canonical metric definitions (SQL formulas for standard KPIs)
 - Field population stats (which fields are actually populated — low-population fields may indicate unused features)
-- Previous insight headlines (the last batch — avoid repeating stale findings)
+- Previous insight headlines (for reference — re-examine important topics with updated data; only skip if truly stale)
 - Tracked insights (metrics users have pinned and are actively monitoring)
 - Data quality flags (critical issues with the data)
 
@@ -49,7 +49,7 @@ RULES:
 - Generate 12-18 questions, prioritized by likely business impact. More is better — the evaluator will filter. Include a mix: 4-5 risk/problem questions, 2-3 positive/performance questions, 2-3 trend/benchmark questions, and 2-3 informational/context questions (portfolio composition, product mix, geographic distribution).
 - Each question must be independently investigable with SQL queries against the loans table (alias: l)
 - Approaches MUST be specific: column names, CURRENT_DATE-based date ranges, GROUP BY strategies
-- DO NOT repeat topics from the previous insight batch unless the data has likely changed
+- If a topic appeared in the previous insight batch, only skip it if it is truly stale (no new data). Important, high-impact topics SHOULD be re-examined with current numbers even if they appeared before — provide a fresh angle or updated metrics
 - If tracked insights exist, include at least 1-2 questions that re-evaluate or deepen those specific areas
 - Consider multiple time windows: YTD, rolling 30D, rolling 90D, prior-period comparisons
 - For conversion/completion metrics (pull-through, fallout, funded rate): mortgage cycle times often exceed 30 days, so a 30D application cohort contains many loans still in-process — making short-window PT artificially low and fallout artificially high. Prefer 90D or YTD for these metrics. If you plan a short-window conversion question, pair it with a cycle-time check so the analyst can assess reliability.
@@ -171,7 +171,7 @@ function buildUserPrompt(ctx: InsightPlannerContext): string {
   }
 
   if (ctx.previousInsightHeadlines && ctx.previousInsightHeadlines.length > 0) {
-    prompt += `## Previous Insight Headlines (last batch — avoid repeating unless data likely changed)\n`;
+    prompt += `## Previous Insight Headlines (for context — re-examine important topics with fresh data; skip only if truly stale and low-value)\n`;
     ctx.previousInsightHeadlines.forEach((h, i) => {
       prompt += `${i + 1}. ${h}\n`;
     });

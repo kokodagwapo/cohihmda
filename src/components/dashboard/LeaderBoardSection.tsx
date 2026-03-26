@@ -156,6 +156,8 @@ interface LeaderBoardSectionProps {
   hideAvatar?: boolean;
   /** Optional channel filter - filters leaderboard to loans in the selected channel */
   selectedChannel?: string | null;
+  /** Report data to canvasDataStore for PowerPoint export. */
+  onDataReady?: (payload: unknown) => void;
 }
 
 export const LeaderBoardSection = ({
@@ -163,6 +165,7 @@ export const LeaderBoardSection = ({
   selectedTenantId,
   hideAvatar = false,
   selectedChannel,
+  onDataReady,
 }: LeaderBoardSectionProps) => {
   const sectionRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
@@ -495,6 +498,31 @@ export const LeaderBoardSection = ({
   );
   const top5 = leadersData.slice(0, 5);
   const others = leadersData.slice(5);
+
+  useEffect(() => {
+    if (!onDataReady || leadersData.length === 0) return;
+    const columns = [
+      { key: 'rank', label: 'Rank', align: 'right' as const },
+      { key: 'name', label: 'Name', align: 'left' as const },
+      { key: 'units', label: 'Units', align: 'right' as const },
+      { key: 'volume', label: 'Volume', align: 'right' as const },
+      { key: 'cycleTime', label: 'Cycle Time', align: 'right' as const },
+      { key: 'pullThru', label: 'Pull-Through', align: 'right' as const },
+    ];
+    const rows = leadersData.slice(0, 10).map((l) => ({
+      rank: String(l.rank),
+      name: l.name,
+      units: String(l.loans),
+      volume: typeof l.volume === 'number' && l.volume >= 1_000_000
+        ? `$${(l.volume / 1_000_000).toFixed(1)}M`
+        : typeof l.volume === 'number' && l.volume >= 1_000
+        ? `$${Math.round(l.volume / 1_000).toLocaleString()}K`
+        : `$${l.volume?.toLocaleString() ?? '—'}`,
+      cycleTime: l.cycleTime != null ? `${l.cycleTime} days` : '—',
+      pullThru: l.pullThru != null ? `${l.pullThru}%` : '—',
+    }));
+    onDataReady({ columns, rows, title: 'Leaderboard' });
+  }, [onDataReady, leadersData]);
 
   useEffect(() => {
     if (!pendingLeaderName || leadersData.length === 0) return;
