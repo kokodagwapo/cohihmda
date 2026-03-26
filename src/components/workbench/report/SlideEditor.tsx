@@ -5,16 +5,11 @@
  * using react-rnd. Shows a scaled preview of the slide content.
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Rnd } from 'react-rnd';
 import { Button } from '@/components/ui/button';
 import {
   Type,
-  BarChart3,
-  Table,
-  Hash,
-  Image,
-  Square,
   Minus,
   Plus,
 } from 'lucide-react';
@@ -48,15 +43,6 @@ interface SlideEditorProps {
   onUpdateSlide: (updates: Partial<SlideDefinition>) => void;
 }
 
-const ADD_ELEMENT_OPTIONS: { type: SlideElementType; icon: React.ComponentType<any>; label: string }[] = [
-  { type: 'text', icon: Type, label: 'Text' },
-  { type: 'chart', icon: BarChart3, label: 'Chart' },
-  { type: 'table', icon: Table, label: 'Table' },
-  { type: 'kpi', icon: Hash, label: 'KPI' },
-  { type: 'image', icon: Image, label: 'Image' },
-  { type: 'shape', icon: Square, label: 'Shape' },
-];
-
 export function SlideEditor({
   slide,
   theme,
@@ -68,6 +54,8 @@ export function SlideEditor({
   onUpdateSlide,
 }: SlideEditorProps) {
   const [zoom, setZoom] = useState(0.72); // Fit typical screen
+  const [editingElementId, setEditingElementId] = useState<string | null>(null);
+  const pendingTextEditRef = useRef(false);
 
   const scale = zoom;
   const slideWidthPx = SLIDE_W_IN * PX_PER_INCH * scale;
@@ -81,6 +69,25 @@ export function SlideEditor({
     (px: number) => px / (PX_PER_INCH * scale),
     [scale]
   );
+
+  useEffect(() => {
+    if (!slide) {
+      setEditingElementId(null);
+      return;
+    }
+    const selected = slide.elements.find((el) => el.id === selectedElementId);
+    if (!selected) {
+      if (editingElementId && !slide.elements.some((el) => el.id === editingElementId)) {
+        setEditingElementId(null);
+      }
+      return;
+    }
+    const selectedType = selected.config?.type || selected.type;
+    if (pendingTextEditRef.current && selectedType === 'text') {
+      setEditingElementId(selected.id);
+      pendingTextEditRef.current = false;
+    }
+  }, [slide, selectedElementId, editingElementId]);
 
   if (!slide) {
     return (
@@ -96,24 +103,28 @@ export function SlideEditor({
     ? theme.primaryColor
     : theme.backgroundColor;
 
+  const handleAddElement = useCallback(
+    (type: SlideElementType) => {
+      pendingTextEditRef.current = type === 'text';
+      onAddElement(type);
+    },
+    [onAddElement]
+  );
+
   return (
     <div className="flex-1 flex flex-col min-h-0">
       {/* Element toolbar */}
       <div className="flex items-center gap-1 px-3 py-1.5 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
-        <span className="text-xs text-slate-500 mr-2">Add:</span>
-        {ADD_ELEMENT_OPTIONS.map(({ type, icon: Icon, label }) => (
-          <Button
-            key={type}
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2 text-xs gap-1"
-            onClick={() => onAddElement(type)}
-            title={`Add ${label}`}
-          >
-            <Icon className="h-3.5 w-3.5" />
-            {label}
-          </Button>
-        ))}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2 text-xs gap-1"
+          onClick={() => handleAddElement('text')}
+          title="Add text box"
+        >
+          <Type className="h-3.5 w-3.5" />
+          Add text
+        </Button>
         <div className="flex-1" />
         {/* Zoom controls */}
         <div className="flex items-center gap-1">
@@ -300,8 +311,45 @@ export function SlideEditor({
                 e.stopPropagation();
                 onSelectElement(el.id);
               }}
+              onDoubleClick={(e: React.MouseEvent) => {
+                e.stopPropagation();
+                if ((el.config?.type || el.type) === 'text') {
+                  onSelectElement(el.id);
+                  setEditingElementId(el.id);
+                }
+              }}
             >
-              <SlideElementRenderer element={el} isSelected={selectedElementId === el.id} scale={scale} />
+              {editingElementId === el.id && (el.config?.type || el.type) === 'text' ? (
+                <textarea
+                  autoFocus
+                  value={(el.config as any)?.content || ''}
+                  onChange={(e) =>
+                    onUpdateElement(el.id, {
+                      config: {
+                        ...el.config,
+                        content: e.target.value,
+                      } as SlideElementConfig,
+                    })
+                  }
+                  onBlur={() => setEditingElementId((current) => (current === el.id ? null : current))}
+                  onClick={(e) => e.stopPropagation()}
+                  className="h-full w-full resize-none border-none bg-white/95 p-2 outline-none"
+                  style={{
+                    fontSize: (((el.config as any)?.fontSize || 12) * scale),
+                    fontFamily: (el.config as any)?.fontFamily || 'inherit',
+                    fontWeight: (el.config as any)?.fontWeight || 'normal',
+                    fontStyle: (el.config as any)?.fontStyle || 'normal',
+                    color: (el.config as any)?.color || '#1e293b',
+                    textAlign: (el.config as any)?.align || 'left',
+                    lineHeight: (el.config as any)?.lineSpacing
+                      ? `${(el.config as any).lineSpacing}em`
+                      : undefined,
+                  }}
+                  placeholder="Type text..."
+                />
+              ) : (
+                <SlideElementRenderer element={el} isSelected={selectedElementId === el.id} scale={scale} />
+              )}
               {/* Delete button */}
               {selectedElementId === el.id && (
                 <button

@@ -199,7 +199,12 @@ export default function MyDashboard() {
     if (!isAccessible) return;
     setOpenTabs((prev) => (prev.includes(urlCanvasId) ? prev : [...prev, urlCanvasId]));
     setActiveTabId(urlCanvasId);
-    setLoadCanvasId(urlCanvasId);
+    // Only trigger a load if this is genuinely a different canvas being opened,
+    // not a URL update from saving the current canvas
+    setLoadCanvasId((prev) => {
+      if (prev === urlCanvasId) return prev;
+      return urlCanvasId;
+    });
   }, [urlCanvasId, activeTabId, canvasList, isHydratingWorkbench]);
 
   // Open a canvas tab (from sidebar click)
@@ -260,21 +265,21 @@ export default function MyDashboard() {
     updateUrl(tabId);
   }, [updateUrl]);
 
-  // Callback from WorkbenchCanvas after a canvas is saved (new or existing)
+  // Callback from WorkbenchCanvas after a canvas is saved (new or existing).
+  // Does NOT re-fetch the canvas or cause a remount — only updates tabs/URL.
   const handleCanvasSaved = useCallback((savedId: string, title: string) => {
     setOpenTabs((prev) => {
-      // If the active tab was a temp "new-*", replace it with the real ID
       const currentActive = activeTabId;
       if (currentActive && currentActive.startsWith('new-')) {
         return prev.map((t) => t === currentActive ? savedId : t);
       }
-      // Otherwise just make sure the ID is in tabs
       return prev.includes(savedId) ? prev : [...prev, savedId];
     });
     setActiveTabId(savedId);
     setTabTitles((prev) => ({ ...prev, [savedId]: title }));
     updateUrl(savedId);
-    fetchCanvases();
+    // Update the canvas list in the background — don't block or re-trigger load
+    fetchCanvases().catch(() => {});
   }, [activeTabId, updateUrl, fetchCanvases]);
 
   // Get tab title from canvas list or override titles

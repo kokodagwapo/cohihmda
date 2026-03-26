@@ -130,6 +130,7 @@ export interface ChartElementConfig {
   nameKey?: string;
   valueKey?: string;
   colors?: string[];
+  seriesNames?: string[];
   showLegend?: boolean;
   showGrid?: boolean;
   showValues?: boolean;

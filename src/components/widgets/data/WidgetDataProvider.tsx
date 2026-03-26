@@ -476,7 +476,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     turnTimeType: (actorsFilters?.actorsTurnTimeType as 'app_to_fund_days' | 'app_to_closing_days') ?? 'app_to_fund_days',
     dateRangeType: (actorsFilters?.actorsDateRangeType as 'calendar_days' | 'business_days') ?? 'calendar_days',
     measure: (actorsFilters?.actorsMeasure as 'units' | 'volume') ?? 'units',
-    effectiveTenantId,
+    selectedTenantId: effectiveTenantId,
     channelGroup: selectedChannel,
     selectedActor: (actorsFilters?.actorsSelectedActor ?? null) as { type: ActorDimension; name: string } | null,
     selectedStatus: actorsFilters?.actorsSelectedStatus ?? null,

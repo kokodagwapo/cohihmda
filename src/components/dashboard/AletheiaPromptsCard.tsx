@@ -273,6 +273,8 @@ interface AletheiaPromptsCardProps {
   };
   selectedTenantId?: string | null;
   selectedChannel?: string | null;
+  /** Report data to canvasDataStore for PowerPoint export. */
+  onDataReady?: (payload: unknown) => void;
 }
 
 // ============================================================================
@@ -899,6 +901,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
   briefingContext,
   selectedTenantId,
   selectedChannel,
+  onDataReady,
 }: AletheiaPromptsCardProps) {
   const sectionRef = useRef<HTMLDivElement>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -1237,6 +1240,16 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
     },
     []
   );
+
+  useEffect(() => {
+    if (!onDataReady || insightsLoading || allInsights.length === 0) return;
+    const lines = allInsights.slice(0, 20).map((i) => {
+      const bucket = (i.bucket ?? 'info').toUpperCase();
+      const headline = i.headline || i.message || '';
+      return `[${bucket}] ${headline}`;
+    });
+    onDataReady({ content: lines.join('\n'), title: 'Cohi Daily Briefings', insightCount: allInsights.length });
+  }, [onDataReady, insightsLoading, allInsights]);
 
   // Filter insights by the active functional category, then group by bucket
   const filteredInsights = useMemo(() => {

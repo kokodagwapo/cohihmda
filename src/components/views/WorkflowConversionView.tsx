@@ -94,6 +94,8 @@ export interface WorkflowConversionViewProps {
   onStateChange?: (state: WorkflowConversionSavedState) => void;
   /** When set (workbench group), group filters (branch, loan officer, dynamic filters) are applied to data. */
   groupId?: string | null;
+  /** Report data to canvasDataStore for PowerPoint export. */
+  onDataReady?: (payload: unknown) => void;
 }
 
 const DEBOUNCE_MS = 300;
@@ -105,6 +107,7 @@ export function WorkflowConversionView({
   initialState,
   onStateChange,
   groupId,
+  onDataReady,
 }: WorkflowConversionViewProps) {
   const defaultPeriod: PeriodSelection = useMemo(() => {
     const range = getDefaultDateRange();
@@ -238,6 +241,31 @@ export function WorkflowConversionView({
   );
 
   const segmentResults = data?.segments ?? [];
+
+  useEffect(() => {
+    if (!onDataReady || loading || segmentResults.length === 0) return;
+    const labelOf = (id: string) => milestones.find((m) => m.id === id)?.label ?? id;
+    const columns = [
+      { key: 'segment', label: 'Segment', align: 'left' as const },
+      { key: 'left', label: 'From Count', align: 'right' as const },
+      { key: 'right', label: 'To Count', align: 'right' as const },
+      { key: 'metric', label: calculationType === 'conversion' ? 'Conversion %' : 'Avg Turn Time (days)', align: 'right' as const },
+    ];
+    const rows = segments.map((seg, i) => {
+      const r = segmentResults[i];
+      return {
+        segment: `${labelOf(seg.from)} → ${labelOf(seg.to)}`,
+        left: r ? r.leftCount.toLocaleString() : '—',
+        right: r ? r.rightCount.toLocaleString() : '—',
+        metric: r
+          ? calculationType === 'conversion'
+            ? `${(r.conversionPercent ?? 0).toFixed(1)}%`
+            : `${(r.avgTurnTimeDays ?? 0).toFixed(1)}`
+          : '—',
+      };
+    });
+    onDataReady({ columns, rows, title: 'Workflow Conversion' });
+  }, [onDataReady, loading, segmentResults, segments, calculationType, milestones]);
 
   return (
     <div className="space-y-4">

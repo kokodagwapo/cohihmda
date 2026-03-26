@@ -10,6 +10,7 @@ import {
 } from "../encompassLoanExtractor.js";
 import { coheusAliasToColumnName } from "../encompassFieldMapper.js";
 import { FieldBackfillService } from "./fieldBackfillService.js";
+import { FolderReconciliationService } from "./folderReconciliationService.js";
 import { runPostSyncHooks } from "../hooks/postSyncHookService.js";
 
 export interface SyncResult {
@@ -18,6 +19,7 @@ export interface SyncResult {
   records_failed: number;
   loans_added: number;
   loans_updated: number;
+  loans_deleted: number;
   errors: string[];
   duration: number;
   /** Hint when a new field is mostly NULL after incremental sync; run full sync to backfill */
@@ -163,6 +165,7 @@ export class EncompassEtlService {
     let recordsFailed = 0;
     let loansAdded = 0;
     let loansUpdated = 0;
+    let loansDeleted = 0;
 
     if (!this.tenantPool) {
       throw new Error("Tenant database pool not available");
@@ -235,6 +238,38 @@ export class EncompassEtlService {
         loansAdded = loadResult.insertCount;
         loansUpdated = loadResult.updateCount;
         errors.push(...loadResult.errors);
+      }
+
+      // =========================================================================
+      // FOLDER RECONCILIATION: Remove loans that have moved out of synced folders
+      // Runs after the main ETL load so any newly-synced loans are already in the DB.
+      // =========================================================================
+      const syncedFolders = options.folderNames?.length
+        ? options.folderNames
+        : options.folderName
+          ? [options.folderName]
+          : [];
+
+      if (syncedFolders.length > 0) {
+        try {
+          const reconciler = new FolderReconciliationService(this.tenantPool);
+          const reconcileResult = await reconciler.reconcileFolders(
+            tenantId,
+            losConnectionId,
+            syncedFolders,
+          );
+          loansDeleted = reconcileResult.loansDeleted;
+          if (reconcileResult.loansDeleted > 0) {
+            console.log(
+              `[Sync] Reconciliation: ${reconcileResult.loansDeleted} loan(s) deleted (moved out of synced folders), ` +
+              `${reconcileResult.loansChecked} total checked`,
+            );
+          }
+        } catch (reconcileErr: any) {
+          console.warn(
+            `[Sync] Folder reconciliation failed (main sync still succeeded): ${reconcileErr.message}`,
+          );
+        }
       }
 
       // Verify actual database count after load
@@ -353,7 +388,7 @@ export class EncompassEtlService {
       }
 
       console.log(
-        `[Sync] Complete: +${loansAdded} new, ~${loansUpdated} updated, ${recordsFailed} failed in ${Math.round(duration / 1000)}s (${totalLoansAfter} total)`
+        `[Sync] Complete: +${loansAdded} new, ~${loansUpdated} updated, -${loansDeleted} deleted, ${recordsFailed} failed in ${Math.round(duration / 1000)}s (${totalLoansAfter} total)`
       );
 
       // Fire post-sync hooks asynchronously (don't block return)
@@ -398,6 +433,7 @@ export class EncompassEtlService {
         records_failed: recordsFailed,
         loans_added: loansAdded,
         loans_updated: loansUpdated,
+        loans_deleted: loansDeleted,
         errors: errors.slice(0, 10),
         duration: Date.now() - startTime,
         backfill_hint: backfillHint,
@@ -438,6 +474,7 @@ export class EncompassEtlService {
         records_failed: recordsFailed,
         loans_added: loansAdded,
         loans_updated: loansUpdated,
+        loans_deleted: loansDeleted,
         errors: [error.message],
         duration: Date.now() - startTime,
         backfill_hint: undefined,

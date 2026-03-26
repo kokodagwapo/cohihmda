@@ -162,6 +162,8 @@ interface ExecutiveDashboardProps {
   selectedTenantId?: string | null;
   /** Optional channel filter - filters metrics to loans in the selected channel */
   selectedChannel?: string | null;
+  /** Report data to canvasDataStore for PowerPoint export. */
+  onDataReady?: (payload: unknown) => void;
 }
 
 export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
@@ -169,6 +171,7 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
   year = new Date().getFullYear(),
   selectedTenantId,
   selectedChannel,
+  onDataReady,
 }: ExecutiveDashboardProps) {
   const [selectedCard, setSelectedCard] = useState<string | null>(null);
   const [animatedValues, setAnimatedValues] = useState<Record<string, number>>(
@@ -1213,6 +1216,17 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
     ],
     [metrics]
   );
+
+  useEffect(() => {
+    if (!onDataReady || metricsLoading || metrics.activeLoans.value === "--") return;
+    const kpiPayload = kpiCards.map((card) => ({
+      label: card.label,
+      value: card.value,
+      change: card.change,
+      trend: card.trend,
+    }));
+    onDataReady({ kpis: kpiPayload, title: 'Business Overview' });
+  }, [onDataReady, metricsLoading, kpiCards, metrics.activeLoans.value]);
 
   // Start count-up animation when component mounts or data changes
   useEffect(() => {

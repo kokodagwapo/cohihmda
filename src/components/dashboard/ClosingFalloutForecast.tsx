@@ -79,6 +79,8 @@ interface ClosingFalloutForecastProps {
   selectedChannel?: string | null;
   openLoanId?: string;
   onOpenLoanIdHandled?: () => void;
+  /** Report data to canvasDataStore for PowerPoint export. */
+  onDataReady?: (payload: unknown) => void;
 }
 
 interface FalloutAlertConfigState {
@@ -983,6 +985,7 @@ export const ClosingFalloutForecast = ({
   selectedChannel,
   openLoanId,
   onOpenLoanIdHandled,
+  onDataReady,
 }: ClosingFalloutForecastProps) => {
   const { user } = useAuth();
   const isPlatformAdmin = user?.role === "super_admin" || user?.role === "platform_admin";
@@ -1597,6 +1600,23 @@ export const ClosingFalloutForecast = ({
     serverActiveLoansCount, // Server-side active loans count with date filter
     bucketedLoans,
   ]);
+
+  useEffect(() => {
+    if (!onDataReady || statsLoading || metrics.activeLoansToday === 0) return;
+    onDataReady({
+      kpis: [
+        { label: 'Active Loans', value: metrics.activeLoansToday.toLocaleString() },
+        { label: 'Closed Loans', value: metrics.closedLoansMTD.toLocaleString() },
+        { label: 'Predicted Closings', value: metrics.predictedClosing.toLocaleString() },
+        { label: 'Pipeline Value', value: `$${metrics.pipelineValueM}M` },
+        { label: 'Pull-Through Rate', value: `${metrics.pullThroughRateDisplay}%` },
+        { label: 'Fallout Rate', value: `${metrics.falloutRate}%` },
+        { label: 'Locked Loans', value: metrics.lockedLoans.toLocaleString() },
+        { label: 'Avg Cycle Time', value: `${metrics.avgCycleTime} days` },
+      ],
+      title: 'Closing & Fallout Forecast',
+    });
+  }, [onDataReady, statsLoading, metrics]);
 
   const getExportData = (): ExportData => ({
     title: "Closing & Fallout Forecast",

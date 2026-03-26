@@ -200,11 +200,22 @@ export interface DashboardInsight {
   escalate: boolean;
   sourcePageId: string;
   sourcePageName: string;
+  functional_category?: string;
   /** Optional snapshot of by-period metrics for evidence table (e.g. leaderboard MTD/LM/QTD). */
   supporting_data?: SupportingData;
   /** Pre-hydrated detail snapshot for details API (same shape as original pipeline detail_data). */
   detail_data?: DashboardDetailSnapshot | null;
 }
+
+/**
+ * Map dashboard pageId → functional_category for the Aletheia tabbed view.
+ */
+export const DASHBOARD_PAGE_CATEGORY_MAP: Record<string, string> = {
+  "leaderboard": "sales",
+  "loan-complexity": "operations",
+  "company-scorecard": "finance",
+  "credit-risk-management": "compliance",
+};
 
 // ---------------------------------------------------------------------------
 // DB row shape (dashboard_generated_insights table)
