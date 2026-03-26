@@ -18,7 +18,6 @@ import {
   ArrowLeft,
   Download,
   Presentation,
-  FileText,
   Mail,
   Palette,
   LayoutTemplate,
@@ -26,7 +25,6 @@ import {
   Sparkles,
   Send,
   Loader2,
-  RefreshCw,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -162,17 +160,20 @@ function normalizeChartData(widgetData: any): {
   yKeys: string[];
   colors: string[];
   title?: string;
+  seriesNames?: string[];
 } {
   // Shape A – widget registry ChartData (has xAxisKey / series)
   if (widgetData?.xAxisKey || widgetData?.series) {
+    const series = widgetData.series || [];
     return {
       chartType: widgetData.chartType || 'bar',
       data: widgetData.data || [],
       xKey: widgetData.xAxisKey || '',
-      yKey: widgetData.series?.[0]?.dataKey || '',
-      yKeys: (widgetData.series || []).map((s: any) => s.dataKey),
-      colors: (widgetData.series || []).map((s: any) => s.color).filter(Boolean),
+      yKey: series[0]?.dataKey || '',
+      yKeys: series.map((s: any) => s.dataKey),
+      colors: series.map((s: any) => s.color).filter(Boolean),
       title: widgetData.title,
+      seriesNames: series.map((s: any) => s.name || s.label || s.dataKey),
     };
   }
   // Shape B – CohiWidgetRenderer { vizType, data, xKey, yKey }
@@ -196,17 +197,44 @@ function normalizeChartData(widgetData: any): {
     yKeys: widgetData?.yKeys || (widgetData?.yKey ? [widgetData.yKey] : []),
     colors: widgetData?.colors || [],
     title: widgetData?.title,
+    seriesNames: widgetData?.seriesNames,
   };
 }
 
 /**
  * Normalise table widget data into the canonical { columns, data } shape.
- * TableData uses `rows`, but report elements expect `data`.
+ * Handles: { columns, rows }, { columns, data }, { tabs: [{ table }] }, raw Array<object>.
  */
 function normalizeTableData(widgetData: any): { columns: any[]; data: any[] } {
+  if (widgetData == null) return { columns: [], data: [] };
+
+  // Raw array of objects — infer columns from first row's keys
+  if (Array.isArray(widgetData)) {
+    if (widgetData.length === 0) return { columns: [], data: [] };
+    const sample = widgetData[0];
+    if (typeof sample !== 'object' || sample == null) return { columns: [], data: [] };
+    const columns = Object.keys(sample).map((key) => ({
+      key,
+      label: key.replace(/([A-Z])/g, ' $1').replace(/^./, (s: string) => s.toUpperCase()).trim(),
+      align: typeof sample[key] === 'number' ? 'right' as const : 'left' as const,
+    }));
+    return { columns, data: widgetData };
+  }
+
+  // Tabbed table — flatten all tabs into one table (use first tab with data)
+  if (Array.isArray(widgetData.tabs)) {
+    for (const tab of widgetData.tabs) {
+      const t = tab?.table;
+      if (t?.columns && t?.rows?.length > 0) {
+        return { columns: t.columns, data: t.rows };
+      }
+    }
+    return { columns: [], data: [] };
+  }
+
   return {
-    columns: widgetData?.columns || [],
-    data: widgetData?.rows || widgetData?.data || [],
+    columns: widgetData.columns || [],
+    data: widgetData.rows || widgetData.data || [],
   };
 }
 
@@ -278,11 +306,11 @@ function hydrateSlideData(
                 yKey: cfg.yKey || norm.yKey,
                 yKeys: cfg.yKeys?.length ? cfg.yKeys : norm.yKeys,
                 colors: cfg.colors?.length ? cfg.colors : norm.colors,
+                seriesNames: norm.seriesNames,
                 chartType: cfg.chartType || norm.chartType,
               },
             };
           }
-          // If no title match, use the first available chart data as fallback
           if (charts.length > 0) {
             const norm = normalizeChartData(charts[0].data);
             if (norm.data.length > 0) {
@@ -295,6 +323,7 @@ function hydrateSlideData(
                   yKey: cfg.yKey || norm.yKey,
                   yKeys: cfg.yKeys?.length ? cfg.yKeys : norm.yKeys,
                   colors: cfg.colors?.length ? cfg.colors : norm.colors,
+                  seriesNames: norm.seriesNames,
                 },
               };
             }
@@ -376,9 +405,11 @@ function isEmbedSentinel(data: unknown): boolean {
 function hasRenderableData(w: WidgetDataEntry): boolean {
   if (isEmbedSentinel(w.data)) return false;
   const d = w.data as any;
+  if (d == null) return false;
   if (w.category === 'chart') {
     if (d?.data && Array.isArray(d.data) && d.data.length > 0) return true;
     if (d?.xKey && d?.data) return true;
+    if (d?.columns && d?.rows) return true;
     return false;
   }
   if (w.category === 'kpi') {
@@ -387,13 +418,18 @@ function hasRenderableData(w: WidgetDataEntry): boolean {
     return false;
   }
   if (w.category === 'table') {
-    const rows = d?.rows || d?.data;
-    return Array.isArray(rows) && rows.length > 0;
+    if (Array.isArray(d)) return d.length > 0;
+    if (d?.rows?.length > 0 || d?.data?.length > 0) return true;
+    // Tabbed table: { tabs: [{ table: { rows } }] }
+    if (Array.isArray(d?.tabs) && d.tabs.some((t: any) => t?.table?.rows?.length > 0)) return true;
+    // Nested columns+rows
+    if (d?.columns && d?.rows) return true;
+    return false;
   }
   if (w.category === 'other') {
     return typeof d?.content === 'string' && d.content.length > 0;
   }
-  return true;
+  return d != null;
 }
 
 /**
@@ -431,7 +467,7 @@ function canvasWidgetsToSlides(
   const kpis = withData.filter((w) => w.category === 'kpi');
   const charts = withData.filter((w) => w.category === 'chart');
   const tables = withData.filter((w) => w.category === 'table');
-  const others = withData.filter((w) => w.category === 'other');
+  const others = withData.filter((w) => w.category === 'other' || w.category === 'embed' || !['kpi', 'chart', 'table', 'other'].includes(w.category));
 
   // Executive Summary slide with KPI overview
   if (kpis.length > 0) {
@@ -487,7 +523,7 @@ function canvasWidgetsToSlides(
     } else {
       flatKpis.push({
         label: kpi.widgetName,
-        value: String(d?.value ?? d ?? '--'),
+        value: fmtKpi(d?.value ?? d, d?.format),
         change: d?.change,
       });
     }
@@ -563,7 +599,9 @@ function canvasWidgetsToSlides(
           yKey: norm.yKey,
           yKeys: norm.yKeys,
           colors: norm.colors.length ? norm.colors : undefined,
+          seriesNames: norm.seriesNames,
           showLegend: true,
+          showValues: true,
         } as ChartElementConfig,
       }],
     });
@@ -573,10 +611,11 @@ function canvasWidgetsToSlides(
   tables.forEach((table) => {
     const d = table.data as any;
     const norm = normalizeTableData(d);
+    const tableTitle = (!Array.isArray(d) && d?.title) || table.widgetName;
     slides.push({
       id: generateId('slide'),
       layout: 'table',
-      title: d?.title || table.widgetName,
+      title: tableTitle,
       speakerNotes: `Data table: ${table.widgetName}. Review the detailed data and highlight key rows.`,
       elements: [{
         id: generateId('table'),
@@ -591,10 +630,38 @@ function canvasWidgetsToSlides(
     });
   });
 
-  // Text-content slides (news, briefings, etc.)
+  // Remaining widgets (text content, embeds, uncategorized) — render as text or tables
   others.forEach((widget) => {
     const d = widget.data as any;
-    const content = d?.content ?? '';
+    if (d == null) return;
+
+    // If data looks like a table (array or has rows/columns), render as table
+    if (Array.isArray(d) || d?.rows || d?.columns || d?.tabs) {
+      const norm = normalizeTableData(d);
+      if (norm.data.length > 0) {
+        slides.push({
+          id: generateId('slide'),
+          layout: 'table',
+          title: (!Array.isArray(d) && d?.title) || widget.widgetName,
+          speakerNotes: `Data: ${widget.widgetName}.`,
+          elements: [{
+            id: generateId('table'),
+            type: 'table',
+            position: { x: 0.5, y: 1.0, w: 9, h: 5.5 },
+            config: { type: 'table', columns: norm.columns, data: norm.data } as TableElementConfig,
+          }],
+        });
+        return;
+      }
+    }
+
+    // If data has KPI-like shape, render as KPI
+    if (d?.value != null || d?.kpis) {
+      return; // Already handled in KPI section above
+    }
+
+    // Text content (news, briefings, etc.)
+    const content = d?.content ?? (typeof d === 'string' ? d : '');
     if (!content) return;
     slides.push({
       id: generateId('slide'),
@@ -633,16 +700,14 @@ export function ReportBuilder({
   const { toast } = useToast();
   const navigate = useNavigate();
 
-  // Read canvas data once at mount (or when "Refresh from Canvas" is clicked)
-  // instead of live-subscribing, which would cause infinite re-renders because
-  // Object.values() produces a new array reference on every store change.
   const getLatestCanvasData = useCallback((): WidgetDataEntry[] => {
     const live = useCanvasDataStore.getState().getSnapshot();
     return live.length > 0 ? live : (canvasWidgetDataProp || []);
   }, [canvasWidgetDataProp]);
 
-  // Track widget count reactively (primitive, stable) to know when data arrives
+  // Track widget count and data version reactively (primitives, stable)
   const widgetCount = useCanvasDataStore((s) => Object.keys(s.widgets).length);
+  const dataVersion = useCanvasDataStore((s) => s.dataVersion);
 
   // Build initial slides: if an initialDefinition is provided, use that
   // (hydrated with canvas data as a safety net); otherwise auto-populate from canvas.
@@ -672,25 +737,43 @@ export function ReportBuilder({
   const [showTemplateGallery, setShowTemplateGallery] = useState(false);
   const [showThemePicker, setShowThemePicker] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-  const [hasAutoPopulated, setHasAutoPopulated] = useState(false);
 
-  // Auto-populate slides once canvas data becomes available (widgets report
-  // data asynchronously, so the store may be empty at mount time).
-  // We track only the widgetCount (a primitive number) so this doesn't
-  // re-trigger on every store mutation — only when widgets are added/removed.
+  // Auto-sync slides with canvas data. The component stays mounted, so whenever
+  // widgets report new data the slides rebuild automatically (debounced).
+  const prevRenderableCountRef = useRef(0);
+  const prevDataVersionRef = useRef(dataVersion);
+
   useEffect(() => {
-    if (hasAutoPopulated || initialDefinition?.slides) return;
-    if (widgetCount > 0) {
+    if (initialDefinition?.slides) return;
+    if (widgetCount === 0 && prevRenderableCountRef.current === 0) return;
+
+    const timer = setTimeout(() => {
       const data = getLatestCanvasData();
-      if (data.length > 0) {
-        const fresh = canvasWidgetsToSlides(data, canvasTitle);
-        setSlides(fresh);
-        setSelectedSlideId(fresh[0]?.id || null);
-        setSelectedElementId(null);
-        setHasAutoPopulated(true);
+      const renderableCount = data.filter(hasRenderableData).length;
+
+      // Rebuild when renderable count changes (widget added/removed/loaded)
+      // or when dataVersion bumped (widget data updated)
+      const countChanged = renderableCount !== prevRenderableCountRef.current;
+      const versionChanged = dataVersion !== prevDataVersionRef.current;
+      if (!countChanged && !versionChanged && prevRenderableCountRef.current > 0) return;
+      if (renderableCount === 0 && prevRenderableCountRef.current === 0) return;
+
+      prevRenderableCountRef.current = renderableCount;
+      prevDataVersionRef.current = dataVersion;
+
+      if (renderableCount === 0) {
+        setSlides([createDefaultSlide('title'), createDefaultSlide('content')]);
+        return;
       }
-    }
-  }, [widgetCount, canvasTitle, hasAutoPopulated, initialDefinition, getLatestCanvasData]);
+
+      const fresh = canvasWidgetsToSlides(data, canvasTitle);
+      setSlides(fresh);
+      setSelectedSlideId((prev) => fresh.find((s) => s.id === prev) ? prev : fresh[0]?.id || null);
+      setSelectedElementId(null);
+    }, 600);
+
+    return () => clearTimeout(timer);
+  }, [widgetCount, dataVersion, canvasTitle, initialDefinition, getLatestCanvasData]);
 
   // When a NEW initialDefinition arrives (e.g., user clicks "Generate Report" again),
   // update the builder state. Hydrate any missing data from canvas widgets as a safety net.
@@ -858,21 +941,6 @@ export function ReportBuilder({
     },
     [reportTitle, theme, slides, tenantId, toast]
   );
-
-  // --- Import / Refresh from Canvas ---
-  const handleImportFromCanvas = useCallback(() => {
-    const data = getLatestCanvasData();
-    if (data.length === 0) {
-      toast({ title: 'No canvas data', description: 'Add widgets to the canvas first.', variant: 'destructive' });
-      return;
-    }
-    const imported = canvasWidgetsToSlides(data, canvasTitle);
-    setSlides(imported);
-    setReportTitle(canvasTitle || 'Canvas Report');
-    setSelectedSlideId(imported[0]?.id || null);
-    setSelectedElementId(null);
-    toast({ title: 'Canvas refreshed', description: `Imported ${data.length} widget${data.length !== 1 ? 's' : ''} into ${imported.length} slides.` });
-  }, [getLatestCanvasData, canvasTitle, toast]);
 
   // --- Template loading ---
   const handleSelectTemplate = useCallback(
@@ -1079,16 +1147,6 @@ export function ReportBuilder({
     )}>
       {/* Top bar */}
       <div className="h-10 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2 px-3 bg-white dark:bg-slate-900 shrink-0">
-        {!inline && (
-          <>
-            <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={onClose}>
-              <ArrowLeft className="h-4 w-4" />
-              Back to Canvas
-            </Button>
-            <div className="h-6 w-px bg-slate-200 dark:bg-slate-700" />
-          </>
-        )}
-
         {/* Report title */}
         <input
           type="text"
@@ -1144,18 +1202,6 @@ export function ReportBuilder({
           Templates
         </Button>
 
-        {widgetCount > 0 && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5 text-xs border-blue-200 text-blue-600 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-900/30"
-            onClick={handleImportFromCanvas}
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-            Refresh from Canvas ({widgetCount})
-          </Button>
-        )}
-
         <div className="h-6 w-px bg-slate-200 dark:bg-slate-700" />
 
         {/* Export buttons */}
@@ -1173,20 +1219,14 @@ export function ReportBuilder({
           variant="outline"
           size="sm"
           className="gap-1.5 text-xs"
-          onClick={() => handleExport('pdf')}
-          disabled={isExporting}
-        >
-          <FileText className="h-3.5 w-3.5" />
-          PDF
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-1.5 text-xs"
           onClick={() => navigate('/workbench/distributions')}
         >
           <Mail className="h-3.5 w-3.5" />
           Schedule distribution
+        </Button>
+        <Button variant="ghost" size="sm" className="gap-1.5 text-xs ml-2" onClick={onClose}>
+          <ArrowLeft className="h-4 w-4" />
+          Back to Canvas
         </Button>
       </div>
 

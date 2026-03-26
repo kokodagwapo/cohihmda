@@ -264,7 +264,10 @@ export async function getActorsDashboardData(
        SUM(CASE WHEN l.loan_term IS NOT NULL THEN l.loan_amount * l.loan_term ELSE NULL END)::float / NULLIF(SUM(CASE WHEN l.loan_term IS NOT NULL THEN l.loan_amount ELSE 0 END), 0) as wam,
        SUM(CASE WHEN l.fico_score IS NOT NULL THEN l.loan_amount * l.fico_score ELSE NULL END)::float / NULLIF(SUM(CASE WHEN l.fico_score IS NOT NULL THEN l.loan_amount ELSE 0 END), 0) as wa_fico,
        SUM(CASE WHEN l.ltv_ratio IS NOT NULL THEN l.loan_amount * l.ltv_ratio ELSE NULL END)::float / NULLIF(SUM(CASE WHEN l.ltv_ratio IS NOT NULL THEN l.loan_amount ELSE 0 END), 0) as wa_ltv,
-       SUM(CASE WHEN l.be_dti_ratio IS NOT NULL THEN l.loan_amount * l.be_dti_ratio ELSE NULL END)::float / NULLIF(SUM(CASE WHEN l.be_dti_ratio IS NOT NULL THEN l.loan_amount ELSE 0 END), 0) as wa_dti
+       -- Match legacy Qlik Operations app: [DTI Out of Range Flag]={No}
+       -- Include only sane DTI values (> 0 and < 70) in the weighted average.
+       SUM(CASE WHEN l.be_dti_ratio IS NOT NULL AND l.be_dti_ratio > 0 AND l.be_dti_ratio < 70 THEN l.loan_amount * l.be_dti_ratio ELSE NULL END)::float
+         / NULLIF(SUM(CASE WHEN l.be_dti_ratio IS NOT NULL AND l.be_dti_ratio > 0 AND l.be_dti_ratio < 70 THEN l.loan_amount ELSE 0 END), 0) as wa_dti
      FROM public.loans l
      WHERE ${whereSql}`,
     params

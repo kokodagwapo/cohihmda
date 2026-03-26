@@ -100,6 +100,7 @@ import { api } from '@/lib/api';
 import type { GroupWidgetItem, WidgetFilterState } from '@/components/workbench/canvas/types';
 import type { DateFilter, DimensionFilter } from '@/hooks/useCohiWidgetData';
 import type { VisualizationConfig } from '@/hooks/useCohiChat';
+import type { ActorsDashboardData, ActorsTableResult } from '@/hooks/useActorsData';
 
 // ---------------------------------------------------------------------------
 // Stable empty array to avoid Zustand selector re-render loops
@@ -639,6 +640,103 @@ const ACTORS_DIMENSION_LABELS: Record<string, string> = {
   warehouse_co_name: 'Warehouse Co Name',
 };
 
+function formatActorsCurrency(value: number | null | undefined): string {
+  if (value == null) return '—';
+  if (value >= 1e9) return `$${(value / 1e9).toFixed(2)}B`;
+  if (value >= 1e6) return `$${(value / 1e6).toFixed(2)}M`;
+  if (value >= 1e3) return `$${(value / 1e3).toFixed(0)}K`;
+  return `$${value.toFixed(0)}`;
+}
+
+function buildActorsReportData(
+  defId: string,
+  widgetName: string,
+  data: unknown,
+  options: {
+    measure: 'units' | 'volume';
+    turnTimeLabel: string;
+    dimensionLabel: string;
+    visibleColumnIds: string[];
+  },
+) {
+  if (defId === 'actors-status-chart') {
+    const dashboard = data as ActorsDashboardData | null;
+    return {
+      chartType: 'bar',
+      title: widgetName,
+      data:
+        dashboard?.statusCounts?.map((status) => ({
+          name: status.status,
+          count: status.count,
+          volume: status.volume,
+          value: options.measure === 'volume' ? status.volume : status.count,
+        })) ?? [],
+      xKey: 'name',
+      yKey: 'value',
+      yKeys: ['value'],
+      seriesNames: [options.measure === 'volume' ? 'Volume' : 'Units'],
+    };
+  }
+
+  if (defId === 'actors-kpis') {
+    const kpis = (data as ActorsDashboardData | null)?.kpis;
+    if (!kpis) return null;
+    return {
+      kpis: [
+        { label: 'Units', value: kpis.units.toLocaleString() },
+        { label: 'Volume', value: formatActorsCurrency(kpis.volume) },
+        { label: 'Average Balance', value: formatActorsCurrency(kpis.averageBalance) },
+        { label: 'WAC', value: kpis.wac != null ? kpis.wac.toFixed(3) : '—' },
+        { label: 'WAM', value: kpis.wam != null ? kpis.wam.toFixed(1) : '—' },
+        { label: 'WA FICO', value: kpis.waFico != null ? kpis.waFico.toFixed(1) : '—' },
+        { label: 'WA LTV', value: kpis.waLtv != null ? `${kpis.waLtv.toFixed(1)}%` : '—' },
+        { label: 'WA DTI', value: kpis.waDti != null ? `${kpis.waDti.toFixed(1)}%` : '—' },
+      ],
+    };
+  }
+
+  if (defId.startsWith('actors-table-')) {
+    const table = data as ActorsTableResult | null;
+    if (!table) return null;
+    const allColumns = [
+      { key: 'name', label: 'Actor', align: 'left' as const },
+      { key: 'units', label: 'Units', align: 'right' as const },
+      { key: 'volume', label: 'Volume', align: 'right' as const },
+      { key: 'avgAppToFund', label: options.turnTimeLabel, align: 'right' as const },
+      { key: 'approvalPct', label: 'Approval %', align: 'right' as const },
+      { key: 'deniedPct', label: 'Denied %', align: 'right' as const },
+      { key: 'withdrawnPct', label: 'Withdrawn %', align: 'right' as const },
+      { key: 'loanComplexity', label: 'Complexity', align: 'right' as const },
+    ];
+    const selectedColumns = options.visibleColumnIds
+      .map((id) => allColumns.find((column) => column.key === id))
+      .filter(Boolean);
+    const toRow = (
+      row: ActorsTableResult['rows'][number] | ActorsTableResult['totals'],
+      isTotals: boolean,
+    ) => ({
+      name: isTotals ? 'Totals' : row.name,
+      units: row.units,
+      volume: formatActorsCurrency(row.volume),
+      avgAppToFund: row.avgAppToFund != null ? row.avgAppToFund.toFixed(2) : '—',
+      approvalPct: `${row.approvalPct.toFixed(1)}%`,
+      deniedPct: `${row.deniedPct.toFixed(1)}%`,
+      withdrawnPct: `${row.withdrawnPct.toFixed(1)}%`,
+      loanComplexity: row.loanComplexity != null ? row.loanComplexity.toFixed(1) : '—',
+    });
+    return {
+      title: options.dimensionLabel,
+      columns: selectedColumns,
+      rows: [
+        ...(table.totals ? [toRow(table.totals, true)] : []),
+        ...table.rows.map((row) => toRow(row, false)),
+      ],
+    };
+  }
+
+  return data;
+}
+
 // ---------------------------------------------------------------------------
 // Available dimension filter catalog — users can add these via the "+" button
 // ---------------------------------------------------------------------------
@@ -1110,21 +1208,9 @@ function GridCellRegistryWidget({
     definition?.dataSelector,
   );
 
-  // Report data to canvasDataStore for Cohi chat context.
   // Skip for embed-sentinel widgets ({ ready: true }) — those report their own data.
   const isEmbedSentinel = selectedData != null && typeof selectedData === 'object'
     && Object.keys(selectedData as any).length <= 1 && (selectedData as any).ready === true;
-  useEffect(() => {
-    if (!definition || isEmbedSentinel) return;
-    if (!loading && selectedData != null && !error) {
-      reportWidgetData(canvasItemId, {
-        widgetName: definition.name,
-        category: definition.category as 'kpi' | 'chart' | 'table' | 'embed' | 'other',
-        data: selectedData,
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedData, loading, error, canvasItemId, isEmbedSentinel]);
   useEffect(() => {
     if (isEmbedSentinel) return;
     return () => { removeWidget(canvasItemId); };
@@ -1174,6 +1260,10 @@ function GridCellRegistryWidget({
         : 'Avg App to Closing';
   const actorsTableDims = (filters.actorsTableDimensions ?? ['loan_officer', 'processor', 'underwriter', 'closer']) as string[];
   const tableIndex = (definition.config?.tableIndex as number) ?? 0;
+  const actorsVisibleColumnIds =
+    filters.actorsTableColumnIds?.length
+      ? filters.actorsTableColumnIds
+      : ACTORS_TABLE_DEFAULT_COLUMN_IDS;
   const actorsConfig = isActors
     ? {
         measure: filters.actorsMeasure ?? 'units',
@@ -1202,12 +1292,39 @@ function GridCellRegistryWidget({
                 updateFilters(groupId, { actorsSelectedActor: { type: dimension, name } });
               }
             : undefined,
-        visibleColumnIds:
-          filters.actorsTableColumnIds?.length
-            ? filters.actorsTableColumnIds
-            : [...ACTORS_TABLE_DEFAULT_COLUMN_IDS],
+        visibleColumnIds: actorsVisibleColumnIds,
       }
     : {};
+  const reportData = useMemo(() => {
+    if (!definition) return selectedData;
+    if (!isActors) return selectedData;
+    return buildActorsReportData(definition.id, definition.name, selectedData, {
+      measure: (actorsConfig.measure as 'units' | 'volume') ?? 'units',
+      turnTimeLabel: actorsTurnTimeLabel,
+      dimensionLabel: actorsConfig.dimensionLabel as string,
+      visibleColumnIds: actorsVisibleColumnIds,
+    });
+  }, [
+    definition,
+    isActors,
+    selectedData,
+    actorsConfig.measure,
+    actorsConfig.dimensionLabel,
+    actorsTurnTimeLabel,
+    actorsVisibleColumnIds,
+  ]);
+  // Report data to canvasDataStore for PPT/chat hydration.
+  useEffect(() => {
+    if (!definition || isEmbedSentinel) return;
+    if (!loading && reportData != null && !error) {
+      reportWidgetData(canvasItemId, {
+        widgetName: definition.name,
+        category: definition.category as 'kpi' | 'chart' | 'table' | 'embed' | 'other',
+        data: reportData,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportData, loading, error, canvasItemId, isEmbedSentinel, definition]);
 
   const isPricingTable =
     definition.dataSource === 'pricing-dashboard' &&

@@ -703,7 +703,10 @@ const SECTION_TO_WIDGETS: Record<
   },
   salesScorecardOverview: {
     sectionType: "sales-scorecard-overview",
-    widgetIds: ["sales-scorecard-overview-chart", "sales-scorecard-overview-table"],
+    widgetIds: [
+      "sales-scorecard-overview-chart",
+      "sales-scorecard-overview-table",
+    ],
   },
   lockStratification: {
     sectionType: "lock-stratification",
@@ -842,6 +845,7 @@ export function WorkbenchCanvas({
   const [canvasBackground, setCanvasBackground] =
     useState<CanvasBackground>(DEFAULT_BACKGROUND);
   const [canvasId, setCanvasId] = useState<string | null>(null);
+  const [canvasLoading, setCanvasLoading] = useState(!!loadCanvasId);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [saveTitle, setSaveTitle] = useState("Untitled canvas");
   const [isSaving, setIsSaving] = useState(false);
@@ -869,7 +873,11 @@ export function WorkbenchCanvas({
   const [sharedWithUserIds, setSharedWithUserIds] = useState<string[]>([]);
   /** Granular shares (user/group + permission). Synced from API and used when saving. */
   const [canvasShares, setCanvasShares] = useState<
-    Array<{ userId?: string; groupId?: string; permission: "viewer" | "editor" }>
+    Array<{
+      userId?: string;
+      groupId?: string;
+      permission: "viewer" | "editor";
+    }>
   >([]);
   const [tenantUsers, setTenantUsers] = useState<
     Array<{ id: string; email: string; full_name?: string; role?: string }>
@@ -884,10 +892,10 @@ export function WorkbenchCanvas({
   const navigate = useNavigate();
   const isOwner = isOwnerProp ?? true; // Default to true for new/own canvases
   const canEdit = isOwner;
-  const {
-    handleExportExcel,
-    handleEmailScreenshot,
-  } = useCanvasExport({ items, saveTitle });
+  const { handleExportExcel, handleEmailScreenshot } = useCanvasExport({
+    items,
+    saveTitle,
+  });
   const [activeAddGroup, setActiveAddGroup] = useState(
     () => DASHBOARD_SECTION_GROUPS[0]?.label ?? "Insights",
   );
@@ -1048,8 +1056,12 @@ export function WorkbenchCanvas({
         );
         // Deduplicate modify_widget by instanceId — keep only the last one per widget
         const modifyActions = otherActions.filter(
-          (a): a is WidgetAction & { type: "modify_widget"; instanceId: string } =>
-            a.type === "modify_widget" && "instanceId" in a,
+          (
+            a,
+          ): a is WidgetAction & {
+            type: "modify_widget";
+            instanceId: string;
+          } => a.type === "modify_widget" && "instanceId" in a,
         );
         if (modifyActions.length > 0) {
           const lastByInstanceId = new Map<
@@ -1131,7 +1143,7 @@ export function WorkbenchCanvas({
             const kpiRows = Math.ceil(kpiCount / 4);
             const chartRows = Math.ceil(chartCount / 2);
             const groupH = Math.max(420, 60 + kpiRows * 100 + chartRows * 300);
-            const groupW = Math.max(width - 56, 600);
+            const groupW = defaultGroupWidth;
 
             const groupId = `canvas-group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
             const groupItem = createLayoutItem(
@@ -1196,7 +1208,7 @@ export function WorkbenchCanvas({
               sectionType,
               widgetIds: [action.widgetId],
             },
-            { x: 20, y: 20, w: 500, h: 400 },
+            { x: 0, y: 20, w: defaultGroupWidth, h: 400 },
           );
           setItemsWithHistory([...items, newItem]);
           toast({
@@ -1250,7 +1262,7 @@ export function WorkbenchCanvas({
               sectionType: section.sectionType as SectionType,
               widgetIds: section.widgetIds,
             },
-            { x: 20, y: 20, w: 1000, h: 800 },
+            { x: 0, y: 20, w: defaultGroupWidth, h: 800 },
           );
           setItemsWithHistory([...items, dashItem]);
           toast({
@@ -1264,7 +1276,8 @@ export function WorkbenchCanvas({
           const groupIdx = items.findIndex(
             (it) =>
               it.payload.type === "widget_group" &&
-              (it.payload as { groupId: string }).groupId === groupAction.groupId
+              (it.payload as { groupId: string }).groupId ===
+                groupAction.groupId,
           );
           if (groupIdx < 0) {
             toast({
@@ -1282,28 +1295,44 @@ export function WorkbenchCanvas({
             sectionType: SectionType;
             widgetIds: string[];
             items?: GroupWidgetItem[];
-            widgetLayouts?: Record<string, { x: number; y: number; w: number; h: number }>;
+            widgetLayouts?: Record<
+              string,
+              { x: number; y: number; w: number; h: number }
+            >;
             layoutVersion?: number;
             savedFilters?: Record<string, unknown>;
           };
           const LAYOUT_VERSION = 8;
           function itemKey(groupItem: GroupWidgetItem, idx: number): string {
-            if (groupItem.kind === "registry") return `${groupItem.defId}__${idx}`;
+            if (groupItem.kind === "registry")
+              return `${groupItem.defId}__${idx}`;
             return `cohi__${groupItem.id}__${idx}`;
           }
           let itemsList: GroupWidgetItem[] = Array.isArray(payload.items)
             ? [...payload.items]
-            : (payload.widgetIds ?? []).map((defId: string) => ({ kind: "registry" as const, defId }));
-          let layouts: Record<string, { x: number; y: number; w: number; h: number }> = { ...(payload.widgetLayouts ?? {}) };
+            : (payload.widgetIds ?? []).map((defId: string) => ({
+                kind: "registry" as const,
+                defId,
+              }));
+          let layouts: Record<
+            string,
+            { x: number; y: number; w: number; h: number }
+          > = { ...(payload.widgetLayouts ?? {}) };
           let groupTitle = payload.title;
-          let savedFilters = payload.savedFilters ? { ...payload.savedFilters } : undefined;
+          let savedFilters = payload.savedFilters
+            ? { ...payload.savedFilters }
+            : undefined;
 
           for (const op of groupAction.operations) {
             if (op.op === "add_registry") {
-              const newItem: GroupWidgetItem = { kind: "registry", defId: op.defId };
+              const newItem: GroupWidgetItem = {
+                kind: "registry",
+                defId: op.defId,
+              };
               const idx = itemsList.length;
               itemsList.push(newItem);
-              if (op.gridPosition) layouts[itemKey(newItem, idx)] = op.gridPosition;
+              if (op.gridPosition)
+                layouts[itemKey(newItem, idx)] = op.gridPosition;
             } else if (op.op === "add_cohi") {
               const id = `cohi-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
               const newItem: GroupWidgetItem = {
@@ -1315,13 +1344,19 @@ export function WorkbenchCanvas({
               };
               const idx = itemsList.length;
               itemsList.push(newItem);
-              if (op.gridPosition) layouts[itemKey(newItem, idx)] = op.gridPosition;
+              if (op.gridPosition)
+                layouts[itemKey(newItem, idx)] = op.gridPosition;
             } else if (op.op === "remove") {
-              const idx = itemsList.findIndex((it, i) => itemKey(it, i) === op.widgetId);
+              const idx = itemsList.findIndex(
+                (it, i) => itemKey(it, i) === op.widgetId,
+              );
               if (idx >= 0) {
                 const oldKeys = itemsList.map((it, i) => itemKey(it, i));
                 itemsList = itemsList.filter((_, i) => i !== idx);
-                const nextLayouts: Record<string, { x: number; y: number; w: number; h: number }> = {};
+                const nextLayouts: Record<
+                  string,
+                  { x: number; y: number; w: number; h: number }
+                > = {};
                 itemsList.forEach((it, i) => {
                   const newKey = itemKey(it, i);
                   const oldKey = i < idx ? oldKeys[i] : oldKeys[i + 1];
@@ -1331,15 +1366,23 @@ export function WorkbenchCanvas({
               }
             } else if (op.op === "resize") {
               if (layouts[op.widgetId]) {
-                layouts = { ...layouts, [op.widgetId]: { ...layouts[op.widgetId], w: op.w, h: op.h } };
+                layouts = {
+                  ...layouts,
+                  [op.widgetId]: { ...layouts[op.widgetId], w: op.w, h: op.h },
+                };
               }
             } else if (op.op === "reorder") {
               const keyToItem = new Map<string | undefined, GroupWidgetItem>();
               itemsList.forEach((it, i) => keyToItem.set(itemKey(it, i), it));
-              const reordered = op.widgetIds.map((k) => keyToItem.get(k)).filter(Boolean) as GroupWidgetItem[];
+              const reordered = op.widgetIds
+                .map((k) => keyToItem.get(k))
+                .filter(Boolean) as GroupWidgetItem[];
               if (reordered.length === itemsList.length) {
                 itemsList = reordered;
-                const nextLayouts: Record<string, { x: number; y: number; w: number; h: number }> = {};
+                const nextLayouts: Record<
+                  string,
+                  { x: number; y: number; w: number; h: number }
+                > = {};
                 itemsList.forEach((it, i) => {
                   const newKey = itemKey(it, i);
                   const oldKey = op.widgetIds[i];
@@ -1359,17 +1402,19 @@ export function WorkbenchCanvas({
             title: groupTitle,
             savedFilters,
             items: itemsList,
-            widgetLayouts: Object.keys(layouts).length > 0 ? layouts : undefined,
+            widgetLayouts:
+              Object.keys(layouts).length > 0 ? layouts : undefined,
             layoutVersion: LAYOUT_VERSION,
           } as typeof layoutItem.payload;
           setItemsWithHistory((prev) =>
             prev.map((it, i) =>
-              i === groupIdx ? { ...layoutItem, payload: nextPayload } : it
-            )
+              i === groupIdx ? { ...layoutItem, payload: nextPayload } : it,
+            ),
           );
           toast({
             title: "Group updated",
-            description: groupAction.explanation?.substring(0, 80) || "Changes applied",
+            description:
+              groupAction.explanation?.substring(0, 80) || "Changes applied",
           });
           break;
         }
@@ -1378,7 +1423,7 @@ export function WorkbenchCanvas({
           const groupIdx = items.findIndex(
             (it) =>
               it.payload.type === "widget_group" &&
-              (it.payload as { groupId: string }).groupId === regAction.groupId
+              (it.payload as { groupId: string }).groupId === regAction.groupId,
           );
           if (groupIdx < 0) {
             toast({
@@ -1396,17 +1441,27 @@ export function WorkbenchCanvas({
             sectionType: SectionType;
             widgetIds: string[];
             items?: GroupWidgetItem[];
-            widgetLayouts?: Record<string, { x: number; y: number; w: number; h: number }>;
+            widgetLayouts?: Record<
+              string,
+              { x: number; y: number; w: number; h: number }
+            >;
           };
           function itemKey(groupItem: GroupWidgetItem, idx: number): string {
-            if (groupItem.kind === "registry") return `${groupItem.defId}__${idx}`;
+            if (groupItem.kind === "registry")
+              return `${groupItem.defId}__${idx}`;
             return `cohi__${groupItem.id}__${idx}`;
           }
           const itemsList = Array.isArray(payload.items)
             ? [...payload.items]
-            : (payload.widgetIds ?? []).map((defId: string) => ({ kind: "registry" as const, defId }));
+            : (payload.widgetIds ?? []).map((defId: string) => ({
+                kind: "registry" as const,
+                defId,
+              }));
           const targetIdx = itemsList.findIndex(
-            (it, i) => it.kind === "registry" && (itemKey(it, i) === regAction.widgetId || it.defId === regAction.widgetId)
+            (it, i) =>
+              it.kind === "registry" &&
+              (itemKey(it, i) === regAction.widgetId ||
+                it.defId === regAction.widgetId),
           );
           if (targetIdx < 0) {
             toast({
@@ -1420,15 +1475,22 @@ export function WorkbenchCanvas({
           if (target.kind !== "registry") {
             toast({
               title: "Not a registry widget",
-              description: "modify_registry_widget only applies to pre-built catalog widgets",
+              description:
+                "modify_registry_widget only applies to pre-built catalog widgets",
               variant: "destructive",
             });
             break;
           }
           const updatedItems = itemsList.map((it, i) =>
             i === targetIdx && it.kind === "registry"
-              ? { ...it, configOverrides: { ...(it.configOverrides ?? {}), ...regAction.configOverrides } }
-              : it
+              ? {
+                  ...it,
+                  configOverrides: {
+                    ...(it.configOverrides ?? {}),
+                    ...regAction.configOverrides,
+                  },
+                }
+              : it,
           );
           const nextPayload = {
             ...payload,
@@ -1436,12 +1498,14 @@ export function WorkbenchCanvas({
           } as typeof layoutItem.payload;
           setItemsWithHistory((prev) =>
             prev.map((it, i) =>
-              i === groupIdx ? { ...layoutItem, payload: nextPayload } : it
-            )
+              i === groupIdx ? { ...layoutItem, payload: nextPayload } : it,
+            ),
           );
           toast({
             title: "Widget config updated",
-            description: regAction.explanation?.substring(0, 80) || "Config overrides applied",
+            description:
+              regAction.explanation?.substring(0, 80) ||
+              "Config overrides applied",
           });
           break;
         }
@@ -1450,7 +1514,8 @@ export function WorkbenchCanvas({
           const groupIdx = items.findIndex(
             (it) =>
               it.payload.type === "widget_group" &&
-              (it.payload as { groupId: string }).groupId === convAction.groupId
+              (it.payload as { groupId: string }).groupId ===
+                convAction.groupId,
           );
           if (groupIdx < 0) {
             toast({
@@ -1468,19 +1533,29 @@ export function WorkbenchCanvas({
             sectionType: SectionType;
             widgetIds: string[];
             items?: GroupWidgetItem[];
-            widgetLayouts?: Record<string, { x: number; y: number; w: number; h: number }>;
+            widgetLayouts?: Record<
+              string,
+              { x: number; y: number; w: number; h: number }
+            >;
             layoutVersion?: number;
           };
           const LAYOUT_VER = 8;
           function itemKey(groupItem: GroupWidgetItem, idx: number): string {
-            if (groupItem.kind === "registry") return `${groupItem.defId}__${idx}`;
+            if (groupItem.kind === "registry")
+              return `${groupItem.defId}__${idx}`;
             return `cohi__${groupItem.id}__${idx}`;
           }
           const itemsList = Array.isArray(payload.items)
             ? [...payload.items]
-            : (payload.widgetIds ?? []).map((defId: string) => ({ kind: "registry" as const, defId }));
+            : (payload.widgetIds ?? []).map((defId: string) => ({
+                kind: "registry" as const,
+                defId,
+              }));
           const targetIdx = itemsList.findIndex(
-            (it, i) => it.kind === "registry" && (itemKey(it, i) === convAction.widgetId || it.defId === convAction.widgetId)
+            (it, i) =>
+              it.kind === "registry" &&
+              (itemKey(it, i) === convAction.widgetId ||
+                it.defId === convAction.widgetId),
           );
           if (targetIdx < 0) {
             toast({
@@ -1498,7 +1573,9 @@ export function WorkbenchCanvas({
             title: convAction.title,
             vizConfig: convAction.vizConfig,
           };
-          const updatedItems = itemsList.map((it, i) => (i === targetIdx ? newCohi : it));
+          const updatedItems = itemsList.map((it, i) =>
+            i === targetIdx ? newCohi : it,
+          );
           const newKey = itemKey(newCohi, targetIdx);
           const layouts = { ...(payload.widgetLayouts ?? {}) };
           if (layouts[oldKey]) {
@@ -1508,17 +1585,20 @@ export function WorkbenchCanvas({
           const nextPayload = {
             ...payload,
             items: updatedItems,
-            widgetLayouts: Object.keys(layouts).length > 0 ? layouts : undefined,
+            widgetLayouts:
+              Object.keys(layouts).length > 0 ? layouts : undefined,
             layoutVersion: LAYOUT_VER,
           } as typeof layoutItem.payload;
           setItemsWithHistory((prev) =>
             prev.map((it, i) =>
-              i === groupIdx ? { ...layoutItem, payload: nextPayload } : it
-            )
+              i === groupIdx ? { ...layoutItem, payload: nextPayload } : it,
+            ),
           );
           toast({
             title: "Widget converted",
-            description: convAction.explanation?.substring(0, 80) || "Replaced with SQL-backed widget",
+            description:
+              convAction.explanation?.substring(0, 80) ||
+              "Replaced with SQL-backed widget",
           });
           break;
         }
@@ -1544,23 +1624,46 @@ export function WorkbenchCanvas({
                 vizConfig: w.vizConfig,
               };
             });
-            const pos = group.canvasPosition ?? { x: 20, y: yOffset, w: defaultGroupSize.w, h: defaultGroupSize.h };
-            const sectionType = (group.sectionType ?? "company-scorecard") as SectionType;
+            const pos = group.canvasPosition ?? {
+              x: 20,
+              y: yOffset,
+              w: defaultGroupSize.w,
+              h: defaultGroupSize.h,
+            };
+            const sectionType = (group.sectionType ??
+              "company-scorecard") as SectionType;
             const groupPayload = {
               type: "widget_group" as const,
               groupId,
               title: group.title,
               sectionType,
-              widgetIds: groupItems.filter((i): i is Extract<GroupWidgetItem, { kind: "registry" }> => i.kind === "registry").map((i) => i.defId),
+              widgetIds: groupItems
+                .filter(
+                  (i): i is Extract<GroupWidgetItem, { kind: "registry" }> =>
+                    i.kind === "registry",
+                )
+                .map((i) => i.defId),
               items: groupItems,
             };
-            newItems.push(createLayoutItem(`canvas-${groupId}`, "widget_group", groupPayload, pos));
+            newItems.push(
+              createLayoutItem(
+                `canvas-${groupId}`,
+                "widget_group",
+                groupPayload,
+                pos,
+              ),
+            );
             yOffset = pos.y + pos.h + groupGap;
           }
 
           for (const spec of dashAction.standaloneWidgets ?? []) {
             if (spec.kind !== "cohi") continue;
-            const pos = spec.canvasPosition ?? { x: 20, y: yOffset, w: 360, h: 240 };
+            const pos = spec.canvasPosition ?? {
+              x: 20,
+              y: yOffset,
+              w: 360,
+              h: 240,
+            };
             const cohiItem = createLayoutItem(
               `cohi-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
               "cohi_widget",
@@ -1570,7 +1673,7 @@ export function WorkbenchCanvas({
                 title: spec.title,
                 vizConfig: spec.vizConfig,
               },
-              pos
+              pos,
             );
             newItems.push(cohiItem);
             yOffset = pos.y + pos.h + groupGap;
@@ -1579,7 +1682,9 @@ export function WorkbenchCanvas({
           setItemsWithHistory((prev) => [...prev, ...newItems]);
           toast({
             title: "Dashboard created",
-            description: dashAction.explanation?.substring(0, 80) || `Added ${dashAction.groups.length} group(s)`,
+            description:
+              dashAction.explanation?.substring(0, 80) ||
+              `Added ${dashAction.groups.length} group(s)`,
           });
           break;
         }
@@ -1799,7 +1904,8 @@ export function WorkbenchCanvas({
           const target = items[targetIdx];
           if (target.payload.type === "cohi_widget") {
             const hasSql = !!(action.sql && String(action.sql).trim());
-            const hasChanges = action.changes && Object.keys(action.changes).length > 0;
+            const hasChanges =
+              action.changes && Object.keys(action.changes).length > 0;
             const hasTitle = !!(action.title && String(action.title).trim());
             if (!hasSql && !hasChanges && !hasTitle) {
               toast({
@@ -1825,7 +1931,9 @@ export function WorkbenchCanvas({
             }
             const updated = [...items];
             const existingViz = target.payload.vizConfig || {};
-            const changes = action.changes as Partial<typeof existingViz> & { tableConfig?: Record<string, unknown> };
+            const changes = action.changes as Partial<typeof existingViz> & {
+              tableConfig?: Record<string, unknown>;
+            };
             const mergedViz =
               action.changes && Object.keys(action.changes).length > 0
                 ? {
@@ -1834,7 +1942,11 @@ export function WorkbenchCanvas({
                     ...(changes.tableConfig
                       ? {
                           tableConfig: {
-                            ...((existingViz as { tableConfig?: Record<string, unknown> }).tableConfig || {}),
+                            ...((
+                              existingViz as {
+                                tableConfig?: Record<string, unknown>;
+                              }
+                            ).tableConfig || {}),
                             ...changes.tableConfig,
                           },
                         }
@@ -1934,9 +2046,9 @@ export function WorkbenchCanvas({
 
         newItems.push(
           createLayoutItem(groupId, "widget_group", groupPayload, {
-            x: 20,
+            x: 0,
             y: yOffset,
-            w: 900,
+            w: defaultGroupWidth,
             h: groupHeight,
           }),
         );
@@ -1970,6 +2082,7 @@ export function WorkbenchCanvas({
   useEffect(() => {
     if (!loadCanvasId) return;
     let cancelled = false;
+    setCanvasLoading(true);
     (async () => {
       try {
         // In dev, load demo canvas via unauthenticated endpoint so export can be tested without login
@@ -2016,10 +2129,10 @@ export function WorkbenchCanvas({
               userId: s.userId ?? undefined,
               groupId: s.groupId ?? undefined,
               permission: s.permission === "editor" ? "editor" : "viewer",
-            }))
+            })),
           );
           setSharedWithUserIds(
-            data.shares.filter((s: any) => s.userId).map((s: any) => s.userId)
+            data.shares.filter((s: any) => s.userId).map((s: any) => s.userId),
           );
         } else if (Array.isArray(data.shared_with_user_ids)) {
           setSharedWithUserIds(data.shared_with_user_ids);
@@ -2027,7 +2140,7 @@ export function WorkbenchCanvas({
             data.shared_with_user_ids.map((id: string) => ({
               userId: id,
               permission: "viewer" as const,
-            }))
+            })),
           );
         }
         setCanvasId(data.id);
@@ -2056,9 +2169,11 @@ export function WorkbenchCanvas({
             setSaveStatus("saved");
           });
         });
+        if (!cancelled) setCanvasLoading(false);
         onLoaded?.();
       } catch (err: any) {
         if (!cancelled) {
+          setCanvasLoading(false);
           const msg = err?.message ?? "";
           const is404 = msg.includes("not found") || msg.includes("404");
           toast({
@@ -2128,6 +2243,7 @@ export function WorkbenchCanvas({
   }, []);
 
   const canvasWidth = Math.max(width - 32, 480);
+  const defaultGroupWidth = Math.max(canvasWidth, 600);
 
   // ─── Auto-fit: proportionally rescale items when Cohi panel opens/closes ───
   // Tracks the panel state and rescales widget positions/widths so they fit
@@ -2431,7 +2547,7 @@ export function WorkbenchCanvas({
         const groupId = `group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         const { x, y: startY } = getNextPosition(items);
 
-        const groupW = canvasWidth || 1200;
+        const groupW = defaultGroupWidth;
         const kpiCount = widgetLayout.widgetIds.filter((id) => {
           const def = getWidgetDefinition(id);
           return def?.category === "kpi";
@@ -2947,7 +3063,12 @@ export function WorkbenchCanvas({
         name.replace(/[\s\\/*?:[\]]/g, "_").slice(0, 31) || "Sheet";
 
       const wb = XLSX.utils.book_new();
-      const widgetData = entry.data as { vizType?: string; data?: any[]; xKey?: string; yKey?: string };
+      const widgetData = entry.data as {
+        vizType?: string;
+        data?: any[];
+        xKey?: string;
+        yKey?: string;
+      };
       const rows = Array.isArray(widgetData.data) ? widgetData.data : [];
 
       if (rows.length === 0) {
@@ -2984,15 +3105,22 @@ export function WorkbenchCanvas({
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        const safeName = (entry.widgetName || "widget").replace(/[^a-z0-9]/gi, "_");
+        const safeName = (entry.widgetName || "widget").replace(
+          /[^a-z0-9]/gi,
+          "_",
+        );
         a.download = `${safeName}.xlsx`;
         a.click();
         URL.revokeObjectURL(url);
-        toast({ title: "Downloaded", description: `${entry.widgetName || "Widget"} exported as Excel.` });
+        toast({
+          title: "Downloaded",
+          description: `${entry.widgetName || "Widget"} exported as Excel.`,
+        });
       } catch (err) {
         toast({
           title: "Export failed",
-          description: err instanceof Error ? err.message : "Could not create Excel file",
+          description:
+            err instanceof Error ? err.message : "Could not create Excel file",
           variant: "destructive",
         });
       }
@@ -3029,7 +3157,12 @@ export function WorkbenchCanvas({
             data: w.data,
             widgetType: layoutItem?.type ?? (w.data as any)?.widgetType,
             layoutPosition: layoutItem
-              ? { x: layoutItem.x, y: layoutItem.y, w: layoutItem.w, h: layoutItem.h }
+              ? {
+                  x: layoutItem.x,
+                  y: layoutItem.y,
+                  w: layoutItem.w,
+                  h: layoutItem.h,
+                }
               : undefined,
           };
         });
@@ -3042,8 +3175,11 @@ export function WorkbenchCanvas({
             // Provide a minimal stub so the server can at least order the slide correctly
             widgetData.push({
               itemId: it.i,
-              widgetName: (it.payload as any).title || (it.payload as any).label || it.type,
-              category: 'other',
+              widgetName:
+                (it.payload as any).title ||
+                (it.payload as any).label ||
+                it.type,
+              category: "other",
               data: { widgetType: it.type, ...(it.payload as any) },
               widgetType: it.type,
               layoutPosition: { x: it.x, y: it.y, w: it.w, h: it.h },
@@ -3453,9 +3589,14 @@ Structure it as a narrative-first executive briefing:
     if (!tenantGroupsLoaded) {
       (async () => {
         try {
-          const data = await api.request<{ groups: Array<{ id: string; name: string; description?: string; color?: string }> }>(
-            `/api/groups${tenantQs}`
-          );
+          const data = await api.request<{
+            groups: Array<{
+              id: string;
+              name: string;
+              description?: string;
+              color?: string;
+            }>;
+          }>(`/api/groups${tenantQs}`);
           setTenantGroups(data?.groups ?? []);
           setTenantGroupsLoaded(true);
         } catch {
@@ -3464,7 +3605,14 @@ Structure it as a narrative-first executive briefing:
         }
       })();
     }
-  }, [canvasId, toast, tenantUsersLoaded, tenantGroupsLoaded, tenantQs, user?.id]);
+  }, [
+    canvasId,
+    toast,
+    tenantUsersLoaded,
+    tenantGroupsLoaded,
+    tenantQs,
+    user?.id,
+  ]);
 
   const handleSaveVisibility = useCallback(async () => {
     if (!canvasId) return;
@@ -3529,20 +3677,17 @@ Structure it as a narrative-first executive briefing:
   }, []);
 
   const setSharePermission = useCallback(
-    (
-      key: string,
-      type: "user" | "group",
-      permission: "viewer" | "editor"
-    ) => {
+    (key: string, type: "user" | "group", permission: "viewer" | "editor") => {
       setCanvasShares((prev) =>
         prev.map((s) => {
           if (type === "user" && s.userId === key) return { ...s, permission };
-          if (type === "group" && s.groupId === key) return { ...s, permission };
+          if (type === "group" && s.groupId === key)
+            return { ...s, permission };
           return s;
-        })
+        }),
       );
     },
-    []
+    [],
   );
 
   const handleSaveConfirm = useCallback(async () => {
@@ -3666,8 +3811,13 @@ Structure it as a narrative-first executive briefing:
               </span>
             </div>
           )}
-          {/* Toolbar — sticky at top of canvas, always visible */}
-          <div className="flex flex-wrap md:flex-nowrap items-center justify-between gap-2 md:gap-1 overflow-x-auto py-1.5 px-3 border-b border-slate-200/70 dark:border-slate-700/70 bg-slate-50/80 dark:bg-slate-800/50 shrink-0 min-h-[44px] sticky top-0 z-20">
+          {/* Canvas toolbar — hidden while the report builder is active */}
+          <div
+            className={cn(
+              "flex flex-wrap md:flex-nowrap items-center justify-between gap-2 md:gap-1 overflow-x-auto py-1.5 px-3 border-b border-slate-200/70 dark:border-slate-700/70 bg-slate-50/80 dark:bg-slate-800/50 shrink-0 min-h-[44px] sticky top-0 z-20",
+              showReportBuilder && "hidden",
+            )}
+          >
             <div className="flex items-center gap-1 flex-wrap md:flex-nowrap shrink-0">
               {!showReportBuilder && (
                 <>
@@ -3812,102 +3962,106 @@ Structure it as a narrative-first executive briefing:
                   )}
                   {canEdit && (
                     <>
-                  <input
-                    ref={backgroundImageInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={handleBackgroundImageChange}
-                    className="hidden"
-                    aria-hidden
-                  />
-                  <DropdownMenu>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400"
+                      <input
+                        ref={backgroundImageInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handleBackgroundImageChange}
+                        className="hidden"
+                        aria-hidden
+                      />
+                      <DropdownMenu>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400"
+                              >
+                                <Palette className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">
+                            Background
+                          </TooltipContent>
+                        </Tooltip>
+                        <DropdownMenuContent align="start" className="w-64">
+                          <div className="px-2 py-2 flex items-center gap-2">
+                            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                              Color
+                            </span>
+                            <input
+                              type="color"
+                              value={
+                                canvasBackground.type === "color"
+                                  ? canvasBackground.value
+                                  : "#ffffff"
+                              }
+                              onChange={(e) =>
+                                setCanvasBackground({
+                                  type: "color",
+                                  value: e.target.value,
+                                })
+                              }
+                              className="h-8 w-12 cursor-pointer rounded border border-slate-200 dark:border-slate-600 bg-transparent"
+                            />
+                          </div>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onClick={() =>
+                              backgroundImageInputRef.current?.click()
+                            }
+                            className="gap-2"
                           >
-                            <Palette className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">Background</TooltipContent>
-                    </Tooltip>
-                    <DropdownMenuContent align="start" className="w-64">
-                      <div className="px-2 py-2 flex items-center gap-2">
-                        <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-                          Color
-                        </span>
-                        <input
-                          type="color"
-                          value={
-                            canvasBackground.type === "color"
-                              ? canvasBackground.value
-                              : "#ffffff"
-                          }
-                          onChange={(e) =>
-                            setCanvasBackground({
-                              type: "color",
-                              value: e.target.value,
-                            })
-                          }
-                          className="h-8 w-12 cursor-pointer rounded border border-slate-200 dark:border-slate-600 bg-transparent"
-                        />
-                      </div>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        onClick={() => backgroundImageInputRef.current?.click()}
-                        className="gap-2"
-                      >
-                        <Image className="h-4 w-4" /> Upload image
-                      </DropdownMenuItem>
-                      {/* AI background generation hidden until backend endpoint is implemented */}
-                      <DropdownMenuSeparator />
-                      <div className="px-2 py-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
-                        Templates
-                      </div>
-                      {BACKGROUND_TEMPLATES.map((t) => (
-                        <DropdownMenuItem
-                          key={t.id}
-                          onClick={() =>
-                            setCanvasBackground({
-                              type: "template",
-                              value: t.id,
-                            })
-                          }
-                          className="gap-2"
-                        >
-                          <span
-                            className="h-5 w-8 rounded border border-slate-200 dark:border-slate-600 shrink-0"
-                            style={t.style}
-                          />
-                          {t.label}
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept={
-                      UPLOAD_ALLOWED_TYPES.join(",") +
-                      ",.csv,.xlsx,.xls,.pptx,.ppt"
-                    }
-                    onChange={handleFileChange}
-                    className="hidden"
-                    aria-hidden
-                  />
-                  <input
-                    ref={logoInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={handleLogoChange}
-                    className="hidden"
-                    aria-hidden
-                  />
-                  {/* Upload file button hidden – not ready for release
+                            <Image className="h-4 w-4" /> Upload image
+                          </DropdownMenuItem>
+                          {/* AI background generation hidden until backend endpoint is implemented */}
+                          <DropdownMenuSeparator />
+                          <div className="px-2 py-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
+                            Templates
+                          </div>
+                          {BACKGROUND_TEMPLATES.map((t) => (
+                            <DropdownMenuItem
+                              key={t.id}
+                              onClick={() =>
+                                setCanvasBackground({
+                                  type: "template",
+                                  value: t.id,
+                                })
+                              }
+                              className="gap-2"
+                            >
+                              <span
+                                className="h-5 w-8 rounded border border-slate-200 dark:border-slate-600 shrink-0"
+                                style={t.style}
+                              />
+                              {t.label}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept={
+                          UPLOAD_ALLOWED_TYPES.join(",") +
+                          ",.csv,.xlsx,.xls,.pptx,.ppt"
+                        }
+                        onChange={handleFileChange}
+                        className="hidden"
+                        aria-hidden
+                      />
+                      <input
+                        ref={logoInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handleLogoChange}
+                        className="hidden"
+                        aria-hidden
+                      />
+                      {/* Upload file button hidden – not ready for release
             <DropdownMenu>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -3942,7 +4096,7 @@ Structure it as a narrative-first executive briefing:
               </DropdownMenuContent>
             </DropdownMenu>
             */}
-                  {/* Image-to-Dashboard button hidden until feature is ready for release
+                      {/* Image-to-Dashboard button hidden until feature is ready for release
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -3963,114 +4117,114 @@ Structure it as a narrative-first executive briefing:
                     <>
                       <div className="w-px h-5 bg-slate-200 dark:bg-slate-600 shrink-0 mx-0.5" />
                       <DropdownMenu>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-8 shrink-0 gap-1.5 px-2 text-slate-700 dark:text-slate-300"
-                          >
-                            <PlusCircle className="h-4 w-4" />
-                            <span className="text-xs font-medium">Add</span>
-                            <ChevronDown className="h-3.5 w-3.5" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">
-                        Add widget or template
-                      </TooltipContent>
-                    </Tooltip>
-                    <DropdownMenuContent
-                      align="start"
-                      className="w-[620px] p-0 overflow-hidden border-0 shadow-lg"
-                    >
-                      <div className="grid grid-cols-[160px_1fr] gap-0">
-                        <div className="space-y-0.5 p-2.5 bg-gradient-to-b from-slate-50/90 to-slate-100/60 dark:from-slate-800/40 dark:to-slate-900/50 rounded-l-lg border-r border-slate-200/60 dark:border-slate-700/50">
-                          {DASHBOARD_SECTION_GROUPS.map((group) => (
-                            <button
-                              key={group.label}
-                              type="button"
-                              onClick={() => setActiveAddGroup(group.label)}
-                              className={`w-full text-left rounded-lg px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider transition-all duration-200 ${
-                                activeAddGroup === group.label
-                                  ? "bg-violet-100 text-violet-700 shadow-sm dark:bg-violet-500/20 dark:text-violet-300"
-                                  : "text-slate-500 dark:text-slate-400 hover:bg-violet-50/80 dark:hover:bg-violet-500/10 hover:text-slate-700 dark:hover:text-slate-300"
-                              }`}
-                            >
-                              {group.label}
-                            </button>
-                          ))}
-                        </div>
-                        <div className="rounded-r-lg bg-gradient-to-br from-rose-50/50 via-white to-violet-50/50 dark:from-slate-900/60 dark:via-slate-900/40 dark:to-indigo-950/30 p-3 border border-l-0 border-slate-200/50 dark:border-slate-700/50 flex flex-col">
-                          <div className="grid grid-cols-2 gap-2">
-                            {(
-                              DASHBOARD_SECTION_GROUPS.find(
-                                (g) => g.label === activeAddGroup,
-                              )?.items ?? []
-                            ).map((section) => {
-                              const Icon = section.icon;
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 shrink-0 gap-1.5 px-2 text-slate-700 dark:text-slate-300"
+                              >
+                                <PlusCircle className="h-4 w-4" />
+                                <span className="text-xs font-medium">Add</span>
+                                <ChevronDown className="h-3.5 w-3.5" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">
+                            Add widget or template
+                          </TooltipContent>
+                        </Tooltip>
+                        <DropdownMenuContent
+                          align="start"
+                          className="w-[620px] p-0 overflow-hidden border-0 shadow-lg"
+                        >
+                          <div className="grid grid-cols-[160px_1fr] gap-0">
+                            <div className="space-y-0.5 p-2.5 bg-gradient-to-b from-slate-50/90 to-slate-100/60 dark:from-slate-800/40 dark:to-slate-900/50 rounded-l-lg border-r border-slate-200/60 dark:border-slate-700/50">
+                              {DASHBOARD_SECTION_GROUPS.map((group) => (
+                                <button
+                                  key={group.label}
+                                  type="button"
+                                  onClick={() => setActiveAddGroup(group.label)}
+                                  className={`w-full text-left rounded-lg px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider transition-all duration-200 ${
+                                    activeAddGroup === group.label
+                                      ? "bg-violet-100 text-violet-700 shadow-sm dark:bg-violet-500/20 dark:text-violet-300"
+                                      : "text-slate-500 dark:text-slate-400 hover:bg-violet-50/80 dark:hover:bg-violet-500/10 hover:text-slate-700 dark:hover:text-slate-300"
+                                  }`}
+                                >
+                                  {group.label}
+                                </button>
+                              ))}
+                            </div>
+                            <div className="rounded-r-lg bg-gradient-to-br from-rose-50/50 via-white to-violet-50/50 dark:from-slate-900/60 dark:via-slate-900/40 dark:to-indigo-950/30 p-3 border border-l-0 border-slate-200/50 dark:border-slate-700/50 flex flex-col">
+                              <div className="grid grid-cols-2 gap-2">
+                                {(
+                                  DASHBOARD_SECTION_GROUPS.find(
+                                    (g) => g.label === activeAddGroup,
+                                  )?.items ?? []
+                                ).map((section) => {
+                                  const Icon = section.icon;
+                                  return (
+                                    <DropdownMenuItem
+                                      key={section.id}
+                                      onClick={() =>
+                                        addDashboardSection(
+                                          section.id,
+                                          section.title,
+                                        )
+                                      }
+                                      className="gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-white/90 dark:hover:bg-slate-800/60 hover:shadow-sm border border-transparent hover:border-rose-200/60 dark:hover:border-violet-500/30 transition-all duration-200"
+                                    >
+                                      <Icon
+                                        className={`h-4 w-4 shrink-0 ${section.iconClass ?? "text-slate-500"}`}
+                                      />
+                                      <span className="truncate">
+                                        {section.title}
+                                      </span>
+                                    </DropdownMenuItem>
+                                  );
+                                })}
+                              </div>
+                              <div className="mt-2.5 pt-2.5 border-t border-slate-200/60 dark:border-slate-600/50">
+                                <DropdownMenuItem
+                                  onClick={addTextBlock}
+                                  className="gap-2.5 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-white/90 dark:hover:bg-slate-800/60 hover:text-slate-800 dark:hover:text-slate-100 border-0 focus:bg-white/90 dark:focus:bg-slate-800/60 focus:text-slate-800 dark:focus:text-slate-100 cursor-pointer"
+                                >
+                                  <StickyNote className="h-4 w-4 shrink-0 text-amber-500/80 dark:text-amber-400/80" />
+                                  <span>Text block</span>
+                                </DropdownMenuItem>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="hidden h-px bg-slate-200/70 dark:bg-slate-700/60 my-2" />
+                          <DropdownMenuLabel className="hidden text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 px-3">
+                            Templates
+                          </DropdownMenuLabel>
+                          <div className="hidden grid grid-cols-2 gap-2 px-2 py-2">
+                            {CANVAS_TEMPLATES.map((t) => {
+                              const Icon = t.icon;
                               return (
                                 <DropdownMenuItem
-                                  key={section.id}
-                                  onClick={() =>
-                                    addDashboardSection(
-                                      section.id,
-                                      section.title,
-                                    )
-                                  }
-                                  className="gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-white/90 dark:hover:bg-slate-800/60 hover:shadow-sm border border-transparent hover:border-rose-200/60 dark:hover:border-violet-500/30 transition-all duration-200"
+                                  key={t.id}
+                                  onClick={() => applyTemplate(t)}
+                                  className="gap-3 rounded-lg border border-transparent bg-slate-50/60 p-2.5 transition-colors data-[highlighted]:border-slate-200 data-[highlighted]:bg-slate-100 dark:bg-slate-800/40 dark:data-[highlighted]:border-slate-700 dark:data-[highlighted]:bg-slate-800"
                                 >
-                                  <Icon
-                                    className={`h-4 w-4 shrink-0 ${section.iconClass ?? "text-slate-500"}`}
-                                  />
-                                  <span className="truncate">
-                                    {section.title}
+                                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-slate-600 shadow-sm dark:bg-slate-900 dark:text-slate-300">
+                                    <Icon className="h-4 w-4" />
+                                  </span>
+                                  <span className="flex flex-col">
+                                    <span className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                                      {t.label}
+                                    </span>
+                                    <span className="text-xs text-slate-500 dark:text-slate-400">
+                                      {t.description}
+                                    </span>
                                   </span>
                                 </DropdownMenuItem>
                               );
                             })}
                           </div>
-                          <div className="mt-2.5 pt-2.5 border-t border-slate-200/60 dark:border-slate-600/50">
-                            <DropdownMenuItem
-                              onClick={addTextBlock}
-                              className="gap-2.5 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-white/90 dark:hover:bg-slate-800/60 hover:text-slate-800 dark:hover:text-slate-100 border-0 focus:bg-white/90 dark:focus:bg-slate-800/60 focus:text-slate-800 dark:focus:text-slate-100 cursor-pointer"
-                            >
-                              <StickyNote className="h-4 w-4 shrink-0 text-amber-500/80 dark:text-amber-400/80" />
-                              <span>Text block</span>
-                            </DropdownMenuItem>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="hidden h-px bg-slate-200/70 dark:bg-slate-700/60 my-2" />
-                      <DropdownMenuLabel className="hidden text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 px-3">
-                        Templates
-                      </DropdownMenuLabel>
-                      <div className="hidden grid grid-cols-2 gap-2 px-2 py-2">
-                        {CANVAS_TEMPLATES.map((t) => {
-                          const Icon = t.icon;
-                          return (
-                            <DropdownMenuItem
-                              key={t.id}
-                              onClick={() => applyTemplate(t)}
-                              className="gap-3 rounded-lg border border-transparent bg-slate-50/60 p-2.5 transition-colors data-[highlighted]:border-slate-200 data-[highlighted]:bg-slate-100 dark:bg-slate-800/40 dark:data-[highlighted]:border-slate-700 dark:data-[highlighted]:bg-slate-800"
-                            >
-                              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-slate-600 shadow-sm dark:bg-slate-900 dark:text-slate-300">
-                                <Icon className="h-4 w-4" />
-                              </span>
-                              <span className="flex flex-col">
-                                <span className="text-sm font-medium text-slate-900 dark:text-slate-100">
-                                  {t.label}
-                                </span>
-                                <span className="text-xs text-slate-500 dark:text-slate-400">
-                                  {t.description}
-                                </span>
-                              </span>
-                            </DropdownMenuItem>
-                          );
-                        })}
-                      </div>
-                    </DropdownMenuContent>
+                        </DropdownMenuContent>
                       </DropdownMenu>
                     </>
                   )}
@@ -4188,7 +4342,9 @@ Structure it as a narrative-first executive briefing:
                             <Eraser className="h-4 w-4" />
                           </Button>
                         </TooltipTrigger>
-                        <TooltipContent side="bottom">Clear canvas</TooltipContent>
+                        <TooltipContent side="bottom">
+                          Clear canvas
+                        </TooltipContent>
                       </Tooltip>
                     </>
                   )}
@@ -4220,135 +4376,133 @@ Structure it as a narrative-first executive briefing:
                 </Tooltip>
               )}
 
-              {/* Primary: Open PowerPoint Builder — in-app preview/editor then export */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    size="sm"
-                    className="h-8 gap-1.5 text-xs px-3 font-semibold shrink-0 shadow-sm bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white"
-                    onClick={() => {
-                      setAiReportDefinition(null);
-                      setShowReportBuilder(true);
-                    }}
-                    disabled={!hasItems}
-                  >
-                    <Presentation className="h-3.5 w-3.5" />
-                    Export to PowerPoint
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  Open the slide builder to preview, edit, and export a PowerPoint deck from canvas data
-                </TooltipContent>
-              </Tooltip>
+              <div className="ml-auto flex items-center gap-1">
+                {/* Secondary: AI-powered report builder (future feature) */}
+                {!WORKBENCH_COHI_HIDDEN && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className={cn(
+                          "h-8 gap-1.5 text-xs px-2.5 font-medium shrink-0",
+                          isGeneratingAiReport ? "cursor-wait opacity-70" : "",
+                        )}
+                        onClick={() => handleAiReport("pptx")}
+                        disabled={isGeneratingAiReport || !hasItems}
+                      >
+                        {isGeneratingAiReport ? (
+                          <>
+                            <svg
+                              className="h-3.5 w-3.5 animate-spin"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                            >
+                              <circle
+                                cx="12"
+                                cy="12"
+                                r="10"
+                                strokeDasharray="32"
+                                strokeDashoffset="12"
+                              />
+                            </svg>{" "}
+                            Preparing...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="h-3.5 w-3.5" /> AI Report
+                          </>
+                        )}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      Cohi prepares an executive presentation from your canvas
+                      data
+                    </TooltipContent>
+                  </Tooltip>
+                )}
 
-              {/* Secondary: AI-powered report builder (future feature) */}
-              {!WORKBENCH_COHI_HIDDEN && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className={cn(
-                        "h-8 gap-1.5 text-xs px-2.5 font-medium shrink-0",
-                        isGeneratingAiReport ? "cursor-wait opacity-70" : "",
-                      )}
-                      onClick={() => handleAiReport("pptx")}
-                      disabled={isGeneratingAiReport || !hasItems}
-                    >
-                      {isGeneratingAiReport ? (
-                        <>
-                          <svg
-                            className="h-3.5 w-3.5 animate-spin"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                          >
-                            <circle
-                              cx="12"
-                              cy="12"
-                              r="10"
-                              strokeDasharray="32"
-                              strokeDashoffset="12"
-                            />
-                          </svg>{" "}
-                          Preparing...
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="h-3.5 w-3.5" />{" "}
-                          {showReportBuilder ? "Regenerate Report" : "AI Report"}
-                        </>
-                      )}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">
-                    Cohi prepares an executive presentation from your canvas data
-                  </TooltipContent>
-                </Tooltip>
-              )}
-
-              {/* Report / Canvas view toggle */}
-              {showReportBuilder ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 gap-1.5 text-xs px-2.5 font-medium shrink-0 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700"
-                      onClick={() => setShowReportBuilder(false)}
-                    >
-                      <LayoutDashboard className="h-3.5 w-3.5" />
-                      Back to Canvas
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">
-                    Switch back to canvas view
-                  </TooltipContent>
-                </Tooltip>
-              ) : aiReportDefinition ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 gap-1.5 text-xs px-2.5 font-medium shrink-0 bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 border-violet-300 dark:border-violet-700"
-                      onClick={() => setShowReportBuilder(true)}
-                    >
-                      <Presentation className="h-3.5 w-3.5" />
-                      View Report
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">
-                    Return to your generated report
-                  </TooltipContent>
-                </Tooltip>
-              ) : null}
+                {/* PowerPoint builder entry point */}
+                {aiReportDefinition ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 gap-1.5 text-xs px-2.5 font-medium shrink-0 bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 border-violet-300 dark:border-violet-700"
+                        onClick={() => setShowReportBuilder(true)}
+                      >
+                        <Presentation className="h-3.5 w-3.5" />
+                        View Report
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      Return to your generated report
+                    </TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="sm"
+                        className="h-8 gap-1.5 text-xs px-3 font-semibold shrink-0 shadow-sm bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white"
+                        onClick={() => {
+                          setAiReportDefinition(null);
+                          setShowReportBuilder(true);
+                        }}
+                        disabled={!hasItems}
+                      >
+                        <Presentation className="h-3.5 w-3.5" />
+                        PowerPoint Editor
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      Open the slide builder to preview, edit, and export a
+                      PowerPoint deck from canvas data
+                    </TooltipContent>
+                  </Tooltip>
+                )}
+              </div>
             </div>
             {/* Per-widget export is available in each widget's context menu */}
           </div>
 
-          {/* Inline Report Builder (mount only when active to avoid hidden background requests).
-              The builder live-subscribes to canvasDataStore for real-time widget data. */}
-          {showReportBuilder && (
-            <div className="flex-1 min-h-0 overflow-hidden">
-              <ReportBuilder
-                onClose={() => setShowReportBuilder(false)}
-                canvasTitle={saveTitle || "Untitled Canvas"}
-                tenantId={tenantId}
-                initialDefinition={aiReportDefinition ?? undefined}
-                inline
-              />
-            </div>
-          )}
+          {/* Report Builder — always mounted so it stays in sync with canvas data.
+              Hidden when not active to avoid layout interference. */}
+          <div
+            className={cn(
+              "flex-1 min-h-0 overflow-hidden",
+              !showReportBuilder && "hidden",
+            )}
+          >
+            <ReportBuilder
+              onClose={() => setShowReportBuilder(false)}
+              canvasTitle={saveTitle || "Untitled Canvas"}
+              tenantId={tenantId}
+              initialDefinition={aiReportDefinition ?? undefined}
+              inline
+            />
+          </div>
 
           {/* Canvas surface: freeform or empty state + annotations overlay */}
           <div
             className={cn(
-              "flex-1 p-2 min-h-0 overflow-auto canvas-freeform",
+              "flex-1 p-2 min-h-0 overflow-auto canvas-freeform relative",
               showReportBuilder && "hidden",
             )}
           >
+            {canvasLoading && (
+              <div className="absolute inset-0 z-30 flex items-center justify-center bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm">
+                <div className="flex flex-col items-center gap-3">
+                  <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-indigo-600 dark:border-slate-600 dark:border-t-indigo-400" />
+                  <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
+                    Loading canvas...
+                  </p>
+                </div>
+              </div>
+            )}
             <style>{`
             .canvas-freeform .react-resizable-handle {
               opacity: 0;
@@ -4540,7 +4694,7 @@ Structure it as a narrative-first executive briefing:
                             ],
                             filterSync: false, // Cohi widgets start with independent filters
                           },
-                          { x: item.x, y: item.y, w: 700, h: 500 },
+                          { x: 0, y: item.y, w: defaultGroupWidth, h: 500 },
                         );
                         // Replace standalone item with the new group
                         const replaceId = item.i;
@@ -4753,8 +4907,8 @@ Structure it as a narrative-first executive briefing:
                           What would you like to review?
                         </h3>
                         <p className="text-sm text-slate-400 dark:text-slate-500 mb-6">
-                          Ask Cohi to prepare dashboards, analyze performance, or
-                          build executive presentations.
+                          Ask Cohi to prepare dashboards, analyze performance,
+                          or build executive presentations.
                         </p>
 
                         {/* Primary: Natural language input */}
@@ -4804,7 +4958,10 @@ Structure it as a narrative-first executive briefing:
                               type="button"
                               onClick={() => {
                                 setShowCohiPanel(true);
-                                setTimeout(() => cohiSendMessage(q.prompt), 300);
+                                setTimeout(
+                                  () => cohiSendMessage(q.prompt),
+                                  300,
+                                );
                               }}
                               className="px-3 py-1.5 text-xs font-medium rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:border-violet-300 dark:hover:border-violet-600 hover:text-violet-700 dark:hover:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-all"
                             >
@@ -4822,7 +4979,8 @@ Structure it as a narrative-first executive briefing:
                           Your canvas is empty
                         </h3>
                         <p className="text-sm text-slate-400 dark:text-slate-500 mb-6">
-                          Add widgets from the library or browse templates below.
+                          Add widgets from the library or browse templates
+                          below.
                         </p>
                       </>
                     )}
@@ -5101,11 +5259,7 @@ Structure it as a narrative-first executive briefing:
                   </button>
                   {/* Global option — only for admins */}
                   {(
-                    [
-                      "super_admin",
-                      "platform_admin",
-                      "tenant_admin",
-                    ] as const
+                    ["super_admin", "platform_admin", "tenant_admin"] as const
                   ).includes(user?.role as any) && (
                     <button
                       type="button"
@@ -5144,7 +5298,9 @@ Structure it as a narrative-first executive briefing:
                     {tenantUsers.length > 0 ? (
                       <div className="max-h-[180px] overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800">
                         {tenantUsers.map((u) => {
-                          const shareEntry = canvasShares.find((s) => s.userId === u.id);
+                          const shareEntry = canvasShares.find(
+                            (s) => s.userId === u.id,
+                          );
                           const selected = !!shareEntry;
                           return (
                             <div
@@ -5199,14 +5355,22 @@ Structure it as a narrative-first executive briefing:
                                   <DropdownMenuContent align="end">
                                     <DropdownMenuItem
                                       onClick={() =>
-                                        setSharePermission(u.id, "user", "viewer")
+                                        setSharePermission(
+                                          u.id,
+                                          "user",
+                                          "viewer",
+                                        )
                                       }
                                     >
                                       Viewer
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
                                       onClick={() =>
-                                        setSharePermission(u.id, "user", "editor")
+                                        setSharePermission(
+                                          u.id,
+                                          "user",
+                                          "editor",
+                                        )
                                       }
                                     >
                                       Editor
@@ -5233,7 +5397,9 @@ Structure it as a narrative-first executive briefing:
                     {tenantGroupsLoaded && tenantGroups.length > 0 ? (
                       <div className="max-h-[180px] overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800">
                         {tenantGroups.map((g) => {
-                          const shareEntry = canvasShares.find((s) => s.groupId === g.id);
+                          const shareEntry = canvasShares.find(
+                            (s) => s.groupId === g.id,
+                          );
                           const selected = !!shareEntry;
                           return (
                             <div
@@ -5281,14 +5447,22 @@ Structure it as a narrative-first executive briefing:
                                   <DropdownMenuContent align="end">
                                     <DropdownMenuItem
                                       onClick={() =>
-                                        setSharePermission(g.id, "group", "viewer")
+                                        setSharePermission(
+                                          g.id,
+                                          "group",
+                                          "viewer",
+                                        )
                                       }
                                     >
                                       Viewer
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
                                       onClick={() =>
-                                        setSharePermission(g.id, "group", "editor")
+                                        setSharePermission(
+                                          g.id,
+                                          "group",
+                                          "editor",
+                                        )
                                       }
                                     >
                                       Editor
@@ -5311,7 +5485,8 @@ Structure it as a narrative-first executive briefing:
                   {canvasShares.length > 0 && (
                     <p className="text-xs text-slate-500 dark:text-slate-400">
                       {canvasShares.length} share
-                      {canvasShares.length !== 1 ? "s" : ""} (Viewer = read-only, Editor = can edit)
+                      {canvasShares.length !== 1 ? "s" : ""} (Viewer =
+                      read-only, Editor = can edit)
                     </p>
                   )}
                 </div>
@@ -5344,7 +5519,7 @@ Structure it as a narrative-first executive briefing:
                     className="w-full gap-2"
                   >
                     <Presentation className="h-4 w-4" />
-                    Export to PowerPoint
+                    PowerPoint Editor
                   </Button>
                   <Button
                     variant="outline"
