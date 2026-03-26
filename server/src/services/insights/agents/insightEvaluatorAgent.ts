@@ -37,7 +37,14 @@ export interface EvaluatedInsight {
   evidence: any;
   metricSignature?: { sql: string; keyFields: string[] };
   confidence: "high" | "medium" | "low";
-  findingIndex: number; // maps back to the original InsightFinding
+  findingIndex: number;
+  // ETM Framework fields
+  what_changed?: string;
+  why?: string;
+  business_impact?: string;
+  risk_if_ignored?: string;
+  recommended_action?: string;
+  owner?: string;
 }
 
 export interface EvaluationResult {
@@ -68,13 +75,19 @@ Output JSON:
   "insights": [
     {
       "headline": "Punchy headline, max 45 words, starts with key metric or finding",
-      "understory": "2-3 sentence detail with specific numbers and comparison. Answers: what changed, why it matters, what to do about it.",
+      "understory": "2-3 sentence detail with specific numbers and comparison.",
       "bucket": "critical" | "attention" | "working" | "context",
       "severity_score": 0.00-1.00,
       "source": "MUST be exactly one of: pipeline | performance | lock_risk | closing_risk | conversion | lost_opportunity | predictions | market_news | compliance | revenue | credit_risk | operations — definitions: pipeline=active loan volume/velocity/counts; performance=officer or branch KPIs/rankings/comparisons; lock_risk=rate lock expirations/timing/exposure; closing_risk=TRID deadlines/closing delays/milestone gaps; conversion=pull-through/fallout/application-to-close funnel; lost_opportunity=withdrawn/denied/cancelled volume; predictions=model forecasts/fallout probability; market_news=external rate data/industry news/regulatory updates (MBA, Fannie, Freddie, CFPB, FHFA); compliance=regulatory or compliance violations; revenue=GOS/margin/pricing/revenue figures; credit_risk=credit scores/DTI/LTV/risk cross-tabs; operations=cycle times/condition backlogs/processing/other",
       "impact": { "type": "revenue_at_risk|operational|compliance|performance", "estimated_dollars": null, "units_affected": null },
       "confidence": "high" | "medium" | "low",
-      "findingIndex": 0
+      "findingIndex": 0,
+      "what_changed": "Factual observation with concrete numbers — what moved, by how much, vs what baseline",
+      "why": "Root cause or contributing factors grounded in the data (not speculation)",
+      "business_impact": "Quantified impact in dollars, units, or operational terms",
+      "risk_if_ignored": "What happens if no action is taken — be specific to this finding",
+      "recommended_action": "Prescriptive next step: who should do what, by when (e.g. 'Branch Manager — review 15 stale loans over 90 days and escalate to processing by Friday')",
+      "owner": "Role or person responsible (e.g. 'VP Operations', 'Branch Manager — Main St', 'Compliance Officer')"
     }
   ],
   "dropped": [
@@ -92,6 +105,7 @@ __TARGET_RULE__
 - MARKET RATE INSIGHTS: If any findings reference market rate trends, rate changes, lock-vs-market analysis, or borrower rate sensitivity, these are HIGH VALUE — keep them and bucket appropriately. Market-aware insights connecting rate movements to pipeline behavior are particularly valuable.
 - Headlines must be concrete and specific: "Pull-through drops 12% vs Q4" not "Performance metrics show changes"
 - Understory must include specific numbers from the finding's keyMetrics.
+- ETM COMPLETENESS (REQUIRED): Every insight MUST include all six ETM fields (what_changed, why, business_impact, risk_if_ignored, recommended_action, owner). These fields turn raw observations into executive-ready coaching. If the finding doesn't provide enough detail for a field, derive it from the data context. recommended_action should be prescriptive and specific (who + what + when), NOT vague suggestions. owner should name a role, not "management".
 - Map bucket -> priority: critical=RED, attention=YELLOW, working=BLUE, context=GRAY
 - Map bucket -> insight_type: critical=critical, attention=warning, working=success, context=info
 - Preserve the findingIndex so we can link back to evidence.
