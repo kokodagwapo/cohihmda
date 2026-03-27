@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import { motion } from "framer-motion";
 import { Navigation } from "@/components/layout/Navigation";
 import { AdminPreloader } from "@/components/admin/AdminPreloader";
@@ -144,11 +144,6 @@ export const Admin = () => {
   // Local state for search
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Check if user has admin access (either platform staff or tenant admin)
-  const isAdmin = useMemo(() => {
-    return isPlatform || userRole === "tenant_admin";
-  }, [isPlatform, userRole]);
-
   // Set initial section based on role/mode and handle initial load
   useEffect(() => {
     // Set the default section based on user role and admin mode
@@ -267,7 +262,7 @@ export const Admin = () => {
 
   return (
     <AdminTenantProvider>
-      <AdminContainer isAdmin={isAdmin}>
+      <AdminContainer>
         <div className="h-screen overflow-hidden flex flex-col bg-gradient-to-br from-blue-50/30 via-white to-blue-50/20 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950/50">
           {/* Preloader */}
           <AdminPreloader show={initialLoad} />

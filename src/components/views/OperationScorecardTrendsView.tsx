@@ -836,7 +836,7 @@ export function OperationScorecardTrendsView({ selectedTenantId, selectedChannel
                                           {data?.unitsOutput}
                                         </span>
                                       </TooltipTrigger>
-                                      <TooltipContent side="top" align="center" className="z-50">
+                                      <TooltipContent side="top" align="center">
                                         <div className="text-xs space-y-1">
                                           <p className="font-semibold">{month}</p>
                                           <p>Units: {data?.unitsOutput ?? 0}</p>
