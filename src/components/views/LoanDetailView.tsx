@@ -54,9 +54,16 @@ import { Loader2, Download, ArrowUp, ArrowDown, Filter, X, Check, Bookmark, Penc
 import { LoanDetailColumnsModal } from "@/components/widgets/components/LoanDetailColumnsModal";
 import {
   useLoanDetailColumnsStore,
+  type SavedLoanDetailColumn,
   savedColumnsToColumnDefs,
+  LOAN_DETAIL_STANDALONE_COLUMNS_STORE_ID,
 } from "@/stores/loanDetailColumnsStore";
 import { computePresetDateRange, getPeriodPresetMeta, type PeriodPreset } from "@/components/ui/DatePeriodPicker";
+import {
+  useLoanDetailViewState,
+  normalizeLoanDetailViewState,
+  type LoanDetailViewStateV1,
+} from "@/hooks/useLoanDetailViewState";
 
 const ROW_HEIGHT = 40;
 const HEADER_HEIGHT = 40;
@@ -725,6 +732,7 @@ export function LoanDetailView({
   const savedColumnsFromStore = useLoanDetailColumnsStore((s) =>
     columnsStoreId ? s.byItem[columnsStoreId] : undefined,
   );
+  const setColumnsInStore = useLoanDetailColumnsStore((s) => s.setColumns);
   const storeColumnDefs = useMemo(
     () => savedColumnsToColumnDefs(savedColumnsFromStore),
     [savedColumnsFromStore],
@@ -784,6 +792,16 @@ export function LoanDetailView({
   const [copiedBookmarkState, setCopiedBookmarkState] = useState<{ id: string; fading: boolean } | null>(null);
   const [selectedBookmarkId, setSelectedBookmarkId] = useState<string | null>(null);
   const [sharedBookmarkTitle, setSharedBookmarkTitle] = useState<string | null>(null);
+  const isStandalonePersistenceEnabled = Boolean(
+    syncFiltersToUrl &&
+      columnsStoreId === LOAN_DETAIL_STANDALONE_COLUMNS_STORE_ID &&
+      tenantId,
+  );
+  const standaloneViewState = useLoanDetailViewState({
+    tenantId,
+    scope: "standalone",
+  });
+  const hydratedStandalonePreferenceKeyRef = useRef<string | null>(null);
   const {
     bookmarks,
     isLoading: bookmarksLoading,
@@ -920,6 +938,26 @@ export function LoanDetailView({
     });
   }, []);
 
+  const clearFilterSearch = useCallback((columnId: string) => {
+    const timers = searchDebounceTimersRef.current;
+    if (timers[columnId]) {
+      clearTimeout(timers[columnId]);
+      delete timers[columnId];
+    }
+    setFilterSearchByColumn((prev) => {
+      if (!(columnId in prev)) return prev;
+      const next = { ...prev };
+      delete next[columnId];
+      return next;
+    });
+    setDebouncedFilterSearchByColumn((prev) => {
+      if (!(columnId in prev)) return prev;
+      const next = { ...prev };
+      delete next[columnId];
+      return next;
+    });
+  }, []);
+
   const discardDraft = useCallback((columnId: string) => {
     setDraftFilters((prev) => {
       const next = { ...prev };
@@ -927,11 +965,13 @@ export function LoanDetailView({
       return next;
     });
     setOpenFilterColumnId((current) => (current === columnId ? null : current));
-  }, []);
+    clearFilterSearch(columnId);
+  }, [clearFilterSearch]);
 
   const closePopoverWithoutDiscard = useCallback((columnId: string) => {
     setOpenFilterColumnId((current) => (current === columnId ? null : current));
-  }, []);
+    clearFilterSearch(columnId);
+  }, [clearFilterSearch]);
 
   const commitDraft = useCallback((columnId: string) => {
     let committedFilter: ColumnFilter | undefined;
@@ -955,11 +995,12 @@ export function LoanDetailView({
       return next;
     });
     setOpenFilterColumnId((current) => (current === columnId ? null : current));
+    clearFilterSearch(columnId);
     if (committedFilter && (committedFilter.kind === "text" || (committedFilter.kind === "number" && committedFilter.mode === "all"))) {
       const values = committedFilter.selectedValues;
       setFlashState({ columnId, values, nonce: Date.now() });
     }
-  }, [draftFilters, runFilterUpdate]);
+  }, [draftFilters, runFilterUpdate, clearFilterSearch]);
 
   useEffect(() => {
     if (!flashState) return;
@@ -1004,6 +1045,47 @@ export function LoanDetailView({
   const saveStatusClass = bookmarkInSync
     ? "bg-emerald-600 hover:bg-emerald-600 text-white"
     : "bg-sky-600 hover:bg-sky-700 text-white";
+
+  const toPersistedColumns = useCallback(
+    (columns: SavedLoanDetailColumn[] | undefined): SavedLoanDetailColumn[] => {
+      if (!columns?.length) return [];
+      return columns.map((col) => ({
+        id: col.id,
+        label: col.label,
+        field: col.field,
+      }));
+    },
+    [],
+  );
+
+  const saveStandaloneViewState = useCallback(async () => {
+    if (!isStandalonePersistenceEnabled) return;
+    if (isApplyingFilters) return;
+    const payload: LoanDetailViewStateV1 = normalizeLoanDetailViewState({
+      version: 1,
+      appliedFilters: normalizeFilterState(appliedFilters),
+      selectedBookmarkId,
+      selectedBookmarkTitle: selectedBookmark?.name ?? sharedBookmarkTitle ?? null,
+      columns: toPersistedColumns(savedColumnsFromStore),
+      sortColumnId,
+      sortDirection,
+      showFilters,
+    });
+    await standaloneViewState.save(payload);
+  }, [
+    isStandalonePersistenceEnabled,
+    isApplyingFilters,
+    appliedFilters,
+    selectedBookmarkId,
+    selectedBookmark?.name,
+    sharedBookmarkTitle,
+    savedColumnsFromStore,
+    sortColumnId,
+    sortDirection,
+    showFilters,
+    toPersistedColumns,
+    standaloneViewState,
+  ]);
 
   const filterSummaryItems = useMemo(() => {
     const summarize = (state: ColumnFilterState): string[] => {
@@ -1170,6 +1252,41 @@ export function LoanDetailView({
   }, [searchParams]);
 
   useEffect(() => {
+    if (!isStandalonePersistenceEnabled) return;
+    const preferenceKey = standaloneViewState.preferenceKey;
+    if (!preferenceKey) return;
+    if (hydratedStandalonePreferenceKeyRef.current === preferenceKey) return;
+    let cancelled = false;
+    const hasUrlFilters = Boolean(searchParams.get("ldFilters") || searchParams.get("bookmarkName"));
+    void standaloneViewState.load().then((loaded) => {
+      if (cancelled || !loaded) return;
+      if (loaded.columns.length > 0 && columnsStoreId) {
+        setColumnsInStore(columnsStoreId, loaded.columns);
+      }
+      if (!hasUrlFilters) {
+        setAppliedFilters(normalizeFilterState(loaded.appliedFilters));
+        setSelectedBookmarkId(loaded.selectedBookmarkId);
+        setSharedBookmarkTitle(loaded.selectedBookmarkTitle);
+      }
+      setSortColumnId(loaded.sortColumnId);
+      setSortDirection(loaded.sortDirection);
+      setShowFilters(loaded.showFilters);
+      hydratedStandalonePreferenceKeyRef.current = preferenceKey;
+    }).catch(() => {
+      hydratedStandalonePreferenceKeyRef.current = preferenceKey;
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isStandalonePersistenceEnabled,
+    searchParams,
+    standaloneViewState,
+    columnsStoreId,
+    setColumnsInStore,
+  ]);
+
+  useEffect(() => {
     if (!syncFiltersToUrl) return;
     const fromUrl = decodeFilterStateFromQuery(searchParams.get("ldFilters"));
     if (fromUrl && Object.keys(fromUrl).length > 0) {
@@ -1254,6 +1371,15 @@ export function LoanDetailView({
     onPersistedWorkbenchStateChange,
     isApplyingFilters,
   ]);
+
+  useEffect(() => {
+    if (!isStandalonePersistenceEnabled) return;
+    const preferenceKey = standaloneViewState.preferenceKey;
+    if (!preferenceKey) return;
+    if (standaloneViewState.isLoading) return;
+    if (hydratedStandalonePreferenceKeyRef.current !== preferenceKey) return;
+    void saveStandaloneViewState();
+  }, [isStandalonePersistenceEnabled, saveStandaloneViewState, standaloneViewState]);
 
   const toggleDraftValue = useCallback((columnId: string, value: string, kind: LoanDetailFilterKind) => {
     setDraftFilters((prev) => {
