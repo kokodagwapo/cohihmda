@@ -245,6 +245,14 @@ export function WorkflowConversionView({
   useEffect(() => {
     if (!onDataReady || loading || segmentResults.length === 0) return;
     const labelOf = (id: string) => milestones.find((m) => m.id === id)?.label ?? id;
+    const formatPeriodLabel = (value: unknown) => {
+      if (typeof value !== 'string' || !value) return String(value ?? '');
+      if (value.length === 10 && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        const [y, m, d] = value.split('-').map(Number);
+        return format(new Date(y, m - 1, d), 'M/d');
+      }
+      return value;
+    };
     const columns = [
       { key: 'segment', label: 'Segment', align: 'left' as const },
       { key: 'left', label: 'From Count', align: 'right' as const },
@@ -264,7 +272,36 @@ export function WorkflowConversionView({
           : '—',
       };
     });
-    onDataReady({ columns, rows, title: 'Workflow Conversion' });
+    const charts = segments.map((seg, i) => {
+      const result = segmentResults[i];
+      const fromLabel = labelOf(seg.from);
+      const toLabel = labelOf(seg.to);
+      const metricKey =
+        calculationType === 'conversion' ? 'conversionPercent' : 'avgTurnTimeDays';
+      const metricLabel =
+        calculationType === 'conversion' ? 'Conversion %' : 'Avg Turn Time';
+      return {
+        title: `${fromLabel} → ${toLabel}`,
+        chartType: 'combo',
+        xKey: 'period',
+        yKeys: ['leftCount', 'rightCount'],
+        lineKey: metricKey,
+        colors: ['#1e40af', '#10b981'],
+        lineColor: '#475569',
+        seriesNames: [fromLabel, toLabel, metricLabel],
+        primaryAxisLabel: 'Units',
+        secondaryAxisLabel: metricLabel,
+        data:
+          result?.series?.map((point) => ({
+            period: formatPeriodLabel(point.period),
+            leftCount: point.leftCount ?? 0,
+            rightCount: point.rightCount ?? 0,
+            conversionPercent: point.conversionPercent ?? 0,
+            avgTurnTimeDays: point.avgTurnTimeDays ?? 0,
+          })) ?? [],
+      };
+    }).filter((chart) => chart.data.length > 0);
+    onDataReady({ columns, rows, charts, title: 'Workflow Conversion' });
   }, [onDataReady, loading, segmentResults, segments, calculationType, milestones]);
 
   return (

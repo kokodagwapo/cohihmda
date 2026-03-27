@@ -648,6 +648,140 @@ function formatActorsCurrency(value: number | null | undefined): string {
   return `$${value.toFixed(0)}`;
 }
 
+function formatHighPerformersVolume(value: number): string {
+  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `$${(value / 1_000).toFixed(0)}K`;
+  return `$${value.toFixed(0)}`;
+}
+
+function formatHighPerformersPct(value: number): string {
+  return `${(Math.round(value * 10) / 10).toFixed(1)}%`;
+}
+
+function formatHighPerformersPeriod(period: string | undefined): string {
+  switch (period) {
+    case 'mtd':
+      return 'MTD';
+    case 'lm':
+      return 'Last Month';
+    case 'ytd':
+      return 'YTD';
+    case 'ly':
+      return 'Last Year';
+    case 'rolling_13':
+      return 'Rolling 13 Months';
+    default:
+      return 'Current Period';
+  }
+}
+
+function formatHighPerformersDateType(dateType: string | undefined): string {
+  switch (dateType) {
+    case 'closing_date':
+      return 'Closing Date';
+    case 'application_date':
+      return 'Application Date';
+    case 'funding_date':
+    default:
+      return 'Funding Date';
+  }
+}
+
+function buildHighPerformersReportData(
+  widgetName: string,
+  data: unknown,
+  options: {
+    title?: string;
+    nameLabel: string;
+    period?: string;
+    dateType?: string;
+  },
+) {
+  const rows = Array.isArray(data) ? data as Array<{
+    name: string;
+    units: number;
+    volume: number;
+    rank: number;
+    pctGovt: number;
+    pctConv: number;
+    pctRefi: number;
+    pctPurch: number;
+  }> : [];
+  const periodLabel = formatHighPerformersPeriod(options.period);
+  const dateTypeLabel = formatHighPerformersDateType(options.dateType);
+  const titleBase = options.title || widgetName;
+  const title = `${titleBase} (${periodLabel})`;
+  const columns = [
+    { key: 'name', label: options.nameLabel, align: 'left' as const },
+    { key: 'units', label: 'Units', align: 'right' as const },
+    { key: 'volume', label: 'Volume', align: 'right' as const },
+    { key: 'rank', label: 'Rank', align: 'right' as const },
+    { key: 'pctGovt', label: '% Govt', align: 'right' as const },
+    { key: 'pctConv', label: '% Conv', align: 'right' as const },
+    { key: 'pctRefi', label: '% Refi', align: 'right' as const },
+    { key: 'pctPurch', label: '% Purch', align: 'right' as const },
+  ];
+
+  if (rows.length === 0) {
+    return {
+      title,
+      summary: `${periodLabel} by ${dateTypeLabel}`,
+      columns,
+      rows: [],
+    };
+  }
+
+  const totals = rows.reduce(
+    (acc, row) => {
+      acc.units += row.units;
+      acc.volume += row.volume;
+      acc.pctGovtWeighted += row.pctGovt * row.units;
+      acc.pctConvWeighted += row.pctConv * row.units;
+      acc.pctRefiWeighted += row.pctRefi * row.units;
+      acc.pctPurchWeighted += row.pctPurch * row.units;
+      return acc;
+    },
+    {
+      units: 0,
+      volume: 0,
+      pctGovtWeighted: 0,
+      pctConvWeighted: 0,
+      pctRefiWeighted: 0,
+      pctPurchWeighted: 0,
+    },
+  );
+
+  const denominator = totals.units || 1;
+  const formattedRows = rows.map((row) => ({
+    name: row.name,
+    units: row.units.toLocaleString(),
+    volume: formatHighPerformersVolume(row.volume),
+    rank: row.rank.toString(),
+    pctGovt: formatHighPerformersPct(row.pctGovt),
+    pctConv: formatHighPerformersPct(row.pctConv),
+    pctRefi: formatHighPerformersPct(row.pctRefi),
+    pctPurch: formatHighPerformersPct(row.pctPurch),
+  }));
+
+  formattedRows.push({
+    name: 'Totals',
+    units: totals.units.toLocaleString(),
+    volume: formatHighPerformersVolume(totals.volume),
+    rank: '—',
+    pctGovt: formatHighPerformersPct(totals.pctGovtWeighted / denominator),
+    pctConv: formatHighPerformersPct(totals.pctConvWeighted / denominator),
+    pctRefi: formatHighPerformersPct(totals.pctRefiWeighted / denominator),
+    pctPurch: formatHighPerformersPct(totals.pctPurchWeighted / denominator),
+  });
+
+  return {
+    title,
+    summary: `${periodLabel} by ${dateTypeLabel} | Totals: ${totals.units.toLocaleString()} units | ${formatHighPerformersVolume(totals.volume)} volume`,
+    columns,
+    rows: formattedRows,
+  };
+}
+
 function buildActorsReportData(
   defId: string,
   widgetName: string,
@@ -1217,10 +1351,8 @@ function GridCellRegistryWidget({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canvasItemId, isEmbedSentinel]);
 
-  if (!definition) return null;
-
   const getColumns = useLoanDetailColumnsStore((s) => s.getColumns);
-  const isLoanDetail = definition.dataSource === 'loan-detail';
+  const isLoanDetail = definition?.dataSource === 'loan-detail';
   const savedColumns = isLoanDetail ? getColumns(canvasItemId) : undefined;
   const customColumns: ColumnDef[] | undefined =
     savedColumns?.length
@@ -1229,25 +1361,27 @@ function GridCellRegistryWidget({
           .map((c) => ({ id: c.id, label: c.label, field: c.field }))
       : undefined;
 
-  const Component = definition.component;
+  const Component = definition?.component;
   const periodLabel =
     isLoanDetail
       ? getLoanDetailPeriodLabel(filters.periodSelection)
       : undefined;
   const filterSummary = isLoanDetail ? getLoanDetailFilterSummary(filters) : undefined;
-  const isHighPerformers = definition.dataSource === 'high-performers';
+  const isHighPerformers = definition?.dataSource === 'high-performers';
   const highPerformersConfig = isHighPerformers
     ? {
         sectionId: groupId,
-        periodKey: definition.id.includes('-left') ? ('left' as const) : ('right' as const),
+        nameLabel: (definition?.config?.nameLabel as string) ?? (definition?.name.includes('Branch') ? 'Branch' : 'Loan Officer'),
+        periodKey: definition?.id.includes('-left') ? ('left' as const) : ('right' as const),
         period:
-          definition.id.includes('-left')
+          definition?.id.includes('-left')
             ? (filters.highPerformersLeftPeriod ?? 'mtd')
             : (filters.highPerformersRightPeriod ?? 'ytd'),
+        dateType: filters.highPerformersDateType ?? 'funding_date',
       }
     : {};
 
-  const isActors = definition.dataSource === 'actors';
+  const isActors = definition?.dataSource === 'actors';
   const actorsCalculation = filters.actorsCalculation ?? 'average';
   const actorsTurnTimeType = filters.actorsTurnTimeType ?? 'app_to_fund_days';
   const actorsTurnTimeLabel =
@@ -1259,7 +1393,7 @@ function GridCellRegistryWidget({
         ? 'Avg App to Fund'
         : 'Avg App to Closing';
   const actorsTableDims = (filters.actorsTableDimensions ?? ['loan_officer', 'processor', 'underwriter', 'closer']) as string[];
-  const tableIndex = (definition.config?.tableIndex as number) ?? 0;
+  const tableIndex = (definition?.config?.tableIndex as number) ?? 0;
   const actorsVisibleColumnIds =
     filters.actorsTableColumnIds?.length
       ? filters.actorsTableColumnIds
@@ -1313,22 +1447,39 @@ function GridCellRegistryWidget({
     actorsTurnTimeLabel,
     actorsVisibleColumnIds,
   ]);
+  const normalizedReportData = useMemo(() => {
+    if (!definition) return reportData;
+    if (!isHighPerformers) return reportData;
+    return buildHighPerformersReportData(definition.name, reportData, {
+      title: definition.config?.title as string | undefined,
+      nameLabel: highPerformersConfig.nameLabel as string,
+      period: highPerformersConfig.period as string | undefined,
+      dateType: highPerformersConfig.dateType as string | undefined,
+    });
+  }, [
+    definition,
+    reportData,
+    isHighPerformers,
+    highPerformersConfig.nameLabel,
+    highPerformersConfig.period,
+    highPerformersConfig.dateType,
+  ]);
   // Report data to canvasDataStore for PPT/chat hydration.
   useEffect(() => {
     if (!definition || isEmbedSentinel) return;
-    if (!loading && reportData != null && !error) {
+    if (!loading && normalizedReportData != null && !error) {
       reportWidgetData(canvasItemId, {
         widgetName: definition.name,
         category: definition.category as 'kpi' | 'chart' | 'table' | 'embed' | 'other',
-        data: reportData,
+        data: normalizedReportData,
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reportData, loading, error, canvasItemId, isEmbedSentinel, definition]);
+  }, [normalizedReportData, loading, error, canvasItemId, isEmbedSentinel, definition]);
 
   const isPricingTable =
-    definition.dataSource === 'pricing-dashboard' &&
-    (definition.id?.includes('-report') || definition.id?.includes('-detail'));
+    definition?.dataSource === 'pricing-dashboard' &&
+    (definition?.id?.includes('-report') || definition?.id?.includes('-detail'));
   const pricingConfig = isPricingTable
     ? {
         onRowClick: (row: Record<string, unknown>, columnKey?: string) => {
@@ -1425,7 +1576,7 @@ function GridCellRegistryWidget({
     : {};
 
   const config = {
-    ...definition.config,
+    ...definition?.config,
     ...configProp,
     canvasItemId,
     definitionName: definition.name,
@@ -1441,6 +1592,8 @@ function GridCellRegistryWidget({
     ...lockStratificationConfig,
     ...loanComplexityConfig,
   };
+
+  if (!definition || !Component) return null;
 
   return (
     <div className="h-full w-full flex flex-col min-h-0">
@@ -1827,9 +1980,17 @@ export function WidgetGroup({
       if (filters.loanComplexitySelectedGroups && filters.loanComplexitySelectedGroups.length > 0) toSave.loanComplexitySelectedGroups = filters.loanComplexitySelectedGroups;
       else if (filters.loanComplexitySelectedGroupNames && filters.loanComplexitySelectedGroupNames.length > 0) toSave.loanComplexitySelectedGroupNames = filters.loanComplexitySelectedGroupNames;
     }
-    patchPayload({ savedFilters: Object.keys(toSave).length > 0 ? toSave : undefined });
+    const nextSavedFilters = Object.keys(toSave).length > 0 ? toSave : undefined;
+    try {
+      if (JSON.stringify(savedFiltersProp) === JSON.stringify(nextSavedFilters)) {
+        return;
+      }
+    } catch {
+      // Fall through and persist if serialization fails.
+    }
+    patchPayload({ savedFilters: nextSavedFilters });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sectionType, filters.year, filters.dateRange, filters.periodSelection, filters.dateField, filters.applicationType, filters.actorType, filters.branch, filters.loanOfficer, filters.dynamicFilters, filters.workflowPeriodSelection, filters.workflowCalculationType, filters.workflowGrouping, filters.workflowSegments, filters.pipelineAnalysisYearRange, filters.pipelineAnalysisStartDateField, filters.pipelineAnalysisViewMode, filters.pipelineAnalysisPctMetric, filters.pipelineAnalysisSnapshotDay, filters.pipelineAnalysisLoanTypes, filters.pipelineAnalysisLoanPurposes, filters.pipelineAnalysisBranches, filters.salesScorecardOverviewMeasure, filters.salesScorecardOverviewTimeMeasure, filters.salesScorecardOverviewMilestoneColumns, filters.pricingDashboardColumns, filters.lockStratLocked, filters.lockStratMeasure, filters.lockStratMilestoneGroupBy, filters.lockStratPullThroughPeriod, filters.loanComplexityGroupBy, filters.loanComplexityActorType, filters.loanComplexityCurrentStatus, filters.loanComplexitySelectedGroups, filters.loanComplexitySelectedGroupNames]);
+  }, [sectionType, filters.year, filters.dateRange, filters.periodSelection, filters.dateField, filters.applicationType, filters.actorType, filters.branch, filters.loanOfficer, filters.dynamicFilters, filters.workflowPeriodSelection, filters.workflowCalculationType, filters.workflowGrouping, filters.workflowSegments, filters.pipelineAnalysisYearRange, filters.pipelineAnalysisStartDateField, filters.pipelineAnalysisViewMode, filters.pipelineAnalysisPctMetric, filters.pipelineAnalysisSnapshotDay, filters.pipelineAnalysisLoanTypes, filters.pipelineAnalysisLoanPurposes, filters.pipelineAnalysisBranches, filters.salesScorecardOverviewMeasure, filters.salesScorecardOverviewTimeMeasure, filters.salesScorecardOverviewMilestoneColumns, filters.pricingDashboardColumns, filters.lockStratLocked, filters.lockStratMeasure, filters.lockStratMilestoneGroupBy, filters.lockStratPullThroughPeriod, filters.loanComplexityGroupBy, filters.loanComplexityActorType, filters.loanComplexityCurrentStatus, filters.loanComplexitySelectedGroups, filters.loanComplexitySelectedGroupNames, savedFiltersProp]);
 
   // ─── Grid layout ───
   const contentWidth = Math.max(width - 24, MIN_GRID_WIDTH);

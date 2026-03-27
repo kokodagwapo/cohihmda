@@ -225,6 +225,14 @@ export const useWidgetSectionStore = create<WidgetSectionState>((set, get) => ({
         merged.loanOfficer = 'all';
       }
 
+      try {
+        if (JSON.stringify(prev) === JSON.stringify(merged)) {
+          return state;
+        }
+      } catch {
+        // Fall through and update if serialization fails.
+      }
+
       return {
         sections: { ...state.sections, [sectionId]: merged },
       };

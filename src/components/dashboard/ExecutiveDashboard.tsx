@@ -1219,12 +1219,20 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
 
   useEffect(() => {
     if (!onDataReady || metricsLoading || metrics.activeLoans.value === "--") return;
-    const kpiPayload = kpiCards.map((card) => ({
-      label: card.label,
-      value: card.value,
-      change: card.change,
-      trend: card.trend,
-    }));
+    const kpiPayload = kpiCards.map((card) => {
+      const normalizedValue = (() => {
+        if (card.id !== "cycleTime") return card.value;
+        const parsed = Number.parseFloat(String(card.value).replace(/[^\d.-]/g, ""));
+        return Number.isFinite(parsed) ? `${Math.round(parsed)} days` : card.value;
+      })();
+
+      return {
+        label: card.label,
+        value: normalizedValue,
+        change: typeof card.change === "number" ? card.change : undefined,
+        trend: card.trend,
+      };
+    });
     onDataReady({ kpis: kpiPayload, title: 'Business Overview' });
   }, [onDataReady, metricsLoading, kpiCards, metrics.activeLoans.value]);
 

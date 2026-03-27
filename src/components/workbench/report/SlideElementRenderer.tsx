@@ -54,7 +54,7 @@ function renderByType(config: SlideElementConfig, element: SlideElement, scale: 
     case 'chart':
       return <ChartElement config={config as ChartElementConfig} scale={scale} />;
     case 'table':
-      return <TableElement config={config as TableElementConfig} scale={scale} />;
+      return <TableElement config={config as TableElementConfig} scale={scale} elementHeight={element.position?.h} />;
     case 'kpi':
       return <KpiElement config={config as KpiElementConfig} scale={scale} />;
     case 'metric-card':
@@ -76,7 +76,7 @@ function renderByType(config: SlideElementConfig, element: SlideElement, scale: 
       }
       if (c?.columns && c?.data) {
         // Has table properties — render as table
-        return <TableElement config={{ type: 'table', ...c } as TableElementConfig} scale={scale} />;
+        return <TableElement config={{ type: 'table', ...c } as TableElementConfig} scale={scale} elementHeight={element.position?.h} />;
       }
       if (c?.value != null && c?.label) {
         // Has KPI properties — render as KPI
@@ -137,14 +137,20 @@ function ChartElement({ config, scale }: { config: ChartElementConfig; scale: nu
   const data = config.data || [];
   const colors = config.colors || ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
   const xKey = config.xKey || (data[0] ? Object.keys(data[0])[0] : 'label');
-  const yKeys = config.yKeys?.length
+  const allYKeys = config.yKeys?.length
     ? config.yKeys
     : config.yKey
     ? [config.yKey]
     : data[0] ? [Object.keys(data[0]).find((k) => k !== xKey) || 'value'] : ['value'];
+  const isCombo = config.chartType === 'combo';
+  const yKeys = isCombo ? allYKeys.slice(0, 2) : allYKeys;
   const yKey = yKeys[0];
+  const lineKey = isCombo ? (config.lineKey || allYKeys[2]) : undefined;
   const allVals = data.flatMap((d) => yKeys.map((k) => Number(d[k]) || 0));
   const maxVal = Math.max(...allVals, 1);
+  const lineVals = lineKey ? data.map((d) => Number(d[lineKey]) || 0) : [];
+  const lineMax = Math.max(...lineVals, 1);
+  const lineColor = config.lineColor || colors[yKeys.length % colors.length] || '#475569';
 
   const fmtNum = (n: number) => {
     if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -158,9 +164,13 @@ function ChartElement({ config, scale }: { config: ChartElementConfig; scale: nu
 
   const isPie = config.chartType === 'pie' || config.chartType === 'donut';
   const isLine = config.chartType === 'line' || config.chartType === 'area';
+  const legendEntries = isCombo && lineKey
+    ? [...yKeys.map((key, i) => ({ key, color: colors[i % colors.length], label: config.seriesNames?.[i] || humanLabel(key) })), { key: lineKey, color: lineColor, label: config.seriesNames?.[yKeys.length] || humanLabel(lineKey) }]
+    : yKeys.map((key, i) => ({ key, color: colors[i % colors.length], label: config.seriesNames?.[i] || humanLabel(key) }));
 
   // Y-axis tick values (4 ticks)
   const yTicks = [0, maxVal * 0.25, maxVal * 0.5, maxVal * 0.75, maxVal];
+  const rightTicks = [0, lineMax * 0.25, lineMax * 0.5, lineMax * 0.75, lineMax];
 
   return (
     <div className="w-full h-full flex flex-col p-2 gap-0.5">
@@ -187,30 +197,60 @@ function ChartElement({ config, scale }: { config: ChartElementConfig; scale: nu
             ))}
           </div>
           {/* Bars */}
-          <div className="flex-1 flex items-end gap-0.5">
-            {data.slice(0, 14).map((d, i) => (
-              <div key={i} className="flex-1 flex flex-col items-center justify-end h-full min-w-0">
-                <div className="flex items-end gap-px w-full h-full relative">
-                  {yKeys.map((k, si) => {
-                    const val = Math.max(Number(d[k]) || 0, 0);
-                    const pct = maxVal > 0 ? (val / maxVal) * 100 : 0;
-                    return (
-                      <div key={k} className="flex-1 rounded-t relative group" style={{ height: `${pct}%`, backgroundColor: colors[si % colors.length], minHeight: val > 0 ? 2 : 0 }}>
-                        {(config.showValues !== false && data.length <= 10) && (
-                          <div className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap text-slate-600" style={{ fontSize: 5.5 * scale }}>
-                            {fmtNum(val)}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+          <div className="flex-1 relative">
+            <div className="absolute inset-0 flex items-end gap-0.5">
+              {data.slice(0, 14).map((d, i) => (
+                <div key={i} className="flex-1 flex flex-col items-center justify-end h-full min-w-0">
+                  <div className="flex items-end gap-px w-full h-full relative">
+                    {yKeys.map((k, si) => {
+                      const val = Math.max(Number(d[k]) || 0, 0);
+                      const pct = maxVal > 0 ? (val / maxVal) * 100 : 0;
+                      return (
+                        <div key={k} className="flex-1 rounded-t relative group" style={{ height: `${pct}%`, backgroundColor: colors[si % colors.length], minHeight: val > 0 ? 2 : 0 }}>
+                          {(config.showValues !== false && data.length <= 10 && !isCombo) && (
+                            <div className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap text-slate-600" style={{ fontSize: 5.5 * scale }}>
+                              {fmtNum(val)}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="text-slate-500 truncate w-full text-center mt-0.5 leading-tight" style={{ fontSize: Math.max(6 * scale, 5) }}>
+                    {String(d[xKey] ?? '').slice(0, 12)}
+                  </div>
                 </div>
-                <div className="text-slate-500 truncate w-full text-center mt-0.5 leading-tight" style={{ fontSize: Math.max(6 * scale, 5) }}>
-                  {String(d[xKey] ?? '').slice(0, 12)}
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
+            {isCombo && lineKey && (
+              <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full overflow-visible pointer-events-none">
+                <polyline
+                  fill="none"
+                  stroke={lineColor}
+                  strokeWidth={1.6}
+                  points={data.slice(0, 14).map((d, i, arr) => {
+                    const val = Math.max(Number(d[lineKey]) || 0, 0);
+                    const x = arr.length === 1 ? 50 : (i / (arr.length - 1)) * 100;
+                    const y = 100 - ((lineMax > 0 ? val / lineMax : 0) * 84 + 8);
+                    return `${x},${y}`;
+                  }).join(' ')}
+                />
+                {data.slice(0, 14).map((d, i, arr) => {
+                  const val = Math.max(Number(d[lineKey]) || 0, 0);
+                  const x = arr.length === 1 ? 50 : (i / (arr.length - 1)) * 100;
+                  const y = 100 - ((lineMax > 0 ? val / lineMax : 0) * 84 + 8);
+                  return <circle key={`${lineKey}-${i}`} cx={x} cy={y} r={1.8} fill={lineColor} />;
+                })}
+              </svg>
+            )}
           </div>
+          {isCombo && lineKey && (
+            <div className="flex flex-col justify-between items-start pl-1 py-0.5" style={{ width: 32 * scale }}>
+              {rightTicks.slice().reverse().map((v, i) => (
+                <span key={i} className="text-slate-400 leading-none" style={{ fontSize: 6 * scale }}>{fmtNum(v)}</span>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -222,10 +262,10 @@ function ChartElement({ config, scale }: { config: ChartElementConfig; scale: nu
 
       {data.length > 0 && !isPie && (
         <div className="flex items-center gap-2 flex-wrap justify-center" style={{ minHeight: 10 * scale }}>
-          {yKeys.map((k, i) => (
-            <div key={k} className="flex items-center gap-0.5">
-              <div className="rounded-sm" style={{ width: 7 * scale, height: 7 * scale, backgroundColor: colors[i % colors.length] }} />
-              <span className="text-slate-600" style={{ fontSize: 7 * scale }}>{config.seriesNames?.[i] || humanLabel(k)}</span>
+          {legendEntries.map((entry) => (
+            <div key={entry.key} className="flex items-center gap-0.5">
+              <div className="rounded-sm" style={{ width: 7 * scale, height: 7 * scale, backgroundColor: entry.color }} />
+              <span className="text-slate-600" style={{ fontSize: 7 * scale }}>{entry.label}</span>
             </div>
           ))}
         </div>
@@ -387,7 +427,15 @@ function LinePreview({
 // Table Element
 // ---------------------------------------------------------------------------
 
-function TableElement({ config, scale }: { config: TableElementConfig; scale: number }) {
+function TableElement({
+  config,
+  scale,
+  elementHeight,
+}: {
+  config: TableElementConfig;
+  scale: number;
+  elementHeight?: number;
+}) {
   const data = config.data || [];
   // Auto-detect columns from data keys when no columns defined
   const columns = (config.columns && config.columns.length > 0)
@@ -398,6 +446,23 @@ function TableElement({ config, scale }: { config: TableElementConfig; scale: nu
         label: key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
       }))
     : [];
+  const firstColumnKey = columns[0]?.key;
+  const visibleRows = (() => {
+    const estimatedHeaderHeight = Math.max(0.3, ((config.fontSize || 10) + 4) / 72);
+    const estimatedRowHeight = Math.max(0.22, ((config.fontSize || 9) + 3) / 72);
+    const maxDataRows = Math.max(
+      1,
+      Math.floor(((elementHeight ?? 5.5) - estimatedHeaderHeight) / estimatedRowHeight)
+    );
+    if (data.length <= maxDataRows) return data;
+    const lastRow = data[data.length - 1];
+    const isTotalsRow =
+      firstColumnKey != null &&
+      String(lastRow?.[firstColumnKey] ?? '').trim().toLowerCase() === 'totals';
+    return isTotalsRow && maxDataRows > 1
+      ? [...data.slice(0, maxDataRows - 1), lastRow]
+      : data.slice(0, maxDataRows);
+  })();
 
   return (
     <div className="w-full h-full overflow-auto p-1">
@@ -420,7 +485,7 @@ function TableElement({ config, scale }: { config: TableElementConfig; scale: nu
           </tr>
         </thead>
         <tbody>
-          {data.slice(0, 10).map((row, rowIdx) => (
+          {visibleRows.map((row, rowIdx) => (
             <tr
               key={rowIdx}
               style={{

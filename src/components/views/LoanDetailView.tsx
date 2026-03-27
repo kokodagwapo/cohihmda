@@ -672,8 +672,10 @@ export function LoanDetailView({
     return { dimensionFilters: [{ column: "channel_group", value: selectedChannel }] };
   }, [selectedChannel]);
 
-  const fetched = useLoanDetailData(tenantId, channelFilters);
   const isControlled = dataProp !== undefined;
+  const fetched = useLoanDetailData(tenantId, channelFilters, {
+    enabled: !isControlled,
+  });
   const data = isControlled ? dataProp ?? null : fetched.data;
   const loading = isControlled ? (loadingProp ?? false) : fetched.loading;
   const error = isControlled ? (errorProp ?? null) : fetched.error;

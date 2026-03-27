@@ -149,6 +149,18 @@ const VALID_INSIGHT_PERIODS: PeriodType[] = [
   "ly",
 ];
 
+function formatLeaderboardMoney(value: string | number | null | undefined): string {
+  if (value == null || value === "") return "—";
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return "—";
+    return trimmed.startsWith("$") ? trimmed : `$${trimmed}`;
+  }
+  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `$${Math.round(value / 1_000).toLocaleString()}K`;
+  return `$${value.toLocaleString()}`;
+}
+
 interface LeaderBoardSectionProps {
   dateFilter: "today" | "mtd" | "ytd" | "custom";
   selectedTenantId?: string | null;
@@ -498,6 +510,23 @@ export const LeaderBoardSection = ({
 
   useEffect(() => {
     if (!onDataReady || leadersData.length === 0) return;
+    const rankingLabel =
+      rankingMetric === "units"
+        ? "Units"
+        : rankingMetric === "volume"
+          ? "Volume"
+          : rankingMetric === "turnTime"
+            ? "Turn-Time"
+            : rankingMetric === "pullThrough"
+              ? "Pull-through"
+              : "Revenue";
+    const scopeLabel =
+      scope === "All"
+        ? "All branches"
+        : scope === "Branch"
+          ? "By branch"
+          : "By team";
+    const summary = `${getPeriodDisplayLabel()} · ${scopeLabel} · Ranked by ${rankingLabel}`;
     const columns = [
       { key: 'rank', label: 'Rank', align: 'right' as const },
       { key: 'name', label: 'Name', align: 'left' as const },
@@ -510,16 +539,27 @@ export const LeaderBoardSection = ({
       rank: String(l.rank),
       name: l.name,
       units: String(l.loans),
-      volume: typeof l.volume === 'number' && l.volume >= 1_000_000
-        ? `$${(l.volume / 1_000_000).toFixed(1)}M`
-        : typeof l.volume === 'number' && l.volume >= 1_000
-        ? `$${Math.round(l.volume / 1_000).toLocaleString()}K`
-        : `$${l.volume?.toLocaleString() ?? '—'}`,
+      volume: formatLeaderboardMoney(l.volume),
       cycleTime: l.cycleTime != null ? `${l.cycleTime} days` : '—',
       pullThru: l.pullThru != null ? `${l.pullThru}%` : '—',
     }));
-    onDataReady({ columns, rows, title: 'Leaderboard' });
-  }, [onDataReady, leadersData]);
+    onDataReady({
+      title: `Leaderboard (${getPeriodDisplayLabel()})`,
+      summary,
+      columns,
+      rows,
+      leaders: leadersData.slice(0, 5).map((leader) => ({
+        name: leader.name,
+        role: leader.role,
+        units: leader.loans.toLocaleString(),
+        volume: leader.volume,
+        cycleTime: leader.cycleTime != null ? `${leader.cycleTime} days` : '—',
+        pullThru: leader.pullThru != null ? `${leader.pullThru}%` : '—',
+        revenue: leader.revenue,
+      })),
+      rankingMetric,
+    });
+  }, [onDataReady, leadersData, rankingMetric, scope]);
 
   useEffect(() => {
     if (!pendingLeaderName || leadersData.length === 0) return;
