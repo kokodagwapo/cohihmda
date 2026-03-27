@@ -254,18 +254,7 @@ export function SlideEditor({
             </>
           )}
 
-          {/* Footer */}
-          <div
-            className="absolute left-0 right-0 bottom-0 flex items-center px-4"
-            style={{
-              height: inchToPx(0.5),
-              backgroundColor: theme.primaryColor,
-            }}
-          >
-            <span className="text-white text-opacity-80" style={{ fontSize: 8 * scale }}>
-              {theme.footerText || 'Coheus - Confidential'}
-            </span>
-          </div>
+          {/* Footer removed — clean slides */}
 
           {/* Elements */}
           {slide.elements.map((el) => (

@@ -1,6 +1,6 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Clock3, LayoutDashboard, Pin, PinOff, Users } from "lucide-react";
+import { Clock3, LayoutDashboard, Pin, PinOff, Trash2, Users } from "lucide-react";
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { useDashboardVisibility } from "@/hooks/useDashboardVisibility";
 import { useWorkbenchNav, type SidebarCanvas } from "@/hooks/useWorkbenchNav";
@@ -26,6 +26,7 @@ function CanvasTable({
   icon,
   rows,
   onOpen,
+  onDelete,
   onToggleFavorite,
   favoriteUpdatingIds,
   showOwner,
@@ -36,6 +37,7 @@ function CanvasTable({
   icon: React.ReactNode;
   rows: SidebarCanvas[];
   onOpen: (id: string) => void;
+  onDelete?: (row: SidebarCanvas) => void;
   onToggleFavorite: (row: SidebarCanvas) => void;
   favoriteUpdatingIds: Set<string>;
   showOwner: boolean;
@@ -127,6 +129,15 @@ function CanvasTable({
                           >
                             {row.favorited ? <PinOff className="w-4 h-4 text-amber-500" /> : <Pin className="w-4 h-4" />}
                           </button>
+                          {onDelete && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); onDelete(row); }}
+                              className="h-8 w-8 rounded-md inline-flex items-center justify-center text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+                              title="Delete canvas"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                           <button
                             onClick={() => onOpen(row.id)}
                             className="px-2.5 h-8 rounded-md text-xs font-medium bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 hover:opacity-90"
@@ -152,7 +163,16 @@ export default function WorkbenchHub() {
   const { user } = useAuth();
   const { dashboardVisibility, handleVisibilityChange } = useDashboardVisibility();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { ownedCanvases, sharedCanvases, favoriteUpdatingIds, toggleCanvasFavorite } = useWorkbenchNav();
+  const { ownedCanvases, sharedCanvases, favoriteUpdatingIds, toggleCanvasFavorite, deleteCanvas } = useWorkbenchNav();
+
+  const handleDeleteCanvas = useCallback(
+    (row: SidebarCanvas) => {
+      const confirmed = window.confirm(`Delete "${row.title}"? This cannot be undone.`);
+      if (!confirmed) return;
+      void deleteCanvas(row.id);
+    },
+    [deleteCanvas],
+  );
   const sortedOwned = useMemo(
     () => [...ownedCanvases].sort((a, b) => new Date(b.updated_at ?? 0).getTime() - new Date(a.updated_at ?? 0).getTime()),
     [ownedCanvases],
@@ -195,6 +215,7 @@ export default function WorkbenchHub() {
             icon={<LayoutDashboard className="w-4 h-4 text-slate-600 dark:text-slate-300" />}
             rows={sortedOwned}
             onOpen={(id) => navigate(`/my-dashboard/${id}`)}
+            onDelete={handleDeleteCanvas}
             onToggleFavorite={(row) => void toggleCanvasFavorite(row.id, !row.favorited)}
             favoriteUpdatingIds={favoriteUpdatingIds}
             showOwner={false}

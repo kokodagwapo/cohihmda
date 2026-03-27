@@ -133,9 +133,9 @@ function formatDisplayValue(value: unknown, format?: string): string {
   if (isNaN(num)) return String(value);
 
   if (format === "currency") {
-    if (Math.abs(num) >= 1_000_000) return `$${(num / 1_000_000).toFixed(1)}M`;
+    if (Math.abs(num) >= 1_000_000) return `$${(num / 1_000_000).toFixed(1)}M`.replace("$$", "$");
     if (Math.abs(num) >= 1_000)
-      return `$${Math.round(num / 1_000).toLocaleString()}K`;
+      return `$${Math.round(num / 1_000).toLocaleString()}K`.replace("$$", "$");
     return `$${num.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
   }
   if (format === "percent") return `${num.toFixed(1)}%`;
@@ -144,6 +144,19 @@ function formatDisplayValue(value: unknown, format?: string): string {
   if (Math.abs(num) >= 100) return Math.round(num).toLocaleString();
   if (Math.abs(num) >= 10) return num.toFixed(1);
   return num.toFixed(2);
+}
+
+/**
+ * PowerPoint's text pipeline can mangle some UI separator glyphs.
+ * Normalize those to ASCII for native export while leaving canvas UI unchanged.
+ */
+function normalizePptText(value: unknown): string {
+  return String(value ?? "")
+    .replace(/\u00a0/g, " ")
+    .replace(/[\u2013\u2014]/g, " - ")
+    .replace(/[\u2192\u2794\u27A1]/g, " -> ")
+    .replace(/\u00b7/g, " - ")
+    .replace(/\u2022/g, "- ");
 }
 
 // ---------------------------------------------------------------------------
@@ -254,59 +267,10 @@ export async function generatePptx(
   pres.subject = definition.subtitle || "Mortgage Analytics Report";
   pres.company = "Coheus";
 
-  // Define slide master for consistent branding
   pres.defineSlideMaster({
     title: "COHI_MASTER",
     background: { color: theme.backgroundColor.replace("#", "") },
-    objects: [
-      // Footer bar
-      {
-        rect: {
-          x: 0,
-          y: "93%",
-          w: "100%",
-          h: "7%",
-          fill: { color: theme.primaryColor.replace("#", "") },
-        },
-      },
-      // Footer text
-      {
-        text: {
-          text: theme.footerText || "Coheus - Confidential",
-          options: {
-            x: 0.5,
-            y: "93.5%",
-            w: 7,
-            h: 0.35,
-            fontSize: 8,
-            color: "FFFFFF",
-            fontFace: theme.fontFamily,
-          },
-        },
-      },
-      // Slide number
-      {
-        text: {
-          text: "Slide ",
-          options: {
-            x: 8.5,
-            y: "93.5%",
-            w: 1,
-            h: 0.35,
-            fontSize: 8,
-            color: "FFFFFF",
-            fontFace: theme.fontFamily,
-            align: "right",
-          },
-        },
-      },
-    ],
-    slideNumber: {
-      x: 9.2,
-      y: "93.5%",
-      fontSize: 8,
-      color: "FFFFFF",
-    },
+    objects: [],
   });
 
   // Generate each slide
@@ -358,7 +322,7 @@ function renderSlideByLayout(
       // Full-bleed title slide
       slide.background = { color: pc };
       if (slideDef.title) {
-        slide.addText(slideDef.title, {
+        slide.addText(normalizePptText(slideDef.title), {
           x: 0.8,
           y: 1.5,
           w: 8.4,
@@ -370,7 +334,7 @@ function renderSlideByLayout(
         });
       }
       if (slideDef.subtitle) {
-        slide.addText(slideDef.subtitle, {
+        slide.addText(normalizePptText(slideDef.subtitle), {
           x: 0.8,
           y: 3.0,
           w: 8.4,
@@ -398,7 +362,7 @@ function renderSlideByLayout(
     case "section-break":
       slide.background = { color: ac };
       if (slideDef.title) {
-        slide.addText(slideDef.title, {
+        slide.addText(normalizePptText(slideDef.title), {
           x: 1,
           y: 2,
           w: 8,
@@ -423,7 +387,7 @@ function renderSlideByLayout(
           h: 0.7,
           fill: { color: pc },
         });
-        slide.addText(slideDef.title, {
+        slide.addText(normalizePptText(slideDef.title), {
           x: 0.5,
           y: 0.05,
           w: 9,
@@ -435,7 +399,7 @@ function renderSlideByLayout(
         });
       }
       if (slideDef.subtitle) {
-        slide.addText(slideDef.subtitle, {
+        slide.addText(normalizePptText(slideDef.subtitle), {
           x: 0.5,
           y: 0.75,
           w: 9,
@@ -453,12 +417,17 @@ function renderSlideByLayout(
 /**
  * Render a single slide element (text, chart, table, kpi, image, etc.)
  */
+const SLIDE_MAX_Y = 7.1;
+
 function renderElement(
   slide: pptxgen.Slide,
   element: SlideElement,
   theme: ReportTheme
 ): void {
-  const { position: pos, config } = element;
+  const rawPos = element.position;
+  const maxH = Math.max(0.5, SLIDE_MAX_Y - rawPos.y);
+  const pos = { ...rawPos, h: Math.min(rawPos.h, maxH) };
+  const { config } = element;
   const data = element.resolvedData ?? config.data ?? config.staticData;
 
   switch (config.type || element.type) {
@@ -530,10 +499,11 @@ function renderTextElement(
     valign: config.verticalAlign || "top",
     bullet: config.bullet ? true : undefined,
     lineSpacingMultiple: config.lineSpacing || undefined,
+    margin: 0,
     wrap: true,
   };
 
-  slide.addText(config.content || "", textOpts);
+  slide.addText(normalizePptText(config.content || ""), textOpts);
 }
 
 function renderChartElement(
@@ -580,6 +550,7 @@ function renderChartElement(
   const xKey = config.xKey || Object.keys(chartData[0])[0];
   const yKey = config.yKey || Object.keys(chartData[0])[1];
   const yKeys = config.yKeys || (yKey ? [yKey] : []);
+  const lineKey = config.lineKey;
   const colors = (config.colors || theme.chartColors).map((c: string) =>
     c.replace("#", "")
   );
@@ -613,7 +584,7 @@ function renderChartElement(
   );
 
   const series = yKeys.map((key: string, idx: number) => ({
-    name: key,
+    name: config.seriesNames?.[idx] || key,
     labels,
     values: chartData.map((d: Record<string, any>) =>
       typeof d[key] === "number" ? d[key] : parseFloat(d[key]) || 0
@@ -623,7 +594,7 @@ function renderChartElement(
 
   if (series.length === 0 && yKey) {
     series.push({
-      name: yKey,
+      name: config.seriesNames?.[0] || yKey,
       labels,
       values: chartData.map((d: Record<string, any>) =>
         typeof d[yKey] === "number" ? d[yKey] : parseFloat(d[yKey]) || 0
@@ -650,6 +621,36 @@ function renderChartElement(
       valAxisLabelFontSize: 9,
       chartColors: colors,
     };
+
+    if (chartType === "combo" && lineKey) {
+      const barSeries = series.slice(0, 2);
+      const lineSeries = {
+        name: config.seriesNames?.[barSeries.length] || lineKey,
+        labels,
+        values: chartData.map((d: Record<string, any>) =>
+          typeof d[lineKey] === "number" ? d[lineKey] : parseFloat(d[lineKey]) || 0
+        ),
+        color: (config.lineColor || colors[barSeries.length] || theme.textColor).replace("#", ""),
+      };
+
+      slide.addChart([
+        {
+          type: pptxgen.charts ? pptxgen.charts.BAR : "bar",
+          values: barSeries,
+          options: {
+            barGrouping: "clustered",
+          },
+        } as any,
+        {
+          type: pptxgen.charts ? pptxgen.charts.LINE : "line",
+          values: [lineSeries],
+          options: {
+            secondaryValAxis: true,
+          },
+        } as any,
+      ] as any, chartOpts);
+      return;
+    }
 
     if (chartType === "stacked_bar") {
       chartOpts.barGrouping = "stacked";
@@ -690,34 +691,36 @@ function renderTableElement(
     config.columns || [];
 
   if (!columns.length && tableData.length) {
-    // Auto-detect columns from data
     Object.keys(tableData[0]).forEach((key) => {
       columns.push({ key, label: key });
     });
   }
 
-  // Build header row
+  const fontSize = config.fontSize || 8;
+  const headerFontSize = Math.min(fontSize + 1, 10);
+  const ROW_H = 0.28;
+  const HEADER_H = 0.32;
+  const MAX_TOTAL_ROWS = TABLE_ROWS_PER_SLIDE * TABLE_MAX_PAGES;
+  const cappedData = tableData.slice(0, MAX_TOTAL_ROWS);
+
   const headerRow: pptxgen.TableCell[] = columns.map((col) => ({
-    text: col.label || col.key,
+    text: normalizePptText(col.label || col.key),
     options: {
       bold: true,
-      fontSize: config.fontSize || 10,
+      fontSize: headerFontSize,
       color: "FFFFFF",
       fill: { color: theme.primaryColor.replace("#", "") },
       fontFace: theme.fontFamily,
       align: (col.align as any) || "left",
       border: { type: "solid", pt: 0.5, color: "CCCCCC" },
-      margin: [3, 5, 3, 5],
+      margin: [1, 3, 1, 3],
     },
   }));
 
-  // Build data rows
-  const dataRows: pptxgen.TableCell[][] = tableData
-    .slice(0, 20) // Limit rows for slide readability
+  const dataRows: pptxgen.TableCell[][] = cappedData
     .map((row: Record<string, any>, rowIdx: number) =>
       columns.map((col) => {
         let val = row[col.key] ?? "";
-        // Format values
         if (col.format === "currency" && typeof val === "number") {
           val = `$${val.toLocaleString()}`;
         } else if (col.format === "percent" && typeof val === "number") {
@@ -726,9 +729,9 @@ function renderTableElement(
           val = val.toLocaleString();
         }
         return {
-          text: String(val),
+          text: normalizePptText(val),
           options: {
-            fontSize: config.fontSize || 9,
+            fontSize: fontSize,
             color: theme.textColor.replace("#", ""),
             fontFace: theme.fontFamily,
             align: (col.align as any) || "left",
@@ -739,27 +742,41 @@ function renderTableElement(
                   : "FFFFFF",
             },
             border: { type: "solid", pt: 0.5, color: "E2E8F0" },
-            margin: [2, 5, 2, 5],
+            margin: [1, 3, 1, 3],
           },
         } as pptxgen.TableCell;
       })
     );
 
   const allRows = [headerRow, ...dataRows];
+  const rowH = [HEADER_H, ...dataRows.map(() => ROW_H)];
 
-  // Calculate column widths
-  const colW = columns.map(
-    (col) => col.width || pos.w / columns.length
-  );
+  const rawColW = columns.map((col) => {
+    if (col.width) return col.width;
+    const longestValue = cappedData.reduce((max, row) => {
+      const len = String(row?.[col.key] ?? "").length;
+      return Math.max(max, len);
+    }, String(col.label || col.key).length);
+    return Math.max(0.6, longestValue * 0.075);
+  });
+  const totalRawWidth = rawColW.reduce((sum, width) => sum + width, 0) || columns.length;
+  const widthScale = pos.w / totalRawWidth;
+  const colW = rawColW.map((width) => Number((width * widthScale).toFixed(3)));
 
   slide.addTable(allRows, {
     x: pos.x,
     y: pos.y,
     w: pos.w,
     colW,
-    fontSize: config.fontSize || 9,
+    rowH,
+    fontSize: fontSize,
     fontFace: theme.fontFamily,
-    autoPage: false,
+    autoPage: true,
+    autoPageRepeatHeader: true,
+    autoPageHeaderRows: 1,
+    newSlideStartY: 0.5,
+    autoPageLineWeight: -0.3,
+    margin: 0,
   });
 }
 
@@ -1162,8 +1179,13 @@ function normalizeChartWidgetData(widgetData: any): {
   xKey: string;
   yKey: string;
   yKeys: string[];
+  lineKey?: string;
   colors: string[];
+  lineColor?: string;
   title?: string;
+  seriesNames?: string[];
+  primaryAxisLabel?: string;
+  secondaryAxisLabel?: string;
 } {
   // Shape A – widget registry ChartData (has xAxisKey / series)
   if (widgetData?.xAxisKey || widgetData?.series) {
@@ -1173,8 +1195,13 @@ function normalizeChartWidgetData(widgetData: any): {
       xKey: widgetData.xAxisKey || "",
       yKey: widgetData.series?.[0]?.dataKey || "",
       yKeys: (widgetData.series || []).map((s: any) => s.dataKey),
+      lineKey: widgetData.lineKey,
       colors: (widgetData.series || []).map((s: any) => s.color).filter(Boolean),
+      lineColor: widgetData.lineColor,
       title: widgetData.title,
+      seriesNames: (widgetData.series || []).map((s: any) => s.name || s.label || s.dataKey),
+      primaryAxisLabel: widgetData.primaryAxisLabel,
+      secondaryAxisLabel: widgetData.secondaryAxisLabel,
     };
   }
   // Shape B – CohiWidgetRenderer { vizType, data, xKey, yKey }
@@ -1185,8 +1212,13 @@ function normalizeChartWidgetData(widgetData: any): {
       xKey: widgetData.xKey || "",
       yKey: widgetData.yKey || "",
       yKeys: widgetData.yKey ? [widgetData.yKey] : [],
+      lineKey: widgetData.lineKey,
       colors: widgetData.colors || [],
+      lineColor: widgetData.lineColor,
       title: widgetData.title,
+      seriesNames: widgetData.seriesNames,
+      primaryAxisLabel: widgetData.primaryAxisLabel,
+      secondaryAxisLabel: widgetData.secondaryAxisLabel,
     };
   }
   // Shape C – already normalised / AI-generated
@@ -1196,8 +1228,13 @@ function normalizeChartWidgetData(widgetData: any): {
     xKey: widgetData?.xKey || "",
     yKey: widgetData?.yKey || "",
     yKeys: widgetData?.yKeys || (widgetData?.yKey ? [widgetData.yKey] : []),
+    lineKey: widgetData?.lineKey,
     colors: widgetData?.colors || [],
+    lineColor: widgetData?.lineColor,
     title: widgetData?.title,
+    seriesNames: widgetData?.seriesNames,
+    primaryAxisLabel: widgetData?.primaryAxisLabel,
+    secondaryAxisLabel: widgetData?.secondaryAxisLabel,
   };
 }
 
@@ -1291,48 +1328,6 @@ function resolveWidgetKind(
 // Slide builders per widget kind
 // ---------------------------------------------------------------------------
 
-function buildKpiSlide(
-  kpis: CanvasWidgetForReport[],
-  theme: ReportTheme,
-  slideId: string,
-  slideTitle = "Key Metrics"
-): SlideDefinition {
-  const batch = kpis.slice(0, 8);
-  const cols = Math.min(batch.length, 4);
-  const rows = Math.ceil(batch.length / cols);
-  const itemW = 8.5 / cols;
-  const itemH = Math.min(1.6, 4.5 / rows);
-  const startY = 1.0;
-
-  const elements: SlideElement[] = batch.map((kpi, idx) => {
-    const col = idx % cols;
-    const row = Math.floor(idx / cols);
-    const rawVal = kpi.data?.value ?? kpi.data ?? "--";
-    return {
-      id: `kpi-${slideId}-${idx}`,
-      type: "kpi" as const,
-      position: {
-        x: 0.5 + col * itemW + 0.05,
-        y: startY + row * itemH + 0.05,
-        w: itemW - 0.1,
-        h: itemH - 0.1,
-      },
-      config: {
-        type: "kpi",
-        label: kpi.widgetName,
-        value: rawVal,
-        format: kpi.data?.format || "number",
-        change: kpi.data?.change,
-        trend: kpi.data?.trend,
-        color: theme.accentColor,
-      },
-      dataSource: { type: "static" as const, staticData: kpi.data },
-    };
-  });
-
-  return { id: slideId, layout: "kpi-grid", title: slideTitle, elements };
-}
-
 function buildChartSlide(
   w: CanvasWidgetForReport,
   slideId: string,
@@ -1347,7 +1342,7 @@ function buildChartSlide(
       {
         id: `el-${slideId}`,
         type: "chart",
-        position: { x: 0.5, y: 1.0, w: 9, h: 5.0 },
+        position: { x: 0.5, y: 1.1, w: 9, h: 4.8 },
         config: {
           type: "chart",
           chartType: norm.chartType,
@@ -1356,7 +1351,12 @@ function buildChartSlide(
           xKey: norm.xKey,
           yKey: norm.yKey,
           yKeys: norm.yKeys,
+          lineKey: norm.lineKey,
           colors: norm.colors.length ? norm.colors : theme.chartColors,
+          lineColor: norm.lineColor,
+          seriesNames: norm.seriesNames,
+          primaryAxisLabel: norm.primaryAxisLabel,
+          secondaryAxisLabel: norm.secondaryAxisLabel,
           showLegend: true,
         },
         dataSource: { type: "static" as const, staticData: norm.data },
@@ -1365,26 +1365,114 @@ function buildChartSlide(
   };
 }
 
+function isWorkflowConversionWidget(w: CanvasWidgetForReport): boolean {
+  const data = w.data as any;
+  return (
+    data?.title === "Workflow Conversion" &&
+    Array.isArray(data?.rows) &&
+    Array.isArray(data?.charts)
+  );
+}
+
+function buildWorkflowConversionSlides(
+  w: CanvasWidgetForReport,
+  theme: ReportTheme,
+  slideIdBase: string
+): SlideDefinition[] {
+  const data = w.data as any;
+  return (data.charts || []).flatMap((chartDef: any, idx: number) => {
+    const norm = normalizeChartWidgetData(chartDef);
+    if (!norm.data.length) return [];
+
+    const row = data.rows?.[idx];
+    const leftLabel = norm.seriesNames?.[0] || "From Count";
+    const rightLabel = norm.seriesNames?.[1] || "To Count";
+    const metricLabel =
+      norm.seriesNames?.[2]
+      || norm.secondaryAxisLabel
+      || (norm.lineKey === "avgTurnTimeDays" ? "Avg Turn Time" : "Conversion %");
+    const segmentTitle = chartDef.title || row?.segment || `Segment ${idx + 1}`;
+
+    return [{
+      id: `${slideIdBase}-${idx}`,
+      layout: "content",
+      title: `${w.widgetName} - ${segmentTitle}`,
+      speakerNotes: `Workflow conversion segment: ${segmentTitle}. Review milestone volumes and the ${metricLabel.toLowerCase()} trend over time.`,
+      elements: [
+        {
+          id: `${slideIdBase}-metrics-${idx}`,
+          type: "metric-card",
+          position: { x: 0.5, y: 1.0, w: 9, h: 1.0 },
+          config: {
+            type: "metric-card",
+            columns: 3,
+            metrics: [
+              { label: leftLabel, value: row?.left ?? "--" },
+              { label: metricLabel, value: row?.metric ?? "--" },
+              { label: rightLabel, value: row?.right ?? "--" },
+            ],
+          },
+          dataSource: { type: "static" as const, staticData: row },
+        },
+        {
+          id: `${slideIdBase}-chart-${idx}`,
+          type: "chart",
+          position: { x: 0.5, y: 2.15, w: 9, h: 4.1 },
+          config: {
+            type: "chart",
+            chartType: norm.chartType,
+            title: segmentTitle,
+            data: norm.data,
+            xKey: norm.xKey,
+            yKey: norm.yKey,
+            yKeys: norm.yKeys,
+            lineKey: norm.lineKey,
+            colors: norm.colors.length ? norm.colors : theme.chartColors,
+            lineColor: norm.lineColor,
+            seriesNames: norm.seriesNames,
+            primaryAxisLabel: norm.primaryAxisLabel,
+            secondaryAxisLabel: norm.secondaryAxisLabel,
+            showLegend: true,
+          },
+          dataSource: { type: "static" as const, staticData: norm.data },
+        },
+      ],
+    }];
+  });
+}
+
+const TABLE_ROWS_PER_SLIDE = 12;
+const TABLE_MAX_PAGES = 5;
+
 function buildTableSlide(
   w: CanvasWidgetForReport,
   slideId: string
 ): SlideDefinition {
   const norm = normalizeTableWidgetData(w.data);
+  const maxRows = TABLE_ROWS_PER_SLIDE * TABLE_MAX_PAGES;
+  const cappedData = norm.data.slice(0, maxRows);
+  const totalRows = norm.data.length;
+  const note = totalRows > maxRows
+    ? `Showing ${maxRows} of ${totalRows} rows`
+    : `${totalRows} rows`;
+
   return {
     id: slideId,
     layout: "table",
     title: w.widgetName,
+    subtitle: note,
     elements: [
       {
         id: `el-${slideId}`,
         type: "table",
-        position: { x: 0.5, y: 1.0, w: 9, h: 5.5 },
+        position: { x: 0.5, y: 1.15, w: 9, h: 5.2 },
         config: {
           type: "table",
           columns: norm.columns,
-          data: norm.data,
+          data: cappedData,
+          fontSize: 8,
         },
-        dataSource: { type: "static" as const, staticData: norm.data },
+        dataSource: { type: "static" as const, staticData: cappedData },
       },
     ],
   };
@@ -1506,98 +1594,25 @@ export function canvasToReportDefinition(
   // Sort by spatial position so slide order matches canvas reading order
   const sorted = sortBySpatialPosition(widgets);
 
-  // Coalesce leading KPIs (before any chart/table) into a single summary slide
-  const leadingKpis: CanvasWidgetForReport[] = [];
-  const remaining: CanvasWidgetForReport[] = [];
-  let kpiPhase = true;
+  let slideIndex = 0;
 
   for (const w of sorted) {
-    const kind = resolveWidgetKind(w);
-    if (kpiPhase && kind === "kpi") {
-      leadingKpis.push(w);
-    } else {
-      kpiPhase = false;
-      remaining.push(w);
-    }
-  }
-
-  // Build KPI summary slide first (if any leading KPIs)
-  if (leadingKpis.length > 0) {
-    // Build Executive Summary auto-text
-    const summaryLines = leadingKpis.map((kpi) => {
-      const rawVal = kpi.data?.value ?? kpi.data ?? "--";
-      const fmt = kpi.data?.format || "number";
-      const val = formatDisplayValue(rawVal, fmt);
-      const change = kpi.data?.change;
-      const changeStr =
-        change != null
-          ? ` (${change >= 0 ? "+" : ""}${typeof change === "number" ? change.toFixed(1) : change}%)`
-          : "";
-      return `\u2022 ${kpi.widgetName}: ${val}${changeStr}`;
-    }).join("\n");
-
-    slides.push({
-      id: "slide-exec-summary",
-      layout: "content",
-      title: "Executive Summary",
-      speakerNotes:
-        "High-level overview of key metrics from the canvas. Highlight the most important trends and any areas requiring attention.",
-      elements: [
-        {
-          id: "exec-summary-text",
-          type: "text",
-          position: { x: 0.5, y: 1.0, w: 9, h: 5.0 },
-          config: {
-            type: "text",
-            content: `Key Metrics Overview\n\n${summaryLines}\n\nReport generated from Cohi Workbench on ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}.`,
-            fontSize: 13,
-            color: theme.textColor,
-            lineSpacing: 1.5,
-          },
-        },
-      ],
-    });
-
-    // KPI grid slide (batches of up to 8 per slide)
-    for (let i = 0; i < leadingKpis.length; i += 8) {
-      const batch = leadingKpis.slice(i, i + 8);
-      slides.push(buildKpiSlide(batch, theme, `slide-kpis-${i}`, i === 0 ? "Key Metrics" : "Key Metrics (cont.)"));
-    }
-  }
-
-  // Now walk remaining widgets in spatial order
-  let slideIndex = 0;
-  let inlineKpiBuffer: CanvasWidgetForReport[] = [];
-  let inlineKpiGroupId: string | null = null; // track widget_group context
-
-  const flushInlineKpis = () => {
-    if (inlineKpiBuffer.length === 0) return;
-    for (let i = 0; i < inlineKpiBuffer.length; i += 8) {
-      slides.push(buildKpiSlide(inlineKpiBuffer.slice(i, i + 8), theme, `slide-inline-kpi-${slideIndex++}`, "Metrics"));
-    }
-    inlineKpiBuffer = [];
-  };
-
-  for (const w of remaining) {
     const kind = resolveWidgetKind(w);
 
     if (kind === "skip") continue;
 
     if (kind === "section_header") {
-      flushInlineKpis();
       slides.push(buildSectionBreakSlide(w.widgetName, `slide-section-${slideIndex++}`));
       continue;
     }
 
     if (kind === "widget_group") {
-      flushInlineKpis();
       const d = w.data as any;
       slides.push(buildSectionBreakSlide(d?.title || w.widgetName, `slide-group-${slideIndex++}`));
       continue;
     }
 
     if (kind === "embed") {
-      flushInlineKpis();
       // Dashboard section embed: render as a titled text placeholder
       const d = w.data as any;
       slides.push({
@@ -1624,17 +1639,18 @@ export function canvasToReportDefinition(
     }
 
     if (kind === "kpi") {
-      // Buffer KPIs — will be coalesced into a grid slide
-      inlineKpiBuffer.push(w);
       continue;
     }
 
-    // Non-KPI widgets flush any buffered KPIs first
-    flushInlineKpis();
-
     switch (kind) {
       case "chart":
-        slides.push(buildChartSlide(w, `slide-chart-${slideIndex++}`, theme));
+        if (isWorkflowConversionWidget(w)) {
+          const workflowSlides = buildWorkflowConversionSlides(w, theme, `slide-workflow-${slideIndex}`);
+          workflowSlides.forEach((slide) => slides.push(slide));
+          slideIndex += workflowSlides.length;
+        } else {
+          slides.push(buildChartSlide(w, `slide-chart-${slideIndex++}`, theme));
+        }
         break;
       case "table":
         slides.push(buildTableSlide(w, `slide-table-${slideIndex++}`));
@@ -1652,48 +1668,6 @@ export function canvasToReportDefinition(
         break;
     }
   }
-
-  // Flush any trailing inline KPIs
-  flushInlineKpis();
-
-  // Key Takeaways slide (final)
-  const allKpis = [...leadingKpis, ...remaining.filter((w) => resolveWidgetKind(w) === "kpi")];
-  const takeawayItems: string[] = [];
-  for (const kpi of allKpis) {
-    const change = kpi.data?.change;
-    if (change != null && typeof change === "number" && Math.abs(change) >= 5) {
-      const direction = change >= 0 ? "increased" : "decreased";
-      takeawayItems.push(
-        `${kpi.widgetName} ${direction} by ${Math.abs(change).toFixed(1)}% — ${change >= 0 ? "positive trend to maintain" : "investigate root cause"}`
-      );
-    }
-  }
-  if (takeawayItems.length === 0) {
-    takeawayItems.push("Review the data presented in this report for actionable insights");
-    takeawayItems.push("Compare these metrics against prior period targets");
-    takeawayItems.push("Schedule follow-up discussion with stakeholders");
-  }
-
-  slides.push({
-    id: "slide-takeaways",
-    layout: "content",
-    title: "Key Takeaways & Next Steps",
-    speakerNotes: "Summarize the main findings and outline recommended action items. Tailor these points to your audience.",
-    elements: [
-      {
-        id: "takeaways-text",
-        type: "text",
-        position: { x: 0.5, y: 1.0, w: 9, h: 5.0 },
-        config: {
-          type: "text",
-          content: takeawayItems.map((item, i) => `${i + 1}. ${item}`).join("\n\n"),
-          fontSize: 14,
-          color: theme.textColor,
-          lineSpacing: 1.8,
-        },
-      },
-    ],
-  });
 
   return {
     id: `report-${Date.now()}`,

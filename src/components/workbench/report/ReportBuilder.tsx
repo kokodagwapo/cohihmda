@@ -67,6 +67,7 @@ import type {
   ImageElementConfig,
   ShapeElementConfig,
   ReportTemplate,
+  CanvasWidgetData,
 } from '@/types/reportTypes';
 import { REPORT_THEMES } from '@/types/reportTypes';
 import type { WidgetDataEntry } from '@/stores/canvasDataStore';
@@ -77,7 +78,7 @@ import type { WidgetDataEntry } from '@/stores/canvasDataStore';
 
 interface ReportBuilderProps {
   onClose: () => void;
-  canvasWidgetData?: WidgetDataEntry[];
+  canvasWidgetData?: CanvasWidgetData[];
   canvasTitle?: string;
   tenantId?: string | null;
   /** Pre-loaded report definition (e.g., from AI generation) */
@@ -158,9 +159,13 @@ function normalizeChartData(widgetData: any): {
   xKey: string;
   yKey: string;
   yKeys: string[];
+  lineKey?: string;
   colors: string[];
+  lineColor?: string;
   title?: string;
   seriesNames?: string[];
+  primaryAxisLabel?: string;
+  secondaryAxisLabel?: string;
 } {
   // Shape A – widget registry ChartData (has xAxisKey / series)
   if (widgetData?.xAxisKey || widgetData?.series) {
@@ -171,9 +176,13 @@ function normalizeChartData(widgetData: any): {
       xKey: widgetData.xAxisKey || '',
       yKey: series[0]?.dataKey || '',
       yKeys: series.map((s: any) => s.dataKey),
+      lineKey: widgetData.lineKey,
       colors: series.map((s: any) => s.color).filter(Boolean),
+      lineColor: widgetData.lineColor,
       title: widgetData.title,
       seriesNames: series.map((s: any) => s.name || s.label || s.dataKey),
+      primaryAxisLabel: widgetData.primaryAxisLabel,
+      secondaryAxisLabel: widgetData.secondaryAxisLabel,
     };
   }
   // Shape B – CohiWidgetRenderer { vizType, data, xKey, yKey }
@@ -184,8 +193,13 @@ function normalizeChartData(widgetData: any): {
       xKey: widgetData.xKey || '',
       yKey: widgetData.yKey || '',
       yKeys: widgetData.yKey ? [widgetData.yKey] : [],
+      lineKey: widgetData.lineKey,
       colors: widgetData.colors || [],
+      lineColor: widgetData.lineColor,
       title: widgetData.title,
+      seriesNames: widgetData.seriesNames,
+      primaryAxisLabel: widgetData.primaryAxisLabel,
+      secondaryAxisLabel: widgetData.secondaryAxisLabel,
     };
   }
   // Shape C – already normalised / AI-generated
@@ -195,9 +209,13 @@ function normalizeChartData(widgetData: any): {
     xKey: widgetData?.xKey || '',
     yKey: widgetData?.yKey || '',
     yKeys: widgetData?.yKeys || (widgetData?.yKey ? [widgetData.yKey] : []),
+    lineKey: widgetData?.lineKey,
     colors: widgetData?.colors || [],
+    lineColor: widgetData?.lineColor,
     title: widgetData?.title,
     seriesNames: widgetData?.seriesNames,
+    primaryAxisLabel: widgetData?.primaryAxisLabel,
+    secondaryAxisLabel: widgetData?.secondaryAxisLabel,
   };
 }
 
@@ -398,6 +416,31 @@ function isEmbedSentinel(data: unknown): boolean {
   return Object.keys(d).length <= 1 && d.ready === true;
 }
 
+type CanvasWidgetLike = WidgetDataEntry & Pick<CanvasWidgetData, 'layoutPosition' | 'widgetType'>;
+
+function sortBySpatialPosition(widgets: CanvasWidgetLike[]): CanvasWidgetLike[] {
+  return [...widgets].sort((a, b) => {
+    const ay = a.layoutPosition?.y ?? 0;
+    const by = b.layoutPosition?.y ?? 0;
+    if (ay !== by) return ay - by;
+    const ax = a.layoutPosition?.x ?? 0;
+    const bx = b.layoutPosition?.x ?? 0;
+    return ax - bx;
+  });
+}
+
+function stripHtml(html: string | undefined): string {
+  return (html || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\s+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
 /**
  * Check if a widget has meaningful data that can be rendered in a slide.
  * Returns false for embed sentinels and empty/null data.
@@ -407,6 +450,7 @@ function hasRenderableData(w: WidgetDataEntry): boolean {
   const d = w.data as any;
   if (d == null) return false;
   if (w.category === 'chart') {
+    if (Array.isArray(d?.charts) && d.charts.some((chart: any) => Array.isArray(chart?.data) && chart.data.length > 0)) return true;
     if (d?.data && Array.isArray(d.data) && d.data.length > 0) return true;
     if (d?.xKey && d?.data) return true;
     if (d?.columns && d?.rows) return true;
@@ -427,9 +471,21 @@ function hasRenderableData(w: WidgetDataEntry): boolean {
     return false;
   }
   if (w.category === 'other') {
-    return typeof d?.content === 'string' && d.content.length > 0;
+    if (typeof d?.content === 'string' && d.content.trim().length > 0) return true;
+    if (typeof d?.summary === 'string' && d.summary.trim().length > 0) return true;
+    if (typeof d?.html === 'string' && stripHtml(d.html).length > 0) return true;
+    if (typeof d?.title === 'string' && d.title.trim().length > 0) return true;
+    return false;
   }
   return d != null;
+}
+
+function isWorkflowConversionPayload(data: any): boolean {
+  return (
+    data?.title === 'Workflow Conversion' &&
+    Array.isArray(data?.rows) &&
+    Array.isArray(data?.charts)
+  );
 }
 
 /**
@@ -437,7 +493,7 @@ function hasRenderableData(w: WidgetDataEntry): boolean {
  * Produces a structured set of slides: Title -> Executive Summary -> KPIs -> Charts -> Tables -> Embeds -> Takeaways.
  */
 function canvasWidgetsToSlides(
-  widgets: WidgetDataEntry[],
+  widgets: CanvasWidgetLike[],
   canvasTitle?: string
 ): SlideDefinition[] {
   const slides: SlideDefinition[] = [];
@@ -461,212 +517,380 @@ function canvasWidgetsToSlides(
     speakerNotes: 'Title slide for the report generated from the current canvas.',
   });
 
-  // Separate widgets with real data from embed-style placeholders
-  const withData = widgets.filter(hasRenderableData);
-
+  // Keep slide order aligned with canvas reading order.
+  const withData = sortBySpatialPosition(widgets.filter(hasRenderableData) as CanvasWidgetLike[]);
   const kpis = withData.filter((w) => w.category === 'kpi');
-  const charts = withData.filter((w) => w.category === 'chart');
-  const tables = withData.filter((w) => w.category === 'table');
-  const others = withData.filter((w) => w.category === 'other' || w.category === 'embed' || !['kpi', 'chart', 'table', 'other'].includes(w.category));
 
-  // Executive Summary slide with KPI overview
-  if (kpis.length > 0) {
-    const summaryLines = kpis.flatMap((kpi) => {
-      const d = kpi.data as any;
-      // Handle { kpis: [{ label, value, ... }] } shape from ExecDashboard / ClosingForecast
-      if (Array.isArray(d?.kpis)) {
-        return d.kpis.map((k: any) => {
-          const changeStr = k.change && k.change !== '--'
-            ? ` (${typeof k.change === 'number' ? (k.change >= 0 ? '+' : '') + k.change.toFixed(1) + '%' : k.change})`
-            : '';
-          return `\u2022 ${k.label}: ${k.value}${changeStr}`;
-        });
-      }
-      // Single KPI shape
-      const rawVal = d?.value ?? d ?? '--';
-      const fmt = d?.format || 'number';
-      const val = fmtKpi(rawVal, fmt);
-      const change = d?.change;
-      const changeStr = change != null
-        ? ` (${change >= 0 ? '+' : ''}${typeof change === 'number' ? change.toFixed(1) : change}%)`
-        : '';
-      return [`\u2022 ${kpi.widgetName}: ${val}${changeStr}`];
-    }).join('\n');
+  const getWidgetTitle = (widget: CanvasWidgetLike, fallback?: string) => {
+    const d = widget.data as any;
+    return d?.title || fallback || widget.widgetName;
+  };
 
-    slides.push({
-      id: generateId('slide'),
-      layout: 'content',
-      title: 'Executive Summary',
-      speakerNotes: 'High-level overview of key metrics. Highlight the most important trends and areas requiring attention.',
-      elements: [{
-        id: generateId('text'),
-        type: 'text',
-        position: { x: 0.5, y: 1.0, w: 9, h: 5.0 },
-        config: {
-          type: 'text',
-          content: `Key Metrics Overview\n\n${summaryLines}`,
-          fontSize: 13,
-          lineSpacing: 1.5,
-        } as TextElementConfig,
-      }],
-    });
-  }
+  const getWidgetSummary = (widget: CanvasWidgetLike): string | undefined => {
+    const d = widget.data as any;
+    const summary = d?.summary || d?.summaryLine;
+    return typeof summary === 'string' && summary.trim().length > 0 ? summary.trim() : undefined;
+  };
 
-  // KPI grid slides — flatten multi-KPI widgets (ExecDashboard, ClosingForecast)
-  const flatKpis: { label: string; value: string; change?: string; trend?: string }[] = [];
-  for (const kpi of kpis) {
-    const d = kpi.data as any;
-    if (Array.isArray(d?.kpis)) {
-      for (const k of d.kpis) {
-        flatKpis.push({ label: k.label, value: String(k.value ?? '--'), change: k.change, trend: k.trend });
-      }
-    } else {
-      flatKpis.push({
-        label: kpi.widgetName,
-        value: fmtKpi(d?.value ?? d, d?.format),
-        change: d?.change,
-      });
-    }
-  }
-  // Emit KPI grid slides (up to 8 per slide)
-  for (let page = 0; page < flatKpis.length; page += 8) {
-    const batch = flatKpis.slice(page, page + 8);
-    const cols = Math.min(batch.length, 4);
-    slides.push({
-      id: generateId('slide'),
-      layout: 'kpi-grid',
-      title: page === 0 ? 'Key Metrics' : 'Key Metrics (cont.)',
-      speakerNotes: 'Detailed KPI metrics from the canvas. Discuss trends and compare against targets.',
-      elements: batch.map((kpi, idx) => {
-        const col = idx % cols;
-        const row = Math.floor(idx / cols);
-        const itemW = 8.5 / cols;
-        return {
-          id: generateId('kpi'),
-          type: 'kpi' as const,
-          position: { x: 0.5 + col * itemW + 0.05, y: 1.0 + row * 1.5 + 0.05, w: itemW - 0.1, h: 1.3 },
-          config: {
-            type: 'kpi',
-            label: kpi.label,
-            value: kpi.value,
-            format: 'text',
-            change: kpi.change,
-          } as KpiElementConfig,
-        };
-      }),
-    });
-  }
 
-  // Chart slides (1 per chart) — if data has columns+rows, treat as table instead
-  charts.forEach((chart) => {
-    const d = chart.data as any;
-    if (d?.columns && d?.rows) {
-      const norm = normalizeTableData(d);
+  const TABLE_ROWS_PER_SLIDE = 12;
+  const TABLE_MAX_PAGES = 5;
+
+  const pushTableSlide = (
+    title: string,
+    norm: { columns: any[]; data: any[] },
+    summary: string | undefined,
+    speakerNotes: string,
+  ) => {
+    const totalRows = norm.data.length;
+    const maxRows = TABLE_ROWS_PER_SLIDE * TABLE_MAX_PAGES;
+    const cappedData = norm.data.slice(0, maxRows);
+    const totalPages = Math.max(1, Math.min(TABLE_MAX_PAGES, Math.ceil(cappedData.length / TABLE_ROWS_PER_SLIDE)));
+
+    for (let page = 0; page < totalPages; page++) {
+      const start = page * TABLE_ROWS_PER_SLIDE;
+      const end = Math.min(start + TABLE_ROWS_PER_SLIDE, cappedData.length);
+      const pageData = cappedData.slice(start, end);
+      const rangeLabel = `Rows ${start + 1}-${end} of ${totalRows}`;
+      const titleSuffix = totalPages > 1 ? ` (${page + 1}/${totalPages})` : '';
+      const truncationNote = totalRows > maxRows && page === totalPages - 1
+        ? `${rangeLabel} (showing first ${maxRows})`
+        : rangeLabel;
+
+      const hasSummary = !!summary && page === 0;
       slides.push({
         id: generateId('slide'),
         layout: 'table',
-        title: d.title || chart.widgetName,
-        speakerNotes: `Data table: ${chart.widgetName}. Review the detailed data and highlight key rows.`,
-        elements: [{
-          id: generateId('table'),
-          type: 'table',
-          position: { x: 0.5, y: 1.0, w: 9, h: 5.5 },
-          config: {
+        title: `${title}${titleSuffix}`,
+        speakerNotes,
+        elements: [
+          ...(hasSummary
+            ? [{
+                id: generateId('text'),
+                type: 'text' as const,
+                position: { x: 0.5, y: 1.0, w: 9, h: 0.4 },
+                config: {
+                  type: 'text',
+                  content: summary!,
+                  fontSize: 10,
+                  color: '#475569',
+                  lineSpacing: 1.2,
+                } as TextElementConfig,
+              }]
+            : []),
+          {
+            id: generateId('text'),
+            type: 'text' as const,
+            position: { x: 0.5, y: hasSummary ? 1.4 : 0.78, w: 9, h: 0.22 },
+            config: {
+              type: 'text',
+              content: truncationNote,
+              fontSize: 8,
+              color: '#94a3b8',
+              align: 'right',
+            } as TextElementConfig,
+          },
+          {
+            id: generateId('table'),
             type: 'table',
-            columns: norm.columns,
-            data: norm.data,
-          } as TableElementConfig,
-        }],
+            position: { x: 0.5, y: hasSummary ? 1.65 : 1.05, w: 9, h: hasSummary ? 4.7 : 5.2 },
+            config: {
+              type: 'table',
+              columns: norm.columns,
+              data: pageData,
+              fontSize: 8,
+            } as TableElementConfig,
+          },
+        ],
       });
-      return;
     }
-    const norm = normalizeChartData(d);
+  };
+
+  const pushChartSlide = (
+    title: string,
+    norm: ReturnType<typeof normalizeChartData>,
+    summary: string | undefined,
+    speakerNotes: string,
+  ) => {
+    const hasSummary = !!summary;
     slides.push({
       id: generateId('slide'),
       layout: 'chart-focus',
-      title: chart.widgetName,
-      speakerNotes: `Chart: ${chart.widgetName}. Discuss the trends and notable data points visible in this visualization.`,
-      elements: [{
-        id: generateId('chart'),
-        type: 'chart',
-        position: { x: 0.5, y: 1.0, w: 9, h: 5.0 },
-        config: {
+      title,
+      speakerNotes,
+      elements: [
+        ...(hasSummary
+          ? [{
+              id: generateId('text'),
+              type: 'text' as const,
+              position: { x: 0.5, y: 1.0, w: 9, h: 0.4 },
+              config: {
+                type: 'text',
+                content: summary!,
+                fontSize: 10,
+                color: '#475569',
+                lineSpacing: 1.2,
+              } as TextElementConfig,
+            }]
+          : []),
+        {
+          id: generateId('chart'),
           type: 'chart',
-          chartType: norm.chartType,
-          title: chart.widgetName,
-          data: norm.data,
-          xKey: norm.xKey,
-          yKey: norm.yKey,
-          yKeys: norm.yKeys,
-          colors: norm.colors.length ? norm.colors : undefined,
-          seriesNames: norm.seriesNames,
-          showLegend: true,
-          showValues: true,
-        } as ChartElementConfig,
-      }],
+          position: { x: 0.5, y: hasSummary ? 1.45 : 1.0, w: 9, h: hasSummary ? 4.55 : 5.0 },
+          config: {
+            type: 'chart',
+            chartType: norm.chartType,
+            title,
+            data: norm.data,
+            xKey: norm.xKey,
+            yKey: norm.yKey,
+            yKeys: norm.yKeys,
+            lineKey: norm.lineKey,
+            colors: norm.colors.length ? norm.colors : undefined,
+            lineColor: norm.lineColor,
+            seriesNames: norm.seriesNames,
+            primaryAxisLabel: norm.primaryAxisLabel,
+            secondaryAxisLabel: norm.secondaryAxisLabel,
+            showLegend: true,
+            showValues: true,
+          } as ChartElementConfig,
+        },
+      ],
     });
-  });
+  };
 
-  // Table slides (1 per table)
-  tables.forEach((table) => {
-    const d = table.data as any;
-    const norm = normalizeTableData(d);
-    const tableTitle = (!Array.isArray(d) && d?.title) || table.widgetName;
-    slides.push({
-      id: generateId('slide'),
-      layout: 'table',
-      title: tableTitle,
-      speakerNotes: `Data table: ${table.widgetName}. Review the detailed data and highlight key rows.`,
-      elements: [{
-        id: generateId('table'),
-        type: 'table',
-        position: { x: 0.5, y: 1.0, w: 9, h: 5.5 },
-        config: {
-          type: 'table',
-          columns: norm.columns,
-          data: norm.data,
-        } as TableElementConfig,
-      }],
+  const pushWorkflowConversionSlides = (widget: CanvasWidgetLike, payload: any) => {
+    payload.charts.forEach((chartDef: any, idx: number) => {
+      const norm = normalizeChartData(chartDef);
+      if (norm.data.length === 0) return;
+
+      const row = payload.rows?.[idx];
+      const leftLabel = norm.seriesNames?.[0] || 'From Count';
+      const rightLabel = norm.seriesNames?.[1] || 'To Count';
+      const metricLabel =
+        norm.seriesNames?.[2]
+        || norm.secondaryAxisLabel
+        || (norm.lineKey === 'avgTurnTimeDays' ? 'Avg Turn Time' : 'Conversion %');
+      const segmentTitle = chartDef.title || row?.segment || `Segment ${idx + 1}`;
+
+      slides.push({
+        id: generateId('slide'),
+        layout: 'content',
+        title: `${getWidgetTitle(widget)} - ${segmentTitle}`,
+        speakerNotes: `Workflow conversion segment: ${segmentTitle}. Review the milestone volumes and the ${metricLabel.toLowerCase()} trend over time.`,
+        elements: [
+          {
+            id: generateId('metric-card'),
+            type: 'metric-card',
+            position: { x: 0.5, y: 1.0, w: 9, h: 1.0 },
+            config: {
+              type: 'metric-card',
+              columns: 3,
+              metrics: [
+                { label: leftLabel, value: row?.left ?? '--' },
+                { label: metricLabel, value: row?.metric ?? '--' },
+                { label: rightLabel, value: row?.right ?? '--' },
+              ],
+            } as MetricCardConfig,
+          },
+          {
+            id: generateId('chart'),
+            type: 'chart',
+            position: { x: 0.5, y: 2.15, w: 9, h: 4.1 },
+            config: {
+              type: 'chart',
+              chartType: norm.chartType as ChartElementConfig['chartType'],
+              title: segmentTitle,
+              data: norm.data,
+              xKey: norm.xKey,
+              yKey: norm.yKey,
+              yKeys: norm.yKeys,
+              lineKey: norm.lineKey,
+              colors: norm.colors.length ? norm.colors : undefined,
+              lineColor: norm.lineColor,
+              seriesNames: norm.seriesNames,
+              primaryAxisLabel: norm.primaryAxisLabel,
+              secondaryAxisLabel: norm.secondaryAxisLabel,
+              showLegend: true,
+            } as ChartElementConfig,
+          },
+        ],
+      });
     });
-  });
+  };
 
-  // Remaining widgets (text content, embeds, uncategorized) — render as text or tables
-  others.forEach((widget) => {
+  // KPIs are rendered inline as grid slides — no separate executive summary
+
+  for (const widget of withData) {
     const d = widget.data as any;
-    if (d == null) return;
 
-    // If data looks like a table (array or has rows/columns), render as table
+    if (widget.category === 'kpi') {
+      continue;
+    }
+
+    if (widget.category === 'chart') {
+      if (isWorkflowConversionPayload(d)) {
+        pushWorkflowConversionSlides(widget, d);
+        continue;
+      }
+      if (Array.isArray(d?.charts) && d.charts.length > 0) {
+        d.charts.forEach((chartDef: any, idx: number) => {
+          const norm = normalizeChartData(chartDef);
+          if (norm.data.length === 0) return;
+          pushChartSlide(
+            d.charts.length > 1 ? `${getWidgetTitle(widget)} - ${chartDef.title || `Chart ${idx + 1}`}` : (chartDef.title || getWidgetTitle(widget)),
+            norm,
+            chartDef.summary,
+            `Chart: ${chartDef.title || widget.widgetName}. Discuss the trends and notable data points visible in this visualization.`,
+          );
+        });
+        if (Array.isArray(d?.rows) && d.rows.length > 0) {
+          pushTableSlide(
+            `${getWidgetTitle(widget)} Summary`,
+            normalizeTableData(d),
+            getWidgetSummary(widget),
+            `Data table: ${widget.widgetName}. Review the detailed data and highlight key rows.`,
+          );
+        }
+        continue;
+      }
+      if (d?.columns && d?.rows) {
+        pushTableSlide(
+          getWidgetTitle(widget),
+          normalizeTableData(d),
+          getWidgetSummary(widget),
+          `Data table: ${widget.widgetName}. Review the detailed data and highlight key rows.`,
+        );
+        continue;
+      }
+      const norm = normalizeChartData(d);
+      if (norm.data.length > 0) {
+        pushChartSlide(
+          getWidgetTitle(widget),
+          norm,
+          getWidgetSummary(widget),
+          `Chart: ${widget.widgetName}. Discuss the trends and notable data points visible in this visualization.`,
+        );
+      }
+      continue;
+    }
+
+    if (widget.category === 'table') {
+      if (Array.isArray(d?.leaders) && d.leaders.length > 0) {
+        const hasSummary = !!getWidgetSummary(widget);
+        const kpiY = hasSummary ? 1.4 : 1.05;
+        const KPI_H = 1.0;
+        const tableY = kpiY + KPI_H + 0.15;
+        const tableH = 6.4 - tableY;
+        const norm = normalizeTableData(d);
+        const maxVisibleRows = Math.floor((tableH - 0.3) / 0.25);
+        const cappedData = norm.data.slice(0, Math.max(maxVisibleRows, 5));
+
+        slides.push({
+          id: generateId('slide'),
+          layout: 'content',
+          title: getWidgetTitle(widget),
+          speakerNotes: `${widget.widgetName}: leaderboard summary from the canvas.`,
+          elements: [
+            ...(hasSummary
+              ? [{
+                  id: generateId('text'),
+                  type: 'text' as const,
+                  position: { x: 0.5, y: 1.0, w: 9, h: 0.35 },
+                  config: {
+                    type: 'text',
+                    content: getWidgetSummary(widget)!,
+                    fontSize: 9,
+                    color: '#475569',
+                    lineSpacing: 1.2,
+                  } as TextElementConfig,
+                }]
+              : []),
+            {
+              id: generateId('metric-card'),
+              type: 'metric-card',
+              position: { x: 0.5, y: kpiY, w: 9, h: KPI_H },
+              config: {
+                type: 'metric-card',
+                columns: Math.min(d.leaders.length, 5),
+                metrics: d.leaders.map((leader: { name: string; units: string; volume: string; cycleTime: string; pullThru: string; revenue: string }) => ({
+                  label: leader.name,
+                  value:
+                    d.rankingMetric === 'volume'
+                      ? leader.volume
+                      : d.rankingMetric === 'turnTime'
+                        ? leader.cycleTime
+                        : d.rankingMetric === 'pullThrough'
+                          ? leader.pullThru
+                          : d.rankingMetric === 'revenue'
+                            ? leader.revenue
+                            : `${leader.units} units`,
+                  format: 'text',
+                })),
+              },
+            } as SlideElement,
+            {
+              id: generateId('table'),
+              type: 'table',
+              position: { x: 0.5, y: tableY, w: 9, h: tableH },
+              config: {
+                type: 'table',
+                columns: norm.columns,
+                data: cappedData,
+                fontSize: 8,
+              } as TableElementConfig,
+            },
+          ],
+        });
+
+        if (norm.data.length > cappedData.length) {
+          pushTableSlide(
+            `${getWidgetTitle(widget)} (cont.)`,
+            { columns: norm.columns, data: norm.data.slice(cappedData.length) },
+            undefined,
+            `Continuation of ${widget.widgetName} data table.`,
+          );
+        }
+        continue;
+      }
+      pushTableSlide(
+        getWidgetTitle(widget),
+        normalizeTableData(d),
+        getWidgetSummary(widget),
+        `Data table: ${widget.widgetName}. Review the detailed data and highlight key rows.`,
+      );
+      continue;
+    }
+
     if (Array.isArray(d) || d?.rows || d?.columns || d?.tabs) {
       const norm = normalizeTableData(d);
       if (norm.data.length > 0) {
-        slides.push({
-          id: generateId('slide'),
-          layout: 'table',
-          title: (!Array.isArray(d) && d?.title) || widget.widgetName,
-          speakerNotes: `Data: ${widget.widgetName}.`,
-          elements: [{
-            id: generateId('table'),
-            type: 'table',
-            position: { x: 0.5, y: 1.0, w: 9, h: 5.5 },
-            config: { type: 'table', columns: norm.columns, data: norm.data } as TableElementConfig,
-          }],
-        });
-        return;
+        pushTableSlide(
+          getWidgetTitle(widget),
+          norm,
+          getWidgetSummary(widget),
+          `Data: ${widget.widgetName}.`,
+        );
+        continue;
       }
     }
 
-    // If data has KPI-like shape, render as KPI
-    if (d?.value != null || d?.kpis) {
-      return; // Already handled in KPI section above
-    }
-
-    // Text content (news, briefings, etc.)
-    const content = d?.content ?? (typeof d === 'string' ? d : '');
-    if (!content) return;
+    const content =
+      d?.content
+      ?? d?.summary
+      ?? stripHtml(d?.html)
+      ?? (typeof d === 'string' ? d : '');
+    const fallbackContent =
+      typeof content === 'string' && content.trim().length > 0
+        ? content
+        : d?.widgetType === 'text_block'
+          ? 'Empty note'
+          : '';
+    if (!fallbackContent) continue;
     slides.push({
       id: generateId('slide'),
       layout: 'content',
-      title: d?.title || widget.widgetName,
+      title: getWidgetTitle(widget),
       speakerNotes: `${widget.widgetName}: text content from the canvas.`,
       elements: [{
         id: generateId('text'),
@@ -674,13 +898,13 @@ function canvasWidgetsToSlides(
         position: { x: 0.5, y: 1.0, w: 9, h: 5.5 },
         config: {
           type: 'text',
-          content,
+          content: fallbackContent,
           fontSize: 12,
           lineSpacing: 1.4,
         } as TextElementConfig,
       }],
     });
-  });
+  }
 
   return slides;
 }
@@ -700,9 +924,47 @@ export function ReportBuilder({
   const { toast } = useToast();
   const navigate = useNavigate();
 
-  const getLatestCanvasData = useCallback((): WidgetDataEntry[] => {
-    const live = useCanvasDataStore.getState().getSnapshot();
-    return live.length > 0 ? live : (canvasWidgetDataProp || []);
+  const getLatestCanvasData = useCallback((): CanvasWidgetLike[] => {
+    const live = useCanvasDataStore.getState().getSnapshot() as CanvasWidgetLike[];
+    if (!canvasWidgetDataProp?.length) return live;
+
+    const propById = new Map(canvasWidgetDataProp.map((entry) => [entry.itemId, entry]));
+    const mergedLive = live.map((entry) => {
+      const meta = propById.get(entry.itemId);
+      return meta
+        ? {
+            ...entry,
+            layoutPosition: meta.layoutPosition,
+            widgetType: meta.widgetType,
+          }
+        : entry;
+    });
+
+    if (mergedLive.length > 0) {
+      const liveIds = new Set(mergedLive.map((entry) => entry.itemId));
+      const extras = canvasWidgetDataProp
+        .filter((entry) => !liveIds.has(entry.itemId))
+        .map((entry) => ({
+          itemId: entry.itemId,
+          widgetName: entry.widgetName,
+          category: entry.category,
+          data: entry.data,
+          updatedAt: Date.now(),
+          layoutPosition: entry.layoutPosition,
+          widgetType: entry.widgetType,
+        }));
+      return [...mergedLive, ...extras];
+    }
+
+    return canvasWidgetDataProp.map((entry) => ({
+      itemId: entry.itemId,
+      widgetName: entry.widgetName,
+      category: entry.category,
+      data: entry.data,
+      updatedAt: Date.now(),
+      layoutPosition: entry.layoutPosition,
+      widgetType: entry.widgetType,
+    }));
   }, [canvasWidgetDataProp]);
 
   // Track widget count and data version reactively (primitives, stable)
@@ -792,6 +1054,19 @@ export function ReportBuilder({
       setSelectedElementId(null);
     }
   }, [initialDefinition, canvasTitle, getLatestCanvasData]);
+
+  useEffect(() => {
+    if (!canvasTitle) return;
+    const lower = canvasTitle.toLowerCase();
+    if (lower === 'untitled canvas' || lower === 'untitled report' || lower === 'canvas report') return;
+    setReportTitle((prev) => {
+      const prevLower = prev.toLowerCase();
+      if (prevLower === 'untitled report' || prevLower === 'untitled canvas' || prevLower === 'canvas report') {
+        return canvasTitle;
+      }
+      return prev;
+    });
+  }, [canvasTitle]);
 
   const selectedSlide = useMemo(
     () => slides.find((s) => s.id === selectedSlideId) || null,
