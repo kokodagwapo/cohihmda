@@ -244,6 +244,13 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     [scopedFilters?.sectionType, sections],
   );
 
+  const hasLoanDetailSection = useMemo(
+    () =>
+      scopedFilters?.sectionType === 'loan-detail' ||
+      Object.values(sections).some((s) => s.sectionType === 'loan-detail'),
+    [scopedFilters?.sectionType, sections],
+  );
+
   // ---- Hook calls with dynamic filter values ----
 
   // Effective branch/loanOfficer: prefer dynamic filter value when present (so "Add Filter" Branch works)
@@ -433,7 +440,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
         : undefined,
     [ldFilters?.dateField, ldDateRange, ldEffectiveBranch, ldEffectiveLoanOfficer, ldDimensionFilters],
   );
-  const loanDetail = useLoanDetailData(effectiveTenantId, loanDetailFilters ?? undefined);
+  const loanDetail = useLoanDetailData(effectiveTenantId, loanDetailFilters ?? undefined, { enabled: hasLoanDetailSection });
 
   // High Performers: left and right period with shared date type
   const hpDateType = (hpFilters?.highPerformersDateType ?? 'funding_date') as HighPerformersDateType;
