@@ -32,6 +32,7 @@ import {
   PinOff,
   Lock,
   Layers,
+  ShieldCheck,
 } from "lucide-react";
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -134,6 +135,18 @@ const topTieringMenuGroups = {
         label: "HMDA",
         icon: FileText,
         iconColor: "indigo" as const,
+      },
+      {
+        id: "captureAnalysis",
+        label: "Capture Analysis",
+        icon: BarChart3,
+        iconColor: "emerald" as const,
+      },
+      {
+        id: "tridCompliance",
+        label: "TRID Compliance",
+        icon: ShieldCheck,
+        iconColor: "teal" as const,
       },
     ],
   }, */
@@ -306,6 +319,8 @@ const routeMap: Record<string, string> = {
   operationsScorecard: "/performance/operation-scorecard",
   operationsTrends: "/performance/operation-scorecard-trends",
   financialModeling: "/performance/financial-modeling-sandbox",
+  captureAnalysis: "/capture-analysis",
+  tridCompliance: "/capture-analysis?view=respa&hideNav=1",
 };
 
 /** Match pathname + search when route targets include query params. */
@@ -593,6 +608,7 @@ export function Navigation(
       "/performance/operation-scorecard",
       "/performance/operation-scorecard-trends",
       "/performance/financial-modeling-sandbox",
+      "/capture-analysis",
     ];
     return topTieringRoutes.some(
       (route) =>
@@ -798,6 +814,41 @@ export function Navigation(
                   const itemRoute = routeMap[item.id];
                   const isItemActive =
                     itemRoute && navTargetMatches(location.pathname, location.search, itemRoute);
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => {
+                        handleTopTieringClick(item.id);
+                        setMobileMenuOpen(false);
+                      }}
+                      className={cn(
+                        "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
+                        isItemActive
+                          ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                          : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800",
+                      )}
+                    >
+                      <Icon className="w-4 h-4 flex-shrink-0" />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Compliance (mobile) */}
+            <div>
+              <div className="px-2 py-1 text-xs font-medium text-slate-600 dark:text-slate-400 mb-2 flex items-center gap-2">
+                <Shield className="w-3.5 h-3.5" />
+                Compliance
+              </div>
+              <div className="space-y-1 pl-4">
+                {topTieringMenuGroups.compliance.items.map((item) => {
+                  const Icon = item.icon;
+                  const itemRoute = routeMap[item.id];
+                  const isItemActive =
+                    itemRoute &&
+                    navTargetMatches(location.pathname, location.search, itemRoute);
                   return (
                     <button
                       key={item.id}
