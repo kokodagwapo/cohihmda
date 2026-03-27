@@ -126,7 +126,7 @@ const topTieringMenuGroups = {
       },
     ],
   },
-  compliance: {
+/*   compliance: {
     label: "Compliance",
     items: [
       {
@@ -136,7 +136,7 @@ const topTieringMenuGroups = {
         iconColor: "indigo" as const,
       },
     ],
-  },
+  }, */
   sales: {
     label: "Sales",
     icon: Users,
