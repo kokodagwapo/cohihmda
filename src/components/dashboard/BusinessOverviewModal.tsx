@@ -454,4 +454,4 @@ export const BusinessOverviewModal: React.FC<BusinessOverviewModalProps> = ({
       </DialogContent>
     </Dialog>
   );
-};
+});

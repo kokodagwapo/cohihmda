@@ -40,7 +40,6 @@ import SalesScorecard from "./pages/SalesScorecard";
 import SalesTrends from "./pages/SalesTrends";
 import SalesScorecardOverview from "./pages/SalesScorecardOverview";
 import CompanyScorecard from "./pages/CompanyScorecard";
-import CaptureAnalysis from "./pages/CaptureAnalysis";
 import HighPerformers from "./pages/HighPerformers";
 import CreditRiskManagement from "./pages/CreditRiskManagement";
 import LoanDetail from "./pages/LoanDetail";
@@ -202,7 +201,6 @@ const App = () => (
               <Route path="/loan-complexity" element={<LoanComplexity />} />
               <Route path="/credit-risk-management" element={<CreditRiskManagement />} />
                 <Route path="/company-scorecard" element={<CompanyScorecard />} />
-              <Route path="/capture-analysis" element={<CaptureAnalysis />} />
               <Route path="/high-performers" element={<HighPerformers />} />
               <Route path="/actors" element={<Actors />} />
               <Route path="/performance/toptiering-comparison" element={<TopTieringComparison />} />

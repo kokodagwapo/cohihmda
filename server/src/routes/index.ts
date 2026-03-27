@@ -45,7 +45,6 @@ import jobsRoutes from "./jobs.js";
 import helpContentRoutes from "./helpContent.js";
 import analyticsRoutes from "./analytics.js";
 import releaseNotesRoutes from "./releaseNotes.js";
-import cohibuilderPortfolioRoutes from "./cohibuilderPortfolio.js";
 import falloutAlertsRoutes from "./falloutAlerts.js";
 import falloutResponseRoutes from "./falloutResponse.js";
 import podcastRoutes from "./podcast.js";
@@ -148,7 +147,6 @@ export function setupRoutes(app: Express) {
   app.use("/api/help", helpContentRoutes); // Help content RAG seeding
   app.use("/api/analytics", analyticsRoutes); // User behavior analytics (ingestion + reporting)
   app.use("/api/release-notes", releaseNotesRoutes); // Published release notes (management DB)
-  app.use("/api/cohibuilder/portfolio", cohibuilderPortfolioRoutes);
   app.use("/api/fallout-alerts", falloutAlertsRoutes); // Fallout alert config + send + response tracking
   app.use("/api/fallout-response", falloutResponseRoutes); // Public one-time fallout response links
   app.use("/api/podcast/cohi", podcastRoutes); // Cohi Daily Briefing podcast (TTS streaming)

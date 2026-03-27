@@ -21,8 +21,6 @@ export default defineConfig(({ mode }) => ({
   server: {
     host: "0.0.0.0",
     port: 5000,
-    /** Fail fast if 5000 is taken so the app is always at http://localhost:5000 */
-    strictPort: true,
     allowedHosts: true,
     watch: {
       ignored: ['**/.cursor/**', '**/server/logs/**', '**/node_modules/**', '**/.git/**'],
