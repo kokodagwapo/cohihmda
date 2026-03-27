@@ -1966,6 +1966,33 @@ function GridCellRegistryWidget({
   useEffect(() => {
     if (!definition || isEmbedSentinel) return;
     if (!loading && normalizedReportData != null && !error) {
+      let periodLabel: string | undefined;
+      const ps = filters.periodSelection;
+      if (ps) {
+        if (ps.type === "preset" && ps.preset) {
+          const presetLabels: Record<string, string> = {
+            "rolling-3": "Last 3 Months", "rolling-6": "Last 6 Months",
+            "rolling-12": "Last 12 Months", "rolling-13": "Last 13 Months",
+            "last-30-days": "Last 30 Days",
+            mtd: "Month to Date", qtd: "Quarter to Date", ytd: "Year to Date",
+            "last-month": "Last Month", "last-quarter": "Last Quarter",
+            "last-year": "Last Year", "trailing-12": "Trailing 12 Months",
+          };
+          periodLabel = presetLabels[ps.preset] ?? ps.preset;
+        } else if (ps.type === "year" && ps.year) {
+          periodLabel = String(ps.year);
+        } else if (ps.type === "custom" && ps.dateRange) {
+          periodLabel = `${ps.dateRange.start} – ${ps.dateRange.end}`;
+        }
+      } else if (filters.year) {
+        periodLabel = String(filters.year);
+      }
+
+      const enrichedData =
+        periodLabel && typeof normalizedReportData === "object" && normalizedReportData !== null
+          ? { ...normalizedReportData, _periodLabel: periodLabel }
+          : normalizedReportData;
+
       reportWidgetData(canvasItemId, {
         widgetName: definition.name,
         category: definition.category as
@@ -1974,7 +2001,7 @@ function GridCellRegistryWidget({
           | "table"
           | "embed"
           | "other",
-        data: normalizedReportData,
+        data: enrichedData,
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1985,6 +2012,8 @@ function GridCellRegistryWidget({
     canvasItemId,
     isEmbedSentinel,
     definition,
+    filters.periodSelection,
+    filters.year,
   ]);
 
   const isPricingTable =

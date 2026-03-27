@@ -503,6 +503,7 @@ function canvasWidgetsToSlides(
       name: w.widgetName,
       category: w.category,
       hasData: hasRenderableData(w),
+      periodLabel: (w.data as any)?._periodLabel,
       dataSample: typeof w.data === 'object' ? Object.keys(w.data as any).slice(0, 5) : typeof w.data,
     })));
   }
@@ -523,7 +524,9 @@ function canvasWidgetsToSlides(
 
   const getWidgetTitle = (widget: CanvasWidgetLike, fallback?: string) => {
     const d = widget.data as any;
-    return d?.title || fallback || widget.widgetName;
+    const base = d?.title || fallback || widget.widgetName;
+    const period = d?._periodLabel;
+    return period ? `${base} (${period})` : base;
   };
 
   const getWidgetSummary = (widget: CanvasWidgetLike): string | undefined => {
@@ -725,6 +728,41 @@ function canvasWidgetsToSlides(
     const d = widget.data as any;
 
     if (widget.category === 'kpi') {
+      if (!Array.isArray(d?.kpis) || d.kpis.length === 0) {
+        continue;
+      }
+      const title = getWidgetTitle(widget);
+      const entries = d.kpis.map((k: any) => ({
+        label: k.label ?? String(k.id ?? ''),
+        value: String(k.value ?? '--'),
+        change: k.change,
+        trend: k.trend,
+      }));
+      const cols = Math.min(entries.length, 4);
+      const rows = Math.ceil(entries.length / cols);
+      const itemW = 8.5 / cols;
+      const maxH = Math.min(1.3, 5.0 / rows);
+      const rowSpacing = maxH + 0.1;
+      const elements: SlideElement[] = entries.map((kpi: any, idx: number) => {
+        const col = idx % cols;
+        const row = Math.floor(idx / cols);
+        return {
+          id: generateId('kpi'),
+          type: 'metric-card' as const,
+          position: { x: 0.5 + col * itemW + 0.05, y: 1.0 + row * rowSpacing + 0.05, w: itemW - 0.1, h: maxH },
+          config: {
+            type: 'metric-card',
+            metrics: [{ label: kpi.label, value: kpi.value, format: 'text', change: kpi.change, trend: kpi.trend }],
+          },
+        };
+      });
+      slides.push({
+        id: generateId('slide'),
+        layout: 'kpi-grid',
+        title,
+        speakerNotes: `${title}: KPI overview from the canvas.`,
+        elements,
+      });
       continue;
     }
 
@@ -931,13 +969,20 @@ export function ReportBuilder({
     const propById = new Map(canvasWidgetDataProp.map((entry) => [entry.itemId, entry]));
     const mergedLive = live.map((entry) => {
       const meta = propById.get(entry.itemId);
-      return meta
-        ? {
-            ...entry,
-            layoutPosition: meta.layoutPosition,
-            widgetType: meta.widgetType,
-          }
-        : entry;
+      if (!meta) return entry;
+      const metaData = meta.data as any;
+      const liveData = entry.data as any;
+      const periodLabel = metaData?._periodLabel;
+      const enrichedData =
+        periodLabel && typeof liveData === 'object' && liveData !== null && !liveData._periodLabel
+          ? { ...liveData, _periodLabel: periodLabel }
+          : entry.data;
+      return {
+        ...entry,
+        data: enrichedData,
+        layoutPosition: meta.layoutPosition,
+        widgetType: meta.widgetType,
+      };
     });
 
     if (mergedLive.length > 0) {
