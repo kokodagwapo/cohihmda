@@ -3914,6 +3914,33 @@ Structure it as a narrative-first executive briefing:
     persistExistingCanvas,
   ]);
 
+  /** Stable layout items for rendering (avoids new `widget_group` payload refs every parent re-render for legacy loan detail). */
+  const itemsForRender = useMemo((): CanvasLayoutItem[] => {
+    return items.map((layoutItem) => {
+      const isDashboardSecs =
+        layoutItem.type === "dashboard_section" &&
+        layoutItem.payload.type === "dashboard_section";
+      const pl = layoutItem.payload;
+      const isLegacyLoanDetail =
+        isDashboardSecs &&
+        (pl as { sectionId?: string }).sectionId === "loanDetail";
+      if (isLegacyLoanDetail) {
+        return {
+          ...layoutItem,
+          type: "widget_group",
+          payload: {
+            type: "widget_group",
+            groupId: layoutItem.i,
+            title: (pl as { title?: string }).title ?? "Loan Detail",
+            sectionType: "loan-detail",
+            widgetIds: ["loan-detail-table"],
+          },
+        };
+      }
+      return layoutItem;
+    });
+  }, [items]);
+
   const hasItems = items.length > 0;
 
   const handleClearCanvas = useCallback(() => {
@@ -4645,7 +4672,6 @@ Structure it as a narrative-first executive briefing:
               z-index: 20;
               width: 14px;
               height: 14px;
-              transition: opacity 0.2s ease;
             }
             .canvas-freeform .canvas-item:hover .react-resizable-handle {
               opacity: 1;
@@ -4671,31 +4697,16 @@ Structure it as a narrative-first executive briefing:
               }}
             >
               {hasItems ? (
-                items.map((item, index) => {
+                itemsForRender.map((displayItem, index) => {
+                  const item = items[index]!;
                   const isDashboardSection =
                     item.type === "dashboard_section" &&
                     item.payload.type === "dashboard_section";
                   const payload = item.payload;
-                  // Legacy Loan Detail: show as WidgetGroup (with filters) and migrate on first update
                   const isLegacyLoanDetail =
                     isDashboardSection &&
                     (payload as { sectionId?: string }).sectionId ===
                       "loanDetail";
-                  const displayItem: CanvasLayoutItem = isLegacyLoanDetail
-                    ? {
-                        ...item,
-                        type: "widget_group",
-                        payload: {
-                          type: "widget_group",
-                          groupId: item.i,
-                          title:
-                            (payload as { title?: string }).title ??
-                            "Loan Detail",
-                          sectionType: "loan-detail",
-                          widgetIds: ["loan-detail-table"],
-                        },
-                      }
-                    : item;
                   const hideableSections = isDashboardSection
                     ? (DASHBOARD_HIDEABLE_SECTIONS[
                         (payload as { sectionId: string }).sectionId

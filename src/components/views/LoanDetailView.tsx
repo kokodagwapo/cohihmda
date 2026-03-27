@@ -50,7 +50,20 @@ import {
   isFilterActive,
 } from "@/utils/loanDetailFilters";
 import { useLoanDetailFilterBookmarks, type LoanDetailFilterBookmark } from "@/hooks/useLoanDetailFilterBookmarks";
-import { Loader2, Download, ArrowUp, ArrowDown, Filter, X, Check, Bookmark, Pencil, Trash2, Share2 } from "lucide-react";
+import { Loader2, Download, ArrowUp, ArrowDown, Filter, X, Check, Bookmark, Pencil, Trash2, Share2, SlidersHorizontal } from "lucide-react";
+import { LoanDetailColumnsModal } from "@/components/widgets/components/LoanDetailColumnsModal";
+import {
+  useLoanDetailColumnsStore,
+  type SavedLoanDetailColumn,
+  savedColumnsToColumnDefs,
+  LOAN_DETAIL_STANDALONE_COLUMNS_STORE_ID,
+} from "@/stores/loanDetailColumnsStore";
+import { computePresetDateRange, getPeriodPresetMeta, type PeriodPreset } from "@/components/ui/DatePeriodPicker";
+import {
+  useLoanDetailViewState,
+  normalizeLoanDetailViewState,
+  type LoanDetailViewStateV1,
+} from "@/hooks/useLoanDetailViewState";
 
 const ROW_HEIGHT = 40;
 const HEADER_HEIGHT = 40;
@@ -61,6 +74,7 @@ const MIN_COL_WIDTH = 80;
 const CHARS_TO_PX = 8;
 /** Max width per column so one outlier doesn't make table huge; content still fits up to this */
 const MAX_COL_WIDTH = 800;
+const LOAN_NUMBER_FILTER_MAX_OPTIONS = 200;
 
 export interface LoanDetailViewProps {
   selectedTenantId?: string | null;
@@ -77,6 +91,25 @@ export interface LoanDetailViewProps {
   filterSummary?: string | null;
   /** When set (workbench only), use these columns instead of default. Enables per-widget column editor. */
   columns?: ColumnDef[] | null;
+  /**
+   * When set (e.g. standalone Loan Detail page), load/save column layout under this id in loanDetailColumnsStore
+   * and show Edit Columns in the header. Independent from workbench widget keys.
+   */
+  columnsStoreId?: string;
+  /** Standalone page uses URL query params for shareable filters. Workbench widgets should disable this. */
+  syncFiltersToUrl?: boolean;
+  /** Workbench-only: persisted column filter + bookmark selection state (stored in widget config). */
+  persistedWorkbenchState?: {
+    appliedFilters: ColumnFilterState;
+    selectedBookmarkId: string | null;
+    selectedBookmarkTitle: string | null;
+  } | null;
+  /** Workbench-only: callback to persist filter + bookmark selection state. */
+  onPersistedWorkbenchStateChange?: (next: {
+    appliedFilters: ColumnFilterState;
+    selectedBookmarkId: string | null;
+    selectedBookmarkTitle: string | null;
+  }) => void;
 }
 
 export type ColumnDef = {
@@ -338,17 +371,30 @@ function matchesAppliedDateFilter(filter: DateColumnFilter, rawValue: unknown): 
 
   if (filter.shortcut?.trim()) {
     const token = filter.shortcut.trim().toLowerCase();
-    const now = new Date();
-    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    let start: Date | null = null;
-    if (token === "ytd") start = new Date(end.getFullYear(), 0, 1);
-    else if (token === "last 30 days") start = new Date(end.getTime() - 29 * 24 * 60 * 60 * 1000);
-    else if (/^\d{4}$/.test(token)) start = new Date(Number(token), 0, 1);
-    if (!start) return false;
-    const shortcutEnd = /^\d{4}$/.test(token) ? new Date(Number(token), 11, 31) : end;
+    // Support Loan Detail shortcut tokens (including DatePeriodPicker presets).
+    if (/^\d{4}$/.test(token)) {
+      const year = Number(token);
+      const start = new Date(year, 0, 1);
+      const end = new Date(year, 11, 31);
+      start.setHours(0, 0, 0, 0);
+      end.setHours(0, 0, 0, 0);
+      return valueDate >= start && valueDate <= end;
+    }
+
+    const presetToken =
+      token === "last 30 days"
+        ? ("last-30-days" as const) // back-compat
+        : (token as PeriodPreset);
+    const supportedPresets: PeriodPreset[] = ["last-30-days", "mtd", "ytd", "last-month", "rolling-13", "rolling-12"];
+    if (!supportedPresets.includes(presetToken)) return false;
+
+    const range = computePresetDateRange(presetToken);
+    const start = new Date(range.start);
+    const end = new Date(range.end);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return false;
     start.setHours(0, 0, 0, 0);
-    shortcutEnd.setHours(0, 0, 0, 0);
-    return valueDate >= start && valueDate <= shortcutEnd;
+    end.setHours(0, 0, 0, 0);
+    return valueDate >= start && valueDate <= end;
   }
   const from = parseFilterDate(filter.from);
   const to = parseFilterDate(filter.to);
@@ -554,16 +600,6 @@ function sortLoans(
   });
 }
 
-/** Column ids that get no total (leave blank) */
-const TOTALS_BLANK_COLUMN_IDS = new Set([
-  "loan_term",
-  "locked_days",
-  "fees_va_fund_fee_borr",
-  "fees_loan_discount_fee_borr",
-  "borr_info_points_paid",
-  "income_total_mo_income",
-]);
-
 function getColumnTotal(
   col: ColumnDef,
   loans: LoanDetailRow[],
@@ -571,9 +607,20 @@ function getColumnTotal(
 ): string {
   if (loans.length === 0) return col.id === "loan_number" ? "Totals" : BLANK_PLACEHOLDER;
   if (col.id === "loan_number") return "Totals";
+
+  // Totals row is intentionally narrow for performance:
+  // Units, Volume (loan_amount), WAC, and averages for FICO/LTV/BE DTI only.
+  const shouldCompute =
+    col.id === "units" ||
+    col.id === "wac" ||
+    col.field === "loan_amount" ||
+    col.field === "fico_score" ||
+    col.field === "ltv_ratio" ||
+    col.field === "be_dti_ratio";
+  if (!shouldCompute) return BLANK_PLACEHOLDER;
+
   if (col.id === "units") return String(loans.length);
   if (col.id === "wac") return wacFormatted || BLANK_PLACEHOLDER;
-  if (TOTALS_BLANK_COLUMN_IDS.has(col.id)) return BLANK_PLACEHOLDER;
 
   // Volume: sum of loan_amount (ensure numeric) – match by field for custom "volume" label
   if (col.field === "loan_amount") {
@@ -659,6 +706,10 @@ export function LoanDetailView({
   periodLabel,
   filterSummary,
   columns: columnsProp,
+  columnsStoreId,
+  syncFiltersToUrl = true,
+  persistedWorkbenchState = null,
+  onPersistedWorkbenchStateChange,
 }: LoanDetailViewProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const { theme } = useTheme();
@@ -679,10 +730,33 @@ export function LoanDetailView({
   const data = isControlled ? dataProp ?? null : fetched.data;
   const loading = isControlled ? (loadingProp ?? false) : fetched.loading;
   const error = isControlled ? (errorProp ?? null) : fetched.error;
-  const baseColumns = columnsProp && columnsProp.length > 0 ? columnsProp : COLUMNS;
+
+  const savedColumnsFromStore = useLoanDetailColumnsStore((s) =>
+    columnsStoreId ? s.byItem[columnsStoreId] : undefined,
+  );
+  const setColumnsInStore = useLoanDetailColumnsStore((s) => s.setColumns);
+  const storeColumnDefs = useMemo(
+    () => savedColumnsToColumnDefs(savedColumnsFromStore),
+    [savedColumnsFromStore],
+  );
+  const baseColumns = useMemo((): ColumnDef[] => {
+    if (columnsProp && columnsProp.length > 0) return columnsProp;
+    if (storeColumnDefs && storeColumnDefs.length > 0) {
+      return storeColumnDefs as ColumnDef[];
+    }
+    return COLUMNS;
+  }, [columnsProp, storeColumnDefs]);
+
+  // When the user is in "edited columns" mode (workbench `columns` or standalone saved columns),
+  // the table must reflect *exactly* what they selected in the editor.
+  //
+  // Otherwise `buildEffectiveColumns(baseColumns, additionalColumns)` will re-append any
+  // additional fields the user deleted, making it look like "remove" doesn't work.
+  const hasUserSelectedColumns = Boolean((columnsProp && columnsProp.length > 0) || (storeColumnDefs && storeColumnDefs.length > 0));
+
   const columnsToUse = useMemo(
-    () => buildEffectiveColumns(baseColumns, additionalColumns),
-    [baseColumns, additionalColumns],
+    () => (hasUserSelectedColumns ? baseColumns : buildEffectiveColumns(baseColumns, additionalColumns)),
+    [baseColumns, additionalColumns, hasUserSelectedColumns],
   );
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const [, setScrollReady] = useState(0);
@@ -711,6 +785,7 @@ export function LoanDetailView({
   const [debouncedFilterSearchByColumn, setDebouncedFilterSearchByColumn] = useState<Record<string, string>>({});
   const searchDebounceTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const [bookmarksModalOpen, setBookmarksModalOpen] = useState(false);
+  const [loanDetailColumnsModalOpen, setLoanDetailColumnsModalOpen] = useState(false);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [overwriteModalOpen, setOverwriteModalOpen] = useState(false);
   const [saveModalInitialName, setSaveModalInitialName] = useState("");
@@ -719,11 +794,32 @@ export function LoanDetailView({
   const [copiedBookmarkState, setCopiedBookmarkState] = useState<{ id: string; fading: boolean } | null>(null);
   const [selectedBookmarkId, setSelectedBookmarkId] = useState<string | null>(null);
   const [sharedBookmarkTitle, setSharedBookmarkTitle] = useState<string | null>(null);
+  const isStandalonePersistenceEnabled = Boolean(
+    syncFiltersToUrl &&
+      columnsStoreId === LOAN_DETAIL_STANDALONE_COLUMNS_STORE_ID &&
+      tenantId,
+  );
+  const standaloneViewState = useLoanDetailViewState({
+    tenantId,
+    scope: "standalone",
+  });
+  const hydratedStandalonePreferenceKeyRef = useRef<string | null>(null);
   const {
     bookmarks,
     isLoading: bookmarksLoading,
     saveAll: saveAllBookmarks,
   } = useLoanDetailFilterBookmarks();
+
+  // Workbench widgets can re-render frequently due to canvas interactions, which can keep transitions pending.
+  // When URL sync is disabled, apply filter updates synchronously so "Applying filter..." always settles.
+  const runFilterUpdate = useCallback((fn: () => void) => {
+    if (syncFiltersToUrl) startFilterTransition(fn);
+    else fn();
+  }, [syncFiltersToUrl, startFilterTransition]);
+
+  // Workbench persistence loop protection: avoid echoing our own persisted state back into hydration.
+  const lastPersistedWorkbenchStateJsonRef = useRef<string | null>(null);
+  const lastHydratedWorkbenchStateJsonRef = useRef<string | null>(null);
 
   const getFilterRawValue = useCallback((row: LoanDetailRow, col: ColumnDef): unknown => {
     if (col.id === "units") return 1;
@@ -776,20 +872,54 @@ export function LoanDetailView({
     });
   }, []);
 
-  const distinctValuesByColumn = useMemo(() => {
-    const result: Record<string, string[]> = {};
-    for (const col of columnsToUse) {
-      const values = new Set<string>();
-      for (const row of loans) {
-        const raw = getFilterRawValue(row, col);
-        if (raw == null) continue;
-        const value = String(raw).trim();
-        if (value) values.add(value);
+  // Lazy distinct-values cache: compute only for the column whose filter UI is opened.
+  // (Previously we computed distinct values for *all* columns on every relevant change.)
+  const [distinctCache, setDistinctCache] = useState<
+    Record<string, { values: string[]; hasBlank: boolean; version: number }>
+  >({});
+  const distinctCacheRef = useRef(distinctCache);
+  useEffect(() => {
+    distinctCacheRef.current = distinctCache;
+  }, [distinctCache]);
+
+  const loansVersionRef = useRef(0);
+  useEffect(() => {
+    loansVersionRef.current += 1;
+    setDistinctCache({});
+  }, [loans]);
+
+  useEffect(() => {
+    if (!openFilterColumnId) return;
+    const col = columnsToUse.find((c) => c.id === openFilterColumnId);
+    if (!col) return;
+
+    const version = loansVersionRef.current;
+    const cached = distinctCacheRef.current[openFilterColumnId];
+    if (cached && cached.version === version) return;
+
+    const values = new Set<string>();
+    let hasBlank = false;
+    for (const row of loans) {
+      const raw = getFilterRawValue(row, col);
+      if (raw == null) {
+        hasBlank = true;
+        continue;
       }
-      result[col.id] = Array.from(values).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      const v = String(raw).trim();
+      if (!v) {
+        hasBlank = true;
+        continue;
+      }
+      values.add(v);
     }
-    return result;
-  }, [columnsToUse, loans, getFilterRawValue]);
+    const sorted = Array.from(values).sort((a, b) =>
+      a.localeCompare(b, undefined, { numeric: true }),
+    );
+    setDistinctCache((prev) => ({
+      ...prev,
+      [openFilterColumnId]: { values: sorted, hasBlank, version },
+    }));
+  }, [openFilterColumnId, columnsToUse, loans, getFilterRawValue]);
 
   const beginDraft = useCallback((columnId: string) => {
     setDraftFilters((prev) => {
@@ -810,6 +940,26 @@ export function LoanDetailView({
     });
   }, []);
 
+  const clearFilterSearch = useCallback((columnId: string) => {
+    const timers = searchDebounceTimersRef.current;
+    if (timers[columnId]) {
+      clearTimeout(timers[columnId]);
+      delete timers[columnId];
+    }
+    setFilterSearchByColumn((prev) => {
+      if (!(columnId in prev)) return prev;
+      const next = { ...prev };
+      delete next[columnId];
+      return next;
+    });
+    setDebouncedFilterSearchByColumn((prev) => {
+      if (!(columnId in prev)) return prev;
+      const next = { ...prev };
+      delete next[columnId];
+      return next;
+    });
+  }, []);
+
   const discardDraft = useCallback((columnId: string) => {
     setDraftFilters((prev) => {
       const next = { ...prev };
@@ -817,16 +967,18 @@ export function LoanDetailView({
       return next;
     });
     setOpenFilterColumnId((current) => (current === columnId ? null : current));
-  }, []);
+    clearFilterSearch(columnId);
+  }, [clearFilterSearch]);
 
   const closePopoverWithoutDiscard = useCallback((columnId: string) => {
     setOpenFilterColumnId((current) => (current === columnId ? null : current));
-  }, []);
+    clearFilterSearch(columnId);
+  }, [clearFilterSearch]);
 
   const commitDraft = useCallback((columnId: string) => {
     let committedFilter: ColumnFilter | undefined;
     setFilterFeedback({ message: "Applying filter...", nonce: Date.now() });
-    startFilterTransition(() => {
+    runFilterUpdate(() => {
       setAppliedFilters((prev) => {
         const draft = draftFilters[columnId];
         if (!draft || !isFilterActive(draft)) {
@@ -845,11 +997,12 @@ export function LoanDetailView({
       return next;
     });
     setOpenFilterColumnId((current) => (current === columnId ? null : current));
+    clearFilterSearch(columnId);
     if (committedFilter && (committedFilter.kind === "text" || (committedFilter.kind === "number" && committedFilter.mode === "all"))) {
       const values = committedFilter.selectedValues;
       setFlashState({ columnId, values, nonce: Date.now() });
     }
-  }, [draftFilters, startFilterTransition]);
+  }, [draftFilters, runFilterUpdate, clearFilterSearch]);
 
   useEffect(() => {
     if (!flashState) return;
@@ -894,6 +1047,47 @@ export function LoanDetailView({
   const saveStatusClass = bookmarkInSync
     ? "bg-emerald-600 hover:bg-emerald-600 text-white"
     : "bg-sky-600 hover:bg-sky-700 text-white";
+
+  const toPersistedColumns = useCallback(
+    (columns: SavedLoanDetailColumn[] | undefined): SavedLoanDetailColumn[] => {
+      if (!columns?.length) return [];
+      return columns.map((col) => ({
+        id: col.id,
+        label: col.label,
+        field: col.field,
+      }));
+    },
+    [],
+  );
+
+  const saveStandaloneViewState = useCallback(async () => {
+    if (!isStandalonePersistenceEnabled) return;
+    if (isApplyingFilters) return;
+    const payload: LoanDetailViewStateV1 = normalizeLoanDetailViewState({
+      version: 1,
+      appliedFilters: normalizeFilterState(appliedFilters),
+      selectedBookmarkId,
+      selectedBookmarkTitle: selectedBookmark?.name ?? sharedBookmarkTitle ?? null,
+      columns: toPersistedColumns(savedColumnsFromStore),
+      sortColumnId,
+      sortDirection,
+      showFilters,
+    });
+    await standaloneViewState.save(payload);
+  }, [
+    isStandalonePersistenceEnabled,
+    isApplyingFilters,
+    appliedFilters,
+    selectedBookmarkId,
+    selectedBookmark?.name,
+    sharedBookmarkTitle,
+    savedColumnsFromStore,
+    sortColumnId,
+    sortDirection,
+    showFilters,
+    toPersistedColumns,
+    standaloneViewState,
+  ]);
 
   const filterSummaryItems = useMemo(() => {
     const summarize = (state: ColumnFilterState): string[] => {
@@ -992,15 +1186,16 @@ export function LoanDetailView({
 
   const applyBookmark = useCallback((bookmark: LoanDetailFilterBookmark) => {
     setFilterFeedback({ message: "Applying filter...", nonce: Date.now() });
-    startFilterTransition(() => {
+    runFilterUpdate(() => {
       setAppliedFilters(normalizeFilterState(bookmark.filters));
       setDraftFilters({});
       setOpenFilterColumnId(null);
       setSelectedBookmarkId(bookmark.id);
-      setSharedBookmarkTitle(null);
+      // Keep a fallback title so the badge can restore even if the bookmark list changes.
+      setSharedBookmarkTitle(bookmark.name);
     });
     setBookmarksModalOpen(false);
-  }, [startFilterTransition]);
+  }, [runFilterUpdate]);
 
   const handleDeleteBookmark = useCallback(async (bookmarkId: string) => {
     const next = bookmarks.filter((bookmark) => bookmark.id !== bookmarkId);
@@ -1028,14 +1223,14 @@ export function LoanDetailView({
 
   const clearAppliedBookmarkView = useCallback(() => {
     setFilterFeedback({ message: "Removing filters...", nonce: Date.now() });
-    startFilterTransition(() => {
+    runFilterUpdate(() => {
       setAppliedFilters({});
       setDraftFilters({});
       setOpenFilterColumnId(null);
       setSelectedBookmarkId(null);
       setSharedBookmarkTitle(null);
     });
-  }, [startFilterTransition]);
+  }, [runFilterUpdate]);
 
   const copyBookmarkLink = useCallback(async (bookmark: LoanDetailFilterBookmark) => {
     const params = new URLSearchParams(searchParams);
@@ -1059,6 +1254,42 @@ export function LoanDetailView({
   }, [searchParams]);
 
   useEffect(() => {
+    if (!isStandalonePersistenceEnabled) return;
+    const preferenceKey = standaloneViewState.preferenceKey;
+    if (!preferenceKey) return;
+    if (hydratedStandalonePreferenceKeyRef.current === preferenceKey) return;
+    let cancelled = false;
+    const hasUrlFilters = Boolean(searchParams.get("ldFilters") || searchParams.get("bookmarkName"));
+    void standaloneViewState.load().then((loaded) => {
+      if (cancelled || !loaded) return;
+      if (loaded.columns.length > 0 && columnsStoreId) {
+        setColumnsInStore(columnsStoreId, loaded.columns);
+      }
+      if (!hasUrlFilters) {
+        setAppliedFilters(normalizeFilterState(loaded.appliedFilters));
+        setSelectedBookmarkId(loaded.selectedBookmarkId);
+        setSharedBookmarkTitle(loaded.selectedBookmarkTitle);
+      }
+      setSortColumnId(loaded.sortColumnId);
+      setSortDirection(loaded.sortDirection);
+      setShowFilters(loaded.showFilters);
+      hydratedStandalonePreferenceKeyRef.current = preferenceKey;
+    }).catch(() => {
+      hydratedStandalonePreferenceKeyRef.current = preferenceKey;
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isStandalonePersistenceEnabled,
+    searchParams,
+    standaloneViewState,
+    columnsStoreId,
+    setColumnsInStore,
+  ]);
+
+  useEffect(() => {
+    if (!syncFiltersToUrl) return;
     const fromUrl = decodeFilterStateFromQuery(searchParams.get("ldFilters"));
     if (fromUrl && Object.keys(fromUrl).length > 0) {
       setAppliedFilters(normalizeFilterState(fromUrl));
@@ -1070,6 +1301,7 @@ export function LoanDetailView({
   }, []);
 
   useEffect(() => {
+    if (!syncFiltersToUrl) return;
     const next = new URLSearchParams(searchParams);
     if (Object.values(appliedFilters).some((filter) => isFilterActive(filter))) {
       next.set("ldFilters", encodeFilterStateToQuery(appliedFilters));
@@ -1082,7 +1314,74 @@ export function LoanDetailView({
     if (next.toString() !== searchParams.toString()) {
       setSearchParams(next, { replace: true });
     }
-  }, [appliedFilters, searchParams, selectedBookmark, sharedBookmarkTitle, setSearchParams]);
+  }, [appliedFilters, searchParams, selectedBookmark, sharedBookmarkTitle, setSearchParams, syncFiltersToUrl]);
+
+  // Workbench hydration from persisted widget config.
+  useEffect(() => {
+    if (syncFiltersToUrl) return;
+    if (!persistedWorkbenchState) return;
+    // Don't hydrate over an in-flight transition (commit/apply bookmark).
+    if (isApplyingFilters) return;
+    const nextFilters = normalizeFilterState(persistedWorkbenchState.appliedFilters ?? {});
+    const incomingJson = JSON.stringify({
+      appliedFilters: nextFilters,
+      selectedBookmarkId: persistedWorkbenchState.selectedBookmarkId ?? null,
+      selectedBookmarkTitle: persistedWorkbenchState.selectedBookmarkTitle ?? null,
+    });
+    // If this is the state we just persisted, ignore it to prevent feedback loops.
+    if (lastPersistedWorkbenchStateJsonRef.current === incomingJson) return;
+    // If we've already hydrated this exact persisted state, don't re-run on every render.
+    if (lastHydratedWorkbenchStateJsonRef.current === incomingJson) return;
+    lastHydratedWorkbenchStateJsonRef.current = incomingJson;
+    // Avoid clobbering in-session edits unless the incoming state truly differs.
+    if (!areFilterStatesEquivalent(appliedFilters, nextFilters)) {
+      setAppliedFilters(nextFilters);
+      setDraftFilters({});
+      setOpenFilterColumnId(null);
+    }
+    if (persistedWorkbenchState.selectedBookmarkId !== selectedBookmarkId) {
+      setSelectedBookmarkId(persistedWorkbenchState.selectedBookmarkId);
+    }
+    if ((persistedWorkbenchState.selectedBookmarkTitle ?? null) !== (sharedBookmarkTitle ?? null)) {
+      setSharedBookmarkTitle(persistedWorkbenchState.selectedBookmarkTitle ?? null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncFiltersToUrl, persistedWorkbenchState, isApplyingFilters, appliedFilters, selectedBookmarkId, sharedBookmarkTitle]);
+
+  // Workbench persistence to widget config (do not touch URL).
+  useEffect(() => {
+    if (syncFiltersToUrl) return;
+    if (!onPersistedWorkbenchStateChange) return;
+    // Don't persist while a transition is in flight; we only want settled appliedFilters.
+    if (isApplyingFilters) return;
+    const normalized = normalizeFilterState(appliedFilters);
+    const payload = {
+      appliedFilters: normalized,
+      selectedBookmarkId,
+      selectedBookmarkTitle: selectedBookmark?.name ?? sharedBookmarkTitle ?? null,
+    };
+    const json = JSON.stringify(payload);
+    if (lastPersistedWorkbenchStateJsonRef.current === json) return;
+    lastPersistedWorkbenchStateJsonRef.current = json;
+    onPersistedWorkbenchStateChange(payload);
+  }, [
+    syncFiltersToUrl,
+    appliedFilters,
+    selectedBookmarkId,
+    selectedBookmark?.name,
+    sharedBookmarkTitle,
+    onPersistedWorkbenchStateChange,
+    isApplyingFilters,
+  ]);
+
+  useEffect(() => {
+    if (!isStandalonePersistenceEnabled) return;
+    const preferenceKey = standaloneViewState.preferenceKey;
+    if (!preferenceKey) return;
+    if (standaloneViewState.isLoading) return;
+    if (hydratedStandalonePreferenceKeyRef.current !== preferenceKey) return;
+    void saveStandaloneViewState();
+  }, [isStandalonePersistenceEnabled, saveStandaloneViewState, standaloneViewState]);
 
   const toggleDraftValue = useCallback((columnId: string, value: string, kind: LoanDetailFilterKind) => {
     setDraftFilters((prev) => {
@@ -1107,12 +1406,12 @@ export function LoanDetailView({
 
   const clearAllFilters = useCallback(() => {
     setFilterFeedback({ message: "Removing filters...", nonce: Date.now() });
-    startFilterTransition(() => {
+    runFilterUpdate(() => {
       setAppliedFilters({});
       setDraftFilters({});
       setOpenFilterColumnId(null);
     });
-  }, [startFilterTransition]);
+  }, [runFilterUpdate]);
 
   const activeFilterChips = useMemo(() => {
     const chips: Array<{ key: string; label: string; onRemove: () => void }> = [];
@@ -1127,7 +1426,7 @@ export function LoanDetailView({
             label: `${col.label}: ${value === EMPTY_FILTER_TOKEN ? "(Blank)" : value}`,
             onRemove: () => {
               setFilterFeedback({ message: "Removing filter...", nonce: Date.now() });
-              startFilterTransition(() => {
+              runFilterUpdate(() => {
                 setAppliedFilters((prev) => {
                   const current = prev[col.id];
                   if (!current || current.kind !== "text") return prev;
@@ -1151,7 +1450,7 @@ export function LoanDetailView({
               label: `${col.label}: ${value === EMPTY_FILTER_TOKEN ? "(Blank)" : value}`,
               onRemove: () => {
                 setFilterFeedback({ message: "Removing filter...", nonce: Date.now() });
-                startFilterTransition(() => {
+                runFilterUpdate(() => {
                   setAppliedFilters((prev) => {
                     const current = prev[col.id];
                     if (!current || current.kind !== "number" || current.mode !== "all") return prev;
@@ -1171,7 +1470,7 @@ export function LoanDetailView({
             label: `${col.label}: ${filter.min || ""}-${filter.max || ""}`,
             onRemove: () => {
               setFilterFeedback({ message: "Removing filter...", nonce: Date.now() });
-              startFilterTransition(() => {
+              runFilterUpdate(() => {
                 setAppliedFilters((prev) => {
                   const next = { ...prev };
                   delete next[col.id];
@@ -1186,7 +1485,7 @@ export function LoanDetailView({
             label: `${col.label}: ${filter.mode === "min" ? "Greater Than" : "Less Than"} ${filter.value || ""}`,
             onRemove: () => {
               setFilterFeedback({ message: "Removing filter...", nonce: Date.now() });
-              startFilterTransition(() => {
+              runFilterUpdate(() => {
                 setAppliedFilters((prev) => {
                   const next = { ...prev };
                   delete next[col.id];
@@ -1204,7 +1503,7 @@ export function LoanDetailView({
           label: `${col.label}: ${filter.shortcut || `${filter.from || ""} to ${filter.to || ""}`}`,
           onRemove: () => {
             setFilterFeedback({ message: "Removing filter...", nonce: Date.now() });
-            startFilterTransition(() => {
+            runFilterUpdate(() => {
               setAppliedFilters((prev) => {
                 const next = { ...prev };
                 delete next[col.id];
@@ -1220,7 +1519,7 @@ export function LoanDetailView({
         label: `${col.label}: ${filter.value === "yes" ? "Yes" : "No"}`,
         onRemove: () => {
           setFilterFeedback({ message: "Removing filter...", nonce: Date.now() });
-          startFilterTransition(() => {
+          runFilterUpdate(() => {
             setAppliedFilters((prev) => {
               const next = { ...prev };
               delete next[col.id];
@@ -1231,7 +1530,7 @@ export function LoanDetailView({
       });
     }
     return chips;
-  }, [columnsToUse, appliedFilters, startFilterTransition]);
+  }, [columnsToUse, appliedFilters, runFilterUpdate]);
 
   // Use a fixed column width to avoid expensive full-dataset width scans.
   const { gridColsStyle, totalTableWidth } = useMemo(() => {
@@ -1294,17 +1593,20 @@ export function LoanDetailView({
 
   const renderFilterContent = useCallback((col: ColumnDef) => {
     const filterKind = getColumnFilterKind(col);
-    const allValues = distinctValuesByColumn[col.id] ?? [];
-    const hasBlank = loans.some((row) => {
-      const raw = getFilterRawValue(row, col);
-      return raw == null || String(raw).trim() === "";
-    });
+    const cached = distinctCache[col.id];
+    const allValues = cached?.values ?? [];
+    const hasBlank = cached?.hasBlank ?? false;
     const valuesForList = hasBlank ? [EMPTY_FILTER_TOKEN, ...allValues] : allValues;
     const search = (debouncedFilterSearchByColumn[col.id] ?? "").toLowerCase();
+    const isLoanNumberColumn = col.id === "loan_number";
     const filteredOptions = search
-      ? valuesForList.filter((value) => value === EMPTY_FILTER_TOKEN
-        ? "(blank)".includes(search)
-        : value.toLowerCase().includes(search))
+      ? valuesForList.filter((value) => {
+        if (value === EMPTY_FILTER_TOKEN) return "(blank)".includes(search);
+        const normalized = value.toLowerCase();
+        return isLoanNumberColumn
+          ? normalized.startsWith(search)
+          : normalized.includes(search);
+      })
       : valuesForList;
     const filter = draftFilters[col.id] ?? cloneFilter(appliedFilters[col.id]);
     const selectedValues =
@@ -1321,6 +1623,9 @@ export function LoanDetailView({
       if (b === EMPTY_FILTER_TOKEN) return 1;
       return a.localeCompare(b, undefined, { numeric: true });
     });
+    const displayedOptions = isLoanNumberColumn
+      ? orderedOptions.slice(0, LOAN_NUMBER_FILTER_MAX_OPTIONS)
+      : orderedOptions;
 
     if (filterKind === "boolean") {
       const value = filter?.kind === "boolean" ? filter.value : "all";
@@ -1344,6 +1649,17 @@ export function LoanDetailView({
 
     if (filterKind === "date") {
       const dateFilter = filter?.kind === "date" ? filter : { kind: "date" as const };
+      const yearToken = String(new Date().getFullYear());
+      const fixedYears = ["2025", "2024", "2023"];
+      const dateShortcutOptions: Array<{ token: string; label: string; kind: "preset" | "year" | "ytd" }> = [
+        { token: "last-30-days", label: "Last 30 Days", kind: "preset" },
+        { token: "mtd", label: "MTD", kind: "preset" },
+        { token: "last-month", label: "Last Month", kind: "preset" },
+        { token: "ytd", label: `${yearToken} YTD`, kind: "ytd" },
+        ...fixedYears.map((y) => ({ token: y, label: y, kind: "year" as const })),
+        { token: "rolling-13", label: getPeriodPresetMeta("rolling-13").label, kind: "preset" }, // L13M
+        { token: "rolling-12", label: getPeriodPresetMeta("rolling-12").label, kind: "preset" }, // L12M
+      ];
       return (
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-2">
@@ -1358,21 +1674,36 @@ export function LoanDetailView({
               onChange={(e) => setDraftFilter(col.id, { kind: "date", from: dateFilter.from, to: e.target.value })}
             />
           </div>
-          <div className="grid grid-cols-3 gap-2">
-            {["last 30 days", "ytd", String(new Date().getFullYear())].map((shortcut) => (
+          <div className="grid grid-cols-2 gap-2">
+            {dateShortcutOptions.map((opt) => (
               <Button
-                key={shortcut}
+                key={opt.token}
                 type="button"
                 size="sm"
-                variant={dateFilter.shortcut === shortcut ? "default" : "outline"}
-                onClick={() => setDraftFilter(col.id, { kind: "date", shortcut })}
+                variant={dateFilter.shortcut === opt.token ? "default" : "outline"}
+                onClick={() => {
+                  if (opt.kind === "year") {
+                    const from = `${opt.token}-01-01`;
+                    const to = `${opt.token}-12-31`;
+                    setDraftFilter(col.id, { kind: "date", shortcut: opt.token, from, to });
+                    return;
+                  }
+                  if (opt.kind === "ytd") {
+                    const range = computePresetDateRange("ytd");
+                    setDraftFilter(col.id, { kind: "date", shortcut: "ytd", from: range.start, to: range.end });
+                    return;
+                  }
+                  const preset = opt.token as PeriodPreset;
+                  const range = computePresetDateRange(preset);
+                  setDraftFilter(col.id, { kind: "date", shortcut: opt.token, from: range.start, to: range.end });
+                }}
               >
-                {shortcut.toUpperCase() === "YTD" ? "YTD" : shortcut}
+                {opt.label}
               </Button>
             ))}
           </div>
           <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(col.id)}>
-            Clear
+            Clear Selection
           </Button>
         </div>
       );
@@ -1400,18 +1731,34 @@ export function LoanDetailView({
               />
               <CommandList>
                 <CommandEmpty>No values found.</CommandEmpty>
-                {orderedOptions.map((value) => (
-                  <CommandItem key={value} onSelect={() => toggleDraftValue(col.id, value, "number")}>
+                {displayedOptions.map((value) => {
+                  const isDraftSelected = numberFilter.selectedValues.includes(value);
+                  return (
+                  <CommandItem
+                    key={value}
+                    onSelect={() => toggleDraftValue(col.id, value, "number")}
+                    className={cn(
+                      "cursor-pointer hover:!bg-transparent hover:!text-foreground data-[selected=true]:!bg-transparent data-[selected=true]:!text-foreground",
+                      isDraftSelected
+                        ? "!bg-accent !text-accent-foreground hover:!bg-accent hover:!text-accent-foreground data-[selected=true]:!bg-accent data-[selected=true]:!text-accent-foreground"
+                        : "",
+                    )}
+                  >
                     <span className="mr-2">
-                      {numberFilter.selectedValues.includes(value) ? "✓" : ""}
+                      {isDraftSelected ? "✓" : ""}
                     </span>
                     {value === EMPTY_FILTER_TOKEN ? "(Blank)" : value}
                   </CommandItem>
-                ))}
+                )})}
               </CommandList>
             </Command>
+            {isLoanNumberColumn && orderedOptions.length > displayedOptions.length && (
+              <p className="px-1 text-xs text-slate-500 dark:text-slate-400">
+                Showing first {LOAN_NUMBER_FILTER_MAX_OPTIONS} matches. Keep typing to narrow results.
+              </p>
+            )}
             <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(col.id)}>
-              Clear
+              Clear Selection
             </Button>
           </TabsContent>
           <TabsContent value="range" className="space-y-2">
@@ -1431,7 +1778,7 @@ export function LoanDetailView({
               />
             </div>
             <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(col.id)}>
-              Clear
+              Clear Selection
             </Button>
           </TabsContent>
           <TabsContent value="min" className="space-y-2">
@@ -1445,7 +1792,7 @@ export function LoanDetailView({
               />
             </div>
             <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(col.id)}>
-              Clear
+              Clear Selection
             </Button>
           </TabsContent>
           <TabsContent value="max" className="space-y-2">
@@ -1459,7 +1806,7 @@ export function LoanDetailView({
               />
             </div>
             <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(col.id)}>
-              Clear
+              Clear Selection
             </Button>
           </TabsContent>
         </Tabs>
@@ -1477,20 +1824,36 @@ export function LoanDetailView({
           />
           <CommandList>
             <CommandEmpty>No values found.</CommandEmpty>
-            {orderedOptions.map((value) => (
-              <CommandItem key={value} onSelect={() => toggleDraftValue(col.id, value, "text")}>
-                <span className="mr-2">{textFilter.selectedValues.includes(value) ? "✓" : ""}</span>
+            {displayedOptions.map((value) => {
+              const isDraftSelected = textFilter.selectedValues.includes(value);
+              return (
+              <CommandItem
+                key={value}
+                onSelect={() => toggleDraftValue(col.id, value, "text")}
+                className={cn(
+                  "cursor-pointer hover:!bg-transparent hover:!text-foreground data-[selected=true]:!bg-transparent data-[selected=true]:!text-foreground",
+                  isDraftSelected
+                    ? "!bg-accent !text-accent-foreground hover:!bg-accent hover:!text-accent-foreground data-[selected=true]:!bg-accent data-[selected=true]:!text-accent-foreground"
+                    : "",
+                )}
+              >
+                <span className="mr-2">{isDraftSelected ? "✓" : ""}</span>
                 {value === EMPTY_FILTER_TOKEN ? "(Blank)" : value}
               </CommandItem>
-            ))}
+            )})}
           </CommandList>
         </Command>
+        {isLoanNumberColumn && orderedOptions.length > displayedOptions.length && (
+          <p className="px-1 text-xs text-slate-500 dark:text-slate-400">
+            Showing first {LOAN_NUMBER_FILTER_MAX_OPTIONS} matches. Keep typing to narrow results.
+          </p>
+        )}
         <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(col.id)}>
-          Clear
+          Clear Selection
         </Button>
       </div>
     );
-  }, [appliedFilters, draftFilters, distinctValuesByColumn, debouncedFilterSearchByColumn, filterSearchByColumn, setDraftFilter, clearDraftFilter, toggleDraftValue, loans, getFilterRawValue, updateFilterSearch]);
+  }, [appliedFilters, draftFilters, distinctCache, debouncedFilterSearchByColumn, filterSearchByColumn, setDraftFilter, clearDraftFilter, toggleDraftValue, updateFilterSearch]);
 
   const getValueToken = useCallback((row: LoanDetailRow, col: ColumnDef): string => {
     const raw = getFilterRawValue(row, col);
@@ -1573,7 +1936,7 @@ export function LoanDetailView({
           return (
             <div
               key={row.loan_id}
-              className={`absolute left-0 border-b ${borderRow} hover:bg-slate-50 dark:hover:bg-slate-800/50 grid items-center transition-colors`}
+              className={`absolute left-0 border-b ${borderRow} hover:bg-slate-50 dark:hover:bg-slate-800/50 grid items-center`}
               style={{
                 ...gridColsStyle,
                 top: 0,
@@ -1608,7 +1971,7 @@ export function LoanDetailView({
                     type="button"
                     onClick={() => handleCellClickToDraft(row, col)}
                     className={cn(
-                      `whitespace-nowrap py-3 px-4 text-sm text-left transition-colors ${cellClass}`,
+                      `whitespace-nowrap py-3 px-4 text-sm text-left ${cellClass}`,
                       isSelectedCell && "bg-emerald-100/60 dark:bg-emerald-900/30",
                       hasFlash && "bg-emerald-100/70 dark:bg-emerald-900/40",
                     )}
@@ -1666,6 +2029,18 @@ export function LoanDetailView({
               <Filter className="h-4 w-4" />
               {showFilters ? "Hide Filters" : "Show Filters"}
             </Button>
+            {columnsStoreId && (
+              <Button
+                variant="outline"
+                size="sm"
+                type="button"
+                onClick={() => setLoanDetailColumnsModalOpen(true)}
+                className="gap-2 border-slate-300 hover:bg-slate-50 dark:border-slate-600 dark:hover:bg-slate-800"
+              >
+                <SlidersHorizontal className="h-4 w-4" />
+                Edit Columns
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"
@@ -1688,19 +2063,19 @@ export function LoanDetailView({
                 </button>
               </Badge>
             )}
-            {!isControlled && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={exportToExcel}
+          {!isControlled && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={exportToExcel}
                 disabled={sortedLoans.length === 0}
                 className="gap-2 border-slate-300 hover:bg-slate-50 dark:border-slate-600 dark:hover:bg-slate-800"
-              >
-                <Download className="h-4 w-4" />
-                Export to Excel
-              </Button>
-            )}
-          </div>
+            >
+              <Download className="h-4 w-4" />
+              Export to Excel
+            </Button>
+          )}
+        </div>
         </div>
         {(hasActiveFilters || hasBookmarkSelection || sharedBookmarkTitle || isApplyingFilters || filterFeedback) && (
           <div className="flex flex-wrap items-center gap-2 px-4 pb-3 border-b border-slate-200/60 dark:border-slate-700/60">
@@ -1796,7 +2171,7 @@ export function LoanDetailView({
                     <div
                       key={col.id}
                       className={cn(
-                        "whitespace-nowrap py-2 px-2 text-xs font-semibold text-left flex items-center gap-1 w-full min-w-0 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-colors",
+                        "whitespace-nowrap py-2 px-2 text-xs font-semibold text-left flex items-center gap-1 w-full min-w-0 hover:bg-slate-200/50 dark:hover:bg-slate-700/50",
                         isDarkMode ? "text-slate-300" : "text-slate-600",
                         activeFilterColumnIds.has(col.id) && "border-b-2 border-emerald-500",
                       )}
@@ -1807,15 +2182,15 @@ export function LoanDetailView({
                         type="button"
                         onClick={() => handleSort(col.id)}
                         className="flex items-center gap-1 min-w-0 flex-1 px-2"
-                      >
-                        <span className="truncate">{col.label}</span>
-                        {isSorted &&
-                          (sortDirection === "asc" ? (
-                            <ArrowUp className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                          ) : (
-                            <ArrowDown className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                          ))}
-                      </button>
+                    >
+                      <span className="truncate">{col.label}</span>
+                      {isSorted &&
+                        (sortDirection === "asc" ? (
+                          <ArrowUp className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                        ) : (
+                          <ArrowDown className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                        ))}
+                    </button>
                       {showFilters && (
                         <Popover
                           open={openFilterColumnId === col.id}
@@ -1853,26 +2228,34 @@ export function LoanDetailView({
                             onEscapeKeyDown={(event) => event.preventDefault()}
                           >
                             <div className="mb-2 flex items-center justify-between gap-2">
-                              <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-                                {col.label}
+                              <div>
+                                <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                                  {col.label}
+                                </div>
+                                <div className="text-[11px] text-slate-400 dark:text-slate-500">
+                                  Select one or more values from the list below.
+                                </div>
                               </div>
                               <div className="flex items-center gap-1">
-                                <button
+                                <Button
                                   type="button"
-                                  className="rounded p-1 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 px-2 text-xs"
                                   onClick={() => discardDraft(col.id)}
                                   aria-label={`Cancel ${col.label} filter changes`}
                                 >
-                                  <X className="h-3.5 w-3.5" />
-                                </button>
-                                <button
+                                  Cancel
+                                </Button>
+                                <Button
                                   type="button"
-                                  className="rounded p-1 text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/30"
+                                  size="sm"
+                                  className="h-7 px-2 text-xs"
                                   onClick={() => commitDraft(col.id)}
                                   aria-label={`Apply ${col.label} filter changes`}
                                 >
-                                  <Check className="h-3.5 w-3.5" />
-                                </button>
+                                  Apply Filters
+                                </Button>
                               </div>
                             </div>
                             {renderFilterContent(col)}
@@ -2008,8 +2391,8 @@ export function LoanDetailView({
                       >
                         <Trash2 className="h-4 w-4 text-red-500" />
                       </Button>
+                          </div>
                     </div>
-                  </div>
                   <ul className="space-y-1">
                     {summarizeFilterState(bookmark.filters).map((line) => (
                       <li key={`${bookmark.id}-${line}`} className="text-xs text-slate-600 dark:text-slate-400">
@@ -2017,7 +2400,7 @@ export function LoanDetailView({
                       </li>
                     ))}
                   </ul>
-                </div>
+              </div>
               ))
             )}
           </div>
@@ -2058,6 +2441,15 @@ export function LoanDetailView({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {columnsStoreId && (
+        <LoanDetailColumnsModal
+          open={loanDetailColumnsModalOpen}
+          onClose={() => setLoanDetailColumnsModalOpen(false)}
+          canvasItemId={columnsStoreId}
+          tenantId={tenantId}
+        />
+      )}
     </div>
   );
 }

@@ -1319,6 +1319,55 @@ export class ApiClient {
     return this.request(`/api/insights/tracked/${id}${tenantParam}`, { method: "DELETE" });
   }
 
+  // =========================================================================
+  // Dashboard Insights (per-page insight cards)
+  // =========================================================================
+
+  async submitDashboardInsightFeedback(
+    dashboardInsightId: number,
+    rating: -1 | 1,
+    tags?: string[],
+    comment?: string,
+    tenantId?: string | null
+  ) {
+    const tenantParam = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`/api/dashboard-insights/${dashboardInsightId}/feedback${tenantParam}`, {
+      method: "POST",
+      body: JSON.stringify({
+        rating,
+        tags: tags || [],
+        comment: comment || "",
+      }),
+    });
+  }
+
+  async getDashboardInsightFeedback(dashboardInsightId: number, tenantId?: string | null) {
+    const tenantParam = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`/api/dashboard-insights/${dashboardInsightId}/feedback${tenantParam}`);
+  }
+
+  async deleteDashboardInsight(dashboardInsightId: number, tenantId?: string | null) {
+    const tenantParam = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`/api/dashboard-insights/${dashboardInsightId}${tenantParam}`, { method: "DELETE" });
+  }
+
+  async createWorkbenchCanvasFromDashboardInsight(dashboardInsightId: number, tenantId?: string | null) {
+    const sp = new URLSearchParams();
+    if (tenantId) sp.set("tenant_id", tenantId);
+    // Prevent any intermediary/proxy from reusing a stale POST response.
+    sp.set("_ts", String(Date.now()));
+    const qs = `?${sp.toString()}`;
+    // Do not add Cache-Control/Pragma here: they trigger a CORS preflight that lists those
+    // headers and must match the server's Access-Control-Allow-Headers (often they don't).
+    // Unique _ts query is enough to avoid stale URL identity for proxies.
+    const canvas = await this.request<{ id: string }>(`/api/workbench/canvases/from-dashboard-insight${qs}`, {
+      method: "POST",
+      body: JSON.stringify({ dashboardInsightId }),
+    });
+    this.invalidateCacheFor("/api/workbench/canvases");
+    return canvas;
+  }
+
   async insightChat(
     insightContext: any,
     messages: Array<{ role: string; content: string }>,

@@ -24,7 +24,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { DatePeriodPicker } from "@/components/ui/DatePeriodPicker";
+import { DatePeriodPicker, computePresetDateRange } from "@/components/ui/DatePeriodPicker";
 import type { PeriodSelection, PeriodPreset } from "@/components/ui/DatePeriodPicker";
 import {
   DEFAULT_WORKFLOW_SEGMENTS,
@@ -53,6 +53,12 @@ import {
   DialogContent,
 } from "@/components/ui/dialog";
 import { useWidgetSectionStore } from "@/stores/widgetSectionStore";
+import { api } from "@/lib/api";
+import {
+  useDashboardInsights,
+  type DashboardInsightItem,
+} from "@/hooks/useDashboardInsights";
+import { DashboardInsightsStrip } from "@/components/dashboard/DashboardInsightsStrip";
 
 const PERIOD_PRESETS: PeriodPreset[] = [
   "mtd",
@@ -65,6 +71,26 @@ const PERIOD_PRESETS: PeriodPreset[] = [
 
 const INVALID_MESSAGE =
   "Please select two different date stages (From and To must differ).";
+
+/** Maps stored insight filter_context.datePeriod to DatePeriodPicker presets (aligned with loan complexity). */
+const INSIGHT_DATE_PERIOD_TO_PRESET: Record<string, PeriodPreset> = {
+  mtd: "mtd",
+  qtd: "qtd",
+  ytd: "ytd",
+  lm: "last-month",
+  lq: "last-quarter",
+  ly: "last-year",
+};
+
+function segmentAnchorLabel(
+  fromId: string,
+  toId: string,
+  milestones: { id: string; label: string }[]
+): string {
+  const a = milestones.find((m) => m.id === fromId)?.label ?? fromId;
+  const b = milestones.find((m) => m.id === toId)?.label ?? toId;
+  return `${a} → ${b}`;
+}
 
 function getDefaultDateRange(): { start: string; end: string } {
   const now = new Date();
@@ -130,6 +156,119 @@ export function WorkflowConversionView({
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isFirstMountRef = useRef(true);
+
+  const [generateLoading, setGenerateLoading] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const [pendingInsightWidgetId, setPendingInsightWidgetId] = useState<string | null>(null);
+
+  const dashboardInsightFilters = useMemo(() => ({}), []);
+  const {
+    insights: dashboardInsights,
+    generatedAt: dashboardInsightsGeneratedAt,
+    loading: dashboardInsightsLoading,
+    refresh: refreshDashboardInsights,
+  } = useDashboardInsights("workflow-conversion", dashboardInsightFilters, {
+    tenantId: selectedTenantId,
+    enabled: !embeddedInWorkbench,
+  });
+
+  const dateRange = periodSelection.dateRange;
+  const { milestones, loading: milestonesLoading, error: milestonesError } = useWorkflowMilestones(selectedTenantId);
+
+  const handleGenerateInsights = useCallback(async () => {
+    setGenerateLoading(true);
+    setGenerateError(null);
+    try {
+      const tenantParam = selectedTenantId ? `?tenant_id=${encodeURIComponent(selectedTenantId)}` : "";
+      await api.request<{
+        insights: DashboardInsightItem[];
+        count: number;
+        pageId: string;
+        pageName: string;
+        generationBatch: string;
+      }>(`/api/dashboard-insights/generate${tenantParam}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pageId: "workflow-conversion",
+          filters: {},
+        }),
+      });
+      await refreshDashboardInsights();
+    } catch (err: unknown) {
+      setGenerateError(
+        err instanceof Error ? err.message : "We couldn't generate insights right now. Please try again later."
+      );
+    } finally {
+      setGenerateLoading(false);
+    }
+  }, [refreshDashboardInsights, selectedTenantId]);
+
+  const handleShowInsight = useCallback(
+    (insight: DashboardInsightItem) => {
+      const fc = insight.filter_context ?? {};
+      const datePeriod = typeof fc.datePeriod === "string" ? fc.datePeriod.toLowerCase() : null;
+      const preset = datePeriod ? INSIGHT_DATE_PERIOD_TO_PRESET[datePeriod] : undefined;
+      if (preset) {
+        setPeriodSelection({
+          type: "preset",
+          preset,
+          dateRange: computePresetDateRange(preset),
+        });
+      }
+
+      const calc = fc.calculationType;
+      if (calc === "conversion" || calc === "turn_time") {
+        setCalculationType(calc as WorkflowConversionMetric);
+      }
+
+      setGrouping("workflow");
+      setSegments([...DEFAULT_WORKFLOW_SEGMENTS]);
+
+      let scrollId: string | null = null;
+      for (const ref of insight.evidence_refs ?? []) {
+        if (ref.widgetId?.startsWith("workflow-conversion-segment-")) {
+          scrollId = ref.widgetId;
+          break;
+        }
+      }
+      if (
+        !scrollId &&
+        typeof fc.segmentIndex === "number" &&
+        fc.segmentIndex >= 0 &&
+        fc.segmentIndex <= 5
+      ) {
+        scrollId = `workflow-conversion-segment-${Math.floor(fc.segmentIndex)}`;
+      }
+      const norm = (s: string) => s.trim().replace(/\s+/g, " ");
+      const tryLabel = (label: string | undefined) => {
+        if (!label) return;
+        const want = norm(label);
+        const idx = DEFAULT_WORKFLOW_SEGMENTS.findIndex(
+          (seg) => norm(segmentAnchorLabel(seg.from, seg.to, milestones)) === want
+        );
+        if (idx >= 0) scrollId = `workflow-conversion-segment-${idx}`;
+      };
+      if (!scrollId && typeof fc.segmentLabel === "string") tryLabel(fc.segmentLabel);
+      if (!scrollId) tryLabel(insight.evidence_refs?.[0]?.target?.label);
+
+      setPendingInsightWidgetId(scrollId);
+    },
+    [milestones]
+  );
+
+  const handleDashboardInsightFeedback = useCallback(
+    async (insightId: number, rating: 1 | -1, tags?: string[], comment?: string) => {
+      try {
+        await api.submitDashboardInsightFeedback(insightId, rating, tags, comment, selectedTenantId);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [selectedTenantId]
+  );
+
   useEffect(() => {
     if (!onStateChange) return;
     if (isFirstMountRef.current) {
@@ -167,8 +306,6 @@ export function WorkflowConversionView({
     return dims.length > 0 ? dims : undefined;
   }, [groupFilters?.branch, groupFilters?.loanOfficer, groupFilters?.dynamicFilters]);
 
-  const dateRange = periodSelection.dateRange;
-  const { milestones, loading: milestonesLoading, error: milestonesError } = useWorkflowMilestones(selectedTenantId);
   const { data, loading, error } = useWorkflowConversionData({
     startDate: dateRange.start,
     endDate: dateRange.end,
@@ -304,6 +441,16 @@ export function WorkflowConversionView({
     onDataReady({ columns, rows, charts, title: 'Workflow Conversion' });
   }, [onDataReady, loading, segmentResults, segments, calculationType, milestones]);
 
+  useEffect(() => {
+    if (!pendingInsightWidgetId || loading || milestonesLoading || typeof document === "undefined") return;
+    const el = document.getElementById(pendingInsightWidgetId);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("ring-2", "ring-amber-400", "ring-offset-2");
+    setTimeout(() => el.classList.remove("ring-2", "ring-amber-400", "ring-offset-2"), 3000);
+    setPendingInsightWidgetId(null);
+  }, [pendingInsightWidgetId, loading, milestonesLoading]);
+
   return (
     <div className="space-y-4">
       {/* Toolbar – compact style when embedded in workbench to match other widget filter bars */}
@@ -434,6 +581,25 @@ export function WorkflowConversionView({
         </div>
       )}
 
+      {!embeddedInWorkbench && (
+        <DashboardInsightsStrip
+          insights={dashboardInsights}
+          generatedAt={dashboardInsightsGeneratedAt}
+          loading={dashboardInsightsLoading}
+          generating={generateLoading}
+          generateError={generateError}
+          onClearGenerateError={() => setGenerateError(null)}
+          onShowInsight={handleShowInsight}
+          onGenerate={handleGenerateInsights}
+          onRefreshInsights={refreshDashboardInsights}
+          showGenerateButton
+          showFeedback
+          onSubmitFeedback={handleDashboardInsightFeedback}
+          dateFilter="ytd"
+          selectedTenantId={selectedTenantId}
+        />
+      )}
+
       {milestonesLoading && milestones.length === 0 ? (
         <div className="flex items-center justify-center gap-2 py-8 text-sm text-slate-500 dark:text-slate-400">
           <Loader2 className="h-5 w-5 animate-spin" />
@@ -442,25 +608,30 @@ export function WorkflowConversionView({
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {segments.map((seg, index) => (
-            <WorkflowSegmentCard
+            <div
               key={index}
-              index={index}
-              segment={seg}
-              result={segmentResults[index]}
-              dateRange={dateRange}
-              calculationType={calculationType}
-              loading={loading}
-              milestones={milestones}
-              fromOptions={getFromOptions(index)}
-              getToOptions={getToOptions}
-              onFromChange={(value) => updateSegment(index, "from", value)}
-              onToChange={(value) => updateSegment(index, "to", value)}
-              selectedTenantId={selectedTenantId}
-              selectedChannel={selectedChannel}
-              segments={segments}
-              grouping={grouping}
-              dimensionFilters={dimensionFilters}
-            />
+              id={`workflow-conversion-segment-${index}`}
+              className="scroll-mt-24 min-w-0"
+            >
+              <WorkflowSegmentCard
+                index={index}
+                segment={seg}
+                result={segmentResults[index]}
+                dateRange={dateRange}
+                calculationType={calculationType}
+                loading={loading}
+                milestones={milestones}
+                fromOptions={getFromOptions(index)}
+                getToOptions={getToOptions}
+                onFromChange={(value) => updateSegment(index, "from", value)}
+                onToChange={(value) => updateSegment(index, "to", value)}
+                selectedTenantId={selectedTenantId}
+                selectedChannel={selectedChannel}
+                segments={segments}
+                grouping={grouping}
+                dimensionFilters={dimensionFilters}
+              />
+            </div>
           ))}
         </div>
       )}

@@ -37,6 +37,8 @@ export type ColumnFilter =
 
 export type ColumnFilterState = Record<string, ColumnFilter | undefined>;
 
+import { computePresetDateRange, type PeriodPreset } from "@/components/ui/DatePeriodPicker";
+
 function sortStringArray(values: string[]): string[] {
   return [...values].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 }
@@ -115,12 +117,22 @@ function getShortcutRange(shortcut: string): { start: Date | null; end: Date | n
   const now = new Date();
   const end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-  if (token === "ytd") {
-    return { start: new Date(end.getFullYear(), 0, 1), end };
+  // Prefer DatePeriodPicker for any matching preset token.
+  const preset =
+    token === "last 30 days"
+      ? ("last-30-days" as const) // back-compat
+      : (token as PeriodPreset);
+  const presetTokens: PeriodPreset[] = ["last-30-days", "mtd", "ytd", "last-month", "rolling-13", "rolling-12"];
+  if (presetTokens.includes(preset)) {
+    const range = computePresetDateRange(preset);
+    const start = new Date(range.start);
+    const endDate = new Date(range.end);
+    return {
+      start: Number.isNaN(start.getTime()) ? null : start,
+      end: Number.isNaN(endDate.getTime()) ? null : endDate,
+    };
   }
-  if (token === "last 30 days") {
-    return { start: new Date(end.getTime() - 29 * 24 * 60 * 60 * 1000), end };
-  }
+
   if (/^\d{4}$/.test(token)) {
     const year = Number(token);
     return { start: new Date(year, 0, 1), end: new Date(year, 11, 31) };

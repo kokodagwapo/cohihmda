@@ -25,6 +25,9 @@ import { SectionHeader } from "@/components/widgets/components/SectionHeader";
 import { WidgetGroup } from "@/components/widgets/components/WidgetGroup";
 import { CohiWidgetRenderer } from "./CohiWidgetRenderer";
 import type { CanvasLayoutItem, CanvasWidgetPayload, GroupWidgetItem } from "./types";
+
+/** Coalesce canvasDataStore writes for heavy widget_group payloads (loan detail groups, etc.). */
+const WIDGET_GROUP_STORE_DEBOUNCE_MS = 200;
 import {
   LayoutGrid,
   Lightbulb,
@@ -925,6 +928,7 @@ export function WidgetRenderer({
 
   useEffect(() => {
     if (payloadKey === null) return; // registry/cohi self-manage
+    if (item.type === 'widget_group') return; // debounced effect below
     const id = item.i;
     const p = item.payload;
     switch (item.type) {
@@ -1028,19 +1032,33 @@ export function WidgetRenderer({
           });
         }
         break;
-      case 'widget_group':
-        if (p.type === 'widget_group') {
-          reportWidgetData(id, {
-            widgetName: p.title,
-            category: 'other',
-            data: { widgetType: 'widget_group', groupId: p.groupId, title: p.title, sectionType: p.sectionType, items: p.items },
-          });
-        }
-        break;
       default:
         break;
     }
   // payloadKey is a stable JSON string that changes only when the actual data changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item.i, item.type, payloadKey]);
+
+  useEffect(() => {
+    if (payloadKey === null) return;
+    if (item.type !== 'widget_group') return;
+    const p = item.payload;
+    if (p.type !== 'widget_group') return;
+    const id = item.i;
+    const handle = window.setTimeout(() => {
+      reportWidgetData(id, {
+        widgetName: p.title,
+        category: 'other',
+        data: {
+          widgetType: 'widget_group',
+          groupId: p.groupId,
+          title: p.title,
+          sectionType: p.sectionType,
+          items: p.items,
+        },
+      });
+    }, WIDGET_GROUP_STORE_DEBOUNCE_MS);
+    return () => window.clearTimeout(handle);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item.i, item.type, payloadKey]);
 

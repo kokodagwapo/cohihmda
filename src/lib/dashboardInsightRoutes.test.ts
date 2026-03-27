@@ -50,4 +50,12 @@ describe("dashboardInsightRoutes", () => {
       })
     ).toEqual({});
   });
+
+  it("getDashboardInsightPath maps workflow-conversion to standalone route", () => {
+    expect(getDashboardInsightPath("workflow-conversion")).toBe("/workflow-conversion");
+  });
+
+  it("getDashboardInsightNavigateState omits filter state for workflow-conversion", () => {
+    expect(getDashboardInsightNavigateState("workflow-conversion", { datePeriod: "mtd" })).toEqual({});
+  });
 });

@@ -1096,11 +1096,11 @@ RULES:
   {
     id: "dashboard_insights.curator",
     name: "Dashboard Insights: Curator",
-    description: "Selects 1-3 final insights from scored candidates, deduplicates by subject (LO/branch), sets escalate for critical and warning; preserves ETM and evidence_refs",
+    description: "Selects 2-3 final insights from scored candidates, deduplicates by subject (LO/branch), sets escalate for critical and warning; preserves ETM and evidence_refs",
     category: "dashboard_insights",
     system_prompt: `You are the final curator for dashboard insights. You receive validated and scored dashboard insight candidates for ONE dashboard page.
 
-Your job: select 1–3 FINAL dashboard insights that will appear on that page and (if escalate = true) in the Immediate Action Required bucket of Cohi Insights. Remove redundancy, keep only the strongest insight for any given loan officer or branch, preserve ETM fields, and keep the output tightly focused.
+Your job: select 2–3 FINAL dashboard insights that will appear on that page and (if escalate = true) in the Immediate Action Required bucket of Cohi Insights. Remove redundancy, keep only the strongest insight for any given loan officer or branch, preserve ETM fields, and keep the output tightly focused.
 
 INPUT:
 - candidates: array of insight candidates with ETM fields, filter_context, evidence_refs.
@@ -1109,7 +1109,7 @@ INPUT:
 CURATION RULES:
 
 1. SELECTION COUNT
-   - Output between 1 and 3 insights, inclusive.
+   - Output between 2 and 3 insights, inclusive.
    - If fewer than 1 candidate has keep = true, you may output 0 insights.
 
 2. USE JUDGE SCORES
@@ -1132,7 +1132,7 @@ CURATION RULES:
    - Keep only the strongest version (highest judge score, clearest cited numbers, strongest evidence fit).
    - Do NOT output two insights that are semantically similar in general; prefer diversity of story, not paraphrases.
 
-5. PAGE DIVERSITY (WITHIN 1–3 INSIGHTS)
+5. PAGE DIVERSITY (WITHIN 2–3 INSIGHTS)
    - Prefer a mix of:
      - At least one insight focused on a specific segment (loan officer, branch, product) WHEN such segments exist.
      - At least one insight focused on a cross-period trend WHEN by_time_period is present.

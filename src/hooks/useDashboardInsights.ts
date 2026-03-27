@@ -14,6 +14,10 @@ export interface DashboardInsightFilterContext {
   channelGroup?: string;
   /** For Leaderboard deep-link from Loan Complexity (or other) insights */
   leaderName?: string;
+  /** Workflow Conversion: which calculation mode to restore on “Show on dashboard” */
+  calculationType?: "conversion" | "turn_time";
+  segmentIndex?: number;
+  segmentLabel?: string;
   [key: string]: unknown;
 }
 
@@ -46,6 +50,7 @@ export interface SupportingDataByPeriodRow {
   conventionalQualifiedPercent?: number;
   governmentQualifiedPercent?: number;
   activePercent?: number;
+  workflowBrief?: string;
 }
 
 export interface SupportingData {

@@ -14,7 +14,7 @@ const MAX_INSIGHTS_PER_PAGE_FILTER = 10;
 
 /**
  * Save a batch of dashboard insights for a given page and filter context.
- * Replaces any existing insights for the same page_id + filter_context.
+ * Appends a new generation batch; does not delete older rows.
  */
 export async function saveDashboardInsights(
   tenantPool: pg.Pool,
@@ -24,15 +24,6 @@ export async function saveDashboardInsights(
   generationBatch: string
 ): Promise<void> {
   if (insights.length === 0) return;
-
-  const filterContext = insights[0]?.filter_context ?? {};
-  const filterJson = JSON.stringify(filterContext);
-
-  await tenantPool.query(
-    `DELETE FROM dashboard_generated_insights
-     WHERE page_id = $1 AND filter_context = $2::jsonb`,
-    [pageId, filterJson]
-  );
 
   const values: unknown[] = [];
   const placeholders: string[] = [];
@@ -88,6 +79,33 @@ export async function loadDashboardInsights(
 ): Promise<{ insights: DashboardInsight[]; generatedAt: string | null }> {
   const isPageLevel = Object.keys(filterContext).length === 0;
 
+  // Only show insights from the most recently generated generation_batch for this page+filter slice.
+  //
+  // Tracked insights may be older than this generation batch; those are added by the GET endpoint
+  // after loading the "generated-only" set.
+  const latestBatchResult = isPageLevel
+    ? await tenantPool.query(
+        `SELECT generation_batch
+         FROM dashboard_generated_insights
+         WHERE page_id = $1
+         ORDER BY generated_at DESC
+         LIMIT 1`,
+        [pageId]
+      )
+    : await tenantPool.query(
+        `SELECT generation_batch
+         FROM dashboard_generated_insights
+         WHERE page_id = $1 AND filter_context @> $2::jsonb
+         ORDER BY generated_at DESC
+         LIMIT 1`,
+        [pageId, JSON.stringify(filterContext)]
+      );
+
+  const latestBatch = latestBatchResult.rows?.[0]?.generation_batch as string | undefined;
+  if (!latestBatch) {
+    return { insights: [], generatedAt: null };
+  }
+
   const result = isPageLevel
     ? await tenantPool.query(
         `SELECT id, page_id, page_name, headline, understory, sentiment, severity_score, scope, escalate,
@@ -95,19 +113,22 @@ export async function loadDashboardInsights(
                 filter_context, evidence_refs, cited_numbers, supporting_data, detail_data, functional_category, generation_batch, generated_at
          FROM dashboard_generated_insights
          WHERE page_id = $1
+           AND generation_batch = $2
          ORDER BY generated_at DESC
-         LIMIT $2`,
-        [pageId, MAX_INSIGHTS_PER_PAGE_FILTER]
+         LIMIT $3`,
+        [pageId, latestBatch, MAX_INSIGHTS_PER_PAGE_FILTER]
       )
     : await tenantPool.query(
         `SELECT id, page_id, page_name, headline, understory, sentiment, severity_score, scope, escalate,
                 what_changed, why, business_impact, risk_if_ignored, recommended_action, owner,
                 filter_context, evidence_refs, cited_numbers, supporting_data, detail_data, functional_category, generation_batch, generated_at
          FROM dashboard_generated_insights
-         WHERE page_id = $1 AND filter_context @> $2::jsonb
+         WHERE page_id = $1
+           AND generation_batch = $2
+           AND filter_context @> $3::jsonb
          ORDER BY generated_at DESC
-         LIMIT $3`,
-        [pageId, JSON.stringify(filterContext), MAX_INSIGHTS_PER_PAGE_FILTER]
+         LIMIT $4`,
+        [pageId, latestBatch, JSON.stringify(filterContext), MAX_INSIGHTS_PER_PAGE_FILTER]
       );
 
   const rows = result.rows as Array<{
@@ -183,6 +204,93 @@ export async function loadDashboardInsights(
 }
 
 /**
+ * Load active tracked dashboard insights for this user and page.
+ *
+ * Tracked insights should appear on their source dashboard regardless of the currently
+ * requested filter_context (datePeriod/channelGroup/etc).
+ */
+export async function loadTrackedDashboardInsightsForPage(
+  tenantPool: pg.Pool,
+  userId: number,
+  pageId: string
+): Promise<DashboardInsight[]> {
+  const result = await tenantPool.query(
+    `SELECT dgi.id AS id, dgi.page_id, dgi.page_name, dgi.headline, dgi.understory, dgi.sentiment, dgi.severity_score, dgi.scope, dgi.escalate,
+            what_changed, why, business_impact, risk_if_ignored, recommended_action, owner,
+            dgi.filter_context, dgi.evidence_refs, dgi.cited_numbers, dgi.supporting_data, dgi.detail_data, dgi.generated_at
+     FROM tracked_insights ti
+     JOIN dashboard_generated_insights dgi ON dgi.id = ti.source_insight_id
+     WHERE ti.user_id = $1
+       AND ti.status = 'active'
+       AND ti.source_type = 'dashboard_insights'
+       AND dgi.page_id = $2
+     ORDER BY dgi.generated_at DESC`,
+    [userId, pageId]
+  );
+
+  const rows = result.rows as Array<{
+    id: number;
+    page_id: string;
+    page_name: string;
+    headline: string;
+    understory: string | null;
+    sentiment: string;
+    severity_score: number | null;
+    scope: string;
+    escalate: boolean;
+    what_changed: string | null;
+    why: string | null;
+    business_impact: string | null;
+    risk_if_ignored: string | null;
+    recommended_action: string | null;
+    owner: string | null;
+    filter_context: Record<string, unknown>;
+    evidence_refs: unknown;
+    cited_numbers: unknown;
+    supporting_data: unknown;
+    detail_data: unknown;
+    generated_at: Date;
+  }>;
+
+  function normalizeCitedNumbers(raw: unknown): string[] {
+    if (!Array.isArray(raw)) return [];
+    return raw.map((item: unknown) => {
+      if (typeof item === "string") return item;
+      if (item != null && typeof item === "object") {
+        const o = item as Record<string, unknown>;
+        if (typeof o.value === "string") return o.value;
+        if (typeof o.label === "string") return o.label;
+        return JSON.stringify(o);
+      }
+      return String(item);
+    });
+  }
+
+  return rows.map((r) => ({
+    id: r.id,
+    headline: r.headline,
+    understory: r.understory ?? "",
+    sentiment: r.sentiment as DashboardInsight["sentiment"],
+    severity_score: r.severity_score ?? 0,
+    cited_numbers: normalizeCitedNumbers(r.cited_numbers),
+    what_changed: r.what_changed ?? "",
+    why: r.why ?? "",
+    business_impact: r.business_impact ?? "",
+    risk_if_ignored: r.risk_if_ignored ?? "",
+    recommended_action: r.recommended_action ?? "",
+    owner: r.owner ?? "",
+    scope: (r.scope === "widget" ? "widget" : "page") as "page" | "widget",
+    filter_context: r.filter_context as DashboardInsight["filter_context"],
+    evidence_refs: Array.isArray(r.evidence_refs) ? (r.evidence_refs as DashboardInsight["evidence_refs"]) : [],
+    escalate: r.escalate,
+    sourcePageId: r.page_id,
+    sourcePageName: r.page_name,
+    supporting_data: r.supporting_data as DashboardInsight["supporting_data"],
+    detail_data: r.detail_data as DashboardInsight["detail_data"],
+  }));
+}
+
+/**
  * Load a single dashboard insight by id (for details API).
  */
 export async function loadDashboardInsightById(
@@ -226,12 +334,22 @@ export async function loadEscalatedDashboardInsights(
   tenantPool: pg.Pool
 ): Promise<DashboardInsight[]> {
   const result = await tenantPool.query(
-    `SELECT id, page_id, page_name, headline, understory, sentiment, severity_score, scope, escalate,
-            what_changed, why, business_impact, risk_if_ignored, recommended_action, owner,
-            filter_context, evidence_refs, cited_numbers, supporting_data, detail_data, functional_category, generation_batch, generated_at
-     FROM dashboard_generated_insights
-     WHERE escalate = true
-     ORDER BY generated_at DESC`
+    `WITH latest_batch_per_page AS (
+       SELECT DISTINCT ON (page_id)
+         page_id,
+         generation_batch
+       FROM dashboard_generated_insights
+       ORDER BY page_id, generated_at DESC
+     )
+     SELECT dgi.id, dgi.page_id, dgi.page_name, dgi.headline, dgi.understory, dgi.sentiment, dgi.severity_score, dgi.scope, dgi.escalate,
+            dgi.what_changed, dgi.why, dgi.business_impact, dgi.risk_if_ignored, dgi.recommended_action, dgi.owner,
+            dgi.filter_context, dgi.evidence_refs, dgi.cited_numbers, dgi.supporting_data, dgi.detail_data, dgi.functional_category, dgi.generation_batch, dgi.generated_at
+     FROM dashboard_generated_insights dgi
+     JOIN latest_batch_per_page lb
+       ON lb.page_id = dgi.page_id
+      AND lb.generation_batch = dgi.generation_batch
+     WHERE dgi.escalate = true
+     ORDER BY dgi.generated_at DESC`
   );
 
   const rows = result.rows as Array<{
