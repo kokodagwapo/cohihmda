@@ -9,6 +9,20 @@
 import pg from "pg";
 import { buildChannelWhereClause, sanitizeAndSqlClause } from "../../utils/scorecard-utils.js";
 import { LoanComplexityService } from "../scoring/loanComplexityService.js";
+import {
+  resolveLoanComplexityScoreForRead,
+  loanRecordToLoanData,
+} from "../scoring/persistedLoanComplexity.js";
+
+function complexityScoreFromRow(
+  row: Record<string, any>,
+  complexityService: LoanComplexityService,
+): number | null {
+  return resolveLoanComplexityScoreForRead(
+    row,
+    complexityService.getConfigV2() ?? undefined,
+  );
+}
 
 export type LoanComplexityGroupBy =
   | "loan_officer"
@@ -154,7 +168,7 @@ export async function getLoanComplexityDashboardData(
   const detailQuery = `
     SELECT ${groupByExpr} as group_name,
            l.loan_type, l.loan_purpose, l.loan_amount, l.fico_score, l.ltv_ratio, l.be_dti_ratio,
-           l.occupancy_type, l.borr_self_employed
+           l.occupancy_type, l.borr_self_employed, l.complexity_score, l.non_qm
     FROM public.loans l
     WHERE ${whereSql}
   `;
@@ -163,17 +177,9 @@ export async function getLoanComplexityDashboardData(
   const byGroup = new Map<string, number[]>();
   for (const loan of result.rows) {
     const groupName = String(loan.group_name ?? "Unknown").trim() || "Unknown";
-    const loanData = {
-      loan_type: loan.loan_type,
-      loan_purpose: loan.loan_purpose,
-      loan_amount: loan.loan_amount != null ? parseFloat(loan.loan_amount) : null,
-      fico_score: loan.fico_score != null ? parseInt(loan.fico_score, 10) : null,
-      ltv_ratio: loan.ltv_ratio != null ? parseFloat(loan.ltv_ratio) : null,
-      be_dti_ratio: loan.be_dti_ratio != null ? parseFloat(loan.be_dti_ratio) : null,
-      occupancy_type: loan.occupancy_type,
-      borr_self_employed: loan.borr_self_employed,
-    };
-    const score = complexityService.calculateComplexity(loanData).totalScore;
+    const score =
+      complexityScoreFromRow(loan, complexityService) ??
+      complexityService.calculateComplexity(loanRecordToLoanData(loan)).totalScore;
     if (!byGroup.has(groupName)) byGroup.set(groupName, []);
     byGroup.get(groupName)!.push(score);
   }
@@ -369,7 +375,7 @@ export async function getLoanComplexityGroupLoans(
            l.application_date::text AS application_date,
            l.current_loan_status, l.current_milestone,
            l.ltv_ratio, l.be_dti_ratio, l.fico_score,
-           l.occupancy_type, l.borr_self_employed,
+           l.occupancy_type, l.borr_self_employed, l.complexity_score, l.non_qm,
            l.branch, l.loan_officer, l.underwriter, l.processor, l.closer
     FROM public.loans l
     WHERE ${whereSql}
@@ -381,17 +387,7 @@ export async function getLoanComplexityGroupLoans(
   await complexityService.loadCustomWeights();
 
   const rows: LoanComplexityGroupLoanRow[] = result.rows.map((r) => {
-    const loanData = {
-      loan_type: r.loan_type,
-      loan_purpose: r.loan_purpose,
-      loan_amount: r.loan_amount != null ? parseFloat(r.loan_amount) : null,
-      fico_score: r.fico_score != null ? parseInt(r.fico_score, 10) : null,
-      ltv_ratio: r.ltv_ratio != null ? parseFloat(r.ltv_ratio) : null,
-      be_dti_ratio: r.be_dti_ratio != null ? parseFloat(r.be_dti_ratio) : null,
-      occupancy_type: r.occupancy_type,
-      borr_self_employed: r.borr_self_employed,
-    };
-    const complexity = complexityService.calculateComplexity(loanData);
+    const score = complexityScoreFromRow(r, complexityService);
     return {
       loan_id: String(r.loan_id),
       loan_number: r.loan_number != null ? String(r.loan_number) : null,
@@ -407,7 +403,7 @@ export async function getLoanComplexityGroupLoans(
       fico_score: r.fico_score != null ? parseInt(r.fico_score, 10) : null,
       occupancy_type: r.occupancy_type != null ? String(r.occupancy_type) : null,
       borr_self_employed: r.borr_self_employed,
-      complexity_score: complexity.totalScore,
+      complexity_score: score,
       branch: r.branch != null ? String(r.branch) : null,
       loan_officer: r.loan_officer != null ? String(r.loan_officer) : null,
       underwriter: r.underwriter != null ? String(r.underwriter) : null,
@@ -485,7 +481,7 @@ export async function getLoanComplexityGroupLoansMulti(
            l.application_date::text AS application_date,
            l.current_loan_status, l.current_milestone,
            l.ltv_ratio, l.be_dti_ratio, l.fico_score,
-           l.occupancy_type, l.borr_self_employed,
+           l.occupancy_type, l.borr_self_employed, l.complexity_score, l.non_qm,
            l.branch, l.loan_officer, l.underwriter, l.processor, l.closer
     FROM public.loans l
     WHERE ${whereSql}
@@ -497,17 +493,7 @@ export async function getLoanComplexityGroupLoansMulti(
   await complexityService.loadCustomWeights();
 
   const rows: LoanComplexityGroupLoanRow[] = result.rows.map((r) => {
-    const loanData = {
-      loan_type: r.loan_type,
-      loan_purpose: r.loan_purpose,
-      loan_amount: r.loan_amount != null ? parseFloat(r.loan_amount) : null,
-      fico_score: r.fico_score != null ? parseInt(r.fico_score, 10) : null,
-      ltv_ratio: r.ltv_ratio != null ? parseFloat(r.ltv_ratio) : null,
-      be_dti_ratio: r.be_dti_ratio != null ? parseFloat(r.be_dti_ratio) : null,
-      occupancy_type: r.occupancy_type,
-      borr_self_employed: r.borr_self_employed,
-    };
-    const complexity = complexityService.calculateComplexity(loanData);
+    const score = complexityScoreFromRow(r, complexityService);
     return {
       loan_id: String(r.loan_id),
       loan_number: r.loan_number != null ? String(r.loan_number) : null,
@@ -523,7 +509,7 @@ export async function getLoanComplexityGroupLoansMulti(
       fico_score: r.fico_score != null ? parseInt(r.fico_score, 10) : null,
       occupancy_type: r.occupancy_type != null ? String(r.occupancy_type) : null,
       borr_self_employed: r.borr_self_employed,
-      complexity_score: complexity.totalScore,
+      complexity_score: score,
       branch: r.branch != null ? String(r.branch) : null,
       loan_officer: r.loan_officer != null ? String(r.loan_officer) : null,
       underwriter: r.underwriter != null ? String(r.underwriter) : null,
@@ -604,7 +590,7 @@ export async function getLoanComplexityGroupLoansCrossDimension(
            l.application_date::text AS application_date,
            l.current_loan_status, l.current_milestone,
            l.ltv_ratio, l.be_dti_ratio, l.fico_score,
-           l.occupancy_type, l.borr_self_employed,
+           l.occupancy_type, l.borr_self_employed, l.complexity_score, l.non_qm,
            l.branch, l.loan_officer, l.underwriter, l.processor, l.closer
     FROM public.loans l
     WHERE ${whereSql}
@@ -616,17 +602,7 @@ export async function getLoanComplexityGroupLoansCrossDimension(
   await complexityService.loadCustomWeights();
 
   const rows: LoanComplexityGroupLoanRow[] = result.rows.map((r) => {
-    const loanData = {
-      loan_type: r.loan_type,
-      loan_purpose: r.loan_purpose,
-      loan_amount: r.loan_amount != null ? parseFloat(r.loan_amount) : null,
-      fico_score: r.fico_score != null ? parseInt(r.fico_score, 10) : null,
-      ltv_ratio: r.ltv_ratio != null ? parseFloat(r.ltv_ratio) : null,
-      be_dti_ratio: r.be_dti_ratio != null ? parseFloat(r.be_dti_ratio) : null,
-      occupancy_type: r.occupancy_type,
-      borr_self_employed: r.borr_self_employed,
-    };
-    const complexity = complexityService.calculateComplexity(loanData);
+    const score = complexityScoreFromRow(r, complexityService);
     return {
       loan_id: String(r.loan_id),
       loan_number: r.loan_number != null ? String(r.loan_number) : null,
@@ -642,7 +618,7 @@ export async function getLoanComplexityGroupLoansCrossDimension(
       fico_score: r.fico_score != null ? parseInt(r.fico_score, 10) : null,
       occupancy_type: r.occupancy_type != null ? String(r.occupancy_type) : null,
       borr_self_employed: r.borr_self_employed,
-      complexity_score: complexity.totalScore,
+      complexity_score: score,
       branch: r.branch != null ? String(r.branch) : null,
       loan_officer: r.loan_officer != null ? String(r.loan_officer) : null,
       underwriter: r.underwriter != null ? String(r.underwriter) : null,
@@ -705,7 +681,7 @@ export async function getLoanComplexityLoansInPeriod(
            l.application_date::text AS application_date,
            l.current_loan_status, l.current_milestone,
            l.ltv_ratio, l.be_dti_ratio, l.fico_score,
-           l.occupancy_type, l.borr_self_employed,
+           l.occupancy_type, l.borr_self_employed, l.complexity_score, l.non_qm,
            l.branch, l.loan_officer, l.underwriter, l.processor, l.closer
     FROM public.loans l
     WHERE ${whereSql}
@@ -717,17 +693,7 @@ export async function getLoanComplexityLoansInPeriod(
   await complexityService.loadCustomWeights();
 
   const rows: LoanComplexityGroupLoanRow[] = result.rows.map((r) => {
-    const loanData = {
-      loan_type: r.loan_type,
-      loan_purpose: r.loan_purpose,
-      loan_amount: r.loan_amount != null ? parseFloat(r.loan_amount) : null,
-      fico_score: r.fico_score != null ? parseInt(r.fico_score, 10) : null,
-      ltv_ratio: r.ltv_ratio != null ? parseFloat(r.ltv_ratio) : null,
-      be_dti_ratio: r.be_dti_ratio != null ? parseFloat(r.be_dti_ratio) : null,
-      occupancy_type: r.occupancy_type,
-      borr_self_employed: r.borr_self_employed,
-    };
-    const complexity = complexityService.calculateComplexity(loanData);
+    const score = complexityScoreFromRow(r, complexityService);
     return {
       loan_id: String(r.loan_id),
       loan_number: r.loan_number != null ? String(r.loan_number) : null,
@@ -743,7 +709,7 @@ export async function getLoanComplexityLoansInPeriod(
       fico_score: r.fico_score != null ? parseInt(r.fico_score, 10) : null,
       occupancy_type: r.occupancy_type != null ? String(r.occupancy_type) : null,
       borr_self_employed: r.borr_self_employed,
-      complexity_score: complexity.totalScore,
+      complexity_score: score,
       branch: r.branch != null ? String(r.branch) : null,
       loan_officer: r.loan_officer != null ? String(r.loan_officer) : null,
       underwriter: r.underwriter != null ? String(r.underwriter) : null,
@@ -937,7 +903,9 @@ export async function getLoanComplexityPivotData(
       l.ltv_ratio,
       l.be_dti_ratio,
       l.occupancy_type,
-      l.borr_self_employed
+      l.borr_self_employed,
+      l.complexity_score,
+      l.non_qm
     FROM public.loans l
     WHERE ${whereSql}
   `;
@@ -991,17 +959,9 @@ export async function getLoanComplexityPivotData(
   };
 
   for (const r of result.rows) {
-    const loanData = {
-      loan_type: r.loan_type,
-      loan_purpose: r.loan_purpose,
-      loan_amount: r.loan_amount != null ? parseFloat(r.loan_amount) : null,
-      fico_score: r.fico_score != null ? parseInt(r.fico_score, 10) : null,
-      ltv_ratio: r.ltv_ratio != null ? parseFloat(r.ltv_ratio) : null,
-      be_dti_ratio: r.be_dti_ratio != null ? parseFloat(r.be_dti_ratio) : null,
-      occupancy_type: r.occupancy_type,
-      borr_self_employed: r.borr_self_employed,
-    };
-    const complexity = complexityService.calculateComplexity(loanData).totalScore;
+    const complexity =
+      complexityScoreFromRow(r, complexityService) ??
+      complexityService.calculateComplexity(loanRecordToLoanData(r)).totalScore;
     const amount = r.loan_amount != null ? parseFloat(r.loan_amount) : 0;
     const days = timeInMotionDays(
       r.application_date,

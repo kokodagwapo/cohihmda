@@ -416,6 +416,18 @@ async function startWorker() {
   } catch (error) {
     console.warn("⚠️ Failed to start sync job poller:", error);
   }
+
+  try {
+    const { startLoanComplexityRecomputeSchedulerFromManagement } =
+      await import("./services/loanComplexityRecomputeScheduler.js");
+    startLoanComplexityRecomputeSchedulerFromManagement();
+    console.log("✅ Loan complexity recompute scheduler started (worker)");
+  } catch (error) {
+    console.warn(
+      "⚠️ Failed to start loan complexity recompute scheduler:",
+      error,
+    );
+  }
 }
 
 if (SKIP_DB) {
@@ -496,6 +508,18 @@ if (SKIP_DB) {
           startSyncJobPoller();
         } catch (error) {
           console.warn("⚠️ Failed to start sync job poller:", error);
+        }
+
+        try {
+          const { startLoanComplexityRecomputeSchedulerFromManagement } =
+            await import("./services/loanComplexityRecomputeScheduler.js");
+          startLoanComplexityRecomputeSchedulerFromManagement();
+          console.log("✅ Loan complexity recompute scheduler started");
+        } catch (error) {
+          console.warn(
+            "⚠️ Failed to start loan complexity recompute scheduler:",
+            error,
+          );
         }
       }
     })

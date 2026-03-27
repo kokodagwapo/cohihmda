@@ -7,6 +7,7 @@ import { pool } from '../config/database.js';
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { getApiBaseUrl, getCredentials } from './mockLosHelper.js';
 import { runPostSyncHooks } from './hooks/postSyncHookService.js';
+import { attachPersistedComplexityScores } from './scoring/persistedLoanComplexity.js';
 
 export interface LOSConnection {
   id: string;
@@ -387,13 +388,18 @@ export async function syncLoansFromAPI(connectionId: string): Promise<SyncResult
     // Process and store loans in the database
     for (const loan of loans) {
       try {
+        const raw = loan.raw_data && typeof loan.raw_data === "object" ? loan.raw_data : {};
+        const merged: Record<string, any> = { ...raw, ...loan };
+        await attachPersistedComplexityScores(pool, [merged]);
+        const complexityScore = merged.complexity_score ?? null;
+
         // Upsert loan data into the loans table
         await pool.query(
           `INSERT INTO public.loans (
             tenant_id, loan_id, borrower_name, loan_amount, loan_type, 
             status, application_date, closing_date, interest_rate, 
-            raw_data, created_at, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
+            complexity_score, raw_data, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
           ON CONFLICT (tenant_id, loan_id) 
           DO UPDATE SET
             borrower_name = EXCLUDED.borrower_name,
@@ -403,6 +409,7 @@ export async function syncLoansFromAPI(connectionId: string): Promise<SyncResult
             application_date = EXCLUDED.application_date,
             closing_date = EXCLUDED.closing_date,
             interest_rate = EXCLUDED.interest_rate,
+            complexity_score = EXCLUDED.complexity_score,
             raw_data = EXCLUDED.raw_data,
             updated_at = NOW()`,
           [
@@ -415,6 +422,7 @@ export async function syncLoansFromAPI(connectionId: string): Promise<SyncResult
             loan.application_date,
             loan.closing_date,
             loan.interest_rate,
+            complexityScore,
             JSON.stringify(loan.raw_data || loan),
           ]
         );

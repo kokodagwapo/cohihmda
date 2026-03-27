@@ -12,7 +12,8 @@ import {
   parseComplexityConfigV2,
   type LoanComplexityData,
   type ComplexityConfigV2,
-} from '../../utils/scorecard-utils.js';
+} from "../../utils/scorecard-utils.js";
+import { loanRecordToLoanData } from "./persistedLoanComplexity.js";
 
 export interface LoanData {
   loan_purpose?: string;
@@ -68,6 +69,11 @@ export class LoanComplexityService {
 
   constructor(pool: pg.Pool) {
     this.pool = pool;
+  }
+
+  /** After loadCustomWeights(): V2 config for calcLoanComplexity parity on read paths. */
+  getConfigV2(): ComplexityConfigV2 | null {
+    return this.configV2;
   }
 
   /**
@@ -141,31 +147,25 @@ export class LoanComplexityService {
     try {
       await this.loadCustomWeights();
 
-      const result = await this.pool.query(`
+      const result = await this.pool.query(
+        `
         SELECT 
           loan_purpose, loan_type, loan_amount, occupancy_type,
           fico_score, ltv_ratio, be_dti_ratio,
-          borr_self_employed, co_borr_self_employed
+          borr_self_employed, co_borr_self_employed, non_qm,
+          complexity_score
         FROM public.loans
         WHERE loan_id = $1
-      `, [loanId]);
+      `,
+        [loanId],
+      );
 
       if (result.rows.length === 0) {
         return null;
       }
 
       const loan = result.rows[0];
-      return this.calculateComplexity({
-        loan_purpose: loan.loan_purpose,
-        loan_type: loan.loan_type,
-        loan_amount: loan.loan_amount ? parseFloat(loan.loan_amount) : undefined,
-        occupancy_type: loan.occupancy_type,
-        fico_score: loan.fico_score ? parseInt(loan.fico_score) : undefined,
-        ltv_ratio: loan.ltv_ratio ? parseFloat(loan.ltv_ratio) : undefined,
-        be_dti_ratio: loan.be_dti_ratio ? parseFloat(loan.be_dti_ratio) : undefined,
-        borr_self_employed: loan.borr_self_employed,
-        co_borr_self_employed: loan.co_borr_self_employed,
-      });
+      return this.calculateComplexity(loanRecordToLoanData(loan));
     } catch (error: any) {
       logError('Error calculating complexity by loan ID', error, { loanId });
       throw error;
@@ -173,65 +173,74 @@ export class LoanComplexityService {
   }
 
   /**
-   * Update all loan complexity scores in the database
-   * Adds complexity_score column if it doesn't exist
+   * Synchronous full-table recompute (batch updates). Prefer background_jobs for production.
+   * Expects migration 101+ (complexity_score column present).
    */
   async updateAllComplexityScores(): Promise<{ updated: number; errors: number }> {
     let updated = 0;
     let errors = 0;
+    const bs = parseInt(process.env.LOAN_COMPLEXITY_RECOMPUTE_BATCH_SIZE || "1000", 10) || 1000;
 
     try {
-      // Ensure complexity_score column exists
-      await this.pool.query(`
-        ALTER TABLE public.loans
-        ADD COLUMN IF NOT EXISTS complexity_score DECIMAL(5,2)
-      `).catch(() => {});
-
-      // Load custom weights
       await this.loadCustomWeights();
+      let lastId: string | null = null;
 
-      // Get all loans that need complexity calculation
-      const result = await this.pool.query(`
-        SELECT 
-          id, loan_id, loan_purpose, loan_type, loan_amount, occupancy_type,
-          fico_score, ltv_ratio, be_dti_ratio,
-          borr_self_employed, co_borr_self_employed
-        FROM public.loans
-      `);
+      for (;;) {
+        const result = await this.pool.query(
+          `
+          SELECT id, loan_id,
+                 loan_purpose, loan_type, loan_amount, occupancy_type,
+                 fico_score, ltv_ratio, be_dti_ratio,
+                 borr_self_employed, co_borr_self_employed, non_qm
+          FROM public.loans
+          WHERE ($1::uuid IS NULL OR id > $1::uuid)
+          ORDER BY id ASC
+          LIMIT $2
+          `,
+          [lastId, bs],
+        );
 
-      logInfo('Starting complexity score update', { totalLoans: result.rows.length });
+        if (result.rows.length === 0) break;
 
-      for (const loan of result.rows) {
-        try {
-          const score = this.calculateComplexity({
-            loan_purpose: loan.loan_purpose,
-            loan_type: loan.loan_type,
-            loan_amount: loan.loan_amount ? parseFloat(loan.loan_amount) : undefined,
-            occupancy_type: loan.occupancy_type,
-            fico_score: loan.fico_score ? parseInt(loan.fico_score) : undefined,
-            ltv_ratio: loan.ltv_ratio ? parseFloat(loan.ltv_ratio) : undefined,
-            be_dti_ratio: loan.be_dti_ratio ? parseFloat(loan.be_dti_ratio) : undefined,
-            borr_self_employed: loan.borr_self_employed,
-            co_borr_self_employed: loan.co_borr_self_employed,
-          });
-
-          await this.pool.query(`
-            UPDATE public.loans
-            SET complexity_score = $1
-            WHERE id = $2
-          `, [score.totalScore, loan.id]);
-
-          updated++;
-        } catch (error: any) {
-          logError('Error updating loan complexity', error, { loanId: loan.loan_id });
-          errors++;
+        const pairs: Array<{ id: string; score: number }> = [];
+        for (const loan of result.rows) {
+          try {
+            const score = this.calculateComplexity(loanRecordToLoanData(loan)).totalScore;
+            pairs.push({ id: loan.id, score: Math.round(score * 100) / 100 });
+          } catch (error: any) {
+            logError("Error updating loan complexity", error, { loanId: loan.loan_id });
+            errors++;
+          }
         }
+
+        if (pairs.length > 0) {
+          const parts: string[] = [];
+          const params: unknown[] = [];
+          let i = 1;
+          for (const p of pairs) {
+            parts.push(`($${i}::uuid, $${i + 1}::numeric)`);
+            params.push(p.id, p.score);
+            i += 2;
+          }
+          await this.pool.query(
+            `
+            UPDATE public.loans l
+            SET complexity_score = v.score
+            FROM (VALUES ${parts.join(", ")}) AS v(id, score)
+            WHERE l.id = v.id
+            `,
+            params,
+          );
+          updated += pairs.length;
+        }
+
+        lastId = String(result.rows[result.rows.length - 1].id);
       }
 
-      logInfo('Complexity score update complete', { updated, errors });
+      logInfo("Complexity score update complete", { updated, errors });
       return { updated, errors };
     } catch (error: any) {
-      logError('Error in bulk complexity update', error);
+      logError("Error in bulk complexity update", error);
       throw error;
     }
   }

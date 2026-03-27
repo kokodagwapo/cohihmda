@@ -21,6 +21,10 @@ import { apiLimiter } from "../../middleware/rateLimiter.js";
 import { logError, logWarn, logInfo, logDebug } from "../../services/logger.js";
 import { getLoanAccessContext } from "../../services/userLoanAccessService.js";
 import {
+  resolveLoanComplexityScoreForRead,
+  loanRowToComplexityData,
+} from "../../services/scoring/persistedLoanComplexity.js";
+import {
   isActorMissing,
   filterByChannel,
   buildChannelWhereClause,
@@ -349,7 +353,7 @@ router.get(
           funding_date, closing_date, application_date, started_date,
           branch, loan_officer, fico_score, ltv_ratio, be_dti_ratio,
           origination_points, orig_fee_borr_pd, orig_fees_seller, cd_lender_credits,
-          branch_price_concession, occupancy_type, borr_self_employed,
+          branch_price_concession, occupancy_type, borr_self_employed, non_qm, complexity_score,
           rate_lock_buy_side_base_price_rate,
           number_of_conditions, date_warehoused, investor_status, investor_purchase_date,
           (${revenueExpression}) AS revenue
@@ -510,8 +514,11 @@ router.get(
           }
         }
 
-        // Loan complexity (using tenant-configurable weights)
-        existing.complexityScores.push(calcLoanComplexity(l, complexityConfig));
+        // Loan complexity: persisted column with read-time fallback during rollout
+        existing.complexityScores.push(
+          resolveLoanComplexityScoreForRead(l, complexityConfig) ??
+            calcLoanComplexity(loanRowToComplexityData(l), complexityConfig),
+        );
 
         // Weighted averages (FICO, LTV, DTI)
         const fico = parseFloat(l.fico_score) || 0;
@@ -1191,7 +1198,7 @@ router.get(
         submitted_to_processing_date, submitted_to_underwriting_date,
         processing_date, approval_date, closing_date,
         funding_date, application_date,
-        fico_score, ltv_ratio, be_dti_ratio, occupancy_type, borr_self_employed
+        fico_score, ltv_ratio, be_dti_ratio, occupancy_type, borr_self_employed, non_qm, complexity_score
       FROM loans
       WHERE ${config.outputDateField} IS NOT NULL
         AND ${config.outputDateField} >= $1
@@ -1222,10 +1229,12 @@ router.get(
         return days > 0 ? days : null;
       };
 
-      // Helper: Calculate loan complexity for operations
-      // Uses the same configurable weights as Sales Scorecard for consistency
+      // Helper: Calculate loan complexity for operations (persisted + fallback)
       const calcOpsComplexity = (l: any): number => {
-        return calcLoanComplexity(l, complexityConfig);
+        return (
+          resolveLoanComplexityScoreForRead(l, complexityConfig) ??
+          calcLoanComplexity(loanRowToComplexityData(l), complexityConfig)
+        );
       };
 
       // Aggregate by actor

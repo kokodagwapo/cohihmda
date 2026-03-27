@@ -9,6 +9,10 @@ import { readFile, readdir, stat } from 'fs/promises';
 import { join } from 'path';
 import { parse } from 'csv-parse/sync';
 import { runPostSyncHooks } from './hooks/postSyncHookService.js';
+import {
+  attachPersistedComplexityScores,
+  warnIfCsvComplexityDiverges,
+} from './scoring/persistedLoanComplexity.js';
 import { getTenantFieldMappings, applyFieldMapping, suggestFieldMappings } from './fieldMapper.js';
 
 export interface LoanData {
@@ -187,6 +191,35 @@ export async function processCSVFile(
         const falloutReason = getFieldFromRecord(['fallout_reason', 'falloutReason', 'fallout']);
         const cycleTimeDays = parseNumberFromRecord(getFieldFromRecord(['cycle_time_days', 'cycleTime', 'cycle_time']));
         const complexityScore = parseNumberFromRecord(getFieldFromRecord(['complexity_score', 'complexityScore', 'complexity'])); // For TopTiering Ops scoring
+        const beDti = parseNumberFromRecord(getFieldFromRecord(['be_dti_ratio', 'dti', 'back_end_dti', 'beDti']));
+        const occupancyType = getFieldFromRecord(['occupancy_type', 'occupancy', 'occupancyType']);
+        const selfEmployedRaw = getFieldFromRecord(['borr_self_employed', 'self_employed', 'selfEmployed']);
+        const nonQmRaw = getFieldFromRecord(['non_qm', 'nonQm', 'nonqm']);
+        const parseBoolish = (v: any): boolean | undefined => {
+          if (v === undefined || v === null || v === '') return undefined;
+          if (typeof v === 'boolean') return v;
+          const s = String(v).trim().toLowerCase();
+          if (s === 'y' || s === 'yes' || s === 'true' || s === '1' || s === 'x') return true;
+          if (s === 'n' || s === 'no' || s === 'false' || s === '0') return false;
+          return undefined;
+        };
+
+        const rowForComplexity: Record<string, any> = {
+          loan_type: loanData.loan_type,
+          loan_purpose: loanPurpose ?? loanData.loan_purpose,
+          loan_amount: loanData.loan_amount,
+          fico_score: ficoScore,
+          ltv_ratio: ltv,
+          be_dti_ratio: beDti,
+          occupancy_type: occupancyType,
+          borr_self_employed: parseBoolish(selfEmployedRaw),
+          non_qm: parseBoolish(nonQmRaw),
+        };
+        await attachPersistedComplexityScores(pool, [rowForComplexity]);
+        const persistedComplexity = rowForComplexity.complexity_score as number;
+        warnIfCsvComplexityDiverges(complexityScore, persistedComplexity, {
+          loan_id: loanData.loan_id,
+        });
         
         // Calculate cycle time if not provided but dates are available
         const calculatedCycleTime = cycleTimeDays || 
@@ -205,7 +238,8 @@ export async function processCSVFile(
         if (ltv !== undefined) rawDataObj.ltv = ltv;
         if (loanOfficerName) rawDataObj.loan_officer_name = loanOfficerName;
         if (falloutReason) rawDataObj.fallout_reason = falloutReason;
-        if (complexityScore !== undefined) rawDataObj.complexity_score = complexityScore; // For TopTiering Ops complexity scoring
+        if (complexityScore !== undefined) rawDataObj.complexity_score = complexityScore; // CSV value retained for audit
+        rawDataObj.complexity_score_computed = persistedComplexity;
         
         // Store loan data in the database - include all fields in raw_data for comprehensive access
         await pool.query(
@@ -213,8 +247,8 @@ export async function processCSVFile(
             tenant_id, loan_id, borrower_name, loan_amount, loan_type, 
             status, application_date, closing_date, interest_rate,
             loan_purpose, branch, credit_pull_date, cycle_time_days,
-            raw_data, created_at, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())
+            complexity_score, raw_data, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW())
           ON CONFLICT (tenant_id, loan_id) 
           DO UPDATE SET
             borrower_name = EXCLUDED.borrower_name,
@@ -228,6 +262,7 @@ export async function processCSVFile(
             branch = EXCLUDED.branch,
             credit_pull_date = EXCLUDED.credit_pull_date,
             cycle_time_days = EXCLUDED.cycle_time_days,
+            complexity_score = EXCLUDED.complexity_score,
             raw_data = EXCLUDED.raw_data,
             updated_at = NOW()`,
           [
@@ -244,6 +279,7 @@ export async function processCSVFile(
             branch,
             creditPullDate,
             calculatedCycleTime,
+            persistedComplexity,
             JSON.stringify(rawDataObj),
           ]
         );

@@ -14,11 +14,14 @@ import {
   isActorMissing,
   loadOpsActorConfig,
   assignTiersByCumulativeValue,
-  calcLoanComplexity,
   type ActorConfig,
   type TTSTier,
-  type LoanComplexityData,
 } from "../../utils/scorecard-utils.js";
+import { LoanComplexityService } from "../scoring/loanComplexityService.js";
+import {
+  resolveLoanComplexityScoreForRead,
+  loanRecordToLoanData,
+} from "../scoring/persistedLoanComplexity.js";
 import { getStaffingUnitTargets } from "../../utils/staffingUnitTargets.js";
 
 const MONTH_NAMES = [
@@ -103,6 +106,9 @@ export async function getOperationsScorecardTrends(
           ? targets.closer
           : targets.other;
   const config = await loadOpsActorConfig(tenantPool, actorType);
+  const complexityService = new LoanComplexityService(tenantPool);
+  await complexityService.loadCustomWeights();
+  const complexityConfig = complexityService.getConfigV2() ?? undefined;
 
   const vMaxDate = await getVMaxDate(tenantPool);
   const effectiveEndDate = new Date(vMaxDate);
@@ -131,8 +137,8 @@ export async function getOperationsScorecardTrends(
       processor, underwriter, closer,
       submitted_to_processing_date, submitted_to_underwriting_date,
       processing_date, approval_date, closing_date,
-      funding_date, application_date, fico_score, ltv_ratio, be_dti_ratio,
-      occupancy_type, borr_self_employed
+      funding_date, application_date,       fico_score, ltv_ratio, be_dti_ratio,
+      occupancy_type, borr_self_employed, non_qm, complexity_score
     FROM loans
     WHERE ${config.outputDateField} IS NOT NULL
       AND ${config.outputDateField} >= $1
@@ -159,18 +165,6 @@ export async function getOperationsScorecardTrends(
     return days > 0 ? days : null;
   };
 
-  const toLoanComplexityData = (l: any): LoanComplexityData => ({
-    loan_type: l.loan_type,
-    loan_purpose: l.loan_purpose,
-    loan_amount: l.loan_amount != null && l.loan_amount !== "" ? parseFloat(l.loan_amount) : undefined,
-    fico_score: l.fico_score != null && l.fico_score !== "" ? parseInt(String(l.fico_score), 10) : undefined,
-    ltv_ratio: l.ltv_ratio != null && l.ltv_ratio !== "" ? parseFloat(l.ltv_ratio) : undefined,
-    be_dti_ratio: l.be_dti_ratio != null && l.be_dti_ratio !== "" ? parseFloat(l.be_dti_ratio) : undefined,
-    occupancy_type: l.occupancy_type,
-    borr_self_employed: l.borr_self_employed,
-    non_qm: l.non_qm,
-  });
-
   const actorMap = new Map<string, ActorAggregation>();
 
   for (const l of outputLoans) {
@@ -183,7 +177,9 @@ export async function getOperationsScorecardTrends(
 
     const loanAmount = parseFloat(l.loan_amount) || 0;
     const turnTime = calcTurnTime(l);
-    const complexity = calcLoanComplexity(toLoanComplexityData(l));
+    const complexity =
+      resolveLoanComplexityScoreForRead(l, complexityConfig) ??
+      complexityService.calculateComplexity(loanRecordToLoanData(l)).totalScore;
 
     if (!actorMap.has(actorName)) {
       actorMap.set(actorName, {
