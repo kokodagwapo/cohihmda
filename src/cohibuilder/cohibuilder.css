@@ -1,0 +1,223 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500&family=Montserrat:wght@200;300;400;500&display=swap");
+
+/* Scoped Cohi Builder (from CBuilder) — load only under .cohibuilder-root */
+.cohibuilder-root {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Montserrat", ui-sans-serif, system-ui, sans-serif;
+  --bg-app:
+    radial-gradient(ellipse 80% 60% at 70% 30%, rgba(241, 245, 249, 0.9) 0%, transparent 50%),
+    radial-gradient(ellipse 60% 80% at 20% 80%, rgba(236, 254, 255, 0.6) 0%, transparent 50%),
+    radial-gradient(circle at 20% 20%, #f8fafc 0%, #f1f5f9 40%, #ecfeff 100%);
+  --bg-surface: rgba(255, 255, 255, 0.5);
+  --bg-muted: rgba(241, 245, 249, 0.75);
+  --bg-grid: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Cpath d='M0 24h48M24 0v48' stroke='%23b8c4ce' stroke-opacity='0.045' stroke-width='0.5' fill='none'/%3E%3Cpath d='M0 0h48M0 0v48' stroke='%23cbd5e1' stroke-opacity='0.03' stroke-width='0.25' fill='none'/%3E%3C/svg%3E");
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #64748b;
+  --border-subtle: rgba(255, 255, 255, 0.4);
+  font-family: var(--font-sans);
+  font-weight: 300;
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  background:
+    var(--bg-grid) 0 0 / 48px 48px,
+    var(--bg-app);
+  background-attachment: local;
+}
+
+.dark .cohibuilder-root {
+  --bg-app:
+    radial-gradient(ellipse 80% 60% at 70% 30%, rgba(30, 41, 59, 0.5) 0%, transparent 50%),
+    radial-gradient(ellipse 60% 80% at 20% 80%, rgba(15, 23, 42, 0.6) 0%, transparent 50%),
+    radial-gradient(circle at 20% 20%, #0f172a 0%, #020617 100%);
+  --text-primary: #f1f5f9;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+}
+
+.cohibuilder-root .font-display {
+  font-family: var(--font-display);
+}
+
+.cohibuilder-root .card-base {
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 10px 40px -12px rgba(15, 23, 42, 0.08),
+    0 4px 16px -4px rgba(15, 23, 42, 0.04);
+  border-radius: 1.375rem;
+  transition:
+    background 0.35s ease,
+    border-color 0.35s ease,
+    box-shadow 0.45s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.dark .cohibuilder-root .card-base {
+  background: rgba(30, 41, 59, 0.62);
+  border-color: rgba(71, 85, 105, 0.45);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 12px 48px -16px rgba(0, 0, 0, 0.45);
+}
+
+.cohibuilder-root .card-base:hover {
+  background: rgba(255, 255, 255, 0.88);
+  border-color: rgba(255, 255, 255, 0.95);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.95) inset,
+    0 16px 48px -12px rgba(15, 23, 42, 0.1),
+    0 6px 20px -6px rgba(15, 23, 42, 0.06);
+}
+
+.dark .cohibuilder-root .card-base:hover {
+  background: rgba(51, 65, 85, 0.55);
+  border-color: rgba(100, 116, 139, 0.5);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 16px 48px -12px rgba(0, 0, 0, 0.5);
+}
+
+/** Inner panels inside glass cards — subtle depth without heavy borders */
+.cohibuilder-root .cb-inner-panel {
+  border-radius: 1rem;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  background: linear-gradient(
+    165deg,
+    rgba(255, 255, 255, 0.55) 0%,
+    rgba(248, 250, 252, 0.42) 50%,
+    rgba(241, 245, 249, 0.35) 100%
+  );
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.65) inset;
+  transition:
+    border-color 0.25s ease,
+    box-shadow 0.3s ease,
+    background 0.3s ease;
+}
+
+.dark .cohibuilder-root .cb-inner-panel {
+  border-color: rgba(148, 163, 184, 0.12);
+  background: linear-gradient(
+    165deg,
+    rgba(51, 65, 85, 0.35) 0%,
+    rgba(30, 41, 59, 0.45) 100%
+  );
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+}
+
+.cohibuilder-root .cb-inner-panel:hover {
+  border-color: rgba(14, 165, 233, 0.22);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.75) inset,
+    0 8px 24px -10px rgba(14, 165, 233, 0.12);
+}
+
+.dark .cohibuilder-root .cb-inner-panel:hover {
+  border-color: rgba(56, 189, 248, 0.25);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 8px 28px -12px rgba(0, 0, 0, 0.35);
+}
+
+.cohibuilder-root .glass-text {
+  background: linear-gradient(180deg, #0f172a 0%, #334155 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 1px 1px rgba(255, 255, 255, 0.8));
+}
+
+.cohibuilder-root .glass-panel {
+  background: rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+.dark .cohibuilder-root .glass-panel {
+  background: rgba(15, 23, 42, 0.5);
+  border-color: rgba(51, 65, 85, 0.6);
+}
+
+.cohibuilder-root .btn-primary {
+  background: #2563eb;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
+  color: #fff;
+}
+
+.cohibuilder-root .btn-primary:hover {
+  background: #1d4ed8;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+}
+
+.cohibuilder-root .pastel-icon-container {
+  background: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  padding: 0.75rem;
+  border-radius: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s;
+}
+
+.cohibuilder-root .pastel-icon-container:hover {
+  transform: scale(1.05);
+}
+
+.cohibuilder-root .no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.cohibuilder-root .no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.cohibuilder-root .animate-pulse-ring-high {
+  animation: cohibuilder-pulse-ring-high 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+.cohibuilder-root .animate-pulse-ring-medium {
+  animation: cohibuilder-pulse-ring-medium 2.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+.cohibuilder-root .animate-pulse-ring-low {
+  animation: cohibuilder-pulse-ring-low 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes cohibuilder-pulse-ring-high {
+  0% {
+    box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(244, 63, 94, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(244, 63, 94, 0);
+  }
+}
+@keyframes cohibuilder-pulse-ring-medium {
+  0% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(245, 158, 11, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+  }
+}
+@keyframes cohibuilder-pulse-ring-low {
+  0% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(16, 185, 129, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+  }
+}
