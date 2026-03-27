@@ -54,9 +54,16 @@ import { Loader2, Download, ArrowUp, ArrowDown, Filter, X, Check, Bookmark, Penc
 import { LoanDetailColumnsModal } from "@/components/widgets/components/LoanDetailColumnsModal";
 import {
   useLoanDetailColumnsStore,
+  type SavedLoanDetailColumn,
   savedColumnsToColumnDefs,
+  LOAN_DETAIL_STANDALONE_COLUMNS_STORE_ID,
 } from "@/stores/loanDetailColumnsStore";
 import { computePresetDateRange, getPeriodPresetMeta, type PeriodPreset } from "@/components/ui/DatePeriodPicker";
+import {
+  useLoanDetailViewState,
+  normalizeLoanDetailViewState,
+  type LoanDetailViewStateV1,
+} from "@/hooks/useLoanDetailViewState";
 
 const ROW_HEIGHT = 40;
 const HEADER_HEIGHT = 40;
@@ -67,6 +74,7 @@ const MIN_COL_WIDTH = 80;
 const CHARS_TO_PX = 8;
 /** Max width per column so one outlier doesn't make table huge; content still fits up to this */
 const MAX_COL_WIDTH = 800;
+const LOAN_NUMBER_FILTER_MAX_OPTIONS = 200;
 
 export interface LoanDetailViewProps {
   selectedTenantId?: string | null;
@@ -724,6 +732,7 @@ export function LoanDetailView({
   const savedColumnsFromStore = useLoanDetailColumnsStore((s) =>
     columnsStoreId ? s.byItem[columnsStoreId] : undefined,
   );
+  const setColumnsInStore = useLoanDetailColumnsStore((s) => s.setColumns);
   const storeColumnDefs = useMemo(
     () => savedColumnsToColumnDefs(savedColumnsFromStore),
     [savedColumnsFromStore],
@@ -783,6 +792,16 @@ export function LoanDetailView({
   const [copiedBookmarkState, setCopiedBookmarkState] = useState<{ id: string; fading: boolean } | null>(null);
   const [selectedBookmarkId, setSelectedBookmarkId] = useState<string | null>(null);
   const [sharedBookmarkTitle, setSharedBookmarkTitle] = useState<string | null>(null);
+  const isStandalonePersistenceEnabled = Boolean(
+    syncFiltersToUrl &&
+      columnsStoreId === LOAN_DETAIL_STANDALONE_COLUMNS_STORE_ID &&
+      tenantId,
+  );
+  const standaloneViewState = useLoanDetailViewState({
+    tenantId,
+    scope: "standalone",
+  });
+  const hydratedStandalonePreferenceKeyRef = useRef<string | null>(null);
   const {
     bookmarks,
     isLoading: bookmarksLoading,
@@ -919,6 +938,26 @@ export function LoanDetailView({
     });
   }, []);
 
+  const clearFilterSearch = useCallback((columnId: string) => {
+    const timers = searchDebounceTimersRef.current;
+    if (timers[columnId]) {
+      clearTimeout(timers[columnId]);
+      delete timers[columnId];
+    }
+    setFilterSearchByColumn((prev) => {
+      if (!(columnId in prev)) return prev;
+      const next = { ...prev };
+      delete next[columnId];
+      return next;
+    });
+    setDebouncedFilterSearchByColumn((prev) => {
+      if (!(columnId in prev)) return prev;
+      const next = { ...prev };
+      delete next[columnId];
+      return next;
+    });
+  }, []);
+
   const discardDraft = useCallback((columnId: string) => {
     setDraftFilters((prev) => {
       const next = { ...prev };
@@ -926,11 +965,13 @@ export function LoanDetailView({
       return next;
     });
     setOpenFilterColumnId((current) => (current === columnId ? null : current));
-  }, []);
+    clearFilterSearch(columnId);
+  }, [clearFilterSearch]);
 
   const closePopoverWithoutDiscard = useCallback((columnId: string) => {
     setOpenFilterColumnId((current) => (current === columnId ? null : current));
-  }, []);
+    clearFilterSearch(columnId);
+  }, [clearFilterSearch]);
 
   const commitDraft = useCallback((columnId: string) => {
     let committedFilter: ColumnFilter | undefined;
@@ -954,11 +995,12 @@ export function LoanDetailView({
       return next;
     });
     setOpenFilterColumnId((current) => (current === columnId ? null : current));
+    clearFilterSearch(columnId);
     if (committedFilter && (committedFilter.kind === "text" || (committedFilter.kind === "number" && committedFilter.mode === "all"))) {
       const values = committedFilter.selectedValues;
       setFlashState({ columnId, values, nonce: Date.now() });
     }
-  }, [draftFilters, runFilterUpdate]);
+  }, [draftFilters, runFilterUpdate, clearFilterSearch]);
 
   useEffect(() => {
     if (!flashState) return;
@@ -1003,6 +1045,47 @@ export function LoanDetailView({
   const saveStatusClass = bookmarkInSync
     ? "bg-emerald-600 hover:bg-emerald-600 text-white"
     : "bg-sky-600 hover:bg-sky-700 text-white";
+
+  const toPersistedColumns = useCallback(
+    (columns: SavedLoanDetailColumn[] | undefined): SavedLoanDetailColumn[] => {
+      if (!columns?.length) return [];
+      return columns.map((col) => ({
+        id: col.id,
+        label: col.label,
+        field: col.field,
+      }));
+    },
+    [],
+  );
+
+  const saveStandaloneViewState = useCallback(async () => {
+    if (!isStandalonePersistenceEnabled) return;
+    if (isApplyingFilters) return;
+    const payload: LoanDetailViewStateV1 = normalizeLoanDetailViewState({
+      version: 1,
+      appliedFilters: normalizeFilterState(appliedFilters),
+      selectedBookmarkId,
+      selectedBookmarkTitle: selectedBookmark?.name ?? sharedBookmarkTitle ?? null,
+      columns: toPersistedColumns(savedColumnsFromStore),
+      sortColumnId,
+      sortDirection,
+      showFilters,
+    });
+    await standaloneViewState.save(payload);
+  }, [
+    isStandalonePersistenceEnabled,
+    isApplyingFilters,
+    appliedFilters,
+    selectedBookmarkId,
+    selectedBookmark?.name,
+    sharedBookmarkTitle,
+    savedColumnsFromStore,
+    sortColumnId,
+    sortDirection,
+    showFilters,
+    toPersistedColumns,
+    standaloneViewState,
+  ]);
 
   const filterSummaryItems = useMemo(() => {
     const summarize = (state: ColumnFilterState): string[] => {
@@ -1169,6 +1252,41 @@ export function LoanDetailView({
   }, [searchParams]);
 
   useEffect(() => {
+    if (!isStandalonePersistenceEnabled) return;
+    const preferenceKey = standaloneViewState.preferenceKey;
+    if (!preferenceKey) return;
+    if (hydratedStandalonePreferenceKeyRef.current === preferenceKey) return;
+    let cancelled = false;
+    const hasUrlFilters = Boolean(searchParams.get("ldFilters") || searchParams.get("bookmarkName"));
+    void standaloneViewState.load().then((loaded) => {
+      if (cancelled || !loaded) return;
+      if (loaded.columns.length > 0 && columnsStoreId) {
+        setColumnsInStore(columnsStoreId, loaded.columns);
+      }
+      if (!hasUrlFilters) {
+        setAppliedFilters(normalizeFilterState(loaded.appliedFilters));
+        setSelectedBookmarkId(loaded.selectedBookmarkId);
+        setSharedBookmarkTitle(loaded.selectedBookmarkTitle);
+      }
+      setSortColumnId(loaded.sortColumnId);
+      setSortDirection(loaded.sortDirection);
+      setShowFilters(loaded.showFilters);
+      hydratedStandalonePreferenceKeyRef.current = preferenceKey;
+    }).catch(() => {
+      hydratedStandalonePreferenceKeyRef.current = preferenceKey;
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isStandalonePersistenceEnabled,
+    searchParams,
+    standaloneViewState,
+    columnsStoreId,
+    setColumnsInStore,
+  ]);
+
+  useEffect(() => {
     if (!syncFiltersToUrl) return;
     const fromUrl = decodeFilterStateFromQuery(searchParams.get("ldFilters"));
     if (fromUrl && Object.keys(fromUrl).length > 0) {
@@ -1253,6 +1371,15 @@ export function LoanDetailView({
     onPersistedWorkbenchStateChange,
     isApplyingFilters,
   ]);
+
+  useEffect(() => {
+    if (!isStandalonePersistenceEnabled) return;
+    const preferenceKey = standaloneViewState.preferenceKey;
+    if (!preferenceKey) return;
+    if (standaloneViewState.isLoading) return;
+    if (hydratedStandalonePreferenceKeyRef.current !== preferenceKey) return;
+    void saveStandaloneViewState();
+  }, [isStandalonePersistenceEnabled, saveStandaloneViewState, standaloneViewState]);
 
   const toggleDraftValue = useCallback((columnId: string, value: string, kind: LoanDetailFilterKind) => {
     setDraftFilters((prev) => {
@@ -1469,10 +1596,15 @@ export function LoanDetailView({
     const hasBlank = cached?.hasBlank ?? false;
     const valuesForList = hasBlank ? [EMPTY_FILTER_TOKEN, ...allValues] : allValues;
     const search = (debouncedFilterSearchByColumn[col.id] ?? "").toLowerCase();
+    const isLoanNumberColumn = col.id === "loan_number";
     const filteredOptions = search
-      ? valuesForList.filter((value) => value === EMPTY_FILTER_TOKEN
-        ? "(blank)".includes(search)
-        : value.toLowerCase().includes(search))
+      ? valuesForList.filter((value) => {
+        if (value === EMPTY_FILTER_TOKEN) return "(blank)".includes(search);
+        const normalized = value.toLowerCase();
+        return isLoanNumberColumn
+          ? normalized.startsWith(search)
+          : normalized.includes(search);
+      })
       : valuesForList;
     const filter = draftFilters[col.id] ?? cloneFilter(appliedFilters[col.id]);
     const selectedValues =
@@ -1489,6 +1621,9 @@ export function LoanDetailView({
       if (b === EMPTY_FILTER_TOKEN) return 1;
       return a.localeCompare(b, undefined, { numeric: true });
     });
+    const displayedOptions = isLoanNumberColumn
+      ? orderedOptions.slice(0, LOAN_NUMBER_FILTER_MAX_OPTIONS)
+      : orderedOptions;
 
     if (filterKind === "boolean") {
       const value = filter?.kind === "boolean" ? filter.value : "all";
@@ -1566,7 +1701,7 @@ export function LoanDetailView({
             ))}
           </div>
           <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(col.id)}>
-            Clear
+            Clear Selection
           </Button>
         </div>
       );
@@ -1594,18 +1729,34 @@ export function LoanDetailView({
               />
               <CommandList>
                 <CommandEmpty>No values found.</CommandEmpty>
-                {orderedOptions.map((value) => (
-                  <CommandItem key={value} onSelect={() => toggleDraftValue(col.id, value, "number")}>
+                {displayedOptions.map((value) => {
+                  const isDraftSelected = numberFilter.selectedValues.includes(value);
+                  return (
+                  <CommandItem
+                    key={value}
+                    onSelect={() => toggleDraftValue(col.id, value, "number")}
+                    className={cn(
+                      "cursor-pointer hover:!bg-transparent hover:!text-foreground data-[selected=true]:!bg-transparent data-[selected=true]:!text-foreground",
+                      isDraftSelected
+                        ? "!bg-accent !text-accent-foreground hover:!bg-accent hover:!text-accent-foreground data-[selected=true]:!bg-accent data-[selected=true]:!text-accent-foreground"
+                        : "",
+                    )}
+                  >
                     <span className="mr-2">
-                      {numberFilter.selectedValues.includes(value) ? "✓" : ""}
+                      {isDraftSelected ? "✓" : ""}
                     </span>
                     {value === EMPTY_FILTER_TOKEN ? "(Blank)" : value}
                   </CommandItem>
-                ))}
+                )})}
               </CommandList>
             </Command>
+            {isLoanNumberColumn && orderedOptions.length > displayedOptions.length && (
+              <p className="px-1 text-xs text-slate-500 dark:text-slate-400">
+                Showing first {LOAN_NUMBER_FILTER_MAX_OPTIONS} matches. Keep typing to narrow results.
+              </p>
+            )}
             <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(col.id)}>
-              Clear
+              Clear Selection
             </Button>
           </TabsContent>
           <TabsContent value="range" className="space-y-2">
@@ -1625,7 +1776,7 @@ export function LoanDetailView({
               />
             </div>
             <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(col.id)}>
-              Clear
+              Clear Selection
             </Button>
           </TabsContent>
           <TabsContent value="min" className="space-y-2">
@@ -1639,7 +1790,7 @@ export function LoanDetailView({
               />
             </div>
             <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(col.id)}>
-              Clear
+              Clear Selection
             </Button>
           </TabsContent>
           <TabsContent value="max" className="space-y-2">
@@ -1653,7 +1804,7 @@ export function LoanDetailView({
               />
             </div>
             <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(col.id)}>
-              Clear
+              Clear Selection
             </Button>
           </TabsContent>
         </Tabs>
@@ -1671,16 +1822,32 @@ export function LoanDetailView({
           />
           <CommandList>
             <CommandEmpty>No values found.</CommandEmpty>
-            {orderedOptions.map((value) => (
-              <CommandItem key={value} onSelect={() => toggleDraftValue(col.id, value, "text")}>
-                <span className="mr-2">{textFilter.selectedValues.includes(value) ? "✓" : ""}</span>
+            {displayedOptions.map((value) => {
+              const isDraftSelected = textFilter.selectedValues.includes(value);
+              return (
+              <CommandItem
+                key={value}
+                onSelect={() => toggleDraftValue(col.id, value, "text")}
+                className={cn(
+                  "cursor-pointer hover:!bg-transparent hover:!text-foreground data-[selected=true]:!bg-transparent data-[selected=true]:!text-foreground",
+                  isDraftSelected
+                    ? "!bg-accent !text-accent-foreground hover:!bg-accent hover:!text-accent-foreground data-[selected=true]:!bg-accent data-[selected=true]:!text-accent-foreground"
+                    : "",
+                )}
+              >
+                <span className="mr-2">{isDraftSelected ? "✓" : ""}</span>
                 {value === EMPTY_FILTER_TOKEN ? "(Blank)" : value}
               </CommandItem>
-            ))}
+            )})}
           </CommandList>
         </Command>
+        {isLoanNumberColumn && orderedOptions.length > displayedOptions.length && (
+          <p className="px-1 text-xs text-slate-500 dark:text-slate-400">
+            Showing first {LOAN_NUMBER_FILTER_MAX_OPTIONS} matches. Keep typing to narrow results.
+          </p>
+        )}
         <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(col.id)}>
-          Clear
+          Clear Selection
         </Button>
       </div>
     );
@@ -2059,26 +2226,34 @@ export function LoanDetailView({
                             onEscapeKeyDown={(event) => event.preventDefault()}
                           >
                             <div className="mb-2 flex items-center justify-between gap-2">
-                              <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-                                {col.label}
+                              <div>
+                                <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                                  {col.label}
+                                </div>
+                                <div className="text-[11px] text-slate-400 dark:text-slate-500">
+                                  Select one or more values from the list below.
+                                </div>
                               </div>
                               <div className="flex items-center gap-1">
-                                <button
+                                <Button
                                   type="button"
-                                  className="rounded p-1 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 px-2 text-xs"
                                   onClick={() => discardDraft(col.id)}
                                   aria-label={`Cancel ${col.label} filter changes`}
                                 >
-                                  <X className="h-3.5 w-3.5" />
-                                </button>
-                                <button
+                                  Cancel
+                                </Button>
+                                <Button
                                   type="button"
-                                  className="rounded p-1 text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/30"
+                                  size="sm"
+                                  className="h-7 px-2 text-xs"
                                   onClick={() => commitDraft(col.id)}
                                   aria-label={`Apply ${col.label} filter changes`}
                                 >
-                                  <Check className="h-3.5 w-3.5" />
-                                </button>
+                                  Apply Filters
+                                </Button>
                               </div>
                             </div>
                             {renderFilterContent(col)}

@@ -104,7 +104,7 @@ RULES:
   - Funded (date-based, for revenue/volume): funding_date IS NOT NULL
 - CRITICAL: Loans with NULL application_date are pre-excluded data artifacts. EVERY query on active loans MUST include application_date IS NOT NULL. Do NOT investigate, count, or report on loans missing application_date — that is a known data artifact, not a finding.
 - Pull-through rate: COUNT(originated) / COUNT(completed) * 100 — use the COMPLETED definition above as denominator, NOT just withdrawn+denied.
-- Revenue: loan_amount * (rate_lock_buy_side_base_price_rate - 100) / 100
+- Revenue: Use the TENANT REVENUE FORMULA provided in the user context below. Every tenant has a custom revenue calculation — NEVER assume a formula. If no formula is provided, fall back to: loan_amount * (rate_lock_buy_side_base_price_rate - 100) / 100
 - PostgreSQL: DATE - DATE = integer days. Use ::date cast for date subtraction.
 - Limit to 100 rows max
 - Use COALESCE / NULLIF for NULL handling
@@ -172,7 +172,8 @@ export async function runInsightInvestigator(
   onStep?: OnInvestigatorStep,
   marketContext?: string,
   industryNewsContext?: string,
-  knowledgeContext?: string
+  knowledgeContext?: string,
+  revenueFormula?: string
 ): Promise<InsightFinding> {
   const now = new Date();
   const todayStr = now.toISOString().split("T")[0];
@@ -202,6 +203,12 @@ export async function runInsightInvestigator(
   if (knowledgeContext) {
     userContentParts.push(
       `\n## Organization Knowledge & Guidelines\nThe following excerpts from the organization's knowledge center contain compliance policies, SLA definitions, and internal thresholds. Use these as benchmarks when formulating queries and interpreting results:\n${knowledgeContext}`
+    );
+  }
+
+  if (revenueFormula) {
+    userContentParts.push(
+      `\n## TENANT REVENUE FORMULA (MUST USE)\nThis tenant's configured revenue SQL expression:\n\`\`\`sql\n${revenueFormula}\n\`\`\`\nUse this EXACTLY when computing revenue. Do NOT invent your own formula or reference fields not in this expression.`
     );
   }
 

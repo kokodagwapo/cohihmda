@@ -52,6 +52,7 @@ import {
   initializeMarketRateCache,
 } from "../../dashboard/marketRateService.js";
 import { getIndustryNews } from "../../newsService.js";
+import { getTenantRevenueExpression } from "../../../utils/scorecard-utils.js";
 
 // ============================================================================
 // Types
@@ -87,6 +88,7 @@ export type OnProgress = (event: {
 // ============================================================================
 
 const MAX_CONCURRENT_INVESTIGATORS = 5;
+
 
 // Per-tenant concurrency lock — prevents duplicate runs
 const activeGenerations = new Map<string, { startedAt: number; batch: string }>();
@@ -155,12 +157,13 @@ export async function runInsightGeneration(
 
     // Gather context
     emit("context", "Gathering schema, metrics, and tenant context...");
-    const [schemaContext, metricDefinitions, marketContext, industryNewsContext, staleLoanStats] = await Promise.all([
+    const [schemaContext, metricDefinitions, marketContext, industryNewsContext, staleLoanStats, revenueFormula] = await Promise.all([
       getSchemaContext(tenantId),
       Promise.resolve(getMetricDefinitions()),
       fetchMarketContext(),
       fetchIndustryNewsContext(),
       fetchStaleLoanStats(tenantPool),
+      getTenantRevenueExpression(tenantPool).catch(() => undefined),
     ]);
     if (marketContext) {
       emit("context", `Market rate context loaded (${marketContext.length} chars)`);
@@ -258,7 +261,8 @@ export async function runInsightGeneration(
                 },
                 marketContext || undefined,
                 industryNewsContext || undefined,
-                categoryKnowledgeContext || undefined
+                categoryKnowledgeContext || undefined,
+                revenueFormula || undefined
               )
             )
           );
@@ -474,7 +478,7 @@ export async function generateMoreForBucketAgent(
     const apiKey = await getOpenAIKey(tenantId);
 
     emit("context", "Gathering context...");
-    const [schemaContext, metricDefinitions, knowledgeContext, marketContext, industryNewsContext, staleLoanStats] =
+    const [schemaContext, metricDefinitions, knowledgeContext, marketContext, industryNewsContext, staleLoanStats, revenueFormula] =
       await Promise.all([
         getSchemaContext(tenantId),
         Promise.resolve(getMetricDefinitions()),
@@ -482,6 +486,7 @@ export async function generateMoreForBucketAgent(
         fetchMarketContext(),
         fetchIndustryNewsContext(),
         fetchStaleLoanStats(tenantPool),
+        getTenantRevenueExpression(tenantPool).catch(() => undefined),
       ]);
 
     const staleLoanContext = buildStaleLoanContext(staleLoanStats);
@@ -528,7 +533,8 @@ export async function generateMoreForBucketAgent(
             () => {},
             marketContext || undefined,
             industryNewsContext || undefined,
-            knowledgeContext || undefined
+            knowledgeContext || undefined,
+            revenueFormula || undefined
           )
         )
       );
@@ -671,7 +677,7 @@ export async function generateInsightsForCategory(
     const apiKey = await getOpenAIKey(tenantId);
 
     emit("context", "Gathering context...");
-    const [schemaContext, metricDefinitions, categoryKnowledgeContext, marketContext, industryNewsContext, staleLoanStats] =
+    const [schemaContext, metricDefinitions, categoryKnowledgeContext, marketContext, industryNewsContext, staleLoanStats, revenueFormula] =
       await Promise.all([
         getSchemaContext(tenantId),
         Promise.resolve(getMetricDefinitions()),
@@ -679,6 +685,7 @@ export async function generateInsightsForCategory(
         fetchMarketContext(),
         fetchIndustryNewsContext(),
         fetchStaleLoanStats(tenantPool),
+        getTenantRevenueExpression(tenantPool).catch(() => undefined),
       ]);
 
     if (categoryKnowledgeContext) {
@@ -727,7 +734,8 @@ export async function generateInsightsForCategory(
             },
             marketContext || undefined,
             industryNewsContext || undefined,
-            categoryKnowledgeContext || undefined
+            categoryKnowledgeContext || undefined,
+            revenueFormula || undefined
           )
         )
       );
@@ -882,6 +890,17 @@ async function persistAgentInsights(
     const ph = Array.from({ length: totalParams }, () => `$${paramIdx++}`);
     placeholders.push(`(${ph.join(", ")})`);
 
+    // Pack ETM fields into the evidence JSONB (same pattern as legacy pipeline)
+    const evidenceWithEtm = {
+      ...(ins.evidence || {}),
+      ...(ins.what_changed ? { what_changed: ins.what_changed } : {}),
+      ...(ins.why ? { why: ins.why } : {}),
+      ...(ins.business_impact ? { business_impact: ins.business_impact } : {}),
+      ...(ins.risk_if_ignored ? { risk_if_ignored: ins.risk_if_ignored } : {}),
+      ...(ins.recommended_action ? { recommended_action: ins.recommended_action } : {}),
+      ...(ins.owner ? { owner: ins.owner } : {}),
+    };
+
     values.push(
       ins.bucket,                                    // bucket
       ins.priority,                                  // priority
@@ -891,7 +910,7 @@ async function persistAgentInsights(
       ins.source,                                    // source
       ins.severity_score,                            // severity_score
       JSON.stringify(ins.impact || {}),              // impact
-      JSON.stringify(ins.evidence || {}),            // evidence
+      JSON.stringify(evidenceWithEtm),               // evidence (with ETM fields packed in)
       false,                                         // for_podcast
       "ytd",                                         // date_filter (agent insights are timeframe-agnostic)
       null,                                          // channel_group
@@ -1001,6 +1020,16 @@ async function appendAgentInsights(
     const ph = Array.from({ length: totalParams }, () => `$${paramIdx++}`);
     placeholders.push(`(${ph.join(", ")})`);
 
+    const evidenceWithEtm = {
+      ...(ins.evidence || {}),
+      ...(ins.what_changed ? { what_changed: ins.what_changed } : {}),
+      ...(ins.why ? { why: ins.why } : {}),
+      ...(ins.business_impact ? { business_impact: ins.business_impact } : {}),
+      ...(ins.risk_if_ignored ? { risk_if_ignored: ins.risk_if_ignored } : {}),
+      ...(ins.recommended_action ? { recommended_action: ins.recommended_action } : {}),
+      ...(ins.owner ? { owner: ins.owner } : {}),
+    };
+
     values.push(
       ins.bucket,
       ins.priority,
@@ -1010,7 +1039,7 @@ async function appendAgentInsights(
       ins.source,
       ins.severity_score,
       JSON.stringify(ins.impact || {}),
-      JSON.stringify(ins.evidence || {}),
+      JSON.stringify(evidenceWithEtm),
       false,
       "ytd",
       null,
