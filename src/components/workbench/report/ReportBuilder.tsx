@@ -532,46 +532,6 @@ function canvasWidgetsToSlides(
     return typeof summary === 'string' && summary.trim().length > 0 ? summary.trim() : undefined;
   };
 
-  const buildKpiElements = (entries: Array<{ label: string; value: string; change?: string; trend?: string }>) => {
-    const cols = Math.min(entries.length, 4);
-    const rows = Math.ceil(entries.length / cols);
-    const itemW = 8.5 / cols;
-    const maxH = Math.min(1.3, 5.0 / rows);
-    const rowSpacing = maxH + 0.1;
-    return entries.map((kpi, idx) => {
-      const col = idx % cols;
-      const row = Math.floor(idx / cols);
-      return {
-        id: generateId('kpi'),
-        type: 'kpi' as const,
-        position: { x: 0.5 + col * itemW + 0.05, y: 1.0 + row * rowSpacing + 0.05, w: itemW - 0.1, h: maxH },
-        config: {
-          type: 'kpi',
-          label: kpi.label,
-          value: kpi.value,
-          format: 'text',
-          change: kpi.change,
-        } as KpiElementConfig,
-      };
-    });
-  };
-
-  const pushKpiSlides = (
-    title: string,
-    entries: Array<{ label: string; value: string; change?: string; trend?: string }>,
-    speakerNotes: string,
-  ) => {
-    for (let page = 0; page < entries.length; page += 8) {
-      const batch = entries.slice(page, page + 8);
-      slides.push({
-        id: generateId('slide'),
-        layout: 'kpi-grid',
-        title: page === 0 ? title : `${title} (cont.)`,
-        speakerNotes,
-        elements: buildKpiElements(batch),
-      });
-    }
-  };
 
   const TABLE_ROWS_PER_SLIDE = 12;
   const TABLE_MAX_PAGES = 5;
@@ -759,92 +719,14 @@ function canvasWidgetsToSlides(
     });
   };
 
-  // Executive Summary slide with KPI overview
-  if (kpis.length > 0) {
-    const summaryLines = kpis.flatMap((kpi) => {
-      const d = kpi.data as any;
-      // Handle { kpis: [{ label, value, ... }] } shape from ExecDashboard / ClosingForecast
-      if (Array.isArray(d?.kpis)) {
-        return d.kpis.map((k: any) => {
-          const changeStr = k.change && k.change !== '--'
-            ? ` (${typeof k.change === 'number' ? (k.change >= 0 ? '+' : '') + k.change.toFixed(1) + '%' : k.change})`
-            : '';
-          return `\u2022 ${k.label}: ${k.value}${changeStr}`;
-        });
-      }
-      // Single KPI shape
-      const rawVal = d?.value ?? d ?? '--';
-      const fmt = d?.format || 'number';
-      const val = fmtKpi(rawVal, fmt);
-      const change = d?.change;
-      const changeStr = change != null
-        ? ` (${change >= 0 ? '+' : ''}${typeof change === 'number' ? change.toFixed(1) : change}%)`
-        : '';
-      return [`\u2022 ${kpi.widgetName}: ${val}${changeStr}`];
-    }).join('\n');
-
-    slides.push({
-      id: generateId('slide'),
-      layout: 'content',
-      title: 'Executive Summary',
-      speakerNotes: 'High-level overview of key metrics. Highlight the most important trends and areas requiring attention.',
-      elements: [{
-        id: generateId('text'),
-        type: 'text',
-        position: { x: 0.5, y: 1.0, w: 9, h: 5.0 },
-        config: {
-          type: 'text',
-          content: `Key Metrics Overview\n\n${summaryLines}`,
-          fontSize: 13,
-          lineSpacing: 1.5,
-        } as TextElementConfig,
-      }],
-    });
-  }
-
-  const bufferedSingleKpis: CanvasWidgetLike[] = [];
-  const flushSingleKpis = () => {
-    if (bufferedSingleKpis.length === 0) return;
-    const entries = bufferedSingleKpis.map((kpi) => {
-      const d = kpi.data as any;
-      return {
-        label: getWidgetTitle(kpi),
-        value: fmtKpi(d?.value ?? d, d?.format),
-        change: d?.change,
-      };
-    });
-    pushKpiSlides(
-      'Key Metrics',
-      entries,
-      'Detailed KPI metrics from the canvas. Discuss trends and compare against targets.',
-    );
-    bufferedSingleKpis.splice(0, bufferedSingleKpis.length);
-  };
+  // KPIs are rendered inline as grid slides — no separate executive summary
 
   for (const widget of withData) {
     const d = widget.data as any;
 
     if (widget.category === 'kpi') {
-      if (Array.isArray(d?.kpis) && d.kpis.length > 0) {
-        flushSingleKpis();
-        const entries = d.kpis.map((k: any) => ({
-          label: k.label,
-          value: String(k.value ?? '--'),
-          change: k.change,
-          trend: k.trend,
-        }));
-        pushKpiSlides(
-          getWidgetTitle(widget),
-          entries,
-          `${widget.widgetName}: KPI summary from the canvas.`,
-        );
-      } else {
-        bufferedSingleKpis.push(widget);
-      }
       continue;
     }
-
-    flushSingleKpis();
 
     if (widget.category === 'chart') {
       if (isWorkflowConversionPayload(d)) {
@@ -1023,8 +905,6 @@ function canvasWidgetsToSlides(
       }],
     });
   }
-
-  flushSingleKpis();
 
   return slides;
 }

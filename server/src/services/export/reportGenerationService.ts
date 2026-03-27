@@ -1328,48 +1328,6 @@ function resolveWidgetKind(
 // Slide builders per widget kind
 // ---------------------------------------------------------------------------
 
-function buildKpiSlide(
-  kpis: CanvasWidgetForReport[],
-  theme: ReportTheme,
-  slideId: string,
-  slideTitle = "Key Metrics"
-): SlideDefinition {
-  const batch = kpis.slice(0, 8);
-  const cols = Math.min(batch.length, 4);
-  const rows = Math.ceil(batch.length / cols);
-  const itemW = 8.5 / cols;
-  const itemH = Math.min(1.6, 4.5 / rows);
-  const startY = 1.0;
-
-  const elements: SlideElement[] = batch.map((kpi, idx) => {
-    const col = idx % cols;
-    const row = Math.floor(idx / cols);
-    const rawVal = kpi.data?.value ?? kpi.data ?? "--";
-    return {
-      id: `kpi-${slideId}-${idx}`,
-      type: "kpi" as const,
-      position: {
-        x: 0.5 + col * itemW + 0.05,
-        y: startY + row * itemH + 0.05,
-        w: itemW - 0.1,
-        h: itemH - 0.1,
-      },
-      config: {
-        type: "kpi",
-        label: kpi.widgetName,
-        value: rawVal,
-        format: kpi.data?.format || "number",
-        change: kpi.data?.change,
-        trend: kpi.data?.trend,
-        color: theme.accentColor,
-      },
-      dataSource: { type: "static" as const, staticData: kpi.data },
-    };
-  });
-
-  return { id: slideId, layout: "kpi-grid", title: slideTitle, elements };
-}
-
 function buildChartSlide(
   w: CanvasWidgetForReport,
   slideId: string,
@@ -1636,98 +1594,25 @@ export function canvasToReportDefinition(
   // Sort by spatial position so slide order matches canvas reading order
   const sorted = sortBySpatialPosition(widgets);
 
-  // Coalesce leading KPIs (before any chart/table) into a single summary slide
-  const leadingKpis: CanvasWidgetForReport[] = [];
-  const remaining: CanvasWidgetForReport[] = [];
-  let kpiPhase = true;
+  let slideIndex = 0;
 
   for (const w of sorted) {
-    const kind = resolveWidgetKind(w);
-    if (kpiPhase && kind === "kpi") {
-      leadingKpis.push(w);
-    } else {
-      kpiPhase = false;
-      remaining.push(w);
-    }
-  }
-
-  // Build KPI summary slide first (if any leading KPIs)
-  if (leadingKpis.length > 0) {
-    // Build Executive Summary auto-text
-    const summaryLines = leadingKpis.map((kpi) => {
-      const rawVal = kpi.data?.value ?? kpi.data ?? "--";
-      const fmt = kpi.data?.format || "number";
-      const val = formatDisplayValue(rawVal, fmt);
-      const change = kpi.data?.change;
-      const changeStr =
-        change != null
-          ? ` (${change >= 0 ? "+" : ""}${typeof change === "number" ? change.toFixed(1) : change}%)`
-          : "";
-      return `\u2022 ${kpi.widgetName}: ${val}${changeStr}`;
-    }).join("\n");
-
-    slides.push({
-      id: "slide-exec-summary",
-      layout: "content",
-      title: "Executive Summary",
-      speakerNotes:
-        "High-level overview of key metrics from the canvas. Highlight the most important trends and any areas requiring attention.",
-      elements: [
-        {
-          id: "exec-summary-text",
-          type: "text",
-          position: { x: 0.5, y: 1.0, w: 9, h: 5.0 },
-          config: {
-            type: "text",
-            content: `Key Metrics Overview\n\n${summaryLines}\n\nReport generated from Cohi Workbench on ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}.`,
-            fontSize: 13,
-            color: theme.textColor,
-            lineSpacing: 1.5,
-          },
-        },
-      ],
-    });
-
-    // KPI grid slide (batches of up to 8 per slide)
-    for (let i = 0; i < leadingKpis.length; i += 8) {
-      const batch = leadingKpis.slice(i, i + 8);
-      slides.push(buildKpiSlide(batch, theme, `slide-kpis-${i}`, i === 0 ? "Key Metrics" : "Key Metrics (cont.)"));
-    }
-  }
-
-  // Now walk remaining widgets in spatial order
-  let slideIndex = 0;
-  let inlineKpiBuffer: CanvasWidgetForReport[] = [];
-  let inlineKpiGroupId: string | null = null; // track widget_group context
-
-  const flushInlineKpis = () => {
-    if (inlineKpiBuffer.length === 0) return;
-    for (let i = 0; i < inlineKpiBuffer.length; i += 8) {
-      slides.push(buildKpiSlide(inlineKpiBuffer.slice(i, i + 8), theme, `slide-inline-kpi-${slideIndex++}`, "Metrics"));
-    }
-    inlineKpiBuffer = [];
-  };
-
-  for (const w of remaining) {
     const kind = resolveWidgetKind(w);
 
     if (kind === "skip") continue;
 
     if (kind === "section_header") {
-      flushInlineKpis();
       slides.push(buildSectionBreakSlide(w.widgetName, `slide-section-${slideIndex++}`));
       continue;
     }
 
     if (kind === "widget_group") {
-      flushInlineKpis();
       const d = w.data as any;
       slides.push(buildSectionBreakSlide(d?.title || w.widgetName, `slide-group-${slideIndex++}`));
       continue;
     }
 
     if (kind === "embed") {
-      flushInlineKpis();
       // Dashboard section embed: render as a titled text placeholder
       const d = w.data as any;
       slides.push({
@@ -1754,13 +1639,8 @@ export function canvasToReportDefinition(
     }
 
     if (kind === "kpi") {
-      // Buffer KPIs — will be coalesced into a grid slide
-      inlineKpiBuffer.push(w);
       continue;
     }
-
-    // Non-KPI widgets flush any buffered KPIs first
-    flushInlineKpis();
 
     switch (kind) {
       case "chart":
@@ -1788,48 +1668,6 @@ export function canvasToReportDefinition(
         break;
     }
   }
-
-  // Flush any trailing inline KPIs
-  flushInlineKpis();
-
-  // Key Takeaways slide (final)
-  const allKpis = [...leadingKpis, ...remaining.filter((w) => resolveWidgetKind(w) === "kpi")];
-  const takeawayItems: string[] = [];
-  for (const kpi of allKpis) {
-    const change = kpi.data?.change;
-    if (change != null && typeof change === "number" && Math.abs(change) >= 5) {
-      const direction = change >= 0 ? "increased" : "decreased";
-      takeawayItems.push(
-        `${kpi.widgetName} ${direction} by ${Math.abs(change).toFixed(1)}% — ${change >= 0 ? "positive trend to maintain" : "investigate root cause"}`
-      );
-    }
-  }
-  if (takeawayItems.length === 0) {
-    takeawayItems.push("Review the data presented in this report for actionable insights");
-    takeawayItems.push("Compare these metrics against prior period targets");
-    takeawayItems.push("Schedule follow-up discussion with stakeholders");
-  }
-
-  slides.push({
-    id: "slide-takeaways",
-    layout: "content",
-    title: "Key Takeaways & Next Steps",
-    speakerNotes: "Summarize the main findings and outline recommended action items. Tailor these points to your audience.",
-    elements: [
-      {
-        id: "takeaways-text",
-        type: "text",
-        position: { x: 0.5, y: 1.0, w: 9, h: 5.0 },
-        config: {
-          type: "text",
-          content: takeawayItems.map((item, i) => `${i + 1}. ${item}`).join("\n\n"),
-          fontSize: 14,
-          color: theme.textColor,
-          lineSpacing: 1.8,
-        },
-      },
-    ],
-  });
 
   return {
     id: `report-${Date.now()}`,
