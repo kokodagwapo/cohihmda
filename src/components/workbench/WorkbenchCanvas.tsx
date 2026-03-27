@@ -850,6 +850,8 @@ export function WorkbenchCanvas({
   const [saveTitle, setSaveTitle] = useState("Untitled canvas");
   const [isSaving, setIsSaving] = useState(false);
   const [width, setWidth] = useState(1200);
+  const widthRef = useRef(width);
+  widthRef.current = width;
   const [isUploading, setIsUploading] = useState(false);
   const [selectedWidgetId, setSelectedWidgetId] = useState<string | null>(null);
   /** Widget being edited via Cohi panel; set only by "Edit with Cohi", cleared when panel closes */
@@ -925,6 +927,10 @@ export function WorkbenchCanvas({
   const logoInputRef = useRef<HTMLInputElement>(null);
   const backgroundImageInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+  const onLoadedRef = useRef(onLoaded);
+  const toastRef = useRef(toast);
+  onLoadedRef.current = onLoaded;
+  toastRef.current = toast;
   const pendingPins = useCanvasPinStore((s) => s.pendingPins);
   const consumePendingPins = useCanvasPinStore((s) => s.consumePendingPins);
 
@@ -933,6 +939,7 @@ export function WorkbenchCanvas({
   const lastSavedSnapshotRef = useRef<string>("");
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const manualSavingRef = useRef(false);
+  const previousLoadCanvasIdRef = useRef<string | null>(loadCanvasId ?? null);
 
   // Build a snapshot string for comparison
   const currentSnapshot = useMemo(() => {
@@ -948,6 +955,60 @@ export function WorkbenchCanvas({
       return "";
     }
   }, [items, annotations, canvasBackground, uploads, saveTitle]);
+
+  const persistExistingCanvas = useCallback(
+    async (options?: { keepalive?: boolean }) => {
+      if (!canvasId || !isOwner) return null;
+
+      const title = saveTitle.trim() || "Untitled canvas";
+      const content = {
+        layoutVersion: "freeform-v1",
+        layout: items,
+        annotations,
+        background: canvasBackground,
+        uploadsMeta: uploads,
+      };
+      const snapshot = JSON.stringify({
+        items,
+        annotations,
+        bg: canvasBackground,
+        uploads,
+        title: saveTitle,
+      });
+      const saveTenantQs = tenantId
+        ? `?tenant_id=${encodeURIComponent(tenantId)}`
+        : "";
+      const url = `/api/workbench/canvases/${canvasId}${saveTenantQs}`;
+      const body = JSON.stringify({ title, content });
+
+      if (options?.keepalive) {
+        void fetch(url, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body,
+          keepalive: true,
+        });
+        return { title, snapshot };
+      }
+
+      await api.request(url, { method: "PUT", body });
+      lastSavedSnapshotRef.current = snapshot;
+      onSaved?.(canvasId, title);
+      return { title, snapshot };
+    },
+    [
+      annotations,
+      canvasBackground,
+      canvasId,
+      isOwner,
+      items,
+      onSaved,
+      saveTitle,
+      tenantId,
+      uploads,
+    ],
+  );
 
   // Determine dirty state
   const isDirty = useMemo(() => {
@@ -980,29 +1041,10 @@ export function WorkbenchCanvas({
     autosaveTimerRef.current = setTimeout(async () => {
       // Skip if a manual save is already in progress
       if (manualSavingRef.current) return;
-      const title = saveTitle.trim() || "Untitled canvas";
-      const content = {
-        layoutVersion: "freeform-v1",
-        layout: items,
-        annotations,
-        background: canvasBackground,
-        uploadsMeta: uploads,
-      };
       setSaveStatus("saving");
       try {
-        await api.request(`/api/workbench/canvases/${canvasId}${tenantQs}`, {
-          method: "PUT",
-          body: JSON.stringify({ title, content }),
-        });
-        lastSavedSnapshotRef.current = JSON.stringify({
-          items,
-          annotations,
-          bg: canvasBackground,
-          uploads,
-          title: saveTitle,
-        });
+        await persistExistingCanvas();
         setSaveStatus("saved");
-        onSaved?.(canvasId, title);
       } catch {
         setSaveStatus("unsaved");
       }
@@ -1015,7 +1057,74 @@ export function WorkbenchCanvas({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSnapshot, canvasId]);
+  }, [currentSnapshot, canvasId, persistExistingCanvas]);
+
+  useEffect(() => {
+    const previousLoadCanvasId = previousLoadCanvasIdRef.current;
+    const nextLoadCanvasId = loadCanvasId ?? null;
+    if (
+      previousLoadCanvasId !== null &&
+      previousLoadCanvasId !== nextLoadCanvasId &&
+      canvasId &&
+      isOwner &&
+      isDirty
+    ) {
+      void persistExistingCanvas();
+    }
+    previousLoadCanvasIdRef.current = nextLoadCanvasId;
+  }, [canvasId, isDirty, isOwner, loadCanvasId, persistExistingCanvas]);
+
+  useEffect(() => {
+    if (!canvasId || !isOwner || !isDirty) return;
+
+    const handlePageHide = () => {
+      void persistExistingCanvas({ keepalive: true });
+    };
+
+    window.addEventListener("pagehide", handlePageHide);
+    return () => window.removeEventListener("pagehide", handlePageHide);
+  }, [canvasId, isDirty, isOwner, persistExistingCanvas]);
+
+  const saveIndicator = useMemo(() => {
+    if (!isOwner) {
+      if (!canvasId) return null;
+      return {
+        label: "View only",
+        className:
+          "text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap flex items-center justify-end gap-1",
+        icon: <Lock className="h-3 w-3" />,
+      };
+    }
+
+    if (saveStatus === "saving") {
+      return {
+        label: "Saving...",
+        className:
+          "text-[11px] text-amber-600 dark:text-amber-400 whitespace-nowrap",
+        icon: null,
+      };
+    }
+
+    if (saveStatus === "saved" && canvasId && !isDirty) {
+      return {
+        label: "Saved",
+        className:
+          "text-[11px] text-emerald-600 dark:text-emerald-400 whitespace-nowrap",
+        icon: null,
+      };
+    }
+
+    if (saveStatus === "unsaved" && canvasId && isDirty) {
+      return {
+        label: "Unsaved changes",
+        className:
+          "text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap",
+        icon: null,
+      };
+    }
+
+    return null;
+  }, [canvasId, isDirty, isOwner, saveStatus]);
 
   // --- Cohi Workbench Intelligence ---
   const widgetCatalog = React.useMemo(() => serializeWidgetCatalog(), []);
@@ -2075,8 +2184,49 @@ export function WorkbenchCanvas({
 
   // Clear canvas data store when switching canvases
   const clearCanvasData = useCanvasDataStore((s) => s.clearAll);
+  const canvasDataVersion = useCanvasDataStore((s) => s.dataVersion);
+  const reportBuilderWidgetData = useMemo(() => {
+    const liveCanvasWidgetEntries = useCanvasDataStore.getState().getSnapshot();
+    const layoutById = new Map(items.map((it) => [it.i, it]));
+    const merged = liveCanvasWidgetEntries.map((entry) => {
+      const layoutItem = layoutById.get(entry.itemId);
+      return {
+        itemId: entry.itemId,
+        widgetName: entry.widgetName,
+        category: entry.category,
+        data: entry.data,
+        widgetType: layoutItem?.type ?? (entry.data as any)?.widgetType,
+        layoutPosition: layoutItem
+          ? { x: layoutItem.x, y: layoutItem.y, w: layoutItem.w, h: layoutItem.h }
+          : undefined,
+      };
+    });
+
+    const knownIds = new Set(merged.map((entry) => entry.itemId));
+    for (const item of items) {
+      if (knownIds.has(item.i)) continue;
+      merged.push({
+        itemId: item.i,
+        widgetName:
+          (item.payload as any).title ||
+          (item.payload as any).label ||
+          item.type,
+        category: 'other',
+        data: { widgetType: item.type, ...(item.payload as any) },
+        widgetType: item.type,
+        layoutPosition: { x: item.x, y: item.y, w: item.w, h: item.h },
+      });
+    }
+
+    return merged;
+  }, [items, canvasDataVersion]);
   useEffect(() => {
     clearCanvasData();
+    setItems([]);
+    setAnnotations([]);
+    setUploads([]);
+    setSourceInsight(null);
+    setShowReportBuilder(false);
   }, [loadCanvasId, clearCanvasData]);
 
   useEffect(() => {
@@ -2095,7 +2245,7 @@ export function WorkbenchCanvas({
         if (cancelled || !data) return;
         const content = data.content ?? {};
         if (Array.isArray(content.layout)) {
-          const containerWidth = Math.max(width - 32, 480);
+          const containerWidth = Math.max(widthRef.current - 32, 480);
           const layoutVersion = content.layoutVersion as string | undefined;
           const shouldConvert =
             layoutVersion !== "freeform-v1" &&
@@ -2155,7 +2305,7 @@ export function WorkbenchCanvas({
             let layoutForSnap = shouldConvert2
               ? convertLayoutToPixels(
                   content.layout ?? [],
-                  Math.max(width - 32, 480),
+                  Math.max(widthRef.current - 32, 480),
                 )
               : (content.layout ?? []);
             layoutForSnap = migrateLoanDetailToWidgetGroup(layoutForSnap);
@@ -2170,13 +2320,13 @@ export function WorkbenchCanvas({
           });
         });
         if (!cancelled) setCanvasLoading(false);
-        onLoaded?.();
+        onLoadedRef.current?.();
       } catch (err: any) {
         if (!cancelled) {
           setCanvasLoading(false);
           const msg = err?.message ?? "";
           const is404 = msg.includes("not found") || msg.includes("404");
-          toast({
+          toastRef.current({
             title: is404 ? "Canvas not found" : "Failed to load canvas",
             description: is404
               ? "This canvas may have been deleted or belongs to a different workspace."
@@ -2189,7 +2339,7 @@ export function WorkbenchCanvas({
     return () => {
       cancelled = true;
     };
-  }, [loadCanvasId, onLoaded, toast, width, tenantQs]);
+  }, [loadCanvasId, tenantQs]);
 
   /* ─── Proactive AI: auto-analyze canvas data on load (opens panel automatically) ─── */
   const autoInsightsFiredRef = useRef(false);
@@ -2481,7 +2631,17 @@ export function WorkbenchCanvas({
   const updateWidgetPayload = useCallback(
     (id: string, payload: CanvasLayoutItem["payload"]) => {
       if (!canEdit) return;
-      setItems((prev) => prev.map((i) => (i.i === id ? { ...i, payload } : i)));
+      setItems((prev) =>
+        prev.map((i) => {
+          if (i.i !== id) return i;
+          try {
+            if (JSON.stringify(i.payload) === JSON.stringify(payload)) return i;
+          } catch {
+            // Fall through and update the payload if serialization fails.
+          }
+          return { ...i, payload };
+        }),
+      );
     },
     [canEdit],
   );
@@ -3692,24 +3852,13 @@ Structure it as a narrative-first executive briefing:
 
   const handleSaveConfirm = useCallback(async () => {
     const title = saveTitle.trim() || "Untitled canvas";
-    const content = {
-      layoutVersion: "freeform-v1",
-      layout: items,
-      annotations,
-      background: canvasBackground,
-      uploadsMeta: uploads,
-    };
     manualSavingRef.current = true;
     setIsSaving(true);
     setSaveStatus("saving");
     try {
       if (canvasId) {
-        await api.request(`/api/workbench/canvases/${canvasId}${tenantQs}`, {
-          method: "PUT",
-          body: JSON.stringify({ title, content }),
-        });
+        await persistExistingCanvas();
         toast({ title: "Canvas saved", description: title });
-        onSaved?.(canvasId, title);
       } else {
         const data = await api.request<{ id: string }>(
           `/api/workbench/canvases${tenantQs}`,
@@ -3730,13 +3879,15 @@ Structure it as a narrative-first executive briefing:
         onSaved?.(data.id, title);
       }
       // Update snapshot so dirty-state resets
-      lastSavedSnapshotRef.current = JSON.stringify({
-        items,
-        annotations,
-        bg: canvasBackground,
-        uploads,
-        title: saveTitle,
-      });
+      if (!canvasId) {
+        lastSavedSnapshotRef.current = JSON.stringify({
+          items,
+          annotations,
+          bg: canvasBackground,
+          uploads,
+          title: saveTitle,
+        });
+      }
       setSaveStatus("saved");
       setSaveDialogOpen(false);
     } catch (err) {
@@ -3760,6 +3911,7 @@ Structure it as a narrative-first executive briefing:
     toast,
     tenantQs,
     onSaved,
+    persistExistingCanvas,
   ]);
 
   /** Stable layout items for rendering (avoids new `widget_group` payload refs every parent re-render for legacy loan detail). */
@@ -3912,7 +4064,8 @@ Structure it as a narrative-first executive briefing:
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400"
-                            onClick={handleSaveClick}
+                            onClick={canvasId ? handleSaveConfirm : handleSaveClick}
+                            disabled={isSaving}
                           >
                             <Save className="h-4 w-4" />
                           </Button>
@@ -3921,33 +4074,14 @@ Structure it as a narrative-first executive briefing:
                       </Tooltip>
                     </>
                   )}
-                  {/* Autosave status indicator (only for owners) */}
-                  {isOwner && saveStatus === "saving" && (
-                    <span className="text-[11px] text-amber-600 dark:text-amber-400 whitespace-nowrap animate-pulse">
-                      Saving…
-                    </span>
-                  )}
-                  {isOwner &&
-                    saveStatus === "saved" &&
-                    canvasId &&
-                    !isDirty && (
-                      <span className="text-[11px] text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
-                        Saved
+                  <div className="min-w-[104px] flex items-center justify-end">
+                    {saveIndicator && (
+                      <span className={saveIndicator.className}>
+                        {saveIndicator.icon}
+                        {saveIndicator.label}
                       </span>
                     )}
-                  {isOwner &&
-                    saveStatus === "unsaved" &&
-                    canvasId &&
-                    isDirty && (
-                      <span className="text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap">
-                        Unsaved changes
-                      </span>
-                    )}
-                  {!isOwner && canvasId && (
-                    <span className="text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap flex items-center gap-1">
-                      <Lock className="h-3 w-3" /> View only
-                    </span>
-                  )}
+                  </div>
                   {isOwner && (
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -4505,7 +4639,9 @@ Structure it as a narrative-first executive briefing:
             )}
           >
             <ReportBuilder
+              key={loadCanvasId ?? canvasId ?? "new-canvas"}
               onClose={() => setShowReportBuilder(false)}
+              canvasWidgetData={reportBuilderWidgetData}
               canvasTitle={saveTitle || "Untitled Canvas"}
               tenantId={tenantId}
               initialDefinition={aiReportDefinition ?? undefined}

@@ -121,16 +121,20 @@ export interface TextElementConfig {
 
 export interface ChartElementConfig {
   type: 'chart';
-  chartType: 'bar' | 'line' | 'pie' | 'area' | 'donut' | 'horizontal_bar' | 'stacked_bar' | 'grouped_bar' | 'treemap' | 'pivot';
+  chartType: 'bar' | 'line' | 'pie' | 'area' | 'donut' | 'horizontal_bar' | 'stacked_bar' | 'grouped_bar' | 'treemap' | 'pivot' | 'combo';
   title?: string;
   data: ChartDataPoint[];
   xKey?: string;
   yKey?: string;
   yKeys?: string[];
+  lineKey?: string;
   nameKey?: string;
   valueKey?: string;
   colors?: string[];
+  lineColor?: string;
   seriesNames?: string[];
+  primaryAxisLabel?: string;
+  secondaryAxisLabel?: string;
   showLegend?: boolean;
   showGrid?: boolean;
   showValues?: boolean;

@@ -18,16 +18,19 @@ function ExecDashboardEmbedInner({ width, height, config }: WidgetRenderProps) {
   const canvasItemId = config?.canvasItemId as string | undefined;
   const defName = (config?.definitionName as string) || 'Business Overview';
   const defCategory = (config?.definitionCategory as string) || 'kpi';
+  const reportCategory =
+    (config?.reportCategory as string)
+    || (defCategory === 'table' ? 'kpi' : defCategory);
   const reportWidgetData = useCanvasDataStore((s) => s.reportWidgetData);
 
   const onDataReady = useCallback((payload: unknown) => {
     if (!canvasItemId) return;
     reportWidgetData(canvasItemId, {
       widgetName: defName,
-      category: defCategory as 'chart' | 'table' | 'kpi' | 'embed' | 'other',
+      category: reportCategory as 'chart' | 'table' | 'kpi' | 'embed' | 'other',
       data: payload,
     });
-  }, [canvasItemId, defName, defCategory, reportWidgetData]);
+  }, [canvasItemId, defName, reportCategory, reportWidgetData]);
 
   return (
     <div

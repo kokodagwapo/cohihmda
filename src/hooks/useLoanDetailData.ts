@@ -128,14 +128,16 @@ function buildParams(
 export function useLoanDetailData(
   tenantId?: string | null,
   filters?: LoanDetailFilters | null,
+  options?: { enabled?: boolean },
 ) {
   const [data, setData] = useState<LoanDetailListResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef(0);
+  const enabled = options?.enabled ?? true;
 
   const fetchAll = useCallback(async () => {
-    if (!tenantId) return null;
+    if (!tenantId || !enabled) return null;
 
     const fetchId = ++abortRef.current;
     setLoading(true);
@@ -199,17 +201,17 @@ export function useLoanDetailData(
     }
   // Serialize dimensionFilters to a stable string so a new array ref doesn't cause a fetch loop
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tenantId, filters?.dateField, filters?.dateRange?.start, filters?.dateRange?.end, filters?.branch, filters?.loanOfficer, JSON.stringify(filters?.dimensionFilters)]);
+  }, [enabled, tenantId, filters?.dateField, filters?.dateRange?.start, filters?.dateRange?.end, filters?.branch, filters?.loanOfficer, JSON.stringify(filters?.dimensionFilters)]);
 
   useEffect(() => {
-    if (!tenantId) {
+    if (!tenantId || !enabled) {
       setLoading(false);
       setData(null);
       setError(null);
       return;
     }
     fetchAll();
-  }, [tenantId, fetchAll]);
+  }, [enabled, tenantId, fetchAll]);
 
   return { data, loading, error, fetchAll };
 }
