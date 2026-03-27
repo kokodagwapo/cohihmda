@@ -80,8 +80,8 @@ const insightsMenuConfig = dashboardSectionsConfig.filter(
 
 // Reorganized Top Tiering menu structure with better grouping (iconColor matches sidemenu)
 const topTieringMenuGroups = {
-  coreAnalytics: {
-    label: "Core Analytics",
+  general: {
+    label: "General",
     items: [
       {
         id: "actors",
@@ -94,12 +94,6 @@ const topTieringMenuGroups = {
         label: "Company Scorecard",
         icon: ClipboardList,
         iconColor: "indigo" as const,
-      },
-      {
-        id: "creditRiskManagement",
-        label: "Credit Risk Management",
-        icon: Shield,
-        iconColor: "emerald" as const,
       },
       {
         id: "falloutForecastPage",
@@ -119,12 +113,6 @@ const topTieringMenuGroups = {
         icon: FileText,
         iconColor: "blue" as const,
       },
-      {
-        id: "workflowConversion",
-        label: "Workflow Conversion",
-        icon: BarChart3,
-        iconColor: "blue" as const,
-      },
     ],
   },
   performance: {
@@ -135,6 +123,17 @@ const topTieringMenuGroups = {
         label: "Financial Modeling Sandbox",
         icon: Calculator,
         iconColor: "blue" as const,
+      },
+    ],
+  },
+  compliance: {
+    label: "Compliance",
+    items: [
+      {
+        id: "hmda",
+        label: "HMDA",
+        icon: FileText,
+        iconColor: "indigo" as const,
       },
     ],
   },
@@ -219,6 +218,18 @@ const topTieringMenuGroups = {
         icon: LineChart,
         iconColor: "indigo" as const,
       },
+      {
+        id: "creditRiskManagement",
+        label: "Credit Risk Management",
+        icon: Shield,
+        iconColor: "emerald" as const,
+      },
+      {
+        id: "workflowConversion",
+        label: "Workflow Conversion",
+        icon: BarChart3,
+        iconColor: "blue" as const,
+      },
     ],
   },
 };
@@ -277,6 +288,7 @@ const routeMap: Record<string, string> = {
   // loanFunnel: "/loan-funnel", // hidden – page references removed
   creditRiskManagement: "/credit-risk-management",
   companyScorecard: "/company-scorecard",
+  hmda: "/hmda",
   topTieringComparison: "/performance/toptiering-comparison",
   workflowConversion: "/workflow-conversion",
   pipelineAnalysis: "/pipeline-analysis",
@@ -295,6 +307,20 @@ const routeMap: Record<string, string> = {
   operationsTrends: "/performance/operation-scorecard-trends",
   financialModeling: "/performance/financial-modeling-sandbox",
 };
+
+/** Match pathname + search when route targets include query params. */
+function navTargetMatches(pathname: string, search: string, target: string): boolean {
+  const q = target.indexOf("?");
+  const path = q >= 0 ? target.slice(0, q) : target;
+  if (pathname !== path) return false;
+  if (q < 0) return true;
+  const want = new URLSearchParams(target.slice(q + 1));
+  const have = new URLSearchParams(search || "");
+  for (const [key, val] of want.entries()) {
+    if (have.get(key) !== val) return false;
+  }
+  return true;
+}
 
 export function Navigation(
   {
@@ -551,6 +577,7 @@ export function Navigation(
     const topTieringRoutes = [
       "/credit-risk-management",
       "/company-scorecard",
+      "/hmda",
       "/performance/toptiering-comparison",
       "/workflow-conversion",
       "/pipeline-analysis",
@@ -577,9 +604,8 @@ export function Navigation(
   const getCurrentPageLabel = () => {
     if (isInsightsPage) return "Insights";
     if (isTopTieringPage) {
-      const currentRoute = location.pathname;
-      const entry = Object.entries(routeMap).find(
-        ([_, route]) => route === currentRoute,
+      const entry = Object.entries(routeMap).find(([, route]) =>
+        navTargetMatches(location.pathname, location.search, route),
       );
       if (entry) {
         const [itemId] = entry;
@@ -663,14 +689,14 @@ export function Navigation(
             {/* Core Analytics */}
             <div>
               <div className="px-2 py-1 text-xs font-medium text-slate-600 dark:text-slate-400 mb-2">
-                Core Analytics
+                General
               </div>
               <div className="space-y-1">
-                {topTieringMenuGroups.coreAnalytics.items.map((item) => {
+                {topTieringMenuGroups.general.items.map((item) => {
                   const Icon = item.icon;
                   const itemRoute = routeMap[item.id];
                   const isItemActive =
-                    itemRoute && location.pathname === itemRoute;
+                    itemRoute && navTargetMatches(location.pathname, location.search, itemRoute);
                   return (
                     <button
                       key={item.id}
@@ -703,7 +729,7 @@ export function Navigation(
                   const Icon = item.icon;
                   const itemRoute = routeMap[item.id];
                   const isItemActive =
-                    itemRoute && location.pathname === itemRoute;
+                    itemRoute && navTargetMatches(location.pathname, location.search, itemRoute);
                   return (
                     <button
                       key={item.id}
@@ -737,7 +763,7 @@ export function Navigation(
                   const Icon = item.icon;
                   const itemRoute = routeMap[item.id];
                   const isItemActive =
-                    itemRoute && location.pathname === itemRoute;
+                    itemRoute && navTargetMatches(location.pathname, location.search, itemRoute);
                   return (
                     <button
                       key={item.id}
@@ -771,7 +797,7 @@ export function Navigation(
                   const Icon = item.icon;
                   const itemRoute = routeMap[item.id];
                   const isItemActive =
-                    itemRoute && location.pathname === itemRoute;
+                    itemRoute && navTargetMatches(location.pathname, location.search, itemRoute);
                   return (
                     <button
                       key={item.id}
@@ -1076,26 +1102,27 @@ export function Navigation(
                 <AnimatePresence>
                   {topTieringOpen && (
                     <motion.div
+                      key="top-tiering-mega-menu"
                       ref={topTieringMenuRef}
-                      initial={{ opacity: 0, y: 8, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                      initial={{ opacity: 0, y: 8, scale: 0.95, x: "-50%" }}
+                      animate={{ opacity: 1, y: 0, scale: 1, x: "-50%" }}
+                      exit={{ opacity: 0, y: 8, scale: 0.95, x: "-50%" }}
                       transition={{ duration: 0.15 }}
-                      className="absolute top-full left-0 pt-1.5 bg-transparent z-50 w-[min(95vw,920px)] max-h-[calc(100vh-6rem)] flex flex-col"
+                      className="fixed left-1/2 top-16 z-[60] flex w-[min(1112px,calc(100vw-2rem))] max-h-[calc(100dvh-5rem)] flex-col bg-transparent pt-1.5 origin-top"
                       role="menu"
                       aria-label="Dashboards submenu"
                     >
                       <div className="flex-1 min-h-0 flex flex-col rounded-2xl shadow-[0_25px_50px_-12px_rgba(0,0,0,0.15)] dark:shadow-[0_25px_50px_-12px_rgba(0,0,0,0.4)] border border-slate-200/60 dark:border-slate-700/60 overflow-hidden bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl">
                       <div className="h-0.5 bg-gradient-to-r from-blue-500 via-indigo-500 to-violet-500 opacity-60 shrink-0" aria-hidden />
-                      <div className="px-3 py-3 overflow-y-auto scrollbar-hide flex-1 min-h-0">
-                        <div className="grid grid-cols-3 gap-x-3 gap-y-0">
+                      <div className="px-4 sm:px-5 lg:px-6 py-4 overflow-y-auto scrollbar-hide flex-1 min-h-0">
+                        <div className="grid w-full grid-cols-4 gap-x-4 gap-y-0">
 
-                        {/* Column 1: Core Analytics (with Business Overview at top) */}
+                        {/* Column 1: General (with Business Overview at top) */}
                         <div>
                           <div className="px-1 py-1 mb-1 flex items-center gap-1.5">
                             <div className="w-0.5 h-3.5 rounded-full bg-gradient-to-b from-blue-500 to-indigo-500 opacity-70" />
                             <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                              Core Analytics
+                              General
                             </span>
                           </div>
                           <div className="space-y-0.5">
@@ -1129,11 +1156,11 @@ export function Navigation(
                                 </button>
                               </div>
                             </button>
-                            {topTieringMenuGroups.coreAnalytics.items.map((item) => {
+                            {topTieringMenuGroups.general.items.map((item) => {
                               const Icon = item.icon;
                               const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
                               const itemRoute = routeMap[item.id];
-                              const isItemActive = itemRoute && location.pathname === itemRoute;
+                              const isItemActive = itemRoute && navTargetMatches(location.pathname, location.search, itemRoute);
                               const pinItem: PinnedItem = { type: "route", id: item.id, path: itemRoute || "", label: item.label };
                               const pinned = isPinned(pinItem);
                               return (
@@ -1181,7 +1208,7 @@ export function Navigation(
                               const Icon = item.icon;
                               const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
                               const itemRoute = routeMap[item.id];
-                              const isItemActive = itemRoute && location.pathname === itemRoute;
+                              const isItemActive = itemRoute && navTargetMatches(location.pathname, location.search, itemRoute);
                               const pinItem: PinnedItem = { type: "route", id: item.id, path: itemRoute || "", label: item.label };
                               const pinned = isPinned(pinItem);
                               return (
@@ -1216,20 +1243,20 @@ export function Navigation(
                           </div>
                         </div>
 
-                        {/* Column 3: Secondary Market + Operations + Financial Modeling */}
+                        {/* Column 3: Operations */}
                         <div>
                           <div className="px-1 py-1 mb-1 flex items-center gap-1.5">
                             <div className="w-0.5 h-3.5 rounded-full bg-gradient-to-b from-blue-500 to-indigo-500 opacity-70" />
                             <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                              Secondary Market
+                              Operations
                             </span>
                           </div>
                           <div className="space-y-0.5">
-                            {topTieringMenuGroups.secondaryMarket.items.map((item) => {
+                            {topTieringMenuGroups.operations.items.map((item) => {
                               const Icon = item.icon;
                               const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
                               const itemRoute = routeMap[item.id];
-                              const isItemActive = itemRoute && location.pathname === itemRoute;
+                              const isItemActive = itemRoute && navTargetMatches(location.pathname, location.search, itemRoute);
                               const pinItem: PinnedItem = { type: "route", id: item.id, path: itemRoute || "", label: item.label };
                               const pinned = isPinned(pinItem);
                               return (
@@ -1263,17 +1290,65 @@ export function Navigation(
                             })}
                           </div>
                           <div className="px-1 py-1 mt-2.5 mb-1 flex items-center gap-1.5">
-                            <div className="w-0.5 h-3.5 rounded-full bg-gradient-to-b from-blue-500 to-indigo-500 opacity-70" />
+                            <div className="w-0.5 h-3.5 rounded-full bg-gradient-to-b from-emerald-500 to-teal-500 opacity-70" />
                             <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                              Operations
+                              Compliance
                             </span>
                           </div>
                           <div className="space-y-0.5">
-                            {topTieringMenuGroups.operations.items.map((item) => {
+                            {topTieringMenuGroups.compliance.items.map((item) => {
                               const Icon = item.icon;
                               const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
                               const itemRoute = routeMap[item.id];
-                              const isItemActive = itemRoute && location.pathname === itemRoute;
+                              const isItemActive = itemRoute && navTargetMatches(location.pathname, location.search, itemRoute);
+                              const pinItem: PinnedItem = { type: "route", id: item.id, path: itemRoute || "", label: item.label };
+                              const pinned = isPinned(pinItem);
+                              return (
+                                <button
+                                  key={item.id}
+                                  onClick={() => handleTopTieringClick(item.id)}
+                                  className={cn(compactItemBase, isItemActive ? compactItemActive : compactItemDefault)}
+                                  role="menuitem"
+                                >
+                                  <div className={cn("w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0", style.bg, isItemActive && "ring-1 ring-emerald-400/50")}>
+                                    <Icon className={cn("w-3 h-3", style.icon, isItemActive && "scale-110")} />
+                                  </div>
+                                  <div className="flex items-center gap-1 flex-1 min-w-0">
+                                    <span className="truncate text-left">{item.label}</span>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => { e.stopPropagation(); togglePinned(pinItem); }}
+                                      className="shrink-0 ml-auto p-0.5 rounded hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
+                                      title={pinned ? "Unpin from sidebar" : "Pin to sidebar"}
+                                      aria-label={pinned ? "Unpin" : "Pin to sidebar"}
+                                    >
+                                      {pinned ? (
+                                        <PinOff className="w-3 h-3 text-amber-500" />
+                                      ) : (
+                                        <Pin className="w-3 h-3 text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300" />
+                                      )}
+                                    </button>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Column 4: Secondary Market + Financial Modeling */}
+                        <div>
+                          <div className="px-1 py-1 mb-1 flex items-center gap-1.5">
+                            <div className="w-0.5 h-3.5 rounded-full bg-gradient-to-b from-blue-500 to-indigo-500 opacity-70" />
+                            <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                              Secondary Market
+                            </span>
+                          </div>
+                          <div className="space-y-0.5">
+                            {topTieringMenuGroups.secondaryMarket.items.map((item) => {
+                              const Icon = item.icon;
+                              const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
+                              const itemRoute = routeMap[item.id];
+                              const isItemActive = itemRoute && navTargetMatches(location.pathname, location.search, itemRoute);
                               const pinItem: PinnedItem = { type: "route", id: item.id, path: itemRoute || "", label: item.label };
                               const pinned = isPinned(pinItem);
                               return (
@@ -1317,7 +1392,7 @@ export function Navigation(
                               const Icon = item.icon;
                               const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
                               const itemRoute = routeMap[item.id];
-                              const isItemActive = itemRoute && location.pathname === itemRoute;
+                              const isItemActive = itemRoute && navTargetMatches(location.pathname, location.search, itemRoute);
                               const pinItem: PinnedItem = { type: "route", id: item.id, path: itemRoute || "", label: item.label };
                               const pinned = isPinned(pinItem);
                               return (
