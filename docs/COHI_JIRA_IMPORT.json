@@ -1,0 +1,1516 @@
+{
+  "meta": {
+    "format": "cohi-jira-bulk-v1",
+    "projectKey": "COHI",
+    "jiraCloudCreateIssue": "POST /rest/api/3/issue",
+    "authentication": "OAuth or API token with issue create permission",
+    "usage": "For each object in issues[], POST { fields: issue.fields } to /rest/api/3/issue. Strip any non-API keys if you add them. Issue types Bug and Task must exist on project COHI. If your project uses different names (e.g. Defect), replace issuetype.name in this file.",
+    "issueTypes": {
+      "Task": "Planning, requirements, investigations, legal or compliance review, data parity analysis, umbrella batch tracker. Use for QA items that are questions or follow-ups without a single broken behavior.",
+      "Bug": "Defect: broken behavior, wrong data, failed export, incorrect labels, UX that does not match intended product behavior.",
+      "Story": "Optional on many boards: user-deliverable feature work. Use only if COHI project requires Stories for dev work; QA outcomes are usually Bug or Task.",
+      "Epic": "If your Jira uses Epics for release themes: optionally create a QA Epic and link all qa-finding issues. This JSON uses a Task umbrella instead to avoid custom Epic field IDs."
+    },
+    "labeling": {
+      "cohiBacklog": [
+        "cohi-backlog-draft"
+      ],
+      "productRoadmap": "Issues from product planning (Builder, Lender profile, CSV, etc.) carry cohi-backlog-draft and themed labels (insights, mct, ...).",
+      "qaFromMarkMar2026": "All Mark doc items: qa, qa-run-2026-03, qa-coheus-2-0, qa-finding (except umbrella uses qa-umbrella-batch), env-cohi-dev, client-homestead, tester-mark-roszko on umbrella. Add environment or client label per run for future QA imports.",
+      "howToOrganizeInJira": [
+        "Use Bug vs Task as mapped in issueTypes so reporting separates defect backlog from research/compliance.",
+        "Link all qa-finding issues to the umbrella Task [QA run] or to a QA Epic after import.",
+        "Optionally add Jira Components (Frontend, Data, Market Data, Compliance) — not in JSON; set manually or extend script.",
+        "Optionally set Priority and Fix Version on import; requires known project configuration.",
+        "Filter board: labels in (qa-finding) OR fixVersion = upcoming patch.",
+        "Create Epics in Jira UI and link flat-imported issues; see suggestedEpics below. Epic Link field IDs differ by project type—set manually after import."
+      ],
+      "suggestedEpics": [
+        "Executive & dashboard insights — page-scoped insights, category tabs, escalation to Aletheia",
+        "Tenant experience & segments — lender profile, Cohi Builder",
+        "Data & integrations — CSV (servicing, compensation, chat CSV), webhooks, CRM",
+        "Workbench & reporting — PowerPoint canvas, related exports",
+        "AI platform — prompt saving, LLM reuse, token and usage tracking",
+        "Quality & ops — mobile QA, refresh/Coheus Classic, QA run batches",
+        "Partner & thin app — MCT thin app, embedded deployment strategy"
+      ]
+    }
+  },
+  "issues": [
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "Cohi Builder — homebuilder / affiliated mortgage segment (JDia POC)",
+        "issuetype": {
+          "name": "Task"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "cohi-builder",
+          "homebuilder",
+          "poc"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Cohi Builder is a product track for mortgage operations tied to production homebuilders (e.g. Toll Brothers class and peers such as Lennar, DHI, Taylor Morrison). It is not a generic dashboard configuration tool. These lenders optimize for capture rate (contracts using the builder mortgage versus total contracts), financing readiness when homes finish after long build cycles (often six to nine months), and visibility while borrower qualifications and market conditions change before closing."
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Industry pattern: builder-side CRM and construction or ERP systems often own leads, communities, contracts, and incentives; the captive or preferred lender LOS is fed downstream; loan milestone and risk signals are pushed back so builder teams are not blind to financing. Cohi should eventually surface KPIs, insights, and AI (chat, Research Lab) tuned to that model—capture, fallout during construction, community or source performance—not only resale retail."
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Aligns with lender profile onboarding: when tenant type is builder-affiliated, onboarding captures communities, capture targets, incentive posture, and data availability from builder systems versus LOS only, then curates prompts, RAG, and dashboards accordingly. JDia leads POC; document target customer, MVP metrics, integration priorities, and product packaging (profile vs. SKU vs. feature gate) in child issues or Confluence."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "Lender profile — tenant onboarding for curated experience",
+        "issuetype": {
+          "name": "Task"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "onboarding",
+          "lender-profile"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Structured onboarding where tenants describe their business (origination model, products, channels, priorities, compliance posture). Use that profile to curate the application: navigation and defaults aligned to the lender."
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Cohi insights and Cohi chat should consume profile context so narratives and prioritization match how the tenant works. Research Lab should use the same context for investigations and summaries."
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Profile inputs inform tenant-level prompt engineering and what is emphasized in the RAG corpus and knowledge center (document priorities, retrieval scope, language aligned to the lender). Define storage, onboarding steps, mapping to config objects, and when updates refresh AI behavior."
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "For builder-affiliated or captive mortgage tenants (Cohi Builder segment), onboarding should branch to questions about builder relationship, communities or markets, capture-rate focus, long-build financing risk, and builder-system versus LOS-only data—link product design to the Cohi Builder POC."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "PowerPoint — resume builder in Workbench canvas; align with current canvas and dashboards",
+        "issuetype": {
+          "name": "Task"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "powerpoint",
+          "workbench"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Resume the PowerPoint builder in Workbench canvas and optimize it for how canvas and dashboarding work today. Prior work removed or simplified some canvas export paths; bring canvas-to-deck flow back in sync with current widgets, layouts, data bindings, filters, and AI-generated visuals."
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Deliver a credible PPTX export without re-keying data. Validate layout fidelity, slide order, titles, and chart rendering against real tenant-style canvases. Product to confirm supported widget types and acceptance criteria."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "CSV POC — servicing data ingest",
+        "issuetype": {
+          "name": "Task"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "csv",
+          "servicing"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Proof of concept for servicing-oriented CSV: minimum file format, field mapping, row-to-loan matching, and first surfaces for metrics (dashboard, research, or chat context per product). Owners: JDia and MP for discovery, pipeline, and UI split."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "CSV POC — compensation data ingest",
+        "issuetype": {
+          "name": "Task"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "csv",
+          "compensation"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Proof of concept to load compensation or cost-related structured data so Operations and modeling views can replace placeholders. Define grain (employee, role, period), join keys to production data, and first consuming screens."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "CSV — freeform uploads for Cohi Chat and Research Lab",
+        "issuetype": {
+          "name": "Task"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "csv",
+          "chat",
+          "research-lab"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Allow users to upload a freeform or semi-structured CSV to ground Cohi Chat and Research Lab in that dataset for a session or saved project—without requiring standard LOS loan schema."
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Parse headers and sample rows; allow column confirmation when needed; attach data as context for questions and analysis. Product defines limits (size, rows, retention, PII), tenant scope, and whether data is ephemeral context, RAG-backed, or both. Distinct from servicing and compensation POCs."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "Salesforce / CRM APIs — integration",
+        "issuetype": {
+          "name": "Task"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "crm",
+          "integration"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Greenfield integration: define which CRM objects and fields matter, read vs. write, authentication, sync frequency, and which Cohi surfaces consume CRM data first. Produce an integration brief before build; follow existing connector patterns in the platform."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "HMDA vs Encompass comparison; fair lending / redlining — exploration",
+        "issuetype": {
+          "name": "Task"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "hmda",
+          "fair-lending",
+          "compliance"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Explore comparing HMDA-related data in Cohi to authoritative LOS values (e.g. Encompass) and define how far the product goes on fair lending and geographic analysis with legal and compliance review."
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Inventory existing schema and data quality rules; separate data reconciliation work from statistical or geographic fair lending analytics until scope is approved. Owners JD and MP for discovery and spikes."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "Prompt saving per user; LLM cost optimization via reuse; token and usage tracking",
+        "issuetype": {
+          "name": "Task"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "prompts",
+          "ai",
+          "llm-cost",
+          "caching",
+          "token-tracking",
+          "observability"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Users save, reuse, and refine prompts in Cohi Chat and related AI surfaces; usage and feedback improve relevance per user while tenant-level admin governance remains authoritative."
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "LLM cost optimization: investigate reusing questions and answers (and where appropriate intermediate context) already generated for the tenant’s current data load when new questions overlap—cache keys tied to tenant and data version, semantic or fuzzy question match, invalidation on sync so stale output is not presented as current. Define product rules for automatic reuse versus user-visible attribution."
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Expand token and usage tracking: tokens in/out per call, by surface (chat, insights, research, workbench AI, etc.), aggregations by tenant and by user where allowed, reporting for cost allocation, optional tenant-facing consumption views, spike alerts, export hooks for billing or FinOps. Align with privacy and access policy."
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Deliverables: product definition for saved prompts, reuse MVP, and observability scope; engineering for storage, APIs, reuse layer, guardrails, and telemetry. Owners CH and MP; backend may add owner for usage pipeline."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "Encompass Webhooks API — expand implementation; new data capabilities",
+        "issuetype": {
+          "name": "Task"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "webhooks",
+          "encompass"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Extend current Encompass webhook path (intake, priority fields, queue, reconciliation) for the field and event types the business needs. Clarify new capabilities: additional fields, triggers for sync or insights or alerts, outbound notifications."
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Gap analysis vs. current usage, tenant configuration UX, prioritized engineering. Owner MP with LOS integration support."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "Dashboard insights — partial rollout; Maylin review (leaderboard, loan complexity, company scorecard)",
+        "issuetype": {
+          "name": "Task"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "insights",
+          "dashboard",
+          "dashboard-insights",
+          "in-review"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Dashboard page–scoped insights: first wave merged to dev covers leaderboard, loan complexity dashboard, and company scorecard—not the full page list. Maylin is reviewing and will provide feedback; remaining adapters and pages follow after product direction. CHays leads. See docs/DASHBOARD_INSIGHTS_IMPLEMENTATION_PLAN.md. Prefer child issues per page under an Executive & dashboard insights Epic."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "Enhance insights — bottlenecks; tabbed categories; four buckets per category (Working–Context)",
+        "issuetype": {
+          "name": "Task"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "insights",
+          "ux-tabs",
+          "bottlenecks"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Bottleneck-oriented insight quality using pipeline and milestone timing where data supports it. Insights grouped by function: operations, sales, finance, data quality (names final per product)."
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "UX: users tab through categories. Within each category, show the same four-section structure as today’s Cohi insights—Working, Attention, Critical, Context—each section filled only with insights for that category. Same mental model as the main insights surface, replicated per function."
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Engineering: tag insights with category and bucket; pipeline and UI render tabs plus four sections per tab; define empty-state copy and whether global critical escalation still applies. Owner TBD."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "Data quality section on regular dashboards",
+        "issuetype": {
+          "name": "Task"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "data-quality"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Expose data quality on standard dashboards (freshness, completeness, rule violations) so business users see trust signals on the numbers in view. Reuse existing rules and APIs where possible; define first surfaces and warning thresholds."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "Mobile testing and QA",
+        "issuetype": {
+          "name": "Task"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "qa",
+          "mobile"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Validate core flows on mobile browsers at agreed breakpoints; fix layout and interaction issues; align with QA runbook for regression coverage. Prioritize routes exec and revenue users need on phone or tablet."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "Cohi refresh schedule and display; debug Coheus Classic refresh",
+        "issuetype": {
+          "name": "Task"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "refresh",
+          "coheus-classic"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Show when Cohi data last refreshed and next expected sync where product approves (user vs. admin visibility). In parallel, reproduce and fix Coheus Classic refresh defects tied to tenant duplication or refresh services."
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Ship fixes with support-grade logging. Assign owner when DRI named."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "[QA run] Coheus 2.0 Platform — Mark Roszko (Mar 12–13, 2026)",
+        "issuetype": {
+          "name": "Task"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "qa",
+          "qa-run-2026-03",
+          "qa-coheus-2-0",
+          "env-cohi-dev",
+          "client-homestead",
+          "qa-umbrella-batch",
+          "tester-mark-roszko"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Umbrella for QA findings from docs/QA Coheus 2.0 Platform recovered.docx. URL tested: https://cohi-dev.coheus1.com/admin. Client: Homestead Financial Mortgage. After import, link subsequent Bug/Task issues to this item (Jira linked issues, Epic, or parent) per team workflow. Labels on children include qa-finding."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "Landing: rename Cohi Daily Briefings toggle to match Cohi Insights panel",
+        "issuetype": {
+          "name": "Bug"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "qa",
+          "qa-run-2026-03",
+          "qa-coheus-2-0",
+          "env-cohi-dev",
+          "client-homestead",
+          "qa-finding",
+          "landing-page"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "QA ref 1.03. Toggle label says Cohi Daily Briefings but it hides/shows the Cohi Insights panel — align naming."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "Landing: rename Mortgage News toggle to match Cohi Daily Morning Brief panel",
+        "issuetype": {
+          "name": "Bug"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "qa",
+          "qa-run-2026-03",
+          "qa-coheus-2-0",
+          "env-cohi-dev",
+          "client-homestead",
+          "qa-finding",
+          "landing-page"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "QA ref 1.04. Toggle label says Mortgage News but it controls the Cohi Daily Morning Brief panel — align naming."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "Generate Cohi Insights runs batch loop ~4 minutes then does not display results",
+        "issuetype": {
+          "name": "Bug"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "qa",
+          "qa-run-2026-03",
+          "qa-coheus-2-0",
+          "env-cohi-dev",
+          "client-homestead",
+          "qa-finding",
+          "landing-page",
+          "insights"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "QA ref 1.06. Purple Generate button appears to complete batch processing but insights do not render when finished."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "Insights refresh: button label Fresh should be Refresh; reconcile duplicate refresh controls",
+        "issuetype": {
+          "name": "Bug"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "qa",
+          "qa-run-2026-03",
+          "qa-coheus-2-0",
+          "env-cohi-dev",
+          "client-homestead",
+          "qa-finding",
+          "landing-page",
+          "insights"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "QA ref 1.07. Label typo Fresh; two refresh-related buttons — confirm if both are needed and simplify UX."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "Cohi Daily Morning Brief export: Excel, PDF, PowerPoint fail; PNG and JPEG succeed",
+        "issuetype": {
+          "name": "Bug"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "qa",
+          "qa-run-2026-03",
+          "qa-coheus-2-0",
+          "env-cohi-dev",
+          "client-homestead",
+          "qa-finding",
+          "landing-page",
+          "export"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "QA ref 1.08. Export returns errors for Excel, PDF, PowerPoint (Mark report). PNG/JPEG work."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "Compliance: review Optimal Blue OBMMI redistribution terms for Daily Brief charts",
+        "issuetype": {
+          "name": "Task"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "qa",
+          "qa-run-2026-03",
+          "qa-coheus-2-0",
+          "env-cohi-dev",
+          "client-homestead",
+          "qa-finding",
+          "landing-page",
+          "compliance",
+          "legal-review"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "QA ref 1.10. Data use agreement references restrictions on reselling/relicensing/redistributing for commercial use — confirm product/legal posture."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "10Y Treasury chart: data lag vs brief cutoff; fix Treasury link; clarify Fed cuts subtitle",
+        "issuetype": {
+          "name": "Bug"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "qa",
+          "qa-run-2026-03",
+          "qa-coheus-2-0",
+          "env-cohi-dev",
+          "client-homestead",
+          "qa-finding",
+          "landing-page",
+          "market-data"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "QA ref 1.11. Chart data lags brief cutoff; hyperlink goes to Treasury landing page instead of daily yields page; subtitle ~65bps Fed cuts pricing unclear or needs sourcing."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "MBA Application Index chart: data stale vs brief date",
+        "issuetype": {
+          "name": "Bug"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "qa",
+          "qa-run-2026-03",
+          "qa-coheus-2-0",
+          "env-cohi-dev",
+          "client-homestead",
+          "qa-finding",
+          "landing-page",
+          "market-data"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "QA ref 1.12a. Most recent bar data behind Cohi Daily Morning Brief cutoff (e.g. Feb 7 vs Mar 12)."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "Compliance: review MBA data commercial use terms for Daily Brief charts",
+        "issuetype": {
+          "name": "Task"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "qa",
+          "qa-run-2026-03",
+          "qa-coheus-2-0",
+          "env-cohi-dev",
+          "client-homestead",
+          "qa-finding",
+          "landing-page",
+          "compliance",
+          "legal-review"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "QA ref 1.12b. MBA terms of use may restrict commercial reuse — confirm with legal."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "NAHB Builder Confidence chart: stale data and non-monthly axis labels",
+        "issuetype": {
+          "name": "Bug"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "qa",
+          "qa-run-2026-03",
+          "qa-coheus-2-0",
+          "env-cohi-dev",
+          "client-homestead",
+          "qa-finding",
+          "landing-page",
+          "market-data"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "QA ref 1.13. January data shown; axis shows irregular month labels instead of clear monthly series."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "Rate snapshot by product: incorrect last week value vs Optimal Blue",
+        "issuetype": {
+          "name": "Bug"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "qa",
+          "qa-run-2026-03",
+          "qa-coheus-2-0",
+          "env-cohi-dev",
+          "client-homestead",
+          "qa-finding",
+          "landing-page",
+          "market-data"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "QA ref 1.14. Today value matches site; last week value appears to be prior day not week prior."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "Compliance: review NAR Existing Home Sales citation and member use restrictions",
+        "issuetype": {
+          "name": "Task"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "qa",
+          "qa-run-2026-03",
+          "qa-coheus-2-0",
+          "env-cohi-dev",
+          "client-homestead",
+          "qa-finding",
+          "landing-page",
+          "compliance",
+          "legal-review"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "QA ref 1.15. Citation guidelines may limit use to members — confirm compliance for chart."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "Top Headlines: open article in new browser tab",
+        "issuetype": {
+          "name": "Bug"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "qa",
+          "qa-run-2026-03",
+          "qa-coheus-2-0",
+          "env-cohi-dev",
+          "client-homestead",
+          "qa-finding",
+          "landing-page"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "QA ref 1.17. Clicking headline navigates away without easy return; open target=_blank or equivalent."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "Business Overview Active Loans KPI: reconcile new platform vs classic Coheus count",
+        "issuetype": {
+          "name": "Task"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "qa",
+          "qa-run-2026-03",
+          "qa-coheus-2-0",
+          "env-cohi-dev",
+          "client-homestead",
+          "qa-finding",
+          "dashboards",
+          "business-overview",
+          "data-parity"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "QA ref 2.01. 531 vs 1128; export with criteria yields 1128; is_archived handling — pending definition of Field 5016 / archived logic per Marko."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "Business Overview Closed Loans MTD: exclude loans with future funding dates",
+        "issuetype": {
+          "name": "Bug"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "qa",
+          "qa-run-2026-03",
+          "qa-coheus-2-0",
+          "env-cohi-dev",
+          "client-homestead",
+          "qa-finding",
+          "dashboards",
+          "business-overview"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "QA ref 2.02. KPI includes four loans funding tomorrow; should not count in MTD closed."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "Business Overview Pull-Through KPI: rolling window does not match Last 90 Days label",
+        "issuetype": {
+          "name": "Bug"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "qa",
+          "qa-run-2026-03",
+          "qa-coheus-2-0",
+          "env-cohi-dev",
+          "client-homestead",
+          "qa-finding",
+          "dashboards",
+          "business-overview"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "QA ref 2.05. Earliest app date in export Jan 1 2026 vs expected ~90 days from test date."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "Actors dashboard: time period selector should state which date field drives filter",
+        "issuetype": {
+          "name": "Task"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "qa",
+          "qa-run-2026-03",
+          "qa-coheus-2-0",
+          "env-cohi-dev",
+          "client-homestead",
+          "qa-finding",
+          "dashboards",
+          "actors"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "QA ref 2.07. Users cannot tell if filter uses application, start, funding, or other date."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "Actors KPI panel: restore Combined LTV; reconcile row set vs classic",
+        "issuetype": {
+          "name": "Bug"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "qa",
+          "qa-run-2026-03",
+          "qa-coheus-2-0",
+          "env-cohi-dev",
+          "client-homestead",
+          "qa-finding",
+          "dashboards",
+          "actors"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "QA ref 2.08. Combined LTV missing vs classic; classic includes additional same-day application records."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "Actors Actor Summary: legend for colors/stars; volume precision; Aaron Michael Rist stat mismatch",
+        "issuetype": {
+          "name": "Bug"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "qa",
+          "qa-run-2026-03",
+          "qa-coheus-2-0",
+          "env-cohi-dev",
+          "client-homestead",
+          "qa-finding",
+          "dashboards",
+          "actors"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "QA ref 2.09. Explain color coding and stars; show less rounded volume; fix mismatched stats for named actor."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "Dashboards: loan number search or targeted filter for applicable dashboards",
+        "issuetype": {
+          "name": "Task"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "qa",
+          "qa-run-2026-03",
+          "qa-coheus-2-0",
+          "env-cohi-dev",
+          "client-homestead",
+          "qa-finding",
+          "dashboards",
+          "feature-request"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "QA ref General-A. General finding: cannot add specific filters or search by loan number everywhere needed."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "Dashboards: multi-select values within a dimension on visualizations",
+        "issuetype": {
+          "name": "Task"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "qa",
+          "qa-run-2026-03",
+          "qa-coheus-2-0",
+          "env-cohi-dev",
+          "client-homestead",
+          "qa-finding",
+          "dashboards",
+          "feature-request"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "QA ref General-B. General finding: cannot multi-select loan statuses etc. on Actor dashboard visual."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fields": {
+        "project": {
+          "key": "COHI"
+        },
+        "summary": "MCT thin app — Data Quality led; Insights, Workbench, Chat teaser; embedded / partner strategy",
+        "issuetype": {
+          "name": "Task"
+        },
+        "labels": [
+          "cohi-backlog-draft",
+          "mct",
+          "thin-app",
+          "data-quality",
+          "partner-integration",
+          "requirements"
+        ],
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "MCT thin app: lead with Data Quality as the credible entry offer; add selective access to Insights, Workbench, and Cohi Chat as a teaser so clients experience depth and want full Cohi. Define caps, navigation, and upsell path to the full platform."
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Broader class of work: Cohi deployments where the UI is not only inside Teraverde infra, or where capabilities integrate into a partner product. Strategy must cover packaging (SKU vs feature flags vs artifact), identity and SSO when another host fronts the user, embedding vs API vs co-branded shell, data residency and tenant isolation, support boundaries, and avoiding unbounded bespoke forks for partial deployments."
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Deliverable: workshop MCT and platform stakeholders; produce signed requirements and architecture options (deployment targets, branding, API or SDK needs). No build commitment until aligned."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -311,7 +311,7 @@ function buildCanvasContext(state: CanvasStateSnapshot): string {
           formatted = `- **${entry.widgetName}** (table):\n${formatTableData(entry.data)}`;
           break;
         default:
-          formatted = `- **${entry.widgetName}**: ${JSON.stringify(entry.data).substring(0, 150)}`;
+          formatted = `- **${entry.widgetName}**: ${(JSON.stringify(entry.data) ?? "null").substring(0, 150)}`;
           break;
       }
 
@@ -358,10 +358,11 @@ async function buildResearchContext(
       if (session.findings && session.findings.length > 0) {
         blocks.push(`\n**Findings (${session.findings.length}):**`);
         for (const f of session.findings.slice(0, 5)) {
-          blocks.push(`- **${f.title}** (${f.confidence} confidence): ${f.summary.substring(0, 200)}`);
+          blocks.push(`- **${f.title}** (${f.confidence} confidence): ${(f.summary ?? "").substring(0, 200)}`);
           if (f.evidence && f.evidence.length > 0) {
             for (const ev of f.evidence.slice(0, 2)) {
-              blocks.push(`  SQL: \`${ev.sql.substring(0, 200)}${ev.sql.length > 200 ? "..." : ""}\``);
+              const sql = ev.sql ?? "";
+              blocks.push(`  SQL: \`${sql.substring(0, 200)}${sql.length > 200 ? "..." : ""}\``);
               if (ev.explanation) blocks.push(`  Purpose: ${ev.explanation.substring(0, 150)}`);
             }
           }

@@ -39,6 +39,7 @@ router.post(
         source_insight_id,
         source_type,
         tags,
+        display_metadata,
       } = req.body;
 
       if (!headline || !metric_signature) {
@@ -47,22 +48,39 @@ router.post(
         });
       }
 
+      // Check if display_metadata column exists (migration 093 guard)
+      let hasDisplayMetaCol = false;
+      try {
+        const colCheck = await ctx.tenantPool.query(`
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'tracked_insights' AND column_name = 'display_metadata'
+        `);
+        hasDisplayMetaCol = colCheck.rows.length > 0;
+      } catch { /* pre-migration */ }
+
+      const insertCols = hasDisplayMetaCol
+        ? `(user_id, user_email, headline, understory, metric_signature, source_insight_id, source_type, tags, display_metadata)`
+        : `(user_id, user_email, headline, understory, metric_signature, source_insight_id, source_type, tags)`;
+      const insertVals = hasDisplayMetaCol
+        ? `($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+        : `($1, $2, $3, $4, $5, $6, $7, $8)`;
+      const params: any[] = [
+        req.userId,
+        req.userEmail,
+        headline,
+        understory || null,
+        JSON.stringify(metric_signature),
+        source_insight_id || null,
+        source_type || "pipeline",
+        tags || [],
+      ];
+      if (hasDisplayMetaCol) {
+        params.push(display_metadata ? JSON.stringify(display_metadata) : null);
+      }
+
       const result = await ctx.tenantPool.query(
-        `INSERT INTO tracked_insights
-           (user_id, user_email, headline, understory, metric_signature,
-            source_insight_id, source_type, tags)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         RETURNING *`,
-        [
-          req.userId,
-          req.userEmail,
-          headline,
-          understory || null,
-          JSON.stringify(metric_signature),
-          source_insight_id || null,
-          source_type || "pipeline",
-          tags || [],
-        ]
+        `INSERT INTO tracked_insights ${insertCols} VALUES ${insertVals} RETURNING *`,
+        params
       );
 
       res.status(201).json(result.rows[0]);
@@ -86,9 +104,24 @@ router.get(
       const ctx = getTenantContext(req);
       const userId = req.userId;
 
+      // Check if display_metadata column exists (migration 097 guard)
+      let hasDisplayMetaCol = false;
+      try {
+        const colCheck = await ctx.tenantPool.query(`
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'tracked_insights' AND column_name = 'display_metadata'
+        `);
+        hasDisplayMetaCol = colCheck.rows.length > 0;
+      } catch { /* pre-migration */ }
+
+      const displayMetaSelect = hasDisplayMetaCol ? "ti.display_metadata," : "NULL AS display_metadata,";
+
       const result = await ctx.tenantPool.query(
         `SELECT
-           ti.*,
+           ti.id, ti.headline, ti.understory, ti.status, ti.source_type,
+           ti.source_insight_id, ti.tags, ti.created_at, ti.updated_at,
+           ti.alert_threshold, ti.metric_signature,
+           ${displayMetaSelect}
            s.metric_values AS latest_values,
            s.previous_values AS latest_previous,
            s.change_summary AS latest_change,

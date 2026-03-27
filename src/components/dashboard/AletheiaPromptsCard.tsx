@@ -5,7 +5,12 @@ import React, {
   useCallback,
   useRef,
 } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
+import {
+  getDashboardInsightPath,
+  getDashboardInsightNavigateState,
+} from "@/lib/dashboardInsightRoutes";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Zap,
@@ -33,6 +38,7 @@ import {
   Bot,
   Loader2,
   FlaskConical,
+  Telescope,
 } from "lucide-react";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { useAletheiaData, AletheiaInsight } from "@/hooks/useAletheiaData";
@@ -42,12 +48,78 @@ import { api } from "@/lib/api";
 import { JobProgress } from "@/components/ui/JobProgress";
 import { CohiBriefingControl } from "@/components/aletheia/CohiBriefingControl";
 import { InsightDetailModal } from "./InsightDetailModal";
+import { DashboardInsightEvidenceModal, type DashboardInsightEvidenceModalInsight } from "./DashboardInsightEvidenceModal";
 import { TrackedInsightsWatchlist } from "./TrackedInsightsWatchlist";
 import { FindingDrillDown } from "@/components/research/FindingDrillDown";
 import { InsightChat } from "./InsightChat";
 import { ExportMenu } from "@/components/common/ExportMenu";
 import type { ExportData } from "@/utils/exportUtils";
 import type { Finding } from "@/hooks/useResearchSession";
+
+// ============================================================================
+// Go to dashboard page (for escalated dashboard insights)
+// ============================================================================
+
+/** Map Aletheia insight (from API) to the shape expected by DashboardInsightEvidenceModal */
+function aletheiaInsightToEvidenceModalInsight(
+  i: AletheiaInsight
+): DashboardInsightEvidenceModalInsight {
+  const typeToSentiment = (
+    t: string
+  ): "positive" | "warning" | "critical" | "neutral" => {
+    if (t === "critical" || t === "error") return "critical";
+    if (t === "warning") return "warning";
+    if (t === "success") return "positive";
+    return "neutral";
+  };
+  return {
+    headline: i.headline ?? i.message ?? "",
+    understory: i.understory ?? "",
+    sentiment: typeToSentiment(i.type ?? "info"),
+    severity_score: i.severity_score ?? 0,
+    what_changed: i.what_changed ?? "",
+    why: i.why ?? "",
+    business_impact: i.business_impact ?? "",
+    risk_if_ignored: i.risk_if_ignored ?? "",
+    recommended_action: i.recommended_action ?? "",
+    owner: i.owner ?? "",
+    sourcePageId: i.sourcePageId ?? "",
+    sourcePageName: i.sourcePageName ?? "",
+    filter_context: i.filter_context ?? {},
+    evidence_refs: i.evidence_refs,
+    cited_numbers: i.cited_numbers,
+    supporting_data: i.supporting_data,
+  };
+}
+
+function GoToDashboardPageButton({
+  sourcePageId,
+  sourcePageName,
+  filterContext,
+}: {
+  sourcePageId: string;
+  sourcePageName: string;
+  filterContext?: Record<string, unknown>;
+}) {
+  const navigate = useNavigate();
+  const handleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const path = getDashboardInsightPath(sourcePageId);
+    const state = getDashboardInsightNavigateState(sourcePageId, filterContext);
+    navigate(path, { state: Object.keys(state).length > 0 ? state : undefined });
+  };
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
+    >
+      Go to {sourcePageName}
+      <ChevronRight className="w-3 h-3" />
+    </button>
+  );
+}
 
 // ============================================================================
 // Bucket configuration
@@ -133,6 +205,56 @@ const BUCKET_ORDER: BucketConfig[] = [
 ];
 
 // ============================================================================
+// Functional category tabs
+// ============================================================================
+
+interface CategoryTab {
+  id: string;
+  label: string;
+  emptyTitle: string;
+  emptyBody: string;
+}
+
+const CATEGORY_TABS: CategoryTab[] = [
+  {
+    id: "all",
+    label: "All",
+    emptyTitle: "No insights available",
+    emptyBody: "Insights will appear once live data is available for this tenant.",
+  },
+  {
+    id: "operations",
+    label: "Operations",
+    emptyTitle: "No Operations insights",
+    emptyBody: "Pipeline velocity, cycle time, and operational throughput insights will appear here when generated.",
+  },
+  {
+    id: "sales",
+    label: "Sales",
+    emptyTitle: "No Sales insights",
+    emptyBody: "Loan officer performance, conversion trends, and lost opportunity insights will appear here when generated.",
+  },
+  {
+    id: "finance",
+    label: "Finance",
+    emptyTitle: "No Finance insights",
+    emptyBody: "Margin, lock risk, revenue exposure, and financial health insights will appear here when generated.",
+  },
+  {
+    id: "secondary_marketing",
+    label: "Secondary Marketing",
+    emptyTitle: "No Secondary Marketing insights",
+    emptyBody: "Product strategy, rate lock behavior, and capital markets positioning insights will appear here when generated.",
+  },
+  {
+    id: "compliance",
+    label: "Compliance",
+    emptyTitle: "No Compliance insights",
+    emptyBody: "TRID timing, fair lending signals, and regulatory risk insights will appear here when generated.",
+  },
+];
+
+// ============================================================================
 // Props
 // ============================================================================
 
@@ -151,6 +273,8 @@ interface AletheiaPromptsCardProps {
   };
   selectedTenantId?: string | null;
   selectedChannel?: string | null;
+  /** Report data to canvasDataStore for PowerPoint export. */
+  onDataReady?: (payload: unknown) => void;
 }
 
 // ============================================================================
@@ -208,6 +332,7 @@ const SOURCE_CHIP_LABELS: Record<string, string> = {
   leaderboard: "Performance",
   business_overview: "Performance",
   risk_cross_tab: "Credit Risk",
+  dashboard_insights: "Dashboard Insight",
   other: "Insight",
 };
 
@@ -233,6 +358,8 @@ interface BucketLaneProps {
   onDeleteInsight?: (insightId: number) => Promise<void>;
   /** Submit feedback (thumbs up/down + optional tags/comment) on an insight — visible to all users */
   onSubmitFeedback?: (insightId: number, rating: -1 | 1, tags?: string[], comment?: string) => Promise<boolean>;
+  /** Deep-dive an insight in the workbench (admin only) */
+  onInvestigate?: (insightId: number) => void;
   /** Whether this insight is already on the watchlist */
   isTracked?: (insight: AletheiaInsight) => boolean;
   /** Toggle track/untrack on the watchlist */
@@ -252,6 +379,7 @@ function BucketLane({
   onGenerateMore,
   onDeleteInsight,
   onSubmitFeedback,
+  onInvestigate,
   isTracked,
   onToggleTrack,
   isAdmin,
@@ -338,7 +466,6 @@ function BucketLane({
     const canDrill = isDrillable(insight);
     const isSelected = selectedInsightIdx === idx;
     const chipLabel = getInsightChipLabel(insight);
-
     const insightFeedback = insight.insightId ? feedbackMap[insight.insightId] : null;
     const isPopoverOpen = feedbackPopoverInsightId === insight.insightId;
 
@@ -368,8 +495,15 @@ function BucketLane({
                 {insight.headline || insight.message}
               </p>
             </div>
+            {insight.source === "dashboard_insights" && insight.sourcePageId && insight.sourcePageName && (
+              <GoToDashboardPageButton
+                sourcePageId={insight.sourcePageId}
+                sourcePageName={insight.sourcePageName}
+                filterContext={insight.filter_context}
+              />
+            )}
           </div>
-          {/* Feedback + admin action buttons — wrapped in Popover so the comment form
+          {/* Feedback + action buttons — wrapped in Popover so the comment form
               portals to document.body and is never clipped by overflow-hidden ancestors */}
           {insight.insightId && (
             <Popover
@@ -410,6 +544,22 @@ function BucketLane({
                   )}
                   {/* Hover-only action buttons */}
                   <div className="flex items-center gap-0.5 opacity-0 group-hover/insight:opacity-100 transition-all">
+                    {/* Investigate (deep dive in workbench) — admin only */}
+                    {isAdmin && onInvestigate && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onInvestigate(insight.insightId!);
+                        }}
+                        className="p-1 rounded-md hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-all"
+                        title="Deep dive in Workbench"
+                      >
+                        <Telescope
+                          className="w-3 h-3 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400"
+                          strokeWidth={2}
+                        />
+                      </button>
+                    )}
                     {/* Thumbs Up — all users */}
                     {onSubmitFeedback && (
                       <button
@@ -751,11 +901,17 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
   briefingContext,
   selectedTenantId,
   selectedChannel,
+  onDataReady,
 }: AletheiaPromptsCardProps) {
   const sectionRef = useRef<HTMLDivElement>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedInsight, setSelectedInsight] =
     useState<AletheiaInsight | null>(null);
+  /** When true, show DashboardInsightEvidenceModal for dashboard_insights (fallback when details API returns 404). */
+  const [useDashboardEvidenceModalFallback, setUseDashboardEvidenceModalFallback] = useState(false);
+  useEffect(() => {
+    if (selectedInsight?.source === "dashboard_insights") setUseDashboardEvidenceModalFallback(false);
+  }, [selectedInsight?.source, selectedInsight?.insightId]);
   // Global expand/collapse state: null = uncontrolled (each lane manages itself),
   // true = all expanded, false = all collapsed. Resets to null on individual lane toggle.
   const [globalExpanded, setGlobalExpanded] = useState<boolean | null>(null);
@@ -781,6 +937,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
     deleteInsight,
     submitFeedback,
     loadInsightsByMethod,
+    refreshByCategory,
   } = useAletheiaData(
     dateFilter,
     onDataAvailabilityChange,
@@ -789,6 +946,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
   );
 
   const [activeTab, setActiveTab] = useState<"pipeline" | "agent" | "watchlist">("agent");
+  const [activeCategoryId, setActiveCategoryId] = useState<string>("all");
   const [agentFinding, setAgentFinding] = useState<Finding | null>(null);
   const [agentFindingInsight, setAgentFindingInsight] = useState<AletheiaInsight | null>(null);
 
@@ -797,6 +955,10 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
 
   const [agentJobId, setAgentJobId] = useState<string | null>(null);
   const agentJob = useJobStatus(agentJobId);
+
+  const [categoryJobId, setCategoryJobId] = useState<string | null>(null);
+  const categoryJob = useJobStatus(categoryJobId);
+  const isCategoryRefreshing = categoryJob.status === "processing";
 
   // ---- Tracked insights (watchlist) for pipeline insights ----
   // Map<source_insight_id, tracked_uuid> drives both UI and delete logic.
@@ -839,6 +1001,13 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
     }
   }, [agentJob.status, loadInsightsByMethod]);
 
+  useEffect(() => {
+    if (categoryJob.status === "complete") {
+      loadInsightsByMethod("agent").catch(() => {});
+      setCategoryJobId(null);
+    }
+  }, [categoryJob.status, loadInsightsByMethod]);
+
   const handleRefresh = useCallback(async () => {
     if (isRefreshing) return;
     const jobId = await refreshInsights();
@@ -854,6 +1023,16 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
     },
     [loadInsightsByMethod]
   );
+
+  const handleCategoryRefresh = useCallback(async (categoryId: string) => {
+    if (isCategoryRefreshing || categoryId === "all") return;
+    try {
+      const jobId = await refreshByCategory(categoryId);
+      if (jobId) setCategoryJobId(jobId);
+    } catch (err: any) {
+      console.error("Category refresh failed:", err);
+    }
+  }, [isCategoryRefreshing, refreshByCategory]);
 
   const handleAgentGenerate = useCallback(async (forceFresh = false) => {
     if (isAgentGenerating) return;
@@ -983,12 +1162,39 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
             await api.deleteTrackedInsight(trackedId, selectedTenantId);
           }
         } else {
+          // Determine source type and extract metric_signature correctly
+          const isAgentInsight =
+            insight.generation_method === "agent" &&
+            insight.detail_data?.type === "agent_finding";
+
+          let metric_signature: { sql: string; keyFields: string[] };
+          let source_type: string;
+          let display_metadata: Record<string, any> | undefined;
+
+          if (isAgentInsight && insight.detail_data?.metricSignature?.sql) {
+            metric_signature = insight.detail_data.metricSignature;
+            source_type = "agent";
+            if (insight.detail_data.keyMetricDescriptions || insight.detail_data.keyMetricFormats) {
+              display_metadata = {
+                keyMetricDescriptions: insight.detail_data.keyMetricDescriptions || {},
+                keyMetricFormats: insight.detail_data.keyMetricFormats || {},
+              };
+            }
+          } else {
+            const eq = (insight.evidence as any)?.evidenceQueries?.[0];
+            metric_signature = eq?.sql
+              ? { sql: eq.sql, keyFields: (insight.evidence as any)?.metrics?.map((m: any) => m.label) || [] }
+              : { sql: "", keyFields: [] };
+            source_type = "pipeline";
+          }
+
           await api.trackInsight({
             headline: insight.headline || insight.message,
             understory: insight.understory || insight.reasoning,
-            metric_signature: insight.evidence || { sql: "", keyFields: [] },
+            metric_signature,
             source_insight_id: sourceId,
-            source_type: "pipeline",
+            source_type,
+            display_metadata,
           }, selectedTenantId);
         }
         const freshMap = await fetchAndBuildPipelineMap(true);
@@ -1007,6 +1213,27 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
     [selectedTenantId, trackedPipelineMap, fetchAndBuildPipelineMap]
   );
 
+  const handleInvestigate = useCallback(
+    async (insightId: number) => {
+      try {
+        const tenantParam = selectedTenantId
+          ? `?tenant_id=${encodeURIComponent(selectedTenantId)}`
+          : "";
+        const result = await api.request<{ id: string }>(
+          `/api/workbench/canvases/from-insight${tenantParam}`,
+          {
+            method: "POST",
+            body: JSON.stringify({ insightId }),
+          }
+        );
+        navigate(`/my-dashboard?canvas=${result.id}`);
+      } catch (err) {
+        console.error("Error creating deep-dive canvas:", err);
+      }
+    },
+    [selectedTenantId, navigate]
+  );
+
   const isDrillable = useCallback(
     (insight: AletheiaInsight) => {
       return !!insight.source;
@@ -1014,7 +1241,25 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
     []
   );
 
-  // Group insights by bucket
+  useEffect(() => {
+    if (!onDataReady || insightsLoading || allInsights.length === 0) return;
+    const lines = allInsights.slice(0, 20).map((i) => {
+      const bucket = (i.bucket ?? 'info').toUpperCase();
+      const headline = i.headline || i.message || '';
+      return `[${bucket}] ${headline}`;
+    });
+    onDataReady({ content: lines.join('\n'), title: 'Cohi Daily Briefings', insightCount: allInsights.length });
+  }, [onDataReady, insightsLoading, allInsights]);
+
+  // Filter insights by the active functional category, then group by bucket
+  const filteredInsights = useMemo(() => {
+    if (activeCategoryId === "all") return allInsights;
+    return allInsights.filter(
+      (i) => (i.functional_category || null) === activeCategoryId
+    );
+  }, [allInsights, activeCategoryId]);
+
+  // Group filtered insights by bucket
   const bucketedInsights = useMemo(() => {
     const map: Record<string, AletheiaInsight[]> = {
       critical: [],
@@ -1023,7 +1268,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
       context: [],
     };
 
-    for (const insight of allInsights) {
+    for (const insight of filteredInsights) {
       const bucket = insight.bucket || "context"; // default untagged to context
       if (map[bucket]) {
         map[bucket].push(insight);
@@ -1032,15 +1277,39 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
       }
     }
     return map;
+  }, [filteredInsights]);
+
+  // Per-category counts and critical flags for badge display
+  const categoryStats = useMemo(() => {
+    const stats: Record<string, { total: number; hasCritical: boolean }> = {};
+    for (const cat of CATEGORY_TABS) {
+      if (cat.id === "all") {
+        stats["all"] = {
+          total: allInsights.length,
+          hasCritical: allInsights.some((i) => i.bucket === "critical"),
+        };
+        continue;
+      }
+      const catInsights = allInsights.filter(
+        (i) => (i.functional_category || null) === cat.id
+      );
+      stats[cat.id] = {
+        total: catInsights.length,
+        hasCritical: catInsights.some((i) => i.bucket === "critical"),
+      };
+    }
+    return stats;
   }, [allInsights]);
 
-  // Count non-empty buckets for grid sizing
+  // Count non-empty buckets for the currently visible category
   const nonEmptyBuckets = useMemo(
     () => BUCKET_ORDER.filter((b) => bucketedInsights[b.id]?.length > 0),
     [bucketedInsights]
   );
 
   const hasInsights = allInsights.length > 0;
+  const hasFilteredInsights = filteredInsights.length > 0;
+  const activeCategoryDef = CATEGORY_TABS.find((c) => c.id === activeCategoryId);
 
   return (
     <div className="mb-6 sm:mb-10 aletheia-prompts-card">
@@ -1224,6 +1493,71 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
           )}
         </div>
 
+        {/* ===== Category Tab Row (Insights tab only) ===== */}
+        {activeTab === "agent" && hasInsights && (
+          <div className="flex items-center gap-0.5 mb-4 overflow-x-auto scrollbar-none -mx-1 px-1 pt-1.5 pb-1">
+            {CATEGORY_TABS.map((cat) => {
+              const stats = categoryStats[cat.id];
+              const isActive = activeCategoryId === cat.id;
+              return (
+                <button
+                  key={cat.id}
+                  onClick={() => setActiveCategoryId(cat.id)}
+                  className={`relative overflow-visible flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                    isActive
+                      ? "bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 ring-1 ring-blue-200 dark:ring-blue-700/50"
+                      : "text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-700 dark:hover:text-slate-300"
+                  }`}
+                >
+                  {/* Red dot for critical items */}
+                  {stats?.hasCritical && !isActive && (
+                    <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-rose-500 ring-1 ring-white dark:ring-slate-900" />
+                  )}
+                  {cat.label}
+                  {stats && stats.total > 0 && (
+                    <span
+                      className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-semibold ${
+                        isActive
+                          ? "bg-blue-200 dark:bg-blue-800 text-blue-800 dark:text-blue-200"
+                          : stats.hasCritical
+                          ? "bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300"
+                          : "bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
+                      }`}
+                    >
+                      {stats.total}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+
+            {/* Per-category refresh button (admin only, non-All tabs) */}
+            {isAdmin && activeCategoryId !== "all" && (
+              <button
+                onClick={() => handleCategoryRefresh(activeCategoryId)}
+                disabled={isCategoryRefreshing || insightsLoading}
+                className="ml-auto flex-shrink-0 flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
+                title={`Regenerate ${activeCategoryDef?.label} insights`}
+              >
+                <RotateCw className={`w-3 h-3 ${isCategoryRefreshing ? "animate-spin" : ""}`} strokeWidth={1.5} />
+                Refresh
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Category job progress */}
+        {(categoryJob.status === "processing" || categoryJob.status === "failed") && (
+          <JobProgress
+            status={categoryJob.status}
+            progress={categoryJob.progress}
+            message={categoryJob.message}
+            error={categoryJob.error}
+            onRetry={() => handleCategoryRefresh(activeCategoryId)}
+            className="px-1 mb-3"
+          />
+        )}
+
         {/* ===== Watchlist Tab ===== */}
         {activeTab === "watchlist" && (
           <TrackedInsightsWatchlist
@@ -1330,8 +1664,37 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
           </div>
         )}
 
+        {/* ===== Per-category empty state (has global insights, but none for this category) ===== */}
+        {activeTab === "agent" && hasInsights && !hasFilteredInsights && activeCategoryId !== "all" && !insightsLoading && (
+          <div className="rounded-2xl border border-slate-200/60 dark:border-slate-700/60 bg-slate-50/80 dark:bg-slate-800/40 backdrop-blur-sm p-8 text-center">
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+                <TrendingUp className="w-5 h-5 text-slate-400 dark:text-slate-500" strokeWidth={1.5} />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  {activeCategoryDef?.emptyTitle}
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-xs mx-auto">
+                  {activeCategoryDef?.emptyBody}
+                </p>
+              </div>
+              {isAdmin && (
+                <button
+                  onClick={() => handleCategoryRefresh(activeCategoryId)}
+                  disabled={isCategoryRefreshing}
+                  className="mt-1 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs font-medium hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors disabled:opacity-50"
+                >
+                  <Sparkles className="w-3.5 h-3.5" strokeWidth={1.5} />
+                  Generate {activeCategoryDef?.label} Insights
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* ===== Bucket Lanes (stacked) ===== */}
-        {activeTab !== "watchlist" && hasInsights && (
+        {activeTab !== "watchlist" && hasFilteredInsights && (
           <div className="flex flex-col gap-4">
             {BUCKET_ORDER.map((bucket) => {
               const items = bucketedInsights[bucket.id] || [];
@@ -1359,6 +1722,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                     isAdmin ? deleteInsight : undefined
                   }
                   onSubmitFeedback={submitFeedback}
+                  onInvestigate={isAdmin ? handleInvestigate : undefined}
                   isTracked={(i) => i.insightId != null && trackedPipelineMap.has(i.insightId)}
                   onToggleTrack={handleToggleTrack}
                   isAdmin={isAdmin}
@@ -1369,12 +1733,24 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
         )}
       </motion.div>
 
-      {/* Insight Detail Modal (pipeline insights) */}
-      <InsightDetailModal
-        isOpen={isModalOpen}
+      {/* Dashboard Insight Evidence Modal (fallback when details API returns 404 for dashboard_insights) */}
+      <DashboardInsightEvidenceModal
+        isOpen={isModalOpen && selectedInsight?.source === "dashboard_insights" && useDashboardEvidenceModalFallback}
         onClose={() => {
           setIsModalOpen(false);
           setSelectedInsight(null);
+          setUseDashboardEvidenceModalFallback(false);
+        }}
+        insight={selectedInsight?.source === "dashboard_insights" && selectedInsight ? aletheiaInsightToEvidenceModalInsight(selectedInsight) : null}
+      />
+
+      {/* Insight Detail Modal (pipeline + dashboard_insights; for dashboard_insights fallback to evidence modal on 404) */}
+      <InsightDetailModal
+        isOpen={isModalOpen && selectedInsight != null && (selectedInsight.source !== "dashboard_insights" || !useDashboardEvidenceModalFallback)}
+        onClose={() => {
+          setIsModalOpen(false);
+          setSelectedInsight(null);
+          setUseDashboardEvidenceModalFallback(false);
         }}
         insightSource={selectedInsight?.source || ""}
         insightMessage={selectedInsight?.message || ""}
@@ -1392,17 +1768,19 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
         } : undefined}
         isTracked={selectedInsight != null && selectedInsight.insightId != null && trackedPipelineMap.has(selectedInsight.insightId)}
         onToggleTrack={selectedInsight ? () => handleToggleTrack(selectedInsight) : undefined}
+        onDetailUnavailable={selectedInsight?.source === "dashboard_insights" ? () => setUseDashboardEvidenceModalFallback(true) : undefined}
       />
 
-      {/* Agent Finding Drilldown Modal */}
-      <AnimatePresence>
-        {agentFinding && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
-            onClick={() => { setAgentFinding(null); setAgentFindingInsight(null); }}
+      {/* Agent Finding Drilldown Modal — portal to body to escape overflow-hidden parents */}
+      {createPortal(
+        <AnimatePresence>
+          {agentFinding && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+              onClick={() => { setAgentFinding(null); setAgentFindingInsight(null); }}
           >
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -1469,8 +1847,10 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
               </div>
             </motion.div>
           </motion.div>
-        )}
-      </AnimatePresence>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
     </div>
   );
 });

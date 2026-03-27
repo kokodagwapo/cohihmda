@@ -27,6 +27,8 @@ export interface LLMOptions {
   temperature?: number;
   maxTokens?: number;
   jsonMode?: boolean;
+  /** Optional tag for logging (e.g. prompt id / pipeline pass). */
+  tag?: string;
 }
 
 export interface QueryResult {
@@ -175,6 +177,7 @@ export async function callLLM(
     temperature = 0.4,
     maxTokens = 4000,
     jsonMode = false,
+    tag,
   } = options;
 
   let currentMaxTokens = maxTokens;
@@ -202,7 +205,9 @@ export async function callLLM(
         body: JSON.stringify(body),
       });
     } catch (networkErr: any) {
-      console.warn(`[LLM] Network error (attempt ${attempt}/${MAX_LLM_RETRIES}): ${networkErr.message}`);
+      console.warn(
+        `[LLM] Network error${tag ? ` [${tag}]` : ""} (attempt ${attempt}/${MAX_LLM_RETRIES}): ${networkErr.message}`
+      );
       if (attempt < MAX_LLM_RETRIES) {
         await new Promise((r) => setTimeout(r, 1000 * attempt));
         continue;
@@ -214,7 +219,9 @@ export async function callLLM(
     if (response.status === 429 || response.status >= 500) {
       const retryAfter = response.headers.get("retry-after");
       const waitMs = retryAfter ? Math.min(parseInt(retryAfter, 10) * 1000, 15_000) : 2000 * attempt;
-      console.warn(`[LLM] HTTP ${response.status} (attempt ${attempt}/${MAX_LLM_RETRIES}), retrying in ${waitMs}ms`);
+      console.warn(
+        `[LLM] HTTP ${response.status}${tag ? ` [${tag}]` : ""} (attempt ${attempt}/${MAX_LLM_RETRIES}), retrying in ${waitMs}ms`
+      );
       if (attempt < MAX_LLM_RETRIES) {
         await new Promise((r) => setTimeout(r, waitMs));
         continue;
@@ -252,7 +259,7 @@ export async function callLLM(
     if (finishReason === "length") {
       const escalatedTokens = Math.min(currentMaxTokens * 2, MAX_TOKEN_CEILING);
       console.warn(
-        `[LLM] Truncated (finish_reason=length, attempt ${attempt}/${MAX_LLM_RETRIES}): ` +
+        `[LLM] Truncated${tag ? ` [${tag}]` : ""} (finish_reason=length, attempt ${attempt}/${MAX_LLM_RETRIES}): ` +
         `prompt=${promptTokens}, completion=${completionTokens}/${currentMaxTokens}. ` +
         `Escalating max_tokens to ${escalatedTokens}.`
       );
@@ -273,7 +280,7 @@ export async function callLLM(
 
     // Truly empty response — log and retry
     console.warn(
-      `[LLM] Empty response (attempt ${attempt}/${MAX_LLM_RETRIES}):`,
+      `[LLM] Empty response${tag ? ` [${tag}]` : ""} (attempt ${attempt}/${MAX_LLM_RETRIES}):`,
       JSON.stringify({
         model,
         finishReason,
@@ -281,6 +288,7 @@ export async function callLLM(
         completionTokens,
         maxTokens: currentMaxTokens,
         jsonMode,
+        tag,
       })
     );
 

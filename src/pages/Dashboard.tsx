@@ -1,6 +1,6 @@
 // Dashboard main insights page
 import { useEffect, useState, useMemo } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, useLocation, Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import {
   Card,
@@ -175,6 +175,7 @@ import { useTenantStore } from "@/stores/tenantStore";
 
 const Dashboard = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { toast } = useToast();
   // Use AuthContext for proper authentication (not useEdit)
   const {
@@ -1204,6 +1205,44 @@ const Dashboard = () => {
       });
     }
   };
+
+  // When navigating to /insights with hash or state.scrollToSection (e.g. "Go to Leaderboard"), scroll to that section once the page has rendered.
+  useEffect(() => {
+    if (location.pathname !== "/insights") return;
+    const sectionId =
+      (location.state as { scrollToSection?: string } | null)?.scrollToSection ??
+      (location.hash ? location.hash.slice(1).trim() : null);
+    if (!sectionId) return;
+
+    const headerOffset = 80;
+    let cancelled = false;
+    const attemptScroll = (attempt = 0) => {
+      if (cancelled || attempt > 12) return;
+      const element = document.getElementById(sectionId);
+      if (element) {
+        const elementPosition = element.getBoundingClientRect().top;
+        const offsetPosition =
+          elementPosition + window.pageYOffset - headerOffset;
+        window.scrollTo({ top: offsetPosition, behavior: "smooth" });
+        // Clear scrollToSection from state so we don't scroll again on refresh; keep hash and other state.
+        const state = location.state as Record<string, unknown> | null;
+        if (state?.scrollToSection) {
+          const { scrollToSection: _, ...rest } = state;
+          navigate(location.pathname + location.search + location.hash, {
+            replace: true,
+            state: Object.keys(rest).length ? rest : undefined,
+          });
+        }
+        return;
+      }
+      setTimeout(() => attemptScroll(attempt + 1), 100);
+    };
+    const t = setTimeout(() => attemptScroll(0), 150);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [location.pathname, location.hash, location.state, navigate]);
 
   return (
     <DashboardContainer

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { ChevronLeft, ChevronRight, Loader2, Filter, X, Calendar, ShieldCheck, TrendingUp, TrendingDown, BarChart3, PieChart, AlertCircle, CheckCircle2, User, Building2, Maximize2, Minimize2, Plus, CheckSquare, Square } from 'lucide-react';
 import { KPICard } from '@/components/widgets/components/KPICard';
 import { Button } from '@/components/ui/button';
@@ -27,7 +27,9 @@ import { useCreditRiskData, ApplicationType, DistributionBucket, LoanMixRow, cal
 import { useChannelStore } from '@/stores/channelStore';
 import { useTenantStore } from '@/stores/tenantStore';
 import { useAuth } from '@/contexts/AuthContext';
-import { DatePeriodPicker, useDatePeriodState } from '@/components/ui/DatePeriodPicker';
+import { DatePeriodPicker, useDatePeriodState, computePresetDateRange, type PeriodPreset } from '@/components/ui/DatePeriodPicker';
+import { useDashboardInsights, type DashboardInsightItem } from "@/hooks/useDashboardInsights";
+import { DashboardInsightsStrip } from "@/components/dashboard/DashboardInsightsStrip";
 
 interface Loan {
   id: string;
@@ -104,6 +106,17 @@ export default function CreditRiskManagement() {
   const [canvasEntityId, setCanvasEntityId] = useState<string | null>(null);
   const [canvasEntityType, setCanvasEntityType] = useState<'category' | 'range' | null>(null);
   const [canvasEntityName, setCanvasEntityName] = useState<string>('');
+  const [generateLoading, setGenerateLoading] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const [pendingInsightWidgetId, setPendingInsightWidgetId] = useState<string | null>(null);
+
+  const dashboardInsightFilters = useMemo(() => ({}), []);
+  const {
+    insights: dashboardInsights,
+    generatedAt: dashboardInsightsGeneratedAt,
+    loading: dashboardInsightsLoading,
+    refresh: refreshDashboardInsights,
+  } = useDashboardInsights("credit-risk-management", dashboardInsightFilters, { tenantId });
 
   // Fetch data using the hook
   const { data, loading, error } = useCreditRiskData({
@@ -113,6 +126,113 @@ export default function CreditRiskManagement() {
     dateRange,
     tenantId: tenantId
   });
+
+  const handleGenerateInsights = useCallback(async () => {
+    setGenerateLoading(true);
+    setGenerateError(null);
+    try {
+      const tenantParam = selectedTenantId ? `?tenant_id=${encodeURIComponent(selectedTenantId)}` : "";
+      await api.request<{
+        insights: DashboardInsightItem[];
+        count: number;
+        pageId: string;
+        pageName: string;
+        generationBatch: string;
+      }>(`/api/dashboard-insights/generate${tenantParam}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pageId: "credit-risk-management",
+          filters: {},
+        }),
+      });
+      await refreshDashboardInsights();
+    } catch (err: unknown) {
+      setGenerateError(
+        err instanceof Error ? err.message : "We couldn't generate insights right now. Please try again later."
+      );
+    } finally {
+      setGenerateLoading(false);
+    }
+  }, [refreshDashboardInsights, selectedTenantId]);
+
+  const handleShowInsight = useCallback(
+    (insight: DashboardInsightItem) => {
+      const fc = insight.filter_context ?? {};
+      const insightDatePeriodToSelection: Record<string, { type: 'preset'; preset: PeriodPreset } | { type: 'year'; year: number }> = {
+        l13m: { type: 'preset', preset: 'rolling-13' },
+        l12m: { type: 'preset', preset: 'rolling-12' },
+        ytd: { type: 'year', year: new Date().getFullYear() },
+      };
+      const appType = typeof fc.applicationType === "string" ? fc.applicationType : null;
+      const period = typeof fc.datePeriod === "string" ? fc.datePeriod.toLowerCase() : null;
+      const primaryRef = insight.evidence_refs?.find((r) => r.role === "primary") ?? insight.evidence_refs?.[0];
+      const wid = primaryRef?.widgetId;
+
+      if (appType) {
+        const normalized = appType === "Lost Opperturnities" ? "Lost Opportunities" : appType;
+        if (
+          normalized === "Applications Taken" ||
+          normalized === "Funded Production" ||
+          normalized === "Lost Opportunities" ||
+          normalized === "All Loans"
+        ) {
+          setApplicationType(normalized);
+        }
+      }
+
+      if (period) {
+        const yKey = period.match(/^y_(\d{4})$/);
+        if (yKey) {
+          const y = Number(yKey[1]);
+          if (!Number.isNaN(y)) {
+            setPeriodSelection({
+              type: "year",
+              year: y,
+              dateRange: { start: `${y}-01-01`, end: `${y}-12-31` },
+            });
+            setSelectedYear(y);
+          }
+        } else if (period in insightDatePeriodToSelection) {
+          const selection = insightDatePeriodToSelection[period];
+          if (selection.type === "preset") {
+            setPeriodSelection({
+              type: "preset",
+              preset: selection.preset,
+              dateRange: computePresetDateRange(selection.preset),
+            });
+          } else {
+            const y = selection.year;
+            setPeriodSelection({
+              type: "year",
+              year: y,
+              dateRange: { start: `${y}-01-01`, end: new Date().toISOString().slice(0, 10) },
+            });
+            setSelectedYear(y);
+          }
+        }
+      }
+
+      if (wid === "credit-risk-loan-mix-table" && typeof fc.loanMixDimension === "string") {
+        if (fc.loanMixDimension === "loan_type") setLoanMixTab("Loan Type");
+        if (fc.loanMixDimension === "loan_purpose") setLoanMixTab("Loan Purpose");
+        if (fc.loanMixDimension === "occupancy") setLoanMixTab("Occupancy");
+      }
+
+      setPendingInsightWidgetId(wid ?? "credit-risk-story-panel");
+    },
+    [setPeriodSelection, setSelectedYear]
+  );
+
+  useEffect(() => {
+    if (!pendingInsightWidgetId || loading || typeof document === "undefined") return;
+    const el = document.getElementById(pendingInsightWidgetId);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("ring-2", "ring-amber-400", "ring-offset-2");
+    setTimeout(() => el.classList.remove("ring-2", "ring-amber-400", "ring-offset-2"), 3000);
+    setPendingInsightWidgetId(null);
+  }, [pendingInsightWidgetId, loading]);
 
   const formatNumber = (num: number, decimals = 0) => {
     return num.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
@@ -465,6 +585,30 @@ export default function CreditRiskManagement() {
             )}
           </div>
 
+          <DashboardInsightsStrip
+            insights={dashboardInsights}
+            generatedAt={dashboardInsightsGeneratedAt}
+            loading={dashboardInsightsLoading}
+            generating={generateLoading}
+            generateError={generateError}
+            onClearGenerateError={() => setGenerateError(null)}
+            onShowInsight={handleShowInsight}
+            onGenerate={handleGenerateInsights}
+            onRefreshInsights={refreshDashboardInsights}
+            showGenerateButton
+            showFeedback
+            onSubmitFeedback={async (insightId, rating, tags, comment) => {
+              try {
+                await api.submitDashboardInsightFeedback(insightId, rating, tags, comment, selectedTenantId);
+                return true;
+              } catch {
+                return false;
+              }
+            }}
+            dateFilter="ytd"
+            selectedTenantId={selectedTenantId}
+          />
+
         </div>
 
         {loading ? (
@@ -475,7 +619,7 @@ export default function CreditRiskManagement() {
         ) : (
           <>
             {/* Credit Risk Story - Full Width, Cleaner Design */}
-            <div className="relative bg-white dark:bg-slate-800/50 rounded-2xl p-8 border border-slate-200/60 dark:border-slate-700/60 shadow-sm overflow-hidden">
+            <div id="credit-risk-story-panel" className="relative bg-white dark:bg-slate-800/50 rounded-2xl p-8 border border-slate-200/60 dark:border-slate-700/60 shadow-sm overflow-hidden scroll-mt-24">
               <div className="absolute top-0 right-0 w-40 h-40 bg-gradient-to-br from-purple-100/30 to-transparent rounded-full blur-3xl opacity-50" />
               <div className="absolute bottom-0 left-0 w-32 h-32 bg-gradient-to-tr from-teal-100/30 to-transparent rounded-full blur-2xl opacity-50" />
               
@@ -564,7 +708,7 @@ export default function CreditRiskManagement() {
             </div>
 
             {/* KPI Cards – shared widget components */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+            <div id="credit-risk-kpi-cards" className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 scroll-mt-24">
               {(() => {
                 const kpis = data?.kpis || { units: 0, volume: 0, wac: 0, waFico: 0, waLtv: 0, waDti: 0 };
                 const kpiItems: Array<{ value: number; label: string; format: 'number' | 'currency' | 'ratio' | 'percent'; color: string }> = [
@@ -575,9 +719,9 @@ export default function CreditRiskManagement() {
                   { value: kpis.waLtv, label: 'WA LTV', format: 'percent', color: 'sky' },
                   { value: kpis.waDti, label: 'WA DTI', format: 'percent', color: 'rose' },
                 ];
-                return kpiItems.map((item, idx) => (
+                return kpiItems.map((item) => (
                   <KPICard
-                    key={idx}
+                    key={item.label}
                     data={{ value: item.value, label: item.label, format: item.format }}
                     loading={false}
                     error={null}
@@ -594,7 +738,7 @@ export default function CreditRiskManagement() {
               {/* Distribution Charts - Enhanced Layout */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* FICO Distribution */}
-                <div className="bg-white dark:bg-slate-800/50 rounded-xl p-6 border border-slate-200/60 dark:border-slate-700/60 shadow-sm">
+                <div id="credit-risk-fico-distribution" className="bg-white dark:bg-slate-800/50 rounded-xl p-6 border border-slate-200/60 dark:border-slate-700/60 shadow-sm scroll-mt-24">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-sm font-semibold text-slate-900 dark:text-white uppercase tracking-wider">
                       FICO Distribution
@@ -620,7 +764,11 @@ export default function CreditRiskManagement() {
                         'bg-gradient-to-r from-amber-500 to-amber-600',
                         'bg-gradient-to-r from-rose-500 to-rose-600',
                       ];
-                      return renderHorizontalBar(item, maxFicoUnits, colors[idx % colors.length], 'fico', idx);
+                      return (
+                        <div key={`fico-${item.range}`}>
+                          {renderHorizontalBar(item, maxFicoUnits, colors[idx % colors.length], 'fico', idx)}
+                        </div>
+                      );
                     })}
                     {(!data?.ficoDistribution || data.ficoDistribution.length === 0) && (
                       <div className="text-sm text-slate-500 dark:text-slate-400 text-center py-4">No FICO data available</div>
@@ -629,7 +777,7 @@ export default function CreditRiskManagement() {
                 </div>
 
                 {/* LTV Distribution */}
-                <div className="bg-white dark:bg-slate-800/50 rounded-xl p-6 border border-slate-200/60 dark:border-slate-700/60 shadow-sm">
+                <div id="credit-risk-ltv-distribution" className="bg-white dark:bg-slate-800/50 rounded-xl p-6 border border-slate-200/60 dark:border-slate-700/60 shadow-sm scroll-mt-24">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-sm font-semibold text-slate-900 dark:text-white uppercase tracking-wider">
                       LTV Distribution
@@ -655,7 +803,11 @@ export default function CreditRiskManagement() {
                         'bg-gradient-to-r from-teal-500 to-teal-600',
                         'bg-gradient-to-r from-emerald-500 to-emerald-600',
                       ];
-                      return renderHorizontalBar(item, maxLtvUnits, colors[idx % colors.length], 'ltv', idx);
+                      return (
+                        <div key={`ltv-${item.range}`}>
+                          {renderHorizontalBar(item, maxLtvUnits, colors[idx % colors.length], 'ltv', idx)}
+                        </div>
+                      );
                     })}
                     {(!data?.ltvDistribution || data.ltvDistribution.length === 0) && (
                       <div className="text-sm text-slate-500 dark:text-slate-400 text-center py-4">No LTV data available</div>
@@ -664,7 +816,7 @@ export default function CreditRiskManagement() {
                 </div>
 
                 {/* DTI Distribution */}
-                <div className="bg-white dark:bg-slate-800/50 rounded-xl p-6 border border-slate-200/60 dark:border-slate-700/60 shadow-sm">
+                <div id="credit-risk-dti-distribution" className="bg-white dark:bg-slate-800/50 rounded-xl p-6 border border-slate-200/60 dark:border-slate-700/60 shadow-sm scroll-mt-24">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-sm font-semibold text-slate-900 dark:text-white uppercase tracking-wider">
                       DTI Distribution
@@ -690,7 +842,11 @@ export default function CreditRiskManagement() {
                         'bg-gradient-to-r from-red-500 to-red-600',
                         'bg-gradient-to-r from-rose-600 to-rose-700',
                       ];
-                      return renderHorizontalBar(item, maxDtiUnits, colors[idx % colors.length], 'dti', idx);
+                      return (
+                        <div key={`dti-${item.range}`}>
+                          {renderHorizontalBar(item, maxDtiUnits, colors[idx % colors.length], 'dti', idx)}
+                        </div>
+                      );
                     })}
                     {(!data?.dtiDistribution || data.dtiDistribution.length === 0) && (
                       <div className="text-sm text-slate-500 dark:text-slate-400 text-center py-4">No DTI data available</div>
@@ -742,7 +898,7 @@ export default function CreditRiskManagement() {
               )}
 
               {/* Loan Mix Table - Enhanced Design */}
-              <div className="bg-white dark:bg-slate-800/50 rounded-xl border border-slate-200/60 dark:border-slate-700/60 shadow-sm overflow-hidden">
+              <div id="credit-risk-loan-mix-table" className="bg-white dark:bg-slate-800/50 rounded-xl border border-slate-200/60 dark:border-slate-700/60 shadow-sm overflow-hidden scroll-mt-24">
                 <div className="p-6 border-b border-slate-200/60 dark:border-slate-700/60 bg-gradient-to-r from-slate-50/50 to-white dark:from-slate-800/50 dark:to-slate-800/30">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                     <h3 className="text-sm font-semibold text-slate-900 dark:text-white uppercase tracking-wider">
@@ -782,12 +938,12 @@ export default function CreditRiskManagement() {
                       </tr>
                     </thead>
                     <tbody>
-                      {currentLoanMix.map((row, idx) => {
+                      {currentLoanMix.map((row) => {
                         const categoryKey = getRangeKey(loanMixTab.toLowerCase().replace(' ', '-'), row.category);
                         const isRowSelected = selectedRanges.has(categoryKey);
                         return (
                           <tr 
-                            key={idx} 
+                            key={`${loanMixTab}-${row.category}`}
                             onClick={(e) => {
                               if (e.ctrlKey || e.metaKey) {
                                 handleRangeToggle(loanMixTab.toLowerCase().replace(' ', '-'), row.category, e);

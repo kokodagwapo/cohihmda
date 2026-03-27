@@ -54,13 +54,21 @@ export function useWorkflowConversionSegmentLoans({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Stabilise array/object dependencies to avoid infinite re-render loops
+  const segmentsKey = JSON.stringify(segments);
+  const dimensionFiltersKey = JSON.stringify(dimensionFilters);
+
   const fetchData = useCallback(async () => {
+    const parsedSegments: { from: string; to: string }[] = JSON.parse(segmentsKey);
+    const parsedDimFilters: Array<{ column: string; value: string }> | undefined =
+      dimensionFiltersKey !== "undefined" ? JSON.parse(dimensionFiltersKey) : undefined;
+
     if (
       !startDate ||
       !endDate ||
-      segments.length === 0 ||
+      parsedSegments.length === 0 ||
       segmentIndex < 0 ||
-      segmentIndex >= segments.length ||
+      segmentIndex >= parsedSegments.length ||
       !filter
     ) {
       setLoans([]);
@@ -73,14 +81,14 @@ export function useWorkflowConversionSegmentLoans({
       const params = new URLSearchParams();
       params.set("startDate", startDate);
       params.set("endDate", endDate);
-      params.set("segments", JSON.stringify(segments));
+      params.set("segments", JSON.stringify(parsedSegments));
       params.set("grouping", grouping);
       params.set("segmentIndex", String(segmentIndex));
       params.set("filter", filter);
       if (selectedTenantId) params.set("tenant_id", selectedTenantId);
       if (channelGroup && channelGroup !== "All") params.set("channel_group", channelGroup);
-      if (dimensionFilters) {
-        for (const df of dimensionFilters) {
+      if (parsedDimFilters) {
+        for (const df of parsedDimFilters) {
           if (df.value && df.value !== "all") params.set(df.column, df.value);
         }
       }
@@ -99,13 +107,13 @@ export function useWorkflowConversionSegmentLoans({
   }, [
     startDate,
     endDate,
-    segments,
+    segmentsKey,
     grouping,
     segmentIndex,
     filter,
     selectedTenantId,
     channelGroup,
-    dimensionFilters,
+    dimensionFiltersKey,
   ]);
 
   useEffect(() => {

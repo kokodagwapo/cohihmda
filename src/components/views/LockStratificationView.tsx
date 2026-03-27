@@ -194,6 +194,8 @@ export interface LockStratificationViewProps {
   embedHeight?: number;
   /** When embedded in workbench, the widget cell width in pixels. */
   embedWidth?: number;
+  /** Callback to report rendered data for PPT export / canvasDataStore */
+  onDataReady?: (data: unknown) => void;
 }
 
 export function LockStratificationView({
@@ -204,6 +206,7 @@ export function LockStratificationView({
   variant = "full",
   embedHeight,
   embedWidth,
+  onDataReady,
 }: LockStratificationViewProps) {
   const { theme } = useTheme();
   const isDark = theme === "dark";
@@ -252,6 +255,53 @@ export function LockStratificationView({
     pullThroughPeriod,
     interestRateDrill,
   });
+
+  // Report data to canvasDataStore for PPT export
+  useEffect(() => {
+    if (!onDataReady || loading) return;
+    if (variant === 'kpis' && kpis) {
+      onDataReady({ variant: 'kpis', ...kpis });
+    } else if (variant === 'interest-rates' && interestRates && interestRates.length > 0) {
+      onDataReady({
+        chartType: 'bar',
+        xAxisKey: 'bucket',
+        series: [{ dataKey: 'value', color: '#3b82f6' }],
+        data: interestRates,
+        title: 'Interest Rate Distribution',
+      });
+    } else if (variant === 'days-to-expiration' && daysToExpiration && daysToExpiration.length > 0) {
+      onDataReady({
+        columns: [
+          { key: 'bucket', label: 'Days to Expiration' },
+          { key: 'units', label: 'Units' },
+          { key: 'volume', label: 'Volume' },
+          { key: 'wac', label: 'WAC' },
+          { key: 'avgDaysActive', label: 'Avg Days Active' },
+        ],
+        rows: daysToExpiration,
+      });
+    } else if (variant === 'pull-through' && pullThrough) {
+      onDataReady({
+        chartType: 'bar',
+        xAxisKey: 'month',
+        series: [
+          { dataKey: 'originated_pct', color: '#10b981' },
+          { dataKey: 'withdrawn_pct', color: '#f59e0b' },
+          { dataKey: 'denied_pct', color: '#ef4444' },
+        ],
+        data: pullThrough.bars || [],
+        title: 'Pull Through Analysis',
+      });
+    } else if ((variant === 'milestone-bar' || variant === 'milestone-pivot') && milestoneChart && milestoneChart.length > 0) {
+      onDataReady({
+        chartType: 'bar',
+        xAxisKey: 'group',
+        series: [{ dataKey: 'value', color: '#6366f1' }],
+        data: milestoneChart,
+        title: 'Active Loans by Milestone',
+      });
+    }
+  }, [onDataReady, loading, variant, kpis, interestRates, daysToExpiration, pullThrough, milestoneChart]);
 
   const labelPrefix = kpis?.labelPrefix ?? "All Active";
 

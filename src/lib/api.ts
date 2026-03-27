@@ -584,15 +584,19 @@ export class ApiClient {
     // so only file uploads and chat streams need extended timeouts.
     const isFileUpload = options.body instanceof FormData;
     const isImportEndpoint = endpoint.includes("/import/");
+    const isInsightsGenerateEndpoint = endpoint.includes("/dashboard-insights/generate");
     const isSlowEndpoint =
       endpoint.includes("/loans/funnel") ||
-      endpoint.includes("/dashboard/analytics");
+      endpoint.includes("/dashboard/analytics") ||
+      isInsightsGenerateEndpoint;
     const isChatEndpoint = endpoint.includes("/cohi-chat/");
     const timeoutMs =
       isFileUpload || isImportEndpoint
         ? 600000   // 10 minutes for file uploads/imports
         : isChatEndpoint
         ? 300000   // 5 minutes for AI chat (streaming)
+      : isInsightsGenerateEndpoint
+        ? 180000   // 3 minutes for insight generation (LLM + evidence shaping)
         : 60000;   // 60s default — async job endpoints return 202 immediately
 
     // Create abort controller for timeout (more compatible than AbortSignal.timeout)
@@ -704,11 +708,10 @@ export class ApiClient {
 
       // Handle abort/timeout errors
       if (error.name === "AbortError" || error.message?.includes("timeout")) {
-        const timeoutDuration = isChatEndpoint
-          ? "2 minutes"
-          : isSlowEndpoint
-          ? "60 seconds"
-          : "30 seconds";
+        const timeoutDuration =
+          timeoutMs % 60000 === 0
+            ? `${timeoutMs / 60000} minute${timeoutMs / 60000 === 1 ? "" : "s"}`
+            : `${Math.round(timeoutMs / 1000)} seconds`;
         // Only retry GET requests on timeout — POST/PUT/DELETE are not idempotent
         if (isGetRequest && retries < 1) {
           console.warn(
@@ -1283,6 +1286,7 @@ export class ApiClient {
     source_insight_id?: number;
     source_type?: string;
     tags?: string[];
+    display_metadata?: Record<string, any>;
   }, tenantId?: string | null) {
     const tenantParam = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
     return this.request(`/api/insights/tracked${tenantParam}`, { method: "POST", body: JSON.stringify(data) });
@@ -1313,6 +1317,55 @@ export class ApiClient {
   async deleteTrackedInsight(id: string, tenantId?: string | null) {
     const tenantParam = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
     return this.request(`/api/insights/tracked/${id}${tenantParam}`, { method: "DELETE" });
+  }
+
+  // =========================================================================
+  // Dashboard Insights (per-page insight cards)
+  // =========================================================================
+
+  async submitDashboardInsightFeedback(
+    dashboardInsightId: number,
+    rating: -1 | 1,
+    tags?: string[],
+    comment?: string,
+    tenantId?: string | null
+  ) {
+    const tenantParam = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`/api/dashboard-insights/${dashboardInsightId}/feedback${tenantParam}`, {
+      method: "POST",
+      body: JSON.stringify({
+        rating,
+        tags: tags || [],
+        comment: comment || "",
+      }),
+    });
+  }
+
+  async getDashboardInsightFeedback(dashboardInsightId: number, tenantId?: string | null) {
+    const tenantParam = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`/api/dashboard-insights/${dashboardInsightId}/feedback${tenantParam}`);
+  }
+
+  async deleteDashboardInsight(dashboardInsightId: number, tenantId?: string | null) {
+    const tenantParam = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`/api/dashboard-insights/${dashboardInsightId}${tenantParam}`, { method: "DELETE" });
+  }
+
+  async createWorkbenchCanvasFromDashboardInsight(dashboardInsightId: number, tenantId?: string | null) {
+    const sp = new URLSearchParams();
+    if (tenantId) sp.set("tenant_id", tenantId);
+    // Prevent any intermediary/proxy from reusing a stale POST response.
+    sp.set("_ts", String(Date.now()));
+    const qs = `?${sp.toString()}`;
+    // Do not add Cache-Control/Pragma here: they trigger a CORS preflight that lists those
+    // headers and must match the server's Access-Control-Allow-Headers (often they don't).
+    // Unique _ts query is enough to avoid stale URL identity for proxies.
+    const canvas = await this.request<{ id: string }>(`/api/workbench/canvases/from-dashboard-insight${qs}`, {
+      method: "POST",
+      body: JSON.stringify({ dashboardInsightId }),
+    });
+    this.invalidateCacheFor("/api/workbench/canvases");
+    return canvas;
   }
 
   async insightChat(

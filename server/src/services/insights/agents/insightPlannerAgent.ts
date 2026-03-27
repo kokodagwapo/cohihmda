@@ -10,6 +10,7 @@
 import { callLLM, type LLMMessage } from "../../research/tools.js";
 import type { InvestigationQuestion, ResearchPlan } from "../../research/agents/plannerAgent.js";
 import { pool as managementPool } from "../../../config/managementDatabase.js";
+import type { CategoryDefinition } from "./categoryDefinitions.js";
 
 export type { InvestigationQuestion, ResearchPlan };
 
@@ -25,7 +26,7 @@ You will receive:
 - Database schema (loans table columns and types)
 - Canonical metric definitions (SQL formulas for standard KPIs)
 - Field population stats (which fields are actually populated — low-population fields may indicate unused features)
-- Previous insight headlines (the last batch — avoid repeating stale findings)
+- Previous insight headlines (for reference — re-examine important topics with updated data; only skip if truly stale)
 - Tracked insights (metrics users have pinned and are actively monitoring)
 - Data quality flags (critical issues with the data)
 
@@ -48,7 +49,7 @@ RULES:
 - Generate 12-18 questions, prioritized by likely business impact. More is better — the evaluator will filter. Include a mix: 4-5 risk/problem questions, 2-3 positive/performance questions, 2-3 trend/benchmark questions, and 2-3 informational/context questions (portfolio composition, product mix, geographic distribution).
 - Each question must be independently investigable with SQL queries against the loans table (alias: l)
 - Approaches MUST be specific: column names, CURRENT_DATE-based date ranges, GROUP BY strategies
-- DO NOT repeat topics from the previous insight batch unless the data has likely changed
+- If a topic appeared in the previous insight batch, only skip it if it is truly stale (no new data). Important, high-impact topics SHOULD be re-examined with current numbers even if they appeared before — provide a fresh angle or updated metrics
 - If tracked insights exist, include at least 1-2 questions that re-evaluate or deepen those specific areas
 - Consider multiple time windows: YTD, rolling 30D, rolling 90D, prior-period comparisons
 - For conversion/completion metrics (pull-through, fallout, funded rate): mortgage cycle times often exceed 30 days, so a 30D application cohort contains many loans still in-process — making short-window PT artificially low and fallout artificially high. Prefer 90D or YTD for these metrics. If you plan a short-window conversion question, pair it with a cycle-time check so the analyst can assess reliability.
@@ -56,10 +57,11 @@ RULES:
 - If a field has very low population (<20%), don't base questions on it — mention it as a data quality note instead
 - Categories should be descriptive (e.g., "pipeline_velocity", "officer_performance", "lock_expiration_risk"), NOT generic ("general", "other")
 - PostgreSQL syntax: DATE - DATE returns integer days. Use CURRENT_DATE for today.
-- Active loan status: current_loan_status = 'Active Loan' AND application_date IS NOT NULL (loans without application_date are data artifacts, not real pipeline)
-- Funded: current_loan_status ILIKE '%Originated%' OR ILIKE '%purchased%'
+- Active pipeline: current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND (is_archived IS DISTINCT FROM TRUE)
+- Originated/Funded (status-based): current_loan_status ILIKE '%Originated%' OR current_loan_status ILIKE '%purchased%'
 - Withdrawn: current_loan_status ILIKE '%Withdrawn%'
 - Denied: current_loan_status ILIKE '%Denied%'
+- Completed (all terminal — pull-through denominator): current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
 - NEVER suggest queries that modify data
 
 BALANCED COVERAGE — INCLUDE STRATEGIC REVIEW (POSITIVE SIGNALS):
@@ -151,6 +153,8 @@ export interface InsightPlannerContext {
   staleLoanContext?: string;
   /** When set, planner generates 4-6 questions targeting this bucket only. */
   bucketFocus?: string;
+  /** When set, planner generates questions scoped to this functional category only. */
+  categoryFocus?: CategoryDefinition;
 }
 
 function buildUserPrompt(ctx: InsightPlannerContext): string {
@@ -167,7 +171,7 @@ function buildUserPrompt(ctx: InsightPlannerContext): string {
   }
 
   if (ctx.previousInsightHeadlines && ctx.previousInsightHeadlines.length > 0) {
-    prompt += `## Previous Insight Headlines (last batch — avoid repeating unless data likely changed)\n`;
+    prompt += `## Previous Insight Headlines (for context — re-examine important topics with fresh data; skip only if truly stale and low-value)\n`;
     ctx.previousInsightHeadlines.forEach((h, i) => {
       prompt += `${i + 1}. ${h}\n`;
     });
@@ -216,6 +220,14 @@ function buildUserPrompt(ctx: InsightPlannerContext): string {
     prompt += `Do NOT repeat existing insight headlines listed above.\n\n`;
   }
 
+  if (ctx.categoryFocus) {
+    const cat = ctx.categoryFocus;
+    prompt += `## CATEGORY SCOPE DIRECTIVE\nYou are generating questions ONLY for the "${cat.label}" functional category.\n`;
+    prompt += `Generate between ${cat.questionCount.min} and ${cat.questionCount.max} questions.\n`;
+    prompt += `Stay strictly within the domain described in the category instructions above.\n`;
+    prompt += `Do NOT repeat existing insight headlines listed above.\n\n`;
+  }
+
   prompt += `Produce your investigation plan as a JSON object with "summary" and "questions".`;
   return prompt;
 }
@@ -231,14 +243,19 @@ export async function runInsightPlannerAgent(
   const userPrompt = buildUserPrompt(context);
   const trainingSection = await fetchTrainingExamples();
 
+  // When scoped to a category, append its plannerSupplement to the system prompt
+  const categorySupplement = context.categoryFocus
+    ? `\n\n## FUNCTIONAL CATEGORY INSTRUCTIONS\n${context.categoryFocus.plannerSupplement}`
+    : "";
+
   const messages: LLMMessage[] = [
-    { role: "system", content: INSIGHT_PLANNER_PROMPT + trainingSection },
+    { role: "system", content: INSIGHT_PLANNER_PROMPT + trainingSection + categorySupplement },
     { role: "user", content: userPrompt },
   ];
 
   const raw = await callLLM(messages, apiKey, {
     temperature: 0.6,
-    maxTokens: 8000,
+    maxTokens: 12000,
     jsonMode: true,
   });
 

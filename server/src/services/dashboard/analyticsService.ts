@@ -12,6 +12,7 @@ import {
   loadStoredInsights,
   clearCache as clearInsightsCache,
 } from "../insights/index.js";
+import { loadEscalatedDashboardInsights } from "../dashboardInsights/index.js";
 import type {
   GeneratedInsight,
   CategorizedInsight,
@@ -135,6 +136,14 @@ export interface Insight {
   owner?: string;
   generation_method?: "pipeline" | "agent";
   detail_data?: any;
+  functional_category?: string;
+  // Dashboard insights escalation: "Go to page" link and filter restore
+  sourcePageId?: string;
+  sourcePageName?: string;
+  filter_context?: Record<string, unknown>;
+  evidence_refs?: Array<{ widgetId: string; role: string; target?: { type: string; label: string }; value?: string }>;
+  cited_numbers?: string[];
+  supporting_data?: { byPeriod?: Array<{ period: string; periodLabel?: string; averagePullThrough?: number; totalUnits?: number; totalVolume?: number; topPerformerName?: string; topPerformerUnits?: number; topPerformerVolume?: number }> };
 }
 
 /**
@@ -241,7 +250,7 @@ type ExtendedTimeframe =
  * Calculate date range based on timeframe
  * Returns { start, end } for all timeframes
  */
-function getDateRangeForTimeframe(
+export function getDateRangeForTimeframe(
   timeframe: ExtendedTimeframe,
   customStart?: string,
   customEnd?: string
@@ -1335,6 +1344,47 @@ export async function getClosingFalloutForecast(
 }
 
 /**
+ * Load escalated dashboard insights and map to Aletheia Insight format (Critical bucket).
+ */
+async function loadEscalatedDashboardInsightsAsInsights(
+  tenantPool: pg.Pool
+): Promise<Insight[]> {
+  try {
+    const escalated = await loadEscalatedDashboardInsights(tenantPool);
+    return escalated.map((d) => ({
+      id: d.id,
+      type: "critical",
+      message: d.headline,
+      priority: "critical",
+      reasoning: d.understory,
+      source: "dashboard_insights",
+      forPodcast: false,
+      bucket: "critical",
+      headline: d.headline,
+      understory: d.understory,
+      severity_score: d.severity_score,
+      bucketPriority: "RED",
+      what_changed: d.what_changed,
+      why: d.why,
+      business_impact: d.business_impact,
+      risk_if_ignored: d.risk_if_ignored,
+      recommended_action: d.recommended_action,
+      owner: d.owner,
+      sourcePageId: d.sourcePageId,
+      sourcePageName: d.sourcePageName,
+      filter_context: d.filter_context,
+      evidence_refs: d.evidence_refs ?? [],
+      cited_numbers: d.cited_numbers ?? [],
+      supporting_data: d.supporting_data ?? undefined,
+      functional_category: d.functional_category,
+    }));
+  } catch (err) {
+    console.warn("[Insights] Failed to load escalated dashboard insights:", err);
+    return [];
+  }
+}
+
+/**
  * Get comprehensive insights based on loan data, business overview, leaderboard, and industry news
  * Uses LLM-based dynamic insights with fallback to rule-based system
  *
@@ -1375,6 +1425,7 @@ export async function getInsights(
       industry_news: number;
       loan_funnel: number;
       predictions?: number;
+      dashboard_insights?: number;
     };
   };
 }> {
@@ -1436,8 +1487,13 @@ export async function getInsights(
             owner: ins.owner,
             generation_method: ins.generation_method || "pipeline",
             detail_data: (ins as any).detail_data || null,
+            functional_category: (ins as any).functional_category || null,
           })
         );
+
+        // Append escalated dashboard insights (Critical bucket, "Go to page" link)
+        const escalatedDashboard = await loadEscalatedDashboardInsightsAsInsights(tenantPool);
+        insights.push(...escalatedDashboard);
 
         return {
           insights,
@@ -1454,26 +1510,28 @@ export async function getInsights(
             totalInsights: insights.length,
             bySource: {
               business_overview: insights.filter((i) =>
-                ["performance", "pipeline"].includes(i.source)
+                ["performance", "pipeline"].includes(i.source || "")
               ).length,
-              leaderboard: 0,
-              industry_news: 0,
+              leaderboard: insights.filter((i) => i.source === "leaderboard").length,
+              industry_news: insights.filter((i) => i.source === "industry_news").length,
               loan_funnel: insights.filter(
                 (i) => i.source === "lost_opportunity"
               ).length,
               predictions: insights.filter((i) => i.source === "predictions")
                 .length,
+              dashboard_insights: escalatedDashboard.length,
             },
           },
         };
       }
 
-      // No stored insights — return empty with needsGeneration flag
+      // No stored insights — still include escalated dashboard insights, set needsGeneration
       console.log(
         `[Insights] No stored insights found for dateFilter=${dateFilter}, returning needsGeneration=true`
       );
+      const escalatedDashboard = await loadEscalatedDashboardInsightsAsInsights(tenantPool);
       return {
-        insights: [],
+        insights: escalatedDashboard,
         generatedAt: new Date().toISOString(),
         dateFilter,
         usedLLM: false,
@@ -1483,13 +1541,14 @@ export async function getInsights(
           revenue: 0,
           pullThroughRate: "0",
           avgCycleTime: 0,
-          totalInsights: 0,
+          totalInsights: escalatedDashboard.length,
           bySource: {
             business_overview: 0,
             leaderboard: 0,
             industry_news: 0,
             loan_funnel: 0,
             predictions: 0,
+            dashboard_insights: escalatedDashboard.length,
           },
         },
       };
@@ -2305,8 +2364,12 @@ export async function getInsights(
     () => (seed % 2 === 0 ? 1 : -1) * (Math.random() - 0.5)
   );
 
+  // Append escalated dashboard insights (Critical bucket)
+  const escalatedDashboard = await loadEscalatedDashboardInsightsAsInsights(tenantPool);
+  const allInsights = [...shuffled, ...escalatedDashboard];
+
   return {
-    insights: shuffled,
+    insights: allInsights,
     generatedAt: new Date().toISOString(),
     dateFilter,
     usedLLM: false, // Rule-based fallback was used
@@ -2315,15 +2378,16 @@ export async function getInsights(
       revenue: calculatedRevenue,
       pullThroughRate: pullThroughRateRolling90D.toFixed(1),
       avgCycleTime: Math.round(avgCycleTime),
-      totalInsights: insights.length,
+      totalInsights: allInsights.length,
       bySource: {
-        business_overview: insights.filter(
+        business_overview: allInsights.filter(
           (i) => i.source === "business_overview"
         ).length,
-        leaderboard: insights.filter((i) => i.source === "leaderboard").length,
-        industry_news: insights.filter((i) => i.source === "industry_news")
+        leaderboard: allInsights.filter((i) => i.source === "leaderboard").length,
+        industry_news: allInsights.filter((i) => i.source === "industry_news")
           .length,
-        loan_funnel: insights.filter((i) => i.source === "loan_funnel").length,
+        loan_funnel: allInsights.filter((i) => i.source === "loan_funnel").length,
+        dashboard_insights: escalatedDashboard.length,
       },
     },
   };
@@ -2455,6 +2519,7 @@ export async function refreshInsights(
       impact: ins.impact,
       evidence: ins.evidence,
       generation_method: ins.generation_method || "pipeline",
+      functional_category: (ins as any).functional_category || null,
     })
   );
 
