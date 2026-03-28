@@ -114,6 +114,18 @@ const topTieringMenuGroups = {
         icon: FileText,
         iconColor: "blue" as const,
       },
+      {
+        id: "captureAnalysis",
+        label: "Capture Analysis",
+        icon: BarChart3,
+        iconColor: "emerald" as const,
+      },
+      {
+        id: "tridCompliance",
+        label: "TRID Compliance",
+        icon: ShieldCheck,
+        iconColor: "teal" as const,
+      },
     ],
   },
   performance: {
@@ -135,18 +147,6 @@ const topTieringMenuGroups = {
         label: "HMDA",
         icon: FileText,
         iconColor: "indigo" as const,
-      },
-      {
-        id: "captureAnalysis",
-        label: "Capture Analysis",
-        icon: BarChart3,
-        iconColor: "emerald" as const,
-      },
-      {
-        id: "tridCompliance",
-        label: "TRID Compliance",
-        icon: ShieldCheck,
-        iconColor: "teal" as const,
       },
     ],
   },
