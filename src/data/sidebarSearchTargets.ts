@@ -30,6 +30,8 @@ export function getSidebarSearchTargets(): SidebarRouteSearchTarget[] {
     { id: 'route:operationsScorecard', label: 'Operations Scorecard', group: 'TopTiering', kind: 'route', path: '/performance/operation-scorecard', keywords: ['toptiering', 'top tiering', 'performance'] },
     { id: 'route:operationsTrends', label: 'Operations Trends', group: 'TopTiering', kind: 'route', path: '/performance/operation-scorecard-trends', keywords: ['toptiering', 'top tiering', 'performance'] },
     { id: 'route:financialModeling', label: 'Financial Modeling Sandbox', group: 'TopTiering', kind: 'route', path: '/performance/financial-modeling-sandbox', keywords: ['toptiering', 'top tiering', 'performance'] },
+    { id: 'route:captureAnalysis', label: 'Capture Analysis', group: 'TopTiering', kind: 'route', path: '/capture-analysis', keywords: ['capture', 'builder', 'cohibuilder', 'portfolio', 'csv', 'import'] },
+    { id: 'route:tridCompliance', label: 'TRID Compliance', group: 'TopTiering', kind: 'route', path: '/capture-analysis?view=respa&hideNav=1', keywords: ['trid', 'respa', 'compliance'] },
   ];
 
   const pageTargets: SidebarRouteSearchTarget[] = [

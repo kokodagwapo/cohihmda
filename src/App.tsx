@@ -36,6 +36,7 @@ import TopTieringComparison from "./pages/TopTieringComparison";
 import OperationScorecard from "./pages/OperationScorecard";
 import OperationScorecardTrends from "./pages/OperationScorecardTrends";
 import FinancialModelingSandbox from "./pages/FinancialModelingSandbox";
+import CaptureAnalysis from "./pages/CaptureAnalysis";
 import SalesScorecard from "./pages/SalesScorecard";
 import SalesTrends from "./pages/SalesTrends";
 import SalesScorecardOverview from "./pages/SalesScorecardOverview";
@@ -205,6 +206,7 @@ const App = () => (
               <Route path="/actors" element={<Actors />} />
               <Route path="/performance/toptiering-comparison" element={<TopTieringComparison />} />
               <Route path="/performance/financial-modeling-sandbox" element={<FinancialModelingSandbox />} />
+              <Route path="/capture-analysis" element={<CaptureAnalysis />} />
               <Route path="/sales-scorecard" element={<SalesScorecard />} />
               <Route path="/sales-trends" element={<SalesTrends />} />
               <Route path="/sales-scorecard-overview" element={<SalesScorecardOverview />} />

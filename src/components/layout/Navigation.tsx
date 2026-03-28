@@ -32,6 +32,7 @@ import {
   PinOff,
   Lock,
   Layers,
+  ShieldCheck,
 } from "lucide-react";
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -134,6 +135,18 @@ const topTieringMenuGroups = {
         label: "HMDA",
         icon: FileText,
         iconColor: "indigo" as const,
+      },
+      {
+        id: "captureAnalysis",
+        label: "Capture Analysis",
+        icon: BarChart3,
+        iconColor: "emerald" as const,
+      },
+      {
+        id: "tridCompliance",
+        label: "TRID Compliance",
+        icon: ShieldCheck,
+        iconColor: "teal" as const,
       },
     ],
   },
@@ -306,6 +319,8 @@ const routeMap: Record<string, string> = {
   operationsScorecard: "/performance/operation-scorecard",
   operationsTrends: "/performance/operation-scorecard-trends",
   financialModeling: "/performance/financial-modeling-sandbox",
+  captureAnalysis: "/capture-analysis",
+  tridCompliance: "/capture-analysis?view=respa&hideNav=1",
 };
 
 /** Match pathname + search when route targets include query params. */
@@ -593,6 +608,7 @@ export function Navigation(
       "/performance/operation-scorecard",
       "/performance/operation-scorecard-trends",
       "/performance/financial-modeling-sandbox",
+      "/capture-analysis",
     ];
     return topTieringRoutes.some(
       (route) =>
