@@ -126,17 +126,13 @@ const topTieringMenuGroups = {
       },
     ],
   },
-/*   compliance: {
-    label: "Compliance",
-    items: [
-      {
-        id: "hmda",
-        label: "HMDA",
-        icon: FileText,
-        iconColor: "indigo" as const,
-      },
-    ],
-  }, */
+  // compliance: not yet ready for production
+  // compliance: {
+  //   label: "Compliance",
+  //   items: [
+  //     { id: "hmda", label: "HMDA", icon: FileText, iconColor: "indigo" as const },
+  //   ],
+  // },
   sales: {
     label: "Sales",
     icon: Users,
@@ -1289,50 +1285,7 @@ export function Navigation(
                               );
                             })}
                           </div>
-                          <div className="px-1 py-1 mt-2.5 mb-1 flex items-center gap-1.5">
-                            <div className="w-0.5 h-3.5 rounded-full bg-gradient-to-b from-emerald-500 to-teal-500 opacity-70" />
-                            <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                              Compliance
-                            </span>
-                          </div>
-                          <div className="space-y-0.5">
-                            {topTieringMenuGroups.compliance.items.map((item) => {
-                              const Icon = item.icon;
-                              const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
-                              const itemRoute = routeMap[item.id];
-                              const isItemActive = itemRoute && navTargetMatches(location.pathname, location.search, itemRoute);
-                              const pinItem: PinnedItem = { type: "route", id: item.id, path: itemRoute || "", label: item.label };
-                              const pinned = isPinned(pinItem);
-                              return (
-                                <button
-                                  key={item.id}
-                                  onClick={() => handleTopTieringClick(item.id)}
-                                  className={cn(compactItemBase, isItemActive ? compactItemActive : compactItemDefault)}
-                                  role="menuitem"
-                                >
-                                  <div className={cn("w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0", style.bg, isItemActive && "ring-1 ring-emerald-400/50")}>
-                                    <Icon className={cn("w-3 h-3", style.icon, isItemActive && "scale-110")} />
-                                  </div>
-                                  <div className="flex items-center gap-1 flex-1 min-w-0">
-                                    <span className="truncate text-left">{item.label}</span>
-                                    <button
-                                      type="button"
-                                      onClick={(e) => { e.stopPropagation(); togglePinned(pinItem); }}
-                                      className="shrink-0 ml-auto p-0.5 rounded hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
-                                      title={pinned ? "Unpin from sidebar" : "Pin to sidebar"}
-                                      aria-label={pinned ? "Unpin" : "Pin to sidebar"}
-                                    >
-                                      {pinned ? (
-                                        <PinOff className="w-3 h-3 text-amber-500" />
-                                      ) : (
-                                        <Pin className="w-3 h-3 text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300" />
-                                      )}
-                                    </button>
-                                  </div>
-                                </button>
-                              );
-                            })}
-                          </div>
+                          {/* Compliance section hidden — not yet ready for production */}
                         </div>
 
                         {/* Column 4: Secondary Market + Financial Modeling */}
