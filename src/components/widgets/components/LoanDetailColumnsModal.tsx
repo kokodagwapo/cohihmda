@@ -164,7 +164,10 @@ const ColumnEditRow = memo(function ColumnEditRow({
                 <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
               </Button>
             </PopoverTrigger>
-            <PopoverContent className="w-[280px] p-0" align="start">
+            <PopoverContent
+              className={cn('w-[280px] p-0', 'z-[calc(var(--z-modal)+20)]')}
+              align="start"
+            >
               <Command>
                 <CommandInput placeholder="Search field..." />
                 <CommandList className="max-h-[300px]">
