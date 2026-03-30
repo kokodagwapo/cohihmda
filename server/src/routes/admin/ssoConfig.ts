@@ -671,7 +671,6 @@ router.post("/config", authenticateToken, async (req: AuthRequest, res: Response
       okta: "Okta",
       oidc: "OIDC Provider",
       google: "Google Workspace",
-      coheus_bridge: "Coheus Bridge",
     };
     const providerDisplayName = providerNames[input.provider_type] || input.provider_type;
     
