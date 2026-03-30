@@ -612,14 +612,14 @@ const DATA_QUALITY_TESTS: DataQualityTest[] = [
     id: "trid_missing_estimated_value",
     name: "TRID: Missing Estimated Property Value",
     description:
-      "Estimated property value is one of the 6 TRID trigger items required for application",
+      "Both appraised value and sales price are missing — at least one is required as the TRID 'estimated property value' trigger item",
     severity: "warning",
     group: "Application Tests",
     field: "appraised_value",
     sqlCondition: `(appraised_value IS NULL OR appraised_value <= 0)
                    AND (sales_price IS NULL OR sales_price <= 0)
                    AND application_date IS NOT NULL`,
-    requiredColumns: ["appraised_value", "application_date"],
+    requiredColumns: ["appraised_value", "sales_price", "application_date"],
   },
   {
     id: "trid_missing_loan_amount",
@@ -1592,7 +1592,11 @@ router.get(
           "occupancy_type",
           "lien_position",
           "current_loan_status",
-          "loan_amount"
+          "loan_amount",
+          // Include both value fields so the TRID estimated-value check is self-explanatory:
+          // the warning fires when BOTH appraised_value AND sales_price are NULL/zero.
+          "appraised_value",
+          "sales_price"
         );
       }
 
