@@ -69,6 +69,12 @@ import {
   CustomDateRange,
 } from "@/hooks/useTopTieringComparisonData";
 import { DatePeriodPicker, computePresetDateRange, type PeriodSelection, type PeriodPreset } from "@/components/ui/DatePeriodPicker";
+import { api } from "@/lib/api";
+import { DashboardInsightsStrip } from "@/components/dashboard/DashboardInsightsStrip";
+import {
+  useDashboardInsights,
+  type DashboardInsightItem,
+} from "@/hooks/useDashboardInsights";
 
 type TopTieringActor = "branch" | "loan-officer";
 type TimeFilter =
@@ -80,6 +86,28 @@ type TimeFilter =
   | "mtd"
   | "trailing-12"
   | "custom";
+
+const INSIGHT_DATE_PERIOD_TO_TIME_FILTER: Record<string, TimeFilter> = {
+  mtd: "mtd",
+  qtd: "qtd",
+  ytd: "ytd",
+  lm: "last-month",
+  lq: "last-quarter",
+  ly: "last-year",
+  t12: "trailing-12",
+};
+
+const INSIGHT_WIDGET_IDS = new Set([
+  "ttc-kpi-total-revenue",
+  "ttc-kpi-total-units",
+  "ttc-kpi-avg-revenue-bps",
+  "ttc-kpi-actor-count",
+  "ttc-revenue-chart",
+  "ttc-units-volume-chart",
+  "ttc-revenue-quality-chart",
+  "ttc-detail-table",
+  "ttc-story-panel",
+]);
 
 /** Map PeriodSelection to TopTiering TimeFilter + optional CustomDateRange */
 const mapPeriodToTopTiering = (selection: PeriodSelection): { timeFilter: TimeFilter; customDateRange?: CustomDateRange } => {
@@ -191,6 +219,9 @@ export function TopTieringComparisonView({
   const [customDateRange, setCustomDateRange] = useState<
     CustomDateRange | undefined
   >(undefined);
+  const [generateLoading, setGenerateLoading] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const [pendingInsightWidgetId, setPendingInsightWidgetId] = useState<string | null>(null);
 
   // Selection state for Current Selection feature
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -227,6 +258,71 @@ export function TopTieringComparisonView({
     customDateRange
   );
 
+  const dashboardInsightFilters = useMemo(() => ({}), []);
+  const {
+    insights: dashboardInsights,
+    generatedAt: dashboardInsightsGeneratedAt,
+    loading: dashboardInsightsLoading,
+    refresh: refreshDashboardInsights,
+  } = useDashboardInsights("top-tiering-comparison", dashboardInsightFilters, {
+    tenantId: selectedTenantId,
+  });
+
+  const handleGenerateInsights = useCallback(async () => {
+    setGenerateLoading(true);
+    setGenerateError(null);
+    try {
+      const tenantParam = selectedTenantId ? `?tenant_id=${encodeURIComponent(selectedTenantId)}` : "";
+      await api.request(`/api/dashboard-insights/generate${tenantParam}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pageId: "top-tiering-comparison",
+          filters: {},
+        }),
+      });
+      await refreshDashboardInsights();
+    } catch (err: unknown) {
+      setGenerateError(
+        err instanceof Error ? err.message : "We couldn't generate insights right now. Please try again later."
+      );
+    } finally {
+      setGenerateLoading(false);
+    }
+  }, [refreshDashboardInsights, selectedTenantId]);
+
+  const handleShowInsight = useCallback((insight: DashboardInsightItem) => {
+    const fc = insight.filter_context ?? {};
+    const datePeriod = typeof fc.datePeriod === "string" ? fc.datePeriod.toLowerCase() : "";
+    const mappedTimeFilter = INSIGHT_DATE_PERIOD_TO_TIME_FILTER[datePeriod];
+    if (mappedTimeFilter) setTimeFilter(mappedTimeFilter);
+
+    const actorType = fc.actorType;
+    if (actorType === "branch" || actorType === "loan-officer") {
+      setSelectedActor(actorType);
+    }
+
+    if (typeof fc.actorName === "string" && fc.actorName.trim()) {
+      setSearchQuery(fc.actorName.trim());
+      setSelectedChartTab("detail");
+    }
+
+    const widgetFromEvidence = insight.evidence_refs?.find((r) => INSIGHT_WIDGET_IDS.has(r.widgetId))?.widgetId;
+    if (widgetFromEvidence) setPendingInsightWidgetId(widgetFromEvidence);
+  }, []);
+
+  const handleDashboardInsightFeedback = useCallback(
+    async (insightId: number, rating: 1 | -1, tags?: string[], comment?: string) => {
+      try {
+        await api.submitDashboardInsightFeedback(insightId, rating, tags, comment, selectedTenantId);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [selectedTenantId]
+  );
+
   const periodSelectionForPicker = useMemo(
     () => toptieringTimeToPeriodSelection(timeFilter, customDateRange),
     [timeFilter, customDateRange]
@@ -242,6 +338,14 @@ export function TopTieringComparisonView({
   useEffect(() => {
     localStorage.setItem("toptiering-comparison-time", timeFilter);
   }, [timeFilter]);
+
+  useEffect(() => {
+    if (!pendingInsightWidgetId || loading) return;
+    const el = document.getElementById(pendingInsightWidgetId);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    setPendingInsightWidgetId(null);
+  }, [pendingInsightWidgetId, loading, selectedChartTab, selectedRevenueTab, selectedActor]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -474,7 +578,7 @@ export function TopTieringComparisonView({
     sorting: ChartSorting,
     metric: "revenue" | "units" | "volume" | "revenueBPS" | "revenuePerLoan"
   ) => {
-    let sorted = [...data];
+    const sorted = [...data];
 
     if (metric === "revenue") {
       sorted.sort((a, b) =>
@@ -666,6 +770,20 @@ export function TopTieringComparisonView({
         isFullscreen ? "max-w-full" : "max-w-[1800px]"
       } p-1 sm:p-2`}
     >
+      <DashboardInsightsStrip
+        insights={dashboardInsights}
+        generatedAt={dashboardInsightsGeneratedAt}
+        loading={dashboardInsightsLoading}
+        generating={generateLoading}
+        generateError={generateError}
+        onGenerate={handleGenerateInsights}
+        showGenerateButton
+        onShowInsight={handleShowInsight}
+        onRefreshInsights={refreshDashboardInsights}
+        showFeedback
+        onSubmitFeedback={handleDashboardInsightFeedback}
+      />
+
       {/* Demo data indicator */}
       {isUsingMockData && (
         <div
@@ -701,6 +819,7 @@ export function TopTieringComparisonView({
           <div className="col-span-12 lg:col-span-3 space-y-2 sm:space-y-3">
             {/* Title and Time Filter */}
             <Card
+              id="ttc-story-panel"
               className={`rounded-xl backdrop-blur-sm ${
                 isDarkMode
                   ? "border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]"
@@ -1249,6 +1368,7 @@ export function TopTieringComparisonView({
           {/* KPI Summary Dashboard */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
             <Card
+              id="ttc-kpi-total-revenue"
               className={`rounded-lg backdrop-blur-sm ${
                 isDarkMode
                   ? "border-slate-700/50 bg-slate-800/70"
@@ -1304,6 +1424,7 @@ export function TopTieringComparisonView({
             </Card>
 
             <Card
+              id="ttc-kpi-total-units"
               className={`rounded-lg backdrop-blur-sm ${
                 isDarkMode
                   ? "border-slate-700/50 bg-slate-800/70"
@@ -1355,6 +1476,7 @@ export function TopTieringComparisonView({
             </Card>
 
             <Card
+              id="ttc-kpi-avg-revenue-bps"
               className={`rounded-lg backdrop-blur-sm ${
                 isDarkMode
                   ? "border-slate-700/50 bg-slate-800/70"
@@ -1403,6 +1525,7 @@ export function TopTieringComparisonView({
             </Card>
 
             <Card
+              id="ttc-kpi-actor-count"
               className={`rounded-lg backdrop-blur-sm ${
                 isDarkMode
                   ? "border-slate-700/50 bg-slate-800/70"
@@ -1493,6 +1616,7 @@ export function TopTieringComparisonView({
             <>
               {/* Chart 1: Revenue by Branch (Pareto Chart) */}
               <Card
+                id="ttc-revenue-chart"
                 className={`rounded-lg backdrop-blur-sm ${
                   isDarkMode
                     ? "border-slate-700/50 bg-slate-800/70"
@@ -1717,6 +1841,7 @@ export function TopTieringComparisonView({
 
               {/* Chart 2: Units/Volume/Detail by Actor */}
               <Card
+                id={selectedChartTab === "detail" ? "ttc-detail-table" : "ttc-units-volume-chart"}
                 className={`rounded-lg backdrop-blur-sm ${
                   isDarkMode
                     ? "border-slate-700/50 bg-slate-800/70"
@@ -2179,6 +2304,7 @@ export function TopTieringComparisonView({
 
               {/* Chart 3: Revenue BPS / Revenue per Loan */}
               <Card
+                id="ttc-revenue-quality-chart"
                 className={`rounded-lg backdrop-blur-sm ${
                   isDarkMode
                     ? "border-slate-700/50 bg-slate-800/70"

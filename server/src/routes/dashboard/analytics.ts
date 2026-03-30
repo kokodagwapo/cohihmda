@@ -36,6 +36,7 @@ import {
   getLoanComplexityPivotData,
   type LoanComplexityGroupBy,
 } from "../../services/dashboard/loanComplexityDashboardService.js";
+import { getEstimatedClosingsRiskData } from "../../services/dashboard/estimatedClosingsRiskService.js";
 import { getStaffingUnitTargets } from "../../utils/staffingUnitTargets.js";
 import { buildDimensionFilterWhereClause } from "../../utils/scorecard-utils.js";
 import { deleteInsightById } from "../../services/insights/llmInsightGenerator.js";
@@ -1281,6 +1282,76 @@ router.get(
  * Loan Complexity dashboard: average complexity per loan officer, branch, or current_loan_status.
  * Base loan set: application_date in [startDate, endDate], channel/tenant/access.
  */
+router.get(
+  "/estimated-closings-risk",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const querySchema = z.object({
+        dateRangeType: z.enum(["calendar_days", "business_days"]).default("calendar_days"),
+        channel_group: z.string().optional(),
+        tenant_id: z.string().uuid().optional(),
+        limit: z.coerce.number().int().min(1).max(10000).optional(),
+        offset: z.coerce.number().int().min(0).optional(),
+      });
+      const parsed = querySchema.parse(req.query);
+      const tenantContext = getTenantContext(req);
+      const accessCtx = await getLoanAccessContext(req, tenantContext.tenantPool);
+
+      if (accessCtx.hasNoAccess) {
+        return res.json({
+          kpis: {
+            totalActivePipeline: 0,
+            ecdEmptyOrAfterThisMonth: 0,
+            remainingToFund: 0,
+            fundedThisMonth: 0,
+            maxPossibleFunding: 0,
+            fundingYtdUnits: 0,
+            prevMonthActualUnits: 0,
+            prevMonthActualVolume: 0,
+            unitsLastMonthVsPriorPct: null,
+            volumeLastMonthVsPriorPct: null,
+          },
+          activePipelineEcdSlices: [],
+          maxPossibleFundingByComplexity: [],
+          remainingToFundByComplexity: [],
+          historicalFalloutPooled13Months: null,
+          remainingToFundByProcessingStage: [],
+          detail: { total: 0, limit: parsed.limit ?? 0, offset: parsed.offset ?? 0, rows: [] },
+        });
+      }
+
+      const { accessClause, accessParams } = accessCtx.buildWhereClause("l", 3);
+      const dimensionFilterClause = buildDimensionFilterWhereClause(
+        req.query as Record<string, any>,
+        "l",
+        new Set(["dateRangeType", "channel_group", "tenant_id", "limit", "offset"])
+      );
+      const result = await getEstimatedClosingsRiskData(tenantContext.tenantPool, {
+        dateRangeType: parsed.dateRangeType,
+        channelGroup: parsed.channel_group || undefined,
+        accessClause: accessClause ? ` ${accessClause.trim()}` : undefined,
+        accessParams: accessParams.length > 0 ? accessParams : undefined,
+        dimensionFilterClause: dimensionFilterClause || undefined,
+        detailLimit: parsed.limit,
+        detailOffset: parsed.offset ?? 0,
+      });
+      res.json(result);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid request", details: error.errors });
+      }
+      console.error("Error fetching estimated closings and risk dashboard:", error);
+      if (handleDatabaseError(error, res, "Failed to fetch estimated closings and risk dashboard")) return;
+      res.status(500).json({
+        error: "Failed to fetch estimated closings and risk dashboard",
+        details: process.env.NODE_ENV === "development" ? error.message : undefined,
+      });
+    }
+  }
+);
+
 router.get(
   "/loan-complexity",
   authenticateToken,

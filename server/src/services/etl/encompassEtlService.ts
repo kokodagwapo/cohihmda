@@ -12,6 +12,7 @@ import { coheusAliasToColumnName } from "../encompassFieldMapper.js";
 import { FieldBackfillService } from "./fieldBackfillService.js";
 import { FolderReconciliationService } from "./folderReconciliationService.js";
 import { runPostSyncHooks } from "../hooks/postSyncHookService.js";
+import { attachPersistedComplexityScores } from "../scoring/persistedLoanComplexity.js";
 
 export interface SyncResult {
   success: boolean;
@@ -591,6 +592,10 @@ export class EncompassEtlService {
         console.error("[EncompassEtlService] Transform error:", error.message);
         // Skip this loan
       }
+    }
+
+    if (transformed.length > 0 && this.tenantPool) {
+      await attachPersistedComplexityScores(this.tenantPool, transformed as Record<string, any>[]);
     }
 
     return transformed;

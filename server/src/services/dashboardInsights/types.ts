@@ -217,6 +217,7 @@ export const DASHBOARD_PAGE_CATEGORY_MAP: Record<string, string> = {
   "loan-complexity": "operations",
   "company-scorecard": "finance",
   "credit-risk-management": "compliance",
+  "top-tiering-comparison": "sales",
 };
 
 // ---------------------------------------------------------------------------
