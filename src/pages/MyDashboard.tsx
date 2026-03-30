@@ -60,6 +60,13 @@ export default function MyDashboard() {
   const navigate = useNavigate();
   const initialUrlCanvasIdRef = useRef<string | undefined>(urlCanvasId);
 
+  // Keep in sync when the route param changes (same component instance); hydration only re-runs on tenant change.
+  useEffect(() => {
+    if (urlCanvasId != null && urlCanvasId !== '') {
+      initialUrlCanvasIdRef.current = urlCanvasId;
+    }
+  }, [urlCanvasId]);
+
   const [canvasList, setCanvasList] = useState<CanvasListItem[]>([]);
   const [loadCanvasId, setLoadCanvasId] = useState<string | null>(null);
   const [canvasKey, setCanvasKey] = useState(0);
@@ -151,7 +158,11 @@ export default function MyDashboard() {
         return;
       }
 
-      const urlRequested = initialUrlCanvasId && availableIds.has(initialUrlCanvasId) ? initialUrlCanvasId : null;
+      // Prefer the URL canvas id whenever present — including brand-new canvases that are not
+      // in GET /api/workbench/canvases yet (that list is cached ~30s). Otherwise we fall through to
+      // persisted tabs and re-open the previous deep-dive canvas.
+      const urlRequested =
+        initialUrlCanvasId && initialUrlCanvasId !== 'new' ? initialUrlCanvasId : null;
 
       const nextTabs = [...persistedTabs];
       let nextActive: string | null = null;
@@ -196,10 +207,22 @@ export default function MyDashboard() {
     if (!urlCanvasId || urlCanvasId === 'new') return;
     if (urlCanvasId === activeTabId) return;
     const isAccessible = canvasList.some((c) => c.id === urlCanvasId);
-    if (!isAccessible) return;
+    // Allow opening newly-created canvases immediately, even before sidebar list refreshes.
+    if (!isAccessible) {
+      setOpenTabs((prev) => (prev.includes(urlCanvasId) ? prev : [...prev, urlCanvasId]));
+      setActiveTabId(urlCanvasId);
+      setLoadCanvasId(urlCanvasId);
+      void fetchCanvases();
+      return;
+    }
     setOpenTabs((prev) => (prev.includes(urlCanvasId) ? prev : [...prev, urlCanvasId]));
     setActiveTabId(urlCanvasId);
-    setLoadCanvasId(urlCanvasId);
+    // Only trigger a load if this is genuinely a different canvas being opened,
+    // not a URL update from saving the current canvas
+    setLoadCanvasId((prev) => {
+      if (prev === urlCanvasId) return prev;
+      return urlCanvasId;
+    });
   }, [urlCanvasId, activeTabId, canvasList, isHydratingWorkbench]);
 
   // Open a canvas tab (from sidebar click)
@@ -260,22 +283,36 @@ export default function MyDashboard() {
     updateUrl(tabId);
   }, [updateUrl]);
 
-  // Callback from WorkbenchCanvas after a canvas is saved (new or existing)
+  // Callback from WorkbenchCanvas after a canvas is saved (new or existing).
+  // Does NOT re-fetch the canvas or cause a remount — only updates tabs/URL.
   const handleCanvasSaved = useCallback((savedId: string, title: string) => {
+    const currentKnownTitle =
+      tabTitles[savedId] ?? canvasList.find((c) => c.id === savedId)?.title ?? null;
+    const isNewTabPromotion = !!activeTabId && activeTabId.startsWith('new-');
+    const isNoOpExistingSave =
+      !isNewTabPromotion &&
+      activeTabId === savedId &&
+      currentKnownTitle === title;
+
+    if (isNoOpExistingSave) return;
+
     setOpenTabs((prev) => {
-      // If the active tab was a temp "new-*", replace it with the real ID
       const currentActive = activeTabId;
       if (currentActive && currentActive.startsWith('new-')) {
         return prev.map((t) => t === currentActive ? savedId : t);
       }
-      // Otherwise just make sure the ID is in tabs
       return prev.includes(savedId) ? prev : [...prev, savedId];
     });
     setActiveTabId(savedId);
     setTabTitles((prev) => ({ ...prev, [savedId]: title }));
     updateUrl(savedId);
-    fetchCanvases();
-  }, [activeTabId, updateUrl, fetchCanvases]);
+    // Update the canvas list in the background — don't block or re-trigger load
+    fetchCanvases().catch(() => {});
+  }, [activeTabId, canvasList, fetchCanvases, tabTitles, updateUrl]);
+
+  const handleCanvasLoaded = useCallback(() => {
+    fetchCanvases().catch(() => {});
+  }, [fetchCanvases]);
 
   // Get tab title from canvas list or override titles
   const getTabTitle = (tabId: string) => {
@@ -436,10 +473,7 @@ export default function MyDashboard() {
                 <WorkbenchCanvas
                   key={canvasKey}
                   loadCanvasId={loadCanvasId}
-                  onLoaded={() => {
-                    setLoadCanvasId(null);
-                    fetchCanvases();
-                  }}
+                  onLoaded={handleCanvasLoaded}
                   onSaved={handleCanvasSaved}
                   onDirtyChange={handleDirtyChange}
                   tenantId={effectiveTenantId}

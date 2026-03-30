@@ -116,6 +116,7 @@ export const ROLE_MATRIX: RouteExpectation[] = [
   { routeGroup: "/api/rag", method: "GET", path: "/api/rag/__rbac_probe", policy: "auth", expect: AUTH_BLOCKS_CANVAS_ONLY },
   { routeGroup: "/api/metrics", method: "GET", path: "/api/metrics/__rbac_probe", policy: "auth", expect: AUTH_EXPECTED },
   { routeGroup: "/api/dashboard", method: "GET", path: "/api/dashboard/__rbac_probe", policy: "auth", expect: AUTH_EXPECTED },
+  { routeGroup: "/api/dashboard-insights", method: "GET", path: "/api/dashboard-insights/__rbac_probe", policy: "auth", expect: AUTH_BLOCKS_CANVAS_ONLY },
   { routeGroup: "/api/admin", method: "GET", path: "/api/admin/__rbac_probe", policy: "platform_staff", expect: PLATFORM_STAFF_EXPECTED },
   { routeGroup: "/api/los", method: "GET", path: "/api/los/__rbac_probe", policy: "auth", expect: AUTH_BLOCKS_CANVAS_ONLY },
   { routeGroup: "/api/synapse", method: "GET", path: "/api/synapse/__rbac_probe", policy: "auth", expect: AUTH_BLOCKS_CANVAS_ONLY },
@@ -157,5 +158,6 @@ export const ROLE_MATRIX: RouteExpectation[] = [
   { routeGroup: "/api/fallout-alerts", method: "GET", path: "/api/fallout-alerts/__rbac_probe", policy: "distributions_admin", expect: DISTRIBUTIONS_ADMIN_EXPECTED },
   { routeGroup: "/api/fallout-response", method: "GET", path: "/api/fallout-response/__rbac_probe", policy: "public", expect: PUBLIC_BLOCKS_CANVAS_ONLY },
   { routeGroup: "/api/podcast/cohi", method: "GET", path: "/api/podcast/cohi/__rbac_probe", policy: "auth", expect: AUTH_BLOCKS_CANVAS_ONLY },
+  { routeGroup: "/api/cohibuilder/portfolio", method: "GET", path: "/api/cohibuilder/portfolio/__rbac_probe", policy: "public", expect: PUBLIC_BLOCKS_CANVAS_ONLY },
 ];
 

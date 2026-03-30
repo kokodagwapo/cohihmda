@@ -44,7 +44,10 @@ import {
   isGenerationRunning,
   generateMoreForBucketAgent,
   isBucketGenerationRunning,
+  generateInsightsForCategory,
+  isCategoryGenerationRunning,
 } from "../../services/insights/agents/insightOrchestrator.js";
+import { FUNCTIONAL_CATEGORIES } from "../../services/insights/agents/categoryDefinitions.js";
 import { createJob, updateProgress, completeJob, failJob } from "../../services/jobManager.js";
 
 const router = Router();
@@ -601,6 +604,83 @@ router.post(
     } catch (error: any) {
       console.error("Error starting generate-more:", error);
       res.status(500).json({ error: "Failed to start generate-more" });
+    }
+  }
+);
+
+/**
+ * POST /api/dashboard/insights/refresh-category
+ * Regenerates insights for a single functional category, replacing only that category's rows.
+ * Platform admin only. Uses the per-category agent pipeline.
+ * Body: { category: 'operations' | 'sales' | 'finance' | 'secondary_marketing' | 'compliance' }
+ */
+router.post(
+  "/insights/refresh-category",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantContext = getTenantContext(req);
+      const { isPlatformStaff } = req as any;
+      if (typeof isPlatformStaff === "function" && !isPlatformStaff()) {
+        return res.status(403).json({ error: "Platform staff only" });
+      }
+
+      const { category } = req.body as { category?: string };
+      const validIds = FUNCTIONAL_CATEGORIES.map((c) => c.id);
+      if (!category || !validIds.includes(category)) {
+        return res.status(400).json({ error: `Invalid category. Must be one of: ${validIds.join(", ")}` });
+      }
+
+      const running = isCategoryGenerationRunning(tenantContext.tenantId, category);
+      if (running.running) {
+        return res.status(409).json({
+          error: `Category generation already in progress`,
+          batch: running.batch,
+        });
+      }
+
+      const job = createJob("insight-refresh-category", req.userId!, tenantContext.tenantId);
+      res.status(202).json({ jobId: job.id, status: "processing", category });
+
+      setImmediate(async () => {
+        try {
+          updateProgress(job.id, 5, `Starting ${category} insight generation...`);
+          const result = await generateInsightsForCategory(
+            tenantContext.tenantId,
+            tenantContext.tenantPool,
+            category,
+            (event) => {
+              const pct = event.phase.startsWith("planning")
+                ? 15
+                : event.phase.startsWith("investigating")
+                ? 40
+                : event.phase.startsWith("evaluating")
+                ? 70
+                : event.phase.startsWith("persisting")
+                ? 90
+                : 95;
+              updateProgress(job.id, pct, event.detail);
+            }
+          );
+
+          if (result.success) {
+            completeJob(job.id, {
+              insightCount: result.insightCount,
+              category,
+              durationMs: result.durationMs,
+            });
+          } else {
+            failJob(job.id, result.error || "Category generation failed");
+          }
+        } catch (error: any) {
+          console.error(`Error in refresh-category for ${category}:`, error);
+          failJob(job.id, error.message || "Failed to refresh category insights");
+        }
+      });
+    } catch (error: any) {
+      console.error("Error starting refresh-category:", error);
+      res.status(500).json({ error: "Failed to start category refresh" });
     }
   }
 );

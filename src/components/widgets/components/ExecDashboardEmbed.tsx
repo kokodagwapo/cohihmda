@@ -1,22 +1,36 @@
 /**
  * ExecDashboardEmbed – Widget wrapper that renders the full
  * ExecutiveDashboard component inside a WidgetGroup cell.
- *
- * Preserves all interactive features: per-KPI timeframe selectors,
- * click-to-open drill-down modals, animated values, loan mix breakdowns.
  */
 
-import React from 'react';
+import React, { useCallback } from 'react';
 import { ExecutiveDashboard } from '@/components/dashboard/ExecutiveDashboard';
 import { useTenantStore } from '@/stores/tenantStore';
 import { useChannelStore } from '@/stores/channelStore';
+import { useCanvasDataStore } from '@/stores/canvasDataStore';
 import type { WidgetRenderProps } from '../registry/types';
 
 const currentYear = new Date().getFullYear();
 
-function ExecDashboardEmbedInner({ width, height }: WidgetRenderProps) {
+function ExecDashboardEmbedInner({ width, height, config }: WidgetRenderProps) {
   const { selectedTenantId } = useTenantStore();
   const { selectedChannel } = useChannelStore();
+  const canvasItemId = config?.canvasItemId as string | undefined;
+  const defName = (config?.definitionName as string) || 'Business Overview';
+  const defCategory = (config?.definitionCategory as string) || 'kpi';
+  const reportCategory =
+    (config?.reportCategory as string)
+    || (defCategory === 'table' ? 'kpi' : defCategory);
+  const reportWidgetData = useCanvasDataStore((s) => s.reportWidgetData);
+
+  const onDataReady = useCallback((payload: unknown) => {
+    if (!canvasItemId) return;
+    reportWidgetData(canvasItemId, {
+      widgetName: defName,
+      category: reportCategory as 'chart' | 'table' | 'kpi' | 'embed' | 'other',
+      data: payload,
+    });
+  }, [canvasItemId, defName, reportCategory, reportWidgetData]);
 
   return (
     <div
@@ -28,6 +42,7 @@ function ExecDashboardEmbedInner({ width, height }: WidgetRenderProps) {
         year={currentYear}
         selectedTenantId={selectedTenantId}
         selectedChannel={selectedChannel}
+        onDataReady={onDataReady}
       />
     </div>
   );

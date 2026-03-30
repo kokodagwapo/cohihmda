@@ -5,6 +5,7 @@ import subscriptionsRoutes from "./subscriptions.js";
 import ragRoutes from "./rag.js";
 import metricsRoutes from "./metrics.js";
 import dashboardRoutes from "./dashboard.js";
+import dashboardInsightsRoutes from "./dashboardInsights.js";
 import adminRoutes from "./admin.js";
 import losRoutes from "./los.js";
 import synapseRoutes from "./synapse.js";
@@ -44,10 +45,10 @@ import jobsRoutes from "./jobs.js";
 import helpContentRoutes from "./helpContent.js";
 import analyticsRoutes from "./analytics.js";
 import releaseNotesRoutes from "./releaseNotes.js";
-import cohibuilderPortfolioRoutes from "./cohibuilderPortfolio.js";
 import falloutAlertsRoutes from "./falloutAlerts.js";
 import falloutResponseRoutes from "./falloutResponse.js";
 import podcastRoutes from "./podcast.js";
+import cohibuilderPortfolioRoutes from "./cohibuilderPortfolio.js";
 import { pool, resetPool } from "../config/database.js";
 import { setupMockLosApi } from "../services/mockLosApi.js";
 import { getVersionInfo } from "../services/versionService.js";
@@ -108,6 +109,7 @@ export function setupRoutes(app: Express) {
   app.use("/api/rag/knowledge-base", ragKnowledgeBaseRouter);
   app.use("/api/metrics", metricsRoutes);
   app.use("/api/dashboard", dashboardRoutes);
+  app.use("/api/dashboard-insights", dashboardInsightsRoutes);
   app.use("/api/admin", adminRoutes);
   app.use("/api/los", losRoutes);
   app.use("/api/synapse", synapseRoutes);
@@ -146,10 +148,10 @@ export function setupRoutes(app: Express) {
   app.use("/api/help", helpContentRoutes); // Help content RAG seeding
   app.use("/api/analytics", analyticsRoutes); // User behavior analytics (ingestion + reporting)
   app.use("/api/release-notes", releaseNotesRoutes); // Published release notes (management DB)
-  app.use("/api/cohibuilder/portfolio", cohibuilderPortfolioRoutes);
   app.use("/api/fallout-alerts", falloutAlertsRoutes); // Fallout alert config + send + response tracking
   app.use("/api/fallout-response", falloutResponseRoutes); // Public one-time fallout response links
   app.use("/api/podcast/cohi", podcastRoutes); // Cohi Daily Briefing podcast (TTS streaming)
+  app.use("/api/cohibuilder/portfolio", cohibuilderPortfolioRoutes); // Cohi Builder portfolio CRUD
 
   // Health check handler (shared by both /health and /api/health)
   const healthCheckHandler = async (req: any, res: any) => {

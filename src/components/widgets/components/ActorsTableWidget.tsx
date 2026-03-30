@@ -212,16 +212,6 @@ export function ActorsTableWidget({
     URL.revokeObjectURL(link.href);
   }, [headerColumns, totals, sortedRows, dimensionLabel, getCellCsvValue]);
 
-  if (error) {
-    return (
-      <Card className="border border-slate-200 dark:border-slate-700 h-full">
-        <CardContent className="flex items-center justify-center py-8 text-sm text-red-600 dark:text-red-400">
-          {error}
-        </CardContent>
-      </Card>
-    );
-  }
-
   const colCount = headerColumns.length;
 
   const renderCell = useCallback(
@@ -327,6 +317,16 @@ export function ActorsTableWidget({
       )}
     </>
   );
+
+  if (error) {
+    return (
+      <Card className="border border-slate-200 dark:border-slate-700 h-full">
+        <CardContent className="flex items-center justify-center py-8 text-sm text-red-600 dark:text-red-400">
+          {error}
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <>

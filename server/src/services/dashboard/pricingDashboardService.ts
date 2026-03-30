@@ -170,6 +170,17 @@ const DATE_TYPES = new Set([
   "timestamp without time zone",
 ]);
 
+/** Types that are completely non-queryable — skip in both report and detail. */
+const SKIP_TYPES = new Set([
+  "bytea",
+  "json",
+  "jsonb",
+  "ARRAY",
+]);
+
+/** Boolean types: in report aggregates count TRUE values; in detail show raw. */
+const BOOLEAN_TYPES = new Set(["boolean"]);
+
 /** Column names that suggest “amount” → use SUM; others (scores, ratios) → AVG. */
 function isSumColumn(columnName: string): boolean {
   const lower = columnName.toLowerCase();
@@ -425,7 +436,9 @@ export async function getPricingReport(
       if (FIXED_REPORT_KEYS.has(key)) continue;
       if (RESERVED_REPORT_ALIASES.has(key)) continue;
       const dataType = meta.get(key);
-      if (dataType) dynamicReportCols.push({ key, type: dataType });
+      if (!dataType) continue;
+      if (SKIP_TYPES.has(dataType)) continue;
+      dynamicReportCols.push({ key, type: dataType });
     }
   }
 
@@ -436,6 +449,10 @@ export async function getPricingReport(
       const agg = isSumColumn(key) ? "SUM" : "AVG";
       dynamicSelectFragments.push(
         `${agg}(${quoted})::double precision AS "${key}"`
+      );
+    } else if (BOOLEAN_TYPES.has(type)) {
+      dynamicSelectFragments.push(
+        `COUNT(*) FILTER (WHERE ${quoted} = TRUE)::int AS "${key}"`
       );
     } else if (DATE_TYPES.has(type)) {
       dynamicSelectFragments.push(`NULL::text AS "${key}"`);
@@ -519,7 +536,7 @@ export async function getPricingReport(
     : {};
 
   for (const { key, type } of dynamicReportCols) {
-    if (NUMERIC_TYPES.has(type) && rows.length > 0) {
+    if ((NUMERIC_TYPES.has(type) || BOOLEAN_TYPES.has(type)) && rows.length > 0) {
       let sum = 0;
       for (const r of rows) {
         const v = (r as unknown as Record<string, unknown>)[key];
@@ -552,7 +569,9 @@ export async function getPricingDetail(
       if (FIXED_DETAIL_KEYS.has(key)) continue;
       if (RESERVED_DETAIL_ALIASES.has(key)) continue;
       const dataType = meta.get(key);
-      if (dataType) dynamicDetailCols.push({ key, type: dataType });
+      if (!dataType) continue;
+      if (SKIP_TYPES.has(dataType)) continue;
+      dynamicDetailCols.push({ key, type: dataType });
     }
   }
 
@@ -630,6 +649,13 @@ export async function getPricingDetail(
         if (typeof v === "number" && !Number.isNaN(v)) sum += v;
       }
       (totals as unknown as Record<string, unknown>)[key] = sum;
+    } else if (BOOLEAN_TYPES.has(type) && rows.length > 0) {
+      let count = 0;
+      for (const r of rows) {
+        const v = (r as unknown as Record<string, unknown>)[key];
+        if (v === true || v === "true") count++;
+      }
+      (totals as unknown as Record<string, unknown>)[key] = count;
     }
   }
 

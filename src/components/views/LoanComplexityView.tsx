@@ -15,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { DatePeriodPicker } from "@/components/ui/DatePeriodPicker";
+import { DatePeriodPicker, computePresetDateRange } from "@/components/ui/DatePeriodPicker";
 import type { PeriodSelection, PeriodPreset } from "@/components/ui/DatePeriodPicker";
 import { useLoanComplexityData } from "@/hooks/useLoanComplexityData";
 import type { LoanComplexityGroupBy } from "@/hooks/useLoanComplexityData";
@@ -45,6 +45,11 @@ import {
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/components/theme-provider";
 import { Loader2, Download, ChevronDown, ArrowUp, ArrowDown, ChevronRight, X } from "lucide-react";
+import {
+  useDashboardInsights,
+  type DashboardInsightItem,
+} from "@/hooks/useDashboardInsights";
+import { DashboardInsightsStrip } from "@/components/dashboard/DashboardInsightsStrip";
 
 const PERIOD_PRESETS: PeriodPreset[] = [
   "mtd",
@@ -76,6 +81,34 @@ const ACTOR_TYPE_OPTIONS: { value: LoanComplexityGroupBy; label: string }[] = [
   { value: "underwriter", label: "Underwriter" },
   { value: "closer", label: "Closer" },
 ];
+
+/** DOM ids for dashboard insights evidence targets (must match server widget_catalog). */
+const LOAN_COMPLEXITY_PIVOT_SECTION_DOM_ID: Record<LoanComplexityGroupBy, string> = {
+  loan_officer: "loan-complexity-pivot-loan-officer",
+  processor: "loan-complexity-pivot-processor",
+  underwriter: "loan-complexity-pivot-underwriter",
+  closer: "loan-complexity-pivot-closer",
+  branch: "loan-complexity-pivot-branch",
+  current_loan_status: "loan-complexity-pivot-current-loan-status",
+};
+
+/** Expand pivot section by header label when scrolling to a pivot widget id. */
+const WIDGET_ID_TO_PIVOT_SECTION_LABEL: Record<string, string> = {
+  "loan-complexity-pivot-loan-officer": "Loan Officer",
+  "loan-complexity-pivot-processor": "Processor",
+  "loan-complexity-pivot-underwriter": "Underwriter",
+  "loan-complexity-pivot-closer": "Closer",
+  "loan-complexity-pivot-branch": "Branch",
+  "loan-complexity-pivot-current-loan-status": "Current Loan Status",
+};
+
+const WIDGET_ID_TO_ACTOR_TYPE: Record<string, LoanComplexityGroupBy | undefined> = {
+  "loan-complexity-pivot-loan-officer": "loan_officer",
+  "loan-complexity-pivot-processor": "processor",
+  "loan-complexity-pivot-underwriter": "underwriter",
+  "loan-complexity-pivot-closer": "closer",
+  "loan-complexity-bar-chart": "loan_officer",
+};
 
 const LOAN_DETAIL_COLUMNS: { key: keyof LoanComplexityGroupLoanRow; label: string }[] = [
   { key: "loan_number", label: "Loan number" },
@@ -258,6 +291,121 @@ export function LoanComplexityView({
   const [sortColumnId, setSortColumnId] = useState<keyof LoanComplexityGroupLoanRow | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [pivotExpanded, setPivotExpanded] = useState<string | null>(null);
+  const [generateLoading, setGenerateLoading] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const [pendingInsightWidgetId, setPendingInsightWidgetId] = useState<string | null>(null);
+
+  const INSIGHT_DATE_PERIOD_TO_PRESET: Record<string, PeriodPreset> = {
+    mtd: "mtd",
+    qtd: "qtd",
+    ytd: "ytd",
+    lm: "last-month",
+    lq: "last-quarter",
+    ly: "last-year",
+  };
+
+  const dashboardInsightFilters = useMemo(() => ({}), []);
+  const {
+    insights: dashboardInsights,
+    generatedAt: dashboardInsightsGeneratedAt,
+    loading: dashboardInsightsLoading,
+    refresh: refreshDashboardInsights,
+  } = useDashboardInsights("loan-complexity", dashboardInsightFilters, {
+    tenantId: selectedTenantId,
+  });
+
+  const handleGenerateInsights = useCallback(async () => {
+    setGenerateLoading(true);
+    setGenerateError(null);
+    try {
+      const tenantParam = selectedTenantId ? `?tenant_id=${encodeURIComponent(selectedTenantId)}` : "";
+      await api.request<{
+        insights: DashboardInsightItem[];
+        count: number;
+        pageId: string;
+        pageName: string;
+        generationBatch: string;
+      }>(`/api/dashboard-insights/generate${tenantParam}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pageId: "loan-complexity",
+          filters: {},
+        }),
+      });
+      await refreshDashboardInsights();
+    } catch (err: unknown) {
+      setGenerateError(
+        err instanceof Error ? err.message : "We couldn't generate insights right now. Please try again later."
+      );
+    } finally {
+      setGenerateLoading(false);
+    }
+  }, [refreshDashboardInsights, selectedTenantId]);
+
+  const handleShowInsight = useCallback((insight: DashboardInsightItem) => {
+    const firstRef = insight.evidence_refs?.[0];
+    const wid = firstRef?.widgetId;
+    const datePeriod =
+      typeof insight.filter_context?.datePeriod === "string"
+        ? insight.filter_context.datePeriod.toLowerCase()
+        : null;
+    const preset = datePeriod ? INSIGHT_DATE_PERIOD_TO_PRESET[datePeriod] : undefined;
+
+    if (preset) {
+      setPeriodSelection({
+        type: "preset",
+        preset,
+        dateRange: computePresetDateRange(preset),
+      });
+    }
+
+    // Sync actor type filter to the referenced actor dimension when present.
+    const rawActorType = insight.filter_context?.actorType;
+    const normalizedActorType =
+      typeof rawActorType === "string" ? rawActorType.trim().toLowerCase() : "";
+    const actorTypeFromFilterContext: LoanComplexityGroupBy | null =
+      normalizedActorType === "loan_officer" || normalizedActorType === "loan officer"
+        ? "loan_officer"
+        : normalizedActorType === "processor"
+          ? "processor"
+          : normalizedActorType === "underwriter"
+            ? "underwriter"
+            : normalizedActorType === "closer"
+              ? "closer"
+              : null;
+
+    let actorTypeFromEvidence: LoanComplexityGroupBy | null = null;
+    for (const ref of insight.evidence_refs ?? []) {
+      const inferred = WIDGET_ID_TO_ACTOR_TYPE[ref.widgetId];
+      if (!inferred) continue;
+      // Prefer explicit non-LO actor dimensions over generic LO defaults.
+      if (inferred !== "loan_officer") {
+        actorTypeFromEvidence = inferred;
+        break;
+      }
+      if (!actorTypeFromEvidence) actorTypeFromEvidence = inferred;
+    }
+    const actorTypeToApply = actorTypeFromFilterContext ?? actorTypeFromEvidence;
+    if (actorTypeToApply) setActorType(actorTypeToApply);
+
+    if (wid && WIDGET_ID_TO_PIVOT_SECTION_LABEL[wid]) {
+      setPivotExpanded(WIDGET_ID_TO_PIVOT_SECTION_LABEL[wid]);
+    }
+    setPendingInsightWidgetId(wid ?? null);
+  }, []);
+
+  const handleDashboardInsightFeedback = useCallback(
+    async (insightId: number, rating: 1 | -1, tags?: string[], comment?: string) => {
+      try {
+        await api.submitDashboardInsightFeedback(insightId, rating, tags, comment, selectedTenantId);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [selectedTenantId]
+  );
 
   const dateRange = periodSelection.dateRange;
 
@@ -343,6 +491,16 @@ export function LoanComplexityView({
         : loans,
     [loans, sortColumnId, sortDirection]
   );
+
+  useEffect(() => {
+    if (!pendingInsightWidgetId || loading || pivotLoading || typeof document === "undefined") return;
+    const el = document.getElementById(pendingInsightWidgetId);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("ring-2", "ring-amber-400", "ring-offset-2");
+    setTimeout(() => el.classList.remove("ring-2", "ring-amber-400", "ring-offset-2"), 3000);
+    setPendingInsightWidgetId(null);
+  }, [pendingInsightWidgetId, loading, pivotLoading]);
 
   const handleSort = useCallback((columnId: keyof LoanComplexityGroupLoanRow) => {
     setSortColumnId((prev) => {
@@ -558,6 +716,23 @@ export function LoanComplexityView({
         <p className="text-sm text-red-600 dark:text-red-400">{displayError}</p>
       )}
 
+      <DashboardInsightsStrip
+        insights={dashboardInsights}
+        generatedAt={dashboardInsightsGeneratedAt}
+        loading={dashboardInsightsLoading}
+        generating={generateLoading}
+        generateError={generateError}
+        onClearGenerateError={() => setGenerateError(null)}
+        onShowInsight={handleShowInsight}
+        onGenerate={handleGenerateInsights}
+        onRefreshInsights={refreshDashboardInsights}
+        showGenerateButton
+        showFeedback
+        onSubmitFeedback={handleDashboardInsightFeedback}
+        dateFilter="ytd"
+        selectedTenantId={selectedTenantId}
+      />
+
       {/* Pivot table */}
       <Card
         className={cn(
@@ -662,8 +837,9 @@ export function LoanComplexityView({
                   {pivotData.dimensions.map((dim) => (
                     <React.Fragment key={dim.dimension}>
                       <tr
+                        id={LOAN_COMPLEXITY_PIVOT_SECTION_DOM_ID[dim.dimension as LoanComplexityGroupBy]}
                         className={cn(
-                          "border-b border-slate-100 dark:border-slate-800 cursor-pointer hover:bg-slate-50/50 dark:hover:bg-slate-800/30",
+                          "border-b border-slate-100 dark:border-slate-800 cursor-pointer hover:bg-slate-50/50 dark:hover:bg-slate-800/30 scroll-mt-24",
                           isDark ? "" : ""
                         )}
                         onClick={() => setPivotExpanded((prev) => (prev === dim.label ? null : dim.label))}
@@ -742,8 +918,9 @@ export function LoanComplexityView({
 
       {/* Bar chart */}
       <Card
+        id="loan-complexity-bar-chart"
         className={cn(
-          "rounded-xl border overflow-hidden",
+          "rounded-xl border overflow-hidden scroll-mt-24",
           isDark ? "border-slate-700 bg-slate-800/50" : "border-slate-200/60 bg-white"
         )}
       >

@@ -1,4 +1,5 @@
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   ChevronUp,
   Medal,
@@ -33,6 +34,11 @@ import {
   LeaderboardTimeframe,
 } from "@/hooks/useLeaderboardData";
 import {
+  useDashboardInsights,
+  type DashboardInsightItem,
+} from "@/hooks/useDashboardInsights";
+import { DashboardInsightsStrip } from "@/components/dashboard/DashboardInsightsStrip";
+import {
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -42,6 +48,9 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ExportMenu } from "@/components/common/ExportMenu";
 import type { ExportData } from "@/utils/exportUtils";
+import { api } from "@/lib/api";
+import { Loader2 } from "lucide-react";
+import { useChannelStore } from "@/stores/channelStore";
 
 /** Golden certificate seal icon (scalloped border, star ring, blank center) for rank badge */
 function CertificateSealIcon({
@@ -114,19 +123,43 @@ function CertificateSealIcon({
 }
 
 // Period types for the leaderboard
-type PeriodType = "wtd" | "mtd" | "qtd" | "lw" | "lm" | "lq" | "ly" | "custom";
+type PeriodType = "wtd" | "mtd" | "qtd" | "ytd" | "lw" | "lm" | "lq" | "ly" | "custom";
 
 // Period display labels
 const periodLabels: Record<PeriodType, { short: string; long: string }> = {
   wtd: { short: "WTD", long: "Week-to-Date" },
   mtd: { short: "MTD", long: "Month-to-Date" },
   qtd: { short: "QTD", long: "Quarter-to-Date" },
+  ytd: { short: "YTD", long: "Year-to-Date" },
   lw: { short: "LW", long: "Last Week" },
   lm: { short: "LM", long: "Last Month" },
   lq: { short: "LQ", long: "Last Quarter" },
   ly: { short: "LY", long: "Last Year" },
   custom: { short: "Custom", long: "Custom Range" },
 };
+
+const VALID_INSIGHT_PERIODS: PeriodType[] = [
+  "wtd",
+  "mtd",
+  "qtd",
+  "ytd",
+  "lw",
+  "lm",
+  "lq",
+  "ly",
+];
+
+function formatLeaderboardMoney(value: string | number | null | undefined): string {
+  if (value == null || value === "") return "—";
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return "—";
+    return trimmed.startsWith("$") ? trimmed : `$${trimmed}`;
+  }
+  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `$${Math.round(value / 1_000).toLocaleString()}K`;
+  return `$${value.toLocaleString()}`;
+}
 
 interface LeaderBoardSectionProps {
   dateFilter: "today" | "mtd" | "ytd" | "custom";
@@ -135,6 +168,8 @@ interface LeaderBoardSectionProps {
   hideAvatar?: boolean;
   /** Optional channel filter - filters leaderboard to loans in the selected channel */
   selectedChannel?: string | null;
+  /** Report data to canvasDataStore for PowerPoint export. */
+  onDataReady?: (payload: unknown) => void;
 }
 
 export const LeaderBoardSection = ({
@@ -142,8 +177,12 @@ export const LeaderBoardSection = ({
   selectedTenantId,
   hideAvatar = false,
   selectedChannel,
+  onDataReady,
 }: LeaderBoardSectionProps) => {
   const sectionRef = useRef<HTMLDivElement>(null);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { setSelectedChannel } = useChannelStore();
   // Default to Last Quarter (lq)
   const [period, setPeriod] = useState<PeriodType>("lq");
   const [scope, setScope] = useState<"All" | "Branch" | "Team">("All");
@@ -161,6 +200,42 @@ export const LeaderBoardSection = ({
   });
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [quarterYear, setQuarterYear] = useState(new Date().getFullYear());
+  const [generateLoading, setGenerateLoading] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  /** LO name to select after leaderboard data loads (from dashboard insight navigation). */
+  const [pendingLeaderName, setPendingLeaderName] = useState<string | null>(null);
+
+  // Apply filters when navigating from a dashboard insight (e.g. Loan Complexity → Leaderboard).
+  useEffect(() => {
+    const state = location.state as Record<string, unknown> | null;
+    if (!state) return;
+    const ctx = state.dashboardInsightFilterContext as Record<string, unknown> | undefined;
+    if (!ctx || typeof ctx !== "object") return;
+
+    const dp = ctx.datePeriod;
+    if (typeof dp === "string") {
+      const normalized = dp.toLowerCase().trim() as PeriodType;
+      if (VALID_INSIGHT_PERIODS.includes(normalized)) {
+        setPeriod(normalized);
+      }
+    }
+
+    const cg = ctx.channelGroup;
+    if (typeof cg === "string" && cg.trim()) {
+      setSelectedChannel(cg.trim());
+    }
+
+    const ln = ctx.leaderName;
+    if (typeof ln === "string" && ln.trim()) {
+      setPendingLeaderName(ln.trim());
+    }
+
+    const { dashboardInsightFilterContext: _removed, ...rest } = state;
+    navigate(`${location.pathname}${location.search}${location.hash}`, {
+      replace: true,
+      state: Object.keys(rest).length > 0 ? rest : undefined,
+    });
+  }, [location.state, location.pathname, location.search, location.hash, navigate, setSelectedChannel]);
 
   // Calculate date range based on period selection
   const calculateDateRange = useCallback(
@@ -188,6 +263,13 @@ export const LeaderBoardSection = ({
           const quarterStart = startOfQuarter(today);
           return {
             startDate: format(quarterStart, "yyyy-MM-dd"),
+            endDate: format(today, "yyyy-MM-dd"),
+          };
+        }
+        case "ytd": {
+          const yearStart = startOfYear(today);
+          return {
+            startDate: format(yearStart, "yyyy-MM-dd"),
             endDate: format(today, "yyyy-MM-dd"),
           };
         }
@@ -268,6 +350,69 @@ export const LeaderBoardSection = ({
       endDate: dateRangeFilter?.endDate,
       channelGroup: selectedChannel || undefined,
     }
+  );
+
+  // Insights are page-level: independent of the leaderboard's selected time period or channel.
+  // We do not pass datePeriod/channelGroup so the strip always shows the same insights.
+  const dashboardInsightFilters = useMemo(() => ({}), []);
+  const {
+    insights: dashboardInsights,
+    generatedAt: dashboardInsightsGeneratedAt,
+    loading: dashboardInsightsLoading,
+    refresh: refreshDashboardInsights,
+  } = useDashboardInsights("leaderboard", dashboardInsightFilters, {
+    tenantId: selectedTenantId,
+  });
+
+  const handleGenerateInsights = useCallback(async () => {
+    setGenerateLoading(true);
+    setGenerateError(null);
+    try {
+      const tenantParam = selectedTenantId ? `?tenant_id=${encodeURIComponent(selectedTenantId)}` : "";
+      await api.request<{
+        insights: DashboardInsightItem[];
+        count: number;
+        pageId: string;
+        pageName: string;
+        generationBatch: string;
+      }>(`/api/dashboard-insights/generate${tenantParam}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pageId: "leaderboard",
+          filters: {},
+        }),
+      });
+      await refreshDashboardInsights();
+    } catch (err: unknown) {
+      setGenerateError(
+        err instanceof Error ? err.message : "We couldn't generate insights right now. Please try again later."
+      );
+    } finally {
+      setGenerateLoading(false);
+    }
+  }, [refreshDashboardInsights, selectedTenantId]);
+
+  const handleShowInsight = useCallback((insight: DashboardInsightItem) => {
+    const firstRef = insight.evidence_refs?.[0];
+    if (firstRef?.widgetId && typeof document !== "undefined") {
+      const el = document.getElementById(firstRef.widgetId);
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+      el?.classList.add("ring-2", "ring-amber-400", "ring-offset-2");
+      setTimeout(() => el?.classList.remove("ring-2", "ring-amber-400", "ring-offset-2"), 3000);
+    }
+  }, []);
+
+  const handleDashboardInsightFeedback = useCallback(
+    async (insightId: number, rating: 1 | -1, tags?: string[], comment?: string) => {
+      try {
+        await api.submitDashboardInsightFeedback(insightId, rating, tags, comment, selectedTenantId);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [selectedTenantId]
   );
 
   // Get the display label for current period
@@ -366,6 +511,69 @@ export const LeaderBoardSection = ({
   const top5 = leadersData.slice(0, 5);
   const others = leadersData.slice(5);
 
+  useEffect(() => {
+    if (!onDataReady || leadersData.length === 0) return;
+    const rankingLabel =
+      rankingMetric === "units"
+        ? "Units"
+        : rankingMetric === "volume"
+          ? "Volume"
+          : rankingMetric === "turnTime"
+            ? "Turn-Time"
+            : rankingMetric === "pullThrough"
+              ? "Pull-through"
+              : "Revenue";
+    const scopeLabel =
+      scope === "All"
+        ? "All branches"
+        : scope === "Branch"
+          ? "By branch"
+          : "By team";
+    const summary = `${getPeriodDisplayLabel()} · ${scopeLabel} · Ranked by ${rankingLabel}`;
+    const columns = [
+      { key: 'rank', label: 'Rank', align: 'right' as const },
+      { key: 'name', label: 'Name', align: 'left' as const },
+      { key: 'units', label: 'Units', align: 'right' as const },
+      { key: 'volume', label: 'Volume', align: 'right' as const },
+      { key: 'cycleTime', label: 'Cycle Time', align: 'right' as const },
+      { key: 'pullThru', label: 'Pull-Through', align: 'right' as const },
+    ];
+    const rows = leadersData.slice(0, 10).map((l) => ({
+      rank: String(l.rank),
+      name: l.name,
+      units: String(l.loans),
+      volume: formatLeaderboardMoney(l.volume),
+      cycleTime: l.cycleTime != null ? `${l.cycleTime} days` : '—',
+      pullThru: l.pullThru != null ? `${l.pullThru}%` : '—',
+    }));
+    onDataReady({
+      title: `Leaderboard (${getPeriodDisplayLabel()})`,
+      summary,
+      columns,
+      rows,
+      leaders: leadersData.slice(0, 5).map((leader) => ({
+        name: leader.name,
+        role: leader.role,
+        units: leader.loans.toLocaleString(),
+        volume: leader.volume,
+        cycleTime: leader.cycleTime != null ? `${leader.cycleTime} days` : '—',
+        pullThru: leader.pullThru != null ? `${leader.pullThru}%` : '—',
+        revenue: leader.revenue,
+      })),
+      rankingMetric,
+    });
+  }, [onDataReady, leadersData, rankingMetric, scope]);
+
+  useEffect(() => {
+    if (!pendingLeaderName || leadersData.length === 0) return;
+    const normalized = pendingLeaderName.trim().toLowerCase();
+    const match = leadersData.find((l) => l.name.trim().toLowerCase() === normalized);
+    if (match) {
+      setSelectedLeader(match.id);
+      setPendingLeaderName(null);
+    }
+  }, [pendingLeaderName, leadersData]);
+
   const getExportData = (): ExportData => {
     const headers = [
       "LO Name",
@@ -448,6 +656,18 @@ export const LeaderBoardSection = ({
 
         {/* Period Picker - DatePeriodPicker style */}
         <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleGenerateInsights}
+            disabled={generateLoading}
+            className="text-xs gap-1.5"
+          >
+            {generateLoading ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : null}
+            Generate Insights
+          </Button>
           <ExportMenu
             title="Leaderboard"
             targetRef={sectionRef}
@@ -455,7 +675,7 @@ export const LeaderBoardSection = ({
           />
           {/* To-Date periods */}
           <div className="flex gap-0.5 sm:gap-1 p-0.5 sm:p-1 bg-slate-100/80 dark:bg-slate-800/50 rounded-lg">
-            {(["wtd", "mtd", "qtd"] as const).map((p) => (
+            {(["wtd", "mtd", "qtd", "ytd"] as const).map((p) => (
               <button
                 key={p}
                 onClick={() => setPeriod(p)}
@@ -681,8 +901,29 @@ export const LeaderBoardSection = ({
         </div>
       </div>
 
-      {/* Top 5 Grid - Mobile First */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 sm:gap-3 md:gap-4">
+      {/* Dashboard Insights strip */}
+      <DashboardInsightsStrip
+        insights={dashboardInsights}
+        generatedAt={dashboardInsightsGeneratedAt}
+        loading={dashboardInsightsLoading}
+        generating={generateLoading}
+        generateError={generateError}
+        onClearGenerateError={() => setGenerateError(null)}
+        onShowInsight={handleShowInsight}
+        onGenerate={handleGenerateInsights}
+        onRefreshInsights={refreshDashboardInsights}
+        showGenerateButton
+        showFeedback
+        onSubmitFeedback={handleDashboardInsightFeedback}
+        dateFilter={dateFilter}
+        selectedTenantId={selectedTenantId}
+      />
+
+      {/* Top 5 Grid - Mobile First (widget id for dashboard insights highlighting) */}
+      <div
+        id="leaderboard-main-table"
+        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 sm:gap-3 md:gap-4"
+      >
         {top5.map((leader, idx) => {
           const isFirst = idx === 0;
 

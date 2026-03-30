@@ -77,7 +77,12 @@ export function registerInsightHooks(): void {
         logInfo(
           `[PostSyncHook] Triggering agent insight generation for tenant ${ctx.tenantId}`
         );
-        const result = await runInsightGeneration(ctx.tenantId, ctx.tenantPool);
+        const result = await runInsightGeneration(
+          ctx.tenantId,
+          ctx.tenantPool,
+          undefined,
+          { forceFresh: true }
+        );
         logInfo(
           `[PostSyncHook] Agent insights: ${result.insightCount} generated in ${result.durationMs}ms`
         );
