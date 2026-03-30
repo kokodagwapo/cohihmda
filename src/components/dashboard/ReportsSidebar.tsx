@@ -238,6 +238,7 @@ const TOPTIERING_CHILDREN = [
   { type: 'subheader' as const, label: 'Operations', subsectionKey: 'operations' as SubsectionKey },
   { type: 'route' as const, id: 'operationsScorecard', label: 'Scorecard', icon: Target, path: '/performance/operation-scorecard', subsectionKey: 'operations' as SubsectionKey },
   { type: 'route' as const, id: 'operationsTrends', label: 'Trends', icon: LineChart, path: '/performance/operation-scorecard-trends', subsectionKey: 'operations' as SubsectionKey },
+  { type: 'route' as const, id: 'estimatedClosingsRisk', label: 'Estimated Closings and Risk Analysis', icon: BarChart3, path: '/performance/estimated-closings-risk', subsectionKey: 'operations' as SubsectionKey },
   { type: 'subheader' as const, label: 'Financial Modeling', subsectionKey: 'financialModeling' as SubsectionKey },
   { type: 'route' as const, id: 'financialModeling', label: 'Financial Modeling Sandbox', icon: Calculator, path: '/performance/financial-modeling-sandbox', subsectionKey: 'financialModeling' as SubsectionKey },
 ];
@@ -291,6 +292,7 @@ const navIconColorByItemId: Record<string, string> = {
   salesTrends: 'emerald',
   operationsScorecard: 'blue',
   operationsTrends: 'indigo',
+  estimatedClosingsRisk: 'emerald',
 };
 
 function getIconAndColorForPinnedItem(item: PinnedItem): { Icon: React.ComponentType<{ size?: number; className?: string; style?: React.CSSProperties }>; iconColor: string } {

@@ -230,6 +230,12 @@ const topTieringMenuGroups = {
         icon: BarChart3,
         iconColor: "blue" as const,
       },
+      {
+        id: "estimatedClosingsRisk",
+        label: "Estimated Closings and Risk Analysis",
+        icon: BarChart3,
+        iconColor: "emerald" as const,
+      },
     ],
   },
 };
@@ -305,6 +311,7 @@ const routeMap: Record<string, string> = {
   salesTrends: "/sales-trends",
   operationsScorecard: "/performance/operation-scorecard",
   operationsTrends: "/performance/operation-scorecard-trends",
+  estimatedClosingsRisk: "/performance/estimated-closings-risk",
   financialModeling: "/performance/financial-modeling-sandbox",
 };
 
@@ -592,6 +599,7 @@ export function Navigation(
       "/sales-trends",
       "/performance/operation-scorecard",
       "/performance/operation-scorecard-trends",
+      "/performance/estimated-closings-risk",
       "/performance/financial-modeling-sandbox",
     ];
     return topTieringRoutes.some(
@@ -806,14 +814,14 @@ export function Navigation(
                         setMobileMenuOpen(false);
                       }}
                       className={cn(
-                        "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
+                        "w-full flex items-start gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 text-left",
                         isItemActive
                           ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
                           : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800",
                       )}
                     >
-                      <Icon className="w-4 h-4 flex-shrink-0" />
-                      <span>{item.label}</span>
+                      <Icon className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                      <span className="min-w-0 flex-1 leading-snug break-words whitespace-normal">{item.label}</span>
                     </button>
                   );
                 })}
@@ -1143,12 +1151,12 @@ export function Navigation(
                                 <span className="truncate text-left">Business Overview</span>
                                 <button
                                   type="button"
-                                  onClick={(e) => { e.stopPropagation(); togglePinned({ type: "section", id: "executiveDashboard" as PinnedItem["id"] }); }}
+                                  onClick={(e) => { e.stopPropagation(); togglePinned({ type: "section", id: "executiveDashboard" } as PinnedItem); }}
                                   className="shrink-0 ml-auto p-0.5 rounded hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
-                                  title={isPinned({ type: "section", id: "executiveDashboard" as PinnedItem["id"] }) ? "Unpin from sidebar" : "Pin to sidebar"}
-                                  aria-label={isPinned({ type: "section", id: "executiveDashboard" as PinnedItem["id"] }) ? "Unpin" : "Pin to sidebar"}
+                                  title={isPinned({ type: "section", id: "executiveDashboard" } as PinnedItem) ? "Unpin from sidebar" : "Pin to sidebar"}
+                                  aria-label={isPinned({ type: "section", id: "executiveDashboard" } as PinnedItem) ? "Unpin" : "Pin to sidebar"}
                                 >
-                                  {isPinned({ type: "section", id: "executiveDashboard" as PinnedItem["id"] }) ? (
+                                  {isPinned({ type: "section", id: "executiveDashboard" } as PinnedItem) ? (
                                     <PinOff className="w-3 h-3 text-amber-500" />
                                   ) : (
                                     <Pin className="w-3 h-3 text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300" />
@@ -1263,18 +1271,33 @@ export function Navigation(
                                 <button
                                   key={item.id}
                                   onClick={() => handleTopTieringClick(item.id)}
-                                  className={cn(compactItemBase, isItemActive ? compactItemActive : compactItemDefault)}
+                                  className={cn(
+                                    compactItemBase,
+                                    "items-start",
+                                    isItemActive ? compactItemActive : compactItemDefault,
+                                  )}
                                   role="menuitem"
                                 >
-                                  <div className={cn("w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0", style.bg, isItemActive && "ring-1 ring-emerald-400/50")}>
+                                  <div
+                                    className={cn(
+                                      "w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 mt-0.5",
+                                      style.bg,
+                                      isItemActive && "ring-1 ring-emerald-400/50",
+                                    )}
+                                  >
                                     <Icon className={cn("w-3 h-3", style.icon, isItemActive && "scale-110")} />
                                   </div>
-                                  <div className="flex items-center gap-1 flex-1 min-w-0">
-                                    <span className="truncate text-left">{item.label}</span>
+                                  <div className="flex items-start gap-1 flex-1 min-w-0">
+                                    <span className="text-left leading-snug break-words whitespace-normal flex-1 min-w-0 pr-0.5">
+                                      {item.label}
+                                    </span>
                                     <button
                                       type="button"
-                                      onClick={(e) => { e.stopPropagation(); togglePinned(pinItem); }}
-                                      className="shrink-0 ml-auto p-0.5 rounded hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        togglePinned(pinItem);
+                                      }}
+                                      className="shrink-0 self-start mt-0.5 p-0.5 rounded hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
                                       title={pinned ? "Unpin from sidebar" : "Pin to sidebar"}
                                       aria-label={pinned ? "Unpin" : "Pin to sidebar"}
                                     >
@@ -1289,6 +1312,13 @@ export function Navigation(
                               );
                             })}
                           </div>
+                        </div>
+
+                        {/*
+                          Compliance section intentionally commented out.
+                          Keep this block for easy re-enable once
+                          topTieringMenuGroups.compliance is restored.
+
                           <div className="px-1 py-1 mt-2.5 mb-1 flex items-center gap-1.5">
                             <div className="w-0.5 h-3.5 rounded-full bg-gradient-to-b from-emerald-500 to-teal-500 opacity-70" />
                             <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
@@ -1333,7 +1363,7 @@ export function Navigation(
                               );
                             })}
                           </div>
-                        </div>
+                        */}
 
                         {/* Column 4: Secondary Market + Financial Modeling */}
                         <div>

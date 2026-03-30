@@ -29,6 +29,7 @@ export function getSidebarSearchTargets(): SidebarRouteSearchTarget[] {
     { id: 'route:salesTrends', label: 'Sales Trends', group: 'TopTiering', kind: 'route', path: '/sales-trends', keywords: ['toptiering', 'top tiering', 'performance'] },
     { id: 'route:operationsScorecard', label: 'Operations Scorecard', group: 'TopTiering', kind: 'route', path: '/performance/operation-scorecard', keywords: ['toptiering', 'top tiering', 'performance'] },
     { id: 'route:operationsTrends', label: 'Operations Trends', group: 'TopTiering', kind: 'route', path: '/performance/operation-scorecard-trends', keywords: ['toptiering', 'top tiering', 'performance'] },
+    { id: 'route:estimatedClosingsRisk', label: 'Estimated Closings and Risk Analysis', group: 'TopTiering', kind: 'route', path: '/performance/estimated-closings-risk', keywords: ['operations', 'estimated closings', 'risk analysis', 'ecd', 'dashboard'] },
     { id: 'route:financialModeling', label: 'Financial Modeling Sandbox', group: 'TopTiering', kind: 'route', path: '/performance/financial-modeling-sandbox', keywords: ['toptiering', 'top tiering', 'performance'] },
   ];
 

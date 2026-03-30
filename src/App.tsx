@@ -44,6 +44,7 @@ import HighPerformers from "./pages/HighPerformers";
 import CreditRiskManagement from "./pages/CreditRiskManagement";
 import LoanDetail from "./pages/LoanDetail";
 import WorkflowConversion from "./pages/WorkflowConversion";
+import EstimatedClosingsRisk from "./pages/EstimatedClosingsRisk";
 import PricingDashboard from "./pages/PricingDashboard";
 import LockStratification from "./pages/LockStratification";
 import PipelineAnalysisDashboard from "./pages/PipelineAnalysisDashboard";
@@ -210,6 +211,7 @@ const App = () => (
               <Route path="/sales-scorecard-overview" element={<SalesScorecardOverview />} />
               <Route path="/performance/operation-scorecard" element={<OperationScorecard />} />
               <Route path="/performance/operation-scorecard-trends" element={<OperationScorecardTrends />} />
+              <Route path="/performance/estimated-closings-risk" element={<EstimatedClosingsRisk />} />
               
               {/* Admin route - requires admin role */}
               <Route path="/admin" element={
