@@ -70,6 +70,7 @@ interface SyncHistoryEntry {
   status: string;
   loans_added: number;
   loans_updated: number;
+  loans_unchanged: number;
   loans_failed: number;
   total_loans_after: number;
   modified_from: string | null;
@@ -1039,6 +1040,11 @@ export const SyncManagementSection = () => {
                                       {entry.loans_updated > 0 && (
                                         <span className="text-blue-600 dark:text-blue-400 flex items-center gap-0.5">
                                           <ArrowUpDown className="h-3 w-3" />{entry.loans_updated} updated
+                                        </span>
+                                      )}
+                                      {(entry.loans_unchanged ?? 0) > 0 && (
+                                        <span className="text-slate-400 dark:text-slate-500 text-xs">
+                                          {entry.loans_unchanged} unchanged
                                         </span>
                                       )}
                                       {entry.loans_failed > 0 && (
