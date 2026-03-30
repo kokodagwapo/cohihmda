@@ -37,7 +37,7 @@ interface LayoutProps {
   onExit?: () => void;
   /** Embedded in Capture Analysis — FAB positions inside panel */
   embedded?: boolean;
-  /** Off-canvas left rail on all breakpoints; open via header menu (URL hideNav=1) */
+  /** Off-canvas left rail on all breakpoints; embedded Capture Analysis always sets true */
   hideSidebar?: boolean;
   /** Rendered after the search field in the header (e.g. Capture Analysis page tabs) */
   headerAfterSearch?: React.ReactNode;
