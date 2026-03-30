@@ -9,6 +9,19 @@ export interface ReconciliationResult {
 
 const DELETE_BATCH_SIZE = 500;
 
+/**
+ * Maximum fraction of DB loans that reconciliation is allowed to delete in a
+ * single run. If the computed deletion set exceeds this threshold the run is
+ * aborted and a warning is logged.  This guards against API pagination bugs or
+ * auth failures returning an incomplete GUID set, which would otherwise cause
+ * mass false-deletions.
+ *
+ * Set to 0.25 (25 %).  Raise via the MAX_RECONCILE_DELETE_FRACTION env var if
+ * intentional large-scale cleanup is needed.
+ */
+const MAX_RECONCILE_DELETE_FRACTION =
+  parseFloat(process.env.MAX_RECONCILE_DELETE_FRACTION ?? "0.25");
+
 export class FolderReconciliationService {
   private apiService: EncompassApiService;
 
@@ -91,6 +104,21 @@ export class FolderReconciliationService {
     if (guidsToDelete.length === 0) {
       console.log(
         `[Reconcile] All ${dbGuids.length} loans confirmed in synced folders — nothing to delete`,
+      );
+      return { loansChecked: dbGuids.length, loansDeleted: 0, deletions: [] };
+    }
+
+    // Safety threshold: abort if the deletion set is suspiciously large.
+    // A very high delete count is usually a sign of an incomplete API GUID set
+    // (e.g. auth issue, pagination failure) rather than a legitimate mass move.
+    const deleteFraction = guidsToDelete.length / dbGuids.length;
+    if (deleteFraction > MAX_RECONCILE_DELETE_FRACTION) {
+      console.warn(
+        `[Reconcile] SAFETY THRESHOLD EXCEEDED: would delete ${guidsToDelete.length} / ${dbGuids.length} loans ` +
+        `(${(deleteFraction * 100).toFixed(1)}% > ${(MAX_RECONCILE_DELETE_FRACTION * 100).toFixed(0)}% limit). ` +
+        `Aborting reconciliation to prevent mass false-deletion. ` +
+        `API returned only ${apiGuids.size} GUIDs — verify Encompass connection and folder filter. ` +
+        `Set MAX_RECONCILE_DELETE_FRACTION env var to override this limit if needed.`
       );
       return { loansChecked: dbGuids.length, loansDeleted: 0, deletions: [] };
     }
