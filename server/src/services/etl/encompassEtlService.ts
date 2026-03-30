@@ -602,7 +602,7 @@ export class EncompassEtlService {
   private async load(
     tenantId: string,
     loans: LoanRecord[]
-  ): Promise<{ successCount: number; failureCount: number; insertCount: number; updateCount: number; errors: string[] }> {
+  ): Promise<{ successCount: number; failureCount: number; insertCount: number; updateCount: number; unchangedCount: number; errors: string[] }> {
     // Ensure ratio fields are migrated to DECIMAL(12,2) before loading
     // This migration runs on-demand to fix schema issues
     try {
