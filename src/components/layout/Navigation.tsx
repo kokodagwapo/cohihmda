@@ -32,6 +32,7 @@ import {
   PinOff,
   Lock,
   Layers,
+  ShieldCheck,
 } from "lucide-react";
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -113,6 +114,12 @@ const topTieringMenuGroups = {
         icon: FileText,
         iconColor: "blue" as const,
       },
+      {
+        id: "captureAnalysis",
+        label: "Capture Analysis",
+        icon: BarChart3,
+        iconColor: "emerald" as const,
+      },
     ],
   },
   performance: {
@@ -126,7 +133,7 @@ const topTieringMenuGroups = {
       },
     ],
   },
-/*   compliance: {
+  compliance: {
     label: "Compliance",
     items: [
       {
@@ -135,8 +142,14 @@ const topTieringMenuGroups = {
         icon: FileText,
         iconColor: "indigo" as const,
       },
+      {
+        id: "tridCompliance",
+        label: "TRID Compliance",
+        icon: ShieldCheck,
+        iconColor: "teal" as const,
+      },
     ],
-  }, */
+  },
   sales: {
     label: "Sales",
     icon: Users,
@@ -313,6 +326,8 @@ const routeMap: Record<string, string> = {
   operationsTrends: "/performance/operation-scorecard-trends",
   estimatedClosingsRisk: "/performance/estimated-closings-risk",
   financialModeling: "/performance/financial-modeling-sandbox",
+  captureAnalysis: "/capture-analysis",
+  tridCompliance: "/capture-analysis?view=respa&hideNav=1",
 };
 
 /** Match pathname + search when route targets include query params. */
@@ -601,6 +616,7 @@ export function Navigation(
       "/performance/operation-scorecard-trends",
       "/performance/estimated-closings-risk",
       "/performance/financial-modeling-sandbox",
+      "/capture-analysis",
     ];
     return topTieringRoutes.some(
       (route) =>

@@ -145,9 +145,11 @@ async function runEncompassSync(job: SyncJob, tenantPool: pg.Pool): Promise<void
   if (loansCount === 0) {
     // No existing loans — full sync, no date filter
     modifiedFrom = undefined;
+    console.log(`[SyncScheduler] No existing loans for connection=${job.connectionId} — will run full sync`);
   } else if (job.lastLoanModifiedAt) {
     // Best case: use last_loan_modified_at from a previous successful sync
     modifiedFrom = job.lastLoanModifiedAt;
+    console.log(`[SyncScheduler] Using last_loan_modified_at=${modifiedFrom.toISOString()} for incremental sync (connection=${job.connectionId})`);
   } else {
     // Fallback: query MAX(last_modified_date) directly from loans table.
     // Handles interrupted syncs where last_loan_modified_at was never written.
@@ -157,6 +159,13 @@ async function runEncompassSync(job: SyncJob, tenantPool: pg.Pool): Promise<void
       );
       if (maxModifiedResult.rows[0]?.max_modified) {
         modifiedFrom = new Date(maxModifiedResult.rows[0].max_modified);
+        console.log(`[SyncScheduler] last_loan_modified_at is NULL, using MAX(last_modified_date)=${modifiedFrom.toISOString()} for incremental sync (connection=${job.connectionId})`);
+      } else {
+        console.warn(
+          `[SyncScheduler] MAX(last_modified_date) is NULL for connection=${job.connectionId} with ${loansCount} loans — ` +
+          `will run full sync. last_modified_date may not be populated. ` +
+          `This will be fixed after the next sync via the incremental bookmark fallback.`
+        );
       }
     } catch {
       // will do full sync

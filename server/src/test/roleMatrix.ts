@@ -158,5 +158,6 @@ export const ROLE_MATRIX: RouteExpectation[] = [
   { routeGroup: "/api/fallout-alerts", method: "GET", path: "/api/fallout-alerts/__rbac_probe", policy: "distributions_admin", expect: DISTRIBUTIONS_ADMIN_EXPECTED },
   { routeGroup: "/api/fallout-response", method: "GET", path: "/api/fallout-response/__rbac_probe", policy: "public", expect: PUBLIC_BLOCKS_CANVAS_ONLY },
   { routeGroup: "/api/podcast/cohi", method: "GET", path: "/api/podcast/cohi/__rbac_probe", policy: "auth", expect: AUTH_BLOCKS_CANVAS_ONLY },
+  { routeGroup: "/api/cohibuilder/portfolio", method: "GET", path: "/api/cohibuilder/portfolio/__rbac_probe", policy: "public", expect: PUBLIC_BLOCKS_CANVAS_ONLY },
 ];
 

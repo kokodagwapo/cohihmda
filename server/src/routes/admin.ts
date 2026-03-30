@@ -2891,6 +2891,9 @@ router.post(
 
         if (!fullSync && lastLoanModifiedAt && loansCount > 0) {
           modifiedFrom = new Date(lastLoanModifiedAt);
+          logInfo("Admin trigger sync: using last_loan_modified_at for incremental", {
+            connectionId, tenantId, lastLoanModifiedAt: modifiedFrom.toISOString(), loansCount,
+          });
         } else if (!fullSync && loansCount > 0) {
           try {
             const maxResult = await tenantPool.query(
@@ -2898,6 +2901,15 @@ router.post(
             );
             if (maxResult.rows[0]?.max_modified) {
               modifiedFrom = new Date(maxResult.rows[0].max_modified);
+              logInfo("Admin trigger sync: last_loan_modified_at NULL, using MAX(last_modified_date) fallback", {
+                connectionId, tenantId, maxLastModifiedDate: modifiedFrom.toISOString(), loansCount,
+              });
+            } else {
+              logInfo("Admin trigger sync: MAX(last_modified_date) is NULL — will run full sync. " +
+                "This means last_modified_date is not populated on any loan rows. " +
+                "Check that Loan.LastModified is returned by the Encompass Pipeline API.", {
+                connectionId, tenantId, loansCount,
+              });
             }
           } catch {
             // will do full sync
@@ -2924,7 +2936,8 @@ router.post(
           connectionId,
           tenantId,
           fullSync,
-          modifiedFrom: modifiedFrom?.toISOString() || "full sync",
+          modifiedFrom: modifiedFrom?.toISOString() || "undefined (full sync)",
+          syncType: modifiedFrom ? "incremental" : "full",
           loansCount,
           folders: selectedFolders.length,
         });
@@ -3013,7 +3026,7 @@ router.get(
 
       const result = await tenantPool.query(
         `SELECT id, los_connection_id, sync_type, status,
-                loans_added, loans_updated, loans_failed,
+                loans_added, loans_updated, COALESCE(loans_unchanged, 0) AS loans_unchanged, loans_failed,
                 total_loans_after, modified_from, duration_ms,
                 error_message, started_at, completed_at
          FROM public.los_sync_history

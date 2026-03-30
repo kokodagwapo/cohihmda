@@ -11,7 +11,7 @@ import React, {
   useMemo,
 } from "react";
 import { useNavigate } from "react-router-dom";
-import type { SectionType } from "@/stores/widgetSectionStore";
+import { useWidgetSectionStore, type SectionType, type SectionFilters } from "@/stores/widgetSectionStore";
 import { Rnd } from "react-rnd";
 import { api } from "@/lib/api";
 import * as XLSX from "xlsx";
@@ -454,6 +454,27 @@ const CANVAS_TEMPLATES: {
     background: { type: "template", value: "frost" },
   },
 ];
+
+const PERIOD_PRESET_LABELS: Record<string, string> = {
+  "rolling-3": "Last 3 Months", "rolling-6": "Last 6 Months",
+  "rolling-12": "Last 12 Months", "rolling-13": "Last 13 Months",
+  "last-30-days": "Last 30 Days",
+  mtd: "Month to Date", qtd: "Quarter to Date", ytd: "Year to Date",
+  "last-month": "Last Month", "last-quarter": "Last Quarter",
+  "last-year": "Last Year", "trailing-12": "Trailing 12 Months",
+};
+
+function derivePeriodLabel(filters: SectionFilters | undefined): string | undefined {
+  if (!filters) return undefined;
+  const ps = filters.periodSelection;
+  if (ps) {
+    if (ps.type === "preset" && ps.preset) return PERIOD_PRESET_LABELS[ps.preset] ?? ps.preset;
+    if (ps.type === "year" && ps.year) return String(ps.year);
+    if (ps.type === "custom" && ps.dateRange) return `${ps.dateRange.start} – ${ps.dateRange.end}`;
+  }
+  if (filters.year) return String(filters.year);
+  return undefined;
+}
 
 function getGridColWidth(containerWidth: number) {
   const usable = containerWidth - GRID_MARGIN.x * (GRID_COLS + 1);
@@ -2185,16 +2206,29 @@ export function WorkbenchCanvas({
   // Clear canvas data store when switching canvases
   const clearCanvasData = useCanvasDataStore((s) => s.clearAll);
   const canvasDataVersion = useCanvasDataStore((s) => s.dataVersion);
+  const sectionFilters = useWidgetSectionStore((s) => s.sections);
   const reportBuilderWidgetData = useMemo(() => {
     const liveCanvasWidgetEntries = useCanvasDataStore.getState().getSnapshot();
     const layoutById = new Map(items.map((it) => [it.i, it]));
     const merged = liveCanvasWidgetEntries.map((entry) => {
-      const layoutItem = layoutById.get(entry.itemId);
+      let layoutItem = layoutById.get(entry.itemId);
+      const groupId = entry.itemId.includes('__') ? entry.itemId.split('__')[0] : entry.itemId;
+      if (!layoutItem && entry.itemId.includes('__')) {
+        layoutItem = layoutById.get(groupId);
+      }
+
+      const periodLabel = derivePeriodLabel(sectionFilters[groupId]);
+      const entryData = entry.data;
+      const enrichedData =
+        periodLabel && typeof entryData === 'object' && entryData !== null && !(entryData as any)._periodLabel
+          ? { ...(entryData as any), _periodLabel: periodLabel }
+          : entryData;
+
       return {
         itemId: entry.itemId,
         widgetName: entry.widgetName,
         category: entry.category,
-        data: entry.data,
+        data: enrichedData,
         widgetType: layoutItem?.type ?? (entry.data as any)?.widgetType,
         layoutPosition: layoutItem
           ? { x: layoutItem.x, y: layoutItem.y, w: layoutItem.w, h: layoutItem.h }
@@ -2219,7 +2253,7 @@ export function WorkbenchCanvas({
     }
 
     return merged;
-  }, [items, canvasDataVersion]);
+  }, [items, canvasDataVersion, sectionFilters]);
   useEffect(() => {
     clearCanvasData();
     setItems([]);
@@ -3308,13 +3342,24 @@ export function WorkbenchCanvas({
         // Build a lookup from itemId → layout item so we can attach position + widgetType
         const layoutById = new Map(items.map((it) => [it.i, it]));
 
+        const sectionState = useWidgetSectionStore.getState().sections;
         const widgetData = snapshot.map((w) => {
-          const layoutItem = layoutById.get(w.itemId);
+          let layoutItem = layoutById.get(w.itemId);
+          const groupId = w.itemId.includes('__') ? w.itemId.split('__')[0] : w.itemId;
+          if (!layoutItem && w.itemId.includes('__')) {
+            layoutItem = layoutById.get(groupId);
+          }
+          const periodLabel = derivePeriodLabel(sectionState[groupId]);
+          const wData = w.data;
+          const enrichedData =
+            periodLabel && typeof wData === 'object' && wData !== null && !(wData as any)._periodLabel
+              ? { ...(wData as any), _periodLabel: periodLabel }
+              : wData;
           return {
             itemId: w.itemId,
             widgetName: w.widgetName,
             category: w.category,
-            data: w.data,
+            data: enrichedData,
             widgetType: layoutItem?.type ?? (w.data as any)?.widgetType,
             layoutPosition: layoutItem
               ? {

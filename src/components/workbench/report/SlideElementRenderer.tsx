@@ -496,6 +496,8 @@ function TableElement({
                 let val = row[col.key] ?? '';
                 if (col.format === 'currency' && typeof val === 'number') val = `$${val.toLocaleString()}`;
                 else if (col.format === 'percent' && typeof val === 'number') val = `${val.toFixed(1)}%`;
+                else if (col.format === 'ratio' && typeof val === 'number') val = val.toFixed(2);
+                else if (col.format === 'days' && typeof val === 'number') val = `${Math.round(val)}d`;
                 return (
                   <td key={col.key} className="px-1.5 py-0.5 truncate border-b border-slate-100" style={{ textAlign: col.align || 'left' }}>
                     {String(val)}

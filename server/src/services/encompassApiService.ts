@@ -2039,7 +2039,10 @@ export class EncompassApiService {
         `[Reconcile] Folder GUID fetch page ${pageNumber}: ${pageLoans.length} loans, running total=${guids.size}`,
       );
 
-      if (pageLoans.length === 0 || pageLoans.length < pageLimit) break;
+      // Stop only on an empty page — a short (but non-empty) page is NOT a reliable
+      // end-of-results signal for the Encompass Pipeline API and can cause early termination,
+      // leaving the GUID set incomplete and triggering false deletions during reconciliation.
+      if (pageLoans.length === 0) break;
       start += pageLoans.length;
     }
 

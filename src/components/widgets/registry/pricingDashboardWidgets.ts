@@ -48,7 +48,7 @@ const REPORT_COLUMNS: TableColumn[] = [
   { key: 'units', label: 'Units', sortable: true, align: 'right', format: 'number' },
   { key: 'volume', label: 'Volume', sortable: true, align: 'right', format: 'currency' },
   { key: 'loanPricingDollars', label: 'Loan Pricing $', sortable: true, align: 'right', format: 'currency' },
-  { key: 'pricingMargin', label: 'Pricing Margin', sortable: true, align: 'right', format: 'number' },
+  { key: 'pricingMargin', label: 'Pricing Margin', sortable: true, align: 'right', format: 'ratio' },
   { key: 'cdLenderCredits', label: 'CD Lender Credits', sortable: true, align: 'right', format: 'currency' },
 ];
 
@@ -67,7 +67,7 @@ const DETAIL_COLUMNS: TableColumn[] = [
   { key: 'currentLoanStatus', label: 'Current Loan Status', sortable: true },
   { key: 'volume', label: 'Volume', sortable: true, align: 'right', format: 'currency' },
   { key: 'loanPricingDollars', label: 'Loan Pricing $', sortable: true, align: 'right', format: 'currency' },
-  { key: 'pricingMargin', label: 'Pricing Margin', sortable: true, align: 'right', format: 'number' },
+  { key: 'pricingMargin', label: 'Pricing Margin', sortable: true, align: 'right', format: 'ratio' },
   { key: 'cdLenderCredits', label: 'CD Lender Credits', sortable: true, align: 'right', format: 'currency' },
 ];
 

@@ -20,6 +20,7 @@ export interface SyncResult {
   records_failed: number;
   loans_added: number;
   loans_updated: number;
+  loans_unchanged: number;
   loans_deleted: number;
   errors: string[];
   duration: number;
@@ -166,6 +167,7 @@ export class EncompassEtlService {
     let recordsFailed = 0;
     let loansAdded = 0;
     let loansUpdated = 0;
+    let loansUnchanged = 0;
     let loansDeleted = 0;
 
     if (!this.tenantPool) {
@@ -219,6 +221,7 @@ export class EncompassEtlService {
             recordsFailed += loadResult.failureCount;
             loansAdded += loadResult.insertCount;
             loansUpdated += loadResult.updateCount;
+            loansUnchanged += loadResult.unchangedCount;
             errors.push(...loadResult.errors);
 
             if (loadResult.failureCount > 0) {
@@ -238,6 +241,7 @@ export class EncompassEtlService {
         recordsFailed = loadResult.failureCount;
         loansAdded = loadResult.insertCount;
         loansUpdated = loadResult.updateCount;
+        loansUnchanged = loadResult.unchangedCount;
         errors.push(...loadResult.errors);
       }
 
@@ -251,6 +255,14 @@ export class EncompassEtlService {
           ? [options.folderName]
           : [];
 
+      if (syncedFolders.length === 0) {
+        console.warn(
+          `[Sync] No folder configuration for connection ${losConnectionId} — folder reconciliation skipped. ` +
+          `Loans that moved to non-configured folders will NOT be removed. ` +
+          `Set encompass_selected_folders on the los_connections row to enable reconciliation.`
+        );
+      }
+
       if (syncedFolders.length > 0) {
         try {
           const reconciler = new FolderReconciliationService(this.tenantPool);
@@ -258,6 +270,7 @@ export class EncompassEtlService {
             tenantId,
             losConnectionId,
             syncedFolders,
+            options.loanStartDate,
           );
           loansDeleted = reconcileResult.loansDeleted;
           if (reconcileResult.loansDeleted > 0) {
@@ -278,7 +291,9 @@ export class EncompassEtlService {
       const duration = Date.now() - startTime;
 
       if (recordsSynced > 0) {
-        // Query the MAX(last_modified_date) for incremental sync bookmark
+        // Query the MAX(last_modified_date) for incremental sync bookmark.
+        // This value becomes last_loan_modified_at on the connection, which the
+        // next sync uses as its modifiedFrom filter to run incrementally.
         let maxLastModifiedDate: Date | null = null;
         try {
           const maxModifiedResult = await this.tenantPool.query(
@@ -292,6 +307,26 @@ export class EncompassEtlService {
         } catch (error: any) {
           console.warn(
             `[Sync] Could not query MAX(last_modified_date): ${error.message}`
+          );
+        }
+
+        // INCREMENTAL SYNC BOOKMARK FIX:
+        // If last_modified_date is NULL for all loans (e.g. Loan.LastModified not returned
+        // by the Encompass API), fall back to the sync start time. This ensures the next
+        // sync will use a modifiedFrom of ~now and run incrementally rather than as a full
+        // sync again. The start time is slightly conservative (catches any loans modified
+        // concurrently during this sync).
+        if (!maxLastModifiedDate) {
+          maxLastModifiedDate = new Date(startTime);
+          console.warn(
+            `[Sync] MAX(last_modified_date) is NULL for connection ${losConnectionId} — ` +
+            `last_modified_date may not be populated in the loans table. ` +
+            `Using sync start time (${maxLastModifiedDate.toISOString()}) as the incremental bookmark. ` +
+            `Verify that Loan.LastModified is being returned by the Encompass Pipeline API.`
+          );
+        } else {
+          console.log(
+            `[Sync] Incremental bookmark for connection ${losConnectionId}: last_loan_modified_at → ${maxLastModifiedDate.toISOString()}`
           );
         }
 
@@ -340,15 +375,16 @@ export class EncompassEtlService {
       try {
         await this.tenantPool.query(
           `INSERT INTO public.los_sync_history
-           (los_connection_id, sync_type, status, loans_added, loans_updated, loans_failed,
+           (los_connection_id, sync_type, status, loans_added, loans_updated, loans_unchanged, loans_failed,
             total_loans_after, modified_from, duration_ms, error_message, started_at, completed_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())`,
           [
             losConnectionId,
             syncType,
             syncStatus,
             loansAdded,
             loansUpdated,
+            loansUnchanged,
             recordsFailed,
             totalLoansAfter,
             options.modifiedFrom || null,
@@ -389,7 +425,7 @@ export class EncompassEtlService {
       }
 
       console.log(
-        `[Sync] Complete: +${loansAdded} new, ~${loansUpdated} updated, -${loansDeleted} deleted, ${recordsFailed} failed in ${Math.round(duration / 1000)}s (${totalLoansAfter} total)`
+        `[Sync] Complete: +${loansAdded} new, ~${loansUpdated} updated, =${loansUnchanged} unchanged, -${loansDeleted} deleted, ${recordsFailed} failed in ${Math.round(duration / 1000)}s (${totalLoansAfter} total)`
       );
 
       // Fire post-sync hooks asynchronously (don't block return)
@@ -434,6 +470,7 @@ export class EncompassEtlService {
         records_failed: recordsFailed,
         loans_added: loansAdded,
         loans_updated: loansUpdated,
+        loans_unchanged: loansUnchanged,
         loans_deleted: loansDeleted,
         errors: errors.slice(0, 10),
         duration: Date.now() - startTime,
@@ -475,6 +512,7 @@ export class EncompassEtlService {
         records_failed: recordsFailed,
         loans_added: loansAdded,
         loans_updated: loansUpdated,
+        loans_unchanged: loansUnchanged,
         loans_deleted: loansDeleted,
         errors: [error.message],
         duration: Date.now() - startTime,
@@ -569,7 +607,7 @@ export class EncompassEtlService {
   private async load(
     tenantId: string,
     loans: LoanRecord[]
-  ): Promise<{ successCount: number; failureCount: number; insertCount: number; updateCount: number; errors: string[] }> {
+  ): Promise<{ successCount: number; failureCount: number; insertCount: number; updateCount: number; unchangedCount: number; errors: string[] }> {
     // Ensure ratio fields are migrated to DECIMAL(12,2) before loading
     // This migration runs on-demand to fix schema issues
     try {
@@ -699,6 +737,7 @@ export class EncompassEtlService {
     let failureCount = 0;
     let insertCount = 0;
     let updateCount = 0;
+    let unchangedCount = 0;
     const errors: string[] = [];
 
     // Check for duplicate GUIDs in the batch before inserting
@@ -787,10 +826,32 @@ export class EncompassEtlService {
     let processedCount = 0;
     const totalLoans = loans.length;
     const columnNames = availableColumns.map((c) => c.name);
-    const updateClauses = columnNames
-      .filter((n) => n !== "guid" && n !== "id")
+
+    // Columns included in the SET clause (all non-key columns)
+    const setColumns = columnNames.filter((n) => n !== "guid" && n !== "id");
+    const updateClauses = setColumns
       .map((n) => `${n} = EXCLUDED.${n}`)
       .concat(["updated_at = NOW()"]);
+
+    // IS DISTINCT FROM WHERE clause: only update the row when at least one
+    // value actually changed. Skips unchanged rows entirely, preventing false
+    // "updated" counts and unnecessary row version churn.
+    // Exclude USER-DEFINED types (e.g. pgvector embedding) which may not support
+    // row-level comparison.
+    const comparableTypes = new Set([
+      "text", "character varying", "character", "uuid",
+      "integer", "bigint", "smallint", "numeric", "decimal",
+      "double precision", "real", "boolean",
+      "date", "timestamp without time zone", "timestamp with time zone",
+      "jsonb", "json",
+    ]);
+    const compareColumns = setColumns.filter((n) => {
+      const col = columnTypeMap.get(n);
+      return col && comparableTypes.has(col.data_type);
+    });
+    const whereClause = compareColumns.length > 0
+      ? `WHERE (${compareColumns.map((n) => `loans.${n}`).join(", ")}) IS DISTINCT FROM (${compareColumns.map((n) => `EXCLUDED.${n}`).join(", ")})`
+      : "";
 
     const runOneRow = async (loan: Record<string, any>) => {
       const values = availableColumns.map((col) =>
@@ -802,9 +863,11 @@ export class EncompassEtlService {
           VALUES (${placeholders})
           ON CONFLICT (guid)
           DO UPDATE SET ${updateClauses.join(", ")}
+          ${whereClause}
           RETURNING (xmax = 0) AS is_insert
         `;
       const result = await this.tenantPool!.query(query, values);
+      if (result.rows.length === 0) return "unchanged";
       return result.rows[0]?.is_insert === true ? "insert" : "update";
     };
 
@@ -833,13 +896,18 @@ export class EncompassEtlService {
           VALUES ${placeholders}
           ON CONFLICT (guid)
           DO UPDATE SET ${updateClauses.join(", ")}
+          ${whereClause}
           RETURNING (xmax = 0) AS is_insert
         `;
           const result = await this.tenantPool!.query(query, flatValues);
           const rows = result.rows as { is_insert: boolean }[];
-          successCount += rows.length;
-          insertCount += rows.filter((r) => r.is_insert).length;
-          updateCount += rows.filter((r) => !r.is_insert).length;
+          const batchInserted = rows.filter((r) => r.is_insert).length;
+          const batchUpdated = rows.filter((r) => !r.is_insert).length;
+          const batchUnchanged = batch.length - batchInserted - batchUpdated;
+          successCount += batch.length;
+          insertCount += batchInserted;
+          updateCount += batchUpdated;
+          unchangedCount += batchUnchanged;
           processedCount += batch.length;
         } catch (batchError: any) {
           for (const loan of batch) {
@@ -847,7 +915,8 @@ export class EncompassEtlService {
               const outcome = await runOneRow(loan);
               successCount++;
               if (outcome === "insert") insertCount++;
-              else updateCount++;
+              else if (outcome === "update") updateCount++;
+              else unchangedCount++;
             } catch (err: any) {
               failureCount++;
               errors.push(
@@ -1094,17 +1163,21 @@ export class EncompassEtlService {
 
         // Use guid as the unique conflict target (loan_id is deprecated)
         // RETURNING xmax = 0 tells us if this was an INSERT (true) or UPDATE (false)
+        // The WHERE clause skips unchanged rows so they return no RETURNING row.
         const query = `
           INSERT INTO public.loans (${columns.join(", ")})
           VALUES (${placeholders.join(", ")})
           ON CONFLICT (guid) 
           DO UPDATE SET ${updateClauses.join(", ")}
+          ${whereClause}
           RETURNING (xmax = 0) AS is_insert
         `;
 
         const result = await this.tenantPool!.query(query, values);
         successCount++;
-        if (result.rows[0]?.is_insert) {
+        if (result.rows.length === 0) {
+          unchangedCount++;
+        } else if (result.rows[0]?.is_insert) {
           insertCount++;
         } else {
           updateCount++;
@@ -1311,8 +1384,8 @@ export class EncompassEtlService {
     }
 
     console.log(
-      `[Sync] Loaded ${successCount}/${totalLoans}: +${insertCount} new, ~${updateCount} updated${failureCount > 0 ? `, ${failureCount} failed` : ""}`
+      `[Sync] Loaded ${successCount}/${totalLoans}: +${insertCount} new, ~${updateCount} updated, =${unchangedCount} unchanged${failureCount > 0 ? `, ${failureCount} failed` : ""}`
     );
-    return { successCount, failureCount, insertCount, updateCount, errors };
+    return { successCount, failureCount, insertCount, updateCount, unchangedCount, errors };
   }
 }

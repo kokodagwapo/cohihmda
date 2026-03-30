@@ -725,6 +725,10 @@ function renderTableElement(
           val = `$${val.toLocaleString()}`;
         } else if (col.format === "percent" && typeof val === "number") {
           val = `${val.toFixed(1)}%`;
+        } else if (col.format === "ratio" && typeof val === "number") {
+          val = val.toFixed(2);
+        } else if (col.format === "days" && typeof val === "number") {
+          val = `${Math.round(val)}d`;
         } else if (typeof val === "number") {
           val = val.toLocaleString();
         }
@@ -1280,6 +1284,14 @@ function sortBySpatialPosition(widgets: CanvasWidgetForReport[]): CanvasWidgetFo
   });
 }
 
+/** Build a slide title from widget name + optional period label embedded in data. */
+function getSlideTitle(w: CanvasWidgetForReport, fallback?: string): string {
+  const d = w.data as any;
+  const base = d?.title || fallback || w.widgetName;
+  const period = d?._periodLabel;
+  return period ? `${base} (${period})` : base;
+}
+
 // ---------------------------------------------------------------------------
 // Determine the effective widget kind for slide routing
 // ---------------------------------------------------------------------------
@@ -1337,7 +1349,7 @@ function buildChartSlide(
   return {
     id: slideId,
     layout: "chart-focus",
-    title: w.widgetName,
+    title: getSlideTitle(w),
     elements: [
       {
         id: `el-${slideId}`,
@@ -1346,7 +1358,7 @@ function buildChartSlide(
         config: {
           type: "chart",
           chartType: norm.chartType,
-          title: norm.title || w.widgetName,
+          title: norm.title || getSlideTitle(w),
           data: norm.data,
           xKey: norm.xKey,
           yKey: norm.yKey,
@@ -1396,7 +1408,7 @@ function buildWorkflowConversionSlides(
     return [{
       id: `${slideIdBase}-${idx}`,
       layout: "content",
-      title: `${w.widgetName} - ${segmentTitle}`,
+      title: `${getSlideTitle(w)} - ${segmentTitle}`,
       speakerNotes: `Workflow conversion segment: ${segmentTitle}. Review milestone volumes and the ${metricLabel.toLowerCase()} trend over time.`,
       elements: [
         {
@@ -1459,7 +1471,7 @@ function buildTableSlide(
   return {
     id: slideId,
     layout: "table",
-    title: w.widgetName,
+    title: getSlideTitle(w),
     subtitle: note,
     elements: [
       {
@@ -1489,7 +1501,7 @@ function buildTextSlide(
   return {
     id: slideId,
     layout: "content",
-    title: w.widgetName,
+    title: getSlideTitle(w),
     elements: [
       {
         id: `el-${slideId}`,
@@ -1539,7 +1551,7 @@ function buildImageSlide(
   return {
     id: slideId,
     layout: "blank",
-    title: w.widgetName,
+    title: getSlideTitle(w),
     elements: [
       {
         id: `el-${slideId}`,
@@ -1548,7 +1560,7 @@ function buildImageSlide(
         config: {
           type: "image",
           src: d?.src || "",
-          alt: d?.alt || w.widgetName,
+          alt: d?.alt || getSlideTitle(w),
           objectFit: "contain",
         },
         dataSource: { type: "static" as const, staticData: d },
@@ -1602,23 +1614,22 @@ export function canvasToReportDefinition(
     if (kind === "skip") continue;
 
     if (kind === "section_header") {
-      slides.push(buildSectionBreakSlide(w.widgetName, `slide-section-${slideIndex++}`));
+      slides.push(buildSectionBreakSlide(getSlideTitle(w), `slide-section-${slideIndex++}`));
       continue;
     }
 
     if (kind === "widget_group") {
-      const d = w.data as any;
-      slides.push(buildSectionBreakSlide(d?.title || w.widgetName, `slide-group-${slideIndex++}`));
+      slides.push(buildSectionBreakSlide(getSlideTitle(w), `slide-group-${slideIndex++}`));
       continue;
     }
 
     if (kind === "embed") {
-      // Dashboard section embed: render as a titled text placeholder
       const d = w.data as any;
+      const embedTitle = getSlideTitle(w);
       slides.push({
         id: `slide-embed-${slideIndex++}`,
         layout: "content",
-        title: d?.title || w.widgetName,
+        title: embedTitle,
         elements: [
           {
             id: `embed-text-${slideIndex}`,
@@ -1626,7 +1637,7 @@ export function canvasToReportDefinition(
             position: { x: 0.5, y: 1.2, w: 9, h: 4.5 },
             config: {
               type: "text",
-              content: `${d?.title || w.widgetName}\n\nThis section is a live dashboard embed. Open the Cohi Workbench canvas to view the full interactive data.`,
+              content: `${embedTitle}\n\nThis section is a live dashboard embed. Open the Cohi Workbench canvas to view the full interactive data.`,
               fontSize: 13,
               color: theme.textColor,
               align: "center",
@@ -1639,6 +1650,45 @@ export function canvasToReportDefinition(
     }
 
     if (kind === "kpi") {
+      const d = w.data as any;
+      if (!Array.isArray(d?.kpis) || d.kpis.length === 0) {
+        continue;
+      }
+      const kpis = d.kpis as any[];
+      const cols = Math.min(kpis.length, 4);
+      const rows = Math.ceil(kpis.length / cols);
+      const itemW = 8.5 / cols;
+      const itemH = Math.min(1.6, 4.5 / rows);
+      const elements: SlideElement[] = kpis.map((kpi: any, idx: number) => {
+        const col = idx % cols;
+        const row = Math.floor(idx / cols);
+        return {
+          id: `kpi-${slideIndex}-${idx}`,
+          type: "kpi" as const,
+          position: {
+            x: 0.5 + col * itemW + 0.05,
+            y: 1.0 + row * itemH + 0.05,
+            w: itemW - 0.1,
+            h: itemH - 0.1,
+          },
+          config: {
+            type: "kpi",
+            label: kpi.label ?? String(kpi.id ?? ""),
+            value: kpi.value ?? "--",
+            format: kpi.format || "text",
+            change: kpi.change,
+            trend: kpi.trend,
+            color: theme.accentColor,
+          },
+          dataSource: { type: "static" as const, staticData: kpi },
+        };
+      });
+      slides.push({
+        id: `slide-kpi-${slideIndex++}`,
+        layout: "kpi-grid",
+        title: getSlideTitle(w),
+        elements,
+      });
       continue;
     }
 
