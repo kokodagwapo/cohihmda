@@ -1330,11 +1330,6 @@ export function Navigation(
                           </div>
                         </div>
 
-                        {/*
-                          Compliance section intentionally commented out.
-                          Keep this block for easy re-enable once
-                          topTieringMenuGroups.compliance is restored.
-
                           <div className="px-1 py-1 mt-2.5 mb-1 flex items-center gap-1.5">
                             <div className="w-0.5 h-3.5 rounded-full bg-gradient-to-b from-emerald-500 to-teal-500 opacity-70" />
                             <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
@@ -1379,7 +1374,6 @@ export function Navigation(
                               );
                             })}
                           </div>
-                        */}
 
                         {/* Column 4: Secondary Market + Financial Modeling */}
                         <div>
