@@ -30,6 +30,7 @@ export function getSidebarSearchTargets(): SidebarRouteSearchTarget[] {
     { id: 'route:operationsScorecard', label: 'Operations Scorecard', group: 'TopTiering', kind: 'route', path: '/performance/operation-scorecard', keywords: ['toptiering', 'top tiering', 'performance'] },
     { id: 'route:operationsTrends', label: 'Operations Trends', group: 'TopTiering', kind: 'route', path: '/performance/operation-scorecard-trends', keywords: ['toptiering', 'top tiering', 'performance'] },
     { id: 'route:financialModeling', label: 'Financial Modeling Sandbox', group: 'TopTiering', kind: 'route', path: '/performance/financial-modeling-sandbox', keywords: ['toptiering', 'top tiering', 'performance'] },
+    { id: 'route:dataQuality', label: 'Data Quality', group: 'Operations', kind: 'route', path: '/data-quality', keywords: ['data quality', 'warnings', 'hmda', 'trid', 'field health', 'compliance', 'integrity'] },
   ];
 
   const pageTargets: SidebarRouteSearchTarget[] = [

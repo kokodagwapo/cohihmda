@@ -32,6 +32,7 @@ import {
   PinOff,
   Lock,
   Layers,
+  Database,
 } from "lucide-react";
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -226,6 +227,12 @@ const topTieringMenuGroups = {
         icon: BarChart3,
         iconColor: "blue" as const,
       },
+      {
+        id: "dataQuality",
+        label: "Data Quality",
+        icon: Database,
+        iconColor: "emerald" as const,
+      },
     ],
   },
 };
@@ -302,6 +309,7 @@ const routeMap: Record<string, string> = {
   operationsScorecard: "/performance/operation-scorecard",
   operationsTrends: "/performance/operation-scorecard-trends",
   financialModeling: "/performance/financial-modeling-sandbox",
+  dataQuality: "/data-quality",
 };
 
 /** Match pathname + search when route targets include query params. */
@@ -589,6 +597,7 @@ export function Navigation(
       "/performance/operation-scorecard",
       "/performance/operation-scorecard-trends",
       "/performance/financial-modeling-sandbox",
+      "/data-quality",
     ];
     return topTieringRoutes.some(
       (route) =>
