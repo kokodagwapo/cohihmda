@@ -4,7 +4,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate, Outlet } from "react-router-dom";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, lazy, Suspense, type ReactNode } from "react";
 import { EditProvider } from "@/contexts/EditContext";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { AnalyticsWrapper, AnalyticsPageViewTracker } from "@/contexts/AnalyticsContext";
@@ -70,6 +70,8 @@ import ResearchHub from "./pages/ResearchHub";
 // Help Center
 import HelpCenter from "./pages/HelpCenter";
 import DataChat from "./pages/DataChat";
+
+const AgenticSecurity = lazy(() => import("./pages/AgenticSecurity"));
 import { CanvasOnlyLayout } from "@/components/layout/CanvasOnlyLayout";
 
 const queryClient = new QueryClient();
@@ -231,6 +233,21 @@ const App = () => (
               
               {/* Help Center */}
               <Route path="/help/*" element={<HelpCenter />} />
+
+              <Route
+                path="/agentic-security"
+                element={
+                  <Suspense
+                    fallback={
+                      <div className="flex min-h-[40vh] items-center justify-center bg-white text-slate-500">
+                        Loading…
+                      </div>
+                    }
+                  >
+                    <AgenticSecurity />
+                  </Suspense>
+                }
+              />
               </Route>
               
               {/* Catch-all route */}

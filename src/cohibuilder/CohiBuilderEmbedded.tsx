@@ -1,4 +1,4 @@
-import { useCallback, useMemo, type ReactNode } from "react";
+import { useCallback, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import CohiBuilderApp from "@/cohibuilder/CohiBuilderApp";
 import "@/cohibuilder/cohibuilder.css";
@@ -14,10 +14,8 @@ type CohiBuilderEmbeddedProps = {
 export function CohiBuilderEmbedded({ headerAfterSearch }: CohiBuilderEmbeddedProps = {}) {
   const navigate = useNavigate();
   const location = useLocation();
-  const hideSidebar = useMemo(
-    () => new URLSearchParams(location.search).get("hideNav") === "1",
-    [location.search],
-  );
+  /** Inside Coheus Capture Analysis: only the main app sidebar (ReportsSidebar) — never the Builder left rail. */
+  const hideSidebar = true;
   const syncNavigation = useCallback(
     (to: string) => {
       navigate(to, { replace: false });

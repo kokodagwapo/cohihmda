@@ -508,9 +508,16 @@ export default function Dashboard({ onLoanClick, onStatClick, onViewMap, onOpenV
   const totalAgreementRows = contracts.length;
   const withdrawnFalloutRows = contracts.filter((c) => falloutKindFromContract(c) === 'withdrawn').length;
   const deniedFalloutRows = contracts.filter((c) => falloutKindFromContract(c) === 'denied').length;
-  const preferredActiveContracts = contracts.filter(
-    (c) => c.status !== 'Canceled' && (c.mortgageStatus ?? '').toLowerCase().includes('preferred'),
-  ).length;
+  /**
+   * Captured (TB) agreements for capture-rate denominator alignment with the pipeline card.
+   * When import rows align loans↔contracts 1:1, use the same `isPreferred` signal as loans
+   * (Capture_Indicator / TB), not contract.mortgageStatus text (often blank → 0% captured).
+   */
+  const preferredActiveContracts = parallelLoansContracts
+    ? loans.filter((_, i) => contracts[i]?.status !== 'Canceled' && loans[i].isPreferred).length
+    : contracts.filter(
+        (c) => c.status !== 'Canceled' && (c.mortgageStatus ?? '').toLowerCase().includes('preferred'),
+      ).length;
   const pipelineLoanCount = activePipelineLoanList.length;
   /** Demo: Loan Estimate issued (sent + dated) as RESPA originated files. */
   const respaOriginatedCount = respaApps.filter(
@@ -666,7 +673,7 @@ export default function Dashboard({ onLoanClick, onStatClick, onViewMap, onOpenV
       id: 'capture',
       label: 'Mortgage Capture Rate',
       tooltipVariant: 'emerald' as const,
-      cardTooltip: `Mortgage capture rate\n\nWhat it shows: Captured share vs not captured (external + pending/TBD) as two whole percents that sum to 100% for the window. Footer uses contract and captured-loan context.\n\nHow it’s calculated: Captured active contract rows ÷ all active (non-canceled) contract rows, scaled to ${funnelPeriod.toUpperCase()}. “Not captured” is the complement of that rounded captured %.\n\nTerms: Captured = Capture_Indicator is Y, Yes, 1, or True. External = explicit N/No. Pending = blank or unknown capture.\n\nDetail — ${funnelPeriod.toUpperCase()}: ${kpiPreferredContractRows.toLocaleString()} captured of ${kpiTotalContractRows.toLocaleString()} active contract rows.`,
+      cardTooltip: `Mortgage capture rate\n\nWhat it shows: Captured share vs not captured (external + pending/TBD) as two whole percents that sum to 100% for the window.\n\nHow it’s calculated: When loan and contract rows align 1:1 from import, captured active agreements = same loans as “captured (TB)” on the pipeline card (isPreferred), ÷ all active (non-canceled) agreement rows, scaled to ${funnelPeriod.toUpperCase()}. Otherwise captured agreements use mortgage status containing “preferred”. “Not captured” is the complement of the rounded captured %.\n\nTerms: Captured = Capture_Indicator is Y, Yes, 1, or True on the loan row.\n\nDetail — ${funnelPeriod.toUpperCase()}: ${kpiPreferredContractRows.toLocaleString()} captured of ${kpiTotalContractRows.toLocaleString()} active agreement rows.`,
       badgeHelp: '',
       footerHelp:
         'Footer: active contract count and average days to funding for captured (TB) loans still in the active pipeline.',
