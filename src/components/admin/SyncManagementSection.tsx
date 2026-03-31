@@ -699,7 +699,10 @@ export const SyncManagementSection = () => {
         ),
         api.request<{ hookRuns: HookRun[] }>(
           `/api/admin/sync-management/${connection.id}/hook-status?tenant_id=${connection.tenant_id}&limit=20`
-        ).catch(() => ({ hookRuns: [] as HookRun[] })),
+        ).catch((err: any) => {
+          console.error('[SyncManagement] hook-status fetch failed:', err?.message ?? err);
+          return { hookRuns: [] as HookRun[] };
+        }),
       ]);
       setHistoryData(prev => ({ ...prev, [key]: histResponse.history }));
       setHookRunData(prev => ({ ...prev, [key]: hookResponse.hookRuns }));
