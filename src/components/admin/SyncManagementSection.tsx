@@ -40,6 +40,7 @@ import {
   Plus,
   ArrowUpDown,
   BarChart3,
+  Sparkles,
 } from 'lucide-react';
 
 interface SyncConnection {
@@ -210,6 +211,7 @@ export const SyncManagementSection = () => {
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [updatingIds, setUpdatingIds] = useState<Set<string>>(new Set());
   const [triggeringIds, setTriggeringIds] = useState<Set<string>>(new Set());
+  const [runningInsightIds, setRunningInsightIds] = useState<Set<string>>(new Set());
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [historyData, setHistoryData] = useState<Record<string, SyncHistoryEntry[]>>({});
   const [historyLoading, setHistoryLoading] = useState<Set<string>>(new Set());
@@ -495,6 +497,36 @@ export const SyncManagementSection = () => {
       });
     } finally {
       setTriggeringIds(prev => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
+
+  const handleRunInsights = async (connection: SyncConnection) => {
+    const key = connKey(connection);
+    setRunningInsightIds(prev => new Set(prev).add(key));
+    try {
+      await api.request<{ success: boolean; message: string }>(
+        `/api/admin/sync-management/${connection.id}/run-insights`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ tenant_id: connection.tenant_id }),
+        }
+      );
+      toast({
+        title: 'Insight generation started',
+        description: `Running agent insights for ${connection.name} (${connection.tenant_name}). Results will appear in the insights section shortly.`,
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to start insight generation',
+        variant: 'destructive',
+      });
+    } finally {
+      setRunningInsightIds(prev => {
         const next = new Set(prev);
         next.delete(key);
         return next;
@@ -1051,6 +1083,23 @@ export const SyncManagementSection = () => {
                               <BarChart3 className="h-4 w-4" />
                             </Button>
                           )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-violet-600 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300"
+                            onClick={() => handleRunInsights(connection)}
+                            disabled={
+                              runningInsightIds.has(key) ||
+                              !connection.is_active
+                            }
+                            title="Run insights now (without sync)"
+                          >
+                            {runningInsightIds.has(key) ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Sparkles className="h-4 w-4" />
+                            )}
+                          </Button>
                           <Button
                             variant="ghost"
                             size="sm"

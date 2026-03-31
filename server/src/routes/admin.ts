@@ -3012,6 +3012,76 @@ router.post(
 );
 
 /**
+ * POST /api/admin/sync-management/:connectionId/run-insights
+ * Manually trigger the agent insight pipeline for a connection without running a sync.
+ * Useful for re-generating insights on existing loan data.
+ */
+router.post(
+  "/sync-management/:connectionId/run-insights",
+  authenticateToken,
+  requireRole("super_admin", "platform_admin"),
+  async (req: AuthRequest, res) => {
+    try {
+      const connectionId = req.params.connectionId as string;
+      const { tenant_id } = req.body;
+
+      if (!tenant_id) {
+        return res.status(400).json({ error: "tenant_id is required" });
+      }
+
+      const tenantId = tenant_id as string;
+      const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+
+      const connResult = await tenantPool.query(
+        `SELECT id FROM public.los_connections WHERE id = $1`,
+        [connectionId]
+      );
+      if (connResult.rows.length === 0) {
+        return res.status(404).json({ error: "Connection not found" });
+      }
+
+      const { runInsightGeneration } = await import(
+        "../services/insights/agents/insightOrchestrator.js"
+      );
+
+      logInfo("Admin: manually triggering insight generation", {
+        connectionId,
+        tenantId,
+        requestedBy: req.userId,
+      });
+
+      // Run async; respond immediately so the admin UI doesn't time out
+      runInsightGeneration(tenantId, tenantPool, undefined, { forceFresh: true })
+        .then((result) => {
+          logInfo("Admin: insight generation complete", {
+            connectionId,
+            tenantId,
+            insightCount: result.insightCount,
+            durationMs: result.durationMs,
+          });
+        })
+        .catch((err: any) => {
+          logError("Admin: insight generation failed", err, {
+            connectionId,
+            tenantId,
+          });
+        });
+
+      return res.json({
+        success: true,
+        message: "Insight generation started. Results will be available shortly.",
+      });
+    } catch (error: any) {
+      logError("Error triggering insight generation", error, {
+        userId: req.userId,
+        connectionId: req.params.connectionId,
+      });
+      return res.status(500).json({ error: "Failed to start insight generation" });
+    }
+  }
+);
+
+/**
  * GET /api/admin/sync-management/:connectionId/history
  * Get sync history for a specific connection
  */
