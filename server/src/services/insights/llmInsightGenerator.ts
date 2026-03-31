@@ -17,6 +17,7 @@ import crypto from "crypto";
 import { tenantDbManager } from "../../config/tenantDatabaseManager.js";
 import { pool as managementPool } from "../../config/managementDatabase.js";
 import { decryptAPIKeys } from "../encryption.js";
+import { logLLMUsage } from "../llmUsageTracker.js";
 import {
   InsightMetricsPayload,
   PeriodSnapshot,
@@ -1133,12 +1134,23 @@ async function callOpenAI(
   systemPrompt: string,
   userPrompt: string,
   apiKey: string,
-  options: { model?: string; temperature?: number; maxTokens?: number } = {}
+  options: {
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
+    /** If provided, token usage is persisted to cost_events in the tenant DB. */
+    tenantPool?: pg.Pool;
+    tenantId?: string;
+    requestedBy?: string;
+  } = {}
 ): Promise<string> {
   const {
     model = "gpt-5.2",
     temperature = 0.5,
     maxTokens = 4500,
+    tenantPool,
+    tenantId,
+    requestedBy,
   } = options;
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -1170,7 +1182,26 @@ async function callOpenAI(
 
   const data = (await response.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
+    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
   };
+
+  // Fire-and-forget token tracking when tenant context is provided
+  if (tenantPool && tenantId) {
+    const promptTokens = data.usage?.prompt_tokens ?? 0;
+    const completionTokens = data.usage?.completion_tokens ?? 0;
+    if (promptTokens > 0 || completionTokens > 0) {
+      logLLMUsage({
+        tenantPool,
+        tenantId,
+        model,
+        promptTokens,
+        completionTokens,
+        totalTokens: data.usage?.total_tokens,
+        requestedBy,
+      });
+    }
+  }
+
   return data.choices?.[0]?.message?.content || "";
 }
 
@@ -3198,6 +3229,7 @@ export async function generateCategorizedInsights(
 
         const response = await callOpenAI(generatorSystem, userPrompt, apiKey, {
           model: generatorModel, temperature: generatorTemp, maxTokens: generatorMaxTokens,
+          tenantPool, tenantId, requestedBy: "insight-generator",
         });
 
         const domainCandidates = parseGeneratorResponse(response);
@@ -3350,6 +3382,7 @@ export async function generateCategorizedInsights(
 
     const judgeResponse = await callOpenAI(judgeSystem, judgeUserPrompt, apiKey, {
       model: judgeModel, temperature: judgeTemp, maxTokens: judgeMaxTokens,
+      tenantPool, tenantId, requestedBy: "insight-judge",
     });
 
     const evaluations = parseJudgeResponse(judgeResponse);
@@ -3453,6 +3486,7 @@ export async function generateCategorizedInsights(
 
     const curatorResponse = await callOpenAI(curatorSystem, curatorUserPrompt, apiKey, {
       model: curatorModel, temperature: curatorTemp, maxTokens: curatorMaxTokens,
+      tenantPool, tenantId, requestedBy: "insight-curator",
     });
 
     finalInsights = parseCuratorResponse(curatorResponse);

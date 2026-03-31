@@ -33,6 +33,7 @@ import {
   ArrowLeftRight,
   Folder,
   Megaphone,
+  Coins,
 } from "lucide-react";
 import type { AdminSection, AdminMode } from "@/hooks/admin/useAdminState";
 
@@ -186,6 +187,16 @@ const allAdminSections: AdminSectionDef[] = [
     icon: Settings,
     description: "API keys and platform-wide configuration",
     color: "text-slate-300 dark:text-slate-400/70",
+    allowedRoles: ["super_admin", "platform_admin"],
+    category: "Infrastructure",
+    mode: "platform",
+  },
+  {
+    id: "api-usage" as AdminSection,
+    label: "API Usage",
+    icon: Coins,
+    description: "Per-tenant OpenAI token and cost tracking",
+    color: "text-yellow-300 dark:text-yellow-400/70",
     allowedRoles: ["super_admin", "platform_admin"],
     category: "Infrastructure",
     mode: "platform",

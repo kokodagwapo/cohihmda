@@ -911,7 +911,7 @@ async function persistAgentInsights(
       ins.severity_score,                            // severity_score
       JSON.stringify(ins.impact || {}),              // impact
       JSON.stringify(evidenceWithEtm),               // evidence (with ETM fields packed in)
-      false,                                         // for_podcast
+      ins.for_podcast !== false,                     // for_podcast (true by default so agent insights feed the podcast)
       "ytd",                                         // date_filter (agent insights are timeframe-agnostic)
       null,                                          // channel_group
       generationBatch,                               // generation_batch
@@ -1040,7 +1040,7 @@ async function appendAgentInsights(
       ins.severity_score,
       JSON.stringify(ins.impact || {}),
       JSON.stringify(evidenceWithEtm),
-      false,
+      ins.for_podcast !== false,                     // for_podcast (true by default so agent insights feed the podcast)
       "ytd",
       null,
       generationBatch,

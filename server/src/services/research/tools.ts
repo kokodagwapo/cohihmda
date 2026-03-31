@@ -12,6 +12,7 @@ import { getSchemaForTenant, getFallbackSchemaContext } from "../ai/schemaContex
 import { METRICS_CATALOG, type MetricDefinition } from "../metrics/metricsService.js";
 import { decryptAPIKeys } from "../encryption.js";
 import { generateEmbeddings } from "../embeddingService.js";
+import { logLLMUsage } from "../llmUsageTracker.js";
 
 // ============================================================================
 // Types
@@ -29,6 +30,11 @@ export interface LLMOptions {
   jsonMode?: boolean;
   /** Optional tag for logging (e.g. prompt id / pipeline pass). */
   tag?: string;
+  /** If provided, token usage is persisted to cost_events in the tenant DB. */
+  tenantPool?: import("pg").Pool;
+  tenantId?: string;
+  /** Attribution label written to cost_events.requested_by. */
+  requestedBy?: string;
 }
 
 export interface QueryResult {
@@ -178,6 +184,9 @@ export async function callLLM(
     maxTokens = 4000,
     jsonMode = false,
     tag,
+    tenantPool,
+    tenantId,
+    requestedBy,
   } = options;
 
   let currentMaxTokens = maxTokens;
@@ -249,9 +258,29 @@ export async function callLLM(
     const finishReason = data.choices?.[0]?.finish_reason;
     const completionTokens = data.usage?.completion_tokens ?? 0;
     const promptTokens = data.usage?.prompt_tokens ?? 0;
+    const totalTokens = data.usage?.total_tokens ?? promptTokens + completionTokens;
+
+    // Fire-and-forget token tracking when tenant context is available
+    const trackUsage = () => {
+      if (tenantPool && tenantId && (promptTokens > 0 || completionTokens > 0)) {
+        logLLMUsage({
+          tenantPool,
+          tenantId,
+          model,
+          promptTokens,
+          completionTokens,
+          totalTokens,
+          requestedBy,
+          metadata: tag ? { tag } : undefined,
+        });
+      }
+    };
 
     // Successful complete response
-    if (content && finishReason === "stop") return content;
+    if (content && finishReason === "stop") {
+      trackUsage();
+      return content;
+    }
 
     // Truncated response — finish_reason is "length" meaning the model ran out of output tokens.
     // In JSON mode this produces invalid JSON, so content may be empty or unparseable.
@@ -264,7 +293,10 @@ export async function callLLM(
         `Escalating max_tokens to ${escalatedTokens}.`
       );
       // If content exists despite truncation (non-JSON mode), return it as-is
-      if (content && !jsonMode) return content;
+      if (content && !jsonMode) {
+        trackUsage();
+        return content;
+      }
       // Otherwise escalate and retry
       if (attempt < MAX_LLM_RETRIES && escalatedTokens > currentMaxTokens) {
         currentMaxTokens = escalatedTokens;
@@ -272,11 +304,17 @@ export async function callLLM(
         continue;
       }
       // Last attempt with max tokens and still truncated — return partial content if available
-      if (content) return content;
+      if (content) {
+        trackUsage();
+        return content;
+      }
     }
 
     // Content present with any other finish reason — accept it
-    if (content) return content;
+    if (content) {
+      trackUsage();
+      return content;
+    }
 
     // Truly empty response — log and retry
     console.warn(
