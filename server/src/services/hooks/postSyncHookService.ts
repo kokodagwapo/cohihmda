@@ -61,8 +61,8 @@ async function insertHookRun(
       [ctx.syncHistoryId ?? null, ctx.connectionId, ctx.tenantId, hookName]
     );
     return Number(result.rows[0]?.id);
-  } catch {
-    // Table may not exist on older tenants; degrade gracefully
+  } catch (err: any) {
+    logAlways(`[PostSyncHooks] insertHookRun failed for "${hookName}" (tenant=${ctx.tenantId}): ${err?.message ?? err}`);
     return null;
   }
 }
@@ -126,6 +126,9 @@ export async function runPostSyncHooks(ctx: PostSyncContext): Promise<void> {
 
   for (const hook of hooks) {
     const runId = await insertHookRun(ctx, hook.name);
+    if (runId === null) {
+      logAlways(`[PostSyncHooks] Hook "${hook.name}" running without DB tracking (insertHookRun returned null)`);
+    }
     const start = Date.now();
 
     try {
