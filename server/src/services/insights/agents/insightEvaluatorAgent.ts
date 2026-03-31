@@ -38,6 +38,8 @@ export interface EvaluatedInsight {
   metricSignature?: { sql: string; keyFields: string[] };
   confidence: "high" | "medium" | "low";
   findingIndex: number;
+  /** Whether this insight should be included in the podcast briefing context. Defaults to true. */
+  for_podcast?: boolean;
   // ETM Framework fields
   what_changed?: string;
   why?: string;
