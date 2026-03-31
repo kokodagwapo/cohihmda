@@ -754,6 +754,8 @@ Resources:
                   - logs:DescribeLogGroups
                   - logs:DescribeLogStreams
                   - logs:PutLogEvents
+                  - logs:FilterLogEvents
+                  - logs:GetLogEvents
                 Resource: "*"
               - Effect: Allow
                 Action:
