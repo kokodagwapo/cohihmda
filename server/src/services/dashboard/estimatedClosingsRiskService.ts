@@ -359,12 +359,12 @@ export async function getEstimatedClosingsRiskData(
   `;
 
   const fundedThisMonthExpr = `l.funding_date::date BETWEEN b.month_start AND b.month_end`;
-  /** Canonical active pipeline + unfunded + ECD in current month — must match pie "Remaining to Fund" (uses ACTIVE_SQL, not status alone). */
+  /** Canonical active pipeline + unfunded + ECD on or before current month end (includes overdue + current month). */
   const remainingToFundExpr = `
     ${ACTIVE_SQL}
     AND l.funding_date IS NULL
     AND l.estimated_closing_date IS NOT NULL
-    AND l.estimated_closing_date::date BETWEEN b.month_start AND b.month_end
+    AND l.estimated_closing_date::date <= b.month_end
   `;
 
   const pipelineKpisQuery = `
