@@ -39,6 +39,41 @@ Before the tracked-insight ticket work, align dashboard insights implementation 
 
 ---
 
+## Implementation Order
+
+Follow this sequence to reduce rework and keep dependencies clean:
+
+1. **Dashboard alignment contract first**
+   - Finalize the shared tracked-signature contract (`metric_signature`, `display_metadata`, evaluable vs non-evaluable state).
+   - Confirm how dashboard source rows will derive signature/metadata server-side.
+
+2. **Backend track-create hardening**
+   - Implement server-side extraction/validation in `trackedInsights` route.
+   - Ensure agent/pipeline/dashboard tracking paths all normalize to the same stored shape.
+
+3. **Backend generation-trigger parity**
+   - Add tracked reevaluation calls after all generation flows (full, bucket generate-more, category refresh).
+
+4. **Backend polarity + summary consistency**
+   - Complete polarity consistency in evaluator output contract.
+   - Add source bucket/severity context persistence and use it in change-summary prompt.
+
+5. **Frontend dashboard tracking parity**
+   - Stop sending guaranteed-empty dashboard `metric_signature`.
+   - Handle backend evaluable/non-evaluable response states in UI.
+
+6. **Frontend tracked detail lifecycle**
+   - Add pause/resume actions and polarity-correct delta rendering in tracked detail modal.
+
+7. **Frontend archived insights UX**
+   - Add active/archived toggle and finalize archive vs untrack semantics in watchlist.
+
+8. **Validation pass**
+   - Run backend and frontend test plan sections end-to-end.
+   - Specifically verify paused-item reevaluation behavior and dashboard parity behavior.
+
+---
+
 ## Current State: Done vs Gap (Clarified)
 
 ### Already done
