@@ -18,6 +18,7 @@ import {
   Loader2,
   AlertTriangle,
   ChevronRight,
+  BookmarkX,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { TrackedInsightDetailModal } from "./TrackedInsightDetailModal";
@@ -38,7 +39,12 @@ interface TrackedInsight {
   updated_at: string;
   alert_threshold: { field: string; operator: string; value: number; triggered?: boolean; last_triggered_at?: string | null } | null;
   metric_signature: { sql: string; keyFields: string[] } | null;
-  display_metadata: { keyMetricDescriptions?: Record<string, string>; keyMetricFormats?: Record<string, string> } | null;
+  display_metadata: {
+    keyMetricDescriptions?: Record<string, string>;
+    keyMetricFormats?: Record<string, string>;
+    evaluable?: boolean;
+    non_evaluable_reason?: string;
+  } | null;
   latest_values: Record<string, any> | null;
   latest_previous: Record<string, any> | null;
   latest_change: string | null;
@@ -91,6 +97,13 @@ function timeAgo(dateStr: string): string {
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
   return `${days}d ago`;
+}
+
+/** Plan §0: explicit evaluable flag from server, or legacy empty-SQL signature. */
+function trackedInsightIsEvaluable(insight: TrackedInsight): boolean {
+  const e = insight.display_metadata?.evaluable;
+  if (typeof e === "boolean") return e;
+  return !!(insight.metric_signature?.sql?.trim());
 }
 
 // ============================================================================
@@ -196,6 +209,18 @@ export function TrackedInsightsWatchlist({ selectedTenantId, refreshTrigger, onI
                   </p>
                   <div className="flex items-center gap-2 mt-1 flex-wrap">
                     <TrendBadge trend={insight.latest_trend} />
+                    {!trackedInsightIsEvaluable(insight) && (
+                      <span
+                        className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-800 dark:bg-amber-900/25 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800/50"
+                        title={
+                          insight.display_metadata?.non_evaluable_reason ||
+                          "This bookmark is kept on your watchlist but metrics are not refreshed automatically."
+                        }
+                      >
+                        <BookmarkX className="w-2.5 h-2.5 shrink-0" />
+                        Not auto-updating
+                      </span>
+                    )}
                     {insight.alert_threshold?.triggered && (
                       <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400">
                         <AlertTriangle className="w-2.5 h-2.5" />

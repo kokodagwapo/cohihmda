@@ -314,7 +314,6 @@ export function DashboardInsightsStrip({
                               {
                                 headline: visibleInsights[activeIdx].headline,
                                 understory: visibleInsights[activeIdx].understory,
-                                metric_signature: { sql: "", keyFields: [] },
                                 source_insight_id: insightId,
                                 source_type: "dashboard_insights",
                               },
@@ -389,7 +388,6 @@ export function DashboardInsightsStrip({
                             {
                               headline: insight.headline,
                               understory: insight.understory,
-                              metric_signature: { sql: "", keyFields: [] },
                               source_insight_id: insightId,
                               source_type: "dashboard_insights",
                             },

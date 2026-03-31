@@ -68,6 +68,8 @@ interface TrackedInsight {
   display_metadata: {
     keyMetricDescriptions?: Record<string, string>;
     keyMetricFormats?: Record<string, string>;
+    evaluable?: boolean;
+    non_evaluable_reason?: string;
   } | null;
   latest_values: Record<string, any> | null;
   latest_previous: Record<string, any> | null;
@@ -181,6 +183,19 @@ function timeAgo(dateStr: string): string {
   const days = Math.floor(hrs / 24);
   if (days < 30) return `${days}d ago`;
   return new Date(dateStr).toLocaleDateString();
+}
+
+function trackedInsightIsEvaluable(insight: TrackedInsight): boolean {
+  const e = insight.display_metadata?.evaluable;
+  if (typeof e === "boolean") return e;
+  return !!(insight.metric_signature?.sql?.trim());
+}
+
+function trackedInsightNonEvaluableMessage(insight: TrackedInsight): string {
+  return (
+    insight.display_metadata?.non_evaluable_reason ||
+    "This bookmark is kept on your watchlist, but metrics are not refreshed automatically for it yet."
+  );
 }
 
 // ============================================================================
@@ -422,7 +437,16 @@ export function TrackedInsightDetailModal({
     .filter((d) => d.value !== null && !isNaN(d.value as number));
 
   const alertTriggered = localInsight.alert_threshold?.triggered;
-  const sourceTypeLabel = localInsight.source_type === "agent" ? "AI Agent" : localInsight.source_type === "pipeline" ? "Pipeline" : localInsight.source_type;
+  const insightEvaluable = trackedInsightIsEvaluable(localInsight);
+  const nonEvaluableMessage = trackedInsightNonEvaluableMessage(localInsight);
+  const sourceTypeLabel =
+    localInsight.source_type === "agent"
+      ? "AI Agent"
+      : localInsight.source_type === "pipeline"
+        ? "Pipeline"
+        : localInsight.source_type === "dashboard_insights"
+          ? "Dashboard"
+          : localInsight.source_type;
 
   return createPortal(
     <AnimatePresence>
@@ -489,6 +513,14 @@ export function TrackedInsightDetailModal({
 
             {/* ===== Scrollable body ===== */}
             <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5 min-h-0">
+              {!insightEvaluable && (
+                <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-amber-50/90 dark:bg-amber-950/35 border border-amber-200/80 dark:border-amber-800/50">
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-amber-900 dark:text-amber-100/90 leading-relaxed">
+                    {nonEvaluableMessage}
+                  </p>
+                </div>
+              )}
 
               {/* Current metric values */}
               {keyFields.length > 0 && Object.keys(currentValues).length > 0 && (
@@ -593,7 +625,11 @@ export function TrackedInsightDetailModal({
                     Loading history...
                   </div>
                 ) : snapshots.length === 0 ? (
-                  <p className="text-xs text-slate-400 py-2">No history yet — will appear after the first evaluation.</p>
+                  <p className="text-xs text-slate-400 py-2">
+                    {insightEvaluable
+                      ? "No history yet — will appear after the first evaluation."
+                      : "No evaluation history — automatic refresh is not available for this bookmark yet."}
+                  </p>
                 ) : (
                   <div className="space-y-1.5">
                     {snapshots.map((snap) => {

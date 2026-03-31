@@ -18,6 +18,8 @@ import {
   getTenantContext,
 } from "../middleware/tenantContext.js";
 import { logError } from "../services/logger.js";
+import { loadDashboardInsightForTracking } from "../services/dashboardInsights/storage.js";
+import { deriveDashboardTrackedFromDetailData } from "../services/trackedInsights/dashboardTrackedDerivation.js";
 
 const router = Router();
 
@@ -37,14 +39,57 @@ router.post(
         understory,
         metric_signature,
         source_insight_id,
-        source_type,
+        source_type: rawSourceType,
         tags,
         display_metadata,
       } = req.body;
 
-      if (!headline || !metric_signature) {
+      const source_type =
+        typeof rawSourceType === "string" && rawSourceType.trim()
+          ? String(rawSourceType).trim()
+          : "pipeline";
+
+      const isDashboardTrack =
+        source_type === "dashboard_insights" && source_insight_id != null;
+
+      if (!headline) {
+        return res.status(400).json({ error: "headline is required" });
+      }
+
+      let effectiveMetricSignature = metric_signature;
+      let effectiveDisplayMetadata = display_metadata;
+
+      /* Plan §0: dashboard tracking — server derives signature/metadata; client payload optional */
+      if (isDashboardTrack) {
+        const dashId = Number(source_insight_id);
+        if (!Number.isFinite(dashId) || dashId <= 0) {
+          return res.status(400).json({
+            error: "source_insight_id must be a positive integer for dashboard_insights",
+          });
+        }
+        const row = await loadDashboardInsightForTracking(
+          ctx.tenantPool,
+          dashId
+        );
+        if (!row) {
+          return res.status(404).json({ error: "Dashboard insight not found" });
+        }
+        const derived = deriveDashboardTrackedFromDetailData(row.detail_data, {
+          sentiment: row.sentiment,
+          severity_score: row.severity_score,
+          page_id: row.page_id,
+          page_name: row.page_name,
+        });
+        effectiveMetricSignature = derived.metric_signature;
+        effectiveDisplayMetadata = {
+          ...(display_metadata && typeof display_metadata === "object"
+            ? display_metadata
+            : {}),
+          ...derived.display_metadata,
+        };
+      } else if (!metric_signature) {
         return res.status(400).json({
-          error: "headline and metric_signature are required",
+          error: "metric_signature is required for non-dashboard insights",
         });
       }
 
@@ -69,13 +114,17 @@ router.post(
         req.userEmail,
         headline,
         understory || null,
-        JSON.stringify(metric_signature),
+        JSON.stringify(effectiveMetricSignature),
         source_insight_id || null,
-        source_type || "pipeline",
+        source_type,
         tags || [],
       ];
       if (hasDisplayMetaCol) {
-        params.push(display_metadata ? JSON.stringify(display_metadata) : null);
+        params.push(
+          effectiveDisplayMetadata
+            ? JSON.stringify(effectiveDisplayMetadata)
+            : null
+        );
       }
 
       const result = await ctx.tenantPool.query(

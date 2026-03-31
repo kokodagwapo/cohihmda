@@ -1282,7 +1282,8 @@ export class ApiClient {
   async trackInsight(data: {
     headline: string;
     understory?: string;
-    metric_signature: any;
+    /** Omitted for `dashboard_insights`; server derives from source row (plan §0). */
+    metric_signature?: any;
     source_insight_id?: number;
     source_type?: string;
     tags?: string[];
