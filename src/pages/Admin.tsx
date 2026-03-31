@@ -30,6 +30,7 @@ import { ReleaseNotesSection } from "@/components/admin/ReleaseNotesSection";
 import { PlatformSettingsSection } from "@/components/admin/PlatformSettingsSection";
 import { SyncManagementSection } from "@/components/admin/SyncManagementSection";
 import { AnalyticsSection } from "@/components/admin/AnalyticsSection";
+import { ApiUsageSection } from "@/components/admin/ApiUsageSection";
 import { AdminModeSelector } from "@/components/admin/AdminModeSelector";
 import { Button } from "@/components/ui/button";
 import { Menu, Settings } from "lucide-react";
@@ -583,6 +584,11 @@ export const Admin = () => {
               {/* Sync Management Section (Platform Admin) */}
               {activeSection === "sync-management" && isPlatform && (
                 <SyncManagementSection />
+              )}
+
+              {/* API Usage Section (Platform Admin) */}
+              {activeSection === "api-usage" && isPlatform && (
+                <ApiUsageSection />
               )}
 
               {/* User Analytics (tenant + platform in tenant mode) */}
