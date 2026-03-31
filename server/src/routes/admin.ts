@@ -130,6 +130,64 @@ const updateTenantSchema = z.object({
 });
 
 /**
+ * GET /api/admin/system
+ * Returns basic server, database, and feature-flag info for the admin System panel.
+ */
+router.get(
+  "/system",
+  authenticateToken,
+  requireRole("super_admin", "platform_admin"),
+  async (_req: AuthRequest, res) => {
+    try {
+      // Database version + uptime from management DB
+      const dbResult = await managementPool.query(
+        `SELECT version() AS version,
+                pg_postmaster_start_time() AS start_time`
+      );
+      const dbRow = dbResult.rows[0] ?? {};
+      const dbVersion = (dbRow.version as string | undefined)?.split(" ").slice(0, 2).join(" ") ?? "Unknown";
+      const uptimeSec = dbRow.start_time
+        ? Math.floor((Date.now() - new Date(dbRow.start_time).getTime()) / 1000)
+        : null;
+      const uptime = uptimeSec !== null
+        ? uptimeSec < 3600
+          ? `${Math.floor(uptimeSec / 60)}m`
+          : uptimeSec < 86400
+            ? `${Math.floor(uptimeSec / 3600)}h ${Math.floor((uptimeSec % 3600) / 60)}m`
+            : `${Math.floor(uptimeSec / 86400)}d ${Math.floor((uptimeSec % 86400) / 3600)}h`
+        : "Unknown";
+
+      // Feature flags via platform_settings
+      const [ragKey, costTracking, hybridSync] = await Promise.all([
+        getPlatformSetting("openai_api_key"),
+        getPlatformSetting("cost_tracking_enabled"),
+        getPlatformSetting("hybrid_sync_enabled"),
+      ]).catch(() => [null, null, null]);
+
+      return res.json({
+        database: {
+          version: dbVersion,
+          uptime,
+        },
+        server: {
+          environment: process.env.NODE_ENV ?? "unknown",
+          port: process.env.PORT ?? "3001",
+          nodeVersion: process.version,
+        },
+        features: {
+          ragEnabled: !!(ragKey as string | null)?.trim(),
+          costTrackingEnabled: (costTracking as string | null) === "true",
+          hybridSyncEnabled: (hybridSync as string | null) === "true",
+        },
+      });
+    } catch (error: any) {
+      logError("Error fetching system info", error);
+      return res.status(500).json({ error: "Failed to fetch system info" });
+    }
+  }
+);
+
+/**
  * GET /api/admin/stats
  * Get comprehensive overview statistics (role-aware: super admin vs lender admin)
  */
