@@ -34,7 +34,6 @@ import {
 import {
   Alert,
   AlertDescription,
-  AlertTitle,
 } from '@/components/ui/alert';
 import { 
   Shield, 
@@ -55,7 +54,6 @@ import {
   User,
   Settings2,
   Zap,
-  Link2,
   RotateCcw
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -66,7 +64,7 @@ import { useAdminTenant } from '@/contexts/AdminTenantContext';
 /**
  * SSO Provider types supported
  */
-type SSOProvider = 'saml' | 'oidc' | 'azure_ad' | 'cyberark' | 'okta' | 'google' | 'coheus_bridge';
+type SSOProvider = 'saml' | 'oidc' | 'azure_ad' | 'cyberark' | 'okta' | 'google';
 
 /**
  * SSO Configuration interface
@@ -143,8 +141,7 @@ const PROVIDERS: Record<SSOProvider, { name: string; icon: any; color: string; d
   saml: { name: 'SAML 2.0 (Generic)', icon: Shield, color: 'text-blue-500', description: 'Standard SAML 2.0 — use if your IdP is not listed above' },
   oidc: { name: 'OpenID Connect', icon: Key, color: 'text-purple-500', description: 'Standard OIDC — for IdPs that support OpenID Connect' },
   okta: { name: 'Okta', icon: Shield, color: 'text-indigo-500' },
-  google: { name: 'Google Workspace', icon: Shield, color: 'text-red-500' },
-  coheus_bridge: { name: 'Coheus Bridge', icon: Link2, color: 'text-orange-500', description: 'SSO via existing Coheus Qlik Sense session (legacy migration only)' }
+  google: { name: 'Google Workspace', icon: Shield, color: 'text-red-500' }
 };
 
 // Default SAML/OIDC attribute claim URIs for common IdPs
@@ -185,10 +182,6 @@ const DEFAULT_ATTRIBUTE_NAMES: Record<SSOProvider, AttributeMapping> = {
     email: 'email',
     first_name: 'given_name',
     last_name: 'family_name',
-  },
-  coheus_bridge: {
-    email: 'qlik_user_email',
-    full_name: 'qlik_user_name',
   }
 };
 
@@ -746,18 +739,6 @@ export function SSOConfigSection() {
                 </div>
               </div>
 
-              {/* Coheus Bridge Info */}
-              {provider === 'coheus_bridge' && (
-                <Alert>
-                  <Link2 className="h-4 w-4" />
-                  <AlertTitle>Coheus Bridge SSO</AlertTitle>
-                  <AlertDescription>
-                    This option allows users to sign into Cohi using their existing Coheus (Qlik Sense) session.
-                    When a user accesses Cohi from within Coheus, they will be automatically authenticated.
-                  </AlertDescription>
-                </Alert>
-              )}
-
               {/* SAML Configuration */}
               {(provider === 'saml' || provider === 'azure_ad' || provider === 'cyberark' || provider === 'okta') && (
                 <div className="space-y-4">
@@ -868,7 +849,7 @@ export function SSOConfigSection() {
                 <Button
                   variant="outline"
                   onClick={() => setTestDialogOpen(true)}
-                  disabled={!idpEntityId && !oidcIssuerUrl && provider !== 'coheus_bridge'}
+                  disabled={!idpEntityId && !oidcIssuerUrl}
                 >
                   <Zap className="h-4 w-4 mr-2" />
                   Test Connection

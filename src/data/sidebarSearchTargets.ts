@@ -32,6 +32,7 @@ export function getSidebarSearchTargets(): SidebarRouteSearchTarget[] {
     { id: 'route:estimatedClosingsRisk', label: 'Estimated Closings and Risk Analysis', group: 'TopTiering', kind: 'route', path: '/performance/estimated-closings-risk', keywords: ['operations', 'estimated closings', 'risk analysis', 'ecd', 'dashboard'] },
     { id: 'route:financialModeling', label: 'Financial Modeling Sandbox', group: 'TopTiering', kind: 'route', path: '/performance/financial-modeling-sandbox', keywords: ['toptiering', 'top tiering', 'performance'] },
     { id: 'route:captureAnalysis', label: 'Capture Analysis', group: 'TopTiering', kind: 'route', path: '/capture-analysis', keywords: ['capture', 'builder', 'cohibuilder', 'portfolio', 'csv', 'import'] },
+    { id: 'route:dataQuality', label: 'Data Quality', group: 'Operations', kind: 'route', path: '/data-quality', keywords: ['data quality', 'warnings', 'hmda', 'trid', 'field health', 'compliance', 'integrity'] },
   ];
 
   const pageTargets: SidebarRouteSearchTarget[] = [

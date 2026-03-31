@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, Zap, BarChart3, Target, Trophy, X, Sun, FileText, LayoutGrid, TrendingUp, LayoutDashboard, Filter, ArrowLeftRight, Shield, ClipboardList, Calculator, LineChart, Pin, PinOff, FlaskConical, GripVertical, Lock, Layers, Mail, Users, MessageSquare, LayoutPanelLeft } from 'lucide-react';
+import { ChevronDown, Zap, BarChart3, Target, Trophy, X, Sun, FileText, LayoutGrid, TrendingUp, LayoutDashboard, Filter, ArrowLeftRight, Shield, ClipboardList, Calculator, LineChart, Pin, PinOff, FlaskConical, GripVertical, Lock, Layers, Mail, Users, MessageSquare, LayoutPanelLeft, Database } from 'lucide-react';
 import { getReportById, ReportData, allReports } from '@/data/reportSimulations';
 import { useTheme } from '@/components/theme-provider';
 import {
@@ -241,6 +241,8 @@ const TOPTIERING_CHILDREN = [
   { type: 'route' as const, id: 'estimatedClosingsRisk', label: 'Estimated Closings and Risk Analysis', icon: BarChart3, path: '/performance/estimated-closings-risk', subsectionKey: 'operations' as SubsectionKey },
   { type: 'subheader' as const, label: 'Financial Modeling', subsectionKey: 'financialModeling' as SubsectionKey },
   { type: 'route' as const, id: 'financialModeling', label: 'Financial Modeling Sandbox', icon: Calculator, path: '/performance/financial-modeling-sandbox', subsectionKey: 'financialModeling' as SubsectionKey },
+  { type: 'subheader' as const, label: 'Data', subsectionKey: 'operations' as SubsectionKey },
+  { type: 'route' as const, id: 'dataQuality', label: 'Data Quality', icon: Database, path: '/data-quality', subsectionKey: 'operations' as SubsectionKey },
 ];
 
 type ToptieringRouteItem = Extract<(typeof TOPTIERING_CHILDREN)[number], { type: 'route' }>;
@@ -293,6 +295,7 @@ const navIconColorByItemId: Record<string, string> = {
   operationsScorecard: 'blue',
   operationsTrends: 'indigo',
   estimatedClosingsRisk: 'emerald',
+  dataQuality: 'emerald',
 };
 
 function getIconAndColorForPinnedItem(item: PinnedItem): { Icon: React.ComponentType<{ size?: number; className?: string; style?: React.CSSProperties }>; iconColor: string } {

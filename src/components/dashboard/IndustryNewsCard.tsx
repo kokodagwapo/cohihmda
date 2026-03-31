@@ -270,7 +270,15 @@ function MarketIntelligenceTicker({
   seriesFromApi,
 }: {
   loading?: boolean;
-  seriesFromApi?: Record<string, { rate: number | null; delta: number | null; trend: string; priorRate: number | null }> | null;
+  seriesFromApi?: Record<
+    string,
+    {
+      rate: number | null;
+      delta: number | null;
+      trend: string;
+      priorRate: number | null;
+    }
+  > | null;
 }) {
   const [obModalOpen, setObModalOpen] = useState(false);
 
@@ -283,7 +291,14 @@ function MarketIntelligenceTicker({
     conforming15yr: "15-Yr. Conforming",
   };
 
-  const keys = ["conforming", "jumbo", "fha", "va", "usda", "conforming15yr"] as const;
+  const keys = [
+    "conforming",
+    "jumbo",
+    "fha",
+    "va",
+    "usda",
+    "conforming15yr",
+  ] as const;
   const RATE_INDICES = keys.map((key) => {
     const label = SERIES_TO_LABEL[key];
     if (loading || !seriesFromApi) {
@@ -292,7 +307,8 @@ function MarketIntelligenceTicker({
     const s = seriesFromApi[key];
     const rate = s?.rate ?? null;
     const delta = s?.delta ?? null;
-    const trend = s?.trend === "down" ? "down" : s?.trend === "up" ? "up" : "flat";
+    const trend =
+      s?.trend === "down" ? "down" : s?.trend === "up" ? "up" : "flat";
     return { label, rate, delta, trend };
   });
 
@@ -316,7 +332,8 @@ function MarketIntelligenceTicker({
     );
   };
 
-  const tickerTooltip = "Click for details on Rate Indices, Credit and LTV, Rate Trends";
+  const tickerTooltip =
+    "Click for details on Rate Indices, Credit and LTV, Rate Trends";
 
   return (
     <>
@@ -328,49 +345,63 @@ function MarketIntelligenceTicker({
               style={{ background: "rgba(243, 249, 252, 0.85)" }}
             >
               <div className="relative flex-1 min-w-0 h-10 sm:h-11 overflow-hidden">
-          <div className="absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-[#f3f9fc] to-transparent pointer-events-none" />
-          <div className="absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-[#f3f9fc] to-transparent pointer-events-none" />
-          <div className="ticker-track">
-            {[...RATE_INDICES, ...RATE_INDICES].map((item, idx) => {
-              const isUp = item.trend === "up";
-              const isDown = item.trend === "down";
-              const hasRate = item.rate != null;
-              const hasDelta = item.delta != null;
-              return (
-                <button
-                  type="button"
-                  key={`${item.label}-${idx}`}
-                  onClick={() => setObModalOpen(true)}
-                  className="flex items-center gap-3 px-6 h-full border-r border-slate-200/70 shrink-0 cursor-pointer hover:bg-slate-100/50 dark:hover:bg-slate-800/30 transition-colors duration-150 text-left touch-manipulation focus:outline-none focus:ring-2 focus:ring-inset focus:ring-slate-400/30 rounded-none"
-                  aria-label={hasRate ? `View rate details: ${item.label} ${item.rate!.toFixed(3)}%` : `View rate details: ${item.label}`}
+                <div className="absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-[#f3f9fc] to-transparent pointer-events-none" />
+                <div className="absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-[#f3f9fc] to-transparent pointer-events-none" />
+                <div className="ticker-track">
+                  {[...RATE_INDICES, ...RATE_INDICES].map((item, idx) => {
+                    const isUp = item.trend === "up";
+                    const isDown = item.trend === "down";
+                    const hasRate = item.rate != null;
+                    const hasDelta = item.delta != null;
+                    return (
+                      <button
+                        type="button"
+                        key={`${item.label}-${idx}`}
+                        onClick={() => setObModalOpen(true)}
+                        className="flex items-center gap-3 px-6 h-full border-r border-slate-200/70 shrink-0 cursor-pointer hover:bg-slate-100/50 dark:hover:bg-slate-800/30 transition-colors duration-150 text-left touch-manipulation focus:outline-none focus:ring-2 focus:ring-inset focus:ring-slate-400/30 rounded-none"
+                        aria-label={
+                          hasRate
+                            ? `View rate details: ${item.label} ${item.rate!.toFixed(3)}%`
+                            : `View rate details: ${item.label}`
+                        }
+                      >
+                        <span className="text-[11px] sm:text-xs md:text-[13px] font-medium text-slate-700 dark:text-slate-300">
+                          {item.label}
+                        </span>
+                        {hasRate && (isUp || isDown) ? (
+                          renderSparkline(item.trend as "up" | "down")
+                        ) : (
+                          <span className="w-[38px] text-slate-400">—</span>
+                        )}
+                        <span className="text-[11px] sm:text-xs md:text-[13px] font-semibold text-slate-800 dark:text-slate-200">
+                          {hasRate ? `${item.rate!.toFixed(3)}%` : "—"}
+                        </span>
+                        <span
+                          className={`text-[10px] sm:text-[11px] md:text-[12px] font-medium min-w-[2.5rem] ${
+                            !hasDelta
+                              ? "text-slate-400"
+                              : isUp
+                                ? "text-emerald-600 dark:text-emerald-400"
+                                : "text-red-500 dark:text-red-400"
+                          }`}
+                        >
+                          {hasDelta
+                            ? `${isUp ? "+" : ""}${item.delta!.toFixed(3)}`
+                            : "—"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <a
+                  href="https://www2.optimalblue.com/obmmi"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="absolute right-1 bottom-0.5 text-[8px] sm:text-[9px] text-slate-500 dark:text-slate-400 bg-white/70 dark:bg-slate-900/70 px-1 py-0.5 rounded-full border border-slate-200/60 dark:border-slate-700/50 backdrop-blur"
                 >
-                  <span className="text-[11px] sm:text-xs md:text-[13px] font-medium text-slate-700 dark:text-slate-300">
-                    {item.label}
-                  </span>
-                  {hasRate && (isUp || isDown) ? renderSparkline(item.trend as "up" | "down") : <span className="w-[38px] text-slate-400">—</span>}
-                  <span className="text-[11px] sm:text-xs md:text-[13px] font-semibold text-slate-800 dark:text-slate-200">
-                    {hasRate ? `${item.rate!.toFixed(3)}%` : "—"}
-                  </span>
-                  <span
-                    className={`text-[10px] sm:text-[11px] md:text-[12px] font-medium min-w-[2.5rem] ${
-                      !hasDelta ? "text-slate-400" : isUp ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400"
-                    }`}
-                  >
-                    {hasDelta ? `${isUp ? "+" : ""}${item.delta!.toFixed(3)}` : "—"}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-          <a
-            href="https://www2.optimalblue.com/obmmi"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="absolute right-1 bottom-0.5 text-[8px] sm:text-[9px] text-slate-500 dark:text-slate-400 bg-white/70 dark:bg-slate-900/70 px-1 py-0.5 rounded-full border border-slate-200/60 dark:border-slate-700/50 backdrop-blur"
-          >
-            Powered by OBMMI
-          </a>
-          <style>{`
+                  Powered by OBMMI
+                </a>
+                <style>{`
             @keyframes ticker-left {
               0% { transform: translateX(0); }
               100% { transform: translateX(-50%); }
@@ -439,7 +470,9 @@ function MarketIntelligenceTicker({
  * Displays industry news from various sources (MBA, Fannie Mae, Freddie Mac, CFPB, FHFA)
  * with source selection, filtering, and detailed article views
  */
-export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unknown) => void } = {}) => {
+export const IndustryNewsCard = ({
+  onDataReady,
+}: { onDataReady?: (payload: unknown) => void } = {}) => {
   const cardRef = useRef<HTMLDivElement>(null);
   const warmedArticleLinksRef = useRef<Set<string>>(new Set());
   const [newsFeed, setNewsFeed] = useState<any[]>([]);
@@ -471,35 +504,44 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
     fetchedAt: string;
     error?: string;
   } | null>(null);
-  
+
   const [excerptPage, setExcerptPage] = useState(0);
   const [showChartDrilldown, setShowChartDrilldown] = useState(false);
-  const [activeChart, setActiveChart] = useState<DrilldownChartKey | null>(null);
+  const [activeChart, setActiveChart] = useState<DrilldownChartKey | null>(
+    null,
+  );
   const [drilldownRange, setDrilldownRange] = useState<DrilldownRange>("mtd");
 
   // FRED-sourced chart data for 30-Yr Fixed (MORTGAGE30US) and 10-Yr Treasury (DGS10)
-  const [fixedRateObservations, setFixedRateObservations] = useState<
-    Array<{ date: string; rate: number }> | null
-  >(null);
-  const [treasuryObservations, setTreasuryObservations] = useState<
-    Array<{ date: string; yield: number }> | null
-  >(null);
+  const [fixedRateObservations, setFixedRateObservations] = useState<Array<{
+    date: string;
+    rate: number;
+  }> | null>(null);
+  const [treasuryObservations, setTreasuryObservations] = useState<Array<{
+    date: string;
+    yield: number;
+  }> | null>(null);
 
-  const [existingHomeSalesObservations, setExistingHomeSalesObservations] = useState<
-    Array<{ date: string; value: number }> | null
-  >(null);
+  const [existingHomeSalesObservations, setExistingHomeSalesObservations] =
+    useState<Array<{ date: string; value: number }> | null>(null);
 
   // OBMMI multi-series (conforming, jumbo, fha, va, conforming15yr, usda) for ticker + rate snapshot
-  const [currentObmmiSeries, setCurrentObmmiSeries] = useState<
-    Record<string, { rate: number | null; delta: number | null; trend: string; priorRate: number | null }> | null
-  >(null);
+  const [currentObmmiSeries, setCurrentObmmiSeries] = useState<Record<
+    string,
+    {
+      rate: number | null;
+      delta: number | null;
+      trend: string;
+      priorRate: number | null;
+    }
+  > | null>(null);
   const [currentRatesLoading, setCurrentRatesLoading] = useState(true);
   const [currentRatesFailed, setCurrentRatesFailed] = useState(false);
   const [chartDataLoading, setChartDataLoading] = useState(true);
   const [chartDataFailed, setChartDataFailed] = useState(false);
   const [currentRatesRetryKey, setCurrentRatesRetryKey] = useState(0);
   const [chartDataRetryKey, setChartDataRetryKey] = useState(0);
-  
+
   // Initialize with government/GSE sources enabled by default
   // RSS feed sources (National Mortgage News, etc.) are disabled by default
   const defaultSources = [
@@ -527,13 +569,13 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
   const loadUserPreferences = async () => {
     try {
       const preference = await api.request<{ preference_value: string[] }>(
-        "/api/user/preferences/selectedNewsSources"
+        "/api/user/preferences/selectedNewsSources",
       );
       if (preference?.preference_value) {
         setSelectedSources(preference.preference_value);
         localStorage.setItem(
           "selectedNewsSources",
-          JSON.stringify(preference.preference_value)
+          JSON.stringify(preference.preference_value),
         );
       } else {
         // Fallback to localStorage
@@ -557,7 +599,7 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
       ) {
         console.warn(
           "User preferences request timed out, using localStorage fallback:",
-          error.message
+          error.message,
         );
       } else {
         console.error("Error loading user preferences:", error);
@@ -570,7 +612,7 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
         setSelectedSources(defaultSources);
         localStorage.setItem(
           "selectedNewsSources",
-          JSON.stringify(defaultSources)
+          JSON.stringify(defaultSources),
         );
       }
     } finally {
@@ -630,19 +672,22 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
     const fetchCharts = (): Promise<void> =>
       Promise.all([
         api.request<{ observations: Array<{ date: string; rate: number }> }>(
-          `/api/loans/market-rates/mortgage-30y?${qsDaily}`
+          `/api/loans/market-rates/mortgage-30y?${qsDaily}`,
         ),
         api.request<{ observations: Array<{ date: string; yield: number }> }>(
-          `/api/loans/market-rates/treasury-10y?${qs}`
+          `/api/loans/market-rates/treasury-10y?${qs}`,
         ),
         api.request<{ observations: Array<{ date: string; value: number }> }>(
-          `/api/loans/market-rates/existing-home-sales?${qs}`
+          `/api/loans/market-rates/existing-home-sales?${qs}`,
         ),
       ]).then(([mort, treas, exHome]) => {
         if (cancelled) return;
-        if (mort?.observations?.length) setFixedRateObservations(mort.observations);
-        if (treas?.observations?.length) setTreasuryObservations(treas.observations);
-        if (exHome?.observations?.length) setExistingHomeSalesObservations(exHome.observations);
+        if (mort?.observations?.length)
+          setFixedRateObservations(mort.observations);
+        if (treas?.observations?.length)
+          setTreasuryObservations(treas.observations);
+        if (exHome?.observations?.length)
+          setExistingHomeSalesObservations(exHome.observations);
         setChartDataLoading(false);
         setChartDataFailed(false);
       });
@@ -656,13 +701,16 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
       attempt += 1;
       fetchCharts().catch(() => {
         if (cancelled) return;
-        const delay = RETRY_DELAYS_MS[Math.min(attempt - 1, RETRY_DELAYS_MS.length - 1)];
+        const delay =
+          RETRY_DELAYS_MS[Math.min(attempt - 1, RETRY_DELAYS_MS.length - 1)];
         if (delay > 0) setTimeout(run, delay);
         else run();
       });
     }
     run();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [chartDataRetryKey]);
 
   // Fetch OBMMI current (all 6 series) for ticker and rate snapshot with retry (5 max, backoff 0/10/20/30s). Bypass cache on first load so refresh gets fresh data.
@@ -673,15 +721,27 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
     setCurrentRatesFailed(false);
 
     const fetchCurrent = (bypassCache: boolean) =>
-      api.request<{
-        available?: boolean;
-        series?: Record<string, { rate: number | null; delta: number | null; trend: string; priorRate: number | null }>;
-      }>(`/api/loans/market-rates/current${bypassCache ? "?bypassCache=1" : ""}`).then((data) => {
-        if (cancelled) return;
-        setCurrentObmmiSeries(data?.series ?? null);
-        setCurrentRatesLoading(false);
-        setCurrentRatesFailed(false);
-      });
+      api
+        .request<{
+          available?: boolean;
+          series?: Record<
+            string,
+            {
+              rate: number | null;
+              delta: number | null;
+              trend: string;
+              priorRate: number | null;
+            }
+          >;
+        }>(
+          `/api/loans/market-rates/current${bypassCache ? "?bypassCache=1" : ""}`,
+        )
+        .then((data) => {
+          if (cancelled) return;
+          setCurrentObmmiSeries(data?.series ?? null);
+          setCurrentRatesLoading(false);
+          setCurrentRatesFailed(false);
+        });
 
     function run() {
       if (cancelled || attempt >= MAX_RETRIES) {
@@ -693,13 +753,16 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
       const bypassCache = attempt === 1;
       fetchCurrent(bypassCache).catch(() => {
         if (cancelled) return;
-        const delay = RETRY_DELAYS_MS[Math.min(attempt - 1, RETRY_DELAYS_MS.length - 1)];
+        const delay =
+          RETRY_DELAYS_MS[Math.min(attempt - 1, RETRY_DELAYS_MS.length - 1)];
         if (delay > 0) setTimeout(run, delay);
         else run();
       });
     }
     run();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [currentRatesRetryKey]);
 
   // Available news sources - Government/GSE sites (enabled by default) + RSS feeds (disabled by default)
@@ -801,7 +864,7 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
   // Default news feed structure (fallback) - filtered by selected sources
   const getDefaultNewsFeed = () => {
     return availableSources.filter((source) =>
-      selectedSources.includes(source.source)
+      selectedSources.includes(source.source),
     );
   };
 
@@ -840,7 +903,7 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
       console.log("[News] Fetched from API:", {
         sources: mappedNewsFeed.map((s: any) => s.source),
         firstItems: mappedNewsFeed.map(
-          (s: any) => s.items?.[0]?.title?.substring(0, 40) + "..."
+          (s: any) => s.items?.[0]?.title?.substring(0, 40) + "...",
         ),
       });
 
@@ -851,7 +914,7 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
       // Update selectedSources if the API returned different sources than expected
       const apiSourceNames = mappedNewsFeed.map((s: any) => s.source);
       const validSelectedSources = selectedSources.filter((s) =>
-        apiSourceNames.includes(s)
+        apiSourceNames.includes(s),
       );
       if (validSelectedSources.length === 0 && apiSourceNames.length > 0) {
         // If no valid selected sources, select all from API
@@ -876,7 +939,7 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
         // For timeout errors, log as warning since we have default news feed fallback
         console.warn(
           "News request timed out, using default news feed fallback:",
-          error.message
+          error.message,
         );
         setNewsError(error.message || "Failed to fetch news");
         setNewsFeed(getDefaultNewsFeed());
@@ -893,9 +956,12 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
   // Fetch news on mount, when selected sources change, and every 5 minutes
   useEffect(() => {
     fetchNews();
-    const interval = setInterval(() => {
-      fetchNews();
-    }, 5 * 60 * 1000);
+    const interval = setInterval(
+      () => {
+        fetchNews();
+      },
+      5 * 60 * 1000,
+    );
     return () => clearInterval(interval);
   }, [selectedSources]);
 
@@ -910,13 +976,16 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
     if (!onDataReady || newsLoading || newsFeed.length === 0) return;
     const headlines: string[] = [];
     for (const source of newsFeed) {
-      const srcName = source.source ?? 'Unknown';
+      const srcName = source.source ?? "Unknown";
       for (const item of (source.items ?? []).slice(0, 3)) {
-        headlines.push(`[${srcName}] ${item.title ?? 'Untitled'}`);
+        headlines.push(`[${srcName}] ${item.title ?? "Untitled"}`);
       }
     }
     if (headlines.length > 0) {
-      onDataReady({ content: headlines.slice(0, 15).join('\n'), title: 'Mortgage Industry News' });
+      onDataReady({
+        content: headlines.slice(0, 15).join("\n"),
+        title: "Mortgage Industry News",
+      });
     }
   }, [onDataReady, newsLoading, newsFeed]);
 
@@ -927,7 +996,7 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
     }
     // Filter by selected sources, or show all if none selected match
     const filtered = newsFeed.filter((source: any) =>
-      selectedSources.includes(source.source)
+      selectedSources.includes(source.source),
     );
     // If no matches, show all available news (user may have old preferences)
     return filtered.length > 0 ? filtered : newsFeed;
@@ -949,7 +1018,7 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
 
     const sourcePool = newsFeed.length > 0 ? newsFeed : filteredNewsFeed;
     const reputableFeed = sourcePool.filter((source: any) =>
-      reputableHeadlineSources.includes(source.source)
+      reputableHeadlineSources.includes(source.source),
     );
     const feedForHeadlines =
       reputableFeed.length > 0 ? reputableFeed : filteredNewsFeed;
@@ -966,7 +1035,7 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
             ? format(releaseDate, "MMM d, yyyy, h:mm a")
             : `${item?.date || "Unknown date"}${item?.time ? `, ${item.time}` : ""}`,
         };
-      })
+      }),
     );
 
     return flattened
@@ -975,29 +1044,34 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
           !!headline.item?.title &&
           !headline.item.title.toLowerCase().startsWith("visit ") &&
           !!headline.releaseDate &&
-          Date.now() - headline.releaseDate.getTime() <= MAX_HEADLINE_AGE_MS
+          Date.now() - headline.releaseDate.getTime() <= MAX_HEADLINE_AGE_MS,
       )
       .sort(
         (a: any, b: any) =>
           b.relevanceScore - a.relevanceScore ||
-          (b.releaseDate?.getTime() || 0) - (a.releaseDate?.getTime() || 0)
+          (b.releaseDate?.getTime() || 0) - (a.releaseDate?.getTime() || 0),
       );
   }, [newsFeed, filteredNewsFeed]);
 
   const headlinePageCount = Math.max(
     1,
-    Math.ceil(recentHeadlines.length / HEADLINES_PER_PAGE)
+    Math.ceil(recentHeadlines.length / HEADLINES_PER_PAGE),
   );
 
   const getHeadlineId = useCallback(
     (headline: any) =>
-      headline?.item?.link || `${headline?.source?.source}-${headline?.item?.title || "headline"}`,
-    []
+      headline?.item?.link ||
+      `${headline?.source?.source}-${headline?.item?.title || "headline"}`,
+    [],
   );
 
   const pinnedHeadline = useMemo(() => {
     if (!pinnedHeadlineId) return null;
-    return recentHeadlines.find((headline: any) => getHeadlineId(headline) === pinnedHeadlineId) || null;
+    return (
+      recentHeadlines.find(
+        (headline: any) => getHeadlineId(headline) === pinnedHeadlineId,
+      ) || null
+    );
   }, [recentHeadlines, pinnedHeadlineId, getHeadlineId]);
 
   const visibleHeadlines = useMemo(() => {
@@ -1007,9 +1081,18 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
     }
     const pageItems = recentHeadlines
       .slice(start, start + HEADLINES_PER_PAGE)
-      .filter((headline: any) => getHeadlineId(headline) !== getHeadlineId(pinnedHeadline));
+      .filter(
+        (headline: any) =>
+          getHeadlineId(headline) !== getHeadlineId(pinnedHeadline),
+      );
     return [pinnedHeadline, ...pageItems].slice(0, HEADLINES_PER_PAGE);
-  }, [recentHeadlines, headlinePage, headlinePageCount, pinnedHeadline, getHeadlineId]);
+  }, [
+    recentHeadlines,
+    headlinePage,
+    headlinePageCount,
+    pinnedHeadline,
+    getHeadlineId,
+  ]);
 
   const selectedHeadlineId = useMemo(() => {
     if (!selectedNewsItem) return null;
@@ -1040,24 +1123,31 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
     const title = headline?.item?.title || "Industry headline";
     const link = headline?.item?.link || "";
     const subject = encodeURIComponent(title);
-    const body = encodeURIComponent(`Thought you might find this useful:\n\n${title}\n${link}`);
+    const body = encodeURIComponent(
+      `Thought you might find this useful:\n\n${title}\n${link}`,
+    );
     window.location.href = `mailto:?subject=${subject}&body=${body}`;
   }, []);
 
-  const handleHeadlineCopyLink = useCallback(async (headline: any) => {
-    const link = headline?.item?.link;
-    if (!link) return;
-    const headlineId = getHeadlineId(headline);
-    try {
-      await navigator.clipboard.writeText(link);
-      setCopiedHeadlineId(headlineId);
-      window.setTimeout(() => {
-        setCopiedHeadlineId((current) => (current === headlineId ? null : current));
-      }, 1500);
-    } catch (error) {
-      console.warn("Could not copy article link:", error);
-    }
-  }, [getHeadlineId]);
+  const handleHeadlineCopyLink = useCallback(
+    async (headline: any) => {
+      const link = headline?.item?.link;
+      if (!link) return;
+      const headlineId = getHeadlineId(headline);
+      try {
+        await navigator.clipboard.writeText(link);
+        setCopiedHeadlineId(headlineId);
+        window.setTimeout(() => {
+          setCopiedHeadlineId((current) =>
+            current === headlineId ? null : current,
+          );
+        }, 1500);
+      } catch (error) {
+        console.warn("Could not copy article link:", error);
+      }
+    },
+    [getHeadlineId],
+  );
 
   // Handle source selection - Allow all sources to be selected
   const handleSourceToggle = (sourceName: string) => {
@@ -1274,11 +1364,11 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
   const excerptParagraphs = articleBrief?.articleParagraphs || [];
   const excerptPageCount = Math.max(
     1,
-    Math.ceil(excerptParagraphs.length / EXCERPT_PARAGRAPHS_PER_PAGE)
+    Math.ceil(excerptParagraphs.length / EXCERPT_PARAGRAPHS_PER_PAGE),
   );
   const visibleExcerptParagraphs = excerptParagraphs.slice(
     excerptPage * EXCERPT_PARAGRAPHS_PER_PAGE,
-    (excerptPage + 1) * EXCERPT_PARAGRAPHS_PER_PAGE
+    (excerptPage + 1) * EXCERPT_PARAGRAPHS_PER_PAGE,
   );
 
   useEffect(() => {
@@ -1323,7 +1413,12 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
       { key: "va" as const, product: "30-Yr VA" },
       { key: "usda" as const, product: "30-Yr USDA" },
     ];
-    if (!s) return products.map((p) => ({ product: p.product, prior: null, today: null }));
+    if (!s)
+      return products.map((p) => ({
+        product: p.product,
+        prior: null,
+        today: null,
+      }));
     return products.map((p) => ({
       product: p.product,
       prior: s[p.key]?.priorRate ?? null,
@@ -1338,7 +1433,7 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
         prior: r.prior ?? 0,
         today: r.today ?? 0,
       })),
-    [displayRateSnapshotData]
+    [displayRateSnapshotData],
   );
 
   const displayExistingHomeSalesData = useMemo(() => {
@@ -1406,12 +1501,21 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
       };
     }
     return base;
-  }, [fixedRateObservations, treasuryObservations, rangeStartDates, displayRateSnapshotData, existingHomeSalesObservations, rateSnapshotChartData]);
+  }, [
+    fixedRateObservations,
+    treasuryObservations,
+    rangeStartDates,
+    displayRateSnapshotData,
+    existingHomeSalesObservations,
+    rateSnapshotChartData,
+  ]);
 
   const availableDrilldownRanges = useMemo<DrilldownRange[]>(() => {
     if (!activeChart) return [];
-    return (Object.keys(resolvedDrilldownData[activeChart]) as DrilldownRange[]).filter(
-      (range) => (resolvedDrilldownData[activeChart][range] || []).length > 0
+    return (
+      Object.keys(resolvedDrilldownData[activeChart]) as DrilldownRange[]
+    ).filter(
+      (range) => (resolvedDrilldownData[activeChart][range] || []).length > 0,
     );
   }, [activeChart, resolvedDrilldownData]);
 
@@ -1437,7 +1541,12 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
     if (!availableDrilldownRanges.includes(drilldownRange)) {
       setDrilldownRange(availableDrilldownRanges[0] || "mtd");
     }
-  }, [showChartDrilldown, activeChart, drilldownRange, availableDrilldownRanges]);
+  }, [
+    showChartDrilldown,
+    activeChart,
+    drilldownRange,
+    availableDrilldownRanges,
+  ]);
 
   useEffect(() => {
     prewarmArticleLink(selectedNewsItem?.item?.link);
@@ -1467,7 +1576,10 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
   const renderDrilldownChart = () => {
     if (!activeChart) return null;
     const isLoading =
-      (activeChart === "fixedRate" || activeChart === "treasury" || activeChart === "existingSales") && chartDataLoading ||
+      ((activeChart === "fixedRate" ||
+        activeChart === "treasury" ||
+        activeChart === "existingSales") &&
+        chartDataLoading) ||
       (activeChart === "rateSnapshot" && currentRatesLoading);
     if (isLoading) {
       return (
@@ -1491,12 +1603,26 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
     if (activeChart === "fixedRate") {
       return (
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
+          <LineChart
+            data={chartData}
+            margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
+          >
+            <CartesianGrid
+              strokeDasharray="3 3"
+              className="stroke-slate-200 dark:stroke-slate-700"
+            />
             <XAxis dataKey="week" tick={{ fontSize: 12 }} />
             <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `${v}%`} />
-            <RechartsTooltip formatter={(v: number) => [`${Number(v).toFixed(3)}%`, "Rate"]} />
-            <Line type="monotone" dataKey="rate" stroke="rgb(59, 130, 246)" strokeWidth={2.5} dot={false} />
+            <RechartsTooltip
+              formatter={(v: number) => [`${Number(v).toFixed(3)}%`, "Rate"]}
+            />
+            <Line
+              type="monotone"
+              dataKey="rate"
+              stroke="rgb(59, 130, 246)"
+              strokeWidth={2.5}
+              dot={false}
+            />
           </LineChart>
         </ResponsiveContainer>
       );
@@ -1505,12 +1631,26 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
     if (activeChart === "treasury") {
       return (
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
+          <LineChart
+            data={chartData}
+            margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
+          >
+            <CartesianGrid
+              strokeDasharray="3 3"
+              className="stroke-slate-200 dark:stroke-slate-700"
+            />
             <XAxis dataKey="date" tick={{ fontSize: 12 }} />
             <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `${v}%`} />
-            <RechartsTooltip formatter={(v: number) => [`${Number(v).toFixed(3)}%`, "Yield"]} />
-            <Line type="monotone" dataKey="yield" stroke="rgb(249, 115, 22)" strokeWidth={2.5} dot={false} />
+            <RechartsTooltip
+              formatter={(v: number) => [`${Number(v).toFixed(3)}%`, "Yield"]}
+            />
+            <Line
+              type="monotone"
+              dataKey="yield"
+              stroke="rgb(249, 115, 22)"
+              strokeWidth={2.5}
+              dot={false}
+            />
           </LineChart>
         </ResponsiveContainer>
       );
@@ -1519,14 +1659,31 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
     if (activeChart === "mba") {
       return (
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }} barCategoryGap="20%">
-            <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
+          <BarChart
+            data={chartData}
+            margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
+            barCategoryGap="20%"
+          >
+            <CartesianGrid
+              strokeDasharray="3 3"
+              className="stroke-slate-200 dark:stroke-slate-700"
+            />
             <XAxis dataKey="week" tick={{ fontSize: 12 }} />
             <YAxis tick={{ fontSize: 12 }} />
             <RechartsTooltip />
             <Legend />
-            <Bar dataKey="purchase" fill="rgb(59, 130, 246)" name="Purchase" radius={[4, 4, 0, 0]} />
-            <Bar dataKey="refi" fill="rgb(249, 115, 22)" name="Refi" radius={[4, 4, 0, 0]} />
+            <Bar
+              dataKey="purchase"
+              fill="rgb(59, 130, 246)"
+              name="Purchase"
+              radius={[4, 4, 0, 0]}
+            />
+            <Bar
+              dataKey="refi"
+              fill="rgb(249, 115, 22)"
+              name="Refi"
+              radius={[4, 4, 0, 0]}
+            />
           </BarChart>
         </ResponsiveContainer>
       );
@@ -1535,12 +1692,22 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
     if (activeChart === "nahb") {
       return (
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
+          <BarChart
+            data={chartData}
+            margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
+          >
+            <CartesianGrid
+              strokeDasharray="3 3"
+              className="stroke-slate-200 dark:stroke-slate-700"
+            />
             <XAxis dataKey="month" tick={{ fontSize: 12 }} />
             <YAxis tick={{ fontSize: 12 }} />
             <RechartsTooltip />
-            <Bar dataKey="value" fill="rgb(59, 130, 246)" radius={[4, 4, 0, 0]} />
+            <Bar
+              dataKey="value"
+              fill="rgb(59, 130, 246)"
+              radius={[4, 4, 0, 0]}
+            />
           </BarChart>
         </ResponsiveContainer>
       );
@@ -1549,14 +1716,41 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
     if (activeChart === "rateSnapshot") {
       return (
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }} layout="vertical" barCategoryGap="14%">
-            <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
-            <XAxis type="number" tick={{ fontSize: 12 }} tickFormatter={(v) => `${v}%`} />
-            <YAxis type="category" dataKey="product" tick={{ fontSize: 12 }} width={120} />
+          <BarChart
+            data={chartData}
+            margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
+            layout="vertical"
+            barCategoryGap="14%"
+          >
+            <CartesianGrid
+              strokeDasharray="3 3"
+              className="stroke-slate-200 dark:stroke-slate-700"
+            />
+            <XAxis
+              type="number"
+              tick={{ fontSize: 12 }}
+              tickFormatter={(v) => `${v}%`}
+            />
+            <YAxis
+              type="category"
+              dataKey="product"
+              tick={{ fontSize: 12 }}
+              width={120}
+            />
             <RechartsTooltip formatter={(v: number) => [`${v}%`, ""]} />
             <Legend />
-            <Bar dataKey="prior" fill="rgb(148, 163, 184)" name="Prior Week" radius={[0, 4, 4, 0]} />
-            <Bar dataKey="today" fill="rgb(59, 130, 246)" name="Today" radius={[0, 4, 4, 0]} />
+            <Bar
+              dataKey="prior"
+              fill="rgb(148, 163, 184)"
+              name="Prior Week"
+              radius={[0, 4, 4, 0]}
+            />
+            <Bar
+              dataKey="today"
+              fill="rgb(59, 130, 246)"
+              name="Today"
+              radius={[0, 4, 4, 0]}
+            />
           </BarChart>
         </ResponsiveContainer>
       );
@@ -1564,8 +1758,14 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
 
     return (
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
+        <BarChart
+          data={chartData}
+          margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
+        >
+          <CartesianGrid
+            strokeDasharray="3 3"
+            className="stroke-slate-200 dark:stroke-slate-700"
+          />
           <XAxis dataKey="month" tick={{ fontSize: 12 }} />
           <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `${v}M`} />
           <RechartsTooltip formatter={(v: number) => [`${v}M`, "Units"]} />
@@ -1589,23 +1789,24 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-5 md:mb-6">
           <div className="flex items-center gap-3 flex-1 min-w-0">
             <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-blue-500 via-blue-600 to-indigo-600 flex items-center justify-center shadow-lg flex-shrink-0">
-              <Newspaper className="w-5 h-5 sm:w-6 sm:h-6 text-white" strokeWidth={1.5} />
+              <Newspaper
+                className="w-5 h-5 sm:w-6 sm:h-6 text-white"
+                strokeWidth={1.5}
+              />
             </div>
             <div>
               <h3 className="text-xl sm:text-2xl md:text-3xl font-semibold text-slate-900 dark:text-white mb-0.5 tracking-tight leading-tight">
                 Cohi Daily Morning Brief
               </h3>
               <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-light mt-0.5">
-                {format(new Date(), "EEEE, MMMM d, yyyy")} | Markets & Economy Update
+                {format(new Date(), "EEEE, MMMM d, yyyy")} | Markets & Economy
+                Update
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <CohiPodcast />
-            <ExportMenu
-              title="Industry News"
-              targetRef={cardRef}
-            />
+            <ExportMenu title="Industry News" targetRef={cardRef} />
             <button
               onClick={() => navigate("/settings?tab=notifications")}
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all border border-slate-200 dark:border-slate-700 text-xs sm:text-sm text-slate-700 dark:text-slate-200"
@@ -1619,14 +1820,20 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
               className="flex items-center justify-center p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all border border-slate-200 dark:border-slate-700"
               aria-label="Select news sources"
             >
-              <Settings className="w-5 h-5 text-slate-700 dark:text-slate-300" strokeWidth={1.5} />
+              <Settings
+                className="w-5 h-5 text-slate-700 dark:text-slate-300"
+                strokeWidth={1.5}
+              />
             </button>
           </div>
         </div>
 
         {/* Market Intelligence Ticker - rate strip */}
         <div className="mb-5 md:mb-6">
-          <MarketIntelligenceTicker loading={currentRatesLoading} seriesFromApi={currentObmmiSeries} />
+          <MarketIntelligenceTicker
+            loading={currentRatesLoading}
+            seriesFromApi={currentObmmiSeries}
+          />
           {currentRatesFailed && (
             <p className="mt-2 text-xs text-slate-500 dark:text-slate-400 text-center">
               Unable to load rates.{" "}
@@ -1648,8 +1855,12 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
             className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50 cursor-pointer hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
             onClick={() => openChartDrilldown("fixedRate")}
           >
-            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">30-YR FIXED RATE</p>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">OBMMI 30 Year Fixed Rate Conforming Mortgage Index</p>
+            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">
+              30-YR FIXED RATE
+            </p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
+              OBMMI 30 Year Fixed Rate Conforming Mortgage Index
+            </p>
             <button
               type="button"
               onClick={(event) => {
@@ -1674,7 +1885,10 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
                       <span>Unable to load rates.</span>
                       <button
                         type="button"
-                        onClick={(e) => { e.stopPropagation(); setChartDataRetryKey((k) => k + 1); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setChartDataRetryKey((k) => k + 1);
+                        }}
                         className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
                       >
                         Retry
@@ -1686,12 +1900,40 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={displayFixedRateData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
-                    <XAxis dataKey="week" tick={{ fontSize: 10 }} stroke="currentColor" className="fill-slate-500" />
-                    <YAxis domain={["dataMin - 0.2", "dataMax + 0.2"]} tick={{ fontSize: 10 }} width={28} tickFormatter={(v) => `${v}%`} />
-                    <RechartsTooltip formatter={(v: number) => [`${Number(v).toFixed(3)}%`, "Rate"]} contentStyle={{ fontSize: 12 }} />
-                    <Line type="monotone" dataKey="rate" stroke="rgb(59, 130, 246)" strokeWidth={2} dot={false} />
+                  <LineChart
+                    data={displayFixedRateData}
+                    margin={{ top: 4, right: 4, left: -20, bottom: 0 }}
+                  >
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      className="stroke-slate-200 dark:stroke-slate-600"
+                    />
+                    <XAxis
+                      dataKey="week"
+                      tick={{ fontSize: 10 }}
+                      stroke="currentColor"
+                      className="fill-slate-500"
+                    />
+                    <YAxis
+                      domain={["dataMin - 0.2", "dataMax + 0.2"]}
+                      tick={{ fontSize: 10 }}
+                      width={28}
+                      tickFormatter={(v) => `${v}%`}
+                    />
+                    <RechartsTooltip
+                      formatter={(v: number) => [
+                        `${Number(v).toFixed(3)}%`,
+                        "Rate",
+                      ]}
+                      contentStyle={{ fontSize: 12 }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="rate"
+                      stroke="rgb(59, 130, 246)"
+                      strokeWidth={2}
+                      dot={false}
+                    />
                   </LineChart>
                 </ResponsiveContainer>
               )}
@@ -1702,8 +1944,10 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
             className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50 cursor-pointer hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
             onClick={() => openChartDrilldown("treasury")}
           >
-            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">10-YR TREASURY YIELD</p>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">~65bps of Fed cuts priced for 2026</p>
+            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">
+              10-YR TREASURY YIELD
+            </p>
+
             <button
               type="button"
               onClick={(event) => {
@@ -1722,15 +1966,40 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
                   <span className="text-xs font-medium">Loading rates</span>
                 </div>
               ) : displayTreasuryData.length === 0 ? (
-                <div className="h-full flex items-center justify-center text-slate-500 dark:text-slate-400 text-xs">No data available</div>
+                <div className="h-full flex items-center justify-center text-slate-500 dark:text-slate-400 text-xs">
+                  No data available
+                </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={displayTreasuryData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
+                  <LineChart
+                    data={displayTreasuryData}
+                    margin={{ top: 4, right: 4, left: -20, bottom: 0 }}
+                  >
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      className="stroke-slate-200 dark:stroke-slate-600"
+                    />
                     <XAxis dataKey="date" tick={{ fontSize: 10 }} />
-                    <YAxis domain={["dataMin - 0.05", "dataMax + 0.05"]} tick={{ fontSize: 10 }} width={28} tickFormatter={(v) => `${v}%`} />
-                    <RechartsTooltip formatter={(v: number) => [`${Number(v).toFixed(3)}%`, "Yield"]} contentStyle={{ fontSize: 12 }} />
-                    <Line type="monotone" dataKey="yield" stroke="rgb(249, 115, 22)" strokeWidth={2} dot={false} />
+                    <YAxis
+                      domain={["dataMin - 0.05", "dataMax + 0.05"]}
+                      tick={{ fontSize: 10 }}
+                      width={28}
+                      tickFormatter={(v) => `${v}%`}
+                    />
+                    <RechartsTooltip
+                      formatter={(v: number) => [
+                        `${Number(v).toFixed(3)}%`,
+                        "Yield",
+                      ]}
+                      contentStyle={{ fontSize: 12 }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="yield"
+                      stroke="rgb(249, 115, 22)"
+                      strokeWidth={2}
+                      dot={false}
+                    />
                   </LineChart>
                 </ResponsiveContainer>
               )}
@@ -1741,8 +2010,12 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
             className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50 cursor-pointer hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
             onClick={() => openChartDrilldown("mba")}
           >
-            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">MBA APPLICATION INDEX</p>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Refi share of total apps</p>
+            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">
+              MBA APPLICATION INDEX
+            </p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
+              Refi share of total apps
+            </p>
             <button
               type="button"
               onClick={(event) => {
@@ -1756,14 +2029,31 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
             </button>
             <div className="h-[140px] w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={MBA_INDEX_DATA} margin={{ top: 4, right: 4, left: -20, bottom: 0 }} barCategoryGap="20%">
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
+                <BarChart
+                  data={MBA_INDEX_DATA}
+                  margin={{ top: 4, right: 4, left: -20, bottom: 0 }}
+                  barCategoryGap="20%"
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    className="stroke-slate-200 dark:stroke-slate-600"
+                  />
                   <XAxis dataKey="week" tick={{ fontSize: 10 }} />
                   <YAxis tick={{ fontSize: 10 }} width={28} />
                   <RechartsTooltip contentStyle={{ fontSize: 12 }} />
                   <Legend wrapperStyle={{ fontSize: 10 }} />
-                  <Bar dataKey="purchase" fill="rgb(59, 130, 246)" name="Purchase" radius={[2, 2, 0, 0]} />
-                  <Bar dataKey="refi" fill="rgb(249, 115, 22)" name="Refi" radius={[2, 2, 0, 0]} />
+                  <Bar
+                    dataKey="purchase"
+                    fill="rgb(59, 130, 246)"
+                    name="Purchase"
+                    radius={[2, 2, 0, 0]}
+                  />
+                  <Bar
+                    dataKey="refi"
+                    fill="rgb(249, 115, 22)"
+                    name="Refi"
+                    radius={[2, 2, 0, 0]}
+                  />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -1773,8 +2063,12 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
             className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50 cursor-pointer hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
             onClick={() => openChartDrilldown("nahb")}
           >
-            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">NAHB BUILDER CONFIDENCE</p>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Feb forecast releasing 10am ET</p>
+            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">
+              NAHB BUILDER CONFIDENCE
+            </p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
+              Feb forecast releasing 10am ET
+            </p>
             <button
               type="button"
               onClick={(event) => {
@@ -1788,12 +2082,22 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
             </button>
             <div className="h-[140px] w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={NAHB_DATA} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
+                <BarChart
+                  data={NAHB_DATA}
+                  margin={{ top: 4, right: 4, left: -20, bottom: 0 }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    className="stroke-slate-200 dark:stroke-slate-600"
+                  />
                   <XAxis dataKey="month" tick={{ fontSize: 10 }} />
                   <YAxis domain={[0, 50]} tick={{ fontSize: 10 }} width={28} />
                   <RechartsTooltip contentStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="value" fill="rgb(59, 130, 246)" radius={[2, 2, 0, 0]} />
+                  <Bar
+                    dataKey="value"
+                    fill="rgb(59, 130, 246)"
+                    radius={[2, 2, 0, 0]}
+                  />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -1803,8 +2107,12 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
             className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50 cursor-pointer hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
             onClick={() => openChartDrilldown("rateSnapshot")}
           >
-            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">RATE SNAPSHOT BY PRODUCT</p>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Prior week vs today</p>
+            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">
+              RATE SNAPSHOT BY PRODUCT
+            </p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
+              Prior week vs today
+            </p>
             <button
               type="button"
               onClick={(event) => {
@@ -1823,17 +2131,50 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
                   <span className="text-xs font-medium">Loading rates</span>
                 </div>
               ) : !displayRateSnapshotData.some((r) => r.today != null) ? (
-                <div className="h-full flex items-center justify-center text-slate-500 dark:text-slate-400 text-xs">No data available</div>
+                <div className="h-full flex items-center justify-center text-slate-500 dark:text-slate-400 text-xs">
+                  No data available
+                </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={rateSnapshotChartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }} layout="vertical" barCategoryGap="12%">
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
-                    <XAxis type="number" domain={["auto", "auto"]} tick={{ fontSize: 10 }} tickFormatter={(v) => `${v}%`} />
-                    <YAxis type="category" dataKey="product" tick={{ fontSize: 10 }} width={70} />
-                    <RechartsTooltip formatter={(v: number) => [`${v}%`, ""]} contentStyle={{ fontSize: 12 }} />
+                  <BarChart
+                    data={rateSnapshotChartData}
+                    margin={{ top: 4, right: 4, left: -20, bottom: 0 }}
+                    layout="vertical"
+                    barCategoryGap="12%"
+                  >
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      className="stroke-slate-200 dark:stroke-slate-600"
+                    />
+                    <XAxis
+                      type="number"
+                      domain={["auto", "auto"]}
+                      tick={{ fontSize: 10 }}
+                      tickFormatter={(v) => `${v}%`}
+                    />
+                    <YAxis
+                      type="category"
+                      dataKey="product"
+                      tick={{ fontSize: 10 }}
+                      width={70}
+                    />
+                    <RechartsTooltip
+                      formatter={(v: number) => [`${v}%`, ""]}
+                      contentStyle={{ fontSize: 12 }}
+                    />
                     <Legend wrapperStyle={{ fontSize: 10 }} />
-                    <Bar dataKey="prior" fill="rgb(148, 163, 184)" name="Prior Week" radius={[0, 2, 2, 0]} />
-                    <Bar dataKey="today" fill="rgb(59, 130, 246)" name="Today" radius={[0, 2, 2, 0]} />
+                    <Bar
+                      dataKey="prior"
+                      fill="rgb(148, 163, 184)"
+                      name="Prior Week"
+                      radius={[0, 2, 2, 0]}
+                    />
+                    <Bar
+                      dataKey="today"
+                      fill="rgb(59, 130, 246)"
+                      name="Today"
+                      radius={[0, 2, 2, 0]}
+                    />
                   </BarChart>
                 </ResponsiveContainer>
               )}
@@ -1844,8 +2185,12 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
             className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50 cursor-pointer hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
             onClick={() => openChartDrilldown("existingSales")}
           >
-            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">EXISTING HOME SALES (SAAR)</p>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Jan drops — weather impact muted</p>
+            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">
+              EXISTING HOME SALES (SAAR)
+            </p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
+              Jan drops — weather impact muted
+            </p>
             <button
               type="button"
               onClick={(event) => {
@@ -1864,15 +2209,35 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
                   <span className="text-xs font-medium">Loading rates</span>
                 </div>
               ) : displayExistingHomeSalesData.length === 0 ? (
-                <div className="h-full flex items-center justify-center text-slate-500 dark:text-slate-400 text-xs">No data available</div>
+                <div className="h-full flex items-center justify-center text-slate-500 dark:text-slate-400 text-xs">
+                  No data available
+                </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={displayExistingHomeSalesData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
+                  <BarChart
+                    data={displayExistingHomeSalesData}
+                    margin={{ top: 4, right: 4, left: -20, bottom: 0 }}
+                  >
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      className="stroke-slate-200 dark:stroke-slate-600"
+                    />
                     <XAxis dataKey="month" tick={{ fontSize: 10 }} />
-                    <YAxis domain={["auto", "auto"]} tick={{ fontSize: 10 }} width={28} tickFormatter={(v) => `${v}M`} />
-                    <RechartsTooltip formatter={(v: number) => [`${v}M`, "Units"]} contentStyle={{ fontSize: 12 }} />
-                    <Bar dataKey="value" fill="rgb(59, 130, 246)" radius={[2, 2, 0, 0]} />
+                    <YAxis
+                      domain={["auto", "auto"]}
+                      tick={{ fontSize: 10 }}
+                      width={28}
+                      tickFormatter={(v) => `${v}M`}
+                    />
+                    <RechartsTooltip
+                      formatter={(v: number) => [`${v}M`, "Units"]}
+                      contentStyle={{ fontSize: 12 }}
+                    />
+                    <Bar
+                      dataKey="value"
+                      fill="rgb(59, 130, 246)"
+                      radius={[2, 2, 0, 0]}
+                    />
                   </BarChart>
                 </ResponsiveContainer>
               )}
@@ -1887,7 +2252,9 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
           onMouseLeave={() => setHeadlinesPaused(false)}
         >
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 mb-4">
-            <h4 className="text-lg font-medium text-slate-900 dark:text-white">TOP HEADLINES</h4>
+            <h4 className="text-lg font-medium text-slate-900 dark:text-white">
+              TOP HEADLINES
+            </h4>
             <div className="flex flex-col sm:items-end text-xs text-slate-500 dark:text-slate-400">
               <span>Click through for full articles</span>
               <span className="mt-0.5">
@@ -1906,17 +2273,24 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
                     }`}
               </span>
               <span className="mt-0.5">
-                {pinnedHeadline ? "Pinned in place • rotation paused" : "Auto-rotates every 15s when unpinned"}
+                {pinnedHeadline
+                  ? "Pinned in place • rotation paused"
+                  : "Auto-rotates every 15s when unpinned"}
               </span>
             </div>
           </div>
           <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {visibleHeadlines.map((headline: any, idx: number) => (
-              <li key={`${headline.source.source}-${headline.item.link || idx}`} className="h-full">
+              <li
+                key={`${headline.source.source}-${headline.item.link || idx}`}
+                className="h-full"
+              >
                 <div className="w-full h-full p-3.5 rounded-xl bg-slate-50/60 dark:bg-slate-800/35 hover:bg-slate-100 dark:hover:bg-slate-800/55 border border-slate-200/50 dark:border-slate-700/50 hover:border-slate-300 dark:hover:border-slate-600 transition-all shadow-sm hover:shadow-md">
                   <button
                     type="button"
-                    onClick={() => handleNewsItemClick(headline.item, headline.source)}
+                    onClick={() =>
+                      handleNewsItemClick(headline.item, headline.source)
+                    }
                     className="w-full text-left group"
                   >
                     <p className="text-sm font-medium text-slate-900 dark:text-slate-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 line-clamp-2">
@@ -1955,7 +2329,11 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
                         }}
                         className="w-7 h-7 rounded-md border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
                         aria-label="Copy article link"
-                        title={copiedHeadlineId === getHeadlineId(headline) ? "Copied" : "Copy link"}
+                        title={
+                          copiedHeadlineId === getHeadlineId(headline)
+                            ? "Copied"
+                            : "Copy link"
+                        }
                       >
                         <Link2 className="w-3.5 h-3.5" strokeWidth={1.8} />
                       </button>
@@ -1964,15 +2342,25 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
                         onClick={(event) => {
                           event.stopPropagation();
                           const headlineId = getHeadlineId(headline);
-                          setPinnedHeadlineId((current) => (current === headlineId ? null : headlineId));
+                          setPinnedHeadlineId((current) =>
+                            current === headlineId ? null : headlineId,
+                          );
                         }}
                         className={`w-7 h-7 rounded-md border flex items-center justify-center ${
                           pinnedHeadlineId === getHeadlineId(headline)
                             ? "border-blue-500 bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400"
                             : "border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
                         }`}
-                        aria-label={pinnedHeadlineId === getHeadlineId(headline) ? "Unpin headline" : "Pin headline in place"}
-                        title={pinnedHeadlineId === getHeadlineId(headline) ? "Unpin" : "Pin in place"}
+                        aria-label={
+                          pinnedHeadlineId === getHeadlineId(headline)
+                            ? "Unpin headline"
+                            : "Pin headline in place"
+                        }
+                        title={
+                          pinnedHeadlineId === getHeadlineId(headline)
+                            ? "Unpin"
+                            : "Pin in place"
+                        }
                       >
                         {pinnedHeadlineId === getHeadlineId(headline) ? (
                           <PinOff className="w-3.5 h-3.5" strokeWidth={1.8} />
@@ -1992,7 +2380,9 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
                 <span
                   key={`headline-page-${idx}`}
                   className={`h-1.5 rounded-full transition-all ${
-                    idx === headlinePage ? "w-5 bg-blue-500" : "w-1.5 bg-slate-300 dark:bg-slate-600"
+                    idx === headlinePage
+                      ? "w-5 bg-blue-500"
+                      : "w-1.5 bg-slate-300 dark:bg-slate-600"
                   }`}
                 />
               ))}
@@ -2000,7 +2390,8 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
           )}
           {recentHeadlines.length === 0 && !newsLoading && (
             <p className="text-sm text-slate-500 dark:text-slate-400 py-4">
-              No recent lending headlines are available right now. Try refreshing in a moment.
+              No recent lending headlines are available right now. Try
+              refreshing in a moment.
             </p>
           )}
         </div>
@@ -2018,7 +2409,9 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
             <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200/60 dark:border-slate-700/50">
               <div>
                 <DialogTitle className="text-base sm:text-lg font-medium text-slate-900 dark:text-slate-100">
-                  {activeChart ? `${chartTitles[activeChart]} Drilldown` : "Chart Drilldown"}
+                  {activeChart
+                    ? `${chartTitles[activeChart]} Drilldown`
+                    : "Chart Drilldown"}
                 </DialogTitle>
                 <DialogDescription className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                   {activeChart === "rateSnapshot"
@@ -2035,33 +2428,38 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
                 className="w-9 h-9 rounded-full border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800"
                 aria-label="Close chart drilldown"
               >
-                <X className="w-4 h-4 text-slate-500 dark:text-slate-400" strokeWidth={1.8} />
+                <X
+                  className="w-4 h-4 text-slate-500 dark:text-slate-400"
+                  strokeWidth={1.8}
+                />
               </button>
             </div>
 
             {activeChart !== "rateSnapshot" && (
-            <div className="px-4 pt-3 pb-2 border-b border-slate-200/60 dark:border-slate-700/50 flex items-center gap-2 overflow-x-auto">
-              {(Object.keys(DRILLDOWN_RANGE_LABELS) as DrilldownRange[]).map((range) => {
-                const hasData = availableDrilldownRanges.includes(range);
-                return (
-                  <button
-                    key={range}
-                    type="button"
-                    disabled={!hasData}
-                    onClick={() => setDrilldownRange(range)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap ${
-                      drilldownRange === range
-                        ? "bg-blue-600 text-white border-blue-600"
-                        : hasData
-                        ? "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
-                        : "bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border-slate-200 dark:border-slate-700 cursor-not-allowed"
-                    }`}
-                  >
-                    {DRILLDOWN_RANGE_LABELS[range]}
-                  </button>
-                );
-              })}
-            </div>
+              <div className="px-4 pt-3 pb-2 border-b border-slate-200/60 dark:border-slate-700/50 flex items-center gap-2 overflow-x-auto">
+                {(Object.keys(DRILLDOWN_RANGE_LABELS) as DrilldownRange[]).map(
+                  (range) => {
+                    const hasData = availableDrilldownRanges.includes(range);
+                    return (
+                      <button
+                        key={range}
+                        type="button"
+                        disabled={!hasData}
+                        onClick={() => setDrilldownRange(range)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap ${
+                          drilldownRange === range
+                            ? "bg-blue-600 text-white border-blue-600"
+                            : hasData
+                              ? "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+                              : "bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border-slate-200 dark:border-slate-700 cursor-not-allowed"
+                        }`}
+                      >
+                        {DRILLDOWN_RANGE_LABELS[range]}
+                      </button>
+                    );
+                  },
+                )}
+              </div>
             )}
 
             <div className="flex-1 p-4 sm:p-6">
@@ -2113,8 +2511,8 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
                         isSelected
                           ? "bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900/40 shadow-sm"
                           : isDisabled
-                          ? "bg-slate-50 dark:bg-slate-800/30 border-slate-200 dark:border-slate-700 opacity-50 cursor-not-allowed"
-                          : "bg-white dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/60 hover:border-slate-300 dark:hover:border-slate-600"
+                            ? "bg-slate-50 dark:bg-slate-800/30 border-slate-200 dark:border-slate-700 opacity-50 cursor-not-allowed"
+                            : "bg-white dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/60 hover:border-slate-300 dark:hover:border-slate-600"
                       }`}
                     >
                       <div
@@ -2252,10 +2650,16 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
                   </button>
                   <button
                     type="button"
-                    onClick={() => void handleHeadlineCopyLink(selectedNewsItem)}
+                    onClick={() =>
+                      void handleHeadlineCopyLink(selectedNewsItem)
+                    }
                     className="w-9 h-9 rounded-full border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
                     aria-label="Copy article link"
-                    title={copiedHeadlineId === selectedHeadlineId ? "Copied" : "Copy link"}
+                    title={
+                      copiedHeadlineId === selectedHeadlineId
+                        ? "Copied"
+                        : "Copy link"
+                    }
                   >
                     <Link2 className="w-4 h-4" strokeWidth={1.8} />
                   </button>
@@ -2263,7 +2667,9 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
                     type="button"
                     onClick={() =>
                       setPinnedHeadlineId((current) =>
-                        current === selectedHeadlineId ? null : selectedHeadlineId
+                        current === selectedHeadlineId
+                          ? null
+                          : selectedHeadlineId,
                       )
                     }
                     className={`w-9 h-9 rounded-full border flex items-center justify-center ${
@@ -2271,8 +2677,16 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
                         ? "border-blue-500 bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400"
                         : "border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
                     }`}
-                    aria-label={pinnedHeadlineId === selectedHeadlineId ? "Unpin headline" : "Pin headline in place"}
-                    title={pinnedHeadlineId === selectedHeadlineId ? "Unpin" : "Pin in place"}
+                    aria-label={
+                      pinnedHeadlineId === selectedHeadlineId
+                        ? "Unpin headline"
+                        : "Pin headline in place"
+                    }
+                    title={
+                      pinnedHeadlineId === selectedHeadlineId
+                        ? "Unpin"
+                        : "Pin in place"
+                    }
                   >
                     {pinnedHeadlineId === selectedHeadlineId ? (
                       <PinOff className="w-4 h-4" strokeWidth={1.8} />
@@ -2364,7 +2778,7 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
                             type="button"
                             onClick={() =>
                               setExcerptPage((prev) =>
-                                prev === 0 ? excerptPageCount - 1 : prev - 1
+                                prev === 0 ? excerptPageCount - 1 : prev - 1,
                               )
                             }
                             className="px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -2378,7 +2792,7 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
                             type="button"
                             onClick={() =>
                               setExcerptPage((prev) =>
-                                prev >= excerptPageCount - 1 ? 0 : prev + 1
+                                prev >= excerptPageCount - 1 ? 0 : prev + 1,
                               )
                             }
                             className="px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -2455,7 +2869,10 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
                       <p className="text-[0.9375rem] sm:text-sm md:text-base text-slate-700 dark:text-slate-300 leading-[1.7] font-light tracking-tight break-words">
                         {insights?.insights && insights.insights.length > 0
                           ? insights.insights
-                              .map((insight) => `${insight.label}: ${insight.content}`)
+                              .map(
+                                (insight) =>
+                                  `${insight.label}: ${insight.content}`,
+                              )
                               .join(" ")
                           : "This development may indicate broader market and operational implications across lending. Read the full article for complete context."}
                         {insights?.clientDataSummary
@@ -2471,7 +2888,9 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
                   href={selectedNewsItem?.item?.link}
                   target="_blank"
                   rel="noopener noreferrer"
-                  onMouseEnter={() => prewarmArticleLink(selectedNewsItem?.item?.link)}
+                  onMouseEnter={() =>
+                    prewarmArticleLink(selectedNewsItem?.item?.link)
+                  }
                   className="
                     flex items-center justify-center gap-2.5 
                     w-full 
@@ -2507,7 +2926,6 @@ export const IndustryNewsCard = ({ onDataReady }: { onDataReady?: (payload: unkn
           )}
         </DialogContent>
       </Dialog>
-
     </div>
   );
 };

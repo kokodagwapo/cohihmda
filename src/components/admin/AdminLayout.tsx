@@ -227,7 +227,7 @@ const allAdminSections: AdminSectionDef[] = [
     id: "data-quality" as AdminSection,
     label: "Data Quality",
     icon: CheckCircle2,
-    description: "Monitor and resolve data issues",
+    description: "Opens the Data Quality dashboard",
     color: "text-lime-300 dark:text-lime-400/70",
     allowedRoles: ["super_admin", "platform_admin", "tenant_admin"],
     category: "Data",

@@ -32,6 +32,7 @@ import {
   PinOff,
   Lock,
   Layers,
+  Database,
 } from "lucide-react";
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -132,6 +133,13 @@ const topTieringMenuGroups = {
       },
     ],
   },
+  // compliance: not yet ready for production
+  // compliance: {
+  //   label: "Compliance",
+  //   items: [
+  //     { id: "hmda", label: "HMDA", icon: FileText, iconColor: "indigo" as const },
+  //   ],
+  // },
   sales: {
     label: "Sales",
     icon: Users,
@@ -231,6 +239,12 @@ const topTieringMenuGroups = {
         icon: BarChart3,
         iconColor: "emerald" as const,
       },
+      {
+        id: "dataQuality",
+        label: "Data Quality",
+        icon: Database,
+        iconColor: "emerald" as const,
+      },
     ],
   },
 };
@@ -308,6 +322,7 @@ const routeMap: Record<string, string> = {
   estimatedClosingsRisk: "/performance/estimated-closings-risk",
   financialModeling: "/performance/financial-modeling-sandbox",
   captureAnalysis: "/capture-analysis",
+  dataQuality: "/data-quality",
 };
 
 /** Match pathname + search when route targets include query params. */
@@ -596,6 +611,7 @@ export function Navigation(
       "/performance/estimated-closings-risk",
       "/performance/financial-modeling-sandbox",
       "/capture-analysis",
+      "/data-quality",
     ];
     return topTieringRoutes.some(
       (route) =>
@@ -1288,11 +1304,8 @@ export function Navigation(
                                     </span>
                                     <button
                                       type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        togglePinned(pinItem);
-                                      }}
-                                      className="shrink-0 self-start mt-0.5 p-0.5 rounded hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
+                                      onClick={(e) => { e.stopPropagation(); togglePinned(pinItem); }}
+                                      className="shrink-0 ml-auto p-0.5 rounded hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
                                       title={pinned ? "Unpin from sidebar" : "Pin to sidebar"}
                                       aria-label={pinned ? "Unpin" : "Pin to sidebar"}
                                     >
@@ -1307,6 +1320,7 @@ export function Navigation(
                               );
                             })}
                           </div>
+                          {/* Compliance section hidden — not yet ready for production */}
                         </div>
 
                         {/* Column 4: Secondary Market + Financial Modeling */}
