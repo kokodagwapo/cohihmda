@@ -49,6 +49,7 @@ import EstimatedClosingsRisk from "./pages/EstimatedClosingsRisk";
 import PricingDashboard from "./pages/PricingDashboard";
 import LockStratification from "./pages/LockStratification";
 import PipelineAnalysisDashboard from "./pages/PipelineAnalysisDashboard";
+import DataQualityDashboard from "./pages/DataQualityDashboard";
 import LoanComplexity from "./pages/LoanComplexity";
 import Actors from "./pages/Actors";
 import FalloutForecast from "./pages/FalloutForecast";
@@ -202,6 +203,7 @@ const App = () => (
               <Route path="/pricing-dashboard" element={<PricingDashboard />} />
               <Route path="/lock-stratification" element={<LockStratification />} />
               <Route path="/pipeline-analysis" element={<PipelineAnalysisDashboard />} />
+              <Route path="/data-quality" element={<DataQualityDashboard />} />
               <Route path="/loan-complexity" element={<LoanComplexity />} />
               <Route path="/credit-risk-management" element={<CreditRiskManagement />} />
                 <Route path="/company-scorecard" element={<CompanyScorecard />} />

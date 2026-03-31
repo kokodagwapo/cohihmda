@@ -55,6 +55,7 @@ interface SyncConnection {
   last_loan_modified_at: string | null;
   is_active: boolean;
   insights_auto_enabled: boolean;
+  podcast_auto_enabled: boolean;
   created_at: string;
   updated_at: string;
   tenant_id: string;
@@ -78,6 +79,19 @@ interface SyncHistoryEntry {
   error_message: string | null;
   started_at: string;
   completed_at: string | null;
+}
+
+interface HookRun {
+  id: number;
+  sync_history_id: number | null;
+  hook_name: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+  started_at: string | null;
+  completed_at: string | null;
+  duration_ms: number | null;
+  error_message: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
 }
 
 interface SchedulerInfo {
@@ -199,6 +213,7 @@ export const SyncManagementSection = () => {
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [historyData, setHistoryData] = useState<Record<string, SyncHistoryEntry[]>>({});
   const [historyLoading, setHistoryLoading] = useState<Set<string>>(new Set());
+  const [hookRunData, setHookRunData] = useState<Record<string, HookRun[]>>({});
   const [tenants, setTenants] = useState<TenantOption[]>([]);
   const [podcastSettings, setPodcastSettings] = useState<PodcastSettings>({
     nightly_enabled: false,
@@ -351,6 +366,45 @@ export const SyncManagementSection = () => {
       toast({
         title: 'Error',
         description: error.message || 'Failed to update insights setting',
+        variant: 'destructive',
+      });
+    } finally {
+      setUpdatingIds(prev => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
+
+  const handleTogglePodcast = async (connection: SyncConnection) => {
+    const newEnabled = !connection.podcast_auto_enabled;
+    const key = connKey(connection);
+    setUpdatingIds(prev => new Set(prev).add(key));
+
+    try {
+      await api.request(`/api/admin/sync-management/${connection.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          tenant_id: connection.tenant_id,
+          podcast_auto_enabled: newEnabled,
+        }),
+      });
+
+      setConnections(prev =>
+        prev.map(c =>
+          connKey(c) === key ? { ...c, podcast_auto_enabled: newEnabled } : c
+        )
+      );
+
+      toast({
+        title: newEnabled ? 'Auto-podcast enabled' : 'Auto-podcast disabled',
+        description: `${connection.name} (${connection.tenant_name})`,
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to update podcast setting',
         variant: 'destructive',
       });
     } finally {
@@ -553,15 +607,21 @@ export const SyncManagementSection = () => {
     return () => stopPodcastPolling();
   }, [stopPodcastPolling]);
 
-  // Helper to fetch history for a connection
+  // Helper to fetch history and hook run status for a connection
   const fetchHistory = async (connection: SyncConnection) => {
     const key = connKey(connection);
     setHistoryLoading(prev => new Set(prev).add(key));
     try {
-      const response = await api.request<{ history: SyncHistoryEntry[] }>(
-        `/api/admin/sync-management/${connection.id}/history?tenant_id=${connection.tenant_id}&limit=10`
-      );
-      setHistoryData(prev => ({ ...prev, [key]: response.history }));
+      const [histResponse, hookResponse] = await Promise.all([
+        api.request<{ history: SyncHistoryEntry[] }>(
+          `/api/admin/sync-management/${connection.id}/history?tenant_id=${connection.tenant_id}&limit=10`
+        ),
+        api.request<{ hookRuns: HookRun[] }>(
+          `/api/admin/sync-management/${connection.id}/hook-status?tenant_id=${connection.tenant_id}&limit=20`
+        ).catch(() => ({ hookRuns: [] as HookRun[] })),
+      ]);
+      setHistoryData(prev => ({ ...prev, [key]: histResponse.history }));
+      setHookRunData(prev => ({ ...prev, [key]: hookResponse.hookRuns }));
     } catch {
       setHistoryData(prev => ({ ...prev, [key]: [] }));
     } finally {
@@ -864,6 +924,7 @@ export const SyncManagementSection = () => {
                     <TableHead className="font-light text-xs">Schedule</TableHead>
                     <TableHead className="font-light text-xs text-center">Auto-Sync</TableHead>
                     <TableHead className="font-light text-xs text-center">Auto-Insights</TableHead>
+                    <TableHead className="font-light text-xs text-center">Auto-Podcast</TableHead>
                     <TableHead className="font-light text-xs text-center">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -872,6 +933,7 @@ export const SyncManagementSection = () => {
                     const key = connKey(connection);
                     const isExpanded = expandedKey === key;
                     const history = historyData[key] || [];
+                    const hookRuns = hookRunData[key] || [];
                     const isLoadingHistory = historyLoading.has(key);
                     return (
                     <Fragment key={key}><TableRow className="group">
@@ -946,6 +1008,14 @@ export const SyncManagementSection = () => {
                         />
                       </TableCell>
                       <TableCell className="text-center">
+                        <Switch
+                          checked={connection.podcast_auto_enabled ?? true}
+                          onCheckedChange={() => handleTogglePodcast(connection)}
+                          disabled={updatingIds.has(connKey(connection)) || !connection.is_active}
+                          className="data-[state=checked]:bg-violet-500"
+                        />
+                      </TableCell>
+                      <TableCell className="text-center">
                         <div className="flex items-center justify-center gap-1">
                           <Button
                             variant="ghost"
@@ -999,78 +1069,153 @@ export const SyncManagementSection = () => {
                     </TableRow>
                     {isExpanded && (
                       <TableRow key={`${key}-history`}>
-                        <TableCell colSpan={10} className="p-0 bg-slate-50/50 dark:bg-slate-900/30">
-                          <div className="px-6 py-4">
-                            <div className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3">
-                              Sync History
-                            </div>
-                            {isLoadingHistory ? (
-                              <div className="flex items-center gap-2 py-4">
-                                <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
-                                <span className="text-sm text-slate-400 font-light">Loading history...</span>
+                        <TableCell colSpan={11} className="p-0 bg-slate-50/50 dark:bg-slate-900/30">
+                          <div className="px-6 py-4 space-y-5">
+                            {/* Sync History */}
+                            <div>
+                              <div className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3">
+                                Sync History
                               </div>
-                            ) : history.length === 0 ? (
-                              <p className="text-sm text-slate-400 font-light py-2">No sync history yet</p>
-                            ) : (
-                              <div className="space-y-2">
-                                {history.map((entry) => (
-                                  <div
-                                    key={entry.id}
-                                    className="flex items-center gap-4 text-sm py-2 px-3 rounded-lg bg-white dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700/50"
-                                  >
-                                    <span className="text-slate-500 dark:text-slate-400 font-light w-[100px] flex-shrink-0" title={entry.started_at}>
-                                      {formatRelativeTime(entry.started_at)}
-                                    </span>
-                                    <Badge
-                                      variant="outline"
-                                      className={`text-[10px] w-[80px] justify-center flex-shrink-0 ${
-                                        entry.sync_type === 'incremental'
-                                          ? 'text-blue-600 border-blue-200 dark:text-blue-400 dark:border-blue-800'
-                                          : 'text-purple-600 border-purple-200 dark:text-purple-400 dark:border-purple-800'
-                                      }`}
+                              {isLoadingHistory ? (
+                                <div className="flex items-center gap-2 py-4">
+                                  <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+                                  <span className="text-sm text-slate-400 font-light">Loading history...</span>
+                                </div>
+                              ) : history.length === 0 ? (
+                                <p className="text-sm text-slate-400 font-light py-2">No sync history yet</p>
+                              ) : (
+                                <div className="space-y-2">
+                                  {history.map((entry) => (
+                                    <div
+                                      key={entry.id}
+                                      className="flex items-center gap-4 text-sm py-2 px-3 rounded-lg bg-white dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700/50"
                                     >
-                                      {entry.sync_type}
-                                    </Badge>
-                                    <div className="flex items-center gap-3 font-light flex-1 min-w-0">
-                                      {entry.loans_added > 0 && (
-                                        <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5">
-                                          <Plus className="h-3 w-3" />{entry.loans_added} new
-                                        </span>
-                                      )}
-                                      {entry.loans_updated > 0 && (
-                                        <span className="text-blue-600 dark:text-blue-400 flex items-center gap-0.5">
-                                          <ArrowUpDown className="h-3 w-3" />{entry.loans_updated} updated
-                                        </span>
-                                      )}
-                                      {(entry.loans_unchanged ?? 0) > 0 && (
-                                        <span className="text-slate-400 dark:text-slate-500 text-xs">
-                                          {entry.loans_unchanged} unchanged
-                                        </span>
-                                      )}
-                                      {entry.loans_failed > 0 && (
-                                        <span className="text-red-600 dark:text-red-400">
-                                          {entry.loans_failed} failed
-                                        </span>
-                                      )}
-                                      {entry.loans_added === 0 && entry.loans_updated === 0 && entry.loans_failed === 0 && (
-                                        <span className="text-slate-400">No changes</span>
+                                      <span className="text-slate-500 dark:text-slate-400 font-light w-[100px] flex-shrink-0" title={entry.started_at}>
+                                        {formatRelativeTime(entry.started_at)}
+                                      </span>
+                                      <Badge
+                                        variant="outline"
+                                        className={`text-[10px] w-[80px] justify-center flex-shrink-0 ${
+                                          entry.sync_type === 'incremental'
+                                            ? 'text-blue-600 border-blue-200 dark:text-blue-400 dark:border-blue-800'
+                                            : 'text-purple-600 border-purple-200 dark:text-purple-400 dark:border-purple-800'
+                                        }`}
+                                      >
+                                        {entry.sync_type}
+                                      </Badge>
+                                      <div className="flex items-center gap-3 font-light flex-1 min-w-0">
+                                        {entry.loans_added > 0 && (
+                                          <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5">
+                                            <Plus className="h-3 w-3" />{entry.loans_added} new
+                                          </span>
+                                        )}
+                                        {entry.loans_updated > 0 && (
+                                          <span className="text-blue-600 dark:text-blue-400 flex items-center gap-0.5">
+                                            <ArrowUpDown className="h-3 w-3" />{entry.loans_updated} updated
+                                          </span>
+                                        )}
+                                        {(entry.loans_unchanged ?? 0) > 0 && (
+                                          <span className="text-slate-400 dark:text-slate-500 text-xs">
+                                            {entry.loans_unchanged} unchanged
+                                          </span>
+                                        )}
+                                        {entry.loans_failed > 0 && (
+                                          <span className="text-red-600 dark:text-red-400">
+                                            {entry.loans_failed} failed
+                                          </span>
+                                        )}
+                                        {entry.loans_added === 0 && entry.loans_updated === 0 && entry.loans_failed === 0 && (
+                                          <span className="text-slate-400">No changes</span>
+                                        )}
+                                      </div>
+                                      <span className="text-slate-400 font-light flex-shrink-0">
+                                        {(entry.total_loans_after || 0).toLocaleString()} total
+                                      </span>
+                                      <span className="text-slate-400 font-light w-[60px] text-right flex-shrink-0">
+                                        {entry.duration_ms ? `${Math.round(entry.duration_ms / 1000)}s` : '—'}
+                                      </span>
+                                      {entry.status === 'success' ? (
+                                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />
+                                      ) : entry.status === 'partial' ? (
+                                        <AlertTriangle className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />
+                                      ) : (
+                                        <XCircle className="h-3.5 w-3.5 text-red-500 flex-shrink-0" />
                                       )}
                                     </div>
-                                    <span className="text-slate-400 font-light flex-shrink-0">
-                                      {(entry.total_loans_after || 0).toLocaleString()} total
-                                    </span>
-                                    <span className="text-slate-400 font-light w-[60px] text-right flex-shrink-0">
-                                      {entry.duration_ms ? `${Math.round(entry.duration_ms / 1000)}s` : '—'}
-                                    </span>
-                                    {entry.status === 'success' ? (
-                                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />
-                                    ) : entry.status === 'partial' ? (
-                                      <AlertTriangle className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />
-                                    ) : (
-                                      <XCircle className="h-3.5 w-3.5 text-red-500 flex-shrink-0" />
-                                    )}
-                                  </div>
-                                ))}
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Post-Sync Pipeline Status */}
+                            {!isLoadingHistory && hookRuns.length > 0 && (
+                              <div>
+                                <div className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3">
+                                  Post-Sync Pipeline
+                                </div>
+                                <div className="space-y-1.5">
+                                  {hookRuns.map((run) => {
+                                    const hookLabel: Record<string, string> = {
+                                      'agent-insight-generation': 'Insights',
+                                      'tracked-insight-generation': 'Tracked Insights',
+                                      'prediction-generation': 'Predictions',
+                                      'podcast-auto-generation': 'Podcast',
+                                    };
+                                    const label = hookLabel[run.hook_name] ?? run.hook_name;
+                                    const insightCount = typeof run.metadata?.insight_count === 'number'
+                                      ? run.metadata.insight_count
+                                      : null;
+                                    const podcastJobId = run.metadata?.podcast_job_id;
+                                    return (
+                                      <div
+                                        key={run.id}
+                                        className="flex items-center gap-3 text-xs py-1.5 px-3 rounded-md bg-white dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700/50"
+                                      >
+                                        <span className="text-slate-500 dark:text-slate-400 font-light w-[80px] flex-shrink-0" title={run.created_at}>
+                                          {formatRelativeTime(run.created_at)}
+                                        </span>
+                                        <span className="font-medium text-slate-700 dark:text-slate-300 w-[130px] flex-shrink-0">
+                                          {label}
+                                        </span>
+                                        <div className="flex-1 min-w-0 font-light text-slate-500 dark:text-slate-400 truncate">
+                                          {run.status === 'running' && (
+                                            <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
+                                              <Loader2 className="h-3 w-3 animate-spin" /> Running…
+                                            </span>
+                                          )}
+                                          {run.status === 'completed' && insightCount !== null && (
+                                            <span>{insightCount} insights generated</span>
+                                          )}
+                                          {run.status === 'completed' && podcastJobId && (
+                                            <span>Job #{String(podcastJobId)} enqueued</span>
+                                          )}
+                                          {run.status === 'failed' && run.error_message && (
+                                            <span className="text-red-500 dark:text-red-400 truncate" title={run.error_message}>
+                                              {run.error_message}
+                                            </span>
+                                          )}
+                                          {run.status === 'skipped' && (
+                                            <span className="text-slate-400">Disabled for this connection</span>
+                                          )}
+                                        </div>
+                                        <span className="text-slate-400 font-light flex-shrink-0 w-[45px] text-right">
+                                          {run.duration_ms != null ? `${Math.round(run.duration_ms / 1000)}s` : '—'}
+                                        </span>
+                                        {run.status === 'completed' ? (
+                                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />
+                                        ) : run.status === 'running' ? (
+                                          <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin flex-shrink-0" />
+                                        ) : run.status === 'failed' ? (
+                                          <XCircle className="h-3.5 w-3.5 text-red-500 flex-shrink-0" />
+                                        ) : run.status === 'skipped' ? (
+                                          <Clock className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+                                        ) : (
+                                          <Clock className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
                               </div>
                             )}
                           </div>

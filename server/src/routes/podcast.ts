@@ -17,6 +17,7 @@ import {
   persistAletheiaAsset,
 } from "../services/aletheiaAssetStore.js";
 import { enqueueAletheiaPrefetchJob } from "../services/aletheiaPrefetchWorker.js";
+import { logLLMUsage } from "../services/llmUsageTracker.js";
 
 const router = Router();
 
@@ -794,7 +795,8 @@ async function fetchInsightsForBriefing(
 
 async function generateBriefingScript(
   apiKey: string,
-  insightsSummary: string
+  insightsSummary: string,
+  trackingCtx?: { tenantId: string; requestedBy?: string }
 ): Promise<string> {
   const userPrompt = insightsSummary
     ? `Here are today's key insights for the executive briefing:\n\n${insightsSummary}\n\nDeliver the spoken briefing.`
@@ -826,7 +828,28 @@ async function generateBriefingScript(
 
   const data = (await response.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
+    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
   };
+
+  // Fire-and-forget token tracking
+  if (trackingCtx) {
+    const promptTokens = data.usage?.prompt_tokens ?? 0;
+    const completionTokens = data.usage?.completion_tokens ?? 0;
+    if (promptTokens > 0 || completionTokens > 0) {
+      tenantDbManager.getTenantPool(trackingCtx.tenantId).then((tenantPool) =>
+        logLLMUsage({
+          tenantPool,
+          tenantId: trackingCtx.tenantId,
+          model: CHAT_MODEL,
+          promptTokens,
+          completionTokens,
+          totalTokens: data.usage?.total_tokens,
+          requestedBy: trackingCtx.requestedBy ?? "podcast-briefing",
+        })
+      ).catch(() => { /* best-effort */ });
+    }
+  }
+
   return data.choices?.[0]?.message?.content || "Briefing unavailable.";
 }
 
@@ -961,7 +984,9 @@ router.get(
       const { insights, summary } = await fetchInsightsForBriefing(
         tenantId || ""
       );
-      const script = await generateBriefingScript(apiKey, summary);
+      const script = await generateBriefingScript(apiKey, summary,
+        tenantId ? { tenantId, requestedBy: "podcast-briefing" } : undefined
+      );
 
       res.json({
         success: true,
@@ -1001,7 +1026,9 @@ router.post(
       const { insights, summary } = await fetchInsightsForBriefing(
         tenantId || ""
       );
-      const script = await generateBriefingScript(apiKey, summary);
+      const script = await generateBriefingScript(apiKey, summary,
+        tenantId ? { tenantId, requestedBy: "podcast-stream" } : undefined
+      );
 
       res.write(
         `data: ${JSON.stringify({ type: "script", data: script })}\n\n`
@@ -1197,7 +1224,8 @@ async function generateAletheiaScriptText(
     userName?: string;
     greeting?: string;
     timezone?: string;
-  }
+  },
+  trackingCtx?: { tenantId: string; requestedBy?: string }
 ): Promise<string> {
   const userPrompt = buildAletheiaBriefingPrompt(briefingContext);
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -1226,7 +1254,28 @@ async function generateAletheiaScriptText(
 
   const data = (await response.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
+    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
   };
+
+  // Fire-and-forget token tracking
+  if (trackingCtx) {
+    const promptTokens = data.usage?.prompt_tokens ?? 0;
+    const completionTokens = data.usage?.completion_tokens ?? 0;
+    if (promptTokens > 0 || completionTokens > 0) {
+      tenantDbManager.getTenantPool(trackingCtx.tenantId).then((tenantPool) =>
+        logLLMUsage({
+          tenantPool,
+          tenantId: trackingCtx.tenantId,
+          model: CHAT_MODEL,
+          promptTokens,
+          completionTokens,
+          totalTokens: data.usage?.total_tokens,
+          requestedBy: trackingCtx.requestedBy ?? "aletheia-script",
+        })
+      ).catch(() => { /* best-effort */ });
+    }
+  }
+
   return data.choices?.[0]?.message?.content || "Briefing unavailable.";
 }
 
@@ -1352,7 +1401,11 @@ export async function prefetchAletheiaBriefing(
   const safeTenantId = tenantId || "";
   const openAIKey = await getOpenAIKey(tenantId);
   let geminiConfig = await getGeminiVoiceConfig(tenantId);
-  const script = await generateAletheiaScriptText(openAIKey, briefingContext as any);
+  const script = await generateAletheiaScriptText(
+    openAIKey,
+    briefingContext as any,
+    safeTenantId ? { tenantId: safeTenantId, requestedBy: "aletheia-prefetch" } : undefined
+  );
   let synthesis = await synthesizeWithConfig(geminiConfig).catch(async (error) => {
     if (
       tenantId &&

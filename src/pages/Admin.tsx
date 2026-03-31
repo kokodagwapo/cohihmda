@@ -15,7 +15,7 @@ import { UserManagementSection } from "@/components/admin/UserManagementSection"
 import { PlatformTeamSection } from "@/components/admin/PlatformTeamSection";
 import { SSOConfigSection } from "@/components/admin/SSOConfigSection";
 import { OrgSettingsSection } from "@/components/admin/OrgSettingsSection";
-import { DataQualitySection } from "@/components/admin/DataQualitySection";
+import { Link } from "react-router-dom";
 import { TenantConfigSection } from "@/components/admin/tenant-config";
 import { SOC2ComplianceSection } from "@/components/admin/SOC2ComplianceSection";
 import { StripeSection } from "@/components/admin/StripeSection";
@@ -30,6 +30,7 @@ import { ReleaseNotesSection } from "@/components/admin/ReleaseNotesSection";
 import { PlatformSettingsSection } from "@/components/admin/PlatformSettingsSection";
 import { SyncManagementSection } from "@/components/admin/SyncManagementSection";
 import { AnalyticsSection } from "@/components/admin/AnalyticsSection";
+import { ApiUsageSection } from "@/components/admin/ApiUsageSection";
 import { AdminModeSelector } from "@/components/admin/AdminModeSelector";
 import { Button } from "@/components/ui/button";
 import { Menu, Settings } from "lucide-react";
@@ -356,8 +357,20 @@ export const Admin = () => {
               {/* Organization Settings Section */}
               {activeSection === "org" && <OrgSettingsSection />}
 
-              {/* Data Quality Section */}
-              {activeSection === "data-quality" && <DataQualitySection />}
+              {/* Data Quality Section — moved to standalone dashboard */}
+              {activeSection === "data-quality" && (
+                <div className="flex flex-col items-center justify-center py-24 gap-4">
+                  <p className="text-slate-500 dark:text-slate-400 text-sm">
+                    Data Quality has moved to its own dashboard.
+                  </p>
+                  <Link
+                    to="/data-quality"
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors"
+                  >
+                    Open Data Quality Dashboard
+                  </Link>
+                </div>
+              )}
 
               {/* Field Mapping */}
               {activeSection === "data-config" && (
@@ -571,6 +584,11 @@ export const Admin = () => {
               {/* Sync Management Section (Platform Admin) */}
               {activeSection === "sync-management" && isPlatform && (
                 <SyncManagementSection />
+              )}
+
+              {/* API Usage Section (Platform Admin) */}
+              {activeSection === "api-usage" && isPlatform && (
+                <ApiUsageSection />
               )}
 
               {/* User Analytics (tenant + platform in tenant mode) */}

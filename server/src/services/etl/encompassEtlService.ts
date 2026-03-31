@@ -372,12 +372,14 @@ export class EncompassEtlService {
       const syncStatus = recordsFailed === 0 ? "success" : "partial";
       const syncType = options.modifiedFrom ? "incremental" : "full";
 
+      let syncHistoryId: number | undefined;
       try {
-        await this.tenantPool.query(
+        const histResult = await this.tenantPool.query(
           `INSERT INTO public.los_sync_history
            (los_connection_id, sync_type, status, loans_added, loans_updated, loans_unchanged, loans_failed,
             total_loans_after, modified_from, duration_ms, error_message, started_at, completed_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+           RETURNING id`,
           [
             losConnectionId,
             syncType,
@@ -393,6 +395,7 @@ export class EncompassEtlService {
             new Date(startTime),
           ]
         );
+        syncHistoryId = histResult.rows[0]?.id ? Number(histResult.rows[0].id) : undefined;
       } catch (histErr: any) {
         console.warn(`[Sync] Could not write sync history: ${histErr.message}`);
       }
@@ -438,6 +441,7 @@ export class EncompassEtlService {
           recordsSynced,
           loansAdded,
           loansUpdated,
+          syncHistoryId,
         }).catch((err) =>
           console.error("[Sync] Post-sync hooks error:", err.message)
         );

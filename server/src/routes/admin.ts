@@ -2527,7 +2527,7 @@ router.get(
           const connectionsResult = await tenantPool.query(
             `SELECT id, name, los_type, connection_method, sync_enabled, sync_frequency,
                     last_synced_at, last_sync_status, last_sync_error, last_loan_modified_at,
-                    is_active, insights_auto_enabled, created_at, updated_at
+                    is_active, insights_auto_enabled, podcast_auto_enabled, created_at, updated_at
              FROM public.los_connections
              ORDER BY name`
           );
@@ -2748,7 +2748,7 @@ router.put(
   async (req: AuthRequest, res) => {
     try {
       const connectionId = req.params.connectionId as string;
-      const { tenant_id, sync_enabled, sync_frequency, insights_auto_enabled } = req.body;
+      const { tenant_id, sync_enabled, sync_frequency, insights_auto_enabled, podcast_auto_enabled } = req.body;
 
       if (!tenant_id) {
         return res.status(400).json({ error: "tenant_id is required" });
@@ -2784,6 +2784,11 @@ router.put(
         values.push(insights_auto_enabled);
       }
 
+      if (typeof podcast_auto_enabled === "boolean") {
+        updates.push(`podcast_auto_enabled = $${paramIndex++}`);
+        values.push(podcast_auto_enabled);
+      }
+
       if (updates.length === 0) {
         return res.status(400).json({ error: "No valid fields to update" });
       }
@@ -2795,7 +2800,7 @@ router.put(
         `UPDATE public.los_connections 
          SET ${updates.join(", ")} 
          WHERE id = $${paramIndex} 
-         RETURNING id, name, sync_enabled, sync_frequency, insights_auto_enabled, last_synced_at, last_sync_status`,
+         RETURNING id, name, sync_enabled, sync_frequency, insights_auto_enabled, podcast_auto_enabled, last_synced_at, last_sync_status`,
         values
       );
 
@@ -2814,6 +2819,7 @@ router.put(
           sync_enabled,
           sync_frequency,
           insights_auto_enabled,
+          podcast_auto_enabled,
         },
       }).catch(() => {});
 
@@ -2824,6 +2830,7 @@ router.put(
         sync_enabled,
         sync_frequency,
         insights_auto_enabled,
+        podcast_auto_enabled,
       });
 
       return res.json({ connection: result.rows[0] });
@@ -3047,6 +3054,117 @@ router.get(
         connectionId: req.params.connectionId,
       });
       return res.status(500).json({ error: "Failed to fetch sync history" });
+    }
+  }
+);
+
+/**
+ * GET /api/admin/usage/by-tenant
+ * Returns aggregated LLM token usage and estimated cost per tenant for the
+ * given date range. Queries cost_daily_summary from each tenant DB in parallel.
+ */
+router.get(
+  "/usage/by-tenant",
+  authenticateToken,
+  requireRole("super_admin", "platform_admin"),
+  async (req: AuthRequest, res) => {
+    try {
+      const days = Math.min(parseInt(req.query.days as string) || 30, 90);
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
+      const startDateStr = startDate.toISOString().split("T")[0];
+
+      const tenants = await listTenants();
+
+      const rows = await Promise.all(
+        tenants.map(async (tenant) => {
+          try {
+            const tenantPool = await tenantDbManager.getTenantPool(tenant.id);
+            const result = await tenantPool.query(
+              `SELECT
+                 COALESCE(SUM(total_cost), 0)::FLOAT        AS total_cost,
+                 COALESCE(SUM(total_tokens), 0)::BIGINT     AS total_tokens,
+                 COALESCE(SUM(prompt_tokens), 0)::BIGINT    AS prompt_tokens,
+                 COALESCE(SUM(completion_tokens), 0)::BIGINT AS completion_tokens
+               FROM public.cost_daily_summary
+               WHERE date >= $1`,
+              [startDateStr]
+            );
+            const row = result.rows[0] ?? {};
+            return {
+              tenant_id: tenant.id,
+              tenant_name: tenant.name,
+              total_cost: parseFloat(row.total_cost ?? "0"),
+              total_tokens: parseInt(row.total_tokens ?? "0", 10),
+              prompt_tokens: parseInt(row.prompt_tokens ?? "0", 10),
+              completion_tokens: parseInt(row.completion_tokens ?? "0", 10),
+            };
+          } catch {
+            return {
+              tenant_id: tenant.id,
+              tenant_name: tenant.name,
+              total_cost: 0,
+              total_tokens: 0,
+              prompt_tokens: 0,
+              completion_tokens: 0,
+            };
+          }
+        })
+      );
+
+      // Sort by cost descending
+      rows.sort((a, b) => b.total_cost - a.total_cost);
+
+      return res.json({ usage: rows, days, start_date: startDateStr });
+    } catch (error: any) {
+      logError("Error fetching usage by tenant", error, { userId: req.userId });
+      return res.status(500).json({ error: "Failed to fetch usage data" });
+    }
+  }
+);
+
+/**
+ * GET /api/admin/sync-management/:connectionId/hook-status
+ * Returns the most recent post-sync hook runs for a connection, providing
+ * visibility into the insight generation and podcast pipeline after each sync.
+ */
+router.get(
+  "/sync-management/:connectionId/hook-status",
+  authenticateToken,
+  requireRole("super_admin", "platform_admin"),
+  async (req: AuthRequest, res) => {
+    try {
+      const connectionId = req.params.connectionId as string;
+      const tenantId = req.query.tenant_id as string;
+      const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
+
+      if (!tenantId) {
+        return res.status(400).json({ error: "tenant_id query parameter is required" });
+      }
+
+      const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+
+      const result = await tenantPool.query(
+        `SELECT id, sync_history_id, hook_name, status, started_at, completed_at,
+                duration_ms, error_message, metadata, created_at
+         FROM public.post_sync_hook_runs
+         WHERE los_connection_id = $1
+         ORDER BY created_at DESC
+         LIMIT $2`,
+        [connectionId, limit]
+      );
+
+      return res.json({ hookRuns: result.rows });
+    } catch (error: any) {
+      // Table may not exist yet for older tenants (before migration 106)
+      if (error.code === "42P01") {
+        return res.json({ hookRuns: [] });
+      }
+      logError("Error fetching hook status", error, {
+        userId: req.userId,
+        connectionId: req.params.connectionId,
+      });
+      return res.status(500).json({ error: "Failed to fetch hook status" });
     }
   }
 );

@@ -33,6 +33,7 @@ import {
   ArrowLeftRight,
   Folder,
   Megaphone,
+  Coins,
 } from "lucide-react";
 import type { AdminSection, AdminMode } from "@/hooks/admin/useAdminState";
 
@@ -190,6 +191,16 @@ const allAdminSections: AdminSectionDef[] = [
     category: "Infrastructure",
     mode: "platform",
   },
+  {
+    id: "api-usage" as AdminSection,
+    label: "API Usage",
+    icon: Coins,
+    description: "Per-tenant OpenAI token and cost tracking",
+    color: "text-yellow-300 dark:text-yellow-400/70",
+    allowedRoles: ["super_admin", "platform_admin"],
+    category: "Infrastructure",
+    mode: "platform",
+  },
 
   // ============ TENANT CONTEXT (mode: tenant) ============
   // These sections are for managing a specific tenant (impersonation for platform admins)
@@ -227,7 +238,7 @@ const allAdminSections: AdminSectionDef[] = [
     id: "data-quality" as AdminSection,
     label: "Data Quality",
     icon: CheckCircle2,
-    description: "Monitor and resolve data issues",
+    description: "Opens the Data Quality dashboard",
     color: "text-lime-300 dark:text-lime-400/70",
     allowedRoles: ["super_admin", "platform_admin", "tenant_admin"],
     category: "Data",

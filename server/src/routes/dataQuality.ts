@@ -32,68 +32,123 @@ const router = Router();
  * Crucial fields list from Qlik Data Pilot
  * These are priority fields that should always be populated
  */
-const CRUCIAL_FIELDS = [
-  { name: "Funding Date", column: "funding_date", priority: 1 },
-  { name: "Branch", column: "branch", priority: 2 },
-  { name: "Closing Date", column: "closing_date", priority: 3 },
-  { name: "Started Date", column: "started_date", priority: 4 },
-  { name: "Loan Officer", column: "loan_officer", priority: 5 },
-  { name: "Processor", column: "processor", priority: 6 },
-  { name: "Underwriter", column: "underwriter", priority: 7 },
-  { name: "Closer", column: "closer", priority: 8 },
-  { name: "Account Executive", column: "account_executive", priority: 9 },
-  {
-    name: "Conditional Approval Date",
-    column: "conditional_approval_date",
-    priority: 10,
-  },
-  { name: "Credit Pull Date", column: "credit_pull_date", priority: 11 },
-  { name: "CTC Date", column: "ctc_date", priority: 12 },
-  {
-    name: "Estimated Closing Date",
-    column: "estimated_closing_date",
-    priority: 13,
-  },
-  {
-    name: "Investor Purchase Date",
-    column: "investor_purchase_date",
-    priority: 14,
-  },
-  { name: "Resubmittal Date", column: "resubmittal_date", priority: 15 },
-  { name: "Shipped Date", column: "shipped_date", priority: 16 },
-  { name: "UW Approval Date", column: "uw_approval_date", priority: 17 },
-  {
-    name: "UW Final Approval Date",
-    column: "uw_final_approval_date",
-    priority: 18,
-  },
-  {
-    name: "Submitted To Processing Date",
-    column: "submitted_to_processing_date",
-    priority: 19,
-  },
-  {
-    name: "Submitted To Underwriting Date",
-    column: "submitted_to_underwriting_date",
-    priority: 20,
-  },
-  { name: "Loan Amount", column: "loan_amount", priority: 21 },
-  { name: "Loan Number", column: "loan_number", priority: 22 },
-  { name: "Current Status Date", column: "current_status_date", priority: 23 },
-  { name: "UW Denied Date", column: "uw_denied_date", priority: 24 },
-  { name: "Application Date", column: "application_date", priority: 25 },
-  {
-    name: "Loan Estimate Sent Date",
-    column: "loan_estimate_sent_date",
-    priority: 26,
-  },
-  {
-    name: "Rate Lock Buy Side Base Price Rate",
-    column: "rate_lock_buy_side_base_price_rate",
-    priority: 27,
-  },
-  { name: "Loan Source", column: "loan_source", priority: 28 },
-  { name: "Investor Status", column: "investor_status", priority: 29 },
+/**
+ * Stage groups define which subset of loans each field should be measured against.
+ *
+ * - universal:   every loan in the portfolio
+ * - originated:  loans that successfully closed/funded (originated, funded, purchased)
+ * - processing:  loans that progressed past the initial Active Loan stage
+ *
+ * The `applicableFilter` override is used for fields whose denominator is more
+ * specific than the stage group default (e.g. uw_denied_date → denied loans only).
+ */
+type CrucialFieldStage = "universal" | "originated" | "processing";
+
+interface CrucialFieldDef {
+  name: string;
+  column: string;
+  priority: number;
+  stage: CrucialFieldStage;
+  /** Optional SQL WHERE clause fragment that overrides the stage-group default denominator */
+  applicableFilter?: string;
+}
+
+// SQL WHERE fragments for each stage group
+// SQL WHERE fragments for each stage group.
+// "File Closed for incompleteness" loans are excluded from universal and processing —
+// they are abandoned before application and structurally lack fields like
+// application_date, processor, and submitted-to-UW dates.
+const STAGE_FILTERS: Record<CrucialFieldStage, string> = {
+  universal:  `current_loan_status IS NOT NULL
+               AND current_loan_status NOT ILIKE '%closed for incompleteness%'`,
+  originated: `(current_loan_status ILIKE '%originated%'
+                OR current_loan_status ILIKE '%funded%'
+                OR current_loan_status ILIKE '%purchased%')`,
+  processing: `current_loan_status IS NOT NULL
+               AND current_loan_status != 'Active Loan'
+               AND current_loan_status NOT ILIKE '%closed for incompleteness%'`,
+};
+
+const CRUCIAL_FIELDS: CrucialFieldDef[] = [
+  // ── Universal: expected on every loan ──────────────────────────────────────
+  { name: "Loan Number",        column: "loan_number",        priority: 1,  stage: "universal" },
+  { name: "Loan Officer",       column: "loan_officer",       priority: 2,  stage: "universal" },
+  { name: "Branch",             column: "branch",             priority: 3,  stage: "universal" },
+  { name: "Loan Amount",        column: "loan_amount",        priority: 4,  stage: "universal" },
+  { name: "Loan Source",        column: "loan_source",        priority: 5,  stage: "universal" },
+  { name: "Current Status Date",column: "current_status_date",priority: 6,  stage: "universal" },
+  // application_date / started_date: exclude "File Closed for incompleteness" —
+  // these loans were closed before a formal application was ever submitted.
+  { name: "Application Date",   column: "application_date",   priority: 7,  stage: "universal",
+    applicableFilter: `current_loan_status IS NOT NULL AND current_loan_status NOT ILIKE '%closed for incompleteness%'` },
+  { name: "Started Date",       column: "started_date",       priority: 8,  stage: "universal",
+    applicableFilter: `current_loan_status IS NOT NULL AND current_loan_status NOT ILIKE '%closed for incompleteness%'` },
+
+  // ── Originated / Funded: only meaningful once a loan closes ────────────────
+  { name: "Closing Date",          column: "closing_date",          priority: 10, stage: "originated" },
+  { name: "Funding Date",          column: "funding_date",          priority: 11, stage: "originated" },
+  { name: "CTC Date",              column: "ctc_date",              priority: 12, stage: "originated" },
+  { name: "Shipped Date",          column: "shipped_date",          priority: 13, stage: "originated" },
+  { name: "Investor Purchase Date",column: "investor_purchase_date",priority: 14, stage: "originated",
+    applicableFilter: `(current_loan_status ILIKE '%purchased%')` },
+  { name: "Investor Status",       column: "investor_status",       priority: 15, stage: "originated" },
+
+  // ── Processing / Underwriting: expected after a loan progresses past Active ─
+  // processor: scoped to non-active, non-incomplete loans — loans that are
+  // actually being worked. A withdrawn app or closed-for-incompleteness loan
+  // never needed a processor assigned.
+  { name: "Processor",                     column: "processor",                     priority: 16, stage: "processing",
+    applicableFilter: `current_loan_status IS NOT NULL
+                       AND current_loan_status != 'Active Loan'
+                       AND current_loan_status NOT ILIKE '%closed for incompleteness%'` },
+  { name: "Underwriter",                   column: "underwriter",                   priority: 17, stage: "processing",
+    applicableFilter: `(current_loan_status ILIKE '%originated%'
+                        OR current_loan_status ILIKE '%funded%'
+                        OR current_loan_status ILIKE '%purchased%'
+                        OR current_loan_status ILIKE '%approved%'
+                        OR current_loan_status ILIKE '%denied%'
+                        OR current_loan_status ILIKE '%withdrawn%')` },
+  // closer: only check on loans that actually reached the approval/closing stage
+  { name: "Closer",                        column: "closer",                        priority: 18, stage: "processing",
+    applicableFilter: `(current_loan_status ILIKE '%originated%'
+                        OR current_loan_status ILIKE '%funded%'
+                        OR current_loan_status ILIKE '%purchased%'
+                        OR current_loan_status ILIKE '%approved%')` },
+  { name: "Account Executive",             column: "account_executive",             priority: 19, stage: "processing" },
+  { name: "Credit Pull Date",              column: "credit_pull_date",              priority: 20, stage: "processing" },
+  { name: "Submitted To Processing Date",  column: "submitted_to_processing_date",  priority: 21, stage: "processing",
+    applicableFilter: `current_loan_status IS NOT NULL
+                       AND current_loan_status != 'Active Loan'
+                       AND current_loan_status NOT ILIKE '%closed for incompleteness%'` },
+  { name: "Submitted To Underwriting Date",column: "submitted_to_underwriting_date",priority: 22, stage: "processing",
+    applicableFilter: `(current_loan_status ILIKE '%originated%'
+                        OR current_loan_status ILIKE '%funded%'
+                        OR current_loan_status ILIKE '%purchased%'
+                        OR current_loan_status ILIKE '%approved%'
+                        OR current_loan_status ILIKE '%denied%'
+                        OR current_loan_status ILIKE '%withdrawn%')` },
+  { name: "Conditional Approval Date",     column: "conditional_approval_date",     priority: 22, stage: "processing",
+    applicableFilter: `(current_loan_status ILIKE '%approved%'
+                        OR current_loan_status ILIKE '%originated%'
+                        OR current_loan_status ILIKE '%funded%'
+                        OR current_loan_status ILIKE '%purchased%')` },
+  { name: "UW Approval Date",              column: "uw_approval_date",              priority: 23, stage: "processing",
+    applicableFilter: `(current_loan_status ILIKE '%approved%'
+                        OR current_loan_status ILIKE '%originated%'
+                        OR current_loan_status ILIKE '%funded%'
+                        OR current_loan_status ILIKE '%purchased%')` },
+  { name: "UW Final Approval Date",        column: "uw_final_approval_date",        priority: 24, stage: "processing",
+    applicableFilter: `(current_loan_status ILIKE '%approved%'
+                        OR current_loan_status ILIKE '%originated%'
+                        OR current_loan_status ILIKE '%funded%'
+                        OR current_loan_status ILIKE '%purchased%')` },
+  { name: "UW Denied Date",                column: "uw_denied_date",                priority: 25, stage: "processing",
+    applicableFilter: `(current_loan_status ILIKE '%denied%' OR current_loan_status ILIKE '%declined%')` },
+  { name: "Loan Estimate Sent Date",        column: "loan_estimate_sent_date",       priority: 26, stage: "processing" },
+  { name: "Estimated Closing Date",         column: "estimated_closing_date",        priority: 27, stage: "processing",
+    applicableFilter: `current_loan_status = 'Active Loan'` },
+  { name: "Resubmittal Date",               column: "resubmittal_date",              priority: 28, stage: "processing" },
+  { name: "Rate Lock Buy Side Base Price Rate", column: "rate_lock_buy_side_base_price_rate", priority: 29, stage: "processing" },
 ];
 
 /**
@@ -557,14 +612,14 @@ const DATA_QUALITY_TESTS: DataQualityTest[] = [
     id: "trid_missing_estimated_value",
     name: "TRID: Missing Estimated Property Value",
     description:
-      "Estimated property value is one of the 6 TRID trigger items required for application",
+      "Both appraised value and sales price are missing — at least one is required as the TRID 'estimated property value' trigger item",
     severity: "warning",
     group: "Application Tests",
     field: "appraised_value",
     sqlCondition: `(appraised_value IS NULL OR appraised_value <= 0)
                    AND (sales_price IS NULL OR sales_price <= 0)
                    AND application_date IS NOT NULL`,
-    requiredColumns: ["appraised_value", "application_date"],
+    requiredColumns: ["appraised_value", "sales_price", "application_date"],
   },
   {
     id: "trid_missing_loan_amount",
@@ -729,7 +784,9 @@ const DATA_QUALITY_TESTS: DataQualityTest[] = [
 
 /**
  * GET /api/data-quality/crucial-fields-status
- * Get population status for crucial fields
+ * Returns field population health grouped by lifecycle stage.
+ * Each field is measured against its applicable loan subset (not the whole portfolio),
+ * so stage-gated fields like funding_date are only checked on originated/funded loans.
  */
 router.get(
   "/crucial-fields-status",
@@ -740,82 +797,132 @@ router.get(
     try {
       const tenantPool = getTenantContext(req).tenantPool;
 
-      // Get total loan count
-      const countResult = await tenantPool.query(
-        "SELECT COUNT(*) as total FROM loans"
+      // Check which columns exist in the loans table
+      const columnsResult = await tenantPool.query(`
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'loans'
+      `);
+      const existingColumns = new Set(
+        columnsResult.rows.map((r: { column_name: string }) => r.column_name)
       );
-      const totalLoans = parseInt(countResult.rows[0]?.total || "0");
 
-      if (totalLoans === 0) {
+      // Get applicable loan counts for each stage group denominator
+      const stageCountResults = await tenantPool.query(`
+        SELECT
+          COUNT(*) AS total,
+          COUNT(*) FILTER (WHERE ${STAGE_FILTERS.originated}) AS originated,
+          COUNT(*) FILTER (WHERE ${STAGE_FILTERS.processing}) AS processing
+        FROM loans
+        WHERE current_loan_status IS NOT NULL
+      `);
+      const row = stageCountResults.rows[0] || {};
+      const stageCounts: Record<CrucialFieldStage, number> = {
+        universal:  parseInt(row.total      || "0"),
+        originated: parseInt(row.originated || "0"),
+        processing: parseInt(row.processing || "0"),
+      };
+
+      if (stageCounts.universal === 0) {
         return res.json({
           success: true,
-          crucialFields: [],
+          stageGroups: {
+            universal:  { label: "Universal Fields",             applicableLoanCount: 0, fields: [] },
+            originated: { label: "Originated / Funded Fields",   applicableLoanCount: 0, fields: [] },
+            processing: { label: "Processing / Underwriting Fields", applicableLoanCount: 0, fields: [] },
+          },
           totalLoans: 0,
         });
       }
 
-      // Check which columns actually exist in the loans table
-      const columnsResult = await tenantPool.query(`
-      SELECT column_name 
-      FROM information_schema.columns 
-      WHERE table_schema = 'public' AND table_name = 'loans'
-    `);
-      const existingColumns = new Set(
-        columnsResult.rows.map((r) => r.column_name)
-      );
-
-      // Build queries for each crucial field that exists
-      const crucialFieldsStatus = [];
+      // Build per-field results grouped by stage
+      const groupedFields: Record<CrucialFieldStage, object[]> = {
+        universal:  [],
+        originated: [],
+        processing: [],
+      };
 
       for (const field of CRUCIAL_FIELDS) {
-        if (existingColumns.has(field.column)) {
-          const populatedResult = await tenantPool.query(`
-          SELECT COUNT(*) as populated 
-          FROM loans 
-          WHERE ${field.column} IS NOT NULL 
-            AND TRIM(CAST(${field.column} AS TEXT)) != ''
-            AND CAST(${field.column} AS TEXT) NOT IN ('99-Missing', 'No Data', 'No Branch Found')
+        const whereFilter = field.applicableFilter ?? STAGE_FILTERS[field.stage];
+        const applicableLoanCount = field.applicableFilter
+          ? (() => {
+              // Will be filled by a per-field query below
+              return -1;
+            })()
+          : stageCounts[field.stage];
+
+        if (!existingColumns.has(field.column)) {
+          // Column missing from schema entirely
+          const applicableCount = field.applicableFilter
+            ? 0
+            : stageCounts[field.stage];
+          groupedFields[field.stage].push({
+            name: field.name,
+            column: field.column,
+            priority: field.priority,
+            applicableLoanCount: applicableCount,
+            populatedCount: 0,
+            missingCount: applicableCount,
+            populationRate: 0,
+            status: "critical",
+            columnMissing: true,
+          });
+          continue;
+        }
+
+        // Query: applicable count + populated count in a single pass
+        const result = await tenantPool.query(`
+          SELECT
+            COUNT(*) AS applicable,
+            COUNT(*) FILTER (
+              WHERE ${field.column} IS NOT NULL
+                AND TRIM(CAST(${field.column} AS TEXT)) != ''
+                AND CAST(${field.column} AS TEXT) NOT IN ('99-Missing', 'No Data', 'No Branch Found')
+            ) AS populated
+          FROM loans
+          WHERE ${whereFilter}
         `);
 
-          const populatedCount = parseInt(
-            populatedResult.rows[0]?.populated || "0"
-          );
-          const populationRate =
-            totalLoans > 0 ? (populatedCount / totalLoans) * 100 : 0;
+        const applicable  = parseInt(result.rows[0]?.applicable || "0");
+        const populated   = parseInt(result.rows[0]?.populated  || "0");
+        const missing     = applicable - populated;
+        const rate        = applicable > 0 ? (populated / applicable) * 100 : 0;
 
-          crucialFieldsStatus.push({
-            name: field.name,
-            column: field.column,
-            priority: field.priority,
-            populationRate: Math.round(populationRate * 10) / 10,
-            populatedCount,
-            totalCount: totalLoans,
-            status:
-              populationRate >= 80
-                ? "good"
-                : populationRate >= 50
-                ? "warning"
-                : "critical",
-          });
-        } else {
-          // Column doesn't exist
-          crucialFieldsStatus.push({
-            name: field.name,
-            column: field.column,
-            priority: field.priority,
-            populationRate: 0,
-            populatedCount: 0,
-            totalCount: totalLoans,
-            status: "critical",
-            missing: true,
-          });
-        }
+        groupedFields[field.stage].push({
+          name: field.name,
+          column: field.column,
+          priority: field.priority,
+          applicableLoanCount: applicable,
+          populatedCount: populated,
+          missingCount: missing,
+          populationRate: Math.round(rate * 10) / 10,
+          status: rate >= 95 ? "good" : rate >= 70 ? "warning" : "critical",
+        });
       }
 
       res.json({
         success: true,
-        crucialFields: crucialFieldsStatus,
-        totalLoans,
+        stageGroups: {
+          universal: {
+            label: "Universal Fields",
+            description: "Required on every loan regardless of status or outcome",
+            applicableLoanCount: stageCounts.universal,
+            fields: groupedFields.universal,
+          },
+          originated: {
+            label: "Originated / Funded Fields",
+            description: "Only expected once a loan successfully closes or funds",
+            applicableLoanCount: stageCounts.originated,
+            fields: groupedFields.originated,
+          },
+          processing: {
+            label: "Processing & Underwriting Fields",
+            description: "Expected as loans progress beyond the initial active stage",
+            applicableLoanCount: stageCounts.processing,
+            fields: groupedFields.processing,
+          },
+        },
+        totalLoans: stageCounts.universal,
       });
     } catch (error: unknown) {
       logError("Error fetching crucial fields status", { error });
@@ -1485,7 +1592,11 @@ router.get(
           "occupancy_type",
           "lien_position",
           "current_loan_status",
-          "loan_amount"
+          "loan_amount",
+          // Include both value fields so the TRID estimated-value check is self-explanatory:
+          // the warning fires when BOTH appraised_value AND sales_price are NULL/zero.
+          "appraised_value",
+          "sales_price"
         );
       }
 
@@ -1744,6 +1855,255 @@ router.get(
     } catch (error: unknown) {
       logError("Error fetching data quality metrics", { error });
       res.status(500).json({ error: "Failed to fetch data quality metrics" });
+    }
+  }
+);
+
+/**
+ * GET /api/data-quality/field-missing-loans
+ * Returns loans where a given crucial field is NULL or blank.
+ * Only loans within the field's applicable stage filter are included.
+ * Supports search, sort (by column name), and pagination.
+ */
+router.get(
+  "/field-missing-loans",
+  authenticateToken,
+  attachTenantContext,
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const {
+        field: fieldColumn,
+        search = "",
+        limit = "100",
+        offset = "0",
+        sort = "application_date",
+        sortDir = "desc",
+      } = req.query as Record<string, string>;
+
+      if (!fieldColumn) {
+        return res.status(400).json({ error: "field query parameter is required" });
+      }
+
+      const tenantPool = getTenantContext(req).tenantPool;
+
+      // Validate the column actually exists to prevent SQL injection
+      const colCheckResult = await tenantPool.query<{ column_name: string }>(
+        `SELECT column_name FROM information_schema.columns
+         WHERE table_schema = 'public' AND table_name = 'loans' AND column_name = $1`,
+        [fieldColumn]
+      );
+      if (colCheckResult.rows.length === 0) {
+        return res.status(400).json({ error: `Unknown column: ${fieldColumn}` });
+      }
+
+      // Look up CRUCIAL_FIELDS definition if available (provides stage filter context)
+      const fieldDef = CRUCIAL_FIELDS.find((f) => f.column === fieldColumn);
+
+      // Allowed columns for both display and sort — prevents SQL injection
+      const CONTEXT_COLUMNS = [
+        "loan_id",
+        "loan_number",
+        "current_loan_status",
+        "loan_officer",
+        "processor",
+        "underwriter",
+        "closer",
+        "branch",
+        "loan_amount",
+        "application_date",
+        "started_date",
+        "closing_date",
+        "funding_date",
+        "current_status_date",
+      ];
+
+      // Check which context columns actually exist
+      const columnsResult = await tenantPool.query(`
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'loans'
+      `);
+      const existingColumns = new Set(
+        columnsResult.rows.map((r: { column_name: string }) => r.column_name)
+      );
+
+      // Include the target field in the output so the user can see its raw value (should be NULL)
+      const displayColumns = [
+        ...CONTEXT_COLUMNS,
+        ...(CONTEXT_COLUMNS.includes(fieldColumn) ? [] : [fieldColumn]),
+      ].filter((c) => existingColumns.has(c));
+
+      // WHERE: only applicable loans, AND the field is missing
+      // If the field is not in CRUCIAL_FIELDS, default to all loans (no stage filter)
+      const stageFilter = fieldDef
+        ? (fieldDef.applicableFilter ?? STAGE_FILTERS[fieldDef.stage])
+        : "TRUE";
+      const missingCondition = `(
+        ${fieldColumn} IS NULL
+        OR TRIM(CAST(${fieldColumn} AS TEXT)) = ''
+        OR CAST(${fieldColumn} AS TEXT) IN ('99-Missing', 'No Data', 'No Branch Found')
+      )`;
+
+      // Search condition
+      const searchTerm = (search as string).trim().toLowerCase();
+      const searchableFields = [
+        "loan_number", "loan_officer", "processor", "underwriter", "closer", "branch",
+      ].filter((c) => existingColumns.has(c));
+
+      let searchCondition = "";
+      const searchParams: string[] = [];
+      let paramIndex = 1;
+
+      if (searchTerm && searchableFields.length > 0) {
+        const clauses = searchableFields.map((f) => {
+          searchParams.push(`%${searchTerm}%`);
+          return `LOWER(CAST(${f} AS TEXT)) LIKE $${paramIndex++}`;
+        });
+        searchCondition = ` AND (${clauses.join(" OR ")})`;
+      }
+
+      // Validate sort column
+      const safeSort = displayColumns.includes(sort) ? sort : "application_date";
+      const safeSortDir = sortDir === "asc" ? "ASC" : "DESC";
+
+      const baseWhere = `(${stageFilter}) AND ${missingCondition}`;
+
+      // Total applicable + missing (ignoring search)
+      const totalResult = await tenantPool.query(
+        `SELECT COUNT(*) AS cnt FROM loans WHERE ${baseWhere}`
+      );
+      const totalCount = parseInt(totalResult.rows[0]?.cnt || "0");
+
+      // Filtered count (with search)
+      let filteredCount = totalCount;
+      if (searchTerm && searchCondition) {
+        const filteredResult = await tenantPool.query(
+          `SELECT COUNT(*) AS cnt FROM loans WHERE ${baseWhere}${searchCondition}`,
+          searchParams
+        );
+        filteredCount = parseInt(filteredResult.rows[0]?.cnt || "0");
+      }
+
+      // Paginated rows
+      const queryParams = [
+        ...searchParams,
+        parseInt(limit),
+        parseInt(offset),
+      ];
+      const loansResult = await tenantPool.query(
+        `SELECT ${displayColumns.join(", ")}
+         FROM loans
+         WHERE ${baseWhere}${searchCondition}
+         ORDER BY ${safeSort} ${safeSortDir} NULLS LAST, loan_number ASC NULLS LAST
+         LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+        queryParams
+      );
+
+      const loans = loansResult.rows.map((loan: Record<string, unknown>) => {
+        const formatted: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(loan)) {
+          formatted[key] = value instanceof Date
+            ? value.toISOString().split("T")[0]
+            : value;
+        }
+        return formatted;
+      });
+
+      res.json({
+        success: true,
+        fieldName: fieldDef?.name ?? fieldColumn.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+        fieldColumn,
+        stage: fieldDef?.stage ?? "universal",
+        totalCount,
+        filteredCount,
+        fields: displayColumns,
+        highlightField: fieldColumn,
+        loans,
+      });
+    } catch (error: unknown) {
+      logError("Error fetching field missing loans", { error });
+      res.status(500).json({ error: "Failed to fetch field missing loans" });
+    }
+  }
+);
+
+/**
+ * GET /api/data-quality/all-fields-coverage
+ *
+ * Returns population stats for EVERY column in the loans table in a single
+ * aggregate query (no loop of 296 individual queries).
+ * Response shape:
+ *   { totalLoans, fields: [{ column, populatedCount, missingCount }] }
+ */
+router.get(
+  "/all-fields-coverage",
+  authenticateToken,
+  attachTenantContext,
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantPool = getTenantContext(req).tenantPool;
+
+      // 1. Discover every column in the loans table
+      const colResult = await tenantPool.query<{ column_name: string; data_type: string }>(`
+        SELECT column_name, data_type
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'loans'
+        ORDER BY column_name
+      `);
+
+      if (colResult.rows.length === 0) {
+        return res.json({ success: true, totalLoans: 0, fields: [] });
+      }
+
+      const totalResult = await tenantPool.query<{ total: string }>(
+        "SELECT COUNT(*) AS total FROM loans"
+      );
+      const totalLoans = parseInt(totalResult.rows[0]?.total ?? "0");
+
+      if (totalLoans === 0) {
+        return res.json({ success: true, totalLoans: 0, fields: [] });
+      }
+
+      // 2. Build a single aggregate SELECT:
+      //    COUNT(*) FILTER (WHERE col IS NOT NULL AND …) AS "col"
+      //    for every column, in one round-trip.
+      const BLANK_VALUES = `('', '99-Missing', 'No Data', 'No Branch Found', 'N/A', 'NA')`;
+      const textCols = new Set(["text", "character varying", "varchar", "char", "bpchar"]);
+
+      const selectParts = colResult.rows.map((r) => {
+        const col = `"${r.column_name}"`;
+        if (textCols.has(r.data_type)) {
+          // For text columns also strip blank / sentinel values
+          return `COUNT(*) FILTER (
+            WHERE ${col} IS NOT NULL
+              AND TRIM(${col}) != ''
+              AND TRIM(${col}) NOT IN ${BLANK_VALUES}
+          ) AS "${r.column_name}"`;
+        }
+        // For numeric / date / boolean columns NULL is the only missing signal
+        return `COUNT(*) FILTER (WHERE ${col} IS NOT NULL) AS "${r.column_name}"`;
+      });
+
+      const aggQuery = `SELECT ${selectParts.join(",\n")} FROM loans`;
+      const aggResult = await tenantPool.query(aggQuery);
+      const counts = aggResult.rows[0] ?? {};
+
+      const fields = colResult.rows.map((r) => {
+        const populated = parseInt(String(counts[r.column_name] ?? "0"));
+        return {
+          column: r.column_name,
+          dataType: r.data_type,
+          populatedCount: populated,
+          missingCount: totalLoans - populated,
+        };
+      });
+
+      res.json({ success: true, totalLoans, fields });
+    } catch (error: unknown) {
+      logError("Error fetching all-fields coverage", { error });
+      res.status(500).json({ error: "Failed to fetch all-fields coverage" });
     }
   }
 );
