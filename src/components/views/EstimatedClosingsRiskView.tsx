@@ -1,8 +1,15 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
+import { computePresetDateRange, getPeriodPresetMeta, type PeriodPreset } from "@/components/ui/DatePeriodPicker";
 import {
   Bar,
   BarChart,
@@ -15,12 +22,33 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Info } from "lucide-react";
+import { Info, Filter, X } from "lucide-react";
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 import {
+  type EstimatedClosingsComplexityBucketKey,
   type EstimatedClosingsDateRangeType,
+  type EstimatedClosingsEcdSliceKey,
   useEstimatedClosingsRiskData,
 } from "@/hooks/useEstimatedClosingsRiskData";
+import {
+  ESTIMATED_CLOSINGS_DETAIL_COLUMNS,
+  ESTIMATED_CLOSINGS_DETAIL_COLUMN_BY_ID,
+  type EstimatedClosingsDetailColumnDefMini,
+} from "@/config/estimatedClosingsDetailColumns";
+import { cn } from "@/lib/utils";
+import {
+  EMPTY_FILTER_TOKEN,
+  isFilterActive,
+  normalizeFilterState,
+  type ColumnFilterState,
+  type LoanDetailFilterKind,
+  type NumericFilterMode,
+  valueMatchesColumnFilter,
+} from "@/utils/loanDetailFilters";
+import {
+  normalizeEstimatedClosingsRiskViewState,
+  useEstimatedClosingsRiskViewState,
+} from "@/hooks/useEstimatedClosingsRiskViewState";
 
 interface EstimatedClosingsRiskViewProps {
   selectedTenantId?: string | null;
@@ -31,13 +59,16 @@ type SortDirection = "asc" | "desc";
 type SortConfig = { key: string; direction: SortDirection };
 
 const PIE_COLORS = ["#94a3b8", "#ef4444", "#3b82f6", "#10b981"];
+const LOAN_NUMBER_FILTER_MAX_OPTIONS = 200;
+/** Detail table page size for GET estimated-closings-risk (reduces payload and query cost). */
+const DETAIL_TABLE_PAGE_SIZE = 250;
 const KPI_DESCRIPTIONS: Record<string, string> = {
   totalActivePipeline:
     "Count of active loans using the canonical site definition: Active Loan status, application date present, and not archived.",
   ecdEmptyOrAfterThisMonth:
     "Active and unfunded loans where ECD is blank or after month-end. This mirrors the Qlik expression using date fields.",
   remainingToFund:
-    "Active and unfunded loans with estimated closing date in the current month and not already past today.",
+    "Same cohort as the pie chart: canonical active pipeline (application date present, not archived), unfunded, estimated closing date on any day in the current calendar month.",
   fundedThisMonth:
     "Loans with a funding date in the current calendar month.",
   maxPossibleFunding:
@@ -72,7 +103,6 @@ function KpiLabel({ label, description }: { label: string; description: string }
   );
 }
 
-/** Previous calendar month label, e.g. 2026-Feb (matches backend prev_month window). */
 function formatPrevMonthYearMon(reference: Date = new Date()): string {
   const d = new Date(reference.getFullYear(), reference.getMonth() - 1, 1);
   const y = d.getFullYear();
@@ -97,6 +127,19 @@ function toNumberOrNull(value: unknown): number | null {
   return Number.isNaN(n) ? null : n;
 }
 
+function averageNonZero(rows: Record<string, unknown>[], key: string): number | null {
+  let sum = 0;
+  let n = 0;
+  for (const row of rows) {
+    const v = toNumberOrNull(row[key]);
+    if (v != null && v !== 0) {
+      sum += v;
+      n += 1;
+    }
+  }
+  return n > 0 ? sum / n : null;
+}
+
 function formatBooleanish(value: unknown): string {
   if (value == null) return "";
   if (typeof value === "boolean") return value ? "Yes" : "No";
@@ -106,19 +149,243 @@ function formatBooleanish(value: unknown): string {
   return String(value);
 }
 
+function getDetailRaw(row: Record<string, unknown>, columnId: string): unknown {
+  return row[columnId];
+}
+
+function getCellToken(columnId: string, raw: unknown): string {
+  if (raw == null || String(raw).trim() === "" || String(raw) === "-") return EMPTY_FILTER_TOKEN;
+  if (columnId === "borrowerSelfEmployed") {
+    return formatBooleanish(raw).toLowerCase() === "yes" ? "yes" : "no";
+  }
+  return String(raw).trim();
+}
+
+function cloneFilter(filter: ColumnFilterState[string]): ColumnFilterState[string] | undefined {
+  if (!filter) return undefined;
+  if (filter.kind === "text") return { kind: "text", selectedValues: [...filter.selectedValues] };
+  if (filter.kind === "number") {
+    return {
+      kind: "number",
+      mode: filter.mode,
+      selectedValues: [...filter.selectedValues],
+      min: filter.min,
+      max: filter.max,
+      value: filter.value,
+    };
+  }
+  if (filter.kind === "date") return { kind: "date", from: filter.from, to: filter.to, shortcut: filter.shortcut };
+  return { kind: "boolean", value: filter.value };
+}
+
 export function EstimatedClosingsRiskView({
   selectedTenantId,
   selectedChannel,
 }: EstimatedClosingsRiskViewProps) {
+  const persistedViewState = useEstimatedClosingsRiskViewState({ tenantId: selectedTenantId });
+  const isPersistenceEnabled = Boolean(selectedTenantId && persistedViewState.preferenceKey);
+  const hydratedPreferenceKeyRef = useRef<string | null>(null);
+
   const [dateRangeType, setDateRangeType] = useState<EstimatedClosingsDateRangeType>("calendar_days");
   const [complexitySort, setComplexitySort] = useState<SortConfig>({ key: "sortOrder", direction: "asc" });
   const [stageSort, setStageSort] = useState<SortConfig>({ key: "sortOrder", direction: "asc" });
   const [detailSort, setDetailSort] = useState<SortConfig>({ key: "loanNumber", direction: "asc" });
+
+  const [ecdSlice, setEcdSlice] = useState<EstimatedClosingsEcdSliceKey | null>(null);
+  const [complexityBarBucket, setComplexityBarBucket] = useState<EstimatedClosingsComplexityBucketKey | null>(null);
+  const [remainingComplexityGroup, setRemainingComplexityGroup] = useState<string | null>(null);
+  const [remainingProcessingStage, setRemainingProcessingStage] = useState<string | null>(null);
+  const [detailColumnFilters, setDetailColumnFilters] = useState<ColumnFilterState>({});
+  const [showDetailColumnFilters, setShowDetailColumnFilters] = useState(false);
+  const [draftDetailFilters, setDraftDetailFilters] = useState<ColumnFilterState>({});
+  const [openDetailFilterColumnId, setOpenDetailFilterColumnId] = useState<string | null>(null);
+  const [detailTableOffset, setDetailTableOffset] = useState(0);
+  const [filterSearchByColumn, setFilterSearchByColumn] = useState<Record<string, string>>({});
+  const [debouncedFilterSearchByColumn, setDebouncedFilterSearchByColumn] = useState<Record<string, string>>({});
+  const searchDebounceTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const [detailDistinctCache, setDetailDistinctCache] = useState<
+    Record<string, { values: string[]; hasBlank: boolean; version: number }>
+  >({});
+  const detailDistinctCacheRef = useRef(detailDistinctCache);
+  useEffect(() => {
+    detailDistinctCacheRef.current = detailDistinctCache;
+  }, [detailDistinctCache]);
+  const detailRowsVersionRef = useRef(0);
+
+  const draftDetailFiltersRef = useRef(draftDetailFilters);
+  draftDetailFiltersRef.current = draftDetailFilters;
+
+  const pageSliceFilters = useMemo(
+    () => ({
+      ecdSlice,
+      complexityBarBucket,
+      remainingComplexityGroup,
+      remainingProcessingStage,
+    }),
+    [ecdSlice, complexityBarBucket, remainingComplexityGroup, remainingProcessingStage],
+  );
+
+  const detailColumnFiltersKey = useMemo(
+    () => JSON.stringify(normalizeFilterState(detailColumnFilters)),
+    [detailColumnFilters],
+  );
+
+  useEffect(() => {
+    setDetailTableOffset(0);
+  }, [
+    selectedTenantId,
+    ecdSlice,
+    complexityBarBucket,
+    remainingComplexityGroup,
+    remainingProcessingStage,
+    detailColumnFiltersKey,
+    dateRangeType,
+    selectedChannel,
+  ]);
+
   const { data, loading, error } = useEstimatedClosingsRiskData({
     tenantId: selectedTenantId,
     channelGroup: selectedChannel,
     dateRangeType,
+    limit: DETAIL_TABLE_PAGE_SIZE,
+    offset: detailTableOffset,
+    pageSliceFilters,
+    detailColumnFilters,
   });
+
+  useEffect(() => {
+    if (!isPersistenceEnabled || !persistedViewState.preferenceKey) {
+      hydratedPreferenceKeyRef.current = null;
+      return;
+    }
+    if (hydratedPreferenceKeyRef.current === persistedViewState.preferenceKey) return;
+
+    setDateRangeType("calendar_days");
+    setEcdSlice(null);
+    setComplexityBarBucket(null);
+    setRemainingComplexityGroup(null);
+    setRemainingProcessingStage(null);
+    setDetailColumnFilters({});
+    setDraftDetailFilters({});
+    setOpenDetailFilterColumnId(null);
+    setShowDetailColumnFilters(false);
+    setDetailSort({ key: "loanNumber", direction: "asc" });
+    setComplexitySort({ key: "sortOrder", direction: "asc" });
+    setStageSort({ key: "sortOrder", direction: "asc" });
+
+    let cancelled = false;
+    void persistedViewState
+      .load()
+      .then((loaded) => {
+        if (cancelled) return;
+        if (loaded) {
+          setDateRangeType(loaded.dateRangeType);
+          setEcdSlice(loaded.ecdSlice);
+          setComplexityBarBucket(loaded.complexityBarBucket);
+          setRemainingComplexityGroup(loaded.remainingComplexityGroup);
+          setRemainingProcessingStage(loaded.remainingProcessingStage);
+          setDetailColumnFilters(normalizeFilterState(loaded.detailColumnFilters));
+          setDraftDetailFilters({});
+          setShowDetailColumnFilters(loaded.showDetailColumnFilters);
+          setDetailSort(loaded.detailSort);
+          setComplexitySort(loaded.complexitySort);
+          setStageSort(loaded.stageSort);
+        }
+        hydratedPreferenceKeyRef.current = persistedViewState.preferenceKey;
+      })
+      .catch(() => {
+        if (!cancelled) hydratedPreferenceKeyRef.current = persistedViewState.preferenceKey;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isPersistenceEnabled, persistedViewState.preferenceKey, persistedViewState.load]);
+
+  const savePersistedViewState = useCallback(async () => {
+    if (!isPersistenceEnabled) return;
+    const payload = normalizeEstimatedClosingsRiskViewState({
+      version: 1,
+      dateRangeType,
+      ecdSlice,
+      complexityBarBucket,
+      remainingComplexityGroup,
+      remainingProcessingStage,
+      detailColumnFilters: normalizeFilterState(detailColumnFilters),
+      showDetailColumnFilters,
+      detailSort,
+      complexitySort,
+      stageSort,
+    });
+    await persistedViewState.save(payload);
+  }, [
+    isPersistenceEnabled,
+    dateRangeType,
+    ecdSlice,
+    complexityBarBucket,
+    remainingComplexityGroup,
+    remainingProcessingStage,
+    detailColumnFilters,
+    showDetailColumnFilters,
+    detailSort,
+    complexitySort,
+    stageSort,
+    persistedViewState,
+  ]);
+
+  useEffect(() => {
+    if (!isPersistenceEnabled) return;
+    if (!persistedViewState.preferenceKey) return;
+    if (persistedViewState.isLoading) return;
+    if (hydratedPreferenceKeyRef.current !== persistedViewState.preferenceKey) return;
+    const t = window.setTimeout(() => {
+      void savePersistedViewState();
+    }, 400);
+    return () => window.clearTimeout(t);
+  }, [
+    isPersistenceEnabled,
+    persistedViewState.preferenceKey,
+    persistedViewState.isLoading,
+    savePersistedViewState,
+  ]);
+
+  useEffect(() => {
+    detailRowsVersionRef.current += 1;
+    setDetailDistinctCache({});
+  }, [data?.detail.rows]);
+
+  useEffect(() => {
+    if (!openDetailFilterColumnId) return;
+    const col = ESTIMATED_CLOSINGS_DETAIL_COLUMN_BY_ID[openDetailFilterColumnId];
+    if (!col || col.kind === "boolean" || col.kind === "date") return;
+
+    const version = detailRowsVersionRef.current;
+    const cached = detailDistinctCacheRef.current[openDetailFilterColumnId];
+    if (cached && cached.version === version) return;
+
+    const rows = (data?.detail.rows ?? []) as Record<string, unknown>[];
+    const vals = new Set<string>();
+    let hasBlank = false;
+    for (const row of rows) {
+      const raw = getDetailRaw(row, openDetailFilterColumnId);
+      if (raw == null || String(raw).trim() === "" || String(raw) === "-") {
+        hasBlank = true;
+        continue;
+      }
+      vals.add(String(raw).trim());
+    }
+    const sorted = [...vals].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    setDetailDistinctCache((prev) => ({
+      ...prev,
+      [openDetailFilterColumnId]: { values: sorted, hasBlank, version },
+    }));
+  }, [openDetailFilterColumnId, data?.detail.rows]);
+
+  useEffect(() => {
+    return () => {
+      const timers = searchDebounceTimersRef.current;
+      for (const t of Object.values(timers)) clearTimeout(t);
+    };
+  }, []);
 
   const kpis = data?.kpis;
   const complexityBars = data?.maxPossibleFundingByComplexity ?? [];
@@ -127,18 +394,165 @@ export function EstimatedClosingsRiskView({
   const prevMonthUnitsDescription = `Loans funded in ${prevMonthYearMon} (funding date in that calendar month).`;
   const prevMonthVolumeDescription = `Sum of loan amount for loans funded in ${prevMonthYearMon} (funding date in that calendar month).`;
 
+  const toggleEcdSlice = useCallback((key: EstimatedClosingsEcdSliceKey) => {
+    setEcdSlice((prev) => (prev === key ? null : key));
+  }, []);
+
+  const toggleComplexityBucket = useCallback((key: EstimatedClosingsComplexityBucketKey) => {
+    setComplexityBarBucket((prev) => (prev === key ? null : key));
+  }, []);
+
+  const toggleRemainingComplexityGroup = useCallback((group: string) => {
+    setRemainingComplexityGroup((prev) => (prev === group ? null : group));
+  }, []);
+
+  const toggleRemainingProcessingStage = useCallback((stage: string) => {
+    setRemainingProcessingStage((prev) => (prev === stage ? null : stage));
+  }, []);
+
+  const clearAllPageFilters = useCallback(() => {
+    setEcdSlice(null);
+    setComplexityBarBucket(null);
+    setRemainingComplexityGroup(null);
+    setRemainingProcessingStage(null);
+    setDetailTableOffset(0);
+    setDetailColumnFilters({});
+    setDraftDetailFilters({});
+    setOpenDetailFilterColumnId(null);
+    const timers = searchDebounceTimersRef.current;
+    for (const k of Object.keys(timers)) {
+      clearTimeout(timers[k]);
+      delete timers[k];
+    }
+    setFilterSearchByColumn({});
+    setDebouncedFilterSearchByColumn({});
+  }, []);
+
+  const hasAnyFilter =
+    ecdSlice != null ||
+    complexityBarBucket != null ||
+    remainingComplexityGroup != null ||
+    remainingProcessingStage != null ||
+    Object.values(detailColumnFilters).some((f) => isFilterActive(f));
+
+  const activeFilterChips = useMemo(() => {
+    const chips: Array<{ key: string; label: string; onRemove: () => void }> = [];
+    if (ecdSlice) {
+      const label = pieData.find((p) => p.key === ecdSlice)?.label ?? ecdSlice;
+      chips.push({ key: "ecd", label: `ECD: ${label}`, onRemove: () => setEcdSlice(null) });
+    }
+    if (complexityBarBucket) {
+      const label = complexityBars.find((b) => b.bucketKey === complexityBarBucket)?.bucketLabel ?? complexityBarBucket;
+      chips.push({
+        key: "bucket",
+        label: `Complexity bucket: ${label}`,
+        onRemove: () => setComplexityBarBucket(null),
+      });
+    }
+    if (remainingComplexityGroup) {
+      chips.push({
+        key: "rg",
+        label: `Complexity group: ${remainingComplexityGroup}`,
+        onRemove: () => setRemainingComplexityGroup(null),
+      });
+    }
+    if (remainingProcessingStage) {
+      chips.push({
+        key: "stage",
+        label: `Processing: ${remainingProcessingStage}`,
+        onRemove: () => setRemainingProcessingStage(null),
+      });
+    }
+    for (const col of ESTIMATED_CLOSINGS_DETAIL_COLUMNS) {
+      const filter = detailColumnFilters[col.id];
+      if (!isFilterActive(filter) || !filter) continue;
+      if (filter.kind === "text") {
+        for (const v of filter.selectedValues) {
+          chips.push({
+            key: `${col.id}:t:${v}`,
+            label: `${col.label}: ${v === EMPTY_FILTER_TOKEN ? "(Blank)" : v}`,
+            onRemove: () => {
+              setDetailColumnFilters((prev) => {
+                const cur = prev[col.id];
+                if (!cur || cur.kind !== "text") return prev;
+                const nv = cur.selectedValues.filter((x) => x !== v);
+                const next = { ...prev };
+                if (nv.length === 0) delete next[col.id];
+                else next[col.id] = { ...cur, selectedValues: nv };
+                return next;
+              });
+            },
+          });
+        }
+      } else if (filter.kind === "number" && filter.mode === "all") {
+        for (const v of filter.selectedValues) {
+          chips.push({
+            key: `${col.id}:n:${v}`,
+            label: `${col.label}: ${v === EMPTY_FILTER_TOKEN ? "(Blank)" : v}`,
+            onRemove: () => {
+              setDetailColumnFilters((prev) => {
+                const cur = prev[col.id];
+                if (!cur || cur.kind !== "number" || cur.mode !== "all") return prev;
+                const nv = cur.selectedValues.filter((x) => x !== v);
+                const next = { ...prev };
+                if (nv.length === 0) delete next[col.id];
+                else next[col.id] = { ...cur, selectedValues: nv };
+                return next;
+              });
+            },
+          });
+        }
+      } else if (filter.kind === "number") {
+        chips.push({
+          key: `${col.id}:nr`,
+          label: `${col.label}: ${filter.mode === "range" ? `${filter.min ?? ""}–${filter.max ?? ""}` : filter.value ?? ""}`,
+          onRemove: () =>
+            setDetailColumnFilters((prev) => {
+              const next = { ...prev };
+              delete next[col.id];
+              return next;
+            }),
+        });
+      } else if (filter.kind === "date") {
+        chips.push({
+          key: `${col.id}:d`,
+          label: `${col.label}: ${filter.shortcut?.trim() ? filter.shortcut : `${filter.from ?? ""} → ${filter.to ?? ""}`}`,
+          onRemove: () =>
+            setDetailColumnFilters((prev) => {
+              const next = { ...prev };
+              delete next[col.id];
+              return next;
+            }),
+        });
+      } else if (filter.kind === "boolean") {
+        chips.push({
+          key: `${col.id}:b`,
+          label: `${col.label}: ${filter.value}`,
+          onRemove: () =>
+            setDetailColumnFilters((prev) => {
+              const next = { ...prev };
+              delete next[col.id];
+              return next;
+            }),
+        });
+      }
+    }
+    return chips;
+  }, [
+    ecdSlice,
+    complexityBarBucket,
+    remainingComplexityGroup,
+    remainingProcessingStage,
+    detailColumnFilters,
+    pieData,
+    complexityBars,
+  ]);
+
   const complexityTotals = useMemo(() => {
     const rows = data?.remainingToFundByComplexity ?? [];
     const units = rows.reduce((sum, row) => sum + row.unitsRemainingToFund, 0);
     return { pooledFallout: data?.historicalFalloutPooled13Months ?? null, units };
   }, [data?.remainingToFundByComplexity, data?.historicalFalloutPooled13Months]);
-
-  const processingTotals = useMemo(
-    () => ({
-      units: (data?.remainingToFundByProcessingStage ?? []).reduce((sum, row) => sum + row.unitsRemainingToFund, 0),
-    }),
-    [data?.remainingToFundByProcessingStage]
-  );
 
   const sortBy = <T extends Record<string, unknown>>(rows: T[], sort: SortConfig): T[] => {
     const sign = sort.direction === "asc" ? 1 : -1;
@@ -168,15 +582,513 @@ export function EstimatedClosingsRiskView({
 
   const complexityRowsSorted = useMemo(
     () => sortBy((data?.remainingToFundByComplexity ?? []) as Record<string, unknown>[], complexitySort),
-    [data?.remainingToFundByComplexity, complexitySort]
+    [data?.remainingToFundByComplexity, complexitySort],
   );
   const stageRowsSorted = useMemo(
     () => sortBy((data?.remainingToFundByProcessingStage ?? []) as Record<string, unknown>[], stageSort),
-    [data?.remainingToFundByProcessingStage, stageSort]
+    [data?.remainingToFundByProcessingStage, stageSort],
   );
   const detailRowsSorted = useMemo(
     () => sortBy((data?.detail.rows ?? []) as Record<string, unknown>[], detailSort),
-    [data?.detail.rows, detailSort]
+    [data?.detail.rows, detailSort],
+  );
+
+  const detailTableTotals = useMemo(() => {
+    let units = 0;
+    let volume = 0;
+    for (const row of detailRowsSorted) {
+      units += Number(row.units ?? 1) || 0;
+      const v = row.volume;
+      if (v != null && !Number.isNaN(Number(v))) volume += Number(v);
+    }
+    return {
+      units,
+      volume,
+      avgComplexity: averageNonZero(detailRowsSorted, "complexity"),
+      avgFico: averageNonZero(detailRowsSorted, "fico"),
+      avgLtv: averageNonZero(detailRowsSorted, "ltv"),
+      avgBeDti: averageNonZero(detailRowsSorted, "beDti"),
+      avgAppToDispositionDays: averageNonZero(detailRowsSorted, "appToDispositionDays"),
+    };
+  }, [detailRowsSorted]);
+
+  const DETAIL_TOTALS_TAIL_COLSPAN = 17;
+
+  const clearFilterSearch = useCallback((columnId: string) => {
+    const timers = searchDebounceTimersRef.current;
+    if (timers[columnId]) {
+      clearTimeout(timers[columnId]);
+      delete timers[columnId];
+    }
+    setFilterSearchByColumn((prev) => {
+      if (!(columnId in prev)) return prev;
+      const next = { ...prev };
+      delete next[columnId];
+      return next;
+    });
+    setDebouncedFilterSearchByColumn((prev) => {
+      if (!(columnId in prev)) return prev;
+      const next = { ...prev };
+      delete next[columnId];
+      return next;
+    });
+  }, []);
+
+  const updateFilterSearch = useCallback((columnId: string, value: string) => {
+    setFilterSearchByColumn((prev) => ({ ...prev, [columnId]: value }));
+    const timers = searchDebounceTimersRef.current;
+    if (timers[columnId]) clearTimeout(timers[columnId]);
+    timers[columnId] = setTimeout(() => {
+      setDebouncedFilterSearchByColumn((prev) => ({ ...prev, [columnId]: value }));
+    }, 200);
+  }, []);
+
+  const closePopoverWithoutDiscard = useCallback(
+    (columnId: string) => {
+      setOpenDetailFilterColumnId((current) => (current === columnId ? null : current));
+      clearFilterSearch(columnId);
+    },
+    [clearFilterSearch],
+  );
+
+  const beginDetailDraft = useCallback(
+    (columnId: string) => {
+      setDraftDetailFilters((prev) => {
+        if (prev[columnId] !== undefined) return prev;
+        return { ...prev, [columnId]: cloneFilter(detailColumnFilters[columnId]) };
+      });
+    },
+    [detailColumnFilters],
+  );
+
+  const setDraftDetailFilter = useCallback((columnId: string, next: NonNullable<ColumnFilterState[string]>) => {
+    setDraftDetailFilters((prev) => ({ ...prev, [columnId]: next }));
+  }, []);
+
+  const clearDraftDetailFilter = useCallback((columnId: string) => {
+    setDraftDetailFilters((prev) => {
+      const next = { ...prev };
+      delete next[columnId];
+      return next;
+    });
+  }, []);
+
+  const commitDetailDraft = useCallback(
+    (columnId: string) => {
+      const draft = draftDetailFiltersRef.current[columnId];
+      setDetailColumnFilters((prev) => {
+        if (!draft || !isFilterActive(draft)) {
+          const next = { ...prev };
+          delete next[columnId];
+          return next;
+        }
+        const c = cloneFilter(draft);
+        return c ? { ...prev, [columnId]: c } : prev;
+      });
+      setDraftDetailFilters((prev) => {
+        const next = { ...prev };
+        delete next[columnId];
+        return next;
+      });
+      setOpenDetailFilterColumnId((cur) => (cur === columnId ? null : cur));
+      clearFilterSearch(columnId);
+    },
+    [clearFilterSearch],
+  );
+
+  const discardDetailDraft = useCallback(
+    (columnId: string) => {
+      setDraftDetailFilters((prev) => {
+        const next = { ...prev };
+        delete next[columnId];
+        return next;
+      });
+      setOpenDetailFilterColumnId((cur) => (cur === columnId ? null : cur));
+      clearFilterSearch(columnId);
+    },
+    [clearFilterSearch],
+  );
+
+  const toggleDetailDraftValue = useCallback((columnId: string, value: string, kind: LoanDetailFilterKind) => {
+    setDraftDetailFilters((prev) => {
+      const current = prev[columnId];
+      if (kind === "number") {
+        const selected = current?.kind === "number" ? current.selectedValues : [];
+        const selectedValues = selected.includes(value) ? selected.filter((item) => item !== value) : [...selected, value];
+        return { ...prev, [columnId]: { kind: "number", mode: "all" as const, selectedValues } };
+      }
+      const selected = current?.kind === "text" ? current.selectedValues : [];
+      const selectedValues = selected.includes(value) ? selected.filter((item) => item !== value) : [...selected, value];
+      return { ...prev, [columnId]: { kind: "text", selectedValues } };
+    });
+  }, []);
+
+  const renderEstimatedClosingsDetailFilterContent = useCallback(
+    (col: EstimatedClosingsDetailColumnDefMini) => {
+      const filterKind = col.kind;
+      const cached = detailDistinctCache[col.id];
+      const allValues = cached?.values ?? [];
+      const hasBlank = cached?.hasBlank ?? false;
+      const valuesForList = hasBlank ? [EMPTY_FILTER_TOKEN, ...allValues] : allValues;
+      const search = (debouncedFilterSearchByColumn[col.id] ?? "").toLowerCase();
+      const isLoanNumberColumn = col.id === "loanNumber";
+      const filteredOptions = search
+        ? valuesForList.filter((value) => {
+            if (value === EMPTY_FILTER_TOKEN) return "(blank)".includes(search);
+            const normalized = value.toLowerCase();
+            return isLoanNumberColumn ? normalized.startsWith(search) : normalized.includes(search);
+          })
+        : valuesForList;
+      const filter = draftDetailFilters[col.id] ?? cloneFilter(detailColumnFilters[col.id]);
+      const selectedValues =
+        filter?.kind === "text"
+          ? filter.selectedValues
+          : filter?.kind === "number" && filter.mode === "all"
+            ? filter.selectedValues
+            : [];
+      const orderedOptions = [...filteredOptions].sort((a, b) => {
+        const aSelected = selectedValues.includes(a) ? 1 : 0;
+        const bSelected = selectedValues.includes(b) ? 1 : 0;
+        if (aSelected !== bSelected) return bSelected - aSelected;
+        if (a === EMPTY_FILTER_TOKEN) return -1;
+        if (b === EMPTY_FILTER_TOKEN) return 1;
+        return a.localeCompare(b, undefined, { numeric: true });
+      });
+      const displayedOptions = isLoanNumberColumn ? orderedOptions.slice(0, LOAN_NUMBER_FILTER_MAX_OPTIONS) : orderedOptions;
+
+      if (filterKind === "boolean") {
+        const value = filter?.kind === "boolean" ? filter.value : "all";
+        return (
+          <div className="space-y-2">
+            {(["all", "yes", "no"] as const).map((option) => (
+              <Button
+                key={option}
+                type="button"
+                size="sm"
+                variant={value === option ? "default" : "outline"}
+                className="w-full justify-start"
+                onClick={() => setDraftDetailFilter(col.id, { kind: "boolean", value: option })}
+              >
+                {option === "all" ? "All" : option === "yes" ? "Yes" : "No"}
+              </Button>
+            ))}
+          </div>
+        );
+      }
+
+      if (filterKind === "date") {
+        const dateFilter = filter?.kind === "date" ? filter : { kind: "date" as const };
+        const yearToken = String(new Date().getFullYear());
+        const fixedYears = ["2025", "2024", "2023"];
+        const dateShortcutOptions: Array<{ token: string; label: string; kind: "preset" | "year" | "ytd" }> = [
+          { token: "last-30-days", label: "Last 30 Days", kind: "preset" },
+          { token: "mtd", label: "MTD", kind: "preset" },
+          { token: "last-month", label: "Last Month", kind: "preset" },
+          { token: "ytd", label: `${yearToken} YTD`, kind: "ytd" },
+          ...fixedYears.map((y) => ({ token: y, label: y, kind: "year" as const })),
+          { token: "rolling-13", label: getPeriodPresetMeta("rolling-13").label, kind: "preset" },
+          { token: "rolling-12", label: getPeriodPresetMeta("rolling-12").label, kind: "preset" },
+        ];
+        return (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <Input
+                type="date"
+                value={dateFilter.from ?? ""}
+                onChange={(e) =>
+                  setDraftDetailFilter(col.id, { kind: "date", from: e.target.value, to: dateFilter.to })
+                }
+              />
+              <Input
+                type="date"
+                value={dateFilter.to ?? ""}
+                onChange={(e) =>
+                  setDraftDetailFilter(col.id, { kind: "date", from: dateFilter.from, to: e.target.value })
+                }
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {dateShortcutOptions.map((opt) => (
+                <Button
+                  key={opt.token}
+                  type="button"
+                  size="sm"
+                  variant={dateFilter.shortcut === opt.token ? "default" : "outline"}
+                  onClick={() => {
+                    if (opt.kind === "year") {
+                      const from = `${opt.token}-01-01`;
+                      const to = `${opt.token}-12-31`;
+                      setDraftDetailFilter(col.id, { kind: "date", shortcut: opt.token, from, to });
+                      return;
+                    }
+                    if (opt.kind === "ytd") {
+                      const range = computePresetDateRange("ytd");
+                      setDraftDetailFilter(col.id, { kind: "date", shortcut: "ytd", from: range.start, to: range.end });
+                      return;
+                    }
+                    const preset = opt.token as PeriodPreset;
+                    const range = computePresetDateRange(preset);
+                    setDraftDetailFilter(col.id, { kind: "date", shortcut: opt.token, from: range.start, to: range.end });
+                  }}
+                >
+                  {opt.label}
+                </Button>
+              ))}
+            </div>
+            <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftDetailFilter(col.id)}>
+              Clear Selection
+            </Button>
+          </div>
+        );
+      }
+
+      if (filterKind === "number") {
+        const numberFilter =
+          filter?.kind === "number"
+            ? filter
+            : { kind: "number" as const, mode: "all" as NumericFilterMode, selectedValues: [] };
+        return (
+          <Tabs
+            value={numberFilter.mode}
+            onValueChange={(mode) =>
+              setDraftDetailFilter(col.id, { kind: "number", mode: mode as NumericFilterMode, selectedValues: [] })
+            }
+          >
+            <TabsList className="grid w-full grid-cols-4">
+              <TabsTrigger value="all">All</TabsTrigger>
+              <TabsTrigger value="range">Range</TabsTrigger>
+              <TabsTrigger value="min">Greater Than</TabsTrigger>
+              <TabsTrigger value="max">Less Than</TabsTrigger>
+            </TabsList>
+            <TabsContent value="all" className="space-y-2">
+              <Command shouldFilter={false}>
+                <CommandInput
+                  placeholder={`Search ${col.label}`}
+                  value={filterSearchByColumn[col.id] ?? ""}
+                  onValueChange={(value) => updateFilterSearch(col.id, value)}
+                />
+                <CommandList>
+                  <CommandEmpty>No values found.</CommandEmpty>
+                  {displayedOptions.map((value) => {
+                    const isDraftSelected = numberFilter.selectedValues.includes(value);
+                    return (
+                      <CommandItem
+                        key={value === EMPTY_FILTER_TOKEN ? "__b" : value}
+                        onSelect={() => toggleDetailDraftValue(col.id, value, "number")}
+                        className={cn(
+                          "cursor-pointer hover:!bg-transparent hover:!text-foreground data-[selected=true]:!bg-transparent data-[selected=true]:!text-foreground",
+                          isDraftSelected
+                            ? "!bg-accent !text-accent-foreground hover:!bg-accent hover:!text-accent-foreground data-[selected=true]:!bg-accent data-[selected=true]:!text-accent-foreground"
+                            : "",
+                        )}
+                      >
+                        <span className="mr-2">{isDraftSelected ? "✓" : ""}</span>
+                        {value === EMPTY_FILTER_TOKEN ? "(Blank)" : value}
+                      </CommandItem>
+                    );
+                  })}
+                </CommandList>
+              </Command>
+              {isLoanNumberColumn && orderedOptions.length > displayedOptions.length && (
+                <p className="px-1 text-xs text-slate-500 dark:text-slate-400">
+                  Showing first {LOAN_NUMBER_FILTER_MAX_OPTIONS} matches. Keep typing to narrow results.
+                </p>
+              )}
+              <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftDetailFilter(col.id)}>
+                Clear Selection
+              </Button>
+            </TabsContent>
+            <TabsContent value="range" className="space-y-2">
+              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                <Input
+                  type="number"
+                  placeholder="Min"
+                  value={numberFilter.min ?? ""}
+                  onChange={(e) =>
+                    setDraftDetailFilter(col.id, {
+                      kind: "number",
+                      mode: "range",
+                      selectedValues: [],
+                      min: e.target.value,
+                      max: numberFilter.max,
+                    })
+                  }
+                />
+                <span>-</span>
+                <Input
+                  type="number"
+                  placeholder="Max"
+                  value={numberFilter.max ?? ""}
+                  onChange={(e) =>
+                    setDraftDetailFilter(col.id, {
+                      kind: "number",
+                      mode: "range",
+                      selectedValues: [],
+                      min: numberFilter.min,
+                      max: e.target.value,
+                    })
+                  }
+                />
+              </div>
+              <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftDetailFilter(col.id)}>
+                Clear Selection
+              </Button>
+            </TabsContent>
+            <TabsContent value="min" className="space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-sm">{">="}</span>
+                <Input
+                  type="number"
+                  placeholder="Value"
+                  value={numberFilter.value ?? ""}
+                  onChange={(e) =>
+                    setDraftDetailFilter(col.id, {
+                      kind: "number",
+                      mode: "min",
+                      selectedValues: [],
+                      value: e.target.value,
+                    })
+                  }
+                />
+              </div>
+              <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftDetailFilter(col.id)}>
+                Clear Selection
+              </Button>
+            </TabsContent>
+            <TabsContent value="max" className="space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-sm">{"<="}</span>
+                <Input
+                  type="number"
+                  placeholder="Value"
+                  value={numberFilter.value ?? ""}
+                  onChange={(e) =>
+                    setDraftDetailFilter(col.id, {
+                      kind: "number",
+                      mode: "max",
+                      selectedValues: [],
+                      value: e.target.value,
+                    })
+                  }
+                />
+              </div>
+              <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftDetailFilter(col.id)}>
+                Clear Selection
+              </Button>
+            </TabsContent>
+          </Tabs>
+        );
+      }
+
+      const textFilter = filter?.kind === "text" ? filter : { kind: "text" as const, selectedValues: [] };
+      return (
+        <div className="space-y-2">
+          <Command shouldFilter={false}>
+            <CommandInput
+              placeholder={`Search ${col.label}`}
+              value={filterSearchByColumn[col.id] ?? ""}
+              onValueChange={(value) => updateFilterSearch(col.id, value)}
+            />
+            <CommandList>
+              <CommandEmpty>No values found.</CommandEmpty>
+              {displayedOptions.map((value) => {
+                const isDraftSelected = textFilter.selectedValues.includes(value);
+                return (
+                  <CommandItem
+                    key={value === EMPTY_FILTER_TOKEN ? "__b" : value}
+                    onSelect={() => toggleDetailDraftValue(col.id, value, "text")}
+                    className={cn(
+                      "cursor-pointer hover:!bg-transparent hover:!text-foreground data-[selected=true]:!bg-transparent data-[selected=true]:!text-foreground",
+                      isDraftSelected
+                        ? "!bg-accent !text-accent-foreground hover:!bg-accent hover:!text-accent-foreground data-[selected=true]:!bg-accent data-[selected=true]:!text-accent-foreground"
+                        : "",
+                    )}
+                  >
+                    <span className="mr-2">{isDraftSelected ? "✓" : ""}</span>
+                    {value === EMPTY_FILTER_TOKEN ? "(Blank)" : value}
+                  </CommandItem>
+                );
+              })}
+            </CommandList>
+          </Command>
+          {isLoanNumberColumn && orderedOptions.length > displayedOptions.length && (
+            <p className="px-1 text-xs text-slate-500 dark:text-slate-400">
+              Showing first {LOAN_NUMBER_FILTER_MAX_OPTIONS} matches. Keep typing to narrow results.
+            </p>
+          )}
+          <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftDetailFilter(col.id)}>
+            Clear Selection
+          </Button>
+        </div>
+      );
+    },
+    [
+      detailDistinctCache,
+      debouncedFilterSearchByColumn,
+      draftDetailFilters,
+      detailColumnFilters,
+      filterSearchByColumn,
+      setDraftDetailFilter,
+      clearDraftDetailFilter,
+      toggleDetailDraftValue,
+      updateFilterSearch,
+    ],
+  );
+
+  const applyDetailCellFilter = useCallback((columnId: string, row: Record<string, unknown>) => {
+    const col = ESTIMATED_CLOSINGS_DETAIL_COLUMN_BY_ID[columnId];
+    if (!col) return;
+    const raw = getDetailRaw(row, columnId);
+    const token = getCellToken(columnId, raw);
+
+    setShowDetailColumnFilters(true);
+    setDetailColumnFilters((prev) => {
+      if (col.kind === "number") {
+        const cur = prev[columnId];
+        if (cur?.kind === "number" && cur.mode === "all" && cur.selectedValues.length === 1 && cur.selectedValues[0] === token) {
+          const next = { ...prev };
+          delete next[columnId];
+          return next;
+        }
+        return { ...prev, [columnId]: { kind: "number", mode: "all", selectedValues: [token] } };
+      }
+      if (col.kind === "text") {
+        const cur = prev[columnId];
+        if (cur?.kind === "text" && cur.selectedValues.length === 1 && cur.selectedValues[0] === token) {
+          const next = { ...prev };
+          delete next[columnId];
+          return next;
+        }
+        return { ...prev, [columnId]: { kind: "text", selectedValues: [token] } };
+      }
+      if (col.kind === "boolean") {
+        const option = token === "yes" ? "yes" : "no";
+        const cur = prev[columnId];
+        const curVal = cur?.kind === "boolean" ? cur.value : "all";
+        const next = { ...prev };
+        if (curVal === option) delete next[columnId];
+        else next[columnId] = { kind: "boolean", value: option };
+        return next;
+      }
+      const dateStr = raw != null && String(raw).trim() !== "" && String(raw) !== "-" ? String(raw).trim() : "";
+      if (!dateStr) return prev;
+      const cur = prev[columnId];
+      if (cur?.kind === "date" && cur.from === dateStr && cur.to === dateStr) {
+        const next = { ...prev };
+        delete next[columnId];
+        return next;
+      }
+      return { ...prev, [columnId]: { kind: "date", from: dateStr, to: dateStr } };
+    });
+  }, []);
+
+  const cellHighlight = useCallback(
+    (row: Record<string, unknown>, columnId: string) => {
+      const f = detailColumnFilters[columnId];
+      if (!isFilterActive(f) || !f) return false;
+      return valueMatchesColumnFilter(getDetailRaw(row, columnId), f);
+    },
+    [detailColumnFilters],
   );
 
   const toggleSort = (key: string, current: SortConfig, setSort: (value: SortConfig) => void) => {
@@ -191,6 +1103,119 @@ export function EstimatedClosingsRiskView({
     if (!active) return <ArrowUpDown className="h-3.5 w-3.5 opacity-40" />;
     return dir === "asc" ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />;
   };
+
+  const activeDetailFilterIds = useMemo(
+    () => new Set(Object.keys(detailColumnFilters).filter((id) => isFilterActive(detailColumnFilters[id]))),
+    [detailColumnFilters],
+  );
+
+  const handlePieClick = useCallback(
+    (_: unknown, index: number) => {
+      const entry = pieData[index];
+      if (entry?.key) toggleEcdSlice(entry.key);
+    },
+    [pieData, toggleEcdSlice],
+  );
+
+  const handleBarChartClick = useCallback(
+    (state: unknown) => {
+      const s = state as { activePayload?: Array<{ payload?: { bucketKey?: string } }> } | null;
+      const k = s?.activePayload?.[0]?.payload?.bucketKey as EstimatedClosingsComplexityBucketKey | undefined;
+      if (k && ["gte_130", "gte_120", "gte_110", "all_rest"].includes(k)) toggleComplexityBucket(k);
+    },
+    [toggleComplexityBucket],
+  );
+
+  const renderDetailHeadCell = (colId: string, sortKey: string, label: string) => {
+    const col = ESTIMATED_CLOSINGS_DETAIL_COLUMN_BY_ID[colId];
+
+    return (
+      <TableHead key={colId} className="align-top">
+        <div className="flex items-center gap-0.5 min-w-0">
+          <button
+            type="button"
+            className={cn(
+              "inline-flex items-center gap-1 min-w-0 shrink",
+              activeDetailFilterIds.has(colId) && "text-emerald-700 dark:text-emerald-400",
+            )}
+            onClick={() => toggleSort(sortKey, detailSort, setDetailSort)}
+          >
+            <span className="truncate">{label}</span>
+            <SortIcon active={detailSort.key === sortKey} dir={detailSort.direction} />
+          </button>
+          {showDetailColumnFilters && col && (
+            <Popover
+              open={openDetailFilterColumnId === colId}
+              onOpenChange={(open) => {
+                if (open) {
+                  beginDetailDraft(colId);
+                  setOpenDetailFilterColumnId(colId);
+                } else {
+                  closePopoverWithoutDiscard(colId);
+                }
+              }}
+            >
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className={cn(
+                    "shrink-0 rounded p-1",
+                    activeDetailFilterIds.has(colId)
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100",
+                  )}
+                  aria-label={`Filter ${label}`}
+                >
+                  <Filter className="h-3.5 w-3.5" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="start"
+                className={cn("p-3", col.kind === "number" ? "w-[420px]" : "w-80")}
+                onInteractOutside={(event) => event.preventDefault()}
+                onPointerDownOutside={(event) => event.preventDefault()}
+                onEscapeKeyDown={(event) => event.preventDefault()}
+              >
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">{label}</div>
+                    <div className="text-[11px] text-slate-400 dark:text-slate-500">
+                      Select one or more values from the list below.
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2 text-xs"
+                      onClick={() => discardDetailDraft(colId)}
+                      aria-label={`Cancel ${label} filter changes`}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-7 px-2 text-xs"
+                      onClick={() => commitDetailDraft(colId)}
+                      aria-label={`Apply ${label} filter changes`}
+                    >
+                      Apply Filters
+                    </Button>
+                  </div>
+                </div>
+                {renderEstimatedClosingsDetailFilterContent(col)}
+              </PopoverContent>
+            </Popover>
+          )}
+        </div>
+      </TableHead>
+    );
+  };
+
+  const clickableCellClass =
+    "cursor-pointer rounded px-1 py-0.5 -mx-1 -my-0.5 transition-colors hover:bg-sky-100/80 dark:hover:bg-sky-900/40";
 
   return (
     <div className="space-y-4">
@@ -213,6 +1238,22 @@ export function EstimatedClosingsRiskView({
           </Select>
         </div>
       </div>
+
+      {hasAnyFilter && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200/80 bg-slate-50/80 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/40">
+          {activeFilterChips.map((chip) => (
+            <Badge key={chip.key} variant="outline" className="gap-1 border-emerald-300/80 bg-emerald-50 text-emerald-800 dark:border-emerald-700/80 dark:bg-emerald-950/40 dark:text-emerald-200">
+              <span className="max-w-[280px] truncate">{chip.label}</span>
+              <button type="button" onClick={chip.onRemove} className="rounded-sm p-0.5 hover:bg-emerald-200/50 dark:hover:bg-emerald-900/50" aria-label={`Remove ${chip.label}`}>
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          ))}
+          <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={clearAllPageFilters}>
+            Clear all filters
+          </Button>
+        </div>
+      )}
 
       {loading && <div className="text-sm text-slate-600 dark:text-slate-300">Loading dashboard data...</div>}
       {error && <div className="text-sm text-red-600 dark:text-red-400">{error}</div>}
@@ -238,8 +1279,18 @@ export function EstimatedClosingsRiskView({
           <CardContent className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie data={pieData} dataKey="count" nameKey="label" outerRadius={95} label={(entry) => `${entry.label}: ${entry.count}`} >
-                  {pieData.map((_, idx) => <Cell key={idx} fill={PIE_COLORS[idx % PIE_COLORS.length]} />)}
+                <Pie
+                  data={pieData}
+                  dataKey="count"
+                  nameKey="label"
+                  outerRadius={95}
+                  label={(entry) => `${entry.label}: ${entry.count}`}
+                  className="cursor-pointer [&_path]:outline-none"
+                  onClick={(d, i) => handlePieClick(d, i ?? 0)}
+                >
+                  {pieData.map((entry, idx) => (
+                    <Cell key={entry.key} fill={PIE_COLORS[idx % PIE_COLORS.length]} opacity={ecdSlice != null && ecdSlice !== entry.key ? 0.35 : 1} />
+                  ))}
                 </Pie>
                 <RechartsTooltip />
               </PieChart>
@@ -251,13 +1302,13 @@ export function EstimatedClosingsRiskView({
           <CardHeader><CardTitle className="text-sm">Max Possible Funding, by Complexity</CardTitle></CardHeader>
           <CardContent className="h-72">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={complexityBars}>
+              <BarChart data={complexityBars} margin={{ top: 8, right: 8, left: 8, bottom: 8 }} onClick={handleBarChartClick}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="bucketLabel" />
                 <YAxis />
                 <RechartsTooltip />
-                <Bar dataKey="funded" stackId="a" fill="#3b82f6" name="Funded" />
-                <Bar dataKey="notFunded" stackId="a" fill="#ef4444" name="Not Funded" />
+                <Bar dataKey="funded" stackId="a" fill="#3b82f6" name="Funded" className="cursor-pointer" />
+                <Bar dataKey="notFunded" stackId="a" fill="#ef4444" name="Not Funded" className="cursor-pointer" />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
@@ -292,13 +1343,21 @@ export function EstimatedClosingsRiskView({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {complexityRowsSorted.map((row) => (
-                  <TableRow key={String(row.sortOrder)}>
-                    <TableCell>{String(row.complexityGroup)}</TableCell>
-                    <TableCell className="text-right">{Number(row.unitsRemainingToFund).toLocaleString()}</TableCell>
-                    <TableCell className="text-right">{formatPercent(toNumberOrNull(row.historicalFalloutLast13Months))}</TableCell>
-                  </TableRow>
-                ))}
+                {complexityRowsSorted.map((row) => {
+                  const g = String(row.complexityGroup);
+                  const active = remainingComplexityGroup === g;
+                  return (
+                    <TableRow
+                      key={String(row.sortOrder)}
+                      className={cn("cursor-pointer", active && "bg-emerald-50/90 dark:bg-emerald-950/30")}
+                      onClick={() => toggleRemainingComplexityGroup(g)}
+                    >
+                      <TableCell>{g}</TableCell>
+                      <TableCell className="text-right">{Number(row.unitsRemainingToFund).toLocaleString()}</TableCell>
+                      <TableCell className="text-right">{formatPercent(toNumberOrNull(row.historicalFalloutLast13Months))}</TableCell>
+                    </TableRow>
+                  );
+                })}
                 <TableRow>
                   <TableCell className="font-semibold">Totals</TableCell>
                   <TableCell className="text-right font-semibold">{complexityTotals.units.toLocaleString()}</TableCell>
@@ -342,116 +1401,312 @@ export function EstimatedClosingsRiskView({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {stageRowsSorted.map((row) => (
-                  <TableRow key={String(row.sortOrder)}>
-                    <TableCell>{String(row.processingStage)}</TableCell>
-                    <TableCell className="text-right">{Number(row.unitsRemainingToFund).toLocaleString()}</TableCell>
-                    <TableCell className="text-right">{formatPercent(toNumberOrNull(row.historicalFallout))}</TableCell>
-                    <TableCell className="text-right">
-                      {row.historicalStatusToFundDays != null ? Number(row.historicalStatusToFundDays).toFixed(1) : "-"}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {stageRowsSorted.map((row) => {
+                  const st = String(row.processingStage);
+                  const active = remainingProcessingStage === st;
+                  return (
+                    <TableRow
+                      key={String(row.sortOrder)}
+                      className={cn("cursor-pointer", active && "bg-emerald-50/90 dark:bg-emerald-950/30")}
+                      onClick={() => toggleRemainingProcessingStage(st)}
+                    >
+                      <TableCell>{st}</TableCell>
+                      <TableCell className="text-right">{Number(row.unitsRemainingToFund).toLocaleString()}</TableCell>
+                      <TableCell className="text-right">{formatPercent(toNumberOrNull(row.historicalFallout))}</TableCell>
+                      <TableCell className="text-right">
+                        {row.historicalStatusToFundDays != null ? Number(row.historicalStatusToFundDays).toFixed(1) : "-"}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </CardContent>
         </Card>
       </div>
 
-      <Card
-        data-loan-details-table
-        className="rounded-xl border overflow-hidden border-slate-200/60 bg-white"
-      >
-        <CardHeader>
+      <Card data-loan-details-table className="rounded-xl border overflow-hidden border-slate-200/60 bg-white dark:bg-slate-900/20">
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
           <CardTitle className="text-sm">Loan Detail for Max Possible Funding</CardTitle>
+          <Button type="button" variant="outline" size="sm" className="gap-2 shrink-0" onClick={() => setShowDetailColumnFilters((s) => !s)}>
+            <Filter className="h-4 w-4" />
+            {showDetailColumnFilters ? "Hide filters" : "Show filters"}
+          </Button>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-auto max-h-[620px] border-t border-slate-200 dark:border-slate-700">
-          <Table>
-            <TableHeader className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
-              <TableRow>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("loanNumber", detailSort, setDetailSort)}>Loan Number<SortIcon active={detailSort.key === "loanNumber"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("complexityGroup", detailSort, setDetailSort)}>Complexity Group<SortIcon active={detailSort.key === "complexityGroup"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("complexity", detailSort, setDetailSort)}>Complexity<SortIcon active={detailSort.key === "complexity"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("closingProjectionGroup", detailSort, setDetailSort)}>Closing Projection<SortIcon active={detailSort.key === "closingProjectionGroup"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("units", detailSort, setDetailSort)}>Units<SortIcon active={detailSort.key === "units"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("volume", detailSort, setDetailSort)}>Volume<SortIcon active={detailSort.key === "volume"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("occupancyType", detailSort, setDetailSort)}>Occupancy Type<SortIcon active={detailSort.key === "occupancyType"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("fico", detailSort, setDetailSort)}>FICO<SortIcon active={detailSort.key === "fico"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("ltv", detailSort, setDetailSort)}>LTV<SortIcon active={detailSort.key === "ltv"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("beDti", detailSort, setDetailSort)}>BE DTI<SortIcon active={detailSort.key === "beDti"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("borrowerSelfEmployed", detailSort, setDetailSort)}>Borrower Self Employed<SortIcon active={detailSort.key === "borrowerSelfEmployed"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("qmLoanType", detailSort, setDetailSort)}>QM Loan Type<SortIcon active={detailSort.key === "qmLoanType"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("propertyType", detailSort, setDetailSort)}>Property Type<SortIcon active={detailSort.key === "propertyType"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("loanProgram", detailSort, setDetailSort)}>Loan Program<SortIcon active={detailSort.key === "loanProgram"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("appToDispositionDays", detailSort, setDetailSort)}>App to Disposition Days<SortIcon active={detailSort.key === "appToDispositionDays"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("currentLoanStatus", detailSort, setDetailSort)}>Current Loan Status<SortIcon active={detailSort.key === "currentLoanStatus"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("currentStatusDate", detailSort, setDetailSort)}>Current Status Date<SortIcon active={detailSort.key === "currentStatusDate"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("lastCompletedMilestone", detailSort, setDetailSort)}>Last Completed Milestone<SortIcon active={detailSort.key === "lastCompletedMilestone"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("loanFolder", detailSort, setDetailSort)}>Loan Folder<SortIcon active={detailSort.key === "loanFolder"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("applicationDate", detailSort, setDetailSort)}>Application Date<SortIcon active={detailSort.key === "applicationDate"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("fundingDate", detailSort, setDetailSort)}>Funding Date<SortIcon active={detailSort.key === "fundingDate"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("lockDate", detailSort, setDetailSort)}>Lock Date<SortIcon active={detailSort.key === "lockDate"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("investorLockDate", detailSort, setDetailSort)}>Investor Lock Date<SortIcon active={detailSort.key === "investorLockDate"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("estimatedClosingDate", detailSort, setDetailSort)}>Estimated Closing Date<SortIcon active={detailSort.key === "estimatedClosingDate"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("ctcDate", detailSort, setDetailSort)}>CTC Date<SortIcon active={detailSort.key === "ctcDate"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("uwFinalApprovalDate", detailSort, setDetailSort)}>UW Final Approval Date<SortIcon active={detailSort.key === "uwFinalApprovalDate"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("deniedDate", detailSort, setDetailSort)}>Denied Date<SortIcon active={detailSort.key === "deniedDate"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("conditionalApprovalDate", detailSort, setDetailSort)}>Conditional Approval Date<SortIcon active={detailSort.key === "conditionalApprovalDate"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("branch", detailSort, setDetailSort)}>Branch<SortIcon active={detailSort.key === "branch"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("loanOfficer", detailSort, setDetailSort)}>Loan Officer<SortIcon active={detailSort.key === "loanOfficer"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("processor", detailSort, setDetailSort)}>Processor<SortIcon active={detailSort.key === "processor"} dir={detailSort.direction} /></button></TableHead>
-                <TableHead><button className="inline-flex items-center gap-1" onClick={() => toggleSort("underwriter", detailSort, setDetailSort)}>Underwriter<SortIcon active={detailSort.key === "underwriter"} dir={detailSort.direction} /></button></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {detailRowsSorted.map((row, idx) => (
-                <TableRow key={`${row.loanNumber as string}-${idx}`}>
-                  <TableCell>{String(row.loanNumber ?? "")}</TableCell>
-                  <TableCell>{String(row.complexityGroup ?? "")}</TableCell>
-                  <TableCell>{row.complexity != null ? Number(row.complexity).toFixed(1) : "-"}</TableCell>
-                  <TableCell>{String(row.closingProjectionGroup ?? "")}</TableCell>
-                  <TableCell>{Number(row.units ?? 1).toLocaleString()}</TableCell>
-                  <TableCell>{formatCurrency(Number(row.volume ?? 0))}</TableCell>
-                  <TableCell>{String(row.occupancyType ?? "")}</TableCell>
-                  <TableCell>{row.fico != null ? Number(row.fico).toLocaleString() : "-"}</TableCell>
-                  <TableCell>{row.ltv != null ? Number(row.ltv).toFixed(1) : "-"}</TableCell>
-                  <TableCell>{row.beDti != null ? Number(row.beDti).toFixed(1) : "-"}</TableCell>
-                  <TableCell>{formatBooleanish(row.borrowerSelfEmployed)}</TableCell>
-                  <TableCell>{String(row.qmLoanType ?? "")}</TableCell>
-                  <TableCell>{String(row.propertyType ?? "")}</TableCell>
-                  <TableCell>{String(row.loanProgram ?? "")}</TableCell>
-                  <TableCell>{row.appToDispositionDays != null ? Number(row.appToDispositionDays).toLocaleString() : "-"}</TableCell>
-                  <TableCell>{String(row.currentLoanStatus ?? "")}</TableCell>
-                  <TableCell>{String(row.currentStatusDate ?? "")}</TableCell>
-                  <TableCell>{String(row.lastCompletedMilestone ?? "")}</TableCell>
-                  <TableCell>{String(row.loanFolder ?? "")}</TableCell>
-                  <TableCell>{String(row.applicationDate ?? "")}</TableCell>
-                  <TableCell>{String(row.fundingDate ?? "")}</TableCell>
-                  <TableCell>{String(row.lockDate ?? "")}</TableCell>
-                  <TableCell>{String(row.investorLockDate ?? "")}</TableCell>
-                  <TableCell>{String(row.estimatedClosingDate ?? "")}</TableCell>
-                  <TableCell>{String(row.ctcDate ?? "")}</TableCell>
-                  <TableCell>{String(row.uwFinalApprovalDate ?? "")}</TableCell>
-                  <TableCell>{String(row.deniedDate ?? "")}</TableCell>
-                  <TableCell>{String(row.conditionalApprovalDate ?? "")}</TableCell>
-                  <TableCell>{String(row.branch ?? "")}</TableCell>
-                  <TableCell>{String(row.loanOfficer ?? "")}</TableCell>
-                  <TableCell>{String(row.processor ?? "")}</TableCell>
-                  <TableCell>{String(row.underwriter ?? "")}</TableCell>
+            <table className="w-full caption-bottom text-sm">
+              <TableHeader className="sticky top-0 z-20 border-b border-slate-200 bg-slate-50 shadow-sm dark:border-slate-700 dark:bg-slate-800 [&_th]:bg-slate-50 [&_th]:shadow-sm dark:[&_th]:bg-slate-800">
+                <TableRow className="border-b border-slate-200 dark:border-slate-700 hover:bg-transparent">
+                  {renderDetailHeadCell("loanNumber", "loanNumber", "Loan Number")}
+                  {renderDetailHeadCell("complexityGroup", "complexityGroup", "Complexity Group")}
+                  {renderDetailHeadCell("complexity", "complexity", "Complexity")}
+                  {renderDetailHeadCell("closingProjectionGroup", "closingProjectionGroup", "Closing Projection")}
+                  {renderDetailHeadCell("units", "units", "Units")}
+                  {renderDetailHeadCell("volume", "volume", "Volume")}
+                  {renderDetailHeadCell("occupancyType", "occupancyType", "Occupancy Type")}
+                  {renderDetailHeadCell("fico", "fico", "FICO")}
+                  {renderDetailHeadCell("ltv", "ltv", "LTV")}
+                  {renderDetailHeadCell("beDti", "beDti", "BE DTI")}
+                  {renderDetailHeadCell("borrowerSelfEmployed", "borrowerSelfEmployed", "Borrower Self Employed")}
+                  {renderDetailHeadCell("qmLoanType", "qmLoanType", "QM Loan Type")}
+                  {renderDetailHeadCell("propertyType", "propertyType", "Property Type")}
+                  {renderDetailHeadCell("loanProgram", "loanProgram", "Loan Program")}
+                  {renderDetailHeadCell("appToDispositionDays", "appToDispositionDays", "App to Disposition Days")}
+                  {renderDetailHeadCell("currentLoanStatus", "currentLoanStatus", "Current Loan Status")}
+                  {renderDetailHeadCell("currentStatusDate", "currentStatusDate", "Current Status Date")}
+                  {renderDetailHeadCell("lastCompletedMilestone", "lastCompletedMilestone", "Last Completed Milestone")}
+                  {renderDetailHeadCell("loanFolder", "loanFolder", "Loan Folder")}
+                  {renderDetailHeadCell("applicationDate", "applicationDate", "Application Date")}
+                  {renderDetailHeadCell("fundingDate", "fundingDate", "Funding Date")}
+                  {renderDetailHeadCell("lockDate", "lockDate", "Lock Date")}
+                  {renderDetailHeadCell("investorLockDate", "investorLockDate", "Investor Lock Date")}
+                  {renderDetailHeadCell("estimatedClosingDate", "estimatedClosingDate", "Estimated Closing Date")}
+                  {renderDetailHeadCell("ctcDate", "ctcDate", "CTC Date")}
+                  {renderDetailHeadCell("uwFinalApprovalDate", "uwFinalApprovalDate", "UW Final Approval Date")}
+                  {renderDetailHeadCell("deniedDate", "deniedDate", "Denied Date")}
+                  {renderDetailHeadCell("conditionalApprovalDate", "conditionalApprovalDate", "Conditional Approval Date")}
+                  {renderDetailHeadCell("branch", "branch", "Branch")}
+                  {renderDetailHeadCell("loanOfficer", "loanOfficer", "Loan Officer")}
+                  {renderDetailHeadCell("processor", "processor", "Processor")}
+                  {renderDetailHeadCell("underwriter", "underwriter", "Underwriter")}
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                <TableRow className="border-b-2 border-slate-200 bg-slate-50/90 font-semibold dark:border-slate-600 dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800/80">
+                  <TableCell>
+                    Totals
+                    {(data?.detail.total ?? 0) > detailRowsSorted.length ? " (this page)" : ""}
+                  </TableCell>
+                  <TableCell />
+                  <TableCell>{detailTableTotals.avgComplexity != null ? detailTableTotals.avgComplexity.toFixed(1) : "-"}</TableCell>
+                  <TableCell />
+                  <TableCell>{detailTableTotals.units.toLocaleString()}</TableCell>
+                  <TableCell>{formatCurrency(detailTableTotals.volume)}</TableCell>
+                  <TableCell />
+                  <TableCell>{detailTableTotals.avgFico != null ? Math.round(detailTableTotals.avgFico).toLocaleString() : "-"}</TableCell>
+                  <TableCell>{detailTableTotals.avgLtv != null ? detailTableTotals.avgLtv.toFixed(1) : "-"}</TableCell>
+                  <TableCell>{detailTableTotals.avgBeDti != null ? detailTableTotals.avgBeDti.toFixed(1) : "-"}</TableCell>
+                  <TableCell />
+                  <TableCell />
+                  <TableCell />
+                  <TableCell />
+                  <TableCell>
+                    {detailTableTotals.avgAppToDispositionDays != null
+                      ? Math.round(detailTableTotals.avgAppToDispositionDays).toLocaleString()
+                      : "-"}
+                  </TableCell>
+                  <TableCell colSpan={DETAIL_TOTALS_TAIL_COLSPAN} />
+                </TableRow>
+                {detailRowsSorted.map((row, idx) => (
+                  <TableRow key={`${row.loanNumber as string}-${idx}`}>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "loanNumber") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("loanNumber", row)}>
+                        {String(row.loanNumber ?? "")}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "complexityGroup") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("complexityGroup", row)}>
+                        {String(row.complexityGroup ?? "")}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "complexity") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("complexity", row)}>
+                        {row.complexity != null ? Number(row.complexity).toFixed(1) : "-"}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "closingProjectionGroup") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("closingProjectionGroup", row)}>
+                        {String(row.closingProjectionGroup ?? "")}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "units") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("units", row)}>
+                        {Number(row.units ?? 1).toLocaleString()}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "volume") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("volume", row)}>
+                        {formatCurrency(Number(row.volume ?? 0))}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "occupancyType") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("occupancyType", row)}>
+                        {String(row.occupancyType ?? "")}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "fico") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("fico", row)}>
+                        {row.fico != null ? Number(row.fico).toLocaleString() : "-"}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "ltv") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("ltv", row)}>
+                        {row.ltv != null ? Number(row.ltv).toFixed(1) : "-"}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "beDti") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("beDti", row)}>
+                        {row.beDti != null ? Number(row.beDti).toFixed(1) : "-"}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "borrowerSelfEmployed") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("borrowerSelfEmployed", row)}>
+                        {formatBooleanish(row.borrowerSelfEmployed)}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "qmLoanType") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("qmLoanType", row)}>
+                        {String(row.qmLoanType ?? "")}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "propertyType") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("propertyType", row)}>
+                        {String(row.propertyType ?? "")}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "loanProgram") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("loanProgram", row)}>
+                        {String(row.loanProgram ?? "")}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "appToDispositionDays") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("appToDispositionDays", row)}>
+                        {row.appToDispositionDays != null ? Number(row.appToDispositionDays).toLocaleString() : "-"}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "currentLoanStatus") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("currentLoanStatus", row)}>
+                        {String(row.currentLoanStatus ?? "")}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "currentStatusDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("currentStatusDate", row)}>
+                        {String(row.currentStatusDate ?? "")}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "lastCompletedMilestone") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("lastCompletedMilestone", row)}>
+                        {String(row.lastCompletedMilestone ?? "")}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "loanFolder") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("loanFolder", row)}>
+                        {String(row.loanFolder ?? "")}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "applicationDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("applicationDate", row)}>
+                        {String(row.applicationDate ?? "")}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "fundingDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("fundingDate", row)}>
+                        {String(row.fundingDate ?? "")}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "lockDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("lockDate", row)}>
+                        {String(row.lockDate ?? "")}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "investorLockDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("investorLockDate", row)}>
+                        {String(row.investorLockDate ?? "")}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "estimatedClosingDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("estimatedClosingDate", row)}>
+                        {String(row.estimatedClosingDate ?? "")}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "ctcDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("ctcDate", row)}>
+                        {String(row.ctcDate ?? "")}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "uwFinalApprovalDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("uwFinalApprovalDate", row)}>
+                        {String(row.uwFinalApprovalDate ?? "")}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "deniedDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("deniedDate", row)}>
+                        {String(row.deniedDate ?? "")}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "conditionalApprovalDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("conditionalApprovalDate", row)}>
+                        {String(row.conditionalApprovalDate ?? "")}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "branch") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("branch", row)}>
+                        {String(row.branch ?? "")}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "loanOfficer") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("loanOfficer", row)}>
+                        {String(row.loanOfficer ?? "")}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "processor") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("processor", row)}>
+                        {String(row.processor ?? "")}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "underwriter") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("underwriter", row)}>
+                        {String(row.underwriter ?? "")}
+                      </button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </table>
           </div>
-          <div className="flex items-center justify-between gap-4 px-4 py-3 border-t border-slate-200/60 dark:border-slate-700/60 bg-slate-50/50 dark:bg-slate-900/30">
+          <div className="flex flex-wrap items-center justify-between gap-4 px-4 py-3 border-t border-slate-200/60 dark:border-slate-700/60 bg-slate-50/50 dark:bg-slate-900/30">
             <span className="text-sm text-slate-700 dark:text-slate-300">
-              {(data?.detail.total ?? detailRowsSorted.length).toLocaleString()} {(data?.detail.total ?? detailRowsSorted.length) === 1 ? "loan" : "loans"}
+              {(data?.detail.total ?? detailRowsSorted.length).toLocaleString()}{" "}
+              {(data?.detail.total ?? detailRowsSorted.length) === 1 ? "loan" : "loans"}
+              {(data?.detail.total ?? 0) > DETAIL_TABLE_PAGE_SIZE && detailRowsSorted.length > 0 ? (
+                <span className="text-slate-500 dark:text-slate-400">
+                  {" "}
+                  (showing {(detailTableOffset + 1).toLocaleString()}–
+                  {(detailTableOffset + detailRowsSorted.length).toLocaleString()})
+                </span>
+              ) : null}
             </span>
+            {(data?.detail.total ?? 0) > DETAIL_TABLE_PAGE_SIZE ? (
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  disabled={detailTableOffset === 0 || loading}
+                  onClick={() => setDetailTableOffset((o) => Math.max(0, o - DETAIL_TABLE_PAGE_SIZE))}
+                >
+                  Previous
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  disabled={
+                    loading ||
+                    detailTableOffset + DETAIL_TABLE_PAGE_SIZE >= (data?.detail.total ?? 0)
+                  }
+                  onClick={() => setDetailTableOffset((o) => o + DETAIL_TABLE_PAGE_SIZE)}
+                >
+                  Next
+                </Button>
+              </div>
+            ) : null}
           </div>
         </CardContent>
       </Card>
     </div>
   );
 }
-

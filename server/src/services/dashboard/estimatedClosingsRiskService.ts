@@ -1,5 +1,13 @@
 import pg from "pg";
 import { buildChannelWhereClause, sanitizeAndSqlClause } from "../../utils/scorecard-utils.js";
+import {
+  buildComplexityBucketSql,
+  buildDetailColumnFiltersSql,
+  buildEstimatedClosingsPageFilterSql,
+  buildEcdSliceSql,
+  buildExactExprMatchSql,
+  type EstimatedClosingsDetailFilterMap,
+} from "./estimatedClosingsRiskFilterSql.js";
 
 export type EstimatedClosingsDateRangeType = "calendar_days" | "business_days";
 
@@ -11,6 +19,16 @@ export interface EstimatedClosingsRiskOptions {
   dimensionFilterClause?: string;
   detailLimit?: number;
   detailOffset?: number;
+  /** Active filter from pie chart ECD slice */
+  ecdSlice?: ActivePipelineEcdSlice["key"];
+  /** Max possible funding bar complexity bucket */
+  complexityBarBucket?: MaxPossibleFundingComplexityBar["bucketKey"];
+  /** Remaining-to-fund table row — six complexity group labels */
+  remainingFundComplexityGroup?: string;
+  /** Remaining-to-fund processing stage key, e.g. 1-CTC */
+  remainingFundProcessingStage?: string;
+  /** Loan-detail-style column filters (validated / allowlisted on server) */
+  detailColumnFilters?: EstimatedClosingsDetailFilterMap;
 }
 
 export interface EstimatedClosingsRiskKpis {
@@ -168,6 +186,47 @@ function processingStageSortExpr(alias: string): string {
   END)`;
 }
 
+function closingProjectionGroupExpr(alias: string): string {
+  return `(CASE
+    WHEN ${alias}.funding_date::date BETWEEN date_trunc('month', CURRENT_DATE)::date AND CURRENT_DATE::date THEN 'Funded'
+    WHEN ${alias}.current_loan_status = 'Active Loan'
+      AND ${alias}.ctc_date IS NOT NULL
+      AND ${alias}.funding_date IS NULL THEN 'CTC'
+    WHEN ${alias}.current_loan_status = 'Active Loan'
+      AND ${alias}.approval_date IS NOT NULL
+      AND ${alias}.ctc_date IS NULL
+      AND ${alias}.funding_date IS NULL THEN 'Approved'
+    WHEN ${alias}.current_loan_status = 'Active Loan'
+      AND ${alias}.conditional_approval_date IS NOT NULL
+      AND ${alias}.approval_date IS NULL
+      AND ${alias}.ctc_date IS NULL
+      AND ${alias}.funding_date IS NULL THEN 'Conditional Approved'
+    WHEN ${alias}.current_loan_status = 'Active Loan'
+      AND (${alias}.lock_date IS NOT NULL OR ${alias}.investor_lock_date IS NOT NULL)
+      AND ${alias}.conditional_approval_date IS NULL
+      AND ${alias}.approval_date IS NULL
+      AND ${alias}.ctc_date IS NULL
+      AND ${alias}.funding_date IS NULL THEN 'Locked'
+    WHEN ${alias}.current_loan_status = 'Active Loan'
+      AND ${alias}.submitted_to_processing_date IS NOT NULL
+      AND ${alias}.lock_date IS NULL
+      AND ${alias}.investor_lock_date IS NULL
+      AND ${alias}.conditional_approval_date IS NULL
+      AND ${alias}.approval_date IS NULL
+      AND ${alias}.ctc_date IS NULL
+      AND ${alias}.funding_date IS NULL THEN 'In Processing'
+    WHEN ${alias}.current_loan_status = 'Active Loan'
+      AND ${alias}.submitted_to_processing_date IS NULL
+      AND ${alias}.lock_date IS NULL
+      AND ${alias}.investor_lock_date IS NULL
+      AND ${alias}.conditional_approval_date IS NULL
+      AND ${alias}.approval_date IS NULL
+      AND ${alias}.ctc_date IS NULL
+      AND ${alias}.funding_date IS NULL THEN 'Not Yet In Processing'
+    ELSE NULL
+  END)`;
+}
+
 function appToDispositionDaysExpr(dateRangeType: EstimatedClosingsDateRangeType, alias: string): string {
   const startDate = `DATE(${alias}.application_date)`;
   const endDate = `DATE(${alias}.funding_date)`;
@@ -229,6 +288,11 @@ export async function getEstimatedClosingsRiskData(
     dimensionFilterClause = "",
     detailLimit,
     detailOffset = 0,
+    ecdSlice,
+    complexityBarBucket,
+    remainingFundComplexityGroup,
+    remainingFundProcessingStage,
+    detailColumnFilters,
   } = options;
 
   const channelWhere = buildChannelWhereClause(channelGroup, "l");
@@ -237,11 +301,47 @@ export async function getEstimatedClosingsRiskData(
   const params: unknown[] = [];
   if (accessParams.length > 0) params.push(...accessParams);
 
-  const extraClauses = [
+  const pageFilterPieces: string[] = [];
+  if (ecdSlice) {
+    const frag = buildEcdSliceSql(ecdSlice);
+    if (frag) pageFilterPieces.push(frag);
+  }
+  if (complexityBarBucket) {
+    const frag = buildComplexityBucketSql(complexityBarBucket, complexityBucketExpr("l"));
+    if (frag) pageFilterPieces.push(frag);
+  }
+  if (remainingFundComplexityGroup?.trim()) {
+    const frag = buildExactExprMatchSql(complexityGroupExpr("l"), remainingFundComplexityGroup);
+    if (frag) pageFilterPieces.push(frag);
+  }
+  if (remainingFundProcessingStage?.trim()) {
+    const frag = buildExactExprMatchSql(processingStageExpr("l"), remainingFundProcessingStage);
+    if (frag) pageFilterPieces.push(frag);
+  }
+  const detailFilterSql = buildDetailColumnFiltersSql(detailColumnFilters, {
+    complexityGroupExpr: complexityGroupExpr("l"),
+    closingProjectionExpr: closingProjectionGroupExpr("l"),
+    appToDispositionDaysExpr: appToDispositionDaysExpr(dateRangeType, "l"),
+  });
+  if (detailFilterSql) pageFilterPieces.push(detailFilterSql);
+
+  const pageFilterSql = buildEstimatedClosingsPageFilterSql(pageFilterPieces);
+  const pageFilterCondition = pageFilterSql
+    ? sanitizeAndSqlClause(`AND (${pageFilterSql})`, "pageFilterClause")
+    : "";
+
+  const dimensionAndPageTail = `${dimensionCondition ? ` AND ${dimensionCondition}` : ""}${
+    pageFilterCondition ? ` AND ${pageFilterCondition}` : ""
+  }`;
+
+  /** Channel + access + dimension only — used for historical KPIs (YTD, prior months) so drill filters do not affect them. */
+  const contextOnlyClauses = [
     channelWhere || "",
     accessCondition ? ` AND ${accessCondition}` : "",
     dimensionCondition ? ` AND ${dimensionCondition}` : "",
   ].join("");
+
+  const extraClauses = `${contextOnlyClauses}${pageFilterCondition ? ` AND ${pageFilterCondition}` : ""}`;
 
   const baseCte = `
     WITH bounds AS (
@@ -259,14 +359,15 @@ export async function getEstimatedClosingsRiskData(
   `;
 
   const fundedThisMonthExpr = `l.funding_date::date BETWEEN b.month_start AND b.month_end`;
+  /** Canonical active pipeline + unfunded + ECD in current month — must match pie "Remaining to Fund" (uses ACTIVE_SQL, not status alone). */
   const remainingToFundExpr = `
-    l.current_loan_status = 'Active Loan'
+    ${ACTIVE_SQL}
     AND l.funding_date IS NULL
     AND l.estimated_closing_date IS NOT NULL
     AND l.estimated_closing_date::date BETWEEN b.month_start AND b.month_end
   `;
 
-  const kpisQuery = `
+  const pipelineKpisQuery = `
     ${baseCte}
     SELECT
       COUNT(*) FILTER (WHERE ${ACTIVE_SQL})::int AS total_active_pipeline,
@@ -281,7 +382,15 @@ export async function getEstimatedClosingsRiskData(
       COUNT(*) FILTER (
         WHERE ${remainingToFundExpr}
       )::int AS remaining_to_fund,
-      COUNT(*) FILTER (WHERE ${fundedThisMonthExpr})::int AS funded_this_month,
+      COUNT(*) FILTER (WHERE ${fundedThisMonthExpr})::int AS funded_this_month
+    FROM public.loans l
+    CROSS JOIN bounds b
+    WHERE TRUE
+    ${extraClauses}
+  `;
+  const historicalKpisQuery = `
+    ${baseCte}
+    SELECT
       COUNT(*) FILTER (WHERE l.funding_date::date BETWEEN b.year_start AND b.today)::int AS funding_ytd_units,
       COUNT(*) FILTER (WHERE l.funding_date::date BETWEEN b.prev_month_start AND b.prev_month_end)::int AS prev_month_actual_units,
       COALESCE(SUM(l.loan_amount) FILTER (WHERE l.funding_date::date BETWEEN b.prev_month_start AND b.prev_month_end), 0)::float AS prev_month_actual_volume,
@@ -290,17 +399,21 @@ export async function getEstimatedClosingsRiskData(
     FROM public.loans l
     CROSS JOIN bounds b
     WHERE TRUE
-    ${extraClauses}
+    ${contextOnlyClauses}
   `;
-  const kpiResult = await tenantPool.query(kpisQuery, params);
-  const kpiRow = kpiResult.rows[0] || {};
+  const [pipelineKpiResult, historicalKpiResult] = await Promise.all([
+    tenantPool.query(pipelineKpisQuery, params),
+    tenantPool.query(historicalKpisQuery, params),
+  ]);
+  const kpiRow = pipelineKpiResult.rows[0] || {};
+  const histRow = historicalKpiResult.rows[0] || {};
   const totalActivePipeline = parseInt(kpiRow.total_active_pipeline ?? "0", 10) || 0;
   const remainingToFund = parseInt(kpiRow.remaining_to_fund ?? "0", 10) || 0;
   const fundedThisMonth = parseInt(kpiRow.funded_this_month ?? "0", 10) || 0;
-  const priorMonthUnits = parseInt(kpiRow.prior_month_units ?? "0", 10) || 0;
-  const priorMonthVolume = Number(kpiRow.prior_month_volume ?? 0);
-  const prevMonthActualUnits = parseInt(kpiRow.prev_month_actual_units ?? "0", 10) || 0;
-  const prevMonthActualVolume = Number(kpiRow.prev_month_actual_volume ?? 0);
+  const priorMonthUnits = parseInt(histRow.prior_month_units ?? "0", 10) || 0;
+  const priorMonthVolume = Number(histRow.prior_month_volume ?? 0);
+  const prevMonthActualUnits = parseInt(histRow.prev_month_actual_units ?? "0", 10) || 0;
+  const prevMonthActualVolume = Number(histRow.prev_month_actual_volume ?? 0);
   const unitsLastMonthVsPriorPct = priorMonthUnits > 0
     ? ((prevMonthActualUnits - priorMonthUnits) / priorMonthUnits) * 100
     : null;
@@ -321,13 +434,12 @@ export async function getEstimatedClosingsRiskData(
           AND l.funding_date IS NULL
           AND l.estimated_closing_date IS NOT NULL
           AND l.estimated_closing_date::date < b.today
+          AND NOT (
+            l.estimated_closing_date::date BETWEEN b.month_start AND b.month_end
+          )
       )::int AS past_ecd,
       COUNT(*) FILTER (
-        WHERE ${ACTIVE_SQL}
-          AND l.funding_date IS NULL
-          AND l.estimated_closing_date IS NOT NULL
-          AND l.estimated_closing_date::date BETWEEN b.month_start AND b.month_end
-          AND l.estimated_closing_date::date >= b.today
+        WHERE ${remainingToFundExpr}
       )::int AS remaining_to_fund,
       COUNT(*) FILTER (
         WHERE ${ACTIVE_SQL}
@@ -340,15 +452,6 @@ export async function getEstimatedClosingsRiskData(
     WHERE TRUE
     ${extraClauses}
   `;
-  const pieResult = await tenantPool.query(pieQuery, params);
-  const pieRow = pieResult.rows[0] || {};
-  const activePipelineEcdSlices: ActivePipelineEcdSlice[] = [
-    { key: "empty_ecd", label: "Empty ECD", count: parseInt(pieRow.empty_ecd ?? "0", 10) || 0 },
-    { key: "past_ecd", label: "Past ECD", count: parseInt(pieRow.past_ecd ?? "0", 10) || 0 },
-    { key: "remaining_to_fund", label: "Remaining to Fund", count: parseInt(pieRow.remaining_to_fund ?? "0", 10) || 0 },
-    { key: "after_this_month", label: "After This Month", count: parseInt(pieRow.after_this_month ?? "0", 10) || 0 },
-  ];
-
   const complexityBarQuery = `
     ${baseCte}
     SELECT
@@ -360,92 +463,15 @@ export async function getEstimatedClosingsRiskData(
     FROM public.loans l
     CROSS JOIN bounds b
     WHERE
-      ${fundedThisMonthExpr}
-      OR (${remainingToFundExpr})
+      (
+        ${fundedThisMonthExpr}
+        OR (${remainingToFundExpr})
+      )
     ${channelWhere}
     ${accessCondition ? ` AND ${accessCondition}` : ""}
-    ${dimensionCondition ? ` AND ${dimensionCondition}` : ""}
+    ${dimensionAndPageTail}
     GROUP BY ${complexityBucketExpr("l")}
   `;
-  const complexityBarResult = await tenantPool.query(complexityBarQuery, params);
-  const barDefaults: Record<string, MaxPossibleFundingComplexityBar> = {
-    gte_130: { bucketKey: "gte_130", bucketLabel: ">= 130", funded: 0, notFunded: 0, total: 0 },
-    gte_120: { bucketKey: "gte_120", bucketLabel: ">= 120", funded: 0, notFunded: 0, total: 0 },
-    gte_110: { bucketKey: "gte_110", bucketLabel: ">= 110", funded: 0, notFunded: 0, total: 0 },
-    all_rest: { bucketKey: "all_rest", bucketLabel: "All the Rest", funded: 0, notFunded: 0, total: 0 },
-  };
-  for (const row of complexityBarResult.rows) {
-    const key = String(row.bucket_key || "all_rest");
-    if (!barDefaults[key]) continue;
-    barDefaults[key].funded = parseInt(row.funded ?? "0", 10) || 0;
-    barDefaults[key].notFunded = parseInt(row.not_funded ?? "0", 10) || 0;
-    barDefaults[key].total = barDefaults[key].funded + barDefaults[key].notFunded;
-  }
-  const maxPossibleFundingByComplexity = [
-    barDefaults.gte_130,
-    barDefaults.gte_120,
-    barDefaults.gte_110,
-    barDefaults.all_rest,
-  ];
-
-  const remainingComplexityQuery = `
-    ${baseCte}
-    , complexity_defs AS (
-      SELECT 1::int AS sort_order, '1 - GT 131'::text AS complexity_group
-      UNION ALL SELECT 2, '2 - 121 to 130'
-      UNION ALL SELECT 3, '3 - 111 to 120'
-      UNION ALL SELECT 4, '4 - 101 to 110'
-      UNION ALL SELECT 5, '5 - 91 to 100'
-      UNION ALL SELECT 6, '6 - Less than 90'
-    )
-    SELECT
-      d.complexity_group,
-      d.sort_order,
-      (
-        SELECT COUNT(*)::int
-        FROM public.loans l
-        CROSS JOIN bounds b
-        WHERE ${remainingToFundExpr}
-          AND ${complexityGroupSortExpr("l")} = d.sort_order
-        ${channelWhere}
-        ${accessCondition ? ` AND ${accessCondition}` : ""}
-        ${dimensionCondition ? ` AND ${dimensionCondition}` : ""}
-      ) AS units_remaining_to_fund,
-      (
-        SELECT (
-          1 - (
-            COUNT(*) FILTER (
-              WHERE l.application_date::date >= b3.hist_start
-                AND TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
-                AND TRIM(COALESCE(l.current_loan_status, '')) = 'Loan Originated'
-            )::float / NULLIF(
-              COUNT(*) FILTER (
-                WHERE l.application_date::date >= b3.hist_start
-                  AND TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
-              ),
-              0
-            )
-          )
-        )::float
-        FROM public.loans l
-        CROSS JOIN bounds b3
-        WHERE ${complexityGroupSortExpr("l")} = d.sort_order
-        ${channelWhere}
-        ${accessCondition ? ` AND ${accessCondition}` : ""}
-        ${dimensionCondition ? ` AND ${dimensionCondition}` : ""}
-      ) AS historical_fallout_last_13_months
-    FROM complexity_defs d
-    ORDER BY d.sort_order
-  `;
-  const remainingComplexityResult = await tenantPool.query(remainingComplexityQuery, params);
-  const remainingToFundByComplexity = remainingComplexityResult.rows.map((r) => ({
-    complexityGroup: String(r.complexity_group),
-    sortOrder: parseInt(r.sort_order ?? "99", 10) || 99,
-    unitsRemainingToFund: parseInt(r.units_remaining_to_fund ?? "0", 10) || 0,
-    historicalFalloutLast13Months:
-      r.historical_fallout_last_13_months != null ? Number(r.historical_fallout_last_13_months) * 100 : null,
-  }));
-
   const complexityHistoricalPooledQuery = `
     ${baseCte}
     SELECT
@@ -469,10 +495,95 @@ export async function getEstimatedClosingsRiskData(
     WHERE TRUE
     ${extraClauses}
   `;
-  const pooledResult = await tenantPool.query(complexityHistoricalPooledQuery, params);
+  const [pieResult, complexityBarResult, pooledResult] = await Promise.all([
+    tenantPool.query(pieQuery, params),
+    tenantPool.query(complexityBarQuery, params),
+    tenantPool.query(complexityHistoricalPooledQuery, params),
+  ]);
+  const pieRow = pieResult.rows[0] || {};
+  const activePipelineEcdSlices: ActivePipelineEcdSlice[] = [
+    { key: "empty_ecd", label: "Empty ECD", count: parseInt(pieRow.empty_ecd ?? "0", 10) || 0 },
+    { key: "past_ecd", label: "Past ECD", count: parseInt(pieRow.past_ecd ?? "0", 10) || 0 },
+    { key: "remaining_to_fund", label: "Remaining to Fund", count: parseInt(pieRow.remaining_to_fund ?? "0", 10) || 0 },
+    { key: "after_this_month", label: "After This Month", count: parseInt(pieRow.after_this_month ?? "0", 10) || 0 },
+  ];
+  const barDefaults: Record<string, MaxPossibleFundingComplexityBar> = {
+    gte_130: { bucketKey: "gte_130", bucketLabel: ">= 130", funded: 0, notFunded: 0, total: 0 },
+    gte_120: { bucketKey: "gte_120", bucketLabel: ">= 120", funded: 0, notFunded: 0, total: 0 },
+    gte_110: { bucketKey: "gte_110", bucketLabel: ">= 110", funded: 0, notFunded: 0, total: 0 },
+    all_rest: { bucketKey: "all_rest", bucketLabel: "All the Rest", funded: 0, notFunded: 0, total: 0 },
+  };
+  for (const row of complexityBarResult.rows) {
+    const key = String(row.bucket_key || "all_rest");
+    if (!barDefaults[key]) continue;
+    barDefaults[key].funded = parseInt(row.funded ?? "0", 10) || 0;
+    barDefaults[key].notFunded = parseInt(row.not_funded ?? "0", 10) || 0;
+    barDefaults[key].total = barDefaults[key].funded + barDefaults[key].notFunded;
+  }
+  const maxPossibleFundingByComplexity = [
+    barDefaults.gte_130,
+    barDefaults.gte_120,
+    barDefaults.gte_110,
+    barDefaults.all_rest,
+  ];
+
   const pooledRow = pooledResult.rows?.[0];
   const historicalFalloutPooled13Months =
     pooledRow?.historical_fallout_pooled != null ? Number(pooledRow.historical_fallout_pooled) * 100 : null;
+
+  const remainingComplexityQuery = `
+    ${baseCte}
+    , complexity_defs AS (
+      SELECT 1::int AS sort_order, '1 - GT 131'::text AS complexity_group
+      UNION ALL SELECT 2, '2 - 121 to 130'
+      UNION ALL SELECT 3, '3 - 111 to 120'
+      UNION ALL SELECT 4, '4 - 101 to 110'
+      UNION ALL SELECT 5, '5 - 91 to 100'
+      UNION ALL SELECT 6, '6 - Less than 90'
+    )
+    , rem_counts AS (
+      SELECT ${complexityGroupSortExpr("l")} AS sort_order, COUNT(*)::int AS cnt
+      FROM public.loans l
+      CROSS JOIN bounds b
+      WHERE ${remainingToFundExpr}
+      ${channelWhere}
+      ${accessCondition ? ` AND ${accessCondition}` : ""}
+      ${dimensionAndPageTail}
+      GROUP BY 1
+    )
+    , hist_counts AS (
+      SELECT ${complexityGroupSortExpr("l")} AS sort_order,
+        COUNT(*) FILTER (
+          WHERE l.application_date::date >= b.hist_start
+            AND TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
+            AND TRIM(COALESCE(l.current_loan_status, '')) = 'Loan Originated'
+        )::float AS numer,
+        COUNT(*) FILTER (
+          WHERE l.application_date::date >= b.hist_start
+            AND TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
+        )::float AS denom
+      FROM public.loans l
+      CROSS JOIN bounds b
+      WHERE TRUE
+      ${channelWhere}
+      ${accessCondition ? ` AND ${accessCondition}` : ""}
+      ${dimensionAndPageTail}
+      GROUP BY 1
+    )
+    SELECT
+      d.complexity_group,
+      d.sort_order,
+      COALESCE(r.cnt, 0)::int AS units_remaining_to_fund,
+      CASE
+        WHEN h.denom IS NOT NULL AND h.denom > 0
+        THEN (1 - (h.numer / h.denom))::float
+        ELSE NULL
+      END AS historical_fallout_last_13_months
+    FROM complexity_defs d
+    LEFT JOIN rem_counts r ON r.sort_order = d.sort_order
+    LEFT JOIN hist_counts h ON h.sort_order = d.sort_order
+    ORDER BY d.sort_order
+  `;
 
   const remainingStageQuery = `
     ${baseCte}
@@ -483,207 +594,150 @@ export async function getEstimatedClosingsRiskData(
       UNION ALL SELECT '4-Locked'::text, 4
       UNION ALL SELECT '5-All Other'::text, 5
     )
+    , stage_units AS (
+      SELECT
+        ${processingStageSortExpr("l")} AS sort_order,
+        COUNT(*) FILTER (WHERE ${remainingToFundExpr})::int AS units_remaining_to_fund
+      FROM public.loans l
+      CROSS JOIN bounds b
+      WHERE TRUE
+      ${channelWhere}
+      ${accessCondition ? ` AND ${accessCondition}` : ""}
+      ${dimensionAndPageTail}
+      GROUP BY 1
+    )
+    , stage_global AS (
+      SELECT
+        COUNT(*) FILTER (
+          WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
+            AND TRIM(COALESCE(l.current_loan_status, '')) = 'Loan Originated'
+            AND l.application_date::date >= b.hist_start
+            AND l.ctc_date IS NOT NULL
+        )::float AS f_num_1,
+        COUNT(*) FILTER (
+          WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
+            AND l.application_date::date >= b.hist_start
+            AND l.ctc_date IS NOT NULL
+        )::float AS f_den_1,
+        COUNT(*) FILTER (
+          WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
+            AND TRIM(COALESCE(l.current_loan_status, '')) = 'Loan Originated'
+            AND l.application_date::date >= b.hist_start
+            AND l.approval_date IS NOT NULL
+        )::float AS f_num_2,
+        COUNT(*) FILTER (
+          WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
+            AND l.application_date::date >= b.hist_start
+            AND l.approval_date IS NOT NULL
+        )::float AS f_den_2,
+        COUNT(*) FILTER (
+          WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
+            AND TRIM(COALESCE(l.current_loan_status, '')) = 'Loan Originated'
+            AND l.application_date::date >= b.hist_start
+            AND l.conditional_approval_date IS NOT NULL
+        )::float AS f_num_3,
+        COUNT(*) FILTER (
+          WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
+            AND l.application_date::date >= b.hist_start
+            AND l.conditional_approval_date IS NOT NULL
+        )::float AS f_den_3,
+        COUNT(*) FILTER (
+          WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
+            AND TRIM(COALESCE(l.current_loan_status, '')) = 'Loan Originated'
+            AND l.application_date::date >= b.hist_start
+            AND (l.lock_date IS NOT NULL OR l.investor_lock_date IS NOT NULL)
+        )::float AS f_num_4,
+        COUNT(*) FILTER (
+          WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
+            AND l.application_date::date >= b.hist_start
+            AND (l.lock_date IS NOT NULL OR l.investor_lock_date IS NOT NULL)
+        )::float AS f_den_4,
+        COUNT(*) FILTER (
+          WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
+            AND TRIM(COALESCE(l.current_loan_status, '')) = 'Loan Originated'
+            AND l.application_date::date >= b.hist_start
+        )::float AS f_num_5,
+        COUNT(*) FILTER (
+          WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
+            AND l.application_date::date >= b.hist_start
+        )::float AS f_den_5,
+        AVG(${stageToFundDaysExpr(dateRangeType, "l.ctc_date")}) FILTER (
+          WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
+            AND l.application_date::date >= b.hist_start
+            AND l.funding_date IS NOT NULL
+            AND l.ctc_date IS NOT NULL
+        ) AS avg_days_1,
+        AVG(${stageToFundDaysExpr(dateRangeType, "l.approval_date")}) FILTER (
+          WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
+            AND l.application_date::date >= b.hist_start
+            AND l.funding_date IS NOT NULL
+            AND l.approval_date IS NOT NULL
+        ) AS avg_days_2,
+        AVG(${stageToFundDaysExpr(dateRangeType, "l.conditional_approval_date")}) FILTER (
+          WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
+            AND l.application_date::date >= b.hist_start
+            AND l.funding_date IS NOT NULL
+            AND l.conditional_approval_date IS NOT NULL
+        ) AS avg_days_3,
+        AVG(${stageToFundDaysExpr(dateRangeType, "COALESCE(l.lock_date, l.investor_lock_date)")}) FILTER (
+          WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
+            AND l.application_date::date >= b.hist_start
+            AND l.funding_date IS NOT NULL
+            AND (l.lock_date IS NOT NULL OR l.investor_lock_date IS NOT NULL)
+        ) AS avg_days_4,
+        AVG(${stageToFundDaysExpr(dateRangeType, "l.application_date")}) FILTER (
+          WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
+            AND l.application_date::date >= b.hist_start
+            AND l.funding_date IS NOT NULL
+            AND l.application_date IS NOT NULL
+        ) AS avg_days_5
+      FROM public.loans l
+      CROSS JOIN bounds b
+      WHERE TRUE
+      ${channelWhere}
+      ${accessCondition ? ` AND ${accessCondition}` : ""}
+      ${dimensionAndPageTail}
+    )
     SELECT
       s.processing_stage,
       s.sort_order,
+      COALESCE(u.units_remaining_to_fund, 0)::int AS units_remaining_to_fund,
       (
-        SELECT COUNT(*)::int
-        FROM public.loans l
-        CROSS JOIN bounds b2
-        WHERE ${remainingToFundExpr}
-          AND ${processingStageExpr("l")} = s.processing_stage
-        ${channelWhere}
-        ${accessCondition ? ` AND ${accessCondition}` : ""}
-        ${dimensionCondition ? ` AND ${dimensionCondition}` : ""}
-      ) AS units_remaining_to_fund,
-      (
-        CASE
-          WHEN s.processing_stage = '1-CTC' THEN (
-            1 - (
-              (
-                SELECT COUNT(*)::float
-                FROM public.loans l
-                WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
-                  AND TRIM(COALESCE(l.current_loan_status, '')) = 'Loan Originated'
-                  AND l.application_date::date >= b.hist_start
-                  AND l.ctc_date IS NOT NULL
-                ${channelWhere}
-                ${accessCondition ? ` AND ${accessCondition}` : ""}
-                ${dimensionCondition ? ` AND ${dimensionCondition}` : ""}
-              ) / NULLIF((
-                SELECT COUNT(*)::float
-                FROM public.loans l
-                WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
-                  AND l.application_date::date >= b.hist_start
-                  AND l.ctc_date IS NOT NULL
-                ${channelWhere}
-                ${accessCondition ? ` AND ${accessCondition}` : ""}
-                ${dimensionCondition ? ` AND ${dimensionCondition}` : ""}
-              ), 0)
-            )
-          )
-          WHEN s.processing_stage = '2-Approved' THEN (
-            1 - (
-              (
-                SELECT COUNT(*)::float
-                FROM public.loans l
-                WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
-                  AND TRIM(COALESCE(l.current_loan_status, '')) = 'Loan Originated'
-                  AND l.application_date::date >= b.hist_start
-                  AND l.approval_date IS NOT NULL
-                ${channelWhere}
-                ${accessCondition ? ` AND ${accessCondition}` : ""}
-                ${dimensionCondition ? ` AND ${dimensionCondition}` : ""}
-              ) / NULLIF((
-                SELECT COUNT(*)::float
-                FROM public.loans l
-                WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
-                  AND l.application_date::date >= b.hist_start
-                  AND l.approval_date IS NOT NULL
-                ${channelWhere}
-                ${accessCondition ? ` AND ${accessCondition}` : ""}
-                ${dimensionCondition ? ` AND ${dimensionCondition}` : ""}
-              ), 0)
-            )
-          )
-          WHEN s.processing_stage = '3-Conditional Approval' THEN (
-            1 - (
-              (
-                SELECT COUNT(*)::float
-                FROM public.loans l
-                WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
-                  AND TRIM(COALESCE(l.current_loan_status, '')) = 'Loan Originated'
-                  AND l.application_date::date >= b.hist_start
-                  AND l.conditional_approval_date IS NOT NULL
-                ${channelWhere}
-                ${accessCondition ? ` AND ${accessCondition}` : ""}
-                ${dimensionCondition ? ` AND ${dimensionCondition}` : ""}
-              ) / NULLIF((
-                SELECT COUNT(*)::float
-                FROM public.loans l
-                WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
-                  AND l.application_date::date >= b.hist_start
-                  AND l.conditional_approval_date IS NOT NULL
-                ${channelWhere}
-                ${accessCondition ? ` AND ${accessCondition}` : ""}
-                ${dimensionCondition ? ` AND ${dimensionCondition}` : ""}
-              ), 0)
-            )
-          )
-          WHEN s.processing_stage = '4-Locked' THEN (
-            1 - (
-              (
-                SELECT COUNT(*)::float
-                FROM public.loans l
-                WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
-                  AND TRIM(COALESCE(l.current_loan_status, '')) = 'Loan Originated'
-                  AND l.application_date::date >= b.hist_start
-                  AND (l.lock_date IS NOT NULL OR l.investor_lock_date IS NOT NULL)
-                ${channelWhere}
-                ${accessCondition ? ` AND ${accessCondition}` : ""}
-                ${dimensionCondition ? ` AND ${dimensionCondition}` : ""}
-              ) / NULLIF((
-                SELECT COUNT(*)::float
-                FROM public.loans l
-                WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
-                  AND l.application_date::date >= b.hist_start
-                  AND (l.lock_date IS NOT NULL OR l.investor_lock_date IS NOT NULL)
-                ${channelWhere}
-                ${accessCondition ? ` AND ${accessCondition}` : ""}
-                ${dimensionCondition ? ` AND ${dimensionCondition}` : ""}
-              ), 0)
-            )
-          )
-          WHEN s.processing_stage = '5-All Other' THEN (
-            1 - (
-              (
-                SELECT COUNT(*)::float
-                FROM public.loans l
-                WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
-                  AND TRIM(COALESCE(l.current_loan_status, '')) = 'Loan Originated'
-                  AND l.application_date::date >= b.hist_start
-                ${channelWhere}
-                ${accessCondition ? ` AND ${accessCondition}` : ""}
-                ${dimensionCondition ? ` AND ${dimensionCondition}` : ""}
-              ) / NULLIF((
-                SELECT COUNT(*)::float
-                FROM public.loans l
-                WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
-                  AND l.application_date::date >= b.hist_start
-                ${channelWhere}
-                ${accessCondition ? ` AND ${accessCondition}` : ""}
-                ${dimensionCondition ? ` AND ${dimensionCondition}` : ""}
-              ), 0)
-            )
-          )
+        CASE s.sort_order
+          WHEN 1 THEN CASE WHEN COALESCE(g.f_den_1, 0) > 0 THEN (1 - (g.f_num_1 / g.f_den_1))::float END
+          WHEN 2 THEN CASE WHEN COALESCE(g.f_den_2, 0) > 0 THEN (1 - (g.f_num_2 / g.f_den_2))::float END
+          WHEN 3 THEN CASE WHEN COALESCE(g.f_den_3, 0) > 0 THEN (1 - (g.f_num_3 / g.f_den_3))::float END
+          WHEN 4 THEN CASE WHEN COALESCE(g.f_den_4, 0) > 0 THEN (1 - (g.f_num_4 / g.f_den_4))::float END
+          WHEN 5 THEN CASE WHEN COALESCE(g.f_den_5, 0) > 0 THEN (1 - (g.f_num_5 / g.f_den_5))::float END
           ELSE NULL
         END
-      )::float AS historical_fallout,
+      ) AS historical_fallout,
       (
-        CASE
-          WHEN s.processing_stage = '1-CTC' THEN (
-            SELECT AVG(${stageToFundDaysExpr(dateRangeType, "l.ctc_date")})::float
-            FROM public.loans l
-            WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
-              AND l.application_date::date >= b.hist_start
-              AND l.funding_date IS NOT NULL
-              AND l.ctc_date IS NOT NULL
-            ${channelWhere}
-            ${accessCondition ? ` AND ${accessCondition}` : ""}
-            ${dimensionCondition ? ` AND ${dimensionCondition}` : ""}
-          )
-          WHEN s.processing_stage = '2-Approved' THEN (
-            SELECT AVG(${stageToFundDaysExpr(dateRangeType, "l.approval_date")})::float
-            FROM public.loans l
-            WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
-              AND l.application_date::date >= b.hist_start
-              AND l.funding_date IS NOT NULL
-              AND l.approval_date IS NOT NULL
-            ${channelWhere}
-            ${accessCondition ? ` AND ${accessCondition}` : ""}
-            ${dimensionCondition ? ` AND ${dimensionCondition}` : ""}
-          )
-          WHEN s.processing_stage = '3-Conditional Approval' THEN (
-            SELECT AVG(${stageToFundDaysExpr(dateRangeType, "l.conditional_approval_date")})::float
-            FROM public.loans l
-            WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
-              AND l.application_date::date >= b.hist_start
-              AND l.funding_date IS NOT NULL
-              AND l.conditional_approval_date IS NOT NULL
-            ${channelWhere}
-            ${accessCondition ? ` AND ${accessCondition}` : ""}
-            ${dimensionCondition ? ` AND ${dimensionCondition}` : ""}
-          )
-          WHEN s.processing_stage = '4-Locked' THEN (
-            SELECT AVG(${stageToFundDaysExpr(dateRangeType, "COALESCE(l.lock_date, l.investor_lock_date)")})::float
-            FROM public.loans l
-            WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
-              AND l.application_date::date >= b.hist_start
-              AND l.funding_date IS NOT NULL
-              AND (l.lock_date IS NOT NULL OR l.investor_lock_date IS NOT NULL)
-            ${channelWhere}
-            ${accessCondition ? ` AND ${accessCondition}` : ""}
-            ${dimensionCondition ? ` AND ${dimensionCondition}` : ""}
-          )
-          WHEN s.processing_stage = '5-All Other' THEN (
-            SELECT AVG(${stageToFundDaysExpr(dateRangeType, "l.application_date")})::float
-            FROM public.loans l
-            WHERE TRIM(COALESCE(l.current_loan_status, '')) <> 'Active Loan'
-              AND l.application_date::date >= b.hist_start
-              AND l.funding_date IS NOT NULL
-              AND l.application_date IS NOT NULL
-            ${channelWhere}
-            ${accessCondition ? ` AND ${accessCondition}` : ""}
-            ${dimensionCondition ? ` AND ${dimensionCondition}` : ""}
-          )
+        CASE s.sort_order
+          WHEN 1 THEN g.avg_days_1
+          WHEN 2 THEN g.avg_days_2
+          WHEN 3 THEN g.avg_days_3
+          WHEN 4 THEN g.avg_days_4
+          WHEN 5 THEN g.avg_days_5
           ELSE NULL
         END
       ) AS historical_status_to_fund_days
     FROM stage_defs s
-    CROSS JOIN bounds b
+    LEFT JOIN stage_units u ON u.sort_order = s.sort_order
+    CROSS JOIN stage_global g
     ORDER BY s.sort_order
   `;
-  const remainingStageResult = await tenantPool.query(remainingStageQuery, params);
+  const [remainingComplexityResult, remainingStageResult] = await Promise.all([
+    tenantPool.query(remainingComplexityQuery, params),
+    tenantPool.query(remainingStageQuery, params),
+  ]);
+  const remainingToFundByComplexity = remainingComplexityResult.rows.map((r) => ({
+    complexityGroup: String(r.complexity_group),
+    sortOrder: parseInt(r.sort_order ?? "99", 10) || 99,
+    unitsRemainingToFund: parseInt(r.units_remaining_to_fund ?? "0", 10) || 0,
+    historicalFalloutLast13Months:
+      r.historical_fallout_last_13_months != null ? Number(r.historical_fallout_last_13_months) * 100 : null,
+  }));
   const remainingToFundByProcessingStage = remainingStageResult.rows.map((r) => ({
     processingStage: String(r.processing_stage),
     sortOrder: parseInt(r.sort_order ?? "5", 10) || 5,
@@ -699,46 +753,7 @@ export async function getEstimatedClosingsRiskData(
       OR ${remainingToFundExpr}
     )
   `;
-  const projectionExpr = `
-    (CASE
-      WHEN l.funding_date::date BETWEEN b.month_start AND b.today THEN 'Funded'
-      WHEN l.current_loan_status = 'Active Loan'
-        AND l.ctc_date IS NOT NULL
-        AND l.funding_date IS NULL THEN 'CTC'
-      WHEN l.current_loan_status = 'Active Loan'
-        AND l.approval_date IS NOT NULL
-        AND l.ctc_date IS NULL
-        AND l.funding_date IS NULL THEN 'Approved'
-      WHEN l.current_loan_status = 'Active Loan'
-        AND l.conditional_approval_date IS NOT NULL
-        AND l.approval_date IS NULL
-        AND l.ctc_date IS NULL
-        AND l.funding_date IS NULL THEN 'Conditional Approved'
-      WHEN l.current_loan_status = 'Active Loan'
-        AND (l.lock_date IS NOT NULL OR l.investor_lock_date IS NOT NULL)
-        AND l.conditional_approval_date IS NULL
-        AND l.approval_date IS NULL
-        AND l.ctc_date IS NULL
-        AND l.funding_date IS NULL THEN 'Locked'
-      WHEN l.current_loan_status = 'Active Loan'
-        AND l.submitted_to_processing_date IS NOT NULL
-        AND l.lock_date IS NULL
-        AND l.investor_lock_date IS NULL
-        AND l.conditional_approval_date IS NULL
-        AND l.approval_date IS NULL
-        AND l.ctc_date IS NULL
-        AND l.funding_date IS NULL THEN 'In Processing'
-      WHEN l.current_loan_status = 'Active Loan'
-        AND l.submitted_to_processing_date IS NULL
-        AND l.lock_date IS NULL
-        AND l.investor_lock_date IS NULL
-        AND l.conditional_approval_date IS NULL
-        AND l.approval_date IS NULL
-        AND l.ctc_date IS NULL
-        AND l.funding_date IS NULL THEN 'Not Yet In Processing'
-      ELSE NULL
-    END)
-  `;
+  const projectionExpr = closingProjectionGroupExpr("l");
   const appToDispExpr = appToDispositionDaysExpr(dateRangeType, "l");
 
   const detailCountQuery = `
@@ -749,11 +764,8 @@ export async function getEstimatedClosingsRiskData(
     WHERE ${detailBaseWhere}
     ${channelWhere}
     ${accessCondition ? ` AND ${accessCondition}` : ""}
-    ${dimensionCondition ? ` AND ${dimensionCondition}` : ""}
+    ${dimensionAndPageTail}
   `;
-  const detailCountResult = await tenantPool.query(detailCountQuery, params);
-  const detailTotal = parseInt(detailCountResult.rows?.[0]?.total ?? "0", 10) || 0;
-
   const usePagination = typeof detailLimit === "number";
   const safeLimit = usePagination ? Math.max(1, detailLimit as number) : null;
   const safeOffset = Math.max(0, detailOffset);
@@ -798,12 +810,16 @@ export async function getEstimatedClosingsRiskData(
     WHERE ${detailBaseWhere}
     ${channelWhere}
     ${accessCondition ? ` AND ${accessCondition}` : ""}
-    ${dimensionCondition ? ` AND ${dimensionCondition}` : ""}
+    ${dimensionAndPageTail}
     ORDER BY l.loan_number NULLS LAST
     ${usePagination ? `LIMIT $${params.length + 1}` : ""}
     ${usePagination ? `OFFSET $${params.length + 2}` : ""}
   `;
-  const detailResult = await tenantPool.query(detailQuery, detailParams);
+  const [detailCountResult, detailResult] = await Promise.all([
+    tenantPool.query(detailCountQuery, params),
+    tenantPool.query(detailQuery, detailParams),
+  ]);
+  const detailTotal = parseInt(detailCountResult.rows?.[0]?.total ?? "0", 10) || 0;
   const detailRows: EstimatedClosingsRiskDetailRow[] = (detailResult.rows || []).map((r) => ({
     loanNumber: r.loan_number != null ? String(r.loan_number) : null,
     complexityGroup: String(r.complexity_group || "Other"),
@@ -845,7 +861,7 @@ export async function getEstimatedClosingsRiskData(
     remainingToFund,
     fundedThisMonth,
     maxPossibleFunding: fundedThisMonth + remainingToFund,
-    fundingYtdUnits: parseInt(kpiRow.funding_ytd_units ?? "0", 10) || 0,
+    fundingYtdUnits: parseInt(histRow.funding_ytd_units ?? "0", 10) || 0,
     prevMonthActualUnits,
     prevMonthActualVolume,
     unitsLastMonthVsPriorPct,

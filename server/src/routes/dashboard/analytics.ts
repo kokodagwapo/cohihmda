@@ -37,6 +37,7 @@ import {
   type LoanComplexityGroupBy,
 } from "../../services/dashboard/loanComplexityDashboardService.js";
 import { getEstimatedClosingsRiskData } from "../../services/dashboard/estimatedClosingsRiskService.js";
+import { parseEstimatedClosingsDetailFiltersJson } from "../../services/dashboard/estimatedClosingsRiskFilterSql.js";
 import { getStaffingUnitTargets } from "../../utils/staffingUnitTargets.js";
 import { buildDimensionFilterWhereClause } from "../../utils/scorecard-utils.js";
 import { deleteInsightById } from "../../services/insights/llmInsightGenerator.js";
@@ -1294,6 +1295,13 @@ router.get(
         tenant_id: z.string().uuid().optional(),
         limit: z.coerce.number().int().min(1).max(10000).optional(),
         offset: z.coerce.number().int().min(0).optional(),
+        ecd_slice: z
+          .enum(["empty_ecd", "past_ecd", "remaining_to_fund", "after_this_month"])
+          .optional(),
+        complexity_bucket: z.enum(["gte_130", "gte_120", "gte_110", "all_rest"]).optional(),
+        remaining_complexity_group: z.string().max(400).optional(),
+        remaining_processing_stage: z.string().max(120).optional(),
+        detail_filters: z.string().max(500_000).optional(),
       });
       const parsed = querySchema.parse(req.query);
       const tenantContext = getTenantContext(req);
@@ -1326,8 +1334,20 @@ router.get(
       const dimensionFilterClause = buildDimensionFilterWhereClause(
         req.query as Record<string, any>,
         "l",
-        new Set(["dateRangeType", "channel_group", "tenant_id", "limit", "offset"])
+        new Set([
+          "dateRangeType",
+          "channel_group",
+          "tenant_id",
+          "limit",
+          "offset",
+          "ecd_slice",
+          "complexity_bucket",
+          "remaining_complexity_group",
+          "remaining_processing_stage",
+          "detail_filters",
+        ])
       );
+      const detailColumnFilters = parseEstimatedClosingsDetailFiltersJson(parsed.detail_filters);
       const result = await getEstimatedClosingsRiskData(tenantContext.tenantPool, {
         dateRangeType: parsed.dateRangeType,
         channelGroup: parsed.channel_group || undefined,
@@ -1336,6 +1356,11 @@ router.get(
         dimensionFilterClause: dimensionFilterClause || undefined,
         detailLimit: parsed.limit,
         detailOffset: parsed.offset ?? 0,
+        ecdSlice: parsed.ecd_slice,
+        complexityBarBucket: parsed.complexity_bucket,
+        remainingFundComplexityGroup: parsed.remaining_complexity_group || undefined,
+        remainingFundProcessingStage: parsed.remaining_processing_stage || undefined,
+        detailColumnFilters,
       });
       res.json(result);
     } catch (error: any) {
