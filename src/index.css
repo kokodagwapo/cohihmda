@@ -62,7 +62,8 @@ All colors MUST be HSL.
     /* Modal stack: above app chrome (z-40–50), cohibuilder map HUD (~1100), grid drag (100). */
     --z-modal-backdrop: 10050;
     --z-modal: 10060;
-    /* Floating UI: menus/popovers above nav (50), mega-menu (60), Leaflet panes (~400+), grid drag (100). Tooltips above popovers. All below modals. */    --z-popover: 10020;
+    /* Floating UI: menus/popovers above nav (50), mega-menu (60), Leaflet panes (~400+), grid drag (100). Tooltips above popovers. All below modals. */
+    --z-popover: 10020;
     --z-tooltip: 10040;
   }
 
