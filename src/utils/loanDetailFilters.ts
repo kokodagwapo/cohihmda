@@ -217,6 +217,15 @@ function matchesBooleanFilter(filter: BooleanColumnFilter, rawValue: unknown): b
   return filter.value === "yes" ? yes : !yes;
 }
 
+/** Single-value check (e.g. highlight a table cell that matches an applied column filter). */
+export function valueMatchesColumnFilter(rawValue: unknown, filter: ColumnFilter | undefined): boolean {
+  if (!filter || !isFilterActive(filter)) return false;
+  if (filter.kind === "text") return matchesTextFilter(filter, rawValue);
+  if (filter.kind === "number") return matchesNumberFilter(filter, rawValue);
+  if (filter.kind === "date") return matchesDateFilter(filter, rawValue);
+  return matchesBooleanFilter(filter, rawValue);
+}
+
 export function evaluateLoanDetailFilters<T>(
   rows: T[],
   filters: ColumnFilterState,

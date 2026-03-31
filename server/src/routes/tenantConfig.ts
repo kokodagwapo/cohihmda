@@ -21,6 +21,11 @@ import {
   getStaffingUnitTargets,
   type StaffingUnitTargets,
 } from "../utils/staffingUnitTargets.js";
+import {
+  hashActiveComplexityComponents,
+  enqueueLoanComplexityRecomputeIfChanged,
+  enqueueLoanComplexityRecompute,
+} from "../services/scoring/loanComplexityBackgroundJob.js";
 
 const router = express.Router();
 
@@ -1915,6 +1920,29 @@ router.get(
 );
 
 /**
+ * POST /api/tenant-config/complexity/recompute
+ * Enqueue a tenant-wide persisted complexity_score recompute (durable job).
+ */
+router.post(
+  "/complexity/recompute",
+  authenticateToken,
+  attachTenantContext,
+  requireRole("tenant_admin", "super_admin"),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { tenantPool } = getTenantContext(req);
+      const enqueued = await enqueueLoanComplexityRecompute(tenantPool);
+      res.json({ enqueued });
+    } catch (error: any) {
+      logError("Error enqueuing complexity recompute", error, {
+        userId: req.userId,
+      });
+      res.status(500).json({ error: "Failed to enqueue complexity recompute" });
+    }
+  },
+);
+
+/**
  * PUT /api/tenant-config/complexity/:componentName
  * Update complexity component weights
  */
@@ -1942,6 +1970,8 @@ router.put(
       });
 
       const data = schema.parse(req.body);
+
+      const hashBefore = await hashActiveComplexityComponents(tenantPool);
 
       const results = [];
       for (const v of data.values) {
@@ -1975,6 +2005,9 @@ router.put(
         userId: req.userId,
         componentName,
       });
+      void enqueueLoanComplexityRecomputeIfChanged(tenantPool, hashBefore).catch(
+        (e) => logError("Complexity recompute enqueue failed", e, {}),
+      );
       res.json({ components: results });
     } catch (error: any) {
       logError("Error updating complexity components", error, {
@@ -2011,6 +2044,8 @@ router.post(
 
       const data = schema.parse(req.body);
 
+      const hashBefore = await hashActiveComplexityComponents(tenantPool);
+
       const result = await tenantPool.query(
         `
         INSERT INTO public.complexity_components (component_name, condition_value, weight, description, is_active, created_by, range_min, range_max)
@@ -2033,6 +2068,10 @@ router.post(
           data.range_min ?? null,
           data.range_max ?? null,
         ]
+      );
+
+      void enqueueLoanComplexityRecomputeIfChanged(tenantPool, hashBefore).catch(
+        (e) => logError("Complexity recompute enqueue failed", e, {}),
       );
 
       logInfo("Complexity condition added/updated", {
@@ -2065,6 +2104,8 @@ router.delete(
       const { tenantPool } = getTenantContext(req);
       const { componentName, conditionValue } = req.params;
 
+      const hashBefore = await hashActiveComplexityComponents(tenantPool);
+
       const result = await tenantPool.query(
         `
         DELETE FROM public.complexity_components
@@ -2077,6 +2118,10 @@ router.delete(
       if (result.rowCount === 0) {
         return res.status(404).json({ error: "Complexity condition not found" });
       }
+
+      void enqueueLoanComplexityRecomputeIfChanged(tenantPool, hashBefore).catch(
+        (e) => logError("Complexity recompute enqueue failed", e, {}),
+      );
 
       logInfo("Complexity condition deleted", {
         userId: req.userId,

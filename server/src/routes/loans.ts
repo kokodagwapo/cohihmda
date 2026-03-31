@@ -66,6 +66,8 @@ import {
   type ActorMissingMode,
 } from "../utils/scorecard-utils.js";
 import { getStaffingUnitTargets } from "../utils/staffingUnitTargets.js";
+import { resolveLoanComplexityScoreForRead } from "../services/scoring/persistedLoanComplexity.js";
+import { LoanComplexityService } from "../services/scoring/loanComplexityService.js";
 
 // Helper function to calculate days between dates
 function daysBetween(
@@ -2892,7 +2894,7 @@ router.get(
           funding_date, closing_date, application_date, started_date,
           branch, loan_officer, fico_score, ltv_ratio, be_dti_ratio,
           origination_points, orig_fee_borr_pd, orig_fees_seller, cd_lender_credits,
-          branch_price_concession, occupancy_type, borr_self_employed,
+          branch_price_concession, occupancy_type, borr_self_employed, non_qm, complexity_score,
           rate_lock_buy_side_base_price_rate,
           number_of_conditions, date_warehoused, investor_status, investor_purchase_date
          FROM loans
@@ -2910,6 +2912,10 @@ router.get(
         500,
       );
       const fundedLoans = fundedLoansResult.rows;
+
+      const loanComplexitySvc = new LoanComplexityService(tenantPool);
+      await loanComplexitySvc.loadCustomWeights();
+      const loanComplexityCfg = loanComplexitySvc.getConfigV2() ?? undefined;
 
       // PHASE 2: Fetch supporting data for pull-through, lost opportunity, etc.
       // These need application_date range, not funding_date
@@ -3232,8 +3238,9 @@ router.get(
           actorData.concessions.push(concessionDollars);
         }
 
-        // Track loan complexity score (canonical calcLoanComplexity from scorecard-utils)
-        const complexityScore = calcLoanComplexity(toLoanComplexityData(l));
+        const complexityScore =
+          resolveLoanComplexityScoreForRead(l, loanComplexityCfg) ??
+          calcLoanComplexity(toLoanComplexityData(l), loanComplexityCfg);
         actorData.complexityScores.push(complexityScore);
 
         // Complexity logging removed for cleaner output
@@ -4418,6 +4425,10 @@ router.get(
         complexity: 0.15,
       };
 
+      const opsLoanComplexitySvc = new LoanComplexityService(tenantPool);
+      await opsLoanComplexitySvc.loadCustomWeights();
+      const opsLoanComplexityCfg = opsLoanComplexitySvc.getConfigV2() ?? undefined;
+
       // OPTIMIZED: Use SQL filtering for date, channel, and actor
       const channelClause = buildChannelWhereClause(channelGroup);
       const startDateStr = formatDateForSQL(effectiveStartDate);
@@ -4440,7 +4451,7 @@ router.get(
         funding_date,
         application_date,
         fico_score, ltv_ratio, be_dti_ratio,
-        occupancy_type, borr_self_employed
+        occupancy_type, borr_self_employed, non_qm, complexity_score
       FROM loans
       WHERE ${config.outputDateField} IS NOT NULL
         AND ${config.outputDateField} >= $1
@@ -4508,7 +4519,9 @@ router.get(
         const loanNumber = String(l.loan_number || l.loan_id); // Use loan_number for distinct counting
         const loanAmount = parseFloat(l.loan_amount) || 0;
         const turnTime = calcTurnTime(l);
-        const complexity = calcLoanComplexity(toLoanComplexityData(l));
+        const complexity =
+          resolveLoanComplexityScoreForRead(l, opsLoanComplexityCfg) ??
+          calcLoanComplexity(toLoanComplexityData(l), opsLoanComplexityCfg);
 
         if (!actorMap.has(actorName)) {
           actorMap.set(actorName, {
@@ -5042,6 +5055,11 @@ router.get(
         complexity: 0.15,
       };
 
+      const opsTrendsLoanComplexitySvc = new LoanComplexityService(tenantPool);
+      await opsTrendsLoanComplexitySvc.loadCustomWeights();
+      const opsTrendsLoanComplexityCfg =
+        opsTrendsLoanComplexitySvc.getConfigV2() ?? undefined;
+
       // OPTIMIZED: Use SQL filtering for date, channel, and actor
       const channelClause = buildChannelWhereClause(channelGroup);
       const startDateStr = formatDateForSQL(effectiveStartDate);
@@ -5064,7 +5082,7 @@ router.get(
         funding_date,
         application_date,
         fico_score, ltv_ratio, be_dti_ratio,
-        occupancy_type, borr_self_employed
+        occupancy_type, borr_self_employed, non_qm, complexity_score
       FROM loans
       WHERE ${config.outputDateField} IS NOT NULL
         AND ${config.outputDateField} >= $1
@@ -5176,7 +5194,9 @@ router.get(
 
         const loanAmount = parseFloat(l.loan_amount) || 0;
         const turnTime = calcTurnTime(l);
-        const complexity = calcLoanComplexity(toLoanComplexityData(l));
+        const complexity =
+          resolveLoanComplexityScoreForRead(l, opsTrendsLoanComplexityCfg) ??
+          calcLoanComplexity(toLoanComplexityData(l), opsTrendsLoanComplexityCfg);
 
         if (!actorMap.has(actorName)) {
           actorMap.set(actorName, {

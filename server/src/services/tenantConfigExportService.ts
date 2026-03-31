@@ -427,6 +427,23 @@ export async function importTenantConfig(
 
     await client.query("COMMIT");
 
+    const complexityTouched = sectionResults.some(
+      (s) =>
+        s.section === "complexityComponents" &&
+        (s.imported > 0 || s.deleted > 0) &&
+        s.errors.length === 0,
+    );
+    if (complexityTouched) {
+      try {
+        const { enqueueLoanComplexityRecompute } = await import(
+          "./scoring/loanComplexityBackgroundJob.js"
+        );
+        await enqueueLoanComplexityRecompute(pool);
+      } catch (e: any) {
+        logError("[ConfigImport] Failed to enqueue complexity recompute", e, {});
+      }
+    }
+
     const totalImported = sectionResults.reduce((s, r) => s + r.imported, 0);
     const totalSkipped = sectionResults.reduce((s, r) => s + r.skipped, 0);
     const totalErrors = sectionResults.reduce(

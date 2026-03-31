@@ -140,6 +140,13 @@ const COLUMN_DEFS: Record<string, { label: string; format: DashboardDetailSnapsh
   deniedPercent: { label: "Denied %", format: "percent" },
   withdrawnPercent: { label: "Withdrawn %", format: "percent" },
   activePercent: { label: "Active %", format: "percent" },
+  revenue: { label: "Revenue", format: "currency" },
+  avgRevenueBPS: { label: "Avg Revenue BPS", format: "bps" },
+  actorCount: { label: "Actor Count", format: "number" },
+  units: { label: "Units", format: "number" },
+  volume: { label: "Volume", format: "currency" },
+  revenueBPS: { label: "Revenue BPS", format: "bps" },
+  revenuePerLoan: { label: "Revenue / Loan", format: "currency" },
   loanNumber: { label: "Loan #", format: "text" },
   borrower: { label: "Borrower", format: "text" },
   officer: { label: "Officer", format: "text" },
@@ -483,6 +490,65 @@ const CREDIT_RISK_COHORT_DETAIL_COLUMN_ORDER = [
   "applicationDate",
   "closingDate",
 ];
+const TTC_AGG_COLUMN_ORDER = [
+  "period",
+  "periodLabel",
+  "revenue",
+  "totalUnits",
+  "totalVolume",
+  "avgRevenueBPS",
+  "actorCount",
+];
+const TTC_SUBJECT_COLUMN_ORDER = [
+  "period",
+  "periodLabel",
+  "name",
+  "tier",
+  "units",
+  "volume",
+  "revenue",
+  "revenueBPS",
+  "revenuePerLoan",
+];
+
+type TopTieringPeriodHydrate = {
+  periodLabel?: string;
+  actors?: Array<{
+    name?: string;
+    tier?: string;
+    units?: number;
+    volume?: number;
+    revenue?: number;
+    revenueBPS?: number;
+    revenuePerLoan?: number;
+  }>;
+};
+
+function buildTopTieringSubjectRows(
+  context: DashboardPageContext,
+  subjectName: string
+): Array<Record<string, unknown>> | null {
+  const byPeriod = context.data?.by_time_period as Record<string, TopTieringPeriodHydrate> | undefined;
+  if (!byPeriod || typeof byPeriod !== "object") return null;
+  const normalized = subjectName.trim();
+  const rows: Array<Record<string, unknown>> = [];
+  for (const [period, data] of Object.entries(byPeriod)) {
+    const actor = data.actors?.find((a) => String(a.name ?? "").trim() === normalized);
+    if (!actor) continue;
+    rows.push({
+      period,
+      periodLabel: data.periodLabel ?? period,
+      name: actor.name,
+      tier: actor.tier,
+      units: actor.units ?? null,
+      volume: actor.volume ?? null,
+      revenue: actor.revenue ?? null,
+      revenueBPS: actor.revenueBPS ?? null,
+      revenuePerLoan: actor.revenuePerLoan ?? null,
+    });
+  }
+  return rows.length > 0 ? rows : null;
+}
 
 function buildSnapshotFromRows(
   insight: DashboardInsight,
@@ -500,7 +566,9 @@ function buildSnapshotFromRows(
     | "credit-risk-aggregate"
     | "credit-risk-cohort-trend"
     | "credit-risk-cohort-kpis"
-    | "credit-risk-cohort-detail" = "leaderboard"
+    | "credit-risk-cohort-detail"
+    | "top-tiering-aggregate"
+    | "top-tiering-subject" = "leaderboard"
 ): DashboardDetailSnapshot {
   const allKeys = new Set<string>();
   rows.forEach((r) => Object.keys(r).forEach((k) => allKeys.add(k)));
@@ -523,6 +591,10 @@ function buildSnapshotFromRows(
                   ? CREDIT_RISK_COHORT_TREND_COLUMN_ORDER
                   : variant === "credit-risk-cohort-detail"
                     ? CREDIT_RISK_COHORT_DETAIL_COLUMN_ORDER
+                    : variant === "top-tiering-subject"
+                      ? TTC_SUBJECT_COLUMN_ORDER
+                      : variant === "top-tiering-aggregate"
+                        ? TTC_AGG_COLUMN_ORDER
         : isSubjectRows
           ? SUBJECT_COLUMN_ORDER
           : AGGREGATE_COLUMN_ORDER;
@@ -556,6 +628,23 @@ function buildSnapshotFromRows(
         label: "Units",
         value: Number(first.units),
         format: "number",
+        color: "blue",
+      });
+  } else if (variant === "workflow-conversion-segment" && isSubjectRows) {
+    if (first?.conversionPercent != null)
+      summaryDefs.push({
+        key: "conversionPercent",
+        label: "Conversion %",
+        value: Number(first.conversionPercent),
+        format: "percent",
+        color: "blue",
+      });
+    if (first?.avgTurnTimeDays != null)
+      summaryDefs.push({
+        key: "avgTurnTimeDays",
+        label: "Avg turn (days)",
+        value: Number(first.avgTurnTimeDays),
+        format: "days",
         color: "blue",
       });
   } else if (isSubjectRows) {
@@ -606,23 +695,6 @@ function buildSnapshotFromRows(
         label: "Units",
         value: Number(first.totalUnits),
         format: "number",
-        color: "blue",
-      });
-  } else if (variant === "workflow-conversion-segment" && isSubjectRows) {
-    if (first?.conversionPercent != null)
-      summaryDefs.push({
-        key: "conversionPercent",
-        label: "Conversion %",
-        value: Number(first.conversionPercent),
-        format: "percent",
-        color: "blue",
-      });
-    if (first?.avgTurnTimeDays != null)
-      summaryDefs.push({
-        key: "avgTurnTimeDays",
-        label: "Avg turn (days)",
-        value: Number(first.avgTurnTimeDays),
-        format: "days",
         color: "blue",
       });
   } else if (variant === "credit-risk-aggregate") {
@@ -716,6 +788,56 @@ function buildSnapshotFromRows(
         color: "blue",
       });
     }
+  } else if (variant === "top-tiering-subject") {
+    if (first?.revenue != null)
+      summaryDefs.push({
+        key: "revenue",
+        label: "Revenue",
+        value: Number(first.revenue),
+        format: "currency",
+        color: "blue",
+      });
+    if (first?.units != null)
+      summaryDefs.push({
+        key: "units",
+        label: "Units",
+        value: Number(first.units),
+        format: "number",
+        color: "blue",
+      });
+    if (first?.revenueBPS != null)
+      summaryDefs.push({
+        key: "revenueBPS",
+        label: "Revenue BPS",
+        value: Number(first.revenueBPS),
+        format: "bps",
+        color: "blue",
+      });
+  } else if (variant === "top-tiering-aggregate") {
+    if (first?.revenue != null)
+      summaryDefs.push({
+        key: "revenue",
+        label: "Revenue",
+        value: Number(first.revenue),
+        format: "currency",
+        color: "blue",
+      });
+    if (first?.totalUnits != null)
+      summaryDefs.push({
+        key: "totalUnits",
+        label: "Units",
+        value: Number(first.totalUnits),
+        format: "number",
+        color: "blue",
+      });
+    if (first?.avgRevenueBPS != null)
+      summaryDefs.push({
+        key: "avgRevenueBPS",
+        label: "Avg Revenue BPS",
+        value: Number(first.avgRevenueBPS),
+        format: "bps",
+        color: "blue",
+      });
   } else {
     if (first?.averagePullThrough != null)
       summaryDefs.push({
@@ -788,6 +910,8 @@ function buildSnapshotFromRows(
               ? "Credit risk cohort loan details"
               : variant === "credit-risk-cohort-trend" || variant === "credit-risk-cohort-kpis"
                 ? "Credit risk cohort evidence"
+                : variant === "top-tiering-aggregate" || variant === "top-tiering-subject"
+                  ? "TopTiering by period"
                 : "Leaderboard by period";
 
   return {
@@ -842,6 +966,11 @@ export function buildDetailFromSupportingData(
       const wfRows = buildWorkflowConversionSegmentRows(context, subjectName);
       if (wfRows && wfRows.length > 0) {
         return buildSnapshotFromRows(insight, wfRows, options, true, "workflow-conversion-segment");
+      }
+    } else if (context.pageId === "top-tiering-comparison") {
+      const ttcRows = buildTopTieringSubjectRows(context, subjectName);
+      if (ttcRows && ttcRows.length > 0) {
+        return buildSnapshotFromRows(insight, ttcRows, options, true, "top-tiering-subject");
       }
     } else {
       const subjectRows = buildSubjectRows(context, subjectName);
@@ -936,6 +1065,9 @@ export function buildDetailFromSupportingData(
     if (row.waFico != null) out.waFico = row.waFico;
     if (row.waLtv != null) out.waLtv = row.waLtv;
     if (row.waDti != null) out.waDti = row.waDti;
+    if ((row as Record<string, unknown>).revenue != null) out.revenue = (row as Record<string, unknown>).revenue;
+    if ((row as Record<string, unknown>).avgRevenueBPS != null) out.avgRevenueBPS = (row as Record<string, unknown>).avgRevenueBPS;
+    if ((row as Record<string, unknown>).actorCount != null) out.actorCount = (row as Record<string, unknown>).actorCount;
     if (row.conventionalQualifiedPercent != null) out.conventionalQualifiedPercent = row.conventionalQualifiedPercent;
     if (row.governmentQualifiedPercent != null) out.governmentQualifiedPercent = row.governmentQualifiedPercent;
     if (row.workflowBrief != null) out.workflowBrief = row.workflowBrief;
@@ -947,6 +1079,8 @@ export function buildDetailFromSupportingData(
       ? "loan-complexity-aggregate"
       : options?.context?.pageId === "workflow-conversion"
         ? "workflow-conversion-aggregate"
+        : options?.context?.pageId === "top-tiering-comparison"
+          ? "top-tiering-aggregate"
         : "leaderboard";
   return buildSnapshotFromRows(insight, rows, options, false, aggVariant);
 }

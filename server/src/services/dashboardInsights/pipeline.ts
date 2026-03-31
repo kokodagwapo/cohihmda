@@ -518,6 +518,40 @@ type WorkflowConversionPeriodData = {
   };
 };
 
+type TopTieringPeriodData = {
+  periodLabel?: string;
+  actorType?: "branch" | "loan-officer";
+  totals?: {
+    revenue?: number;
+    units?: number;
+    volume?: number;
+    avgRevenueBPS?: number;
+    actorCount?: number;
+  };
+  tierSummary?: Record<
+    "top" | "second" | "bottom",
+    {
+      count?: number;
+      revenue?: number;
+      revenuePercent?: number;
+      units?: number;
+      unitsPercent?: number;
+      avgRevenue?: number;
+      avgUnits?: number;
+    }
+  >;
+  actors?: Array<{
+    id?: string;
+    name?: string;
+    tier?: "top" | "second" | "bottom";
+    revenue?: number;
+    units?: number;
+    volume?: number;
+    revenueBPS?: number;
+    revenuePerLoan?: number;
+  }>;
+};
+
 /**
  * Enrich evidence refs with display values from page context (e.g. leaderboard KPIs and aggregate metrics).
  */
@@ -529,6 +563,7 @@ function enrichEvidenceRefsWithValues(
     | Record<string, LoanComplexityPeriodData>
     | Record<string, CompanyScorecardPeriodData>
     | Record<string, WorkflowConversionPeriodData>
+    | Record<string, TopTieringPeriodData>
     | undefined;
 
   if (!byPeriod || typeof byPeriod !== "object") return refs;
@@ -708,6 +743,56 @@ function enrichEvidenceRefsWithValues(
       }
     }
 
+    // TopTiering comparison widgets
+    if (ref.widgetId.startsWith("ttc-")) {
+      for (const [period, data] of Object.entries(byPeriod as Record<string, TopTieringPeriodData>)) {
+        const periodData = data as TopTieringPeriodData;
+        const totals = periodData.totals;
+        const tierSummary = periodData.tierSummary;
+        const tierLabel = label?.toLowerCase();
+        if (
+          ref.widgetId === "ttc-kpi-total-revenue" &&
+          totals?.revenue != null
+        ) {
+          parts.push(`${period}: ${currencyFmt(totals.revenue)}`);
+        } else if (ref.widgetId === "ttc-kpi-total-units" && totals?.units != null) {
+          parts.push(`${period}: ${totals.units} units`);
+        } else if (ref.widgetId === "ttc-kpi-avg-revenue-bps" && totals?.avgRevenueBPS != null) {
+          parts.push(`${period}: ${totals.avgRevenueBPS.toFixed(1)} BPS`);
+        } else if (ref.widgetId === "ttc-kpi-actor-count" && totals?.actorCount != null) {
+          parts.push(`${period}: ${totals.actorCount} actors`);
+        } else if (
+          (ref.widgetId === "ttc-revenue-chart" ||
+            ref.widgetId === "ttc-units-volume-chart" ||
+            ref.widgetId === "ttc-revenue-quality-chart" ||
+            ref.widgetId === "ttc-detail-table") &&
+          label
+        ) {
+          const row = periodData.actors?.find((a) => a.name === label);
+          if (!row) continue;
+          const seg: string[] = [];
+          if (row.revenue != null) seg.push(`${currencyFmt(row.revenue)} revenue`);
+          if (row.units != null) seg.push(`${row.units} units`);
+          if (row.volume != null) seg.push(`${currencyFmt(row.volume)} volume`);
+          if (row.revenueBPS != null) seg.push(`${row.revenueBPS.toFixed(1)} BPS`);
+          if (row.revenuePerLoan != null) seg.push(`${currencyFmt(row.revenuePerLoan)} / loan`);
+          if (row.tier) seg.push(`${row.tier} tier`);
+          if (seg.length > 0) parts.push(`${period}: ${seg.join(", ")}`);
+        } else if (ref.widgetId === "ttc-story-panel" && tierLabel) {
+          const tierKey =
+            tierLabel.includes("top") ? "top" : tierLabel.includes("second") ? "second" : tierLabel.includes("bottom") ? "bottom" : null;
+          if (!tierKey) continue;
+          const tier = tierSummary?.[tierKey];
+          if (!tier) continue;
+          const seg: string[] = [];
+          if (tier.revenue != null) seg.push(`${currencyFmt(tier.revenue)} revenue`);
+          if (tier.avgRevenue != null) seg.push(`${currencyFmt(tier.avgRevenue)} avg revenue`);
+          if (tier.avgUnits != null) seg.push(`${tier.avgUnits.toFixed(1)} avg units`);
+          if (seg.length > 0) parts.push(`${period}: ${seg.join(", ")}`);
+        }
+      }
+    }
+
     if (ref.widgetId === "kpi-top-performer-units" && label) {
       for (const [period, data] of Object.entries(byPeriod)) {
         const summary = data?.summary;
@@ -799,6 +884,7 @@ function getSubjectKey(
     if (dim === "company_scorecard_loan_officer")
       return `company_scorecard_loan_officer:${label}`;
     if (dim === "workflow_segment") return `workflow_segment:${label}`;
+    if (dim === "actor_name") return `actor_name:${label}`;
   }
   const ctx = insight.filter_context as Record<string, unknown> | undefined;
   if (ctx?.leaderName != null && typeof ctx.leaderName === "string")
@@ -815,6 +901,8 @@ function getSubjectKey(
     return `company_scorecard_loan_officer:${String(ctx.loan_officer).trim()}`;
   if (ctx?.applicationType != null && typeof ctx.applicationType === "string")
     return `credit_risk_application_type:${String(ctx.applicationType).trim()}`;
+  if (ctx?.actorName != null && typeof ctx.actorName === "string")
+    return `actor_name:${String(ctx.actorName).trim()}`;
 
   if (context.pageId === "workflow-conversion" && ctx?.segmentLabel != null && typeof ctx.segmentLabel === "string") {
     return `workflow_segment:${String(ctx.segmentLabel).trim()}`;
@@ -889,6 +977,7 @@ function getSubjectNameFromInsight(
       if (d === "company_scorecard_loan_officer") return ref.target.label.trim();
       if (d === "company_scorecard_branch") return ref.target.label.trim();
       if (d === "workflow_segment") return ref.target.label.trim();
+      if (d === "actor_name") return ref.target.label.trim();
       if (d?.startsWith("complexity_")) return ref.target.label.trim();
     }
   }
@@ -899,6 +988,7 @@ function getSubjectNameFromInsight(
   if (ctx?.branch != null && typeof ctx.branch === "string") return ctx.branch.trim();
   if (ctx?.loanOfficer != null && typeof ctx.loanOfficer === "string") return ctx.loanOfficer.trim();
   if (ctx?.loan_officer != null && typeof ctx.loan_officer === "string") return ctx.loan_officer.trim();
+  if (ctx?.actorName != null && typeof ctx.actorName === "string") return ctx.actorName.trim();
   if (context.pageId === "workflow-conversion" && ctx?.segmentLabel != null && typeof ctx.segmentLabel === "string") {
     return ctx.segmentLabel.trim();
   }
@@ -913,6 +1003,7 @@ function buildSupportingDataFromContext(context: DashboardPageContext): Supporti
     | Record<string, LoanComplexityPeriodData>
     | Record<string, CompanyScorecardPeriodData>
     | Record<string, WorkflowConversionPeriodData>
+    | Record<string, TopTieringPeriodData>
     | undefined;
 
   if (!byPeriod || typeof byPeriod !== "object") return undefined;
@@ -995,6 +1086,19 @@ function buildSupportingDataFromContext(context: DashboardPageContext): Supporti
       if (s?.governmentQualifiedPercent != null) {
         row.governmentQualifiedPercent = Number(s.governmentQualifiedPercent);
       }
+      byPeriodRows.push(row);
+      continue;
+    }
+
+    if (context.pageId === "top-tiering-comparison") {
+      const ttc = data as TopTieringPeriodData;
+      const totals = ttc.totals;
+      if (!totals) continue;
+      if (totals.units != null) row.totalUnits = Number(totals.units);
+      if (totals.volume != null) row.totalVolume = Number(totals.volume);
+      row.revenue = Number(totals.revenue ?? 0);
+      row.avgRevenueBPS = Number(totals.avgRevenueBPS ?? 0);
+      row.actorCount = Number(totals.actorCount ?? 0);
       byPeriodRows.push(row);
       continue;
     }

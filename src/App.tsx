@@ -4,7 +4,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate, Outlet } from "react-router-dom";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, lazy, Suspense, type ReactNode } from "react";
 import { EditProvider } from "@/contexts/EditContext";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { AnalyticsWrapper, AnalyticsPageViewTracker } from "@/contexts/AnalyticsContext";
@@ -36,6 +36,7 @@ import TopTieringComparison from "./pages/TopTieringComparison";
 import OperationScorecard from "./pages/OperationScorecard";
 import OperationScorecardTrends from "./pages/OperationScorecardTrends";
 import FinancialModelingSandbox from "./pages/FinancialModelingSandbox";
+import CaptureAnalysis from "./pages/CaptureAnalysis";
 import SalesScorecard from "./pages/SalesScorecard";
 import SalesTrends from "./pages/SalesTrends";
 import SalesScorecardOverview from "./pages/SalesScorecardOverview";
@@ -44,6 +45,7 @@ import HighPerformers from "./pages/HighPerformers";
 import CreditRiskManagement from "./pages/CreditRiskManagement";
 import LoanDetail from "./pages/LoanDetail";
 import WorkflowConversion from "./pages/WorkflowConversion";
+import EstimatedClosingsRisk from "./pages/EstimatedClosingsRisk";
 import PricingDashboard from "./pages/PricingDashboard";
 import LockStratification from "./pages/LockStratification";
 import PipelineAnalysisDashboard from "./pages/PipelineAnalysisDashboard";
@@ -70,6 +72,8 @@ import ResearchHub from "./pages/ResearchHub";
 // Help Center
 import HelpCenter from "./pages/HelpCenter";
 import DataChat from "./pages/DataChat";
+
+const AgenticSecurity = lazy(() => import("./pages/AgenticSecurity"));
 import { CanvasOnlyLayout } from "@/components/layout/CanvasOnlyLayout";
 
 const queryClient = new QueryClient();
@@ -207,11 +211,13 @@ const App = () => (
               <Route path="/actors" element={<Actors />} />
               <Route path="/performance/toptiering-comparison" element={<TopTieringComparison />} />
               <Route path="/performance/financial-modeling-sandbox" element={<FinancialModelingSandbox />} />
+              <Route path="/capture-analysis" element={<CaptureAnalysis />} />
               <Route path="/sales-scorecard" element={<SalesScorecard />} />
               <Route path="/sales-trends" element={<SalesTrends />} />
               <Route path="/sales-scorecard-overview" element={<SalesScorecardOverview />} />
               <Route path="/performance/operation-scorecard" element={<OperationScorecard />} />
               <Route path="/performance/operation-scorecard-trends" element={<OperationScorecardTrends />} />
+              <Route path="/performance/estimated-closings-risk" element={<EstimatedClosingsRisk />} />
               
               {/* Admin route - requires admin role */}
               <Route path="/admin" element={
@@ -231,6 +237,21 @@ const App = () => (
               
               {/* Help Center */}
               <Route path="/help/*" element={<HelpCenter />} />
+
+              <Route
+                path="/agentic-security"
+                element={
+                  <Suspense
+                    fallback={
+                      <div className="flex min-h-[40vh] items-center justify-center bg-white text-slate-500">
+                        Loading…
+                      </div>
+                    }
+                  >
+                    <AgenticSecurity />
+                  </Suspense>
+                }
+              />
               </Route>
               
               {/* Catch-all route */}

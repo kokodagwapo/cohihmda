@@ -29,7 +29,9 @@ export function getSidebarSearchTargets(): SidebarRouteSearchTarget[] {
     { id: 'route:salesTrends', label: 'Sales Trends', group: 'TopTiering', kind: 'route', path: '/sales-trends', keywords: ['toptiering', 'top tiering', 'performance'] },
     { id: 'route:operationsScorecard', label: 'Operations Scorecard', group: 'TopTiering', kind: 'route', path: '/performance/operation-scorecard', keywords: ['toptiering', 'top tiering', 'performance'] },
     { id: 'route:operationsTrends', label: 'Operations Trends', group: 'TopTiering', kind: 'route', path: '/performance/operation-scorecard-trends', keywords: ['toptiering', 'top tiering', 'performance'] },
+    { id: 'route:estimatedClosingsRisk', label: 'Estimated Closings and Risk Analysis', group: 'TopTiering', kind: 'route', path: '/performance/estimated-closings-risk', keywords: ['operations', 'estimated closings', 'risk analysis', 'ecd', 'dashboard'] },
     { id: 'route:financialModeling', label: 'Financial Modeling Sandbox', group: 'TopTiering', kind: 'route', path: '/performance/financial-modeling-sandbox', keywords: ['toptiering', 'top tiering', 'performance'] },
+    { id: 'route:captureAnalysis', label: 'Capture Analysis', group: 'TopTiering', kind: 'route', path: '/capture-analysis', keywords: ['capture', 'builder', 'cohibuilder', 'portfolio', 'csv', 'import'] },
     { id: 'route:dataQuality', label: 'Data Quality', group: 'Operations', kind: 'route', path: '/data-quality', keywords: ['data quality', 'warnings', 'hmda', 'trid', 'field health', 'compliance', 'integrity'] },
   ];
 
@@ -43,6 +45,7 @@ export function getSidebarSearchTargets(): SidebarRouteSearchTarget[] {
     { id: 'route:fallout-forecast', label: 'Coheus Fallout Report', group: 'Pages', kind: 'route', path: '/fallout-forecast', keywords: ['fallout', 'forecast', 'risk', 'closing'] },
     { id: 'route:settings', label: 'Settings', group: 'Pages', kind: 'route', path: '/settings', keywords: ['profile', 'preferences'] },
     { id: 'route:help', label: 'Help Center', group: 'Pages', kind: 'route', path: '/help', keywords: ['support', 'docs'] },
+    { id: 'route:agentic-security', label: 'Agentic AI & data security', group: 'Pages', kind: 'route', path: '/agentic-security', keywords: ['soc2', 'soc 2', 'compliance', 'openai', 'anthropic', 'gemini', 'privacy', 'security', 'ai', 'agent'] },
     { id: 'route:workbench-shared', label: 'Workbench: Shared', group: 'Pages', kind: 'route', path: '/workbench/shared', keywords: ['workbench', 'shared'] },
     { id: 'route:workbench-team', label: 'Workbench: Team Folders', group: 'Pages', kind: 'route', path: '/workbench/team-folders', keywords: ['workbench', 'team'] },
     { id: 'route:workbench-favorites', label: 'Workbench: Favorites', group: 'Pages', kind: 'route', path: '/workbench/favorites', keywords: ['workbench', 'favorites'] },

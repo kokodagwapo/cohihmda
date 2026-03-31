@@ -13,6 +13,10 @@
 import pg from "pg";
 import { buildChannelWhereClause, sanitizeAndSqlClause } from "../../utils/scorecard-utils.js";
 import { LoanComplexityService } from "../scoring/loanComplexityService.js";
+import {
+  resolveLoanComplexityScoreForRead,
+  loanRecordToLoanData,
+} from "../scoring/persistedLoanComplexity.js";
 
 export type ActorsCalculation = "average" | "median";
 export type ActorsTurnTimeType = "app_to_fund_days" | "app_to_closing_days";
@@ -400,11 +404,10 @@ async function buildTableForDimension(
     const name = String(row.name);
     if (!loanIdsByActor.has(name)) loanIdsByActor.set(name, []);
   }
-  // Fetch loan fields needed for complexity (omit non_qm - not all tenant schemas have it)
   const detailQuery = `
     SELECT l.loan_id, TRIM(l.${col}) as actor_name,
            l.loan_type, l.loan_purpose, l.loan_amount, l.fico_score, l.ltv_ratio, l.be_dti_ratio,
-           l.occupancy_type, l.borr_self_employed
+           l.occupancy_type, l.borr_self_employed, l.complexity_score, l.non_qm
     FROM public.loans l
     WHERE ${whereSql}
   `;
@@ -412,17 +415,11 @@ async function buildTableForDimension(
   const complexityByActor = new Map<string, number[]>();
   for (const loan of detailResult.rows) {
     const actorName = String(loan.actor_name ?? "99-Missing").trim() || "99-Missing";
-    const loanData = {
-      loan_type: loan.loan_type,
-      loan_purpose: loan.loan_purpose,
-      loan_amount: loan.loan_amount != null ? parseFloat(loan.loan_amount) : null,
-      fico_score: loan.fico_score != null ? parseInt(loan.fico_score, 10) : null,
-      ltv_ratio: loan.ltv_ratio != null ? parseFloat(loan.ltv_ratio) : null,
-      be_dti_ratio: loan.be_dti_ratio != null ? parseFloat(loan.be_dti_ratio) : null,
-      occupancy_type: loan.occupancy_type,
-      borr_self_employed: loan.borr_self_employed,
-    };
-    const score = complexityService.calculateComplexity(loanData).totalScore;
+    const score =
+      resolveLoanComplexityScoreForRead(
+        loan,
+        complexityService.getConfigV2() ?? undefined,
+      ) ?? complexityService.calculateComplexity(loanRecordToLoanData(loan)).totalScore;
     if (!complexityByActor.has(actorName)) complexityByActor.set(actorName, []);
     complexityByActor.get(actorName)!.push(score);
   }
