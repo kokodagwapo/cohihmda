@@ -9,6 +9,7 @@
 
 import { create } from 'zustand';
 import type { PeriodSelection } from '@/components/ui/DatePeriodPicker';
+import type { ColumnFilterState } from '@/utils/loanDetailFilters';
 
 export type SectionType =
   | 'company-scorecard'
@@ -29,7 +30,8 @@ export type SectionType =
   | 'pipeline-analysis'
   | 'sales-scorecard-overview'
   | 'lock-stratification'
-  | 'loan-complexity';
+  | 'loan-complexity'
+  | 'estimated-closings-risk';
 
 /**
  * A dynamic (user-added) filter dimension.
@@ -153,6 +155,14 @@ export interface SectionFilters {
   loanComplexitySelectedGroupNames?: string[];
   /** Loan Complexity: cross-dimension selection (dimension + groupName). When set, used instead of loanComplexitySelectedGroupNames for the loans API. */
   loanComplexitySelectedGroups?: { dimension: string; groupName: string }[];
+  /** Estimated Closings & Risk: Calendar vs Business day mode. */
+  estimatedClosingsDateRangeType?: 'calendar_days' | 'business_days';
+  /** Estimated Closings & Risk: shared cross-widget interactive filters. */
+  estimatedClosingsEcdSlice?: 'empty_ecd' | 'past_ecd' | 'remaining_to_fund' | 'after_this_month' | null;
+  estimatedClosingsComplexityBucket?: 'gte_130' | 'gte_120' | 'gte_110' | 'all_rest' | null;
+  estimatedClosingsRemainingComplexityGroup?: string | null;
+  estimatedClosingsRemainingProcessingStage?: string | null;
+  estimatedClosingsDetailColumnFilters?: ColumnFilterState;
   /** User-added dynamic filters (column = value conditions) */
   dynamicFilters?: DynamicFilterEntry[];
 }
@@ -336,6 +346,16 @@ export const useWidgetSectionStore = create<WidgetSectionState>((set, get) => ({
           loanComplexityActorType: 'loan_officer',
           loanComplexityCurrentStatus: 'All',
           loanComplexitySelectedGroupNames: [],
+        };
+      } else if (sectionType === 'estimated-closings-risk') {
+        filters = {
+          ...base,
+          estimatedClosingsDateRangeType: 'calendar_days',
+          estimatedClosingsEcdSlice: null,
+          estimatedClosingsComplexityBucket: null,
+          estimatedClosingsRemainingComplexityGroup: null,
+          estimatedClosingsRemainingProcessingStage: null,
+          estimatedClosingsDetailColumnFilters: {},
         };
       }
       return {

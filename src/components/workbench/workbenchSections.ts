@@ -89,6 +89,7 @@ export const DASHBOARD_SECTION_GROUPS: { label: string; items: DashboardSectionI
       { id: 'pipelineAnalysis', title: 'Pipeline Analysis', icon: LineChart, iconClass: 'text-sky-500' },
       { id: 'lockStratification', title: 'Lock Stratification', icon: Lock, iconClass: 'text-blue-500' },
       { id: 'loanComplexity', title: 'Loan Complexity', icon: Layers, iconClass: 'text-indigo-500' },
+      { id: 'estimatedClosingsRisk', title: 'Estimated Closings & Risk Analysis', icon: LineChart, iconClass: 'text-emerald-500' },
     ],
   },
 ];

@@ -748,6 +748,27 @@ const SECTION_TO_WIDGETS: Record<
       "loan-complexity-table",
     ],
   },
+  estimatedClosingsRisk: {
+    sectionType: "estimated-closings-risk",
+    widgetIds: [
+      "estimated-closings-kpi-total-active-pipeline",
+      "estimated-closings-kpi-ecd-empty-or-after",
+      "estimated-closings-kpi-remaining-to-fund",
+      "estimated-closings-kpi-funded-this-month",
+      "estimated-closings-kpi-max-possible-funding",
+      "estimated-closings-kpi-funding-ytd-units",
+      "estimated-closings-kpi-prev-month-actual-units",
+      "estimated-closings-kpi-prev-month-actual-volume",
+      "estimated-closings-kpi-units-last-month-vs-prior",
+      "estimated-closings-kpi-volume-last-month-vs-prior",
+      "estimated-closings-active-filters",
+      "estimated-closings-ecd-pie",
+      "estimated-closings-complexity-bar",
+      "estimated-closings-remaining-complexity-table",
+      "estimated-closings-remaining-stage-table",
+      "estimated-closings-detail-table",
+    ],
+  },
 };
 
 /**
