@@ -28,6 +28,7 @@ import {
   type EstimatedClosingsComplexityBucketKey,
   type EstimatedClosingsDateRangeType,
   type EstimatedClosingsEcdSliceKey,
+  fetchAllEstimatedClosingsDetailRows,
   useEstimatedClosingsRiskData,
 } from "@/hooks/useEstimatedClosingsRiskData";
 import {
@@ -58,6 +59,32 @@ interface EstimatedClosingsRiskViewProps {
 type SortDirection = "asc" | "desc";
 type SortConfig = { key: string; direction: SortDirection };
 
+function sortRowsByConfig<T extends Record<string, unknown>>(rows: T[], sort: SortConfig): T[] {
+  const sign = sort.direction === "asc" ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    const av = a[sort.key];
+    const bv = b[sort.key];
+
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+
+    const an = Number(av);
+    const bn = Number(bv);
+    if (!Number.isNaN(an) && !Number.isNaN(bn)) {
+      return (an - bn) * sign;
+    }
+
+    const ad = new Date(String(av)).getTime();
+    const bd = new Date(String(bv)).getTime();
+    if (!Number.isNaN(ad) && !Number.isNaN(bd)) {
+      return (ad - bd) * sign;
+    }
+
+    return String(av).localeCompare(String(bv), undefined, { sensitivity: "base" }) * sign;
+  });
+}
+
 const PIE_COLORS = ["#94a3b8", "#ef4444", "#3b82f6", "#10b981"];
 const LOAN_NUMBER_FILTER_MAX_OPTIONS = 200;
 /** Detail table page size for GET estimated-closings-risk (reduces payload and query cost). */
@@ -66,9 +93,9 @@ const KPI_DESCRIPTIONS: Record<string, string> = {
   totalActivePipeline:
     "Count of active loans using the canonical site definition: Active Loan status, application date present, and not archived.",
   ecdEmptyOrAfterThisMonth:
-    "Active and unfunded loans where ECD is blank or after month-end. This mirrors the Qlik expression using date fields.",
+    "Active and unfunded loans where ECD is blank or after month-end.",
   remainingToFund:
-    "Same cohort as the pie chart: canonical active pipeline (application date present, not archived), unfunded, estimated closing date on any day in the current calendar month.",
+    "Same cohort as the pie chart: canonical active pipeline (application date present, not archived), unfunded, estimated closing date on or before the end of the current calendar month (includes overdue ECDs).",
   fundedThisMonth:
     "Loans with a funding date in the current calendar month.",
   maxPossibleFunding:
@@ -250,6 +277,7 @@ export function EstimatedClosingsRiskView({
   const [draftDetailFilters, setDraftDetailFilters] = useState<ColumnFilterState>({});
   const [openDetailFilterColumnId, setOpenDetailFilterColumnId] = useState<string | null>(null);
   const [detailTableOffset, setDetailTableOffset] = useState(0);
+  const [detailCsvExporting, setDetailCsvExporting] = useState(false);
   const pieChartContainerRef = useRef<HTMLDivElement | null>(null);
   const barChartContainerRef = useRef<HTMLDivElement | null>(null);
   const [filterSearchByColumn, setFilterSearchByColumn] = useState<Record<string, string>>({});
@@ -606,42 +634,24 @@ export function EstimatedClosingsRiskView({
     return { pooledFallout: data?.historicalFalloutPooled13Months ?? null, units };
   }, [data?.remainingToFundByComplexity, data?.historicalFalloutPooled13Months]);
 
-  const sortBy = <T extends Record<string, unknown>>(rows: T[], sort: SortConfig): T[] => {
-    const sign = sort.direction === "asc" ? 1 : -1;
-    return [...rows].sort((a, b) => {
-      const av = a[sort.key];
-      const bv = b[sort.key];
-
-      if (av == null && bv == null) return 0;
-      if (av == null) return 1;
-      if (bv == null) return -1;
-
-      const an = Number(av);
-      const bn = Number(bv);
-      if (!Number.isNaN(an) && !Number.isNaN(bn)) {
-        return (an - bn) * sign;
-      }
-
-      const ad = new Date(String(av)).getTime();
-      const bd = new Date(String(bv)).getTime();
-      if (!Number.isNaN(ad) && !Number.isNaN(bd)) {
-        return (ad - bd) * sign;
-      }
-
-      return String(av).localeCompare(String(bv), undefined, { sensitivity: "base" }) * sign;
-    });
-  };
-
   const complexityRowsSorted = useMemo(
-    () => sortBy((data?.remainingToFundByComplexity ?? []) as Record<string, unknown>[], complexitySort),
+    () => sortRowsByConfig((data?.remainingToFundByComplexity ?? []) as Record<string, unknown>[], complexitySort),
     [data?.remainingToFundByComplexity, complexitySort],
   );
   const stageRowsSorted = useMemo(
-    () => sortBy((data?.remainingToFundByProcessingStage ?? []) as Record<string, unknown>[], stageSort),
+    () => sortRowsByConfig((data?.remainingToFundByProcessingStage ?? []) as Record<string, unknown>[], stageSort),
     [data?.remainingToFundByProcessingStage, stageSort],
   );
+  const daysRemainingInCurrentMonth = useMemo(() => {
+    const now = new Date();
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    const msPerDay = 24 * 60 * 60 * 1000;
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfEndDate = new Date(endOfMonth.getFullYear(), endOfMonth.getMonth(), endOfMonth.getDate());
+    return Math.max(0, Math.floor((startOfEndDate.getTime() - startOfToday.getTime()) / msPerDay));
+  }, []);
   const detailRowsSorted = useMemo(
-    () => sortBy((data?.detail.rows ?? []) as Record<string, unknown>[], detailSort),
+    () => sortRowsByConfig((data?.detail.rows ?? []) as Record<string, unknown>[], detailSort),
     [data?.detail.rows, detailSort],
   );
 
@@ -1196,21 +1206,57 @@ export function EstimatedClosingsRiskView({
     const rows = stageRowsSorted.map((row) => [
       row.processingStage,
       row.unitsRemainingToFund,
+      daysRemainingInCurrentMonth,
       toNumberOrNull(row.historicalFallout),
       toNumberOrNull(row.historicalStatusToFundDays),
     ]);
     downloadCsvFile(
       "estimated-closings-stage-table.csv",
-      ["Processing Stage", "Units Remaining", "Historical Fallout", "Historical Status to Fund Days"],
+      [
+        "Processing Stage",
+        "Units Remaining",
+        "Days Remaining in Current Month",
+        "Historical Fallout",
+        "Historical Status to Fund Days",
+      ],
       rows,
     );
-  }, [stageRowsSorted]);
+  }, [daysRemainingInCurrentMonth, stageRowsSorted]);
 
-  const exportDetailTable = useCallback(() => {
-    const headers = ESTIMATED_CLOSINGS_DETAIL_COLUMNS.map((c) => c.label);
-    const rows = detailRowsSorted.map((row) => ESTIMATED_CLOSINGS_DETAIL_COLUMNS.map((c) => row[c.id] ?? ""));
-    downloadCsvFile("estimated-closings-loan-detail.csv", headers, rows);
-  }, [detailRowsSorted]);
+  const exportDetailTable = useCallback(async () => {
+    if (detailCsvExporting || !selectedTenantId) return;
+    setDetailCsvExporting(true);
+    try {
+      const { rows } = await fetchAllEstimatedClosingsDetailRows({
+        tenantId: selectedTenantId,
+        channelGroup: selectedChannel,
+        dateRangeType,
+        pageSliceFilters,
+        detailColumnFilters,
+      });
+      const sorted = sortRowsByConfig(rows as Record<string, unknown>[], detailSort);
+      const headers = ESTIMATED_CLOSINGS_DETAIL_COLUMNS.map((c) => c.label);
+      const csvRows = sorted.map((row) =>
+        ESTIMATED_CLOSINGS_DETAIL_COLUMNS.map((c) => row[c.id] ?? ""),
+      );
+      downloadCsvFile("estimated-closings-loan-detail.csv", headers, csvRows);
+    } catch (e) {
+      console.error("Failed to export loan detail CSV", e);
+      window.alert(
+        e instanceof Error ? e.message : "Could not download full loan detail CSV. Please try again.",
+      );
+    } finally {
+      setDetailCsvExporting(false);
+    }
+  }, [
+    detailCsvExporting,
+    selectedTenantId,
+    selectedChannel,
+    dateRangeType,
+    pageSliceFilters,
+    detailColumnFilters,
+    detailSort,
+  ]);
 
   const renderDetailHeadCell = (colId: string, sortKey: string, label: string) => {
     const col = ESTIMATED_CLOSINGS_DETAIL_COLUMN_BY_ID[colId];
@@ -1497,6 +1543,9 @@ export function EstimatedClosingsRiskView({
                     </button>
                   </TableHead>
                   <TableHead className="text-right">
+                    Days Remaining in Current Month
+                  </TableHead>
+                  <TableHead className="text-right">
                     <button className="ml-auto inline-flex items-center gap-1" onClick={() => toggleSort("historicalFallout", stageSort, setStageSort)}>
                       Historical Fallout
                       <SortIcon active={stageSort.key === "historicalFallout"} dir={stageSort.direction} />
@@ -1522,6 +1571,7 @@ export function EstimatedClosingsRiskView({
                     >
                       <TableCell>{st}</TableCell>
                       <TableCell className="text-right">{Number(row.unitsRemainingToFund).toLocaleString()}</TableCell>
+                      <TableCell className="text-right">{daysRemainingInCurrentMonth.toLocaleString()}</TableCell>
                       <TableCell className="text-right">{formatPercent(toNumberOrNull(row.historicalFallout))}</TableCell>
                       <TableCell className="text-right">
                         {row.historicalStatusToFundDays != null ? Number(row.historicalStatusToFundDays).toFixed(1) : "-"}
@@ -1539,9 +1589,16 @@ export function EstimatedClosingsRiskView({
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
           <CardTitle className="text-sm">Loan Detail for Max Possible Funding</CardTitle>
           <div className="flex items-center gap-2">
-            <Button type="button" variant="outline" size="sm" className="gap-2 shrink-0" onClick={exportDetailTable}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-2 shrink-0"
+              disabled={detailCsvExporting || !selectedTenantId}
+              onClick={() => void exportDetailTable()}
+            >
               <Download className="h-4 w-4" />
-              Download CSV
+              {detailCsvExporting ? "Exporting…" : "Download CSV"}
             </Button>
             <Button type="button" variant="outline" size="sm" className="gap-2 shrink-0" onClick={() => setShowDetailColumnFilters((s) => !s)}>
               <Filter className="h-4 w-4" />

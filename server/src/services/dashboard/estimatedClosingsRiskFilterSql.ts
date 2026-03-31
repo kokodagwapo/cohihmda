@@ -159,7 +159,7 @@ export function buildEcdSliceSql(sliceKey: string): string {
     return `(
       ${ACTIVE_PIPELINE_UNFUNDED}
       AND l.estimated_closing_date IS NOT NULL
-      AND l.estimated_closing_date::date BETWEEN ${ECD_BOUNDS_MONTH_START} AND ${ECD_BOUNDS_MONTH_END}
+      AND l.estimated_closing_date::date <= ${ECD_BOUNDS_MONTH_END}
     )`;
   }
   return `(
