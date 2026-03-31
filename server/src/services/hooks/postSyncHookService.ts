@@ -9,7 +9,7 @@
  * giving platform admins visibility into the full post-sync pipeline.
  */
 
-import { logInfo, logError } from "../logger.js";
+import { logAlways, logError } from "../logger.js";
 
 export interface PostSyncContext {
   tenantId: string;
@@ -44,7 +44,7 @@ export function registerPostSyncHook(
 ): void {
   hooks.push({ name, fn, priority });
   hooks.sort((a, b) => a.priority - b.priority);
-  logInfo(`[PostSyncHooks] Registered hook: ${name} (priority ${priority})`);
+  logAlways(`[PostSyncHooks] Registered hook: ${name} (priority ${priority})`);
 }
 
 /** Insert a pending hook run row and return its id. */
@@ -119,7 +119,7 @@ async function failHookRun(
 export async function runPostSyncHooks(ctx: PostSyncContext): Promise<void> {
   if (hooks.length === 0) return;
 
-  logInfo(
+  logAlways(
     `[PostSyncHooks] Running ${hooks.length} hook(s) for tenant=${ctx.tenantId}, ` +
       `connection=${ctx.connectionId}, synced=${ctx.recordsSynced}`
   );
@@ -131,8 +131,8 @@ export async function runPostSyncHooks(ctx: PostSyncContext): Promise<void> {
     try {
       await hook.fn(ctx);
       const duration = Date.now() - start;
-      logInfo(
-        `[PostSyncHooks] Hook "${hook.name}" completed in ${duration}ms`
+      logAlways(
+        `[PostSyncHooks] Hook "${hook.name}" completed in ${duration}ms for tenant=${ctx.tenantId}`
       );
       if (runId !== null) {
         await completeHookRun(ctx, runId, duration);

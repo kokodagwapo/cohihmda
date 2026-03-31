@@ -13,6 +13,7 @@ import { METRICS_CATALOG, type MetricDefinition } from "../metrics/metricsServic
 import { decryptAPIKeys } from "../encryption.js";
 import { generateEmbeddings } from "../embeddingService.js";
 import { logLLMUsage } from "../llmUsageTracker.js";
+import { getPlatformSetting } from "../platformSettingsService.js";
 
 // ============================================================================
 // Types
@@ -49,6 +50,7 @@ export interface QueryResult {
 // ============================================================================
 
 export async function getOpenAIKey(tenantId?: string): Promise<string> {
+  // 1. Tenant-specific key from rag_settings — use the tenant's own key when configured.
   if (tenantId) {
     try {
       const tenantPool = await tenantDbManager.getTenantPool(tenantId);
@@ -65,7 +67,16 @@ export async function getOpenAIKey(tenantId?: string): Promise<string> {
         if (result.rows[0]?.openai_api_key) {
           const raw = result.rows[0].openai_api_key;
           const decrypted = await decryptAPIKeys({ openai_api_key: raw });
-          if (decrypted.openai_api_key) return decrypted.openai_api_key;
+          const key = decrypted.openai_api_key;
+          // Only use the tenant key if it looks like a valid OpenAI key
+          if (key && key.startsWith("sk-")) {
+            return key;
+          }
+          // Invalid/corrupt key — warn and fall through to platform key
+          console.warn(
+            `[Research] Tenant ${tenantId} has an invalid OpenAI key in rag_settings ` +
+            `(does not start with sk-). Falling back to platform key.`
+          );
         }
       }
     } catch (err: any) {
@@ -73,7 +84,18 @@ export async function getOpenAIKey(tenantId?: string): Promise<string> {
     }
   }
 
-  const envKey = process.env.OPENAI_API_KEY;
+  // 2. Platform-wide key — fallback for tenants without their own key, or with an invalid one.
+  try {
+    const platformKey = await getPlatformSetting("openai_api_key");
+    if (platformKey?.trim()) {
+      return platformKey.trim();
+    }
+  } catch {
+    // platform_settings may be unavailable in some environments; continue
+  }
+
+  // 3. Environment variable last resort
+  const envKey = process.env.OPENAI_API_KEY?.trim();
   if (envKey) return envKey;
 
   throw new Error("OpenAI API key not configured.");

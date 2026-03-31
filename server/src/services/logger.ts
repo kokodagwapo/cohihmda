@@ -105,6 +105,15 @@ export function logInfo(message: string, context?: LogContext): void {
 }
 
 /**
+ * Log a message that is always emitted regardless of NODE_ENV.
+ * Use for key operational milestones (pipeline start/end, insight counts, etc.)
+ * that need to be visible in CloudWatch production logs.
+ */
+export function logAlways(message: string, context?: LogContext): void {
+  console.log(formatMessage('info', message, context));
+}
+
+/**
  * Log debug messages (only in development)
  */
 export function logDebug(message: string, context?: LogContext): void {
