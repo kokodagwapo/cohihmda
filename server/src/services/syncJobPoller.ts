@@ -8,6 +8,10 @@ import { pool as managementPool } from "../config/managementDatabase.js";
 import { tenantDbManager } from "../config/tenantDatabaseManager.js";
 import { EncompassEtlService } from "./etl/encompassEtlService.js";
 import { FieldBackfillService } from "./etl/fieldBackfillService.js";
+import {
+  backfillNullComplexityScoresAfterIncrementalSync,
+  enqueueLoanComplexityRecompute,
+} from "./scoring/loanComplexityBackgroundJob.js";
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -199,7 +203,23 @@ async function processJob(job: SyncJobRow): Promise<void> {
       loanStartDateField: opts.loanStartDateField,
     });
 
-    await completeSyncJob(jobId, result as unknown as Record<string, unknown>);
+    // After a full sync, enqueue tenant-wide persisted complexity recompute.
+    // After incremental sync, changed loans already get scores in transform/load; also
+    // backfill any loans that still have NULL complexity_score (bounded batches per job).
+    let complexityNullBackfill: { rowsUpdated: number } | undefined;
+    if (opts.fullSync) {
+      await enqueueLoanComplexityRecompute(tenantPool);
+    } else {
+      complexityNullBackfill =
+        await backfillNullComplexityScoresAfterIncrementalSync(tenantPool);
+    }
+
+    await completeSyncJob(jobId, {
+      ...(result as unknown as Record<string, unknown>),
+      ...(complexityNullBackfill != null
+        ? { complexity_null_score_backfill: complexityNullBackfill }
+        : {}),
+    });
   } catch (error: any) {
     const message = error?.message || String(error);
     console.error("[SyncJobPoller] Job failed:", jobId, message);

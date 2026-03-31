@@ -3034,7 +3034,7 @@ router.post(
           success: true,
           jobId,
           message: fullSync
-            ? "Full sync started (re-fetching all loans)"
+            ? "Full sync started (re-fetching all loans). Complexity recompute will run automatically after sync completes."
             : modifiedFrom
               ? `Incremental sync started (changes since ${modifiedFrom.toISOString()})`
               : "Full sync started (no previous sync data)",
