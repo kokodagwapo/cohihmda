@@ -50,6 +50,7 @@ import type { LoanComplexityGroupBy } from '@/hooks/useLoanComplexityData';
 import { useLoanComplexityPivot } from '@/hooks/useLoanComplexityPivot';
 import { useLoanComplexityGroupLoans } from '@/hooks/useLoanComplexityGroupLoans';
 import { useLoanComplexityStatusOptions } from '@/hooks/useLoanComplexityStatusOptions';
+import { useEstimatedClosingsRiskData } from '@/hooks/useEstimatedClosingsRiskData';
 
 /** Build dimension filter array from section dynamicFilters (for APIs that accept them).
  *  @param exclude – column names already handled natively by the hook (e.g. branch, loan_officer). */
@@ -236,6 +237,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
   const pdFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'pricing-dashboard'), [sections, scopedFilters]);
   const paFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'pipeline-analysis'), [sections, scopedFilters]);
   const lcFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'loan-complexity'), [sections, scopedFilters]);
+  const ecrFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'estimated-closings-risk'), [sections, scopedFilters]);
 
   const hasLoanComplexitySection = useMemo(
     () =>
@@ -284,6 +286,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
   const actorsDimensionFilters = useMemo(() => toDimensionFilters(actorsFilters), [actorsFilters?.dynamicFilters]);
   const pdDimensionFilters = useMemo(() => toDimensionFilters(pdFilters), [pdFilters?.dynamicFilters]);
   const paDimensionFilters = useMemo(() => toDimensionFilters(paFilters), [paFilters?.dynamicFilters]);
+  const ecrDimensionFilters = useMemo(() => toDimensionFilters(ecrFilters), [ecrFilters?.dynamicFilters]);
 
   const companyScorecard = useCompanyScorecardData({
     year: csFilters.year,
@@ -661,6 +664,22 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     lcStatusOptions.error,
   ]);
 
+  const estimatedClosingsRisk = useEstimatedClosingsRiskData({
+    tenantId: effectiveTenantId,
+    channelGroup: selectedChannel,
+    dateRangeType: (ecrFilters?.estimatedClosingsDateRangeType ?? 'calendar_days') as 'calendar_days' | 'business_days',
+    limit: 250,
+    offset: 0,
+    dimensionFilters: ecrDimensionFilters,
+    pageSliceFilters: {
+      ecdSlice: ecrFilters?.estimatedClosingsEcdSlice ?? null,
+      complexityBarBucket: ecrFilters?.estimatedClosingsComplexityBucket ?? null,
+      remainingComplexityGroup: ecrFilters?.estimatedClosingsRemainingComplexityGroup ?? null,
+      remainingProcessingStage: ecrFilters?.estimatedClosingsRemainingProcessingStage ?? null,
+    },
+    detailColumnFilters: ecrFilters?.estimatedClosingsDetailColumnFilters,
+  });
+
   // Build lookup
   const sourceMap = useMemo<Record<string, SourceResult>>(() => ({
     'company-scorecard': {
@@ -788,6 +807,11 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
       loading: loanComplexitySource.loading,
       error: loanComplexitySource.error,
     },
+    'estimated-closings-risk': {
+      data: estimatedClosingsRisk.data,
+      loading: estimatedClosingsRisk.loading,
+      error: estimatedClosingsRisk.error,
+    },
   }), [
     companyScorecard.data, companyScorecard.loading, companyScorecard.error,
     creditRisk.data, creditRisk.loading, creditRisk.error,
@@ -809,6 +833,9 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     paFilters?.pipelineAnalysisViewMode,
     paFilters?.pipelineAnalysisPctMetric,
     loanComplexitySource,
+    estimatedClosingsRisk.data,
+    estimatedClosingsRisk.loading,
+    estimatedClosingsRisk.error,
   ]);
 
   const contextValue = useMemo<WidgetDataContextValue>(

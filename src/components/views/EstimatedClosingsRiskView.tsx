@@ -22,7 +22,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Info, Filter, X } from "lucide-react";
+import { Info, Filter, X, Download } from "lucide-react";
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 import {
   type EstimatedClosingsComplexityBucketKey,
@@ -121,6 +121,56 @@ function formatPercent(value: number | null | undefined) {
   return `${value.toFixed(1)}%`;
 }
 
+function toCsvCell(value: unknown): string {
+  const text = value == null ? "" : String(value);
+  if (/[",\n]/.test(text)) return `"${text.replace(/"/g, "\"\"")}"`;
+  return text;
+}
+
+function downloadCsvFile(filename: string, headers: string[], rows: unknown[][]) {
+  const csv = [headers.map(toCsvCell).join(","), ...rows.map((r) => r.map(toCsvCell).join(","))].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+async function downloadChartAsImage(container: HTMLElement | null, filename: string) {
+  if (!container) return;
+  const svg = container.querySelector("svg");
+  if (!svg) return;
+  const svgData = new XMLSerializer().serializeToString(svg);
+  const blob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const img = new Image();
+  img.src = url;
+  await new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve();
+    img.onerror = () => reject(new Error("Failed to render chart image."));
+  });
+  const canvas = document.createElement("canvas");
+  const width = img.width || 1200;
+  const height = img.height || 700;
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    URL.revokeObjectURL(url);
+    return;
+  }
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(img, 0, 0);
+  URL.revokeObjectURL(url);
+  const pngUrl = canvas.toDataURL("image/png");
+  const link = document.createElement("a");
+  link.href = pngUrl;
+  link.download = filename;
+  link.click();
+}
+
 function toNumberOrNull(value: unknown): number | null {
   if (value == null) return null;
   const n = Number(value);
@@ -200,6 +250,8 @@ export function EstimatedClosingsRiskView({
   const [draftDetailFilters, setDraftDetailFilters] = useState<ColumnFilterState>({});
   const [openDetailFilterColumnId, setOpenDetailFilterColumnId] = useState<string | null>(null);
   const [detailTableOffset, setDetailTableOffset] = useState(0);
+  const pieChartContainerRef = useRef<HTMLDivElement | null>(null);
+  const barChartContainerRef = useRef<HTMLDivElement | null>(null);
   const [filterSearchByColumn, setFilterSearchByColumn] = useState<Record<string, string>>({});
   const [debouncedFilterSearchByColumn, setDebouncedFilterSearchByColumn] = useState<Record<string, string>>({});
   const searchDebounceTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -1126,6 +1178,40 @@ export function EstimatedClosingsRiskView({
     [toggleComplexityBucket],
   );
 
+  const exportComplexityTable = useCallback(() => {
+    const rows = complexityRowsSorted.map((row) => [
+      row.complexityGroup,
+      row.unitsRemainingToFund,
+      toNumberOrNull(row.historicalFalloutLast13Months),
+    ]);
+    rows.push(["Totals", complexityTotals.units, complexityTotals.pooledFallout]);
+    downloadCsvFile(
+      "estimated-closings-complexity-table.csv",
+      ["Complexity Group", "Units Remaining", "Historical % Fallout (13M)"],
+      rows,
+    );
+  }, [complexityRowsSorted, complexityTotals.units, complexityTotals.pooledFallout]);
+
+  const exportStageTable = useCallback(() => {
+    const rows = stageRowsSorted.map((row) => [
+      row.processingStage,
+      row.unitsRemainingToFund,
+      toNumberOrNull(row.historicalFallout),
+      toNumberOrNull(row.historicalStatusToFundDays),
+    ]);
+    downloadCsvFile(
+      "estimated-closings-stage-table.csv",
+      ["Processing Stage", "Units Remaining", "Historical Fallout", "Historical Status to Fund Days"],
+      rows,
+    );
+  }, [stageRowsSorted]);
+
+  const exportDetailTable = useCallback(() => {
+    const headers = ESTIMATED_CLOSINGS_DETAIL_COLUMNS.map((c) => c.label);
+    const rows = detailRowsSorted.map((row) => ESTIMATED_CLOSINGS_DETAIL_COLUMNS.map((c) => row[c.id] ?? ""));
+    downloadCsvFile("estimated-closings-loan-detail.csv", headers, rows);
+  }, [detailRowsSorted]);
+
   const renderDetailHeadCell = (colId: string, sortKey: string, label: string) => {
     const col = ESTIMATED_CLOSINGS_DETAIL_COLUMN_BY_ID[colId];
 
@@ -1275,8 +1361,14 @@ export function EstimatedClosingsRiskView({
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <Card>
-          <CardHeader><CardTitle className="text-sm">Active Pipeline, Estimated Closing Dates</CardTitle></CardHeader>
-          <CardContent className="h-72">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="text-sm">Active Pipeline, Estimated Closing Dates</CardTitle>
+            <Button type="button" size="sm" variant="outline" onClick={() => void downloadChartAsImage(pieChartContainerRef.current, "estimated-closings-ecd-pie.png")}>
+              <Download className="mr-1 h-4 w-4" />
+              Download
+            </Button>
+          </CardHeader>
+          <CardContent className="h-72" ref={pieChartContainerRef}>
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
@@ -1299,13 +1391,19 @@ export function EstimatedClosingsRiskView({
         </Card>
 
         <Card>
-          <CardHeader><CardTitle className="text-sm">Max Possible Funding, by Complexity</CardTitle></CardHeader>
-          <CardContent className="h-72">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="text-sm">Max Possible Funding, by Complexity</CardTitle>
+            <Button type="button" size="sm" variant="outline" onClick={() => void downloadChartAsImage(barChartContainerRef.current, "estimated-closings-max-possible-funding-bar.png")}>
+              <Download className="mr-1 h-4 w-4" />
+              Download
+            </Button>
+          </CardHeader>
+          <CardContent className="h-72" ref={barChartContainerRef}>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={complexityBars} margin={{ top: 8, right: 8, left: 8, bottom: 8 }} onClick={handleBarChartClick}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="bucketLabel" />
-                <YAxis />
+                <XAxis dataKey="bucketLabel" label={{ value: "Complexity", position: "insideBottom", offset: -5 }} />
+                <YAxis label={{ value: "Units", angle: -90, position: "insideLeft" }} />
                 <RechartsTooltip />
                 <Bar dataKey="funded" stackId="a" fill="#3b82f6" name="Funded" className="cursor-pointer" />
                 <Bar dataKey="notFunded" stackId="a" fill="#ef4444" name="Not Funded" className="cursor-pointer" />
@@ -1317,7 +1415,13 @@ export function EstimatedClosingsRiskView({
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <Card>
-          <CardHeader><CardTitle className="text-sm">Remaining to Fund, Experience by Complexity</CardTitle></CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="text-sm">Remaining to Fund, Experience by Complexity</CardTitle>
+            <Button type="button" size="sm" variant="outline" onClick={exportComplexityTable}>
+              <Download className="mr-1 h-4 w-4" />
+              Download CSV
+            </Button>
+          </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
@@ -1369,7 +1473,13 @@ export function EstimatedClosingsRiskView({
         </Card>
 
         <Card>
-          <CardHeader><CardTitle className="text-sm">Remaining to Fund, Experience by Current Processing Stage</CardTitle></CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="text-sm">Remaining to Fund, Experience by Current Processing Stage</CardTitle>
+            <Button type="button" size="sm" variant="outline" onClick={exportStageTable}>
+              <Download className="mr-1 h-4 w-4" />
+              Download CSV
+            </Button>
+          </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
@@ -1428,10 +1538,16 @@ export function EstimatedClosingsRiskView({
       <Card data-loan-details-table className="rounded-xl border overflow-hidden border-slate-200/60 bg-white dark:bg-slate-900/20">
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
           <CardTitle className="text-sm">Loan Detail for Max Possible Funding</CardTitle>
-          <Button type="button" variant="outline" size="sm" className="gap-2 shrink-0" onClick={() => setShowDetailColumnFilters((s) => !s)}>
-            <Filter className="h-4 w-4" />
-            {showDetailColumnFilters ? "Hide filters" : "Show filters"}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="outline" size="sm" className="gap-2 shrink-0" onClick={exportDetailTable}>
+              <Download className="h-4 w-4" />
+              Download CSV
+            </Button>
+            <Button type="button" variant="outline" size="sm" className="gap-2 shrink-0" onClick={() => setShowDetailColumnFilters((s) => !s)}>
+              <Filter className="h-4 w-4" />
+              {showDetailColumnFilters ? "Hide filters" : "Show filters"}
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-auto max-h-[620px] border-t border-slate-200 dark:border-slate-700">

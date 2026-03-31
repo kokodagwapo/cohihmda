@@ -72,10 +72,12 @@ export function useEstimatedClosingsRiskData(params: {
   dateRangeType: EstimatedClosingsDateRangeType;
   limit?: number;
   offset?: number;
+  dimensionFilters?: Array<{ column: string; value: string }>;
   pageSliceFilters?: EstimatedClosingsPageSliceFilters;
   detailColumnFilters?: ColumnFilterState;
 }) {
-  const { tenantId, channelGroup, dateRangeType, limit, offset, pageSliceFilters, detailColumnFilters } = params;
+  const { tenantId, channelGroup, dateRangeType, limit, offset, dimensionFilters, pageSliceFilters, detailColumnFilters } =
+    params;
   const [data, setData] = useState<EstimatedClosingsRiskResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -94,6 +96,10 @@ export function useEstimatedClosingsRiskData(params: {
     if (offset != null) sp.set("offset", String(offset));
     if (tenantId) sp.set("tenant_id", tenantId);
     if (channelGroup && channelGroup !== "All") sp.set("channel_group", channelGroup);
+    for (const df of dimensionFilters ?? []) {
+      if (!df?.column || !df?.value || df.value === "all") continue;
+      sp.append(df.column, df.value);
+    }
 
     const pf = pageSliceFilters;
     if (pf?.ecdSlice) sp.set("ecd_slice", pf.ecdSlice);
@@ -110,6 +116,7 @@ export function useEstimatedClosingsRiskData(params: {
     offset,
     tenantId,
     channelGroup,
+    dimensionFilters,
     pageSliceFilters?.ecdSlice,
     pageSliceFilters?.complexityBarBucket,
     pageSliceFilters?.remainingComplexityGroup,

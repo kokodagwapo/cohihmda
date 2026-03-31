@@ -87,6 +87,8 @@ import {
 } from "@/stores/widgetSectionStore";
 import { getWidgetDefinition } from "@/components/widgets/registry";
 import type { ColumnDef } from "@/components/views/LoanDetailView";
+import { normalizeFilterState } from "@/utils/loanDetailFilters";
+import type { ColumnFilterState } from "@/utils/loanDetailFilters";
 import { useWidgetData } from "@/components/widgets/data";
 import { CohiWidgetRenderer } from "@/components/workbench/canvas/CohiWidgetRenderer";
 import { EditWidgetDialog } from "@/components/widgets/components/EditWidgetDialog";
@@ -355,6 +357,17 @@ const SECTION_FILTER_CONFIG: Partial<
   "pipeline-analysis": [],
   "lock-stratification": [],
   "loan-complexity": [],
+  "estimated-closings-risk": [
+    {
+      key: "estimatedClosingsDateRangeType",
+      label: "Range Type",
+      allLabel: "",
+      staticOptions: [
+        { value: "calendar_days", label: "Calendar Days" },
+        { value: "business_days", label: "Business Days" },
+      ],
+    },
+  ],
 };
 
 /**
@@ -1306,6 +1319,12 @@ const SECTION_COLORS: Record<
     accent: "text-indigo-600 dark:text-indigo-400",
     dot: "bg-indigo-500",
   },
+  "estimated-closings-risk": {
+    border: "border-emerald-400/50",
+    bg: "bg-emerald-50/50 dark:bg-emerald-950/20",
+    accent: "text-emerald-600 dark:text-emerald-400",
+    dot: "bg-emerald-500",
+  },
 };
 
 /**
@@ -1402,6 +1421,15 @@ function getGridSizeForItem(item: GroupWidgetItem): GridSize {
     if (item.defId === "loan-complexity-table")
       return { w: 24, h: 24, minW: 18, minH: 16 };
     return { w: 24, h: 24, minW: 18, minH: 16 };
+  }
+  if (item.kind === "registry" && item.defId.startsWith("estimated-closings-")) {
+    if (item.defId === "estimated-closings-active-filters")
+      return { w: 36, h: 6, minW: 24, minH: 4 };
+    if (item.defId.includes("-kpi-")) return { w: 6, h: 5, minW: 4, minH: 3 };
+    if (item.defId === "estimated-closings-detail-table")
+      return { w: 36, h: 20, minW: 24, minH: 12 };
+    if (item.defId.includes("-table")) return { w: 18, h: 18, minW: 12, minH: 10 };
+    return { w: 18, h: 18, minW: 12, minH: 10 };
   }
   // High Performers: 2x2 grid
   if (item.kind === "registry" && item.defId.startsWith("high-performers-")) {
@@ -2145,6 +2173,64 @@ function GridCellRegistryWidget({
         },
       }
     : {};
+  const isEstimatedClosingsRisk = defId?.startsWith("estimated-closings-");
+  const estimatedClosingsRiskConfig = isEstimatedClosingsRisk
+    ? {
+        selectedEcdSlice: filters.estimatedClosingsEcdSlice ?? null,
+        selectedComplexityBucket: filters.estimatedClosingsComplexityBucket ?? null,
+        selectedRemainingComplexityGroup:
+          filters.estimatedClosingsRemainingComplexityGroup ?? null,
+        selectedRemainingProcessingStage:
+          filters.estimatedClosingsRemainingProcessingStage ?? null,
+        detailColumnFilters:
+          filters.estimatedClosingsDetailColumnFilters ?? {},
+        onSelectComplexityBucket: (
+          key: "gte_130" | "gte_120" | "gte_110" | "all_rest" | null,
+        ) =>
+          updateFilters(groupId, {
+            estimatedClosingsComplexityBucket:
+              (filters.estimatedClosingsComplexityBucket ?? null) === key
+                ? null
+                : key,
+          }),
+        onSelectEcdSlice: (
+          key: "empty_ecd" | "past_ecd" | "remaining_to_fund" | "after_this_month" | null,
+        ) =>
+          updateFilters(groupId, {
+            estimatedClosingsEcdSlice:
+              (filters.estimatedClosingsEcdSlice ?? null) === key ? null : key,
+          }),
+        onSelectRemainingComplexityGroup: (group: string | null) =>
+          updateFilters(groupId, {
+            estimatedClosingsRemainingComplexityGroup:
+              (filters.estimatedClosingsRemainingComplexityGroup ?? null) ===
+              group
+                ? null
+                : group,
+          }),
+        onSelectRemainingProcessingStage: (stage: string | null) =>
+          updateFilters(groupId, {
+            estimatedClosingsRemainingProcessingStage:
+              (filters.estimatedClosingsRemainingProcessingStage ?? null) ===
+              stage
+                ? null
+                : stage,
+          }),
+        onUpdateDetailColumnFilters: (next: ColumnFilterState) =>
+          updateFilters(groupId, {
+            estimatedClosingsDetailColumnFilters: next,
+          }),
+        onClearDetailColumnFilter: (columnId: string) => {
+          const current = {
+            ...(filters.estimatedClosingsDetailColumnFilters ?? {}),
+          } as ColumnFilterState;
+          delete current[columnId];
+          updateFilters(groupId, {
+            estimatedClosingsDetailColumnFilters: current,
+          });
+        },
+      }
+    : {};
 
   const config = {
     ...definition?.config,
@@ -2162,6 +2248,7 @@ function GridCellRegistryWidget({
     ...salesScorecardOverviewConfig,
     ...lockStratificationConfig,
     ...loanComplexityConfig,
+    ...estimatedClosingsRiskConfig,
   };
 
   if (!definition || !Component) return null;
@@ -2708,6 +2795,34 @@ export function WidgetGroup({
         toSave.loanComplexitySelectedGroupNames =
           filters.loanComplexitySelectedGroupNames;
     }
+    if (sectionType === "estimated-closings-risk") {
+      if (
+        filters.estimatedClosingsDateRangeType &&
+        filters.estimatedClosingsDateRangeType !== "calendar_days"
+      )
+        toSave.estimatedClosingsDateRangeType =
+          filters.estimatedClosingsDateRangeType;
+      if (filters.estimatedClosingsEcdSlice)
+        toSave.estimatedClosingsEcdSlice = filters.estimatedClosingsEcdSlice;
+      if (filters.estimatedClosingsComplexityBucket)
+        toSave.estimatedClosingsComplexityBucket =
+          filters.estimatedClosingsComplexityBucket;
+      if (filters.estimatedClosingsRemainingComplexityGroup)
+        toSave.estimatedClosingsRemainingComplexityGroup =
+          filters.estimatedClosingsRemainingComplexityGroup;
+      if (filters.estimatedClosingsRemainingProcessingStage)
+        toSave.estimatedClosingsRemainingProcessingStage =
+          filters.estimatedClosingsRemainingProcessingStage;
+      if (
+        filters.estimatedClosingsDetailColumnFilters &&
+        Object.keys(
+          normalizeFilterState(filters.estimatedClosingsDetailColumnFilters),
+        ).length > 0
+      )
+        toSave.estimatedClosingsDetailColumnFilters = normalizeFilterState(
+          filters.estimatedClosingsDetailColumnFilters,
+        );
+    }
     const nextSavedFilters =
       Object.keys(toSave).length > 0 ? toSave : undefined;
     try {
@@ -2757,6 +2872,12 @@ export function WidgetGroup({
     filters.loanComplexityCurrentStatus,
     filters.loanComplexitySelectedGroups,
     filters.loanComplexitySelectedGroupNames,
+    filters.estimatedClosingsDateRangeType,
+    filters.estimatedClosingsEcdSlice,
+    filters.estimatedClosingsComplexityBucket,
+    filters.estimatedClosingsRemainingComplexityGroup,
+    filters.estimatedClosingsRemainingProcessingStage,
+    filters.estimatedClosingsDetailColumnFilters,
     savedFiltersProp,
   ]);
 
@@ -3128,6 +3249,18 @@ export function WidgetGroup({
           showYears: false,
         };
       case "loan-complexity":
+        return {
+          presets: [
+            "mtd",
+            "last-month",
+            "qtd",
+            "last-quarter",
+            "ytd",
+            "last-year",
+          ],
+          showYears: false,
+        };
+      case "estimated-closings-risk":
         return {
           presets: [
             "mtd",

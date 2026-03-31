@@ -36,7 +36,8 @@ export type DataSourceId =
   | 'pipeline-analysis'
   | 'sales-scorecard-overview'
   | 'lock-stratification'
-  | 'loan-complexity';
+  | 'loan-complexity'
+  | 'estimated-closings-risk';
 
 // ---------------------------------------------------------------------------
 // Widget categories – drives catalog grouping & icon selection
