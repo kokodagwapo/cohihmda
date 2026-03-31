@@ -12,7 +12,7 @@ const ACTIVE_PIPELINE_UNFUNDED = `
   AND l.funding_date IS NULL
 `;
 
-export const ECD_SLICE_KEYS = new Set(["empty_ecd", "past_ecd", "remaining_to_fund", "after_this_month"]);
+export const ECD_SLICE_KEYS = new Set(["empty_ecd", "past_ecd", "this_months_ecd", "after_this_month"]);
 export const COMPLEXITY_BUCKET_KEYS = new Set(["gte_130", "gte_120", "gte_110", "all_rest"]);
 
 export const ESTIMATED_CLOSINGS_DETAIL_FILTER_COLUMN_IDS = new Set([
@@ -155,11 +155,11 @@ export function buildEcdSliceSql(sliceKey: string): string {
       )
     )`;
   }
-  if (sliceKey === "remaining_to_fund") {
+  if (sliceKey === "this_months_ecd") {
     return `(
       ${ACTIVE_PIPELINE_UNFUNDED}
       AND l.estimated_closing_date IS NOT NULL
-      AND l.estimated_closing_date::date <= ${ECD_BOUNDS_MONTH_END}
+      AND l.estimated_closing_date::date BETWEEN ${ECD_BOUNDS_MONTH_START} AND ${ECD_BOUNDS_MONTH_END}
     )`;
   }
   return `(

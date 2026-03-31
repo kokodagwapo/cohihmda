@@ -2194,7 +2194,7 @@ function GridCellRegistryWidget({
                 : key,
           }),
         onSelectEcdSlice: (
-          key: "empty_ecd" | "past_ecd" | "remaining_to_fund" | "after_this_month" | null,
+          key: "empty_ecd" | "past_ecd" | "this_months_ecd" | "after_this_month" | null,
         ) =>
           updateFilters(groupId, {
             estimatedClosingsEcdSlice:
