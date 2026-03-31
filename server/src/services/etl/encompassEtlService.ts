@@ -853,9 +853,18 @@ export class EncompassEtlService {
       const col = columnTypeMap.get(n);
       return col && comparableTypes.has(col.data_type);
     });
-    const whereClause = compareColumns.length > 0
-      ? `WHERE (${compareColumns.map((n) => `loans.${n}`).join(", ")}) IS DISTINCT FROM (${compareColumns.map((n) => `EXCLUDED.${n}`).join(", ")})`
-      : "";
+    // Always apply UPDATE when complexity_score is still NULL so incremental rows
+    // get a persisted score even if all other comparable columns match the prior row.
+    const hasComplexityScoreCol = setColumns.includes("complexity_score");
+    const tupleChangedClause =
+      compareColumns.length > 0
+        ? `(${compareColumns.map((n) => `loans.${n}`).join(", ")}) IS DISTINCT FROM (${compareColumns.map((n) => `EXCLUDED.${n}`).join(", ")})`
+        : "FALSE";
+    const whereClause = hasComplexityScoreCol
+      ? `WHERE (${tupleChangedClause}) OR (loans.complexity_score IS NULL)`
+      : compareColumns.length > 0
+        ? `WHERE (${tupleChangedClause})`
+        : "";
 
     const runOneRow = async (loan: Record<string, any>) => {
       const values = availableColumns.map((col) =>

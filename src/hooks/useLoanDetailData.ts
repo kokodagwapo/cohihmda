@@ -15,6 +15,7 @@ export interface LoanDetailRow {
   fico_score: number | null;
   ltv_ratio: number | null;
   be_dti_ratio: number | null;
+  complexity_score: number | null;
   channel: string | null;
   branch: string | null;
   loan_officer: string | null;

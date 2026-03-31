@@ -65,6 +65,88 @@ export async function enqueueLoanComplexityRecomputeIfChanged(
   return enqueueLoanComplexityRecompute(pool);
 }
 
+function nullBackfillBatchSize(): number {
+  const n = parseInt(process.env.LOAN_COMPLEXITY_NULL_BACKFILL_BATCH_SIZE || "500", 10);
+  return Number.isFinite(n) && n > 0 ? n : 500;
+}
+
+function nullBackfillMaxBatches(): number {
+  const n = parseInt(process.env.LOAN_COMPLEXITY_NULL_BACKFILL_MAX_BATCHES || "40", 10);
+  return Number.isFinite(n) && n > 0 ? n : 40;
+}
+
+/**
+ * After an incremental sync, fill persisted complexity_score for loans that are still NULL.
+ * Bounded work per sync so the worker stays responsive; remaining NULLs are chipped away on later syncs
+ * or by the durable loan_complexity_recompute job / admin full sync.
+ */
+export async function backfillNullComplexityScoresAfterIncrementalSync(
+  pool: pg.Pool,
+): Promise<{ rowsUpdated: number }> {
+  const bs = nullBackfillBatchSize();
+  const maxBatches = nullBackfillMaxBatches();
+  let rowsUpdated = 0;
+
+  const svc = new LoanComplexityService(pool);
+  await svc.loadCustomWeights();
+
+  for (let b = 0; b < maxBatches; b++) {
+    const sel = await pool.query(
+      `
+      SELECT id,
+             loan_type, loan_purpose, loan_amount, fico_score, ltv_ratio, be_dti_ratio,
+             occupancy_type, borr_self_employed, co_borr_self_employed, non_qm
+      FROM public.loans
+      WHERE complexity_score IS NULL
+      ORDER BY id ASC
+      LIMIT $1
+      `,
+      [bs],
+    );
+
+    if (sel.rows.length === 0) break;
+
+    const pairs: Array<{ id: string; score: number }> = [];
+    for (const row of sel.rows) {
+      try {
+        const score = svc.calculateComplexity(loanRecordToLoanData(row)).totalScore;
+        pairs.push({ id: row.id, score: Math.round(score * 100) / 100 });
+      } catch (e: any) {
+        logError("[LoanComplexity] Null-score backfill row failed", e, { loanId: row.id });
+      }
+    }
+
+    if (pairs.length > 0) {
+      const parts: string[] = [];
+      const params: unknown[] = [];
+      let i = 1;
+      for (const p of pairs) {
+        parts.push(`($${i}::uuid, $${i + 1}::numeric)`);
+        params.push(p.id, p.score);
+        i += 2;
+      }
+      await pool.query(
+        `
+        UPDATE public.loans l
+        SET complexity_score = v.score
+        FROM (VALUES ${parts.join(", ")}) AS v(id, score)
+        WHERE l.id = v.id
+        `,
+        params,
+      );
+      rowsUpdated += pairs.length;
+    }
+
+    if (sel.rows.length < bs) break;
+  }
+
+  if (rowsUpdated > 0) {
+    logInfo("[LoanComplexity] Incremental sync null-score backfill", { rowsUpdated });
+  }
+
+  return { rowsUpdated };
+}
+
 let schedulerStarted = false;
 
 /** Process at most one batch on this tenant pool (serialized via advisory lock on one connection). */

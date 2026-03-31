@@ -875,6 +875,7 @@ router.get(
         "fico_score",
         "ltv_ratio",
         "be_dti_ratio",
+        "complexity_score",
         "channel",
         "branch",
         "loan_officer",
