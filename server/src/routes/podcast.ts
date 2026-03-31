@@ -181,19 +181,48 @@ export function hashBriefingContext(briefingContext: unknown): string {
 
 export async function buildDefaultAletheiaBriefingContext(tenantId: string): Promise<{
   dialogues: Array<{ message: string; type: string; priority: string }>;
+  totalInsightCount: number;
   greeting: string;
 }> {
   const tenantPool = await tenantDbManager.getTenantPool(tenantId);
   const dialogues: Array<{ message: string; type: string; priority: string }> = [];
+  let totalInsightCount = 0;
 
   try {
-    const result = await tenantPool.query(
-      `SELECT headline, understory, insight_type, priority
-       FROM public.generated_insights
-       WHERE COALESCE(for_podcast, true) = true
-       ORDER BY generated_at DESC
-       LIMIT 18`
-    );
+    // Use the same filters as the dashboard (generation_method='agent', date_filter='ytd')
+    // so the podcast covers exactly the same insights the user sees.
+    // Fall back to the unfiltered query for pre-migration tenants missing the column.
+    let hasMethodCol = false;
+    try {
+      const colCheck = await tenantPool.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'generated_insights'
+            AND column_name = 'generation_method'
+        ) AS exists
+      `);
+      hasMethodCol = colCheck.rows[0]?.exists === true;
+    } catch { /* pre-migration */ }
+
+    const sql = hasMethodCol
+      ? `SELECT headline, understory, insight_type, priority, bucket
+         FROM public.generated_insights
+         WHERE COALESCE(for_podcast, true) = true
+           AND generation_method = 'agent'
+           AND date_filter = 'ytd'
+         ORDER BY
+           CASE bucket
+             WHEN 'critical' THEN 0 WHEN 'attention' THEN 1
+             WHEN 'working'  THEN 2 WHEN 'context'   THEN 3 ELSE 4
+           END,
+           severity_score DESC`
+      : `SELECT headline, understory, insight_type, priority
+         FROM public.generated_insights
+         WHERE COALESCE(for_podcast, true) = true
+         ORDER BY generated_at DESC`;
+
+    const result = await tenantPool.query(sql);
+    totalInsightCount = result.rows.length;
 
     for (const row of result.rows) {
       const headline = String(row.headline || "").trim();
@@ -207,7 +236,6 @@ export async function buildDefaultAletheiaBriefingContext(tenantId: string): Pro
       });
     }
   } catch (error: any) {
-    // Older tenants may not have generated_insights yet.
     if (error?.code !== "42P01") {
       console.warn(
         `[Aletheia] Failed to build default briefing context for tenant ${tenantId}:`,
@@ -218,6 +246,7 @@ export async function buildDefaultAletheiaBriefingContext(tenantId: string): Pro
 
   return {
     dialogues,
+    totalInsightCount,
     greeting: "Good morning",
   };
 }
@@ -1164,6 +1193,7 @@ router.post(
 function buildAletheiaBriefingPrompt(
   briefingContext: {
     dialogues?: Array<{ message: string; type: string; priority: string }>;
+    totalInsightCount?: number;
     funnelStory?: {
       conversionRates: any;
       falloutData: any;
@@ -1175,8 +1205,8 @@ function buildAletheiaBriefingPrompt(
   }
 ): string {
   const dialogues = briefingContext.dialogues || [];
-  const totalInsights = dialogues.length;
-  const maxInsightsInPrompt = 18;
+  const totalInsights = briefingContext.totalInsightCount ?? dialogues.length;
+  const maxInsightsInPrompt = 20;
   const promptInsights = dialogues.slice(0, maxInsightsInPrompt);
   const omittedFromPrompt = Math.max(0, totalInsights - promptInsights.length);
   const dialoguesText =
@@ -1219,6 +1249,7 @@ async function generateAletheiaScriptText(
   openAIKey: string,
   briefingContext: {
     dialogues?: Array<{ message: string; type: string; priority: string }>;
+    totalInsightCount?: number;
     funnelStory?: {
       conversionRates: any;
       falloutData: any;
