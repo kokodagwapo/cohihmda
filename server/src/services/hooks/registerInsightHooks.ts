@@ -9,6 +9,9 @@
 import { registerPostSyncHook, type PostSyncContext } from "./postSyncHookService.js";
 import { logInfo, logError } from "../logger.js";
 import { queueAutoRefreshForSourceTenant } from "../tenantRefreshService.js";
+import {
+  enqueueAletheiaPrefetchJob,
+} from "../aletheiaPrefetchWorker.js";
 
 let registered = false;
 
@@ -119,6 +122,48 @@ export function registerInsightHooks(): void {
       }
     },
     200
+  );
+
+  // Run podcast generation after all insight hooks complete so that the
+  // briefing context uses the freshest generated_insights rows.
+  registerPostSyncHook(
+    "podcast-auto-generation",
+    async (ctx: PostSyncContext) => {
+      try {
+        const connResult = await ctx.tenantPool.query(
+          "SELECT podcast_auto_enabled FROM public.los_connections WHERE id = $1",
+          [ctx.connectionId],
+        );
+        const enabled = connResult.rows[0]?.podcast_auto_enabled ?? true;
+        if (!enabled) {
+          logInfo(
+            `[PostSyncHook] Auto-podcast disabled for connection ${ctx.connectionId} — skipping`,
+          );
+          return;
+        }
+
+        const { buildDefaultAletheiaBriefingContext, hashBriefingContext } =
+          await import("../../routes/podcast.js");
+
+        logInfo(
+          `[PostSyncHook] Enqueuing podcast generation for tenant ${ctx.tenantId}`,
+        );
+        const briefingContext = await buildDefaultAletheiaBriefingContext(ctx.tenantId);
+        const contextHash = hashBriefingContext(briefingContext);
+        const jobId = await enqueueAletheiaPrefetchJob({
+          tenantId: ctx.tenantId,
+          contextHash,
+          briefingContext,
+          requestedBy: "post-sync-hook",
+        });
+        logInfo(
+          `[PostSyncHook] Podcast job ${jobId} enqueued for tenant ${ctx.tenantId}`,
+        );
+      } catch (err: any) {
+        logError(`[PostSyncHook] Podcast auto-generation failed: ${err.message}`, err);
+      }
+    },
+    250
   );
 
   registerPostSyncHook(
