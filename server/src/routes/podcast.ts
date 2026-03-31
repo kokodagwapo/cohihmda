@@ -223,14 +223,7 @@ export async function buildDefaultAletheiaBriefingContext(tenantId: string): Pro
 }
 
 async function getOpenAIKey(tenantId?: string): Promise<string> {
-  // 1. Platform key takes priority (consistent across all tenants)
-  const platformKey = await getPlatformSetting("openai_api_key");
-  if (platformKey?.trim()) {
-    console.log("[Podcast] Using OpenAI key from platform_settings");
-    return platformKey.trim();
-  }
-
-  // 2. Tenant-specific key from rag_settings
+  // 1. Tenant-specific key from rag_settings — use the tenant's own key when configured.
   if (tenantId) {
     try {
       const tenantPool = await tenantDbManager.getTenantPool(tenantId);
@@ -248,15 +241,25 @@ async function getOpenAIKey(tenantId?: string): Promise<string> {
           const decrypted = await decryptAPIKeys({
             openai_api_key: result.rows[0].openai_api_key,
           });
-          if (decrypted.openai_api_key) {
+          const key = decrypted.openai_api_key;
+          if (key && key.startsWith("sk-")) {
             console.log("[Podcast] Using OpenAI key from tenant rag_settings");
-            return decrypted.openai_api_key;
+            return key;
           }
+          // Invalid/corrupt key — fall through to platform key
+          console.warn("[Podcast] Tenant rag_settings key is invalid (not sk-*). Falling back to platform key.");
         }
       }
     } catch (err: any) {
       console.error("[Podcast] Error fetching tenant API key:", err.message);
     }
+  }
+
+  // 2. Platform-wide key — fallback for tenants without a valid key.
+  const platformKey = await getPlatformSetting("openai_api_key");
+  if (platformKey?.trim()) {
+    console.log("[Podcast] Using OpenAI key from platform_settings");
+    return platformKey.trim();
   }
 
   // 3. Environment variable fallback

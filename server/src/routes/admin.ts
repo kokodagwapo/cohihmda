@@ -3050,25 +3050,61 @@ router.post(
         requestedBy: req.userId,
       });
 
+      // Insert a tracking row into post_sync_hook_runs so status is visible in the admin UI
+      let hookRunId: number | null = null;
+      try {
+        const hookRunResult = await tenantPool.query(
+          `INSERT INTO public.post_sync_hook_runs
+             (sync_history_id, los_connection_id, tenant_id, hook_name, status, started_at)
+           VALUES (NULL, $1, $2, 'manual-insight-generation', 'running', NOW())
+           RETURNING id`,
+          [connectionId, tenantId]
+        );
+        hookRunId = Number(hookRunResult.rows[0]?.id) || null;
+      } catch {
+        // post_sync_hook_runs may not exist on older tenants — degrade gracefully
+      }
+
+      const runStart = Date.now();
+
       // Run async; respond immediately so the admin UI doesn't time out
       runInsightGeneration(tenantId, tenantPool, undefined, { forceFresh: true })
-        .then((result) => {
+        .then(async (result) => {
+          const durationMs = Date.now() - runStart;
           logInfo("Admin: insight generation complete", {
             connectionId,
             tenantId,
             insightCount: result.insightCount,
-            durationMs: result.durationMs,
+            durationMs,
           });
+          if (hookRunId !== null) {
+            await tenantPool.query(
+              `UPDATE public.post_sync_hook_runs
+               SET status = 'completed', completed_at = NOW(), duration_ms = $2, metadata = $3
+               WHERE id = $1`,
+              [hookRunId, durationMs, JSON.stringify({
+                insightCount: result.insightCount,
+                triggeredBy: req.userId ?? "admin",
+              })]
+            ).catch(() => {});
+          }
         })
-        .catch((err: any) => {
-          logError("Admin: insight generation failed", err, {
-            connectionId,
-            tenantId,
-          });
+        .catch(async (err: any) => {
+          const durationMs = Date.now() - runStart;
+          logError("Admin: insight generation failed", err, { connectionId, tenantId });
+          if (hookRunId !== null) {
+            await tenantPool.query(
+              `UPDATE public.post_sync_hook_runs
+               SET status = 'failed', completed_at = NOW(), duration_ms = $2, error_message = $3
+               WHERE id = $1`,
+              [hookRunId, durationMs, (err.message ?? "Unknown error").slice(0, 2000)]
+            ).catch(() => {});
+          }
         });
 
       return res.json({
         success: true,
+        hookRunId,
         message: "Insight generation started. Results will be available shortly.",
       });
     } catch (error: any) {
@@ -3241,5 +3277,110 @@ router.get(
 
 // Mount SSO configuration routes
 router.use("/sso", ssoConfigRoutes);
+
+/**
+ * GET /api/admin/logs/insights?tenant_id=X&hook_run_id=Y&hours=2
+ * Fetch recent insight pipeline log lines from CloudWatch.
+ * Queries the ECS log group and filters by time window (from hook_run started_at/completed_at
+ * when available, otherwise the last N hours). Requires CLOUDWATCH_LOG_GROUP env var or
+ * falls back to /ecs/coheus-{NODE_ENV}.
+ */
+router.get(
+  "/logs/insights",
+  authenticateToken,
+  requireRole("super_admin", "platform_admin"),
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.query.tenant_id as string | undefined;
+      const hookRunId = req.query.hook_run_id as string | undefined;
+      const hoursBack = Math.min(parseInt(req.query.hours as string) || 2, 24);
+
+      const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || "us-east-2";
+      const env = process.env.NODE_ENV === "production" ? "prod" : "dev";
+      const logGroupName =
+        process.env.CLOUDWATCH_LOG_GROUP || `/ecs/coheus-${env}`;
+
+      let startTime: number;
+      let endTime: number = Date.now();
+
+      // If a hook_run_id is provided, use its start/end timestamps for a precise window
+      if (hookRunId && tenantId) {
+        try {
+          const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+          const runResult = await tenantPool.query(
+            `SELECT started_at, completed_at FROM public.post_sync_hook_runs WHERE id = $1`,
+            [parseInt(hookRunId)]
+          );
+          if (runResult.rows.length > 0) {
+            const row = runResult.rows[0];
+            // Give a 30-second buffer on each side for clock skew
+            startTime = new Date(row.started_at).getTime() - 30_000;
+            endTime = row.completed_at
+              ? new Date(row.completed_at).getTime() + 30_000
+              : Date.now();
+          } else {
+            startTime = Date.now() - hoursBack * 60 * 60 * 1000;
+          }
+        } catch {
+          startTime = Date.now() - hoursBack * 60 * 60 * 1000;
+        }
+      } else {
+        startTime = Date.now() - hoursBack * 60 * 60 * 1000;
+      }
+
+      const { CloudWatchLogsClient, FilterLogEventsCommand } = await import(
+        "@aws-sdk/client-cloudwatch-logs"
+      );
+
+      const cwClient = new CloudWatchLogsClient({ region });
+
+      // Filter for insight pipeline messages; tenant ID is embedded in key lines
+      const filterPattern = tenantId
+        ? `?"[Agent]" ?"[PostSyncHooks]" ?"InsightOrchestrator" ?"${tenantId}"`
+        : `?"[Agent]" ?"[PostSyncHooks]" ?"InsightOrchestrator"`;
+
+      const command = new FilterLogEventsCommand({
+        logGroupName,
+        startTime,
+        endTime,
+        filterPattern,
+        limit: 200,
+      });
+
+      const response = await cwClient.send(command);
+
+      const events = (response.events ?? []).map((e) => ({
+        timestamp: e.timestamp,
+        message: e.message?.trim() ?? "",
+        logStreamName: e.logStreamName,
+      }));
+
+      return res.json({
+        logGroupName,
+        region,
+        startTime: new Date(startTime).toISOString(),
+        endTime: new Date(endTime).toISOString(),
+        events,
+        count: events.length,
+      });
+    } catch (error: any) {
+      // If CloudWatch is unavailable (e.g. local dev without credentials), return gracefully
+      if (
+        error?.name === "CredentialsProviderError" ||
+        error?.name === "AccessDeniedException" ||
+        error?.Code === "AccessDeniedException"
+      ) {
+        return res.status(503).json({
+          error: "CloudWatch not available in this environment",
+          detail: error.message,
+        });
+      }
+      logError("Error fetching CloudWatch insight logs", error, {
+        userId: req.userId,
+      });
+      return res.status(500).json({ error: "Failed to fetch logs" });
+    }
+  }
+);
 
 export default router;

@@ -1465,32 +1465,8 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
             </button>
           ))}
 
-          {/* Agent tab: generate buttons */}
-          {activeTab === "agent" && isAdmin && (
-            <div className="ml-auto flex items-center gap-1.5">
-              <button
-                onClick={() => handleAgentGenerate(false)}
-                disabled={isAgentGenerating || insightsLoading}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors disabled:opacity-50"
-              >
-                {isAgentGenerating ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <Sparkles className="w-3.5 h-3.5" />
-                )}
-                {isAgentGenerating ? "Generating..." : "Generate"}
-              </button>
-              <button
-                onClick={() => handleAgentGenerate(true)}
-                disabled={isAgentGenerating || insightsLoading}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors disabled:opacity-50"
-                title="Regenerate from scratch, ignoring all previous insight context"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                Fresh
-              </button>
-            </div>
-          )}
+          {/* Generate/Fresh buttons removed — insight generation is managed
+              via the platform admin panel (Sync Management → Sparkles button). */}
         </div>
 
         {/* ===== Category Tab Row (Insights tab only) ===== */}

@@ -41,6 +41,8 @@ import {
   ArrowUpDown,
   BarChart3,
   Sparkles,
+  ScrollText,
+  ChevronDown as ChevronDownIcon,
 } from 'lucide-react';
 
 interface SyncConnection {
@@ -93,6 +95,18 @@ interface HookRun {
   error_message: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
+}
+
+interface LogEvent {
+  timestamp: number;
+  message: string;
+  logStreamName?: string;
+}
+
+interface HookRunLogs {
+  loading: boolean;
+  events: LogEvent[];
+  error: string | null;
 }
 
 interface SchedulerInfo {
@@ -212,6 +226,8 @@ export const SyncManagementSection = () => {
   const [updatingIds, setUpdatingIds] = useState<Set<string>>(new Set());
   const [triggeringIds, setTriggeringIds] = useState<Set<string>>(new Set());
   const [runningInsightIds, setRunningInsightIds] = useState<Set<string>>(new Set());
+  const [hookRunLogs, setHookRunLogs] = useState<Record<number, HookRunLogs>>({});
+  const [expandedLogRunId, setExpandedLogRunId] = useState<number | null>(null);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [historyData, setHistoryData] = useState<Record<string, SyncHistoryEntry[]>>({});
   const [historyLoading, setHistoryLoading] = useState<Set<string>>(new Set());
@@ -531,6 +547,39 @@ export const SyncManagementSection = () => {
         next.delete(key);
         return next;
       });
+    }
+  };
+
+  const handleViewLogs = async (run: HookRun, connection: SyncConnection) => {
+    const runId = run.id;
+    // Toggle off if already showing
+    if (expandedLogRunId === runId) {
+      setExpandedLogRunId(null);
+      return;
+    }
+    setExpandedLogRunId(runId);
+    // Don't re-fetch if already loaded
+    if (hookRunLogs[runId]?.events.length) return;
+
+    setHookRunLogs(prev => ({ ...prev, [runId]: { loading: true, events: [], error: null } }));
+    try {
+      const params = new URLSearchParams({
+        tenant_id: connection.tenant_id,
+        hook_run_id: String(runId),
+      });
+      const data = await api.request<{ events: LogEvent[]; count: number; error?: string }>(
+        `/api/admin/logs/insights?${params}`
+      );
+      if (data.error) {
+        setHookRunLogs(prev => ({ ...prev, [runId]: { loading: false, events: [], error: data.error! } }));
+      } else {
+        setHookRunLogs(prev => ({ ...prev, [runId]: { loading: false, events: data.events, error: null } }));
+      }
+    } catch (err: any) {
+      setHookRunLogs(prev => ({
+        ...prev,
+        [runId]: { loading: false, events: [], error: err.message || 'Failed to fetch logs' },
+      }));
     }
   };
 
@@ -1205,61 +1254,111 @@ export const SyncManagementSection = () => {
                                 <div className="space-y-1.5">
                                   {hookRuns.map((run) => {
                                     const hookLabel: Record<string, string> = {
+                                      'prediction-pipeline': 'Predictions',
                                       'agent-insight-generation': 'Insights',
-                                      'tracked-insight-generation': 'Tracked Insights',
-                                      'prediction-generation': 'Predictions',
+                                      'manual-insight-generation': 'Insights (Manual)',
+                                      'tracked-insight-evaluation': 'Tracked Insights',
                                       'podcast-auto-generation': 'Podcast',
+                                      'demo-tenant-auto-refresh': 'Demo Refresh',
                                     };
                                     const label = hookLabel[run.hook_name] ?? run.hook_name;
-                                    const insightCount = typeof run.metadata?.insight_count === 'number'
-                                      ? run.metadata.insight_count
-                                      : null;
+                                    const insightCount = typeof run.metadata?.insightCount === 'number'
+                                      ? run.metadata.insightCount
+                                      : typeof run.metadata?.insight_count === 'number'
+                                        ? run.metadata.insight_count
+                                        : null;
                                     const podcastJobId = run.metadata?.podcast_job_id;
+                                    const isLogEligible = [
+                                      'agent-insight-generation',
+                                      'manual-insight-generation',
+                                      'prediction-pipeline',
+                                      'tracked-insight-evaluation',
+                                      'podcast-auto-generation',
+                                    ].includes(run.hook_name);
+                                    const logsState = hookRunLogs[run.id];
+                                    const logsExpanded = expandedLogRunId === run.id;
                                     return (
-                                      <div
-                                        key={run.id}
-                                        className="flex items-center gap-3 text-xs py-1.5 px-3 rounded-md bg-white dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700/50"
-                                      >
-                                        <span className="text-slate-500 dark:text-slate-400 font-light w-[80px] flex-shrink-0" title={run.created_at}>
-                                          {formatRelativeTime(run.created_at)}
-                                        </span>
-                                        <span className="font-medium text-slate-700 dark:text-slate-300 w-[130px] flex-shrink-0">
-                                          {label}
-                                        </span>
-                                        <div className="flex-1 min-w-0 font-light text-slate-500 dark:text-slate-400 truncate">
-                                          {run.status === 'running' && (
-                                            <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
-                                              <Loader2 className="h-3 w-3 animate-spin" /> Running…
-                                            </span>
+                                      <div key={run.id} className="rounded-md border border-slate-100 dark:border-slate-700/50 overflow-hidden">
+                                        <div className="flex items-center gap-3 text-xs py-1.5 px-3 bg-white dark:bg-slate-800/50">
+                                          <span className="text-slate-500 dark:text-slate-400 font-light w-[80px] flex-shrink-0" title={run.created_at}>
+                                            {formatRelativeTime(run.created_at)}
+                                          </span>
+                                          <span className="font-medium text-slate-700 dark:text-slate-300 w-[145px] flex-shrink-0">
+                                            {label}
+                                          </span>
+                                          <div className="flex-1 min-w-0 font-light text-slate-500 dark:text-slate-400 truncate">
+                                            {run.status === 'running' && (
+                                              <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
+                                                <Loader2 className="h-3 w-3 animate-spin" /> Running…
+                                              </span>
+                                            )}
+                                            {run.status === 'completed' && insightCount !== null && (
+                                              <span>{insightCount} insights generated</span>
+                                            )}
+                                            {run.status === 'completed' && podcastJobId && (
+                                              <span>Job #{String(podcastJobId)} enqueued</span>
+                                            )}
+                                            {run.status === 'completed' && insightCount === null && !podcastJobId && (
+                                              <span className="text-emerald-600 dark:text-emerald-400">Done</span>
+                                            )}
+                                            {run.status === 'failed' && run.error_message && (
+                                              <span className="text-red-500 dark:text-red-400 truncate" title={run.error_message}>
+                                                {run.error_message}
+                                              </span>
+                                            )}
+                                            {run.status === 'skipped' && (
+                                              <span className="text-slate-400">Disabled for this connection</span>
+                                            )}
+                                          </div>
+                                          <span className="text-slate-400 font-light flex-shrink-0 w-[45px] text-right">
+                                            {run.duration_ms != null ? `${Math.round(run.duration_ms / 1000)}s` : '—'}
+                                          </span>
+                                          {run.status === 'completed' ? (
+                                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />
+                                          ) : run.status === 'running' ? (
+                                            <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin flex-shrink-0" />
+                                          ) : run.status === 'failed' ? (
+                                            <XCircle className="h-3.5 w-3.5 text-red-500 flex-shrink-0" />
+                                          ) : (
+                                            <Clock className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
                                           )}
-                                          {run.status === 'completed' && insightCount !== null && (
-                                            <span>{insightCount} insights generated</span>
-                                          )}
-                                          {run.status === 'completed' && podcastJobId && (
-                                            <span>Job #{String(podcastJobId)} enqueued</span>
-                                          )}
-                                          {run.status === 'failed' && run.error_message && (
-                                            <span className="text-red-500 dark:text-red-400 truncate" title={run.error_message}>
-                                              {run.error_message}
-                                            </span>
-                                          )}
-                                          {run.status === 'skipped' && (
-                                            <span className="text-slate-400">Disabled for this connection</span>
+                                          {isLogEligible && (run.status === 'completed' || run.status === 'failed') && (
+                                            <button
+                                              onClick={() => handleViewLogs(run, connection)}
+                                              className="flex items-center gap-1 text-slate-400 hover:text-violet-500 dark:hover:text-violet-400 transition-colors flex-shrink-0"
+                                              title="View CloudWatch logs for this run"
+                                            >
+                                              <ScrollText className="h-3.5 w-3.5" />
+                                              <ChevronDownIcon className={`h-3 w-3 transition-transform ${logsExpanded ? 'rotate-180' : ''}`} />
+                                            </button>
                                           )}
                                         </div>
-                                        <span className="text-slate-400 font-light flex-shrink-0 w-[45px] text-right">
-                                          {run.duration_ms != null ? `${Math.round(run.duration_ms / 1000)}s` : '—'}
-                                        </span>
-                                        {run.status === 'completed' ? (
-                                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />
-                                        ) : run.status === 'running' ? (
-                                          <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin flex-shrink-0" />
-                                        ) : run.status === 'failed' ? (
-                                          <XCircle className="h-3.5 w-3.5 text-red-500 flex-shrink-0" />
-                                        ) : run.status === 'skipped' ? (
-                                          <Clock className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
-                                        ) : (
-                                          <Clock className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+                                        {logsExpanded && (
+                                          <div className="border-t border-slate-100 dark:border-slate-700/50 bg-slate-950 text-slate-200 font-mono text-[10px] leading-relaxed p-3 max-h-64 overflow-y-auto">
+                                            {logsState?.loading && (
+                                              <div className="flex items-center gap-2 text-slate-400">
+                                                <Loader2 className="h-3 w-3 animate-spin" /> Fetching CloudWatch logs…
+                                              </div>
+                                            )}
+                                            {logsState?.error && (
+                                              <div className="text-amber-400">
+                                                {logsState.error.includes('not available')
+                                                  ? 'CloudWatch not available in this environment (no AWS credentials).'
+                                                  : logsState.error}
+                                              </div>
+                                            )}
+                                            {!logsState?.loading && !logsState?.error && logsState?.events.length === 0 && (
+                                              <div className="text-slate-500">No log events found for this time window.</div>
+                                            )}
+                                            {logsState?.events.map((evt, i) => (
+                                              <div key={i} className="whitespace-pre-wrap break-all">
+                                                <span className="text-slate-500 select-none mr-2">
+                                                  {new Date(evt.timestamp).toISOString().replace('T', ' ').replace('Z', '')}
+                                                </span>
+                                                {evt.message}
+                                              </div>
+                                            ))}
+                                          </div>
                                         )}
                                       </div>
                                     );
