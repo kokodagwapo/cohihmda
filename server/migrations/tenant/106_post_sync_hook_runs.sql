@@ -9,9 +9,9 @@
 
 CREATE TABLE IF NOT EXISTS public.post_sync_hook_runs (
   id              SERIAL PRIMARY KEY,
-  -- Reference to the sync history entry that triggered this hook run.
+  -- Soft reference to los_sync_history.id (no FK — history table schema varies across tenants).
   -- NULL if hooks ran outside a tracked sync (e.g. manual trigger).
-  sync_history_id INTEGER REFERENCES public.los_sync_history(id) ON DELETE SET NULL,
+  sync_history_id INTEGER,
   los_connection_id TEXT NOT NULL,
   tenant_id       TEXT NOT NULL,
   hook_name       TEXT NOT NULL,
