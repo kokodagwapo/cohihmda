@@ -21,8 +21,11 @@ import {
   PieChart,
   Pie,
   Cell,
+  ScatterChart,
+  Scatter,
   XAxis,
   YAxis,
+  ZAxis,
   CartesianGrid,
   ResponsiveContainer,
   Tooltip as RechartsTooltip,
@@ -1081,7 +1084,25 @@ function _computeConfig(evidence: EvidenceItem): ResolvedChartConfig | null {
     const isStacked = hintType === 'stacked_bar';
     const chartType = hintType === 'stacked_bar' ? 'stacked_bar'
       : hintType === 'grouped_bar' ? 'grouped_bar'
+      : hintType === 'histogram' ? 'histogram'
+      : hintType === 'scatter' ? 'scatter'
       : hintType;
+
+    // Pass-through for histogram and scatter (data is raw rows, not transformed)
+    if (chartType === 'histogram' || chartType === 'scatter') {
+      return {
+        chartType,
+        xKey: xKey ?? fields[0],
+        yKey: yKey ?? numericFields[0],
+        yKeys: undefined,
+        isStacked: false,
+        isMultiSeries: false,
+        data: rows.slice(0, 500),
+        title: `${humanizeKey(xKey ?? fields[0])} distribution`,
+        xLabel: chartHint.xLabel,
+        yLabel: chartHint.yLabel,
+      };
+    }
 
     const titleYLabel = isMulti
       ? (yKeys ?? []).map(k => humanizeKey(k)).join(", ")
@@ -1444,6 +1465,57 @@ export function AutoChart({ evidence, hero = false, onSaveToWorkbench, saveTitle
             />
           ))}
         </LineChart>
+      </AutoChartShell>
+    );
+  }
+
+  // ── Histogram ─────────────────────────────────────────────────────────────
+  if (chartType === 'histogram') {
+    const bucketCount = evidence.chartHint?.buckets ?? 20;
+    const values = data.map((d) => parseNumeric(d[xKey])).filter((v) => !isNaN(v));
+    if (values.length === 0) return null;
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const step = max === min ? 1 : (max - min) / bucketCount;
+    const buckets: { range: string; count: number }[] = [];
+    for (let i = 0; i < bucketCount; i++) {
+      const lo = min + i * step;
+      const hi = lo + step;
+      const count = values.filter((v) => v >= lo && (i === bucketCount - 1 ? v <= hi : v < hi)).length;
+      buckets.push({ range: lo.toFixed(1), count });
+    }
+    return (
+      <AutoChartShell title={title} hero={hero} onSaveToWorkbench={onSaveToWorkbench} evidence={evidence} sessionId={sessionId} saveTitle={saveTitle}>
+        <BarChart data={buckets} margin={{ top: 5, right: 10, bottom: 8, left: 5 }}>
+          {grid}
+          <XAxis dataKey="range" tick={{ fontSize: tickFontSize }} angle={-30} textAnchor="end" height={48} axisLine={false} tickLine={false} />
+          <YAxis tick={{ fontSize: tickFontSize }} width={40} axisLine={false} tickLine={false} />
+          <RechartsTooltip contentStyle={{ fontSize: 11 }} formatter={(v: any) => [v, "Count"]} />
+          <Bar dataKey="count" fill={SINGLE_SERIES_COLOR} radius={[2, 2, 0, 0]} />
+        </BarChart>
+      </AutoChartShell>
+    );
+  }
+
+  // ── Scatter chart ─────────────────────────────────────────────────────────
+  if (chartType === 'scatter') {
+    const hint = evidence.chartHint;
+    const xScatterKey = hint?.xKey ?? fields[0];
+    const yScatterKey = hint?.yKey ?? hint?.y2Key ?? numericFields[1] ?? numericFields[0];
+    const scatterData = data
+      .map((d) => ({ x: parseNumeric(d[xScatterKey]), y: parseNumeric(d[yScatterKey]) }))
+      .filter((p) => !isNaN(p.x) && !isNaN(p.y));
+    if (scatterData.length === 0) return null;
+    return (
+      <AutoChartShell title={title} hero={hero} onSaveToWorkbench={onSaveToWorkbench} evidence={evidence} sessionId={sessionId} saveTitle={saveTitle}>
+        <ScatterChart margin={{ top: 5, right: 10, bottom: 8, left: 5 }}>
+          {grid}
+          <XAxis dataKey="x" type="number" name={humanizeKey(xScatterKey)} tick={{ fontSize: tickFontSize }} axisLine={false} tickLine={false} />
+          <YAxis dataKey="y" type="number" name={humanizeKey(yScatterKey)} tick={{ fontSize: tickFontSize }} width={50} axisLine={false} tickLine={false} />
+          <ZAxis range={[30, 30]} />
+          <RechartsTooltip contentStyle={{ fontSize: 11 }} cursor={{ strokeDasharray: "3 3" }} />
+          <Scatter data={scatterData} fill={SINGLE_SERIES_COLOR} opacity={0.6} />
+        </ScatterChart>
       </AutoChartShell>
     );
   }

@@ -27,6 +27,11 @@ import {
   runSynthesisAgent,
   type ResearchReport,
 } from "./agents/synthesisAgent.js";
+import {
+  loadUploadRecord,
+  buildUploadContextString,
+  buildUploadTableSchemaContext,
+} from "./uploadProcessor.js";
 
 // ============================================================================
 // Types
@@ -94,6 +99,8 @@ export interface ResearchSession {
   // Sharing (in-app user picker)
   visibility?: string;
   sharedWithUserIds?: string[];
+  // Upload attachments
+  uploadIds?: string[];
 }
 
 // ============================================================================
@@ -162,8 +169,8 @@ function getPrimaryCategory(plan: ResearchPlan | undefined): string | null {
 }
 
 const SAVE_SESSION_WITH_CATEGORY = `
-  INSERT INTO research_sessions (id, tenant_id, user_id, user_email, topic, phase, plan, findings, report, events, follow_up_history, error, primary_category, created_at, updated_at)
-  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, to_timestamp($14::double precision / 1000), NOW())
+  INSERT INTO research_sessions (id, tenant_id, user_id, user_email, topic, phase, plan, findings, report, events, follow_up_history, error, primary_category, upload_ids, created_at, updated_at)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, to_timestamp($15::double precision / 1000), NOW())
   ON CONFLICT (id) DO UPDATE SET
     phase = EXCLUDED.phase,
     plan = EXCLUDED.plan,
@@ -173,11 +180,12 @@ const SAVE_SESSION_WITH_CATEGORY = `
     follow_up_history = EXCLUDED.follow_up_history,
     error = EXCLUDED.error,
     primary_category = EXCLUDED.primary_category,
+    upload_ids = EXCLUDED.upload_ids,
     updated_at = NOW()`;
 
 const SAVE_SESSION_WITHOUT_CATEGORY = `
-  INSERT INTO research_sessions (id, tenant_id, user_id, user_email, topic, phase, plan, findings, report, events, follow_up_history, error, created_at, updated_at)
-  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, to_timestamp($13::double precision / 1000), NOW())
+  INSERT INTO research_sessions (id, tenant_id, user_id, user_email, topic, phase, plan, findings, report, events, follow_up_history, error, upload_ids, created_at, updated_at)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, to_timestamp($14::double precision / 1000), NOW())
   ON CONFLICT (id) DO UPDATE SET
     phase = EXCLUDED.phase,
     plan = EXCLUDED.plan,
@@ -186,10 +194,12 @@ const SAVE_SESSION_WITHOUT_CATEGORY = `
     events = EXCLUDED.events,
     follow_up_history = EXCLUDED.follow_up_history,
     error = EXCLUDED.error,
+    upload_ids = EXCLUDED.upload_ids,
     updated_at = NOW()`;
 
 export async function saveSession(session: ResearchSession, tenantPool: pg.Pool): Promise<void> {
   const primaryCategory = getPrimaryCategory(session.plan);
+  const uploadIdsJson = JSON.stringify(session.uploadIds || []);
   const paramsWithCategory = [
     session.id,
     session.tenantId,
@@ -204,6 +214,7 @@ export async function saveSession(session: ResearchSession, tenantPool: pg.Pool)
     JSON.stringify(session.followUpHistory),
     session.error || null,
     primaryCategory,
+    uploadIdsJson,
     session.createdAt,
   ];
   const paramsWithoutCategory = [
@@ -219,6 +230,7 @@ export async function saveSession(session: ResearchSession, tenantPool: pg.Pool)
     JSON.stringify(session.events),
     JSON.stringify(session.followUpHistory),
     session.error || null,
+    uploadIdsJson,
     session.createdAt,
   ];
   try {
@@ -270,6 +282,7 @@ export async function loadSession(sessionId: string, tenantPool: pg.Pool): Promi
       _isRunning: false,
       visibility: row.visibility ?? "private",
       sharedWithUserIds: Array.isArray(row.shared_with_user_ids) ? row.shared_with_user_ids : [],
+      uploadIds: Array.isArray(row.upload_ids) ? row.upload_ids : [],
     };
 
     sessions.set(session.id, session);
@@ -452,7 +465,8 @@ export async function createSession(
   tenantPool: pg.Pool,
   topic?: string,
   initialContext?: InsightContext,
-  mode: ResearchMode = "deep"
+  mode: ResearchMode = "deep",
+  uploadIds: string[] = []
 ): Promise<ResearchSession> {
   pruneExpiredSessions();
 
@@ -501,6 +515,7 @@ export async function createSession(
     paused: false,
     _emitters: [],
     _isRunning: false,
+    uploadIds: uploadIds.length > 0 ? uploadIds : undefined,
   };
 
   sessions.set(session.id, session);
@@ -586,17 +601,65 @@ export async function runResearchPipeline(
       getTrackedInsightContext(tenantPool),
     ]);
 
-    const enrichedKnowledgeContext = [knowledgeContext, priorSessionSummaries, trackedInsightContext]
+    // ── Load upload context ──
+    let uploadSchemaAddendum = "";   // appended to schemaContext for table-backed uploads
+    let uploadDataContext = "";      // appended to knowledgeContext for context-backed uploads
+    if (session.uploadIds && session.uploadIds.length > 0) {
+      for (const uploadId of session.uploadIds) {
+        try {
+          const uploadRecord = await loadUploadRecord(uploadId, tenantPool);
+          if (!uploadRecord) continue;
+          const rec = uploadRecord as typeof uploadRecord & { id: string; originalFileName: string };
+          rec.id = uploadRecord.id;
+          if (uploadRecord.storageStrategy === "table") {
+            uploadSchemaAddendum += buildUploadTableSchemaContext(rec);
+          } else {
+            uploadDataContext += buildUploadContextString(rec);
+          }
+        } catch (uploadErr: any) {
+          console.warn(`[Research] Failed to load upload ${uploadId}:`, uploadErr.message);
+        }
+      }
+    }
+
+    const combinedSchemaContext = uploadSchemaAddendum
+      ? `${schemaContext}\n\n${uploadSchemaAddendum}`
+      : schemaContext;
+
+    const enrichedKnowledgeContext = [knowledgeContext, priorSessionSummaries, trackedInsightContext, uploadDataContext]
       .filter(Boolean)
       .join("\n\n") || undefined;
 
     if (isQuickMode) {
       // ── Quick Answer: single data analyst, no plan, no synthesis ──
+      // Build the approach based on whether inline or table-backed uploads are present
+      let quickApproach = "Answer the user's question directly with one or more SQL queries. Produce a single finding with a clear title, summary, key metrics, and evidence tables. Be concise.";
+      if (uploadDataContext) {
+        // Inline (context-strategy) uploads are present — agent must NOT use SQL for them
+        quickApproach =
+          "Answer the user's question directly. " +
+          "One or more user-uploaded datasets are available as inline text in your knowledge context " +
+          "(labelled 'User-Uploaded Dataset (INLINE)'). " +
+          "For those datasets, do NOT run SQL — read the rows directly from context and compute your answer. " +
+          "Produce two evidence items: (1) a summary table with computed aggregates, and " +
+          "(2) a detail table with the individual rows most relevant to the finding (include all original columns). " +
+          "You may also use SQL against the loans table for supplementary LOS context if relevant. " +
+          "Be concise but include both the summary and detail tables.";
+        if (uploadSchemaAddendum) {
+          quickApproach += " Additional upload tables are also available via SQL (listed in the schema context).";
+        }
+      } else if (uploadSchemaAddendum) {
+        quickApproach =
+          "Answer the user's question directly. " +
+          "One or more user-uploaded datasets are queryable as SQL tables (listed in the schema context as upload_... tables). " +
+          "Use SQL to query them. Produce a single finding with a clear title, summary, key metrics, and evidence tables. Be concise.";
+      }
+
       const quickQuestion: InvestigationQuestion = {
         id: 1,
         topic: session.topic || "Quick analysis",
         hypothesis: session.topic || "Answer the user's question directly.",
-        approach: "Answer the user's question directly with one or more SQL queries. Produce a single finding with a clear title, summary, key metrics, and evidence tables. Be concise.",
+        approach: quickApproach,
         priority: "high",
         category: "performance",
       };
@@ -631,7 +694,7 @@ export async function runResearchPipeline(
 
       const finding = await runDataAnalystAgent(
         quickQuestion,
-        schemaContext,
+        combinedSchemaContext,
         metricDefs,
         tenantPool,
         apiKey,
@@ -700,12 +763,13 @@ export async function runResearchPipeline(
       priorInvestigationContext = ctx;
     }
 
-    const plan = await runPlannerAgent(schemaContext, metricDefs, apiKey, {
+    const plan = await runPlannerAgent(combinedSchemaContext, metricDefs, apiKey, {
       topic: session.topic,
       knowledgeContext,
       priorInvestigationContext,
       priorSessionSummaries: priorSessionSummaries || undefined,
       businessKnowledge,
+      uploadContext: [uploadSchemaAddendum, uploadDataContext].filter(Boolean).join("\n\n") || undefined,
     });
 
     session.plan = plan;
@@ -753,7 +817,7 @@ export async function runResearchPipeline(
           const checkPause = () => waitIfPaused(session, emit);
 
           return runDataAnalystAgent(
-            question, schemaContext, metricDefs, tenantPool, apiKey,
+            question, combinedSchemaContext, metricDefs, tenantPool, apiKey,
             onStep, getSteeringDirective, checkPause, enrichedKnowledgeContext, businessKnowledge
           );
         })
@@ -856,7 +920,32 @@ export async function runFollowUp(
 
     const businessKnowledge = getDerivedMetricContext();
 
-    const enrichedFollowUpContext = [knowledgeContext, trackedInsightCtx]
+    // Re-load upload context for this session so follow-ups can still reference uploaded data
+    let followUpUploadDataContext = "";
+    let followUpUploadSchemaAddendum = "";
+    if (session.uploadIds && session.uploadIds.length > 0) {
+      for (const uploadId of session.uploadIds) {
+        try {
+          const uploadRecord = await loadUploadRecord(uploadId, tenantPool);
+          if (!uploadRecord) continue;
+          const rec = uploadRecord as typeof uploadRecord & { id: string; originalFileName: string };
+          rec.id = uploadRecord.id;
+          if (uploadRecord.storageStrategy === "table") {
+            followUpUploadSchemaAddendum += buildUploadTableSchemaContext(rec);
+          } else {
+            followUpUploadDataContext += buildUploadContextString(rec);
+          }
+        } catch {
+          // Skip failed uploads
+        }
+      }
+    }
+
+    const followUpSchemaContext = followUpUploadSchemaAddendum
+      ? `${schemaContext}\n\n${followUpUploadSchemaAddendum}`
+      : schemaContext;
+
+    const enrichedFollowUpContext = [knowledgeContext, trackedInsightCtx, followUpUploadDataContext]
       .filter(Boolean)
       .join("\n\n") || undefined;
 
@@ -865,11 +954,27 @@ export async function runFollowUp(
       .map((f) => `- ${f.title}: ${f.summary}`)
       .join("\n");
 
+    // Tailor approach if inline uploads are present
+    let followUpApproach = `Use the existing findings as context:\n${existingContext}\n\nInvestigate the user's specific question with targeted SQL queries.`;
+    if (followUpUploadDataContext) {
+      followUpApproach =
+        `Use the existing findings as context:\n${existingContext}\n\n` +
+        `Investigate the user's specific question. ` +
+        `One or more user-uploaded datasets are available as inline text in your knowledge context ` +
+        `(labelled 'User-Uploaded Dataset (INLINE)'). ` +
+        `For those datasets, do NOT run SQL — read the rows directly from context. ` +
+        `Produce two evidence items: (1) a summary table with computed aggregates, and ` +
+        `(2) a detail table with the individual rows most relevant to the finding (all original columns).`;
+      if (followUpUploadSchemaAddendum) {
+        followUpApproach += " Additional upload tables are also queryable via SQL (listed in schema context).";
+      }
+    }
+
     const followUpQuestion = {
       id: 900 + session.followUpHistory.length,
       topic: question,
       hypothesis: `Follow-up investigation based on user question: "${question}"`,
-      approach: `Use the existing findings as context:\n${existingContext}\n\nInvestigate the user's specific question with targeted SQL queries.`,
+      approach: followUpApproach,
       priority: "high" as const,
       category: "followup",
     };
@@ -896,7 +1001,7 @@ export async function runFollowUp(
     const checkPause = () => waitIfPaused(session, emit);
 
     const finding = await runDataAnalystAgent(
-      followUpQuestion, schemaContext, metricDefs, tenantPool, apiKey,
+      followUpQuestion, followUpSchemaContext, metricDefs, tenantPool, apiKey,
       onStep, getSteeringDirective, checkPause, enrichedFollowUpContext, businessKnowledge
     );
 

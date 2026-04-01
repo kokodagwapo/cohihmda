@@ -135,9 +135,9 @@ export async function runPlannerAgent(
   schemaContext: string,
   metricDefinitions: string,
   apiKey: string,
-  options: { topic?: string; knowledgeContext?: string; priorInvestigationContext?: string; priorSessionSummaries?: string; businessKnowledge?: string } = {}
+  options: { topic?: string; knowledgeContext?: string; priorInvestigationContext?: string; priorSessionSummaries?: string; businessKnowledge?: string; uploadContext?: string } = {}
 ): Promise<ResearchPlan> {
-  const { topic, knowledgeContext, priorInvestigationContext, priorSessionSummaries, businessKnowledge } = options;
+  const { topic, knowledgeContext, priorInvestigationContext, priorSessionSummaries, businessKnowledge, uploadContext } = options;
 
   const now = new Date();
   const todayStr = now.toISOString().split("T")[0];
@@ -151,8 +151,26 @@ export async function runPlannerAgent(
     userPrompt += `${businessKnowledge}\n\n`;
   }
 
+  if (uploadContext) {
+    userPrompt += `## User-Uploaded Dataset Context\n`;
+    userPrompt += `The user has uploaded data files for analysis. TWO types of uploads may be present:\n`;
+    userPrompt += `- INLINE (small files, ≤200 rows): The full dataset is embedded as text in the analyst's knowledge context. `
+      + `For questions involving inline data, the analyst will read it directly from context — they do NOT run SQL. `
+      + `In the question "approach", say: "Analyze the inline CSV data from the knowledge context — do NOT use SQL for this. `
+      + `Produce two evidence items: (1) a summary table with computed aggregates, and (2) a detail table with the `
+      + `individual rows most relevant to this finding (e.g. all delinquent loans, all flagged records, top entries). `
+      + `Include all original columns in the detail table." `
+      + `These are labelled "User-Uploaded Dataset (INLINE)" in the context.\n`;
+    userPrompt += `- SQL TABLE (large files, >200 rows): The data is loaded into a queryable table named upload_<name>. `
+      + `For questions involving table data, the analyst CAN use SQL. `
+      + `These are labelled "User-Uploaded Dataset Table: upload_..." in the schema context.\n\n`;
+    userPrompt += `Prioritize investigation questions that leverage these datasets. Cross-reference with existing loan/warehouse data where column semantics overlap.\n${uploadContext}\n\n`;
+  }
+
   if (topic) {
     userPrompt += `## User's Investigation Request\nThe user wants to investigate: "${topic}"\n\nCreate a research plan that prioritizes this topic while also covering other significant areas if relevant.\n`;
+  } else if (uploadContext) {
+    userPrompt += `## Investigation Scope\nThe user has uploaded data for analysis. Focus the investigation plan on understanding patterns, distributions, outliers, and correlations in the uploaded data. Also consider how it relates to existing loan/lending data.\n`;
   } else {
     userPrompt += `## Investigation Scope\nNo specific topic was requested. Create a comprehensive research plan covering pipeline health, conversion performance, personnel patterns, risk exposure, and trends.\n`;
   }

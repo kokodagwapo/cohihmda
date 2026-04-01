@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Clock3, Loader2, Trash2 } from "lucide-react";
+import { Clock3, Database, Loader2, Trash2 } from "lucide-react";
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { useDashboardVisibility } from "@/hooks/useDashboardVisibility";
 import { useWorkbenchNav, type SidebarResearchSession } from "@/hooks/useWorkbenchNav";
@@ -190,12 +190,21 @@ export default function ResearchHub() {
                 Track investigations with status and recency, then jump straight back into analysis.
               </p>
             </div>
-            <button
-              onClick={() => navigate("/research/session")}
-              className="rounded-lg bg-emerald-600 text-white px-3 py-2 text-sm font-medium hover:bg-emerald-500"
-            >
-              New Session
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => navigate("/research/data-explorer")}
+                className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 px-3 py-2 text-sm font-medium hover:bg-slate-50 dark:hover:bg-slate-700 inline-flex items-center gap-1.5"
+              >
+                <Database className="w-4 h-4" />
+                Data Explorer
+              </button>
+              <button
+                onClick={() => navigate("/research/session")}
+                className="rounded-lg bg-emerald-600 text-white px-3 py-2 text-sm font-medium hover:bg-emerald-500"
+              >
+                New Session
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-rows-[minmax(0,1fr)_minmax(180px,0.55fr)] gap-4 flex-1 min-h-0">
