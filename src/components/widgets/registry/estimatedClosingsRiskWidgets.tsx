@@ -29,7 +29,7 @@ type RiskConfig = {
   selectedRemainingComplexityGroup?: string | null;
   selectedRemainingProcessingStage?: string | null;
   onSelectEcdSlice?: (
-    key: "empty_ecd" | "past_ecd" | "remaining_to_fund" | "after_this_month" | null,
+    key: "empty_ecd" | "past_ecd" | "this_months_ecd" | "after_this_month" | null,
   ) => void;
   onSelectComplexityBucket?: (
     key: "gte_130" | "gte_120" | "gte_110" | "all_rest" | null,
@@ -44,7 +44,7 @@ type RiskConfig = {
 const ECD_SLICE_LABELS: Record<string, string> = {
   empty_ecd: "No ECD",
   past_ecd: "Past ECD",
-  remaining_to_fund: "Remaining to Fund",
+  this_months_ecd: "This Month's ECD",
   after_this_month: "After This Month",
 };
 
@@ -62,10 +62,11 @@ function getStringField(row: unknown, key: string): string | null {
 }
 
 function toEcdKey(value: string | null) {
+  if (value === "remaining_to_fund") return "this_months_ecd";
   if (
     value === "empty_ecd" ||
     value === "past_ecd" ||
-    value === "remaining_to_fund" ||
+    value === "this_months_ecd" ||
     value === "after_this_month"
   )
     return value;

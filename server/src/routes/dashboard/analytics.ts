@@ -1295,9 +1295,10 @@ router.get(
         tenant_id: z.string().uuid().optional(),
         limit: z.coerce.number().int().min(1).max(10000).optional(),
         offset: z.coerce.number().int().min(0).optional(),
-        ecd_slice: z
-          .enum(["empty_ecd", "past_ecd", "remaining_to_fund", "after_this_month"])
-          .optional(),
+        ecd_slice: z.preprocess(
+          (v) => (v === "remaining_to_fund" ? "this_months_ecd" : v),
+          z.enum(["empty_ecd", "past_ecd", "this_months_ecd", "after_this_month"]).optional(),
+        ),
         complexity_bucket: z.enum(["gte_130", "gte_120", "gte_110", "all_rest"]).optional(),
         remaining_complexity_group: z.string().max(400).optional(),
         remaining_processing_stage: z.string().max(120).optional(),

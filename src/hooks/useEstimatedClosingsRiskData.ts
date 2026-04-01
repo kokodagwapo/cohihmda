@@ -7,7 +7,7 @@ export type EstimatedClosingsDateRangeType = "calendar_days" | "business_days";
 export type EstimatedClosingsEcdSliceKey =
   | "empty_ecd"
   | "past_ecd"
-  | "remaining_to_fund"
+  | "this_months_ecd"
   | "after_this_month";
 
 export type EstimatedClosingsComplexityBucketKey = "gte_130" | "gte_120" | "gte_110" | "all_rest";

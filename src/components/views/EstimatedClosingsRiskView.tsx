@@ -95,7 +95,7 @@ const KPI_DESCRIPTIONS: Record<string, string> = {
   ecdEmptyOrAfterThisMonth:
     "Active and unfunded loans where ECD is blank or after month-end.",
   remainingToFund:
-    "Same cohort as the pie chart: canonical active pipeline (application date present, not archived), unfunded, estimated closing date on or before the end of the current calendar month (includes overdue ECDs).",
+    "Active and unfunded loans (canonical active pipeline: status, application date present, not archived), with an estimated closing date on or before the end of the current calendar month (includes overdue ECDs from prior months). Not the same as the pie slice “This Month's ECD,” which counts only ECDs in the current month.",
   fundedThisMonth:
     "Loans with a funding date in the current calendar month.",
   maxPossibleFunding:
