@@ -58,7 +58,7 @@ async function insertHookRun(
          (sync_history_id, los_connection_id, tenant_id, hook_name, status, started_at)
        VALUES ($1, $2, $3, $4, 'running', NOW())
        RETURNING id`,
-      [ctx.syncHistoryId ?? null, ctx.connectionId, ctx.tenantId, hookName]
+      [Number.isFinite(ctx.syncHistoryId) ? ctx.syncHistoryId : null, ctx.connectionId, ctx.tenantId, hookName]
     );
     return Number(result.rows[0]?.id);
   } catch (err: any) {
