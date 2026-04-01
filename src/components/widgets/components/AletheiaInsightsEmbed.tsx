@@ -14,7 +14,7 @@ function AletheiaInsightsEmbedInner({ width, height, config }: WidgetRenderProps
   const { selectedTenantId } = useTenantStore();
   const { selectedChannel } = useChannelStore();
   const canvasItemId = config?.canvasItemId as string | undefined;
-  const defName = (config?.definitionName as string) || 'Cohi Daily Briefings';
+  const defName = (config?.definitionName as string) || 'Cohi Insights';
   const defCategory = (config?.definitionCategory as string) || 'other';
   const reportWidgetData = useCanvasDataStore((s) => s.reportWidgetData);
 

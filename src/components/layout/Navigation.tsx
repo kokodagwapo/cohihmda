@@ -63,8 +63,8 @@ export interface NavigationProps {
 
 // Dashboard section configuration (matching ReportsSidebar)
 const dashboardSectionsConfig = [
-  { id: "aletheiaInsights", label: "Cohi Daily Briefings", icon: Zap },
-  { id: "industryNews", label: "Mortgage News", icon: Newspaper },
+  { id: "aletheiaInsights", label: "Cohi Insights", icon: Zap },
+  { id: "industryNews", label: "Cohi Mortgage News", icon: Newspaper },
   { id: "leaderboard", label: "Leaderboard", icon: Trophy },
   { id: "executiveDashboard", label: "Business Overview", icon: Target },
   {
@@ -74,7 +74,7 @@ const dashboardSectionsConfig = [
   },
 ];
 
-// Insights top nav dropdown: only Cohi Daily Briefings + Mortgage News (Leaderboard, Business Overview, Closing & Fallout hidden)
+// Insights top nav dropdown: only Cohi Insights + Cohi Mortgage News (Leaderboard, Business Overview, Closing & Fallout hidden)
 const insightsMenuConfig = dashboardSectionsConfig.filter(
   (s) => s.id === "aletheiaInsights" || s.id === "industryNews",
 );

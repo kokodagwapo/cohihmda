@@ -48,7 +48,7 @@ test.describe("Insights Dashboard", () => {
 
       if (canClickMenu) {
         await insightsMenu.first().click();
-        const mortgageNewsItem = userPage.getByRole("menuitem", { name: "Mortgage News" });
+        const mortgageNewsItem = userPage.getByRole("menuitem", { name: "Cohi Mortgage News" });
         if (await mortgageNewsItem.first().isVisible().catch(() => false)) {
           await mortgageNewsItem.first().click();
         }
