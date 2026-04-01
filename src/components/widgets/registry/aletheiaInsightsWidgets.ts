@@ -1,5 +1,5 @@
 /**
- * Widget definitions for Cohi Daily Briefings (Aletheia Insights).
+ * Widget definitions for Cohi Insights (Aletheia Insights).
  * Single full-component embed.
  */
 
@@ -8,7 +8,7 @@ import { AletheiaInsightsEmbed } from '../components/AletheiaInsightsEmbed';
 
 const aletheiaInsightsEmbed: WidgetDefinition = {
   id: 'aletheia-insights-embed',
-  name: 'Cohi Daily Briefings',
+  name: 'Cohi Insights',
   description: 'AI-generated daily briefings and insights from your pipeline data',
   category: 'insight',
   group: 'Cohi Insights',

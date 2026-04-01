@@ -187,8 +187,8 @@ const statusConfig = {
 
 // Dashboard section configuration
 const dashboardSectionsConfig = [
-  { id: 'aletheiaInsights' as SectionId, label: 'Cohi Daily Briefings', icon: Sun, color: 'text-emerald-500', section: 'main' },
-  { id: 'industryNews' as SectionId, label: 'Mortgage News', icon: FileText, color: 'text-blue-500', section: 'main' },
+  { id: 'aletheiaInsights' as SectionId, label: 'Cohi Insights', icon: Sun, color: 'text-emerald-500', section: 'main' },
+  { id: 'industryNews' as SectionId, label: 'Cohi Mortgage News', icon: FileText, color: 'text-blue-500', section: 'main' },
   { id: 'leaderboard' as SectionId, label: 'Leaderboard', icon: Trophy, color: 'text-amber-500', section: 'dashboards' },
   { id: 'executiveDashboard' as SectionId, label: 'Business Overview', icon: Target, color: 'text-blue-500', section: 'dashboards' },
 ];
@@ -203,8 +203,8 @@ export const defaultSectionOrder: SectionId[] = [
 
 // Nav menu structure mirroring top Navigation (keep sidemenu icons: Sun, FileText, Trophy, Target, BarChart3 for sections)
 const INSIGHTS_CHILDREN = [
-  { type: 'section' as const, id: 'aletheiaInsights' as SectionId, label: 'Cohi Daily Briefings', icon: Sun, color: 'text-emerald-500' },
-  { type: 'section' as const, id: 'industryNews' as SectionId, label: 'Mortgage News', icon: FileText, color: 'text-blue-500' },
+  { type: 'section' as const, id: 'aletheiaInsights' as SectionId, label: 'Cohi Insights', icon: Sun, color: 'text-emerald-500' },
+  { type: 'section' as const, id: 'industryNews' as SectionId, label: 'Cohi Mortgage News', icon: FileText, color: 'text-blue-500' },
 ];
 
 // Dashboard floating menu items (Leaderboard, Business Overview, Closing & Fallout Forecast)
@@ -646,7 +646,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
               </div>
               
               {isInsightsPage ? (
-                /* /insights mobile: only Cohi Daily Briefings + Mortgage News */
+                /* /insights mobile: only Cohi Insights + Cohi Mortgage News */
                 <div className="p-4 pt-3 space-y-0">
                   {INSIGHTS_CHILDREN.map((it) => {
                     if (it.type !== 'section') return null;

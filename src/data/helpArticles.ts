@@ -98,8 +98,8 @@ When you first log in to Cohi, you'll be greeted with the **Insights** dashboard
 ## 1. Take the Welcome Tour
 If this is your first time, we'll offer a guided tour. Accept it to learn the layout in under 2 minutes.
 
-## 2. Review Your Daily Briefings
-The AI-generated Daily Briefings appear at the top of the Insights page. They summarize key changes in your loan pipeline, highlight risks, and surface opportunities.
+## 2. Review Cohi Insights
+The AI-generated Cohi Insights appear at the top of the Insights page. They summarize key changes in your loan pipeline, highlight risks, and surface opportunities.
 
 ## 3. Check the Business Overview
 Scroll down to the Business Overview section for a snapshot of your organization's KPIs: active loans, revenue metrics, pull-through rates, and cycle times.
@@ -125,10 +125,10 @@ Visit **Settings** (from the user menu, top-right) to change your password, enab
 
 The Insights dashboard is divided into several sections, each providing a different perspective on your business:
 
-## Cohi Daily Briefings
+## Cohi Insights
 AI-generated executive insights that highlight significant changes, risks, and opportunities in your loan pipeline. Each insight can be tracked to your watchlist for monitoring.
 
-## Mortgage News
+## Cohi Mortgage News
 Curated industry news aggregated from trusted sources, keeping you informed about market conditions.
 
 ## Leaderboard
@@ -159,7 +159,7 @@ The left sidebar lets you toggle section visibility. Click the section names to 
 ## Top Navigation Bar
 The navigation bar at the top of every page provides access to all major sections:
 
-- **Insights** (dropdown) — Jump to Daily Briefings or Mortgage News
+- **Insights** (dropdown) — Jump to Cohi Insights or Cohi Mortgage News
 - **Dashboard** (dropdown) — Access TopTiering analytics including Scorecards, Credit Risk, Financial Modeling, and more
 - **My Workbench** — Your custom dashboard builder
 - **Research Lab** — AI-powered data investigation tool
@@ -212,11 +212,11 @@ Your name, email, and role are managed by your administrator. Contact them if yo
   {
     id: "ins-daily-briefings",
     slug: "daily-briefings",
-    title: "Reading Your Daily Briefings",
+    title: "Reading Your Cohi Insights",
     category: "Insights",
     categorySlug: "insights",
     summary: "How AI-generated insights work and how to use them.",
-    content: `# Reading Your Daily Briefings
+    content: `# Reading Your Cohi Insights
 
 Cohi's AI analyzes your loan data continuously and generates executive-level insights about significant changes, emerging risks, and opportunities.
 
@@ -897,14 +897,14 @@ Audio Briefings are AI-generated spoken summaries of your organization's key met
 ## Two Briefing Types
 
 ### On-Demand Briefing (Cohi News Brief)
-Found in the **Cohi Daily Morning Brief** section on the Insights page:
+Found in the **Cohi Mortgage News** section on the Insights page:
 - Click the **radio icon** to generate a briefing in real time
 - The AI creates a ~90-second spoken summary from your latest data
 - Controls: Play, Pause, Mute, End
 - Ask follow-up questions by voice (microphone) or text during playback
 
 ### Pre-Generated Briefing (Aletheia Briefing)
-Found in the **Cohi Daily Briefings** section on the Insights page:
+Found in the **Cohi Insights** section on the Insights page:
 - A **Play** button appears when a pre-generated briefing is available
 - Briefings are ~2–3 minutes and cover deeper insight analysis
 - Adjust playback speed (0.75x to 1.5x) and use the seek bar to skip around
