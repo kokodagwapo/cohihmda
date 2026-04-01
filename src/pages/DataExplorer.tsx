@@ -156,8 +156,8 @@ type ActiveTab = "preview" | "schema" | "insights";
 
 export default function DataExplorer() {
   const { user } = useAuth();
-  const { selectedTenant } = useTenantStore();
-  const tenantId = selectedTenant?.id || user?.tenantId;
+  const { selectedTenantId } = useTenantStore();
+  const tenantId = selectedTenantId || user?.tenant_id;
   const navigate = useNavigate();
 
   const {
