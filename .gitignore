@@ -202,3 +202,6 @@ scripts/deploy/config.ps1
 
 # Due diligence documents (local only, not for repo)
 docs/due-diligence/
+
+# Sample/test CSV data for Research Lab upload testing (local only)
+sample-data/

@@ -39,8 +39,12 @@ import {
   type SSEEvent,
 } from "../services/research/orchestrator.js";
 import { startSSEHeartbeat } from "../utils/sseUtils.js";
+import uploadRoutes from "./research/uploads.js";
 
 const router = Router();
+
+// Mount upload sub-routes at /uploads
+router.use("/uploads", uploadRoutes);
 
 // ============================================================================
 // Helper: set up SSE response
@@ -92,20 +96,21 @@ router.post(
   async (req: AuthRequest, res: Response) => {
     try {
       const { tenantPool, tenantId } = getTenantContext(req);
-      const { topic, initialContext, mode } = req.body || {};
+      const { topic, initialContext, mode, uploadIds } = req.body || {};
       const userId = req.userId || "";
       const userEmail = req.userEmail || "";
       const researchMode = mode === "quick" ? "quick" : "deep";
 
-      const session = await createSession(tenantId, userId, userEmail, tenantPool, topic || undefined, initialContext || undefined, researchMode);
+      const session = await createSession(tenantId, userId, userEmail, tenantPool, topic || undefined, initialContext || undefined, researchMode, Array.isArray(uploadIds) ? uploadIds : []);
 
-      console.log(`[Research] Created session ${session.id} for tenant ${tenantId}${topic ? `, topic: "${topic}"` : ""}${initialContext ? " (from insight)" : ""}`);
+      console.log(`[Research] Created session ${session.id} for tenant ${tenantId}${topic ? `, topic: "${topic}"` : ""}${initialContext ? " (from insight)" : ""}${uploadIds?.length ? ` with ${uploadIds.length} uploads` : ""}`);
 
       res.json({
         sessionId: session.id,
         phase: session.phase,
         topic: session.topic,
         createdAt: session.createdAt,
+        uploadIds: session.uploadIds || [],
       });
     } catch (err: any) {
       console.error("[Research] Error creating session:", err);
@@ -509,6 +514,25 @@ router.delete(
         res.status(403).json({ error: "You do not have permission to delete this session" });
         return;
       }
+    }
+
+    // Cascade: drop any upload temp tables linked to this session
+    try {
+      const uploadResult = await tenantPool.query(
+        `SELECT id, table_name, storage_strategy FROM research_uploads WHERE session_id = $1`,
+        [id]
+      );
+      const { dropUploadTable: dropTable } = await import("../services/research/uploadProcessor.js");
+      for (const row of uploadResult.rows) {
+        if (row.storage_strategy === "table" && row.table_name) {
+          await dropTable(row.table_name, tenantPool);
+        }
+      }
+      if (uploadResult.rows.length > 0) {
+        await tenantPool.query(`DELETE FROM research_uploads WHERE session_id = $1`, [id]);
+      }
+    } catch (cleanupErr: any) {
+      console.warn(`[Research] Upload cleanup error for session ${id}:`, cleanupErr.message);
     }
 
     const success = await deleteSession(id, tenantPool);

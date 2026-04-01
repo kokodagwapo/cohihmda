@@ -903,6 +903,20 @@ export function Navigation(
               {session.topic || "Untitled Session"}
             </button>
           ))}
+          <button
+            onClick={() => {
+              navigate("/research/data-explorer");
+              setMobileMenuOpen(false);
+            }}
+            className={cn(
+              "w-full flex items-center gap-2 px-8 py-1.5 rounded-md text-xs font-medium transition-all",
+              location.pathname === "/research/data-explorer"
+                ? "text-blue-600 dark:text-blue-400"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800"
+            )}
+          >
+            Data Explorer
+          </button>
         </div>
       </div>
     </div>
@@ -1567,7 +1581,10 @@ export function Navigation(
                         </div>
                         <div className="pt-2 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2">
                           <button className="text-xs font-medium text-slate-600 dark:text-slate-300 hover:underline" onClick={() => { navigate("/research"); setResearchOpen(false); }}>View All</button>
-                          <button className="text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:underline" onClick={() => { navigate("/research/session"); setResearchOpen(false); }}>New Session</button>
+                          <div className="flex items-center gap-2">
+                            <button className="text-xs font-medium text-slate-600 dark:text-slate-300 hover:underline" onClick={() => { navigate("/research/data-explorer"); setResearchOpen(false); }}>Data Explorer</button>
+                            <button className="text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:underline" onClick={() => { navigate("/research/session"); setResearchOpen(false); }}>New Session</button>
+                          </div>
                         </div>
                       </div>
                     </motion.div>

@@ -37,7 +37,7 @@ export interface InsightContext {
 }
 
 export interface ChartHint {
-  type?: 'bar' | 'horizontal_bar' | 'line' | 'area' | 'pie' | 'donut' | 'stacked_bar' | 'grouped_bar';
+  type?: 'bar' | 'horizontal_bar' | 'line' | 'area' | 'pie' | 'donut' | 'stacked_bar' | 'grouped_bar' | 'histogram' | 'scatter' | 'heatmap' | 'treemap';
   xKey?: string;
   yKey?: string;
   yKeys?: string[];
@@ -45,6 +45,10 @@ export interface ChartHint {
   yLabel?: string;
   nameKey?: string;
   valueKey?: string;
+  y2Key?: string;
+  colorKey?: string;
+  labelKey?: string;
+  buckets?: number;
 }
 
 export interface EvidenceItem {
@@ -259,7 +263,7 @@ export function useResearchSession(tenantId?: string | null) {
 
   // ── Start a new research session ──
   const startSession = useCallback(
-    async (topic?: string, initialContext?: InsightContext, mode: ResearchMode = "quick") => {
+    async (topic?: string, initialContext?: InsightContext, mode: ResearchMode = "quick", uploadIds?: string[]) => {
       setPhase("creating");
       setError(null);
       setPlan(null);
@@ -279,6 +283,7 @@ export function useResearchSession(tenantId?: string | null) {
         if (topic) body.topic = topic;
         if (initialContext) body.initialContext = initialContext;
         body.mode = mode;
+        if (uploadIds && uploadIds.length > 0) body.uploadIds = uploadIds;
 
         const result = await api.request<{ sessionId: string }>(
           `/api/research/sessions${tenantParam}`,

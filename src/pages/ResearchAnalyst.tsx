@@ -41,6 +41,10 @@ import {
   Share2,
   ChevronDown,
   ChevronUp,
+  Database,
+  Check,
+  Upload,
+  X,
 } from "lucide-react";
 import { ExportMenu } from "@/components/common/ExportMenu";
 import { UserSharePicker } from "@/components/common/UserSharePicker";
@@ -60,7 +64,9 @@ import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-
+import { useResearchUploads } from "@/hooks/useResearchUploads";
+import { DatasetAttachmentStrip } from "@/components/research/DatasetAttachmentBadge";
+import { UploadDropZone } from "@/components/research/UploadDropZone";
 // ============================================================================
 // Phase Badge
 // ============================================================================
@@ -380,6 +386,17 @@ export default function ResearchAnalyst() {
   const steerInputRef = useRef<HTMLInputElement>(null);
   const lastReportRef = useRef<boolean>(false);
   const reportContainerRef = useRef<HTMLDivElement>(null);
+  // Upload attachments for this session
+  const {
+    uploads: availableUploads,
+    listUploads: listAvailableUploads,
+    uploadFile,
+    isUploading,
+    uploadProgress,
+  } = useResearchUploads(effectiveTenantId);
+  const [attachedUploadIds, setAttachedUploadIds] = useState<string[]>([]);
+  const [showUploadPanel, setShowUploadPanel] = useState(false);
+  const attachedUploads = availableUploads.filter((u) => attachedUploadIds.includes(u.id));
   const currentSessionTopic = sessionList.find((s) => s.id === sessionId)?.topic ?? null;
   const { toast } = useToast();
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
@@ -539,10 +556,12 @@ export default function ResearchAnalyst() {
   // Start investigation
   const handleStart = useCallback(() => {
     const topic = topicInput.trim() || undefined;
-    startSession(topic, undefined, researchMode);
+    startSession(topic, undefined, researchMode, attachedUploadIds.length > 0 ? attachedUploadIds : undefined);
     setActiveTab("timeline");
     lastReportRef.current = false;
-  }, [topicInput, researchMode, startSession]);
+    setAttachedUploadIds([]);
+    setShowUploadPanel(false);
+  }, [topicInput, researchMode, startSession, attachedUploadIds]);
 
   // Send steering or follow-up
   const handleSend = useCallback(() => {
@@ -723,6 +742,94 @@ export default function ResearchAnalyst() {
                           <Play className="h-4 w-4 mr-1.5" />
                           {researchMode === "quick" ? "Get answer" : "Investigate"}
                         </Button>
+                      </div>
+
+                      {/* CSV Upload + attachment area */}
+                      <div className="mt-3 space-y-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {/* Primary Upload CSV button — toggles the drop zone panel */}
+                          <button
+                            type="button"
+                            onClick={() => { setShowUploadPanel((v) => !v); if (!showUploadPanel) listAvailableUploads(); }}
+                            className={cn(
+                              "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors",
+                              showUploadPanel
+                                ? "border-emerald-400 dark:border-emerald-600 text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/30"
+                                : "border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 hover:border-slate-400 dark:hover:border-slate-500"
+                            )}
+                          >
+                            <Upload className="h-3.5 w-3.5" />
+                            {attachedUploadIds.length > 0
+                              ? `${attachedUploadIds.length} CSV${attachedUploadIds.length > 1 ? "s" : ""} attached`
+                              : "Upload CSV"}
+                          </button>
+                        </div>
+
+                        {/* Attached dataset badges */}
+                        {attachedUploads.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5">
+                            {attachedUploads.map((u) => (
+                              <span
+                                key={u.id}
+                                className="inline-flex items-center gap-1.5 pl-2 pr-1 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-700 dark:text-emerald-300"
+                              >
+                                <Database className="h-3 w-3 flex-shrink-0" />
+                                <span className="max-w-[160px] truncate">{u.originalFileName}</span>
+                                <span className="text-emerald-500/70">{u.rowCount.toLocaleString()}r</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setAttachedUploadIds((prev) => prev.filter((i) => i !== u.id))}
+                                  className="ml-0.5 rounded-full p-0.5 hover:bg-emerald-200 dark:hover:bg-emerald-800 transition-colors"
+                                >
+                                  <X className="h-2.5 w-2.5" />
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Upload panel: drop zone + existing uploads list */}
+                        {showUploadPanel && (
+                          <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/30 p-3 space-y-3">
+                            {/* Drag-and-drop zone with file size info */}
+                            <UploadDropZone
+                              onFileSelected={async (file) => {
+                                const result = await uploadFile(file);
+                                if (result) {
+                                  setAttachedUploadIds((prev) => [...prev, result.id]);
+                                }
+                              }}
+                              isUploading={isUploading}
+                              uploadProgress={uploadProgress}
+                            />
+
+                            {/* Previously uploaded files */}
+                            {availableUploads.length > 0 && (
+                              <div className="space-y-1">
+                                <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide px-1">Your uploads</p>
+                                {availableUploads.map((u) => (
+                                  <button
+                                    key={u.id}
+                                    onClick={() => setAttachedUploadIds((prev) =>
+                                      prev.includes(u.id) ? prev.filter((i) => i !== u.id) : [...prev, u.id]
+                                    )}
+                                    className={cn(
+                                      "w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded-lg transition-colors text-left",
+                                      attachedUploadIds.includes(u.id)
+                                        ? "bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800"
+                                        : "hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300"
+                                    )}
+                                  >
+                                    <Database className="w-3.5 h-3.5 flex-shrink-0" />
+                                    <span className="flex-1 truncate">{u.originalFileName}</span>
+                                    <span className="text-slate-400 tabular-nums">{u.rowCount.toLocaleString()} rows</span>
+                                    {attachedUploadIds.includes(u.id) && <Check className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
 

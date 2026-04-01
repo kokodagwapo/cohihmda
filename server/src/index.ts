@@ -428,6 +428,15 @@ async function startWorker() {
       error,
     );
   }
+
+  try {
+    const { startUploadCleanupScheduler } = await import(
+      "./services/research/uploadCleanupScheduler.js"
+    );
+    startUploadCleanupScheduler();
+  } catch (error) {
+    console.warn("⚠️ Failed to start upload cleanup scheduler:", error);
+  }
 }
 
 if (SKIP_DB) {
@@ -520,6 +529,15 @@ if (SKIP_DB) {
             "⚠️ Failed to start loan complexity recompute scheduler:",
             error,
           );
+        }
+
+        try {
+          const { startUploadCleanupScheduler } = await import(
+            "./services/research/uploadCleanupScheduler.js"
+          );
+          startUploadCleanupScheduler();
+        } catch (error) {
+          console.warn("⚠️ Failed to start upload cleanup scheduler:", error);
         }
       }
     })
