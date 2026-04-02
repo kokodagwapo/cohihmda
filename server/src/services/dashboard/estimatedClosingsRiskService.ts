@@ -45,7 +45,7 @@ export interface EstimatedClosingsRiskKpis {
 }
 
 export interface ActivePipelineEcdSlice {
-  key: "empty_ecd" | "past_ecd" | "remaining_to_fund" | "after_this_month";
+  key: "empty_ecd" | "past_ecd" | "this_months_ecd" | "after_this_month";
   label: string;
   count: number;
 }
@@ -359,6 +359,13 @@ export async function getEstimatedClosingsRiskData(
   `;
 
   const fundedThisMonthExpr = `l.funding_date::date BETWEEN b.month_start AND b.month_end`;
+  /** Active + unfunded + ECD in the current calendar month (pie slice only; matches other ECD buckets). */
+  const thisMonthsEcdPieExpr = `
+    ${ACTIVE_SQL}
+    AND l.funding_date IS NULL
+    AND l.estimated_closing_date IS NOT NULL
+    AND l.estimated_closing_date::date BETWEEN b.month_start AND b.month_end
+  `;
   /** Canonical active pipeline + unfunded + ECD on or before current month end (includes overdue + current month). */
   const remainingToFundExpr = `
     ${ACTIVE_SQL}
@@ -439,8 +446,8 @@ export async function getEstimatedClosingsRiskData(
           )
       )::int AS past_ecd,
       COUNT(*) FILTER (
-        WHERE ${remainingToFundExpr}
-      )::int AS remaining_to_fund,
+        WHERE ${thisMonthsEcdPieExpr}
+      )::int AS this_months_ecd,
       COUNT(*) FILTER (
         WHERE ${ACTIVE_SQL}
           AND l.funding_date IS NULL
@@ -504,7 +511,7 @@ export async function getEstimatedClosingsRiskData(
   const activePipelineEcdSlices: ActivePipelineEcdSlice[] = [
     { key: "empty_ecd", label: "Empty ECD", count: parseInt(pieRow.empty_ecd ?? "0", 10) || 0 },
     { key: "past_ecd", label: "Past ECD", count: parseInt(pieRow.past_ecd ?? "0", 10) || 0 },
-    { key: "remaining_to_fund", label: "Remaining to Fund", count: parseInt(pieRow.remaining_to_fund ?? "0", 10) || 0 },
+    { key: "this_months_ecd", label: "This Month's ECD", count: parseInt(pieRow.this_months_ecd ?? "0", 10) || 0 },
     { key: "after_this_month", label: "After This Month", count: parseInt(pieRow.after_this_month ?? "0", 10) || 0 },
   ];
   const barDefaults: Record<string, MaxPossibleFundingComplexityBar> = {

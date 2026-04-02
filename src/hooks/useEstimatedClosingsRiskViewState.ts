@@ -15,7 +15,7 @@ const LOCAL_STORAGE_PREFIX = "cohi-estimated-closings-risk-view-state:";
 const ECD_SLICE_KEYS: EstimatedClosingsEcdSliceKey[] = [
   "empty_ecd",
   "past_ecd",
-  "remaining_to_fund",
+  "this_months_ecd",
   "after_this_month",
 ];
 const COMPLEXITY_BUCKET_KEYS: EstimatedClosingsComplexityBucketKey[] = [
@@ -49,7 +49,9 @@ function toNullableString(value: unknown): string | null {
 }
 
 function normalizeEcdSlice(value: unknown): EstimatedClosingsEcdSliceKey | null {
-  return typeof value === "string" && ECD_SLICE_KEYS.includes(value as EstimatedClosingsEcdSliceKey)
+  if (typeof value !== "string") return null;
+  if (value === "remaining_to_fund") return "this_months_ecd";
+  return ECD_SLICE_KEYS.includes(value as EstimatedClosingsEcdSliceKey)
     ? (value as EstimatedClosingsEcdSliceKey)
     : null;
 }

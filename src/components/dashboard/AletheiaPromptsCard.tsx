@@ -1285,7 +1285,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
       const headline = i.headline || i.message || '';
       return `[${bucket}] ${headline}`;
     });
-    onDataReady({ content: lines.join('\n'), title: 'Cohi Daily Briefings', insightCount: allInsights.length });
+    onDataReady({ content: lines.join('\n'), title: 'Cohi Insights', insightCount: allInsights.length });
   }, [onDataReady, insightsLoading, allInsights]);
 
   // Filter insights by the active functional category, then group by bucket

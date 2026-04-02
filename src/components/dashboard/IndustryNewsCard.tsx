@@ -984,7 +984,7 @@ export const IndustryNewsCard = ({
     if (headlines.length > 0) {
       onDataReady({
         content: headlines.slice(0, 15).join("\n"),
-        title: "Mortgage Industry News",
+        title: "Cohi Mortgage News",
       });
     }
   }, [onDataReady, newsLoading, newsFeed]);
@@ -1785,7 +1785,7 @@ export const IndustryNewsCard = ({
         transition={{ duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] }}
         className="relative overflow-hidden rounded-xl sm:rounded-2xl md:rounded-3xl bg-white dark:bg-slate-900/95 p-4 sm:p-5 md:p-7 lg:p-9 shadow-[0_1px_3px_0_rgba(0,0,0,0.08),0_4px_12px_0_rgba(0,0,0,0.04)] dark:shadow-[0_1px_3px_0_rgba(0,0,0,0.3),0_4px_12px_0_rgba(0,0,0,0.2)] border border-slate-200/60 dark:border-slate-700/50"
       >
-        {/* Daily Morning Brief Header */}
+        {/* Cohi Mortgage News Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-5 md:mb-6">
           <div className="flex items-center gap-3 flex-1 min-w-0">
             <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-blue-500 via-blue-600 to-indigo-600 flex items-center justify-center shadow-lg flex-shrink-0">
@@ -1796,7 +1796,7 @@ export const IndustryNewsCard = ({
             </div>
             <div>
               <h3 className="text-xl sm:text-2xl md:text-3xl font-semibold text-slate-900 dark:text-white mb-0.5 tracking-tight leading-tight">
-                Cohi Daily Morning Brief
+                Cohi Mortgage News
               </h3>
               <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-light mt-0.5">
                 {format(new Date(), "EEEE, MMMM d, yyyy")} | Markets & Economy
@@ -1806,7 +1806,7 @@ export const IndustryNewsCard = ({
           </div>
           <div className="flex items-center gap-2">
             <CohiPodcast />
-            <ExportMenu title="Industry News" targetRef={cardRef} />
+            <ExportMenu title="Cohi Mortgage News" targetRef={cardRef} />
             <button
               onClick={() => navigate("/settings?tab=notifications")}
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all border border-slate-200 dark:border-slate-700 text-xs sm:text-sm text-slate-700 dark:text-slate-200"
@@ -2489,7 +2489,7 @@ export const IndustryNewsCard = ({
                     Select News Sources
                   </DialogTitle>
                   <DialogDescription className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-light mt-0.5">
-                    Select sources to display in your Industry News feed
+                    Select sources to display in your Cohi Mortgage News feed
                   </DialogDescription>
                 </div>
               </div>

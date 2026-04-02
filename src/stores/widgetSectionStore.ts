@@ -158,7 +158,7 @@ export interface SectionFilters {
   /** Estimated Closings & Risk: Calendar vs Business day mode. */
   estimatedClosingsDateRangeType?: 'calendar_days' | 'business_days';
   /** Estimated Closings & Risk: shared cross-widget interactive filters. */
-  estimatedClosingsEcdSlice?: 'empty_ecd' | 'past_ecd' | 'remaining_to_fund' | 'after_this_month' | null;
+  estimatedClosingsEcdSlice?: "empty_ecd" | "past_ecd" | "this_months_ecd" | "after_this_month" | null;
   estimatedClosingsComplexityBucket?: 'gte_130' | 'gte_120' | 'gte_110' | 'all_rest' | null;
   estimatedClosingsRemainingComplexityGroup?: string | null;
   estimatedClosingsRemainingProcessingStage?: string | null;

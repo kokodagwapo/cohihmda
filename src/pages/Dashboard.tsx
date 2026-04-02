@@ -1351,7 +1351,7 @@ const Dashboard = () => {
                 </div>
               )}
 
-              {/* Mortgage News - Second */}
+              {/* Cohi Mortgage News - Second */}
               {dashboardVisibility.industryNews && (
                 <div id="industryNews" className="section-industry-news">
                   <IndustryNewsCard />

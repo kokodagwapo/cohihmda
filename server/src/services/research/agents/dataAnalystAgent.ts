@@ -39,7 +39,7 @@ export interface Finding {
 }
 
 export interface ChartHint {
-  type?: 'bar' | 'horizontal_bar' | 'line' | 'area' | 'pie' | 'donut' | 'stacked_bar' | 'grouped_bar';
+  type?: 'bar' | 'horizontal_bar' | 'line' | 'area' | 'pie' | 'donut' | 'stacked_bar' | 'grouped_bar' | 'histogram' | 'scatter' | 'heatmap' | 'treemap';
   xKey?: string;
   yKey?: string;
   yKeys?: string[];
@@ -47,6 +47,14 @@ export interface ChartHint {
   yLabel?: string;
   nameKey?: string;
   valueKey?: string;
+  /** For scatter: the second numeric axis */
+  y2Key?: string;
+  /** For heatmap: the metric to render as color intensity */
+  colorKey?: string;
+  /** For treemap: the label column */
+  labelKey?: string;
+  /** For histogram: number of buckets */
+  buckets?: number;
 }
 
 export interface EvidenceItem {
@@ -324,15 +332,73 @@ Respond in JSON format:
   "explanation": "What this query investigates (only when action=query)",
   "columnFormats": { "column_alias": "number|currency|percent|days|date|text", ... },
   "chartHint": {
-    "type": "bar|horizontal_bar|line|area|pie|donut|grouped_bar|stacked_bar",
+    "type": "bar|horizontal_bar|line|area|pie|donut|grouped_bar|stacked_bar|histogram|scatter|heatmap|treemap",
     "xKey": "category_or_date_column",
     "yKey": "primary_value_column",
     "yKeys": ["col1", "col2"],
     "xLabel": "Human-readable X axis label",
     "yLabel": "Human-readable Y axis label",
     "nameKey": "category_column (pie/donut only)",
-    "valueKey": "value_column (pie/donut only)"
+    "valueKey": "value_column (pie/donut only)",
+    "y2Key": "second_numeric_column (scatter only)",
+    "colorKey": "intensity_column (heatmap only)",
+    "labelKey": "label_column (treemap only)",
+    "buckets": 20
   },
+
+USER-UPLOADED DATASETS — TWO MODES (READ CAREFULLY):
+
+MODE A — INLINE DATA (context-window strategy, small files ≤200 rows):
+- These datasets appear in your context under a heading like:
+  "## User-Uploaded Dataset (INLINE — analyze directly, do NOT query via SQL): ..."
+- The full data is embedded as structured JSON in your context. DO NOT attempt any SQL queries for this data.
+  There is no database table for it. Any SELECT query will fail with "table not found".
+- Instead: read the inline JSON rows directly, compute statistics in your reasoning (counts, sums, averages,
+  percentages), and produce your finding using the embedded data as your evidence.
+- For inline data, you MUST use action "query" with sql set to a comment (not real SQL) and include the
+  computed data directly. Produce AT LEAST TWO "query" actions before your final "finding":
+
+  Action 1 — SUMMARY query:
+  {
+    "action": "query",
+    "sql": "-- INLINE_DATA: summary computed from uploaded CSV (not executed as SQL)",
+    "explanation": "Summary aggregates from the uploaded dataset",
+    "inlineRows": [ { "metric": "Total Loans", "value": 80 }, ... ],
+    "columnFormats": { "metric": "text", "value": "number" }
+  }
+
+  Action 2 — DETAIL query:
+  {
+    "action": "query",
+    "sql": "-- INLINE_DATA: row-level detail from uploaded CSV (not executed as SQL)",
+    "explanation": "Delinquent loan detail (19 loans)",
+    "inlineRows": [ ...actual row objects extracted from the JSON data... ],
+    "columnFormats": { "loan_number": "text", "current_upb": "currency", ... }
+  }
+
+  The "inlineRows" field is ONLY used for inline data. Include ALL relevant columns from the original
+  dataset in the detail rows. The system will detect the "-- INLINE_DATA:" prefix in the sql field
+  and use inlineRows instead of executing SQL.
+
+- After producing the summary and detail query actions, produce the "finding" action as normal.
+
+MODE B — SQL TABLE (table strategy, large files >200 rows):
+- These datasets appear in your schema context under:
+  "## User-Uploaded Dataset Table: upload_<name>"
+- Query them normally via SQL: SELECT ... FROM upload_<tablename>
+- Prefer charts that reveal structure:
+  - Single numeric column → histogram (type "histogram", xKey = numeric col, buckets = 20)
+  - Numeric x categorical → bar or horizontal_bar grouped by category
+  - Two numerics → scatter (type "scatter", xKey = first numeric, yKey = second numeric, y2Key = second numeric)
+  - Date x numeric → line (time series)
+  - Categorical x categorical × numeric → heatmap (type "heatmap", xKey = first cat, yKey = second cat, colorKey = numeric col)
+  - Hierarchical categorical data → treemap (type "treemap", labelKey = category, valueKey = numeric)
+  - When analyzing distributions or outliers, ALWAYS include a histogram finding
+
+DETERMINING WHICH MODE TO USE:
+- If your question mentions an uploaded dataset and your schema context does NOT contain an "upload_" table,
+  the data MUST be in your knowledge context as inline text. Look for it there and use MODE A.
+- Never waste iterations trying to SQL-query inline data. Check your knowledge context first.
   "finding": {
     "title": "Concise finding title — must reflect the actual evidence",
     "summary": "2-4 sentence summary of what you found, with specific numbers",
@@ -482,6 +548,49 @@ export async function runDataAnalystAgent(
 
     // Handle query action
     if (parsed.action === "query" && parsed.sql) {
+      // Check if this is an inline-data pseudo-query (not real SQL)
+      const isInlineData = typeof parsed.sql === "string" && parsed.sql.trimStart().startsWith("-- INLINE_DATA:");
+      if (isInlineData && Array.isArray(parsed.inlineRows) && parsed.inlineRows.length > 0) {
+        const inlineRows: Record<string, any>[] = parsed.inlineRows;
+        const fields = inlineRows.length > 0 ? Object.keys(inlineRows[0]) : [];
+
+        onStep({
+          iteration,
+          type: "sql_generated",
+          content: parsed.explanation || "Analyzing inline uploaded data...",
+          sql: parsed.sql,
+          timestamp: Date.now(),
+        });
+
+        onStep({
+          iteration,
+          type: "sql_executed",
+          content: `Inline data: ${inlineRows.length} rows extracted from uploaded CSV`,
+          sql: parsed.sql,
+          result: { rows: inlineRows, rowCount: inlineRows.length, fields, executionTimeMs: 0 },
+          timestamp: Date.now(),
+        });
+
+        evidence.push({
+          sql: parsed.sql,
+          explanation: parsed.explanation || "",
+          rows: inlineRows,
+          rowCount: inlineRows.length,
+          fields,
+          columnFormats: parsed.columnFormats || undefined,
+          chartHint: parsed.chartHint || undefined,
+        });
+
+        const formattedInline = inlineRows.length <= 5
+          ? JSON.stringify(inlineRows, null, 2)
+          : JSON.stringify(inlineRows.slice(0, 5), null, 2) + `\n... and ${inlineRows.length - 5} more rows`;
+        conversationHistory.push(
+          { role: "assistant", content: raw },
+          { role: "user", content: `Inline data accepted (${inlineRows.length} rows). Preview:\n${formattedInline}\n\nContinue your analysis or produce your final finding.` }
+        );
+        continue;
+      }
+
       onStep({
         iteration,
         type: "sql_generated",

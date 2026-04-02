@@ -67,6 +67,7 @@ import Favorites from "./pages/workbench/Favorites";
 import Distributions from "./pages/workbench/Distributions";
 // Research Lab
 import ResearchAnalyst from "./pages/ResearchAnalyst";
+import DataExplorer from "./pages/DataExplorer";
 import WorkbenchHub from "./pages/WorkbenchHub";
 import ResearchHub from "./pages/ResearchHub";
 // Help Center
@@ -188,6 +189,7 @@ const App = () => (
               {/* Research Lab */}
               <Route path="/research" element={<ResearchHub />} />
               <Route path="/research/session" element={<ResearchAnalyst />} />
+              <Route path="/research/data-explorer" element={<DataExplorer />} />
               <Route path="/data-chat" element={
                 <ProtectedRoute>
                   <DataChat />
