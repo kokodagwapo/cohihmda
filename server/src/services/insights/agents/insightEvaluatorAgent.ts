@@ -35,7 +35,11 @@ export interface EvaluatedInsight {
     units_affected?: number;
   };
   evidence: any;
-  metricSignature?: { sql: string; keyFields: string[] };
+  metricSignature?: {
+    sql: string;
+    keyFields: string[];
+    comparisonKeyFields?: string[];
+  };
   confidence: "high" | "medium" | "low";
   findingIndex: number;
   /** Whether this insight should be included in the podcast briefing context. Defaults to true. */

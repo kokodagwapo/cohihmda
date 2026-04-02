@@ -45,6 +45,8 @@ export interface InsightFinding {
   metricSignature?: {
     sql: string;
     keyFields: string[];
+    /** Optional: numeric / time-series fields only — subset of keyFields. Context dimensions stay in keyFields only. */
+    comparisonKeyFields?: string[];
   };
 }
 
@@ -119,6 +121,7 @@ INSIGHT QUALITY STANDARDS:
 - If the data doesn't show anything significant, set confidence to "low" and say so honestly. Do NOT manufacture an insight.
 - Include a suggestedBucket: "critical" (Level 1 — immediate action required), "attention" (Level 2 — monitor closely), "working" (Level 3 — strategic review / positive signal), or "context" (Level 4 — informational).
 - Include metricSignature: the single most representative SQL query and its key result fields — this will be used to track this insight over time.
+- Optional metricSignature.comparisonKeyFields: subset of keyFields containing only numeric KPIs you want compared over time (counts, amounts, rates, day counts). Omit categorical / scope columns here (e.g. age_bucket, milestone labels, branch names) so they stay as context in keyFields but do not drive trends.
 - CRITICAL: Your finding title MUST reflect what the data actually shows, NOT the original hypothesis. If you set out to investigate "missing milestones" but found milestones are fine and the real issue is stale loans, the title should be about stale loans, not missing milestones. The title is the headline users see — it must be accurate to the evidence.
 - Every key in keyMetrics MUST have a corresponding entry in keyMetricDescriptions AND keyMetricFormats.
 - keyMetricDescriptions: 1 sentence explaining what the metric measures in plain business language.
@@ -149,7 +152,7 @@ Respond in JSON:
     "keyMetricFormats": { "metric_name": "number|currency|percent|days|date|text", ... },
     "suggestedBucket": "critical" | "attention" | "working" | "context",
     "impactEstimate": { "type": "revenue_at_risk|operational|compliance", "estimated_dollars": 0, "units_affected": 0 },
-    "metricSignature": { "sql": "the best single query to track this insight", "keyFields": ["field1", "field2"] }
+    "metricSignature": { "sql": "the best single query to track this insight", "keyFields": ["field1", "field2"], "comparisonKeyFields": ["numeric_kpi_only"] }
   }
 }`;
 

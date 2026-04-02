@@ -6,11 +6,21 @@
  * When detail_data has no executable SQL, the row is explicitly marked non-evaluable.
  */
 
+/** Polarity for trend direction; `neutral` = no directional signal (ambiguous / context-dependent). */
+export type TrackedMetricPolarity = "higher_better" | "lower_better" | "neutral";
+
 /** Matches evaluator + frontend contract for tracked insights */
 export interface TrackedMetricSignature {
   sql: string;
   keyFields: string[];
-  polarities?: Record<string, "higher_better" | "lower_better">;
+  polarities?: Record<string, TrackedMetricPolarity>;
+  /** Bound parameters when SQL uses `$1`…`$n` and `param_resolution` is `none` (static). */
+  params?: unknown[];
+  /** How to fill `$n` on each evaluation; `rolling_dashboard` uses `filter_context_snapshot`. */
+  param_resolution?: "none" | "rolling_dashboard";
+  refresh_kind?: "sql" | "handler";
+  /** When `refresh_kind` is `handler`, registry id (see `trackedInsightHandlers.ts`). */
+  handler_id?: string;
 }
 
 /** display_metadata JSONB: aligns with agent insight hints + explicit evaluable flag */
@@ -22,6 +32,8 @@ export interface TrackedDisplayMetadata {
   original_severity_score?: number | null;
   source_page_id?: string;
   source_page_name?: string;
+  /** Snapshot of `dashboard_generated_insights.filter_context` at track time (rolling params). */
+  filter_context_snapshot?: Record<string, unknown>;
   /** false when metric_signature.sql is empty and evaluator cannot refresh */
   evaluable?: boolean;
   non_evaluable_reason?: string;
@@ -67,14 +79,22 @@ export function deriveDashboardTrackedFromDetailData(
     severity_score: number | null | undefined;
     page_id: string;
     page_name: string;
+    /** Row `filter_context` from `dashboard_generated_insights` (rolling date / channel context). */
+    filter_context?: Record<string, unknown>;
   }
 ): DeriveDashboardTrackedResult {
+  const filterSnap =
+    ctx.filter_context && typeof ctx.filter_context === "object"
+      ? { ...ctx.filter_context }
+      : {};
+
   const baseMeta: TrackedDisplayMetadata = {
     original_bucket: sentimentToOriginalBucket(ctx.sentiment),
     original_severity_score:
       ctx.severity_score != null ? Number(ctx.severity_score) : null,
     source_page_id: ctx.page_id,
     source_page_name: ctx.page_name,
+    filter_context_snapshot: filterSnap,
   };
 
   if (!detailData || typeof detailData !== "object") {
@@ -109,11 +129,17 @@ export function deriveDashboardTrackedFromDetailData(
     if (kmDesc) Object.assign(descriptions, kmDesc);
     if (kmFmt) Object.assign(formats, kmFmt);
 
+    const agentParams = (dd.metricSignature as Record<string, unknown> | undefined)?.params;
+    const agentPr = (dd.metricSignature as Record<string, unknown> | undefined)?.param_resolution;
     return {
       metric_signature: {
         sql: agentSig.sql.trim(),
         keyFields: agentSig.keyFields.filter((k) => typeof k === "string"),
         polarities: agentSig.polarities,
+        ...(Array.isArray(agentParams) ? { params: agentParams as unknown[] } : {}),
+        ...(agentPr === "rolling_dashboard" || agentPr === "none"
+          ? { param_resolution: agentPr }
+          : {}),
       },
       display_metadata: {
         ...baseMeta,
@@ -127,6 +153,61 @@ export function deriveDashboardTrackedFromDetailData(
   }
 
   const audit = dd.audit as Record<string, unknown> | undefined;
+
+  if (
+    audit?.trackedRefreshKind === "handler" &&
+    typeof audit.handlerId === "string" &&
+    audit.handlerId.trim().length > 0
+  ) {
+    const descriptions: Record<string, string> = {};
+    const formats: Record<string, string> = {};
+    const displayConfig = dd.displayConfig as
+      | {
+          summary_defs?: Array<{ key: string; label: string; format?: string }>;
+          summaryMetrics?: string[];
+        }
+      | undefined;
+    const summary = dd.summary as Record<string, unknown> | undefined;
+    const keyFields: string[] = [];
+    if (displayConfig?.summary_defs?.length) {
+      for (const s of displayConfig.summary_defs) {
+        if (s?.key && typeof s.key === "string") keyFields.push(s.key);
+      }
+    } else if (displayConfig?.summaryMetrics?.length) {
+      keyFields.push(
+        ...displayConfig.summaryMetrics.filter((k) => typeof k === "string")
+      );
+    } else if (summary && typeof summary === "object") {
+      keyFields.push(...Object.keys(summary));
+    }
+    if (displayConfig?.summary_defs?.length) {
+      for (const s of displayConfig.summary_defs) {
+        if (!s?.key) continue;
+        if (s.label) descriptions[s.key] = s.label;
+        const mf = s.format
+          ? mapSummaryFormatToKeyMetricFormat(String(s.format))
+          : undefined;
+        if (mf) formats[s.key] = mf;
+      }
+    }
+    return {
+      metric_signature: {
+        sql: "",
+        keyFields: keyFields.length > 0 ? keyFields : [],
+        refresh_kind: "handler",
+        handler_id: audit.handlerId.trim(),
+      },
+      display_metadata: {
+        ...baseMeta,
+        keyMetricDescriptions:
+          Object.keys(descriptions).length > 0 ? descriptions : undefined,
+        keyMetricFormats:
+          Object.keys(formats).length > 0 ? formats : undefined,
+        evaluable: true,
+      },
+    };
+  }
+
   const generatedSql =
     typeof audit?.generatedSql === "string" ? audit.generatedSql.trim() : "";
 
@@ -181,10 +262,20 @@ export function deriveDashboardTrackedFromDetailData(
     };
   }
 
+  const hasPlaceholders = /\$\d+/.test(generatedSql);
+  const auditPr = audit?.paramResolution;
+  const param_resolution: "none" | "rolling_dashboard" | undefined =
+    auditPr === "rolling_dashboard" || auditPr === "none"
+      ? auditPr
+      : hasPlaceholders
+        ? "rolling_dashboard"
+        : undefined;
+
   return {
     metric_signature: {
       sql: generatedSql,
       keyFields: keyFields.length > 0 ? keyFields : [],
+      ...(param_resolution ? { param_resolution } : {}),
     },
     display_metadata: {
       ...baseMeta,

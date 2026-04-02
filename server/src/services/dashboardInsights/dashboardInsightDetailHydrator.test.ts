@@ -1,6 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { buildDetailFromSupportingData } from "./dashboardInsightDetailHydrator.js";
 import type { DashboardInsight, SupportingData, DashboardPageContext } from "./types.js";
+import {
+  TRACKED_DASHBOARD_HANDLER_LEADERBOARD_AGGREGATE,
+  TRACKED_DASHBOARD_HANDLER_LEADERBOARD_SUBJECT,
+  TRACKED_DASHBOARD_HANDLER_LOAN_COMPLEXITY_AGGREGATE,
+  TRACKED_DASHBOARD_HANDLER_LOAN_COMPLEXITY_SUBJECT,
+  TRACKED_DASHBOARD_HANDLER_TOP_TIERING_SUBJECT,
+  TRACKED_DASHBOARD_HANDLER_CREDIT_RISK_COHORT_SUBJECT,
+} from "../insights/trackedInsightHandlers.js";
 
 const baseInsight: DashboardInsight = {
   headline: "LQ vs MTD: High Performer Decline for Jane Doe",
@@ -65,6 +73,10 @@ describe("dashboardInsightDetailHydrator", () => {
     const lqRow = result!.rows.find((r) => r.period === "LQ");
     expect(lqRow?.pullThroughRate).toBe(66);
     expect(lqRow?.loansClosed).toBe(57);
+    expect(result!.audit?.trackedRefreshKind).toBe("handler");
+    expect(result!.audit?.handlerId).toBe(
+      TRACKED_DASHBOARD_HANDLER_LEADERBOARD_SUBJECT
+    );
   });
 
   it("buildDetailFromSupportingData without subjectName uses supportingData aggregate rows", () => {
@@ -81,6 +93,10 @@ describe("dashboardInsightDetailHydrator", () => {
     expect(result!.rows[0].topPerformerName).toBe("Craig James Nielsen");
     expect(result!.rows[1].period).toBe("LQ");
     expect(result!.rows[1].topPerformerName).toBe("Stanley Edward Obrecht Jr.");
+    expect(result!.audit?.trackedRefreshKind).toBe("handler");
+    expect(result!.audit?.handlerId).toBe(
+      TRACKED_DASHBOARD_HANDLER_LEADERBOARD_AGGREGATE
+    );
   });
 
   it("buildDetailFromSupportingData with subjectName but subject not in context falls back to aggregate when supportingData provided", () => {
@@ -109,6 +125,9 @@ describe("dashboardInsightDetailHydrator", () => {
     expect(result!.rows).toHaveLength(1);
     expect(result!.rows[0].averagePullThrough).toBe(50);
     expect(result!.rows[0].totalUnits).toBe(100);
+    expect(result!.audit?.handlerId).toBe(
+      TRACKED_DASHBOARD_HANDLER_LEADERBOARD_AGGREGATE
+    );
   });
 
   it("buildDetailFromSupportingData loan-complexity aggregate uses WA complexity columns", () => {
@@ -135,6 +154,8 @@ describe("dashboardInsightDetailHydrator", () => {
     expect(result).not.toBeNull();
     expect(result!.rows[0].portfolioWaComplexity).toBe(104.2);
     expect(result!.displayConfig.columns).toContain("portfolioWaComplexity");
+    expect(result!.audit?.trackedRefreshKind).toBe("handler");
+    expect(result!.audit?.handlerId).toBe(TRACKED_DASHBOARD_HANDLER_LOAN_COMPLEXITY_AGGREGATE);
   });
 
   it("buildDetailFromSupportingData loan-complexity subject uses pivot slice from primary widget", () => {
@@ -182,6 +203,138 @@ describe("dashboardInsightDetailHydrator", () => {
     expect(result).not.toBeNull();
     expect(result!.rows).toHaveLength(2);
     expect(result!.rows.every((r) => r.name === "North")).toBe(true);
+    expect(result!.audit?.trackedRefreshKind).toBe("handler");
+    expect(result!.audit?.handlerId).toBe(TRACKED_DASHBOARD_HANDLER_LOAN_COMPLEXITY_SUBJECT);
+  });
+
+  it("buildDetailFromSupportingData top-tiering subject summary uses TTC metrics not leaderboard branch", () => {
+    const ttcInsight: DashboardInsight = {
+      ...baseInsight,
+      sourcePageId: "top-tiering-comparison",
+      sourcePageName: "TopTiering Comparison",
+      evidence_refs: [
+        { widgetId: "ttc-detail-table", role: "primary", target: { type: "row" as const, label: "Branch 2201" } },
+      ],
+    };
+    const context: DashboardPageContext = {
+      pageId: "top-tiering-comparison",
+      pageName: "TopTiering Comparison",
+      filters: {},
+      dimensions: [],
+      data: {
+        summary: {},
+        by_dimension: {},
+        by_time_period: {
+          MTD_BRANCH: {
+            periodLabel: "Month to Date",
+            actors: [
+              {
+                name: "Branch 2201",
+                tier: "top",
+                revenue: 26000,
+                units: 3,
+                volume: 1.2e6,
+                revenueBPS: 216,
+                revenuePerLoan: 8666,
+              },
+            ],
+          },
+        },
+      },
+      widget_catalog: [],
+    };
+    const result = buildDetailFromSupportingData(ttcInsight, undefined, {
+      subjectName: "Branch 2201",
+      context,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.displayConfig.summary_defs?.map((s) => s.key)).toEqual([
+      "revenue",
+      "units",
+      "volume",
+      "revenueBPS",
+      "revenuePerLoan",
+    ]);
+    expect(result!.summary?.revenue).toBe(26000);
+    expect(result!.audit?.handlerId).toBe(TRACKED_DASHBOARD_HANDLER_TOP_TIERING_SUBJECT);
+  });
+
+  it("buildDetailFromSupportingData credit-risk cohort subject uses cohort handler and summary_defs", () => {
+    const crInsight: DashboardInsight = {
+      ...baseInsight,
+      sourcePageId: "credit-risk-management",
+      sourcePageName: "Credit Risk Management",
+      filter_context: {
+        datePeriod: "ytd",
+        applicationType: "Applications Taken",
+      },
+      evidence_refs: [
+        {
+          widgetId: "credit-risk-fico-distribution",
+          role: "primary" as const,
+          target: { type: "row" as const, label: "620-679" },
+        },
+      ],
+    };
+    const context: DashboardPageContext = {
+      pageId: "credit-risk-management",
+      pageName: "Credit Risk Management",
+      filters: {},
+      dimensions: [
+        {
+          id: "credit_risk_fico_bucket",
+          label: "FICO bucket",
+          type: "structural",
+          values: ["620-679"],
+        },
+      ],
+      data: {
+        summary: {},
+        by_dimension: {},
+        by_time_period: {
+          YTD: {
+            periodLabel: "2026 YTD",
+            dateRange: "2026-01-01 to 2026-04-01",
+            byApplicationType: {
+              "Applications Taken": {
+                kpis: {
+                  units: 1000,
+                  volume: 1e8,
+                  wac: 6,
+                  waFico: 720,
+                  waLtv: 80,
+                  waDti: 40,
+                },
+                distributions: {
+                  fico: [
+                    { range: "620-679", units: 50, percentage: 5, volume: 5e6 },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      },
+      widget_catalog: [
+        {
+          id: "credit-risk-fico-distribution",
+          type: "chart",
+          label: "FICO Distribution",
+          dimension: "credit_risk_fico_bucket",
+        },
+      ],
+    };
+    const result = buildDetailFromSupportingData(crInsight, undefined, {
+      subjectName: "620-679",
+      context,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.audit?.handlerId).toBe(
+      TRACKED_DASHBOARD_HANDLER_CREDIT_RISK_COHORT_SUBJECT
+    );
+    expect(result!.displayConfig.summary_defs?.map((s) => s.key)).toEqual(
+      expect.arrayContaining(["totalUnits", "unitsPercent", "totalVolume"])
+    );
   });
 
   it("buildDetailFromSupportingData credit-risk cohort detail uses loan-level columns", () => {

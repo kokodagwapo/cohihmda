@@ -98,6 +98,22 @@ const activeBucketGenerations = new Map<string, { startedAt: number; batch: stri
 
 const VALID_BUCKETS = ["critical", "attention", "working", "context"] as const;
 
+async function reevaluateTrackedInsightsBestEffort(
+  tenantId: string,
+  tenantPool: pg.Pool,
+  onSuccess?: (evaluatedCount: number) => void
+): Promise<void> {
+  try {
+    const { evaluateTrackedInsights } = await import("../trackedInsightEvaluator.js");
+    const evalResult = await evaluateTrackedInsights(tenantId, tenantPool);
+    if (evalResult.evaluated > 0) {
+      onSuccess?.(evalResult.evaluated);
+    }
+  } catch (err: any) {
+    logWarn(`[InsightOrchestrator] Tracked insight evaluation failed: ${err.message}`);
+  }
+}
+
 export function isGenerationRunning(tenantId: string): { running: boolean; startedAt?: number; batch?: string } {
   const active = activeGenerations.get(tenantId);
   if (!active) return { running: false };
@@ -373,15 +389,9 @@ export async function runInsightGeneration(
     emit("persisting", "Done.");
 
     // ----- Phase 5: Re-evaluate tracked insights -----
-    try {
-      const { evaluateTrackedInsights } = await import("../trackedInsightEvaluator.js");
-      const evalResult = await evaluateTrackedInsights(tenantId, tenantPool);
-      if (evalResult.evaluated > 0) {
-        emit("tracked", `Re-evaluated ${evalResult.evaluated} tracked insights`);
-      }
-    } catch (err: any) {
-      logWarn(`[InsightOrchestrator] Tracked insight evaluation failed: ${err.message}`);
-    }
+    await reevaluateTrackedInsightsBestEffort(tenantId, tenantPool, (evaluated) => {
+      emit("tracked", `Re-evaluated ${evaluated} tracked insights`);
+    });
 
     const duration = Date.now() - startTime;
     emit("complete", `Finished in ${Math.round(duration / 1000)}s — ${allEvaluatedInsights.length} insights across ${FUNCTIONAL_CATEGORIES.length} categories`);
@@ -580,6 +590,11 @@ export async function generateMoreForBucketAgent(
     if (newInsights.length > 0) {
       emit("persisting", `Appending ${newInsights.length} new insights for "${targetBucket}"...`);
       await appendAgentInsights(tenantPool, newInsights, allFindings, generationBatch);
+
+      // Stage 2 parity: re-evaluate tracked insights after generate-more persistence
+      await reevaluateTrackedInsightsBestEffort(tenantId, tenantPool, (evaluated) => {
+        emit("tracked", `Re-evaluated ${evaluated} tracked insights`);
+      });
     } else {
       emit("persisting", "No new unique insights after dedup — nothing to append.");
     }
@@ -788,6 +803,11 @@ export async function generateInsightsForCategory(
     if (evaluation.insights.length > 0) {
       await appendAgentInsights(tenantPool, evaluation.insights, allFindings, generationBatch);
     }
+
+    // Stage 2 parity: re-evaluate tracked insights after category replace/append persistence
+    await reevaluateTrackedInsightsBestEffort(tenantId, tenantPool, (evaluated) => {
+      emit("tracked", `Re-evaluated ${evaluated} tracked insights`);
+    });
 
     activeCategoryGenerations.delete(lockKey);
     const duration = Date.now() - startTime;

@@ -29,6 +29,9 @@ import {
   CheckCircle2,
   Loader2,
   ExternalLink,
+  BookmarkX,
+  Pause,
+  Play,
 } from "lucide-react";
 import {
   LineChart,
@@ -40,6 +43,10 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { api } from "@/lib/api";
+import {
+  inferTrackedMetricPolarity,
+  type TrackedMetricPolarity,
+} from "@/lib/trackedMetricPolarity";
 
 // ============================================================================
 // Types
@@ -64,7 +71,13 @@ interface TrackedInsight {
   created_at: string;
   updated_at: string;
   alert_threshold: AlertThreshold | null;
-  metric_signature: { sql: string; keyFields: string[] } | null;
+  metric_signature: {
+    sql: string;
+    keyFields: string[];
+    /** Agent tracked insights: numeric KPI subset for trends (Pattern A/B). */
+    comparisonKeyFields?: string[];
+    polarities?: Record<string, TrackedMetricPolarity>;
+  } | null;
   display_metadata: {
     keyMetricDescriptions?: Record<string, string>;
     keyMetricFormats?: Record<string, string>;
@@ -93,12 +106,45 @@ interface TrackedInsightDetailModalProps {
   onClose: () => void;
   onArchive: (id: string) => void;
   onDelete: (id: string) => void;
+  /** Called after pause / resume / restore so the parent list can refetch. */
+  onInsightMutated?: () => void | Promise<void>;
   selectedTenantId?: string | null;
 }
 
 // ============================================================================
 // Helpers
 // ============================================================================
+
+/**
+ * Snapshot metric_values often store multi-row SQL rollups as `field_sum` while
+ * metric_signature.keyFields use `field`. Resolve display + trend the same way as the evaluator.
+ */
+function resolveTrackedDisplayValue(
+  values: Record<string, any> | null | undefined,
+  field: string
+): unknown {
+  if (!values) return undefined;
+  if (field in values && values[field] !== undefined) return values[field];
+  const sumKey = `${field}_sum`;
+  if (sumKey in values && values[sumKey] !== undefined) return values[sumKey];
+  const avgKey = `${field}_avg`;
+  if (avgKey in values && values[avgKey] !== undefined) return values[avgKey];
+  return undefined;
+}
+
+/** KPI keys for charts, alerts, and trend UI — agent uses comparisonKeyFields when stored. */
+function comparisonKeysForInsight(insight: TrackedInsight): string[] {
+  const fallback =
+    insight.metric_signature?.keyFields ||
+    Object.keys(insight.latest_values || {}).filter((k) => !k.startsWith("_"));
+  if (
+    insight.source_type === "agent" &&
+    insight.metric_signature?.comparisonKeyFields?.length
+  ) {
+    return insight.metric_signature.comparisonKeyFields;
+  }
+  return fallback;
+}
 
 function formatMetricValue(
   key: string,
@@ -125,19 +171,53 @@ function formatMetricValue(
   return num.toFixed(2);
 }
 
-function getDeltaDisplay(
+function polarityBaseKey(key: string): string {
+  return key.replace(/_(avg|sum|count)$/i, "");
+}
+
+function resolvePolarityForKey(
+  key: string,
+  explicit?: Record<string, TrackedMetricPolarity>
+): TrackedMetricPolarity {
+  const base = polarityBaseKey(key);
+  const fromExplicit = explicit?.[key] ?? explicit?.[base];
+  if (
+    fromExplicit === "higher_better" ||
+    fromExplicit === "lower_better" ||
+    fromExplicit === "neutral"
+  ) {
+    return fromExplicit;
+  }
+  return inferTrackedMetricPolarity(base);
+}
+
+/** Polarity-aware: green/red follow “good/bad for this metric”, not raw up/down. */
+function getDeltaPolarityDisplay(
   key: string,
   current: any,
-  previous: any
-): { text: string; positive: boolean } | null {
+  previous: any,
+  polarities?: Record<string, TrackedMetricPolarity>
+): { text: string; semantic: "good" | "bad" | "neutral" } | null {
   const cur = parseFloat(current);
   const prev = parseFloat(previous);
   if (isNaN(cur) || isNaN(prev) || prev === 0) return null;
   const pct = ((cur - prev) / Math.abs(prev)) * 100;
-  const positive = cur >= prev;
+  const rawUp = cur > prev;
+  const rawDown = cur < prev;
+  const equal = cur === prev;
+
+  const p = resolvePolarityForKey(key, polarities);
+
+  let semantic: "good" | "bad" | "neutral" = "neutral";
+  if (equal) semantic = "neutral";
+  else if (p === "lower_better") semantic = rawDown ? "good" : "bad";
+  else if (p === "higher_better") semantic = rawUp ? "good" : "bad";
+  else semantic = "neutral";
+
+  const sign = pct >= 0 ? "+" : "";
   return {
-    text: `${positive ? "+" : ""}${pct.toFixed(1)}%`,
-    positive,
+    text: `${sign}${pct.toFixed(1)}%`,
+    semantic,
   };
 }
 
@@ -213,7 +293,7 @@ function AlertConfig({
 }) {
   const descriptions = insight.display_metadata?.keyMetricDescriptions || {};
   const formats = insight.display_metadata?.keyMetricFormats || {};
-  const keyFields = insight.metric_signature?.keyFields || Object.keys(insight.latest_values || {}).filter((k) => !k.startsWith("_"));
+  const keyFields = comparisonKeysForInsight(insight);
   const existing = insight.alert_threshold;
 
   const [field, setField] = useState(existing?.field || keyFields[0] || "");
@@ -359,6 +439,7 @@ export function TrackedInsightDetailModal({
   onClose,
   onArchive,
   onDelete,
+  onInsightMutated,
   selectedTenantId,
 }: TrackedInsightDetailModalProps) {
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
@@ -368,14 +449,17 @@ export function TrackedInsightDetailModal({
   const [localInsight, setLocalInsight] = useState<TrackedInsight | null>(null);
   const [archiving, setArchiving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [pausing, setPausing] = useState(false);
+  const [resuming, setResuming] = useState(false);
+  const [restoring, setRestoring] = useState(false);
 
-  // Sync local copy when insight prop changes
+  // Sync local copy when the selected row changes or parent refetches (status / updated_at).
   useEffect(() => {
     setLocalInsight(insight);
     setSnapshots([]);
     setExpandedSnapshotId(null);
     setShowAlertConfig(false);
-  }, [insight?.id]);
+  }, [insight?.id, insight?.status, insight?.updated_at]);
 
   // Load history when modal opens
   useEffect(() => {
@@ -386,6 +470,64 @@ export function TrackedInsightDetailModal({
       .catch(console.error)
       .finally(() => setSnapshotsLoading(false));
   }, [isOpen, insight?.id, selectedTenantId]);
+
+  const runMutated = useCallback(async () => {
+    await onInsightMutated?.();
+  }, [onInsightMutated]);
+
+  const handlePause = useCallback(async () => {
+    if (!localInsight || pausing || localInsight.status !== "active") return;
+    setPausing(true);
+    try {
+      const row = await api.updateTrackedInsight(
+        localInsight.id,
+        { status: "resolved" },
+        selectedTenantId
+      );
+      setLocalInsight(row as TrackedInsight);
+      await runMutated();
+    } catch (e) {
+      console.error("Failed to pause tracked insight:", e);
+    } finally {
+      setPausing(false);
+    }
+  }, [localInsight, pausing, selectedTenantId, runMutated]);
+
+  const handleResume = useCallback(async () => {
+    if (!localInsight || resuming || localInsight.status !== "resolved") return;
+    setResuming(true);
+    try {
+      const row = await api.updateTrackedInsight(
+        localInsight.id,
+        { status: "active" },
+        selectedTenantId
+      );
+      setLocalInsight(row as TrackedInsight);
+      await runMutated();
+    } catch (e) {
+      console.error("Failed to resume tracked insight:", e);
+    } finally {
+      setResuming(false);
+    }
+  }, [localInsight, resuming, selectedTenantId, runMutated]);
+
+  const handleRestore = useCallback(async () => {
+    if (!localInsight || restoring || localInsight.status !== "archived") return;
+    setRestoring(true);
+    try {
+      const row = await api.updateTrackedInsight(
+        localInsight.id,
+        { status: "active" },
+        selectedTenantId
+      );
+      setLocalInsight(row as TrackedInsight);
+      await runMutated();
+    } catch (e) {
+      console.error("Failed to restore tracked insight:", e);
+    } finally {
+      setRestoring(false);
+    }
+  }, [localInsight, restoring, selectedTenantId, runMutated]);
 
   const handleArchive = useCallback(async () => {
     if (!localInsight || archiving) return;
@@ -416,15 +558,27 @@ export function TrackedInsightDetailModal({
   const displayMeta = localInsight.display_metadata;
   const descriptions = displayMeta?.keyMetricDescriptions || {};
   const formats = displayMeta?.keyMetricFormats || {};
-  const keyFields = localInsight.metric_signature?.keyFields || Object.keys(localInsight.latest_values || {}).filter((k) => !k.startsWith("_"));
+  const allKeyFields =
+    localInsight.metric_signature?.keyFields ||
+    Object.keys(localInsight.latest_values || {}).filter((k) => !k.startsWith("_"));
+  const comparisonKeys = comparisonKeysForInsight(localInsight);
+  const contextKeys =
+    localInsight.source_type === "agent" &&
+    localInsight.metric_signature?.comparisonKeyFields?.length
+      ? allKeyFields.filter(
+          (k) => !localInsight.metric_signature!.comparisonKeyFields!.includes(k)
+        )
+      : [];
+  const metricPolarities = localInsight.metric_signature?.polarities;
   const currentValues = localInsight.latest_values || {};
   const prevValues = localInsight.latest_previous || {};
 
   // Build chart data — newest last
-  const chartKey = keyFields.find((k) => {
-    const v = parseFloat(currentValues[k]);
+  const chartKey = comparisonKeys.find((k) => {
+    const raw = resolveTrackedDisplayValue(currentValues, k);
+    const v = parseFloat(String(raw ?? ""));
     return !isNaN(v);
-  }) || keyFields[0];
+  }) || comparisonKeys[0];
 
   const chartData = snapshots
     .slice()
@@ -432,7 +586,9 @@ export function TrackedInsightDetailModal({
     .map((s, i) => ({
       index: i + 1,
       label: new Date(s.evaluated_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-      value: chartKey ? parseFloat(s.metric_values[chartKey]) : null,
+      value: chartKey
+        ? parseFloat(String(resolveTrackedDisplayValue(s.metric_values, chartKey) ?? ""))
+        : null,
     }))
     .filter((d) => d.value !== null && !isNaN(d.value as number));
 
@@ -475,6 +631,27 @@ export function TrackedInsightDetailModal({
                     <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400">
                       {sourceTypeLabel}
                     </span>
+                    {localInsight.status === "resolved" && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300">
+                        <Pause className="w-3 h-3" />
+                        Paused
+                      </span>
+                    )}
+                    {localInsight.status === "archived" && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-200/90 text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+                        <Archive className="w-3 h-3" />
+                        Archived
+                      </span>
+                    )}
+                    {!insightEvaluable && (
+                      <span
+                        className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 dark:bg-amber-900/25 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800/50"
+                        title={nonEvaluableMessage}
+                      >
+                        <BookmarkX className="w-3 h-3 shrink-0" />
+                        Not auto-updating
+                      </span>
+                    )}
                     {alertTriggered && (
                       <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400">
                         <AlertTriangle className="w-3 h-3" />
@@ -522,18 +699,26 @@ export function TrackedInsightDetailModal({
                 </div>
               )}
 
-              {/* Current metric values */}
-              {keyFields.length > 0 && Object.keys(currentValues).length > 0 && (
+              {/* Current metric values (numeric KPIs; agent may exclude context dimensions) */}
+              {comparisonKeys.length > 0 && Object.keys(currentValues).length > 0 && (
                 <div>
                   <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">
                     Current Values
                   </p>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    {keyFields.map((k) => {
-                      const val = currentValues[k];
-                      const prev = prevValues[k];
-                      if (val === undefined && val === null) return null;
-                      const delta = prev !== undefined ? getDeltaDisplay(k, val, prev) : null;
+                    {comparisonKeys.map((k) => {
+                      const val = resolveTrackedDisplayValue(currentValues, k);
+                      const prev = resolveTrackedDisplayValue(prevValues, k);
+                      const delta =
+                        prev !== undefined && prev !== null
+                          ? getDeltaPolarityDisplay(k, val, prev, metricPolarities)
+                          : null;
+                      const deltaColor =
+                        delta?.semantic === "good"
+                          ? "text-green-600 dark:text-green-400"
+                          : delta?.semantic === "bad"
+                            ? "text-red-500 dark:text-red-400"
+                            : "text-slate-500 dark:text-slate-400";
                       const label = descriptions[k] || k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
                       return (
                         <div
@@ -545,10 +730,37 @@ export function TrackedInsightDetailModal({
                             {formatMetricValue(k, val, formats)}
                           </p>
                           {delta && (
-                            <p className={`text-[10px] font-medium mt-0.5 ${delta.positive ? "text-green-600 dark:text-green-400" : "text-red-500 dark:text-red-400"}`}>
+                            <p className={`text-[10px] font-medium mt-0.5 ${deltaColor}`}>
                               {delta.text} vs prev
                             </p>
                           )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {contextKeys.length > 0 && Object.keys(currentValues).length > 0 && (
+                <div>
+                  <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">
+                    Insight scope
+                  </p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {contextKeys.map((k) => {
+                      const val = resolveTrackedDisplayValue(currentValues, k);
+                      const label =
+                        descriptions[k] ||
+                        k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+                      return (
+                        <div
+                          key={k}
+                          className="rounded-lg border border-slate-200/60 dark:border-slate-700/60 bg-slate-50/50 dark:bg-slate-800/40 px-3 py-2.5"
+                        >
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate mb-0.5">{label}</p>
+                          <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
+                            {val !== undefined && val !== null ? formatMetricValue(k, val, formats) : "—"}
+                          </p>
                         </div>
                       );
                     })}
@@ -634,9 +846,10 @@ export function TrackedInsightDetailModal({
                   <div className="space-y-1.5">
                     {snapshots.map((snap) => {
                       const isExpanded = expandedSnapshotId === snap.id;
-                      const numericFields = Object.keys(snap.metric_values).filter(
-                        (k) => !k.startsWith("_") && !isNaN(parseFloat(snap.metric_values[k]))
-                      );
+                      const numericFields = comparisonKeys.filter((k) => {
+                        const v = resolveTrackedDisplayValue(snap.metric_values, k);
+                        return v !== undefined && v !== null && !isNaN(parseFloat(String(v)));
+                      });
                       return (
                         <div
                           key={snap.id}
@@ -677,7 +890,11 @@ export function TrackedInsightDetailModal({
                                         {descriptions[k] || k}
                                       </span>
                                       <span className="text-slate-700 dark:text-slate-200 font-medium">
-                                        {formatMetricValue(k, snap.metric_values[k], formats)}
+                                        {formatMetricValue(
+                                          k,
+                                          resolveTrackedDisplayValue(snap.metric_values, k),
+                                          formats
+                                        )}
                                       </span>
                                     </div>
                                   ))}
@@ -729,32 +946,88 @@ export function TrackedInsightDetailModal({
               </div>
             </div>
 
-            {/* ===== Footer actions ===== */}
-            <div className="flex-shrink-0 flex items-center justify-between gap-2 px-6 py-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/50">
-              <div className="flex items-center gap-2">
+            {/* ===== Footer actions (plan §6: pause = resolved, resume = active; archive vs untrack distinct) ===== */}
+            <div className="flex-shrink-0 px-6 py-3 border-t border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/50 space-y-3">
+              {localInsight.status === "active" && (
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-snug">
+                  <span className="font-medium text-slate-600 dark:text-slate-300">Pause</span> stops automatic metric updates until you resume. The bookmark stays on your watchlist under Watching (paused).{" "}
+                  <span className="font-medium text-slate-600 dark:text-slate-300">Untrack</span> removes it entirely; <span className="font-medium text-slate-600 dark:text-slate-300">Archive</span> keeps it under Archived for reference.
+                </p>
+              )}
+              {localInsight.status === "resolved" && (
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-snug">
+                  This bookmark is paused: it will not receive automatic evaluations until you <span className="font-medium text-slate-600 dark:text-slate-300">Resume updates</span>.
+                </p>
+              )}
+              {localInsight.status === "archived" && (
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-snug">
+                  Archived bookmarks stay for reference. <span className="font-medium text-slate-600 dark:text-slate-300">Restore to watchlist</span> moves it back to Watching as active, or <span className="font-medium text-slate-600 dark:text-slate-300">Untrack</span> to remove.
+                </p>
+              )}
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {localInsight.status === "active" && (
+                    <button
+                      type="button"
+                      onClick={handlePause}
+                      disabled={pausing}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-950/40 hover:bg-violet-100 dark:hover:bg-violet-900/50 transition-colors disabled:opacity-50"
+                    >
+                      {pausing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Pause className="w-3.5 h-3.5" />}
+                      Pause updates
+                    </button>
+                  )}
+                  {localInsight.status === "resolved" && (
+                    <button
+                      type="button"
+                      onClick={handleResume}
+                      disabled={resuming}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors disabled:opacity-50"
+                    >
+                      {resuming ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+                      Resume updates
+                    </button>
+                  )}
+                  {localInsight.status === "archived" && (
+                    <button
+                      type="button"
+                      onClick={handleRestore}
+                      disabled={restoring}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
+                    >
+                      {restoring ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+                      Restore to watchlist
+                    </button>
+                  )}
+                  {localInsight.status !== "archived" && (
+                    <button
+                      type="button"
+                      onClick={handleArchive}
+                      disabled={archiving}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
+                    >
+                      {archiving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Archive className="w-3.5 h-3.5" />}
+                      Archive
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleDelete}
+                    disabled={deleting}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors disabled:opacity-50"
+                  >
+                    {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                    Untrack
+                  </button>
+                </div>
                 <button
-                  onClick={handleArchive}
-                  disabled={archiving}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
+                  type="button"
+                  onClick={onClose}
+                  className="px-4 py-1.5 text-xs font-medium rounded-lg bg-slate-900 dark:bg-slate-700 text-white hover:bg-slate-700 dark:hover:bg-slate-600 transition-colors"
                 >
-                  {archiving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Archive className="w-3.5 h-3.5" />}
-                  Archive
-                </button>
-                <button
-                  onClick={handleDelete}
-                  disabled={deleting}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors disabled:opacity-50"
-                >
-                  {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                  Untrack
+                  Done
                 </button>
               </div>
-              <button
-                onClick={onClose}
-                className="px-4 py-1.5 text-xs font-medium rounded-lg bg-slate-900 dark:bg-slate-700 text-white hover:bg-slate-700 dark:hover:bg-slate-600 transition-colors"
-              >
-                Done
-              </button>
             </div>
           </motion.div>
         </motion.div>

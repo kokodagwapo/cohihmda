@@ -342,15 +342,23 @@ export async function loadDashboardInsightForTracking(
   sentiment: string;
   severity_score: number | null;
   detail_data: unknown;
+  filter_context: Record<string, unknown>;
 } | null> {
   const result = await tenantPool.query(
-    `SELECT id, page_id, page_name, headline, understory, sentiment, severity_score, detail_data
+    `SELECT id, page_id, page_name, headline, understory, sentiment, severity_score, detail_data, filter_context
      FROM dashboard_generated_insights
      WHERE id = $1`,
     [insightId]
   );
   if (result.rows.length === 0) return null;
-  return result.rows[0] as any;
+  const row = result.rows[0] as any;
+  return {
+    ...row,
+    filter_context:
+      row.filter_context && typeof row.filter_context === "object"
+        ? (row.filter_context as Record<string, unknown>)
+        : {},
+  };
 }
 
 /**

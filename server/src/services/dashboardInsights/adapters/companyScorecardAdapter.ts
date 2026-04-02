@@ -20,6 +20,7 @@ import type {
   DashboardDimension,
   WidgetCatalogEntry,
 } from "../types.js";
+import { computeCompanyScorecardPeriodDateRange } from "../datePeriodRange.js";
 
 const PAGE_ID = "company-scorecard";
 
@@ -49,51 +50,6 @@ const SCORECARD_METRICS = [
 
 type TierLabel = "Top Tier" | "Second Tier" | "Bottom Tier";
 const TIER_LABELS: TierLabel[] = ["Top Tier", "Second Tier", "Bottom Tier"];
-
-function pad2(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
-function toYmdLocal(d: Date): string {
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-}
-
-function startOfMonthLocal(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), 1);
-}
-
-function computePeriodDateRange(datePeriod: string): { start: string; end: string; periodLabel: string } {
-  const now = new Date();
-  const end = toYmdLocal(now);
-  const currentYear = now.getFullYear();
-
-  if (datePeriod === "l13m") {
-    const start = startOfMonthLocal(new Date(now.getFullYear(), now.getMonth() - 13, now.getDate()));
-    return { start: toYmdLocal(start), end, periodLabel: "Last 13 Months" };
-  }
-  if (datePeriod === "l12m") {
-    const start = startOfMonthLocal(new Date(now.getFullYear(), now.getMonth() - 12, now.getDate()));
-    return { start: toYmdLocal(start), end, periodLabel: "Last 12 Months" };
-  }
-  if (datePeriod === "ytd") {
-    return { start: `${currentYear}-01-01`, end, periodLabel: `Current Year YTD (${currentYear})` };
-  }
-
-  // Full-year period: y_YYYY
-  if (datePeriod.startsWith("y_")) {
-    const yr = Number(datePeriod.slice(2));
-    if (Number.isFinite(yr) && yr > 1900) {
-      return {
-        start: `${yr}-01-01`,
-        end: `${yr}-12-31`,
-        periodLabel: `Full Year ${yr}`,
-      };
-    }
-  }
-
-  // Fallback: current year YTD
-  return { start: `${currentYear}-01-01`, end, periodLabel: `Current Year YTD (${currentYear})` };
-}
 
 function safeDiv(n: number, d: number): number {
   return d === 0 ? 0 : n / d;
@@ -254,6 +210,183 @@ function pickMovers(entitiesWithTier: Array<ScorecardEntityRow & { tier: TierLab
     .slice(0, limit);
 }
 
+/** One period block for insights / tracked refresh (same logic as adapter by_time_period). */
+export async function loadCompanyScorecardPeriodEntry(
+  tenantPool: Pool,
+  datePeriod: string,
+  topNEntities = 60
+): Promise<{
+  periodKeyUpper: string;
+  periodLabel: string;
+  tierAggregates: Record<TierLabel, TierAggregateMetrics>;
+  branchesWithTierForContext: Array<{
+    name: string;
+    tier: TierLabel;
+    applicationsTakenUnits: number;
+    applicationsTakenDollar: number;
+    wac: number;
+    originatedUnits: number;
+    originatedUnitsPct: number;
+    withdrawnUnits: number;
+    withdrawnUnitsPct: number;
+    deniedUnits: number;
+    deniedUnitsPct: number;
+    waFico: number;
+    waLtv: number;
+    waDti: number;
+    originatedRevenue: number;
+    govtUnits: number;
+    purchaseUnits: number;
+  }>;
+  loanOfficersWithTierForContext: Array<{
+    name: string;
+    tier: TierLabel;
+    applicationsTakenUnits: number;
+    applicationsTakenDollar: number;
+    wac: number;
+    originatedUnits: number;
+    originatedUnitsPct: number;
+    withdrawnUnits: number;
+    withdrawnUnitsPct: number;
+    deniedUnits: number;
+    deniedUnitsPct: number;
+    waFico: number;
+    waLtv: number;
+    waDti: number;
+    originatedRevenue: number;
+    govtUnits: number;
+    purchaseUnits: number;
+  }>;
+  portfolioSummary: {
+    totalUnits: number;
+    totalVolume: number;
+    wac: number;
+    averagePullThrough: number;
+    originatedUnits: number;
+    originatedUnitsPct: number;
+    withdrawnUnits: number;
+    withdrawnUnitsPct: number;
+    deniedUnits: number;
+    deniedUnitsPct: number;
+  };
+}> {
+  const { start, end, periodLabel } = computeCompanyScorecardPeriodDateRange(datePeriod);
+  const dateRange = { start, end };
+
+  const [groupedBranches, groupedLOs] = await Promise.all([
+    queryMetricsGroupedBy(tenantPool, [...SCORECARD_METRICS], "branch", { dateRange }),
+    queryMetricsGroupedBy(tenantPool, [...SCORECARD_METRICS], "loan_officer", { dateRange }),
+  ]);
+
+  const branchEntities = transformGroupedToEntities(groupedBranches as unknown as MetricsByGroup);
+  const loEntities = transformGroupedToEntities(groupedLOs as unknown as MetricsByGroup);
+
+  const branchesWithTier = assignTiersByTieringVolume(branchEntities);
+  const loWithTier = assignTiersByTieringVolume(loEntities);
+
+  const trimmedBranchesWithTier = pickMovers(branchesWithTier, topNEntities);
+  const trimmedLOWithTier = pickMovers(loWithTier, topNEntities);
+
+  const tierAggregates: Record<TierLabel, TierAggregateMetrics> = {
+    "Top Tier": aggregateTierMetrics(trimmedBranchesWithTier, "Top Tier"),
+    "Second Tier": aggregateTierMetrics(trimmedBranchesWithTier, "Second Tier"),
+    "Bottom Tier": aggregateTierMetrics(trimmedBranchesWithTier, "Bottom Tier"),
+  };
+
+  const branchesWithTierForContext = trimmedBranchesWithTier.map((e) => {
+    const originatedUnitsPct = safeDiv(e.originatedLoans, e.totalLoansWithRespa) * 100;
+    const withdrawnUnitsPct = safeDiv(e.falloutWithdrawn, e.totalLoansWithRespa) * 100;
+    const deniedUnitsPct = safeDiv(e.falloutDenied, e.totalLoansWithRespa) * 100;
+    return {
+      name: e.name,
+      tier: e.tier,
+      applicationsTakenUnits: e.totalLoansWithRespa,
+      applicationsTakenDollar: e.tieringVolume,
+      wac: e.wac,
+      originatedUnits: e.originatedLoans,
+      originatedUnitsPct,
+      withdrawnUnits: e.falloutWithdrawn,
+      withdrawnUnitsPct,
+      deniedUnits: e.falloutDenied,
+      deniedUnitsPct,
+      waFico: e.waFico,
+      waLtv: e.waLtv,
+      waDti: e.waDti,
+      originatedRevenue: e.originatedRevenue,
+      govtUnits: e.govtUnits,
+      purchaseUnits: e.purchaseUnits,
+    };
+  });
+
+  const loWithTierForContext = trimmedLOWithTier.map((e) => {
+    const originatedUnitsPct = safeDiv(e.originatedLoans, e.totalLoansWithRespa) * 100;
+    const withdrawnUnitsPct = safeDiv(e.falloutWithdrawn, e.totalLoansWithRespa) * 100;
+    const deniedUnitsPct = safeDiv(e.falloutDenied, e.totalLoansWithRespa) * 100;
+    return {
+      name: e.name,
+      tier: e.tier,
+      applicationsTakenUnits: e.totalLoansWithRespa,
+      applicationsTakenDollar: e.tieringVolume,
+      wac: e.wac,
+      originatedUnits: e.originatedLoans,
+      originatedUnitsPct,
+      withdrawnUnits: e.falloutWithdrawn,
+      withdrawnUnitsPct,
+      deniedUnits: e.falloutDenied,
+      deniedUnitsPct,
+      waFico: e.waFico,
+      waLtv: e.waLtv,
+      waDti: e.waDti,
+      originatedRevenue: e.originatedRevenue,
+      govtUnits: e.govtUnits,
+      purchaseUnits: e.purchaseUnits,
+    };
+  });
+
+  const totalAppsUnits = trimmedBranchesWithTier.reduce((s, e) => s + (e.totalLoansWithRespa || 0), 0);
+  const overallPullThrough =
+    totalAppsUnits > 0
+      ? (trimmedBranchesWithTier.reduce(
+          (s, e) => s + (e.pullThroughRate || 0) * (e.totalLoansWithRespa || 0),
+          0
+        ) /
+          totalAppsUnits) *
+        1
+      : 0;
+
+  const overallWac =
+    trimmedBranchesWithTier.length > 0 ? avgByCount(trimmedBranchesWithTier, (e) => e.wac) : 0;
+
+  const overallOriginatedUnits = trimmedBranchesWithTier.reduce((s, e) => s + (e.originatedLoans || 0), 0);
+  const overallOriginatedUnitsPct = safeDiv(overallOriginatedUnits, totalAppsUnits) * 100;
+
+  const overallWithdrawnUnits = trimmedBranchesWithTier.reduce((s, e) => s + (e.falloutWithdrawn || 0), 0);
+  const overallWithdrawnUnitsPct = safeDiv(overallWithdrawnUnits, totalAppsUnits) * 100;
+
+  const overallDeniedUnits = trimmedBranchesWithTier.reduce((s, e) => s + (e.falloutDenied || 0), 0);
+  const overallDeniedUnitsPct = safeDiv(overallDeniedUnits, totalAppsUnits) * 100;
+
+  return {
+    periodKeyUpper: datePeriod.toUpperCase(),
+    periodLabel,
+    tierAggregates,
+    branchesWithTierForContext,
+    loanOfficersWithTierForContext: loWithTierForContext,
+    portfolioSummary: {
+      totalUnits: totalAppsUnits,
+      totalVolume: branchesWithTier.reduce((s, e) => s + (e.tieringVolume || 0), 0),
+      wac: overallWac,
+      averagePullThrough: overallPullThrough,
+      originatedUnits: overallOriginatedUnits,
+      originatedUnitsPct: overallOriginatedUnitsPct,
+      withdrawnUnits: overallWithdrawnUnits,
+      withdrawnUnitsPct: overallWithdrawnUnitsPct,
+      deniedUnits: overallDeniedUnits,
+      deniedUnitsPct: overallDeniedUnitsPct,
+    },
+  };
+}
+
 export const companyScorecardAdapter: DashboardAdapter = {
   pageId: PAGE_ID,
   pageName: "Company Scorecard",
@@ -325,131 +458,23 @@ export const companyScorecardAdapter: DashboardAdapter = {
     const allBranchValues = new Set<string>();
     const allLoanOfficerValues = new Set<string>();
 
-    const TOP_N_MOVERS_PER_PERIOD = 20;
     const TOP_N_ENTITIES_PER_PERIOD = 60;
 
     for (const datePeriod of insightDatePeriods) {
-      const { start, end, periodLabel } = computePeriodDateRange(datePeriod);
-      const dateRange = { start, end };
+      const block = await loadCompanyScorecardPeriodEntry(
+        tenantPool,
+        datePeriod,
+        TOP_N_ENTITIES_PER_PERIOD
+      );
+      block.branchesWithTierForContext.forEach((e) => allBranchValues.add(e.name));
+      block.loanOfficersWithTierForContext.forEach((e) => allLoanOfficerValues.add(e.name));
 
-      // Branches
-      const [groupedBranches, groupedLOs] = await Promise.all([
-        queryMetricsGroupedBy(tenantPool, [...SCORECARD_METRICS], "branch", { dateRange }),
-        queryMetricsGroupedBy(tenantPool, [...SCORECARD_METRICS], "loan_officer", { dateRange }),
-      ]);
-
-      const branchEntities = transformGroupedToEntities(groupedBranches as unknown as MetricsByGroup);
-      const loEntities = transformGroupedToEntities(groupedLOs as unknown as MetricsByGroup);
-
-      const branchesWithTier = assignTiersByTieringVolume(branchEntities);
-      const loWithTier = assignTiersByTieringVolume(loEntities);
-
-      const trimmedBranchesWithTier = pickMovers(branchesWithTier, TOP_N_ENTITIES_PER_PERIOD);
-      const trimmedLOWithTier = pickMovers(loWithTier, TOP_N_ENTITIES_PER_PERIOD);
-
-      trimmedBranchesWithTier.forEach((e) => allBranchValues.add(e.name));
-      trimmedLOWithTier.forEach((e) => allLoanOfficerValues.add(e.name));
-
-      const tierAggregates: Record<TierLabel, TierAggregateMetrics> = {
-        "Top Tier": aggregateTierMetrics(trimmedBranchesWithTier, "Top Tier"),
-        "Second Tier": aggregateTierMetrics(trimmedBranchesWithTier, "Second Tier"),
-        "Bottom Tier": aggregateTierMetrics(trimmedBranchesWithTier, "Bottom Tier"),
-      };
-
-      // Build entity snapshots for detail modal / entity-specific evidence refs.
-      const branchesWithTierForContext = trimmedBranchesWithTier.map((e) => {
-        const originatedUnitsPct = safeDiv(e.originatedLoans, e.totalLoansWithRespa) * 100;
-        const withdrawnUnitsPct = safeDiv(e.falloutWithdrawn, e.totalLoansWithRespa) * 100;
-        const deniedUnitsPct = safeDiv(e.falloutDenied, e.totalLoansWithRespa) * 100;
-        return {
-          name: e.name,
-          tier: e.tier,
-          applicationsTakenUnits: e.totalLoansWithRespa,
-          applicationsTakenDollar: e.tieringVolume,
-          wac: e.wac,
-          originatedUnits: e.originatedLoans,
-          originatedUnitsPct,
-          withdrawnUnits: e.falloutWithdrawn,
-          withdrawnUnitsPct,
-          deniedUnits: e.falloutDenied,
-          deniedUnitsPct,
-          waFico: e.waFico,
-          waLtv: e.waLtv,
-          waDti: e.waDti,
-          originatedRevenue: e.originatedRevenue,
-          govtUnits: e.govtUnits,
-          purchaseUnits: e.purchaseUnits,
-        };
-      });
-
-      const loWithTierForContext = trimmedLOWithTier.map((e) => {
-        const originatedUnitsPct = safeDiv(e.originatedLoans, e.totalLoansWithRespa) * 100;
-        const withdrawnUnitsPct = safeDiv(e.falloutWithdrawn, e.totalLoansWithRespa) * 100;
-        const deniedUnitsPct = safeDiv(e.falloutDenied, e.totalLoansWithRespa) * 100;
-        return {
-          name: e.name,
-          tier: e.tier,
-          applicationsTakenUnits: e.totalLoansWithRespa,
-          applicationsTakenDollar: e.tieringVolume,
-          wac: e.wac,
-          originatedUnits: e.originatedLoans,
-          originatedUnitsPct,
-          withdrawnUnits: e.falloutWithdrawn,
-          withdrawnUnitsPct,
-          deniedUnits: e.falloutDenied,
-          deniedUnitsPct,
-          waFico: e.waFico,
-          waLtv: e.waLtv,
-          waDti: e.waDti,
-          originatedRevenue: e.originatedRevenue,
-          govtUnits: e.govtUnits,
-          purchaseUnits: e.purchaseUnits,
-        };
-      });
-
-      const branchByName = new Map(branchesWithTierForContext.map((e) => [e.name, e]));
-      const loByName = new Map(loWithTierForContext.map((e) => [e.name, e]));
-
-      // Overall supporting metrics (used for Evidence modal).
-      // Weighted pull-through by applications taken units (approximation) to be stable.
-      const totalAppsUnits = trimmedBranchesWithTier.reduce((s, e) => s + (e.totalLoansWithRespa || 0), 0);
-      const overallPullThrough =
-        totalAppsUnits > 0
-          ? (trimmedBranchesWithTier.reduce((s, e) => s + (e.pullThroughRate || 0) * (e.totalLoansWithRespa || 0), 0) /
-              totalAppsUnits) * 1
-          : 0;
-
-      const overallWac = trimmedBranchesWithTier.length > 0 ? avgByCount(trimmedBranchesWithTier, (e) => e.wac) : 0;
-
-      const overallOriginatedUnits = trimmedBranchesWithTier.reduce((s, e) => s + (e.originatedLoans || 0), 0);
-      const overallOriginatedUnitsPct = safeDiv(overallOriginatedUnits, totalAppsUnits) * 100;
-
-      const overallWithdrawnUnits = trimmedBranchesWithTier.reduce((s, e) => s + (e.falloutWithdrawn || 0), 0);
-      const overallWithdrawnUnitsPct = safeDiv(overallWithdrawnUnits, totalAppsUnits) * 100;
-
-      const overallDeniedUnits = trimmedBranchesWithTier.reduce((s, e) => s + (e.falloutDenied || 0), 0);
-      const overallDeniedUnitsPct = safeDiv(overallDeniedUnits, totalAppsUnits) * 100;
-
-      byTimePeriod[datePeriod.toUpperCase()] = {
-        periodLabel,
-        // Used by enrichEvidenceRefsWithValues for tier-based evidence.
-        tierAggregates,
-        // Used by detail snapshot builders.
-        branchesWithTier: branchesWithTierForContext,
-        loanOfficersWithTier: loWithTierForContext,
-        // Used by Evidence modal evidence table.
-        summary: {
-          totalUnits: totalAppsUnits,
-          totalVolume: branchesWithTier.reduce((s, e) => s + (e.tieringVolume || 0), 0),
-          wac: overallWac,
-          averagePullThrough: overallPullThrough,
-          originatedUnits: overallOriginatedUnits,
-          originatedUnitsPct: overallOriginatedUnitsPct,
-          withdrawnUnits: overallWithdrawnUnits,
-          withdrawnUnitsPct: overallWithdrawnUnitsPct,
-          deniedUnits: overallDeniedUnits,
-          deniedUnitsPct: overallDeniedUnitsPct,
-        },
+      byTimePeriod[block.periodKeyUpper] = {
+        periodLabel: block.periodLabel,
+        tierAggregates: block.tierAggregates,
+        branchesWithTier: block.branchesWithTierForContext,
+        loanOfficersWithTier: block.loanOfficersWithTierForContext,
+        summary: block.portfolioSummary,
       };
     }
 

@@ -145,7 +145,7 @@ function toDateRangeForApi(dateRange: string, vMaxDate: Date): { start: Date; en
   };
 }
 
-async function fetchTopTieringComparisonPeriod(
+export async function fetchTopTieringComparisonPeriod(
   tenantPool: Pool,
   revenueExpression: string,
   actorType: ActorType,

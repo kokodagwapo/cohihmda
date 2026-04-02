@@ -18,6 +18,7 @@
     "preview": "node scripts/launch-vite.mjs preview",
     "test": "vitest",
     "test:run": "vitest run",
+    "test:tracked-insights": "vitest run src/lib/trackedMetricPolarity.test.ts && cd server && npm run test:run -- src/services/insights/trackedPolarityInference.test.ts src/services/trackedInsights/dashboardTrackedDerivation.test.ts src/services/research/tools.sqlPlaceholders.test.ts src/services/insights/trackedInsightParamResolution.test.ts src/services/dashboardInsights/dashboardInsightDetailHydrator.test.ts",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage",
     "test:e2e": "playwright test",
