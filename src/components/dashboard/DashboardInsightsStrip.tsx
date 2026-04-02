@@ -108,6 +108,8 @@ export interface DashboardInsightsStripProps {
   dateFilter?: string;
   /** Tenant id for details API. */
   selectedTenantId?: string | null;
+  /** Increment to refetch tracked-state map (e.g. after track/untrack from another widget). */
+  refreshTrigger?: number;
 }
 
 export function DashboardInsightsStrip({
@@ -125,6 +127,7 @@ export function DashboardInsightsStrip({
   onRefreshInsights,
   dateFilter = "ytd",
   selectedTenantId,
+  refreshTrigger,
 }: DashboardInsightsStripProps) {
   const [evidenceModalInsight, setEvidenceModalInsight] = useState<DashboardInsightItem | null>(null);
   /** When true, show InsightDetailModal first; on 404 fall back to DashboardInsightEvidenceModal. */
@@ -145,7 +148,11 @@ export function DashboardInsightsStrip({
       const data = ((await api.getTrackedInsights(selectedTenantId)) || []) as TrackedInsightRow[];
       const map = new Map<number, string>();
       for (const row of data) {
-        if (row.status === "active" && row.source_type === "dashboard_insights" && row.source_insight_id != null) {
+        if (
+          (row.status === "active" || row.status === "resolved") &&
+          row.source_type === "dashboard_insights" &&
+          row.source_insight_id != null
+        ) {
           map.set(row.source_insight_id, row.id);
         }
       }
@@ -310,11 +317,11 @@ export function DashboardInsightsStrip({
                               await api.deleteTrackedInsight(trackedId, selectedTenantId);
                             }
                           } else {
+                            // Server derives metric_signature + display_metadata from dashboard_generated_insights (plan §0 / §8).
                             await api.trackInsight(
                               {
                                 headline: visibleInsights[activeIdx].headline,
                                 understory: visibleInsights[activeIdx].understory,
-                                metric_signature: { sql: "", keyFields: [] },
                                 source_insight_id: insightId,
                                 source_type: "dashboard_insights",
                               },
@@ -389,7 +396,6 @@ export function DashboardInsightsStrip({
                             {
                               headline: insight.headline,
                               understory: insight.understory,
-                              metric_signature: { sql: "", keyFields: [] },
                               source_insight_id: insightId,
                               source_type: "dashboard_insights",
                             },

@@ -965,18 +965,36 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
   type TrackedInsightRow = { id: string; source_insight_id?: number | null; status?: string };
   const [trackedPipelineMap, setTrackedPipelineMap] = useState<Map<number, string>>(new Map());
   const [watchlistRefreshTrigger, setWatchlistRefreshTrigger] = useState(0);
+  const [trackedReevalLoading, setTrackedReevalLoading] = useState(false);
 
   const fetchAndBuildPipelineMap = useCallback(async (bustCache = false) => {
     if (bustCache) api.invalidateCacheFor("/insights/tracked");
     const data = ((await api.getTrackedInsights(selectedTenantId)) || []) as TrackedInsightRow[];
     const map = new Map<number, string>();
     for (const row of data) {
-      if (row.status === "active" && row.source_insight_id != null) {
+      if (
+        (row.status === "active" || row.status === "resolved") &&
+        row.source_insight_id != null
+      ) {
         map.set(row.source_insight_id, row.id);
       }
     }
     return map;
   }, [selectedTenantId]);
+
+  const handleRunTrackedReevaluation = useCallback(async () => {
+    setTrackedReevalLoading(true);
+    try {
+      await api.runTrackedReevaluation(selectedTenantId);
+      api.invalidateCacheFor("/insights/tracked");
+      setWatchlistRefreshTrigger((t) => t + 1);
+      fetchAndBuildPipelineMap(true).then(setTrackedPipelineMap).catch(() => {});
+    } catch (err) {
+      console.error("Tracked re-evaluation failed:", err);
+    } finally {
+      setTrackedReevalLoading(false);
+    }
+  }, [selectedTenantId, fetchAndBuildPipelineMap]);
 
   useEffect(() => {
     fetchAndBuildPipelineMap().then(setTrackedPipelineMap).catch((err) =>
@@ -1162,40 +1180,59 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
             await api.deleteTrackedInsight(trackedId, selectedTenantId);
           }
         } else {
-          // Determine source type and extract metric_signature correctly
-          const isAgentInsight =
-            insight.generation_method === "agent" &&
-            insight.detail_data?.type === "agent_finding";
+          const isDashboardInsight =
+            (insight.source || "").trim().toLowerCase() === "dashboard_insights";
 
-          let metric_signature: { sql: string; keyFields: string[] };
-          let source_type: string;
-          let display_metadata: Record<string, any> | undefined;
-
-          if (isAgentInsight && insight.detail_data?.metricSignature?.sql) {
-            metric_signature = insight.detail_data.metricSignature;
-            source_type = "agent";
-            if (insight.detail_data.keyMetricDescriptions || insight.detail_data.keyMetricFormats) {
-              display_metadata = {
-                keyMetricDescriptions: insight.detail_data.keyMetricDescriptions || {},
-                keyMetricFormats: insight.detail_data.keyMetricFormats || {},
-              };
-            }
+          // Plan §8 / Stage 4: dashboard rows — server derives metric_signature from dashboard_generated_insights; do not post empty sql.
+          if (isDashboardInsight) {
+            await api.trackInsight(
+              {
+                headline: insight.headline || insight.message,
+                understory: insight.understory || insight.reasoning,
+                source_insight_id: sourceId,
+                source_type: "dashboard_insights",
+              },
+              selectedTenantId
+            );
           } else {
-            const eq = (insight.evidence as any)?.evidenceQueries?.[0];
-            metric_signature = eq?.sql
-              ? { sql: eq.sql, keyFields: (insight.evidence as any)?.metrics?.map((m: any) => m.label) || [] }
-              : { sql: "", keyFields: [] };
-            source_type = "pipeline";
-          }
+            // Agent / pipeline: send signature hints; server normalizes for agent/pipeline.
+            const isAgentInsight =
+              insight.generation_method === "agent" &&
+              insight.detail_data?.type === "agent_finding";
 
-          await api.trackInsight({
-            headline: insight.headline || insight.message,
-            understory: insight.understory || insight.reasoning,
-            metric_signature,
-            source_insight_id: sourceId,
-            source_type,
-            display_metadata,
-          }, selectedTenantId);
+            let metric_signature: { sql: string; keyFields: string[] };
+            let source_type: string;
+            let display_metadata: Record<string, any> | undefined;
+
+            if (isAgentInsight && insight.detail_data?.metricSignature?.sql) {
+              metric_signature = insight.detail_data.metricSignature;
+              source_type = "agent";
+              if (insight.detail_data.keyMetricDescriptions || insight.detail_data.keyMetricFormats) {
+                display_metadata = {
+                  keyMetricDescriptions: insight.detail_data.keyMetricDescriptions || {},
+                  keyMetricFormats: insight.detail_data.keyMetricFormats || {},
+                };
+              }
+            } else {
+              const eq = (insight.evidence as any)?.evidenceQueries?.[0];
+              metric_signature = eq?.sql
+                ? { sql: eq.sql, keyFields: (insight.evidence as any)?.metrics?.map((m: any) => m.label) || [] }
+                : { sql: "", keyFields: [] };
+              source_type = "pipeline";
+            }
+
+            await api.trackInsight(
+              {
+                headline: insight.headline || insight.message,
+                understory: insight.understory || insight.reasoning,
+                metric_signature,
+                source_insight_id: sourceId,
+                source_type,
+                display_metadata,
+              },
+              selectedTenantId
+            );
+          }
         }
         const freshMap = await fetchAndBuildPipelineMap(true);
         setTrackedPipelineMap(freshMap);
@@ -1536,13 +1573,30 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
 
         {/* ===== Watchlist Tab ===== */}
         {activeTab === "watchlist" && (
-          <TrackedInsightsWatchlist
-            selectedTenantId={selectedTenantId}
-            refreshTrigger={watchlistRefreshTrigger}
-            onInsightRemoved={() => {
-              fetchAndBuildPipelineMap(true).then(setTrackedPipelineMap).catch(() => {});
-            }}
-          />
+          <>
+            {isAdmin && (
+              <div className="mb-3 flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleRunTrackedReevaluation}
+                  disabled={trackedReevalLoading}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
+                >
+                  {trackedReevalLoading ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" aria-hidden />
+                  ) : null}
+                  Run Tracked Re-Evaluation
+                </button>
+              </div>
+            )}
+            <TrackedInsightsWatchlist
+              selectedTenantId={selectedTenantId}
+              refreshTrigger={watchlistRefreshTrigger}
+              onInsightRemoved={() => {
+                fetchAndBuildPipelineMap(true).then(setTrackedPipelineMap).catch(() => {});
+              }}
+            />
+          </>
         )}
 
         {/* ===== Job Progress ===== */}

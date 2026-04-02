@@ -885,6 +885,11 @@ function getSubjectKey(
       return `company_scorecard_loan_officer:${label}`;
     if (dim === "workflow_segment") return `workflow_segment:${label}`;
     if (dim === "actor_name") return `actor_name:${label}`;
+    if (dim === "credit_risk_fico_bucket") return `credit_risk_fico:${label}`;
+    if (dim === "credit_risk_ltv_bucket") return `credit_risk_ltv:${label}`;
+    if (dim === "credit_risk_dti_bucket") return `credit_risk_dti:${label}`;
+    if (dim === "credit_risk_loan_mix_category")
+      return `credit_risk_loan_mix:${label}`;
   }
   const ctx = insight.filter_context as Record<string, unknown> | undefined;
   if (ctx?.leaderName != null && typeof ctx.leaderName === "string")
@@ -966,6 +971,11 @@ function getSubjectNameFromInsight(
     if (d === "company_scorecard_loan_officer") return primaryRef.target.label.trim();
     if (d === "company_scorecard_branch") return primaryRef.target.label.trim();
     if (d === "workflow_segment") return primaryRef.target.label.trim();
+    if (d === "credit_risk_fico_bucket") return primaryRef.target.label.trim();
+    if (d === "credit_risk_ltv_bucket") return primaryRef.target.label.trim();
+    if (d === "credit_risk_dti_bucket") return primaryRef.target.label.trim();
+    if (d === "credit_risk_loan_mix_category")
+      return primaryRef.target.label.trim();
     if (d?.startsWith("complexity_")) return primaryRef.target.label.trim();
   }
   // Any evidence_ref with dimension leader and target
@@ -978,6 +988,11 @@ function getSubjectNameFromInsight(
       if (d === "company_scorecard_branch") return ref.target.label.trim();
       if (d === "workflow_segment") return ref.target.label.trim();
       if (d === "actor_name") return ref.target.label.trim();
+      if (d === "credit_risk_fico_bucket") return ref.target.label.trim();
+      if (d === "credit_risk_ltv_bucket") return ref.target.label.trim();
+      if (d === "credit_risk_dti_bucket") return ref.target.label.trim();
+      if (d === "credit_risk_loan_mix_category")
+        return ref.target.label.trim();
       if (d?.startsWith("complexity_")) return ref.target.label.trim();
     }
   }
@@ -993,6 +1008,88 @@ function getSubjectNameFromInsight(
     return ctx.segmentLabel.trim();
   }
   return undefined;
+}
+
+/**
+ * Add stable keys for tracked-insight TypeScript handlers (filter_context_snapshot at track time).
+ */
+function enrichFilterContextForTrackedHandlers(
+  insight: DashboardInsight,
+  context: DashboardPageContext,
+  subjectName: string | undefined
+): DashboardInsight["filter_context"] {
+  const fc = { ...(insight.filter_context as Record<string, unknown>) };
+
+  if (context.pageId === "loan-complexity") {
+    let pivotDim: string | undefined;
+    for (const r of insight.evidence_refs ?? []) {
+      const d = LOAN_COMPLEXITY_PIVOT_WIDGET_DIM[r.widgetId];
+      if (d) {
+        pivotDim = d;
+        break;
+      }
+    }
+    if (pivotDim) fc.complexityPivotDimension = pivotDim;
+    else if (subjectName) fc.complexityPivotDimension = "loan_officer";
+    if (subjectName && (fc.actor == null || String(fc.actor).trim() === "")) {
+      fc.actor = subjectName;
+    }
+  }
+
+  if (context.pageId === "company-scorecard" && subjectName) {
+    let entity: string | undefined;
+    for (const r of insight.evidence_refs ?? []) {
+      if (r.widgetId === "company-scorecard-detail-branch-table") {
+        entity = "branch";
+        break;
+      }
+      if (r.widgetId === "company-scorecard-detail-loan-officer-table") {
+        entity = "loan_officer";
+        break;
+      }
+    }
+    if (entity) fc.scorecardEntityType = entity;
+    if (entity === "branch" && (fc.branch == null || String(fc.branch).trim() === "")) {
+      fc.branch = subjectName;
+    }
+    if (
+      entity === "loan_officer" &&
+      (fc.loanOfficer == null || String(fc.loanOfficer).trim() === "") &&
+      (fc.loan_officer == null || String(fc.loan_officer).trim() === "")
+    ) {
+      fc.loanOfficer = subjectName;
+    }
+  }
+
+  if (context.pageId === "workflow-conversion" && subjectName) {
+    if (fc.segmentLabel == null || String(fc.segmentLabel).trim() === "") {
+      fc.segmentLabel = subjectName;
+    }
+  }
+
+  if (context.pageId === "top-tiering-comparison" && subjectName) {
+    if (
+      (fc.actorName == null || String(fc.actorName).trim() === "") &&
+      (fc.branch == null || String(fc.branch).trim() === "")
+    ) {
+      fc.actorName = subjectName;
+    }
+    if (fc.actorType == null || String(fc.actorType).trim() === "") {
+      fc.actorType = "loan-officer";
+    }
+  }
+
+  if (context.pageId === "credit-risk-management" && subjectName) {
+    const primary =
+      insight.evidence_refs?.find((r) => r.role === "primary") ??
+      insight.evidence_refs?.[0];
+    if (primary?.widgetId && String(primary.widgetId).startsWith("credit-risk-")) {
+      fc.creditRiskTrackedWidgetId = primary.widgetId;
+    }
+    fc.creditRiskTrackedBucketLabel = subjectName;
+  }
+
+  return fc as DashboardInsight["filter_context"];
 }
 
 /**
@@ -1059,10 +1156,22 @@ function buildSupportingDataFromContext(context: DashboardPageContext): Supporti
               })
               .join(" | ")
           : "";
+      const convs = (segs ?? [])
+        .map((s) => s.conversionPercent)
+        .filter((v): v is number => v != null && !Number.isNaN(Number(v)));
+      const turns = (segs ?? [])
+        .map((s) => s.avgTurnTimeDays)
+        .filter((v): v is number => v != null && !Number.isNaN(Number(v)));
+      const meanConversionPercent =
+        convs.length > 0 ? convs.reduce((a, b) => a + b, 0) / convs.length : 0;
+      const meanAvgTurnTimeDays =
+        turns.length > 0 ? turns.reduce((a, b) => a + b, 0) / turns.length : 0;
       byPeriodRows.push({
         period,
         periodLabel: wfd.periodLabel ?? period,
         workflowBrief: brief || undefined,
+        meanConversionPercent,
+        meanAvgTurnTimeDays,
       });
       continue;
     }
@@ -1094,8 +1203,8 @@ function buildSupportingDataFromContext(context: DashboardPageContext): Supporti
       const ttc = data as TopTieringPeriodData;
       const totals = ttc.totals;
       if (!totals) continue;
-      if (totals.units != null) row.totalUnits = Number(totals.units);
-      if (totals.volume != null) row.totalVolume = Number(totals.volume);
+      row.totalUnits = Number(totals.units ?? 0);
+      row.totalVolume = Number(totals.volume ?? 0);
       row.revenue = Number(totals.revenue ?? 0);
       row.avgRevenueBPS = Number(totals.avgRevenueBPS ?? 0);
       row.actorCount = Number(totals.actorCount ?? 0);
@@ -1301,13 +1410,23 @@ export async function runDashboardInsightsPipeline(
         ? await buildCreditRiskSupportingDataForInsight(context, insight, tenantPool)
         : buildSupportingDataFromContext(context);
     const subjectName = getSubjectNameFromInsight(insight, context);
-    const detail_data = buildDetailFromSupportingData(insight, supportingData, {
+    const filter_context = enrichFilterContextForTrackedHandlers(
+      insight,
+      context,
+      subjectName || undefined
+    );
+    const insightForDetail: DashboardInsight = { ...insight, filter_context };
+    const detail_data = buildDetailFromSupportingData(insightForDetail, supportingData, {
       generationBatch,
-      dateFilter: (insight.filter_context?.datePeriod as string) || undefined,
+      dateFilter: (insightForDetail.filter_context?.datePeriod as string) || undefined,
       subjectName: subjectName || undefined,
       context,
     });
-    insights[i] = { ...insight, supporting_data: supportingData, detail_data: detail_data ?? undefined };
+    insights[i] = {
+      ...insightForDetail,
+      supporting_data: supportingData,
+      detail_data: detail_data ?? undefined,
+    };
   }
 
   if (!options?.skipPersistence) {

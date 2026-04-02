@@ -212,6 +212,11 @@ const App = () => (
               <Route path="/high-performers" element={<HighPerformers />} />
               <Route path="/actors" element={<Actors />} />
               <Route path="/performance/toptiering-comparison" element={<TopTieringComparison />} />
+              {/* Legacy / mistaken paths → canonical TopTiering Comparison (avoids 404 from old links) */}
+              <Route
+                path="/top-tiering-comparison"
+                element={<Navigate to="/performance/toptiering-comparison" replace />}
+              />
               <Route path="/performance/financial-modeling-sandbox" element={<FinancialModelingSandbox />} />
               <Route path="/capture-analysis" element={<CaptureAnalysis />} />
               <Route path="/sales-scorecard" element={<SalesScorecard />} />

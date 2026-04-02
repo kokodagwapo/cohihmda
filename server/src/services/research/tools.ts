@@ -131,18 +131,49 @@ function validateSQL(sql: string): void {
 
 const QUERY_TIMEOUT_MS = 30_000;
 
+/** Highest $n placeholder index in SQL (0 if none). */
+export function maxPgPlaceholderIndex(sql: string): number {
+  let max = 0;
+  const re = /\$(\d+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(sql)) !== null) {
+    const n = parseInt(m[1], 10);
+    if (Number.isFinite(n) && n > max) max = n;
+  }
+  return max;
+}
+
+/**
+ * Run a validated read-only query. When the SQL template contains `$1`…`$n`,
+ * pass the same number of bound parameters (Postgres `node-pg` style).
+ */
 export async function safeExecuteSQL(
   sql: string,
-  tenantPool: pg.Pool
+  tenantPool: pg.Pool,
+  params?: unknown[]
 ): Promise<QueryResult> {
   const sanitized = sanitizeSQL(sql);
   validateSQL(sanitized);
+
+  const maxIdx = maxPgPlaceholderIndex(sanitized);
+  if (maxIdx > 0) {
+    if (!params || params.length !== maxIdx) {
+      throw new Error(
+        `SQL has ${maxIdx} placeholder(s) ($1..$${maxIdx}) but received ${params?.length ?? 0} parameter(s)`
+      );
+    }
+  } else if (params && params.length > 0) {
+    throw new Error("SQL has no $n placeholders but parameters were provided");
+  }
 
   const startTime = Date.now();
 
   try {
     await tenantPool.query(`SET statement_timeout = '${QUERY_TIMEOUT_MS}'`);
-    const result = await tenantPool.query(sanitized);
+    const result =
+      maxIdx > 0
+        ? await tenantPool.query(sanitized, params)
+        : await tenantPool.query(sanitized);
     const executionTimeMs = Date.now() - startTime;
     const rows = result.rows.slice(0, 1000);
 

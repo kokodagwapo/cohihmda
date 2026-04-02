@@ -107,6 +107,9 @@ export interface SupportingDataByPeriodRow {
   activePercent?: number;
   /** Workflow conversion: compact per-period summary of all default segments */
   workflowBrief?: string;
+  /** Workflow conversion: mean of default segment conversion % / turn days (tracked refresh) */
+  meanConversionPercent?: number;
+  meanAvgTurnTimeDays?: number;
   [key: string]: unknown;
 }
 
@@ -147,7 +150,16 @@ export interface DashboardDetailSnapshotAudit {
     dateFilter?: string;
     stepTimings?: { evidence?: number; total?: number };
   };
+  /** When set with `handlerId`, watchlist uses handler registry instead of SQL replay. */
+  trackedRefreshKind?: "handler";
+  /** Registered handler id (e.g. `dashboard:leaderboard:aggregate_summary`). */
+  handlerId?: string;
+  /**
+   * Optional SQL template with `$1`…`$n` for rolling `param_resolution` (see tracked insights).
+   */
   generatedSql?: string;
+  /** Stored on metric_signature when SQL uses rolling dashboard date windows. */
+  paramResolution?: "none" | "rolling_dashboard";
   rowCount: number;
   rawSummary: DashboardDetailSnapshotSummaryDef[];
   resolvedSummary: DashboardDetailSnapshotSummaryDef[];

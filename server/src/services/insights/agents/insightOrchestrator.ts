@@ -39,6 +39,10 @@ import {
 } from "./categoryDefinitions.js";
 import { logInfo, logError, logWarn } from "../../logger.js";
 import {
+  validateHeadlineMetricSignatureForPersist,
+  type HeadlineMetricValidationResult,
+} from "../headlineMetricSignatureValidation.js";
+import {
   insightLogStart,
   insightLog,
   insightLogWarn,
@@ -97,6 +101,22 @@ const activeGenerations = new Map<string, { startedAt: number; batch: string }>(
 const activeBucketGenerations = new Map<string, { startedAt: number; batch: string }>();
 
 const VALID_BUCKETS = ["critical", "attention", "working", "context"] as const;
+
+async function reevaluateTrackedInsightsBestEffort(
+  tenantId: string,
+  tenantPool: pg.Pool,
+  onSuccess?: (evaluatedCount: number) => void
+): Promise<void> {
+  try {
+    const { evaluateTrackedInsights } = await import("../trackedInsightEvaluator.js");
+    const evalResult = await evaluateTrackedInsights(tenantId, tenantPool);
+    if (evalResult.evaluated > 0) {
+      onSuccess?.(evalResult.evaluated);
+    }
+  } catch (err: any) {
+    logWarn(`[InsightOrchestrator] Tracked insight evaluation failed: ${err.message}`);
+  }
+}
 
 export function isGenerationRunning(tenantId: string): { running: boolean; startedAt?: number; batch?: string } {
   const active = activeGenerations.get(tenantId);
@@ -373,15 +393,9 @@ export async function runInsightGeneration(
     emit("persisting", "Done.");
 
     // ----- Phase 5: Re-evaluate tracked insights -----
-    try {
-      const { evaluateTrackedInsights } = await import("../trackedInsightEvaluator.js");
-      const evalResult = await evaluateTrackedInsights(tenantId, tenantPool);
-      if (evalResult.evaluated > 0) {
-        emit("tracked", `Re-evaluated ${evalResult.evaluated} tracked insights`);
-      }
-    } catch (err: any) {
-      logWarn(`[InsightOrchestrator] Tracked insight evaluation failed: ${err.message}`);
-    }
+    await reevaluateTrackedInsightsBestEffort(tenantId, tenantPool, (evaluated) => {
+      emit("tracked", `Re-evaluated ${evaluated} tracked insights`);
+    });
 
     const duration = Date.now() - startTime;
     emit("complete", `Finished in ${Math.round(duration / 1000)}s — ${allEvaluatedInsights.length} insights across ${FUNCTIONAL_CATEGORIES.length} categories`);
@@ -580,6 +594,11 @@ export async function generateMoreForBucketAgent(
     if (newInsights.length > 0) {
       emit("persisting", `Appending ${newInsights.length} new insights for "${targetBucket}"...`);
       await appendAgentInsights(tenantPool, newInsights, allFindings, generationBatch);
+
+      // Stage 2 parity: re-evaluate tracked insights after generate-more persistence
+      await reevaluateTrackedInsightsBestEffort(tenantId, tenantPool, (evaluated) => {
+        emit("tracked", `Re-evaluated ${evaluated} tracked insights`);
+      });
     } else {
       emit("persisting", "No new unique insights after dedup — nothing to append.");
     }
@@ -789,6 +808,11 @@ export async function generateInsightsForCategory(
       await appendAgentInsights(tenantPool, evaluation.insights, allFindings, generationBatch);
     }
 
+    // Stage 2 parity: re-evaluate tracked insights after category replace/append persistence
+    await reevaluateTrackedInsightsBestEffort(tenantId, tenantPool, (evaluated) => {
+      emit("tracked", `Re-evaluated ${evaluated} tracked insights`);
+    });
+
     activeCategoryGenerations.delete(lockKey);
     const duration = Date.now() - startTime;
     emit("complete", `Done in ${Math.round(duration / 1000)}s — ${evaluation.insights.length} ${category.label} insights`);
@@ -876,9 +900,8 @@ async function persistAgentInsights(
   for (const ins of insights) {
     const finding = findings[ins.findingIndex];
 
-    // Build detail_data from finding evidence (simplified hydration)
     const detailData = finding
-      ? buildDetailDataFromFinding(ins, finding)
+      ? await finalizeAgentDetailData(tenantPool, ins, finding)
       : null;
 
     const baseCount = 16; // 15 standard + generation_method
@@ -1008,7 +1031,7 @@ async function appendAgentInsights(
   for (const ins of insights) {
     const finding = findings[ins.findingIndex];
     const detailData = finding
-      ? buildDetailDataFromFinding(ins, finding)
+      ? await finalizeAgentDetailData(tenantPool, ins, finding)
       : null;
 
     const baseCount = 16;
@@ -1108,6 +1131,42 @@ function buildDetailDataFromFinding(
       columnFormats: e.columnFormats || undefined,
     })),
   };
+}
+
+/** Adds validated headlineMetricSignature for watchlist SQL; never stores unvalidated headline SQL. */
+async function finalizeAgentDetailData(
+  tenantPool: pg.Pool,
+  insight: EvaluatedInsight,
+  finding: InsightFinding
+): Promise<any> {
+  const dd = buildDetailDataFromFinding(insight, finding);
+  const rawHeadline = finding.headlineMetricSignature;
+  if (!rawHeadline || typeof rawHeadline !== "object") {
+    dd.headlineMetricSignatureValidated = false;
+    dd.headlineMetricSignatureValidationError =
+      "Investigator did not provide headlineMetricSignature";
+    return dd;
+  }
+  const validation = await validateHeadlineMetricSignatureForPersist(
+    tenantPool,
+    rawHeadline,
+    finding.keyMetrics
+  );
+  if (validation.ok) {
+    dd.headlineMetricSignature = validation.normalized;
+    dd.headlineMetricSignatureValidated = true;
+  } else {
+    const { error } = validation as Extract<
+      HeadlineMetricValidationResult,
+      { ok: false }
+    >;
+    dd.headlineMetricSignatureValidated = false;
+    dd.headlineMetricSignatureValidationError = error;
+    logWarn(
+      `[InsightOrchestrator] headlineMetricSignature rejected for "${finding.title?.slice(0, 60)}": ${error}`
+    );
+  }
+  return dd;
 }
 
 // ============================================================================
@@ -1439,6 +1498,7 @@ function buildCoverageInsight(
       })),
     },
     metricSignature: finding.metricSignature,
+    headlineMetricSignature: finding.headlineMetricSignature,
     confidence: finding.confidence || "medium",
     findingIndex,
   };
