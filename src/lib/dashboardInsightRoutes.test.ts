@@ -59,8 +59,16 @@ describe("dashboardInsightRoutes", () => {
     expect(getDashboardInsightNavigateState("workflow-conversion", { datePeriod: "mtd" })).toEqual({});
   });
 
-  it("getDashboardInsightPath maps top-tiering-comparison to standalone route", () => {
-    expect(getDashboardInsightPath("top-tiering-comparison")).toBe("/top-tiering-comparison");
+  it("getDashboardInsightPath maps top-tiering-comparison to /performance/toptiering-comparison", () => {
+    expect(getDashboardInsightPath("top-tiering-comparison")).toBe(
+      "/performance/toptiering-comparison"
+    );
+    expect(getDashboardInsightPath("  Top-Tiering-Comparison  ")).toBe(
+      "/performance/toptiering-comparison"
+    );
+    expect(getDashboardInsightPath("toptiering-comparison")).toBe(
+      "/performance/toptiering-comparison"
+    );
   });
 
   it("getDashboardInsightNavigateState omits filter state for top-tiering-comparison", () => {

@@ -203,6 +203,8 @@ async function fetchTrackedInsightRowWithSnapshot(
        ${displayMetaSelect}
        s.metric_values AS latest_values,
        s.previous_values AS latest_previous,
+       first_s.metric_values AS baseline_values,
+       (SELECT COUNT(*)::int FROM tracked_insight_snapshots WHERE tracked_insight_id = ti.id) AS snapshot_count,
        s.change_summary AS latest_change,
        s.trend AS latest_trend,
        s.evaluated_at AS last_evaluated
@@ -214,6 +216,13 @@ async function fetchTrackedInsightRowWithSnapshot(
        ORDER BY evaluated_at DESC
        LIMIT 1
      ) s ON true
+     LEFT JOIN LATERAL (
+       SELECT metric_values
+       FROM tracked_insight_snapshots
+       WHERE tracked_insight_id = ti.id
+       ORDER BY evaluated_at ASC
+       LIMIT 1
+     ) first_s ON true
      WHERE ti.id = $1 AND ti.user_id = $2`,
     [trackedInsightId, userId]
   );
@@ -520,6 +529,8 @@ router.get(
            ${displayMetaSelect}
            s.metric_values AS latest_values,
            s.previous_values AS latest_previous,
+           first_s.metric_values AS baseline_values,
+           (SELECT COUNT(*)::int FROM tracked_insight_snapshots WHERE tracked_insight_id = ti.id) AS snapshot_count,
            s.change_summary AS latest_change,
            s.trend AS latest_trend,
            s.evaluated_at AS last_evaluated
@@ -531,6 +542,13 @@ router.get(
            ORDER BY evaluated_at DESC
            LIMIT 1
          ) s ON true
+         LEFT JOIN LATERAL (
+           SELECT metric_values
+           FROM tracked_insight_snapshots
+           WHERE tracked_insight_id = ti.id
+           ORDER BY evaluated_at ASC
+           LIMIT 1
+         ) first_s ON true
          WHERE ti.user_id = $1
          ORDER BY
            CASE ti.status WHEN 'active' THEN 0 WHEN 'resolved' THEN 1 ELSE 2 END,

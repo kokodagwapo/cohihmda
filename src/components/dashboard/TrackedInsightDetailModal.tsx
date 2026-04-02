@@ -42,7 +42,12 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
+import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
+import {
+  getDashboardInsightPath,
+  getDashboardInsightNavigateState,
+} from "@/lib/dashboardInsightRoutes";
 import {
   inferTrackedMetricPolarity,
   type TrackedMetricPolarity,
@@ -83,9 +88,18 @@ interface TrackedInsight {
     keyMetricFormats?: Record<string, string>;
     evaluable?: boolean;
     non_evaluable_reason?: string;
+    /** Dashboard-tracked insights: source page for navigation */
+    source_page_id?: string;
+    source_page_name?: string;
+    filter_context_snapshot?: Record<string, unknown>;
   } | null;
   latest_values: Record<string, any> | null;
+  /** Values from the snapshot immediately before the latest (same as server `previous_values` on newest row). */
   latest_previous: Record<string, any> | null;
+  /** First evaluation when this insight was tracked — baseline for "vs original". */
+  baseline_values?: Record<string, any> | null;
+  /** Number of stored evaluations; "vs original" shows when > 2 (otherwise it matches "vs prev" at two evals). */
+  snapshot_count?: number | null;
   latest_change: string | null;
   latest_trend: "improving" | "worsening" | "stable" | "new" | null;
   last_evaluated: string | null;
@@ -236,9 +250,13 @@ function getDeltaPolarityDisplay(
   previous: any,
   polarities?: Record<string, TrackedMetricPolarity>
 ): { text: string; semantic: "good" | "bad" | "neutral" } | null {
-  const cur = parseFloat(current);
-  const prev = parseFloat(previous);
-  if (isNaN(cur) || isNaN(prev) || prev === 0) return null;
+  const cur = parseFloat(String(current));
+  const prev = parseFloat(String(previous));
+  if (isNaN(cur) || isNaN(prev)) return null;
+  if (prev === 0) {
+    if (cur === 0) return { text: "+0.0%", semantic: "neutral" };
+    return { text: "from 0", semantic: "neutral" };
+  }
   const pct = ((cur - prev) / Math.abs(prev)) * 100;
   const rawUp = cur > prev;
   const rawDown = cur < prev;
@@ -256,6 +274,24 @@ function getDeltaPolarityDisplay(
   return {
     text: `${sign}${pct.toFixed(1)}%`,
     semantic,
+  };
+}
+
+/** PUT /tracked/:id returns only the insight row; preserve joined snapshot fields from the previous client state. */
+function mergeTrackedInsightPutResponse(
+  prev: TrackedInsight | null,
+  row: TrackedInsight
+): TrackedInsight {
+  return {
+    ...(prev || ({} as TrackedInsight)),
+    ...row,
+    latest_values: row.latest_values ?? prev?.latest_values ?? null,
+    latest_previous: row.latest_previous ?? prev?.latest_previous ?? null,
+    baseline_values: row.baseline_values ?? prev?.baseline_values ?? null,
+    snapshot_count: row.snapshot_count ?? prev?.snapshot_count ?? null,
+    latest_change: row.latest_change ?? prev?.latest_change ?? null,
+    latest_trend: row.latest_trend ?? prev?.latest_trend ?? null,
+    last_evaluated: row.last_evaluated ?? prev?.last_evaluated ?? null,
   };
 }
 
@@ -480,6 +516,7 @@ export function TrackedInsightDetailModal({
   onInsightMutated,
   selectedTenantId,
 }: TrackedInsightDetailModalProps) {
+  const navigate = useNavigate();
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [snapshotsLoading, setSnapshotsLoading] = useState(false);
   const [expandedSnapshotId, setExpandedSnapshotId] = useState<string | null>(null);
@@ -513,6 +550,27 @@ export function TrackedInsightDetailModal({
     await onInsightMutated?.();
   }, [onInsightMutated]);
 
+  const handleOpenSourceDashboard = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!localInsight || localInsight.source_type !== "dashboard_insights") return;
+      const pageId = localInsight.display_metadata?.source_page_id?.trim();
+      if (!pageId) return;
+      const fc = localInsight.display_metadata?.filter_context_snapshot;
+      const path = getDashboardInsightPath(pageId);
+      const state = getDashboardInsightNavigateState(
+        pageId,
+        fc && typeof fc === "object" ? fc : undefined
+      );
+      navigate(path, {
+        state: Object.keys(state).length > 0 ? state : undefined,
+      });
+      onClose();
+    },
+    [localInsight, navigate, onClose]
+  );
+
   const handlePause = useCallback(async () => {
     if (!localInsight || pausing || localInsight.status !== "active") return;
     setPausing(true);
@@ -522,7 +580,7 @@ export function TrackedInsightDetailModal({
         { status: "resolved" },
         selectedTenantId
       );
-      setLocalInsight(row as TrackedInsight);
+      setLocalInsight(mergeTrackedInsightPutResponse(localInsight, row as TrackedInsight));
       await runMutated();
     } catch (e) {
       console.error("Failed to pause tracked insight:", e);
@@ -540,7 +598,7 @@ export function TrackedInsightDetailModal({
         { status: "active" },
         selectedTenantId
       );
-      setLocalInsight(row as TrackedInsight);
+      setLocalInsight(mergeTrackedInsightPutResponse(localInsight, row as TrackedInsight));
       await runMutated();
     } catch (e) {
       console.error("Failed to resume tracked insight:", e);
@@ -558,7 +616,7 @@ export function TrackedInsightDetailModal({
         { status: "active" },
         selectedTenantId
       );
-      setLocalInsight(row as TrackedInsight);
+      setLocalInsight(mergeTrackedInsightPutResponse(localInsight, row as TrackedInsight));
       await runMutated();
     } catch (e) {
       console.error("Failed to restore tracked insight:", e);
@@ -610,6 +668,10 @@ export function TrackedInsightDetailModal({
   const metricPolarities = localInsight.metric_signature?.polarities;
   const currentValues = localInsight.latest_values || {};
   const prevValues = localInsight.latest_previous || {};
+  const baselineValues = localInsight.baseline_values || {};
+  const snapshotCount = localInsight.snapshot_count ?? 0;
+  /** With only two evaluations, "vs prev" already equals change from the first (baseline); hide duplicate. */
+  const showVsOriginal = snapshotCount > 2;
 
   // Build chart data — newest last
   const chartKey = comparisonKeys.find((k) => {
@@ -705,7 +767,7 @@ export function TrackedInsightDetailModal({
                       {localInsight.understory}
                     </p>
                   )}
-                  <div className="flex items-center gap-3 mt-2">
+                  <div className="flex items-center gap-3 mt-2 flex-wrap">
                     {localInsight.last_evaluated && (
                       <span className="flex items-center gap-1 text-[10px] text-slate-400">
                         <Clock className="w-2.5 h-2.5" />
@@ -716,6 +778,21 @@ export function TrackedInsightDetailModal({
                       Tracked {timeAgo(localInsight.created_at)}
                     </span>
                   </div>
+                  {localInsight.source_type === "dashboard_insights" &&
+                    localInsight.display_metadata?.source_page_id?.trim() && (
+                      <div className="mt-3">
+                        <button
+                          type="button"
+                          onClick={handleOpenSourceDashboard}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200/90 bg-white px-2.5 py-1.5 text-xs font-medium text-blue-600 shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800/80 dark:text-blue-400 dark:hover:bg-slate-800"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                          {localInsight.display_metadata?.source_page_name?.trim()
+                            ? `Open ${localInsight.display_metadata.source_page_name.trim()}`
+                            : "Open source dashboard"}
+                        </button>
+                      </div>
+                    )}
                 </div>
                 <button
                   onClick={onClose}
@@ -747,14 +824,25 @@ export function TrackedInsightDetailModal({
                     {comparisonKeys.map((k) => {
                       const val = resolveTrackedDisplayValue(currentValues, k);
                       const prev = resolveTrackedDisplayValue(prevValues, k);
+                      const baseline = resolveTrackedDisplayValue(baselineValues, k);
                       const delta =
                         prev !== undefined && prev !== null
                           ? getDeltaPolarityDisplay(k, val, prev, metricPolarities)
+                          : null;
+                      const deltaOrig =
+                        showVsOriginal && baseline !== undefined && baseline !== null
+                          ? getDeltaPolarityDisplay(k, val, baseline, metricPolarities)
                           : null;
                       const deltaColor =
                         delta?.semantic === "good"
                           ? "text-green-600 dark:text-green-400"
                           : delta?.semantic === "bad"
+                            ? "text-red-500 dark:text-red-400"
+                            : "text-slate-500 dark:text-slate-400";
+                      const deltaOrigColor =
+                        deltaOrig?.semantic === "good"
+                          ? "text-green-600 dark:text-green-400"
+                          : deltaOrig?.semantic === "bad"
                             ? "text-red-500 dark:text-red-400"
                             : "text-slate-500 dark:text-slate-400";
                       const label = descriptions[k] || k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -772,6 +860,11 @@ export function TrackedInsightDetailModal({
                           {delta && (
                             <p className={`text-[10px] font-medium mt-0.5 ${deltaColor}`}>
                               {delta.text} vs prev
+                            </p>
+                          )}
+                          {deltaOrig && (
+                            <p className={`text-[10px] font-medium mt-0.5 ${deltaOrigColor}`}>
+                              {deltaOrig.text} vs original
                             </p>
                           )}
                         </div>

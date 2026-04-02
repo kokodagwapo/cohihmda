@@ -209,6 +209,8 @@ const REGISTRY: Record<string, HandlerFn> = {
     handlerCompanyScorecardSubjectSummary,
   [TRACKED_DASHBOARD_HANDLER_CREDIT_RISK_AGGREGATE]:
     handlerCreditRiskAggregateSummary,
+  [TRACKED_DASHBOARD_HANDLER_CREDIT_RISK_COHORT_SUBJECT]:
+    handlerCreditRiskCohortSubjectSummary,
   [TRACKED_DASHBOARD_HANDLER_TOP_TIERING_AGGREGATE]:
     handlerTopTieringAggregateSummary,
   [TRACKED_DASHBOARD_HANDLER_TOP_TIERING_SUBJECT]:

@@ -51,9 +51,14 @@ interface TrackedInsight {
     keyMetricFormats?: Record<string, string>;
     evaluable?: boolean;
     non_evaluable_reason?: string;
+    source_page_id?: string;
+    source_page_name?: string;
+    filter_context_snapshot?: Record<string, unknown>;
   } | null;
   latest_values: Record<string, any> | null;
   latest_previous: Record<string, any> | null;
+  baseline_values?: Record<string, any> | null;
+  snapshot_count?: number | null;
   latest_change: string | null;
   latest_trend: "improving" | "worsening" | "stable" | "new" | null;
   last_evaluated: string | null;
