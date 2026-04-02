@@ -12,7 +12,16 @@
 import pg from "pg";
 import { safeExecuteSQL, callLLM, getOpenAIKey, type LLMMessage } from "../research/tools.js";
 import { logInfo, logError, logWarn } from "../logger.js";
-import { inferTrackedMetricPolarity } from "./trackedPolarityInference.js";
+import {
+  resolvePolarityForKey,
+  type MetricPolarity,
+} from "./trackedPolarityResolve.js";
+import {
+  applyLlmPolarityInferenceToTrackedInsight,
+  isTrackedInsightPolarityLlmEnabled,
+  isTrackedInsightPolarityLlmShadow,
+  runTrackedPolarityLlmInference,
+} from "./trackedPolarityLlmResolution.js";
 import { resolveTrackedInsightSqlParams } from "./trackedInsightParamResolution.js";
 import {
   isRegisteredTrackedInsightHandler,
@@ -22,9 +31,6 @@ import {
 // ============================================================================
 // Types
 // ============================================================================
-
-/** Explicit > inferred; `neutral` = no vote on improving vs worsening. */
-type MetricPolarity = "higher_better" | "lower_better" | "neutral";
 
 export interface TrackedInsightEvaluationInput {
   id: string;
@@ -129,11 +135,71 @@ export async function evaluateSingleTrackedInsight(
       prevSnapshot?.metric_values,
       comparisonFields
     );
+
+    let polaritiesForEvaluation: Record<string, MetricPolarity> | undefined =
+      insight.metric_signature.polarities;
+
+    if (isTrackedInsightPolarityLlmEnabled()) {
+      const neutralCompared = comparedKeys.filter(
+        (k) => resolvePolarityForKey(k, polaritiesForEvaluation) === "neutral"
+      );
+      if (neutralCompared.length > 0) {
+        let apiKeyPolarity = options?.llmApiKeyHolder?.key ?? null;
+        if (!apiKeyPolarity) {
+          try {
+            apiKeyPolarity = await getOpenAIKey(tenantId);
+          } catch {
+            /* skip LLM polarity */
+          }
+          if (options?.llmApiKeyHolder) options.llmApiKeyHolder.key = apiKeyPolarity;
+        }
+        if (apiKeyPolarity) {
+          const llmResult = await runTrackedPolarityLlmInference({
+            tenantId,
+            trackedInsightId: insight.id,
+            headline: insight.headline,
+            understory: insight.understory,
+            sourceType: insight.source_type,
+            displayMetadata: insight.display_metadata,
+            metricValues,
+            comparedKeys,
+            existingPolarities: polaritiesForEvaluation,
+            apiKey: apiKeyPolarity,
+          });
+          if (llmResult) {
+            const shouldPersist =
+              Object.keys(llmResult.polaritiesToMerge).length > 0 ||
+              llmResult.polarityInferenceAudit.length > 0;
+            if (shouldPersist) {
+              await applyLlmPolarityInferenceToTrackedInsight(
+                tenantPool,
+                insight.id,
+                insight.metric_signature as Record<string, unknown>,
+                insight.display_metadata as Record<string, unknown> | null | undefined,
+                llmResult,
+                { shadow: isTrackedInsightPolarityLlmShadow() }
+              );
+            }
+            if (!isTrackedInsightPolarityLlmShadow()) {
+              polaritiesForEvaluation = {
+                ...(polaritiesForEvaluation || {}),
+                ...llmResult.polaritiesToMerge,
+              };
+              insight.metric_signature = {
+                ...insight.metric_signature,
+                polarities: polaritiesForEvaluation,
+              };
+            }
+          }
+        }
+      }
+    }
+
     const trend = determineTrend(
       metricValues,
       prevSnapshot?.metric_values,
       comparedKeys,
-      insight.metric_signature.polarities
+      polaritiesForEvaluation
     );
 
     let changeSummary: string;
@@ -159,7 +225,7 @@ export async function evaluateSingleTrackedInsight(
         prevSnapshot.metric_values,
         trend,
         comparedKeys,
-        insight.metric_signature.polarities,
+        polaritiesForEvaluation,
         insight.display_metadata || null,
         apiKey
       );
@@ -199,10 +265,7 @@ export async function evaluateSingleTrackedInsight(
     const snapshotMetricValues = {
       ...metricValues,
       _compared_keys: comparedKeys,
-      _polarities: buildPolarityContext(
-        comparedKeys,
-        insight.metric_signature.polarities
-      ),
+      _polarities: buildPolarityContext(comparedKeys, polaritiesForEvaluation),
     };
     await tenantPool.query(
       `INSERT INTO tracked_insight_snapshots
@@ -224,16 +287,17 @@ export async function evaluateSingleTrackedInsight(
 
     // Pattern B: persist derived numeric comparison keys once for agent insights (UI + alerts).
     if (insight.source_type === "agent") {
-      const explicit = (sig.comparisonKeyFields || []).filter((k) =>
-        sig.keyFields.includes(k)
+      const ms = insight.metric_signature;
+      const explicit = (ms.comparisonKeyFields || []).filter((k) =>
+        ms.keyFields.includes(k)
       );
       if (explicit.length === 0) {
         const derived = deriveComparisonKeyFieldsFromMetricValues(
           metricValues,
-          sig.keyFields
+          ms.keyFields
         );
         if (derived.length > 0) {
-          const nextSig = { ...sig, comparisonKeyFields: derived };
+          const nextSig = { ...ms, comparisonKeyFields: derived };
           await tenantPool.query(
             `UPDATE tracked_insights SET metric_signature = $1::jsonb, updated_at = NOW() WHERE id = $2`,
             [JSON.stringify(nextSig), insight.id]
@@ -442,19 +506,6 @@ export function extractMetricValues(
     }
   }
   return result;
-}
-
-function resolvePolarityForKey(
-  key: string,
-  explicit?: Record<string, MetricPolarity>
-): MetricPolarity {
-  const base = key.replace(/_(avg|sum|count)$/i, "");
-  const fromExplicit =
-    explicit?.[key] ?? explicit?.[base];
-  if (fromExplicit === "higher_better" || fromExplicit === "lower_better" || fromExplicit === "neutral") {
-    return fromExplicit;
-  }
-  return inferTrackedMetricPolarity(base);
 }
 
 function determineTrend(
