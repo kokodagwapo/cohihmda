@@ -40,6 +40,12 @@ export interface EvaluatedInsight {
     keyFields: string[];
     comparisonKeyFields?: string[];
   };
+  /** Raw from investigator; canonical stored copy lives in detail_data after validation. */
+  headlineMetricSignature?: {
+    sql: string;
+    keyFields: string[];
+    comparisonKeyFields?: string[];
+  };
   confidence: "high" | "medium" | "low";
   findingIndex: number;
   /** Whether this insight should be included in the podcast briefing context. Defaults to true. */
@@ -110,7 +116,7 @@ __TARGET_RULE__
 - PRIORITIZE DOLLAR IMPACT: Insights with quantified dollar impact (revenue at risk, lost opportunity volume, exposure) should rank higher than insights that are purely observational. When assigning severity_score, weight financial impact heavily.
 - MARKET RATE INSIGHTS: If any findings reference market rate trends, rate changes, lock-vs-market analysis, or borrower rate sensitivity, these are HIGH VALUE — keep them and bucket appropriately. Market-aware insights connecting rate movements to pipeline behavior are particularly valuable.
 - Headlines must be concrete and specific: "Pull-through drops 12% vs Q4" not "Performance metrics show changes"
-- Understory must include specific numbers from the finding's keyMetrics.
+- Understory must include specific numbers from the finding's keyMetrics. The **headline** states the primary KPIs; the understory may add examples (e.g. a named loan officer) as supplemental context — do not rewrite the headline to be about a drill-down unless the finding is truly single-entity.
 - ETM COMPLETENESS (REQUIRED): Every insight MUST include all six ETM fields (what_changed, why, business_impact, risk_if_ignored, recommended_action, owner). These fields turn raw observations into executive-ready coaching. If the finding doesn't provide enough detail for a field, derive it from the data context. recommended_action should be prescriptive and specific (who + what + when), NOT vague suggestions. owner should name a role, not "management".
 - Map bucket -> priority: critical=RED, attention=YELLOW, working=BLUE, context=GRAY
 - Map bucket -> insight_type: critical=critical, attention=warning, working=success, context=info
@@ -229,6 +235,7 @@ export async function runInsightEvaluator(
       severity_score: Math.min(1, Math.max(0, ins.severity_score || 0.5)),
       functional_category: functionalCategory,
       metricSignature: originalFinding?.metricSignature || ins.metricSignature,
+      headlineMetricSignature: originalFinding?.headlineMetricSignature,
       evidence: originalFinding
         ? {
             metrics: Object.entries(originalFinding.keyMetrics).map(([k, v]) => ({

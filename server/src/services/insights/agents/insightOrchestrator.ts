@@ -39,6 +39,10 @@ import {
 } from "./categoryDefinitions.js";
 import { logInfo, logError, logWarn } from "../../logger.js";
 import {
+  validateHeadlineMetricSignatureForPersist,
+  type HeadlineMetricValidationResult,
+} from "../headlineMetricSignatureValidation.js";
+import {
   insightLogStart,
   insightLog,
   insightLogWarn,
@@ -896,9 +900,8 @@ async function persistAgentInsights(
   for (const ins of insights) {
     const finding = findings[ins.findingIndex];
 
-    // Build detail_data from finding evidence (simplified hydration)
     const detailData = finding
-      ? buildDetailDataFromFinding(ins, finding)
+      ? await finalizeAgentDetailData(tenantPool, ins, finding)
       : null;
 
     const baseCount = 16; // 15 standard + generation_method
@@ -1028,7 +1031,7 @@ async function appendAgentInsights(
   for (const ins of insights) {
     const finding = findings[ins.findingIndex];
     const detailData = finding
-      ? buildDetailDataFromFinding(ins, finding)
+      ? await finalizeAgentDetailData(tenantPool, ins, finding)
       : null;
 
     const baseCount = 16;
@@ -1128,6 +1131,42 @@ function buildDetailDataFromFinding(
       columnFormats: e.columnFormats || undefined,
     })),
   };
+}
+
+/** Adds validated headlineMetricSignature for watchlist SQL; never stores unvalidated headline SQL. */
+async function finalizeAgentDetailData(
+  tenantPool: pg.Pool,
+  insight: EvaluatedInsight,
+  finding: InsightFinding
+): Promise<any> {
+  const dd = buildDetailDataFromFinding(insight, finding);
+  const rawHeadline = finding.headlineMetricSignature;
+  if (!rawHeadline || typeof rawHeadline !== "object") {
+    dd.headlineMetricSignatureValidated = false;
+    dd.headlineMetricSignatureValidationError =
+      "Investigator did not provide headlineMetricSignature";
+    return dd;
+  }
+  const validation = await validateHeadlineMetricSignatureForPersist(
+    tenantPool,
+    rawHeadline,
+    finding.keyMetrics
+  );
+  if (validation.ok) {
+    dd.headlineMetricSignature = validation.normalized;
+    dd.headlineMetricSignatureValidated = true;
+  } else {
+    const { error } = validation as Extract<
+      HeadlineMetricValidationResult,
+      { ok: false }
+    >;
+    dd.headlineMetricSignatureValidated = false;
+    dd.headlineMetricSignatureValidationError = error;
+    logWarn(
+      `[InsightOrchestrator] headlineMetricSignature rejected for "${finding.title?.slice(0, 60)}": ${error}`
+    );
+  }
+  return dd;
 }
 
 // ============================================================================
@@ -1459,6 +1498,7 @@ function buildCoverageInsight(
       })),
     },
     metricSignature: finding.metricSignature,
+    headlineMetricSignature: finding.headlineMetricSignature,
     confidence: finding.confidence || "medium",
     findingIndex,
   };

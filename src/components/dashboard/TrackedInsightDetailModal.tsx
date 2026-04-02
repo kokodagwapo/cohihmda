@@ -171,6 +171,44 @@ function formatMetricValue(
   return num.toFixed(2);
 }
 
+/**
+ * age_bucket (and similar) often stores a month count as a bare number; show units for readability.
+ */
+function formatAgeBucketStyleDisplay(key: string, value: unknown): string | null {
+  const k = key.toLowerCase();
+  if (!k.includes("age_bucket")) return null;
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const n = Math.round(value);
+    if (n >= 1 && n <= 60) {
+      return `${n} Month${n === 1 ? "" : "s"}`;
+    }
+  }
+  if (typeof value === "string") {
+    const t = value.trim();
+    if (/^\d+$/.test(t)) {
+      const n = parseInt(t, 10);
+      if (n >= 1 && n <= 60) {
+        return `${n} Month${n === 1 ? "" : "s"}`;
+      }
+    }
+    if (/month|d\+|^\d+d/i.test(t)) {
+      return t;
+    }
+  }
+  return null;
+}
+
+function formatTrackedFieldDisplay(
+  key: string,
+  value: any,
+  formats?: Record<string, string>
+): string {
+  const age = formatAgeBucketStyleDisplay(key, value);
+  if (age !== null) return age;
+  return formatMetricValue(key, value, formats);
+}
+
 function polarityBaseKey(key: string): string {
   return key.replace(/_(avg|sum|count)$/i, "");
 }
@@ -723,11 +761,13 @@ export function TrackedInsightDetailModal({
                       return (
                         <div
                           key={k}
-                          className="rounded-lg border border-slate-200/60 dark:border-slate-700/60 bg-slate-50/80 dark:bg-slate-800/50 px-3 py-2.5"
+                          className="min-w-0 rounded-lg border border-slate-200/60 dark:border-slate-700/60 bg-slate-50/80 dark:bg-slate-800/50 px-3 py-2.5"
                         >
-                          <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate mb-0.5">{label}</p>
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400 mb-0.5 break-words leading-snug">
+                            {label}
+                          </p>
                           <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                            {formatMetricValue(k, val, formats)}
+                            {formatTrackedFieldDisplay(k, val, formats)}
                           </p>
                           {delta && (
                             <p className={`text-[10px] font-medium mt-0.5 ${deltaColor}`}>
@@ -755,11 +795,13 @@ export function TrackedInsightDetailModal({
                       return (
                         <div
                           key={k}
-                          className="rounded-lg border border-slate-200/60 dark:border-slate-700/60 bg-slate-50/50 dark:bg-slate-800/40 px-3 py-2.5"
+                          className="min-w-0 rounded-lg border border-slate-200/60 dark:border-slate-700/60 bg-slate-50/50 dark:bg-slate-800/40 px-3 py-2.5"
                         >
-                          <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate mb-0.5">{label}</p>
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400 mb-0.5 break-words leading-snug">
+                            {label}
+                          </p>
                           <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
-                            {val !== undefined && val !== null ? formatMetricValue(k, val, formats) : "—"}
+                            {val !== undefined && val !== null ? formatTrackedFieldDisplay(k, val, formats) : "—"}
                           </p>
                         </div>
                       );
@@ -890,7 +932,7 @@ export function TrackedInsightDetailModal({
                                         {descriptions[k] || k}
                                       </span>
                                       <span className="text-slate-700 dark:text-slate-200 font-medium">
-                                        {formatMetricValue(
+                                        {formatTrackedFieldDisplay(
                                           k,
                                           resolveTrackedDisplayValue(snap.metric_values, k),
                                           formats

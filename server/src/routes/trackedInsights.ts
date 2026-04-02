@@ -187,60 +187,6 @@ function addSourceContextToDisplayMetadata(
   return merged;
 }
 
-/** After first baseline, persist derived numeric comparison keys for agent insights (Pattern B). */
-async function persistAgentComparisonKeyFieldsIfNeeded(
-  pool: import("pg").Pool,
-  trackedInsightId: string,
-  sourceType: string
-): Promise<void> {
-  if (sourceType !== "agent") return;
-
-  const row = await pool.query(
-    `SELECT metric_signature FROM tracked_insights WHERE id = $1`,
-    [trackedInsightId]
-  );
-  const rawSig = row.rows[0]?.metric_signature;
-  if (rawSig == null) return;
-  const sig: Record<string, unknown> =
-    typeof rawSig === "string" ? JSON.parse(rawSig) : { ...(rawSig as object) };
-
-  const existing = sig.comparisonKeyFields;
-  if (
-    Array.isArray(existing) &&
-    existing.some((x) => typeof x === "string" && String(x).trim().length > 0)
-  ) {
-    return;
-  }
-
-  const snap = await pool.query(
-    `SELECT metric_values FROM tracked_insight_snapshots
-     WHERE tracked_insight_id = $1
-     ORDER BY evaluated_at DESC
-     LIMIT 1`,
-    [trackedInsightId]
-  );
-  const mv = snap.rows[0]?.metric_values;
-  if (mv == null) return;
-  const metricValues: Record<string, unknown> =
-    typeof mv === "string" ? JSON.parse(mv) : { ...(mv as object) };
-
-  const keyFieldsRaw = sig.keyFields;
-  if (!Array.isArray(keyFieldsRaw)) return;
-  const kf = keyFieldsRaw.filter((k) => typeof k === "string") as string[];
-
-  const derived = deriveComparisonKeyFieldsFromMetricValues(
-    metricValues as Record<string, any>,
-    kf
-  );
-  if (derived.length === 0) return;
-
-  const next = { ...sig, comparisonKeyFields: derived };
-  await pool.query(
-    `UPDATE tracked_insights SET metric_signature = $1::jsonb, updated_at = NOW() WHERE id = $2`,
-    [JSON.stringify(next), trackedInsightId]
-  );
-}
-
 /** Same row shape as GET /api/insights/tracked for one id. */
 async function fetchTrackedInsightRowWithSnapshot(
   pool: import("pg").Pool,
@@ -375,22 +321,30 @@ router.post(
           sourceRow.detail_data && typeof sourceRow.detail_data === "object"
             ? (sourceRow.detail_data as Record<string, unknown>)
             : null;
-        const sourceSigRaw = sourceDetailData?.metricSignature;
-        const sourceSig = normalizeMetricSignature(sourceSigRaw, {
-          allowEmptySql: false,
-        });
         const sourceMeta = extractDisplayMetadataFromDetailData(
           sourceRow.detail_data
         );
 
         if (isAgentTrack) {
-          if (!sourceSig) {
+          const headlineValidated =
+            sourceDetailData?.headlineMetricSignatureValidated === true;
+          const headlineRaw = sourceDetailData?.headlineMetricSignature;
+          const headlineSig =
+            headlineValidated && headlineRaw
+              ? normalizeMetricSignature(headlineRaw, { allowEmptySql: false })
+              : null;
+          const legacySig = normalizeMetricSignature(
+            sourceDetailData?.metricSignature,
+            { allowEmptySql: false }
+          );
+          const chosenAgentSig = headlineSig || legacySig;
+          if (!chosenAgentSig) {
             return res.status(400).json({
               error:
-                "Agent source insight is missing a valid detail_data.metricSignature",
+                "Agent source insight is missing a valid detail_data.headlineMetricSignature (validated) or metricSignature",
             });
           }
-          effectiveMetricSignature = sourceSig;
+          effectiveMetricSignature = chosenAgentSig;
           effectiveDisplayMetadata = addSourceContextToDisplayMetadata({
             ...(display_metadata && typeof display_metadata === "object"
               ? display_metadata
@@ -403,6 +357,10 @@ router.post(
           });
         } else {
           // pipeline: prefer source derivation, fallback to payload if valid
+          const sourceSigRaw = sourceDetailData?.metricSignature;
+          const sourceSig = normalizeMetricSignature(sourceSigRaw, {
+            allowEmptySql: false,
+          });
           const fallbackSig = normalizeMetricSignature(metric_signature, {
             allowEmptySql: false,
           });
