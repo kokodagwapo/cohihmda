@@ -12,7 +12,16 @@
 import pg from "pg";
 import { safeExecuteSQL, callLLM, getOpenAIKey, type LLMMessage } from "../research/tools.js";
 import { logInfo, logError, logWarn } from "../logger.js";
-import { inferTrackedMetricPolarity } from "./trackedPolarityInference.js";
+import {
+  resolvePolarityForKey,
+  type MetricPolarity,
+} from "./trackedPolarityResolve.js";
+import {
+  applyLlmPolarityInferenceToTrackedInsight,
+  isTrackedInsightPolarityLlmEnabled,
+  isTrackedInsightPolarityLlmShadow,
+  runTrackedPolarityLlmInference,
+} from "./trackedPolarityLlmResolution.js";
 import { resolveTrackedInsightSqlParams } from "./trackedInsightParamResolution.js";
 import {
   isRegisteredTrackedInsightHandler,
@@ -22,9 +31,6 @@ import {
 // ============================================================================
 // Types
 // ============================================================================
-
-/** Explicit > inferred; `neutral` = no vote on improving vs worsening. */
-type MetricPolarity = "higher_better" | "lower_better" | "neutral";
 
 export interface TrackedInsightEvaluationInput {
   id: string;
@@ -129,18 +135,93 @@ export async function evaluateSingleTrackedInsight(
       prevSnapshot?.metric_values,
       comparisonFields
     );
+
+    let polaritiesForEvaluation: Record<string, MetricPolarity> | undefined =
+      insight.metric_signature.polarities;
+
+    if (isTrackedInsightPolarityLlmEnabled()) {
+      const neutralCompared = comparedKeys.filter(
+        (k) => resolvePolarityForKey(k, polaritiesForEvaluation) === "neutral"
+      );
+      if (neutralCompared.length > 0) {
+        let apiKeyPolarity = options?.llmApiKeyHolder?.key ?? null;
+        if (!apiKeyPolarity) {
+          try {
+            apiKeyPolarity = await getOpenAIKey(tenantId);
+          } catch {
+            /* skip LLM polarity */
+          }
+          if (options?.llmApiKeyHolder) options.llmApiKeyHolder.key = apiKeyPolarity;
+        }
+        if (apiKeyPolarity) {
+          const llmResult = await runTrackedPolarityLlmInference({
+            tenantId,
+            trackedInsightId: insight.id,
+            headline: insight.headline,
+            understory: insight.understory,
+            sourceType: insight.source_type,
+            displayMetadata: insight.display_metadata,
+            metricValues,
+            comparedKeys,
+            existingPolarities: polaritiesForEvaluation,
+            apiKey: apiKeyPolarity,
+          });
+          if (llmResult) {
+            const shouldPersist =
+              Object.keys(llmResult.polaritiesToMerge).length > 0 ||
+              llmResult.polarityInferenceAudit.length > 0;
+            if (shouldPersist) {
+              await applyLlmPolarityInferenceToTrackedInsight(
+                tenantPool,
+                insight.id,
+                insight.metric_signature as Record<string, unknown>,
+                insight.display_metadata as Record<string, unknown> | null | undefined,
+                llmResult,
+                { shadow: isTrackedInsightPolarityLlmShadow() }
+              );
+            }
+            if (!isTrackedInsightPolarityLlmShadow()) {
+              polaritiesForEvaluation = {
+                ...(polaritiesForEvaluation || {}),
+                ...llmResult.polaritiesToMerge,
+              };
+              insight.metric_signature = {
+                ...insight.metric_signature,
+                polarities: polaritiesForEvaluation,
+              };
+            }
+          }
+        }
+      }
+    }
+
     const trend = determineTrend(
       metricValues,
       prevSnapshot?.metric_values,
       comparedKeys,
-      insight.metric_signature.polarities
+      polaritiesForEvaluation
     );
+
+    let trendVsBaseline: "improving" | "worsening" | "stable" | "new" | null = null;
+    if (prevSnapshot) {
+      const baselineSnap = await fetchBaselineSnapshot(tenantPool, insight.id);
+      if (baselineSnap?.metric_values) {
+        trendVsBaseline = determineTrend(
+          metricValues,
+          baselineSnap.metric_values,
+          comparedKeys,
+          polaritiesForEvaluation
+        );
+      }
+    }
+
+    const dualTrendLine = formatDualTrendSummary(trend, trendVsBaseline);
 
     let changeSummary: string;
     if (!prevSnapshot) {
       changeSummary = "Initial evaluation — baseline established.";
     } else if (trend === "stable") {
-      changeSummary = "No significant change since last evaluation.";
+      changeSummary = `${dualTrendLine}. No significant change vs the immediately prior snapshot (within threshold).`;
     } else {
       let apiKey = options?.llmApiKeyHolder?.key ?? null;
       if (!apiKey) {
@@ -159,9 +240,11 @@ export async function evaluateSingleTrackedInsight(
         prevSnapshot.metric_values,
         trend,
         comparedKeys,
-        insight.metric_signature.polarities,
+        polaritiesForEvaluation,
         insight.display_metadata || null,
-        apiKey
+        apiKey,
+        dualTrendLine,
+        trendVsBaseline
       );
     }
 
@@ -199,23 +282,41 @@ export async function evaluateSingleTrackedInsight(
     const snapshotMetricValues = {
       ...metricValues,
       _compared_keys: comparedKeys,
-      _polarities: buildPolarityContext(
-        comparedKeys,
-        insight.metric_signature.polarities
-      ),
+      _polarities: buildPolarityContext(comparedKeys, polaritiesForEvaluation),
     };
-    await tenantPool.query(
-      `INSERT INTO tracked_insight_snapshots
-         (tracked_insight_id, metric_values, previous_values, change_summary, trend)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [
-        insight.id,
-        JSON.stringify(snapshotMetricValues),
-        prevSnapshot ? JSON.stringify(prevSnapshot.metric_values) : null,
-        changeSummary,
-        trend,
-      ]
-    );
+    try {
+      await tenantPool.query(
+        `INSERT INTO tracked_insight_snapshots
+           (tracked_insight_id, metric_values, previous_values, change_summary, trend, trend_vs_baseline)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          insight.id,
+          JSON.stringify(snapshotMetricValues),
+          prevSnapshot ? JSON.stringify(prevSnapshot.metric_values) : null,
+          changeSummary,
+          trend,
+          trendVsBaseline,
+        ]
+      );
+    } catch (err: any) {
+      const msg = String(err?.message ?? "");
+      if (msg.includes("trend_vs_baseline") || msg.includes("does not exist")) {
+        await tenantPool.query(
+          `INSERT INTO tracked_insight_snapshots
+             (tracked_insight_id, metric_values, previous_values, change_summary, trend)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [
+            insight.id,
+            JSON.stringify(snapshotMetricValues),
+            prevSnapshot ? JSON.stringify(prevSnapshot.metric_values) : null,
+            changeSummary,
+            trend,
+          ]
+        );
+      } else {
+        throw err;
+      }
+    }
 
     await tenantPool.query(
       `UPDATE tracked_insights SET updated_at = NOW() WHERE id = $1`,
@@ -224,16 +325,17 @@ export async function evaluateSingleTrackedInsight(
 
     // Pattern B: persist derived numeric comparison keys once for agent insights (UI + alerts).
     if (insight.source_type === "agent") {
-      const explicit = (sig.comparisonKeyFields || []).filter((k) =>
-        sig.keyFields.includes(k)
+      const ms = insight.metric_signature;
+      const explicit = (ms.comparisonKeyFields || []).filter((k) =>
+        ms.keyFields.includes(k)
       );
       if (explicit.length === 0) {
         const derived = deriveComparisonKeyFieldsFromMetricValues(
           metricValues,
-          sig.keyFields
+          ms.keyFields
         );
         if (derived.length > 0) {
-          const nextSig = { ...sig, comparisonKeyFields: derived };
+          const nextSig = { ...ms, comparisonKeyFields: derived };
           await tenantPool.query(
             `UPDATE tracked_insights SET metric_signature = $1::jsonb, updated_at = NOW() WHERE id = $2`,
             [JSON.stringify(nextSig), insight.id]
@@ -444,17 +546,29 @@ export function extractMetricValues(
   return result;
 }
 
-function resolvePolarityForKey(
-  key: string,
-  explicit?: Record<string, MetricPolarity>
-): MetricPolarity {
-  const base = key.replace(/_(avg|sum|count)$/i, "");
-  const fromExplicit =
-    explicit?.[key] ?? explicit?.[base];
-  if (fromExplicit === "higher_better" || fromExplicit === "lower_better" || fromExplicit === "neutral") {
-    return fromExplicit;
+/** Human-readable stability line: vs last snapshot vs original (first) snapshot. */
+export function formatDualTrendSummary(
+  sinceLast: "improving" | "worsening" | "stable" | "new",
+  sinceBaseline: "improving" | "worsening" | "stable" | "new" | null | undefined
+): string {
+  const label = (t: string) =>
+    t === "improving"
+      ? "Improving"
+      : t === "worsening"
+        ? "Worsening"
+        : t === "new"
+          ? "New baseline"
+          : "Stable";
+  if (sinceLast === "new") {
+    return "New baseline — first evaluation (no prior snapshot).";
   }
-  return inferTrackedMetricPolarity(base);
+  if (sinceBaseline == null || sinceBaseline === undefined) {
+    return `${label(sinceLast)} since last evaluation`;
+  }
+  if (sinceLast === sinceBaseline) {
+    return `${label(sinceLast)} since last evaluation and since original evaluation`;
+  }
+  return `${label(sinceLast)} since last evaluation, ${label(sinceBaseline)} since original evaluation`;
 }
 
 function determineTrend(
@@ -550,6 +664,22 @@ async function fetchPreviousSnapshot(
   return result.rows[0] || null;
 }
 
+/** Earliest snapshot for this insight — "original" baseline for trend_vs_baseline. */
+async function fetchBaselineSnapshot(
+  tenantPool: pg.Pool,
+  trackedInsightId: string
+): Promise<PreviousSnapshot | null> {
+  const result = await tenantPool.query(
+    `SELECT metric_values, evaluated_at
+     FROM tracked_insight_snapshots
+     WHERE tracked_insight_id = $1
+     ORDER BY evaluated_at ASC
+     LIMIT 1`,
+    [trackedInsightId]
+  );
+  return result.rows[0] || null;
+}
+
 async function generateChangeSummary(
   tenantId: string,
   headline: string,
@@ -564,7 +694,9 @@ async function generateChangeSummary(
     original_priority?: string;
     original_severity_score?: number | null;
   } | null,
-  cachedApiKey?: string | null
+  cachedApiKey?: string | null,
+  dualTrendLine?: string,
+  trendVsBaseline?: "improving" | "worsening" | "stable" | "new" | null
 ): Promise<string> {
   // Build polarity context for the LLM
   const polarityLines: string[] = [];
@@ -621,7 +753,13 @@ Rules:
           displayMetadata?.original_severity_score != null
             ? `Original severity score: ${displayMetadata.original_severity_score}`
             : "",
-          `Trend direction: ${trend}`,
+          `Trend vs last snapshot: ${trend}`,
+          trendVsBaseline != null
+            ? `Trend vs original (first) evaluation: ${trendVsBaseline}`
+            : "",
+          dualTrendLine
+            ? `Stability summary: ${dualTrendLine}`
+            : "",
           changeParts.length > 0 ? `Metric changes: ${changeParts.join("; ")}` : "",
           polarityLines.length > 0 ? `Metric polarity: ${polarityLines.join("; ")}` : "",
         ].filter(Boolean).join("\n"),
