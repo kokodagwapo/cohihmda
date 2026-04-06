@@ -6,6 +6,7 @@ import type {
   KPIData,
   TableData,
   ChartData,
+  TableColumn,
 } from "./types";
 import { KPICard } from "../components/KPICard";
 import { DataTable } from "../components/DataTable";
@@ -135,13 +136,21 @@ function selectComplexityBarChartData(raw: unknown): ChartData {
   };
 }
 
-type EstimatedClosingsDetailRowsData = {
-  rows: Record<string, unknown>[];
-};
-
-function selectEstimatedClosingsDetailRows(raw: unknown): EstimatedClosingsDetailRowsData {
+function selectLoanDetailTableData(raw: unknown): TableData {
   const src = toSource(raw);
-  return { rows: (src?.detail?.rows ?? []) as Record<string, unknown>[] };
+  const sliceCols = ESTIMATED_CLOSINGS_DETAIL_COLUMNS.slice(0, 10);
+  const columns: TableColumn[] = sliceCols.map((c) => ({
+    key: c.id,
+    label: c.label,
+    sortable: false,
+    align: c.kind === "number" ? "right" : "left",
+    format: c.kind === "number" ? "number" : undefined,
+  }));
+  return {
+    title: "Loan Detail",
+    columns,
+    rows: (src?.detail?.rows ?? []) as Record<string, unknown>[],
+  };
 }
 
 /** Same calendar logic as EstimatedClosingsRiskView stage table. */
@@ -496,9 +505,9 @@ function EstimatedClosingsDetailTableWidget({
   loading,
   error,
   config,
-}: WidgetRenderProps<EstimatedClosingsDetailRowsData>) {
+}: WidgetRenderProps<TableData>) {
   const cfg = (config ?? {}) as RiskConfig;
-  const rows = useMemo(() => data?.rows ?? [], [data?.rows]);
+  const rows = useMemo(() => (data?.rows ?? []) as Record<string, unknown>[], [data?.rows]);
   const columns = ESTIMATED_CLOSINGS_DETAIL_COLUMNS.slice(0, 10);
   const [openColumn, setOpenColumn] = React.useState<string | null>(null);
   const [searchByColumn, setSearchByColumn] = React.useState<Record<string, string>>({});
@@ -536,7 +545,7 @@ function EstimatedClosingsDetailTableWidget({
     <div className="h-full flex flex-col min-h-0">
       <Card className="h-full border border-slate-200/70 dark:border-slate-700/70">
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Loan Detail</CardTitle>
+          <CardTitle className="text-sm">{data?.title ?? "Loan Detail"}</CardTitle>
         </CardHeader>
         <CardContent className="min-h-0 h-[calc(100%-48px)] overflow-auto p-0">
           {error ? <div className="p-4 text-xs text-red-600">{error}</div> : null}
@@ -741,18 +750,18 @@ function ActiveFiltersWidget({ config }: WidgetRenderProps<Source>) {
   );
 }
 
-const detailTable: WidgetDefinition<EstimatedClosingsDetailRowsData> = {
+const detailTable: WidgetDefinition<TableData> = {
   id: "estimated-closings-detail-table",
   name: "Estimated Closings Detail",
   description: "Loan-level detail table",
   category: "table",
   group: "Estimated Closings & Risk",
   dataSource: "estimated-closings-risk",
-  dataSelector: (raw) => selectEstimatedClosingsDetailRows(raw),
+  dataSelector: (raw) => selectLoanDetailTableData(raw),
   defaultSize: { w: 36, h: 24 },
   minSize: { w: 24, h: 14 },
   component: EstimatedClosingsDetailTableWidget as ComponentType<
-    WidgetRenderProps<EstimatedClosingsDetailRowsData>
+    WidgetRenderProps<TableData>
   >,
 };
 
