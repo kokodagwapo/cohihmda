@@ -52,6 +52,10 @@ import {
   inferTrackedMetricPolarity,
   type TrackedMetricPolarity,
 } from "@/lib/trackedMetricPolarity";
+import {
+  formatDualTrendSummary,
+  effectiveTrendForBadge,
+} from "@/lib/trackedInsightTrendLabels";
 
 // ============================================================================
 // Types
@@ -102,6 +106,8 @@ interface TrackedInsight {
   snapshot_count?: number | null;
   latest_change: string | null;
   latest_trend: "improving" | "worsening" | "stable" | "new" | null;
+  /** Trend vs first (original) snapshot; null if not stored or first eval only. */
+  latest_trend_vs_baseline?: "improving" | "worsening" | "stable" | "new" | null;
   last_evaluated: string | null;
 }
 
@@ -111,6 +117,7 @@ interface Snapshot {
   previous_values: Record<string, any> | null;
   change_summary: string;
   trend: string;
+  trend_vs_baseline?: string | null;
   evaluated_at: string;
 }
 
@@ -291,6 +298,8 @@ function mergeTrackedInsightPutResponse(
     snapshot_count: row.snapshot_count ?? prev?.snapshot_count ?? null,
     latest_change: row.latest_change ?? prev?.latest_change ?? null,
     latest_trend: row.latest_trend ?? prev?.latest_trend ?? null,
+    latest_trend_vs_baseline:
+      row.latest_trend_vs_baseline ?? prev?.latest_trend_vs_baseline ?? null,
     last_evaluated: row.last_evaluated ?? prev?.last_evaluated ?? null,
   };
 }
@@ -727,7 +736,12 @@ export function TrackedInsightDetailModal({
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                    <TrendBadge trend={localInsight.latest_trend} />
+                    <TrendBadge
+                      trend={effectiveTrendForBadge(
+                        localInsight.latest_trend,
+                        localInsight.latest_trend_vs_baseline ?? null
+                      )}
+                    />
                     <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400">
                       {sourceTypeLabel}
                     </span>
@@ -759,6 +773,12 @@ export function TrackedInsightDetailModal({
                       </span>
                     )}
                   </div>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-snug mb-1.5">
+                    {formatDualTrendSummary(
+                      localInsight.latest_trend,
+                      localInsight.latest_trend_vs_baseline ?? null
+                    )}
+                  </p>
                   <h2 className="text-base font-semibold text-slate-900 dark:text-white leading-snug">
                     {localInsight.headline}
                   </h2>
@@ -992,12 +1012,37 @@ export function TrackedInsightDetailModal({
                         >
                           <button
                             onClick={() => setExpandedSnapshotId(isExpanded ? null : snap.id)}
-                            className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors"
+                            className={`w-full flex gap-2.5 px-3 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors ${
+                              isExpanded ? "items-start" : "items-center"
+                            }`}
                           >
-                            <TrendBadge trend={snap.trend} />
-                            <span className="flex-1 text-xs text-slate-600 dark:text-slate-400 line-clamp-1">
-                              {snap.change_summary}
-                            </span>
+                            <TrendBadge
+                              trend={effectiveTrendForBadge(
+                                snap.trend,
+                                snap.trend_vs_baseline ?? null
+                              )}
+                            />
+                            <div className="flex-1 min-w-0">
+                              <span
+                                className={`block text-xs text-slate-600 dark:text-slate-400 ${
+                                  isExpanded ? "" : "line-clamp-1"
+                                }`}
+                              >
+                                {snap.change_summary}
+                              </span>
+                              <span className="block text-[10px] text-slate-500 dark:text-slate-500 mt-0.5 leading-snug">
+                                {formatDualTrendSummary(
+                                  snap.trend as "improving" | "worsening" | "stable" | "new" | null,
+                                  (snap.trend_vs_baseline as
+                                    | "improving"
+                                    | "worsening"
+                                    | "stable"
+                                    | "new"
+                                    | null
+                                    | undefined) ?? null
+                                )}
+                              </span>
+                            </div>
                             <span className="text-[10px] text-slate-400 flex-shrink-0">
                               {timeAgo(snap.evaluated_at)}
                             </span>

@@ -202,11 +202,26 @@ export async function evaluateSingleTrackedInsight(
       polaritiesForEvaluation
     );
 
+    let trendVsBaseline: "improving" | "worsening" | "stable" | "new" | null = null;
+    if (prevSnapshot) {
+      const baselineSnap = await fetchBaselineSnapshot(tenantPool, insight.id);
+      if (baselineSnap?.metric_values) {
+        trendVsBaseline = determineTrend(
+          metricValues,
+          baselineSnap.metric_values,
+          comparedKeys,
+          polaritiesForEvaluation
+        );
+      }
+    }
+
+    const dualTrendLine = formatDualTrendSummary(trend, trendVsBaseline);
+
     let changeSummary: string;
     if (!prevSnapshot) {
       changeSummary = "Initial evaluation — baseline established.";
     } else if (trend === "stable") {
-      changeSummary = "No significant change since last evaluation.";
+      changeSummary = `${dualTrendLine}. No significant change vs the immediately prior snapshot (within threshold).`;
     } else {
       let apiKey = options?.llmApiKeyHolder?.key ?? null;
       if (!apiKey) {
@@ -227,7 +242,9 @@ export async function evaluateSingleTrackedInsight(
         comparedKeys,
         polaritiesForEvaluation,
         insight.display_metadata || null,
-        apiKey
+        apiKey,
+        dualTrendLine,
+        trendVsBaseline
       );
     }
 
@@ -267,18 +284,39 @@ export async function evaluateSingleTrackedInsight(
       _compared_keys: comparedKeys,
       _polarities: buildPolarityContext(comparedKeys, polaritiesForEvaluation),
     };
-    await tenantPool.query(
-      `INSERT INTO tracked_insight_snapshots
-         (tracked_insight_id, metric_values, previous_values, change_summary, trend)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [
-        insight.id,
-        JSON.stringify(snapshotMetricValues),
-        prevSnapshot ? JSON.stringify(prevSnapshot.metric_values) : null,
-        changeSummary,
-        trend,
-      ]
-    );
+    try {
+      await tenantPool.query(
+        `INSERT INTO tracked_insight_snapshots
+           (tracked_insight_id, metric_values, previous_values, change_summary, trend, trend_vs_baseline)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          insight.id,
+          JSON.stringify(snapshotMetricValues),
+          prevSnapshot ? JSON.stringify(prevSnapshot.metric_values) : null,
+          changeSummary,
+          trend,
+          trendVsBaseline,
+        ]
+      );
+    } catch (err: any) {
+      const msg = String(err?.message ?? "");
+      if (msg.includes("trend_vs_baseline") || msg.includes("does not exist")) {
+        await tenantPool.query(
+          `INSERT INTO tracked_insight_snapshots
+             (tracked_insight_id, metric_values, previous_values, change_summary, trend)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [
+            insight.id,
+            JSON.stringify(snapshotMetricValues),
+            prevSnapshot ? JSON.stringify(prevSnapshot.metric_values) : null,
+            changeSummary,
+            trend,
+          ]
+        );
+      } else {
+        throw err;
+      }
+    }
 
     await tenantPool.query(
       `UPDATE tracked_insights SET updated_at = NOW() WHERE id = $1`,
@@ -508,6 +546,31 @@ export function extractMetricValues(
   return result;
 }
 
+/** Human-readable stability line: vs last snapshot vs original (first) snapshot. */
+export function formatDualTrendSummary(
+  sinceLast: "improving" | "worsening" | "stable" | "new",
+  sinceBaseline: "improving" | "worsening" | "stable" | "new" | null | undefined
+): string {
+  const label = (t: string) =>
+    t === "improving"
+      ? "Improving"
+      : t === "worsening"
+        ? "Worsening"
+        : t === "new"
+          ? "New baseline"
+          : "Stable";
+  if (sinceLast === "new") {
+    return "New baseline — first evaluation (no prior snapshot).";
+  }
+  if (sinceBaseline == null || sinceBaseline === undefined) {
+    return `${label(sinceLast)} since last evaluation`;
+  }
+  if (sinceLast === sinceBaseline) {
+    return `${label(sinceLast)} since last evaluation and since original evaluation`;
+  }
+  return `${label(sinceLast)} since last evaluation, ${label(sinceBaseline)} since original evaluation`;
+}
+
 function determineTrend(
   current: Record<string, any>,
   previous?: Record<string, any>,
@@ -601,6 +664,22 @@ async function fetchPreviousSnapshot(
   return result.rows[0] || null;
 }
 
+/** Earliest snapshot for this insight — "original" baseline for trend_vs_baseline. */
+async function fetchBaselineSnapshot(
+  tenantPool: pg.Pool,
+  trackedInsightId: string
+): Promise<PreviousSnapshot | null> {
+  const result = await tenantPool.query(
+    `SELECT metric_values, evaluated_at
+     FROM tracked_insight_snapshots
+     WHERE tracked_insight_id = $1
+     ORDER BY evaluated_at ASC
+     LIMIT 1`,
+    [trackedInsightId]
+  );
+  return result.rows[0] || null;
+}
+
 async function generateChangeSummary(
   tenantId: string,
   headline: string,
@@ -615,7 +694,9 @@ async function generateChangeSummary(
     original_priority?: string;
     original_severity_score?: number | null;
   } | null,
-  cachedApiKey?: string | null
+  cachedApiKey?: string | null,
+  dualTrendLine?: string,
+  trendVsBaseline?: "improving" | "worsening" | "stable" | "new" | null
 ): Promise<string> {
   // Build polarity context for the LLM
   const polarityLines: string[] = [];
@@ -672,7 +753,13 @@ Rules:
           displayMetadata?.original_severity_score != null
             ? `Original severity score: ${displayMetadata.original_severity_score}`
             : "",
-          `Trend direction: ${trend}`,
+          `Trend vs last snapshot: ${trend}`,
+          trendVsBaseline != null
+            ? `Trend vs original (first) evaluation: ${trendVsBaseline}`
+            : "",
+          dualTrendLine
+            ? `Stability summary: ${dualTrendLine}`
+            : "",
           changeParts.length > 0 ? `Metric changes: ${changeParts.join("; ")}` : "",
           polarityLines.length > 0 ? `Metric polarity: ${polarityLines.join("; ")}` : "",
         ].filter(Boolean).join("\n"),

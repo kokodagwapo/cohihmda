@@ -23,6 +23,10 @@ import {
   Archive,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import {
+  formatDualTrendSummary,
+  effectiveTrendForBadge,
+} from "@/lib/trackedInsightTrendLabels";
 import { TrackedInsightDetailModal } from "./TrackedInsightDetailModal";
 
 // ============================================================================
@@ -61,6 +65,7 @@ interface TrackedInsight {
   snapshot_count?: number | null;
   latest_change: string | null;
   latest_trend: "improving" | "worsening" | "stable" | "new" | null;
+  latest_trend_vs_baseline?: "improving" | "worsening" | "stable" | "new" | null;
   last_evaluated: string | null;
 }
 
@@ -277,7 +282,12 @@ export function TrackedInsightsWatchlist({ selectedTenantId, refreshTrigger, onI
                     {insight.headline}
                   </p>
                   <div className="flex items-center gap-2 mt-1 flex-wrap">
-                    <TrendBadge trend={insight.latest_trend} />
+                    <TrendBadge
+                      trend={effectiveTrendForBadge(
+                        insight.latest_trend,
+                        insight.latest_trend_vs_baseline ?? null
+                      )}
+                    />
                     {insight.status === "resolved" && (
                       <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300">
                         <Pause className="w-2.5 h-2.5 shrink-0" />
@@ -309,6 +319,18 @@ export function TrackedInsightsWatchlist({ selectedTenantId, refreshTrigger, onI
                       </span>
                     )}
                   </div>
+                  <p
+                    className="text-[9px] text-slate-500 dark:text-slate-500 mt-1 leading-snug line-clamp-2"
+                    title={formatDualTrendSummary(
+                      insight.latest_trend,
+                      insight.latest_trend_vs_baseline ?? null
+                    )}
+                  >
+                    {formatDualTrendSummary(
+                      insight.latest_trend,
+                      insight.latest_trend_vs_baseline ?? null
+                    )}
+                  </p>
                   {insight.latest_change && (
                     <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 line-clamp-1">
                       {insight.latest_change}

@@ -207,10 +207,11 @@ async function fetchTrackedInsightRowWithSnapshot(
        (SELECT COUNT(*)::int FROM tracked_insight_snapshots WHERE tracked_insight_id = ti.id) AS snapshot_count,
        s.change_summary AS latest_change,
        s.trend AS latest_trend,
+       s.trend_vs_baseline AS latest_trend_vs_baseline,
        s.evaluated_at AS last_evaluated
      FROM tracked_insights ti
      LEFT JOIN LATERAL (
-       SELECT metric_values, previous_values, change_summary, trend, evaluated_at
+       SELECT metric_values, previous_values, change_summary, trend, trend_vs_baseline, evaluated_at
        FROM tracked_insight_snapshots
        WHERE tracked_insight_id = ti.id
        ORDER BY evaluated_at DESC
@@ -533,10 +534,11 @@ router.get(
            (SELECT COUNT(*)::int FROM tracked_insight_snapshots WHERE tracked_insight_id = ti.id) AS snapshot_count,
            s.change_summary AS latest_change,
            s.trend AS latest_trend,
+           s.trend_vs_baseline AS latest_trend_vs_baseline,
            s.evaluated_at AS last_evaluated
          FROM tracked_insights ti
          LEFT JOIN LATERAL (
-           SELECT metric_values, previous_values, change_summary, trend, evaluated_at
+           SELECT metric_values, previous_values, change_summary, trend, trend_vs_baseline, evaluated_at
            FROM tracked_insight_snapshots
            WHERE tracked_insight_id = ti.id
            ORDER BY evaluated_at DESC
