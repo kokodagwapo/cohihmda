@@ -271,7 +271,9 @@ function hydrateSlideData(
   // Build lookup indexes from canvas data
   const kpis = canvasWidgets.filter((w) => w.category === 'kpi');
   const charts = canvasWidgets.filter((w) => w.category === 'chart');
-  const tables = canvasWidgets.filter((w) => w.category === 'table');
+  const tables = canvasWidgets.filter(
+    (w) => w.category === 'table' && !omitFromAutoCanvasSlides(w),
+  );
 
   return slides.map((slide) => ({
     ...slide,
@@ -418,6 +420,11 @@ function isEmbedSentinel(data: unknown): boolean {
 
 type CanvasWidgetLike = WidgetDataEntry & Pick<CanvasWidgetData, 'layoutPosition' | 'widgetType'>;
 
+/** Loan-level grid is interactive and large — omit from auto-generated PowerPoint slides. */
+function omitFromAutoCanvasSlides(w: WidgetDataEntry): boolean {
+  return w.itemId.includes('estimated-closings-detail-table');
+}
+
 function sortBySpatialPosition(widgets: CanvasWidgetLike[]): CanvasWidgetLike[] {
   return [...widgets].sort((a, b) => {
     const ay = a.layoutPosition?.y ?? 0;
@@ -519,7 +526,9 @@ function canvasWidgetsToSlides(
   });
 
   // Keep slide order aligned with canvas reading order.
-  const withData = sortBySpatialPosition(widgets.filter(hasRenderableData) as CanvasWidgetLike[]);
+  const withData = sortBySpatialPosition(
+    widgets.filter((w) => hasRenderableData(w) && !omitFromAutoCanvasSlides(w)) as CanvasWidgetLike[],
+  );
   const kpis = withData.filter((w) => w.category === 'kpi');
 
   const getWidgetTitle = (widget: CanvasWidgetLike, fallback?: string) => {

@@ -668,8 +668,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     tenantId: effectiveTenantId,
     channelGroup: selectedChannel,
     dateRangeType: (ecrFilters?.estimatedClosingsDateRangeType ?? 'calendar_days') as 'calendar_days' | 'business_days',
-    limit: 250,
-    offset: 0,
+    fetchAllDetailRows: true,
     dimensionFilters: ecrDimensionFilters,
     pageSliceFilters: {
       ecdSlice: ecrFilters?.estimatedClosingsEcdSlice ?? null,

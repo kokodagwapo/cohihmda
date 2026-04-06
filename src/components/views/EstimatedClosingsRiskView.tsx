@@ -87,8 +87,6 @@ function sortRowsByConfig<T extends Record<string, unknown>>(rows: T[], sort: So
 
 const PIE_COLORS = ["#94a3b8", "#ef4444", "#3b82f6", "#10b981"];
 const LOAN_NUMBER_FILTER_MAX_OPTIONS = 200;
-/** Detail table page size for GET estimated-closings-risk (reduces payload and query cost). */
-const DETAIL_TABLE_PAGE_SIZE = 250;
 const KPI_DESCRIPTIONS: Record<string, string> = {
   totalActivePipeline:
     "Count of active loans using the canonical site definition: Active Loan status, application date present, and not archived.",
@@ -276,7 +274,6 @@ export function EstimatedClosingsRiskView({
   const [showDetailColumnFilters, setShowDetailColumnFilters] = useState(false);
   const [draftDetailFilters, setDraftDetailFilters] = useState<ColumnFilterState>({});
   const [openDetailFilterColumnId, setOpenDetailFilterColumnId] = useState<string | null>(null);
-  const [detailTableOffset, setDetailTableOffset] = useState(0);
   const [detailCsvExporting, setDetailCsvExporting] = useState(false);
   const pieChartContainerRef = useRef<HTMLDivElement | null>(null);
   const barChartContainerRef = useRef<HTMLDivElement | null>(null);
@@ -305,30 +302,11 @@ export function EstimatedClosingsRiskView({
     [ecdSlice, complexityBarBucket, remainingComplexityGroup, remainingProcessingStage],
   );
 
-  const detailColumnFiltersKey = useMemo(
-    () => JSON.stringify(normalizeFilterState(detailColumnFilters)),
-    [detailColumnFilters],
-  );
-
-  useEffect(() => {
-    setDetailTableOffset(0);
-  }, [
-    selectedTenantId,
-    ecdSlice,
-    complexityBarBucket,
-    remainingComplexityGroup,
-    remainingProcessingStage,
-    detailColumnFiltersKey,
-    dateRangeType,
-    selectedChannel,
-  ]);
-
   const { data, loading, error } = useEstimatedClosingsRiskData({
     tenantId: selectedTenantId,
     channelGroup: selectedChannel,
     dateRangeType,
-    limit: DETAIL_TABLE_PAGE_SIZE,
-    offset: detailTableOffset,
+    fetchAllDetailRows: true,
     pageSliceFilters,
     detailColumnFilters,
   });
@@ -495,7 +473,6 @@ export function EstimatedClosingsRiskView({
     setComplexityBarBucket(null);
     setRemainingComplexityGroup(null);
     setRemainingProcessingStage(null);
-    setDetailTableOffset(0);
     setDetailColumnFilters({});
     setDraftDetailFilters({});
     setOpenDetailFilterColumnId(null);
@@ -1649,7 +1626,6 @@ export function EstimatedClosingsRiskView({
                 <TableRow className="border-b-2 border-slate-200 bg-slate-50/90 font-semibold dark:border-slate-600 dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800/80">
                   <TableCell>
                     Totals
-                    {(data?.detail.total ?? 0) > detailRowsSorted.length ? " (this page)" : ""}
                   </TableCell>
                   <TableCell />
                   <TableCell>{detailTableTotals.avgComplexity != null ? detailTableTotals.avgComplexity.toFixed(1) : "-"}</TableCell>
@@ -1842,41 +1818,7 @@ export function EstimatedClosingsRiskView({
             <span className="text-sm text-slate-700 dark:text-slate-300">
               {(data?.detail.total ?? detailRowsSorted.length).toLocaleString()}{" "}
               {(data?.detail.total ?? detailRowsSorted.length) === 1 ? "loan" : "loans"}
-              {(data?.detail.total ?? 0) > DETAIL_TABLE_PAGE_SIZE && detailRowsSorted.length > 0 ? (
-                <span className="text-slate-500 dark:text-slate-400">
-                  {" "}
-                  (showing {(detailTableOffset + 1).toLocaleString()}–
-                  {(detailTableOffset + detailRowsSorted.length).toLocaleString()})
-                </span>
-              ) : null}
             </span>
-            {(data?.detail.total ?? 0) > DETAIL_TABLE_PAGE_SIZE ? (
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8"
-                  disabled={detailTableOffset === 0 || loading}
-                  onClick={() => setDetailTableOffset((o) => Math.max(0, o - DETAIL_TABLE_PAGE_SIZE))}
-                >
-                  Previous
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8"
-                  disabled={
-                    loading ||
-                    detailTableOffset + DETAIL_TABLE_PAGE_SIZE >= (data?.detail.total ?? 0)
-                  }
-                  onClick={() => setDetailTableOffset((o) => o + DETAIL_TABLE_PAGE_SIZE)}
-                >
-                  Next
-                </Button>
-              </div>
-            ) : null}
           </div>
         </CardContent>
       </Card>

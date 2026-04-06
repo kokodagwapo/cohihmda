@@ -147,7 +147,7 @@ function complexityGroupExpr(alias: string): string {
     WHEN ${alias}.complexity_score BETWEEN 111 AND 120 THEN '3 - 111 to 120'
     WHEN ${alias}.complexity_score BETWEEN 101 AND 110 THEN '4 - 101 to 110'
     WHEN ${alias}.complexity_score BETWEEN 91 AND 100 THEN '5 - 91 to 100'
-    WHEN ${alias}.complexity_score < 90 THEN '6 - Less than 90'
+    WHEN ${alias}.complexity_score <= 90 THEN '6 - 90 or less'
     ELSE 'Other'
   END)`;
 }
@@ -159,7 +159,7 @@ function complexityGroupSortExpr(alias: string): string {
     WHEN ${alias}.complexity_score BETWEEN 111 AND 120 THEN 3
     WHEN ${alias}.complexity_score BETWEEN 101 AND 110 THEN 4
     WHEN ${alias}.complexity_score BETWEEN 91 AND 100 THEN 5
-    WHEN ${alias}.complexity_score < 90 THEN 6
+    WHEN ${alias}.complexity_score <= 90 THEN 6
     ELSE 99
   END)`;
 }
@@ -546,7 +546,7 @@ export async function getEstimatedClosingsRiskData(
       UNION ALL SELECT 3, '3 - 111 to 120'
       UNION ALL SELECT 4, '4 - 101 to 110'
       UNION ALL SELECT 5, '5 - 91 to 100'
-      UNION ALL SELECT 6, '6 - Less than 90'
+      UNION ALL SELECT 6, '6 - 90 or less'
     )
     , rem_counts AS (
       SELECT ${complexityGroupSortExpr("l")} AS sort_order, COUNT(*)::int AS cnt

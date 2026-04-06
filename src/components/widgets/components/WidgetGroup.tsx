@@ -3260,18 +3260,6 @@ export function WidgetGroup({
           ],
           showYears: false,
         };
-      case "estimated-closings-risk":
-        return {
-          presets: [
-            "mtd",
-            "last-month",
-            "qtd",
-            "last-quarter",
-            "ytd",
-            "last-year",
-          ],
-          showYears: false,
-        };
       default:
         return {}; // default behavior: rolling-13, rolling-12 + year buttons
     }
@@ -4328,33 +4316,35 @@ export function WidgetGroup({
                 </>
               ) : (
                 <>
-                  <DatePeriodPicker
-                    year={filters.year}
-                    onYearChange={handleYearChange}
-                    onDateRangeChange={handleDateRangeChange}
-                    onPeriodChange={handlePeriodChange}
-                    presets={sectionPresetConfig.presets}
-                    showYears={sectionPresetConfig.showYears}
-                    size="sm"
-                    showLabel={false}
-                    yearsToShow={4}
-                    showAllOption={sectionType === "loan-detail"}
-                    onAllSelect={
-                      sectionType === "loan-detail"
-                        ? () =>
-                            updateFilters(groupId, {
-                              periodSelection: undefined,
-                              dateRange: undefined,
-                            })
-                        : undefined
-                    }
-                    periodSelectionFromStore={
-                      sectionType === "loan-detail" ||
-                      sectionType === "sales-scorecard-overview"
-                        ? filters.periodSelection
-                        : undefined
-                    }
-                  />
+                  {sectionType !== "estimated-closings-risk" ? (
+                    <DatePeriodPicker
+                      year={filters.year}
+                      onYearChange={handleYearChange}
+                      onDateRangeChange={handleDateRangeChange}
+                      onPeriodChange={handlePeriodChange}
+                      presets={sectionPresetConfig.presets}
+                      showYears={sectionPresetConfig.showYears}
+                      size="sm"
+                      showLabel={false}
+                      yearsToShow={4}
+                      showAllOption={sectionType === "loan-detail"}
+                      onAllSelect={
+                        sectionType === "loan-detail"
+                          ? () =>
+                              updateFilters(groupId, {
+                                periodSelection: undefined,
+                                dateRange: undefined,
+                              })
+                          : undefined
+                      }
+                      periodSelectionFromStore={
+                        sectionType === "loan-detail" ||
+                        sectionType === "sales-scorecard-overview"
+                          ? filters.periodSelection
+                          : undefined
+                      }
+                    />
+                  ) : null}
 
                   {/* Data-driven filters from SECTION_FILTER_CONFIG */}
                   {(SECTION_FILTER_CONFIG[sectionType] ?? []).map((field) => {

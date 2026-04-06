@@ -1,6 +1,13 @@
 import React, { useMemo } from "react";
 import type { ComponentType } from "react";
-import type { WidgetDefinition, WidgetRenderProps, KPIData, TableData } from "./types";
+import type {
+  WidgetDefinition,
+  WidgetRenderProps,
+  KPIData,
+  TableData,
+  ChartData,
+  TableColumn,
+} from "./types";
 import { KPICard } from "../components/KPICard";
 import { DataTable } from "../components/DataTable";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -48,6 +55,9 @@ const ECD_SLICE_LABELS: Record<string, string> = {
   after_this_month: "After This Month",
 };
 
+/** Same order as `EstimatedClosingsRiskView` pie (API slice order × index). */
+const ECD_PIE_COLORS = ["#94a3b8", "#ef4444", "#3b82f6", "#10b981"];
+
 const COMPLEXITY_BUCKET_LABELS: Record<string, string> = {
   gte_130: "Complexity >=130",
   gte_120: "Complexity >=120",
@@ -88,6 +98,75 @@ function toSource(raw: unknown): Source {
   return raw as Source;
 }
 
+/** ChartData for canvas store / PowerPoint — same canonical shape as Company Scorecard charts. */
+function selectEcdPieChartData(raw: unknown): ChartData {
+  const src = toSource(raw);
+  const slices = src?.activePipelineEcdSlices ?? [];
+  return {
+    title: "Active Pipeline by ECD",
+    chartType: "pie",
+    data: slices.map((s) => ({
+      key: s.key,
+      label: s.label,
+      count: s.count,
+    })) as Record<string, unknown>[],
+    series: [{ dataKey: "count", name: "Loans", color: "#3b82f6" }],
+    xAxisKey: "label",
+  };
+}
+
+function selectComplexityBarChartData(raw: unknown): ChartData {
+  const src = toSource(raw);
+  const rows = src?.maxPossibleFundingByComplexity ?? [];
+  return {
+    title: "Max Possible Funding by Complexity",
+    chartType: "bar",
+    stacked: true,
+    data: rows.map((r) => ({
+      bucketLabel: r.bucketLabel,
+      bucketKey: r.bucketKey,
+      funded: r.funded,
+      notFunded: r.notFunded,
+    })) as Record<string, unknown>[],
+    series: [
+      { dataKey: "funded", name: "Funded", color: "#3b82f6" },
+      { dataKey: "notFunded", name: "Not Funded", color: "#ef4444" },
+    ],
+    xAxisKey: "bucketLabel",
+  };
+}
+
+function selectLoanDetailTableData(raw: unknown): TableData {
+  const src = toSource(raw);
+  const sliceCols = ESTIMATED_CLOSINGS_DETAIL_COLUMNS.slice(0, 10);
+  const columns: TableColumn[] = sliceCols.map((c) => ({
+    key: c.id,
+    label: c.label,
+    sortable: false,
+    align: c.kind === "number" ? "right" : "left",
+    format: c.kind === "number" ? "number" : undefined,
+  }));
+  return {
+    title: "Loan Detail",
+    columns,
+    rows: (src?.detail?.rows ?? []) as Record<string, unknown>[],
+  };
+}
+
+/** Same calendar logic as EstimatedClosingsRiskView stage table. */
+function daysRemainingInCurrentMonth(): number {
+  const now = new Date();
+  const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfEndDate = new Date(
+    endOfMonth.getFullYear(),
+    endOfMonth.getMonth(),
+    endOfMonth.getDate(),
+  );
+  return Math.max(0, Math.floor((startOfEndDate.getTime() - startOfToday.getTime()) / msPerDay));
+}
+
 function getActiveFilterLabels(cfg: RiskConfig): string[] {
   const labels: string[] = [];
   if (cfg.selectedComplexityBucket) {
@@ -115,7 +194,7 @@ function getActiveFilterItems(cfg: RiskConfig): Array<{ key: string; label: stri
     items.push({
       key: `complexity:${key}`,
       label: COMPLEXITY_BUCKET_LABELS[key] ?? key,
-      clear: () => cfg.onSelectComplexityBucket?.(key),
+      clear: () => cfg.onSelectComplexityBucket?.(toComplexityBucketKey(key)),
     });
   }
   if (cfg.selectedEcdSlice) {
@@ -123,7 +202,7 @@ function getActiveFilterItems(cfg: RiskConfig): Array<{ key: string; label: stri
     items.push({
       key: `ecd:${key}`,
       label: ECD_SLICE_LABELS[key] ?? key,
-      clear: () => cfg.onSelectEcdSlice?.(key),
+      clear: () => cfg.onSelectEcdSlice?.(toEcdKey(key)),
     });
   }
   if (cfg.selectedRemainingComplexityGroup) {
@@ -178,9 +257,23 @@ function riskKpi(
   };
 }
 
-function EcdPieWidget({ data, loading, error, config }: WidgetRenderProps<Source>) {
+type EcdPieRow = { key: string; label: string; count: number };
+
+function ecdPieRowsFromChartData(data: ChartData | null): EcdPieRow[] {
+  if (!data?.data?.length) return [];
+  return data.data.map((row) => {
+    const r = row as Record<string, unknown>;
+    return {
+      key: String(r.key ?? ""),
+      label: String(r.label ?? ""),
+      count: Number(r.count ?? 0),
+    };
+  });
+}
+
+function EcdPieWidget({ data, loading, error, config }: WidgetRenderProps<ChartData>) {
   const cfg = (config ?? {}) as RiskConfig;
-  const rows = data?.activePipelineEcdSlices ?? [];
+  const rows = ecdPieRowsFromChartData(data);
   const active = getActiveFilterLabels(cfg);
   return (
     <Card className="h-full border border-slate-200/70 dark:border-slate-700/70">
@@ -196,18 +289,29 @@ function EcdPieWidget({ data, loading, error, config }: WidgetRenderProps<Source
         {error ? <div className="text-xs text-red-600">{error}</div> : null}
         {!error && (
           <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
+            <PieChart margin={{ top: 16, right: 20, bottom: 16, left: 20 }}>
               <Pie
                 data={rows}
                 dataKey="count"
                 nameKey="label"
                 outerRadius={90}
-                onClick={(entry: unknown) =>
-                  cfg.onSelectEcdSlice?.(toEcdKey(getStringField(entry, "key")))
+                label={(entry: { label?: string; count?: number }) =>
+                  `${entry.label ?? ""}: ${Number(entry.count ?? 0).toLocaleString()}`
                 }
+                className="cursor-pointer [&_path]:outline-none"
+                onClick={(entry: unknown) => {
+                  const key = getStringField(entry, "key");
+                  cfg.onSelectEcdSlice?.(toEcdKey(key));
+                }}
               >
                 {rows.map((r, i) => (
-                  <Cell key={r.key} fill={cfg.selectedEcdSlice === r.key ? "#16a34a" : ["#3b82f6", "#22c55e", "#f59e0b", "#a855f7"][i % 4]} />
+                  <Cell
+                    key={r.key}
+                    fill={ECD_PIE_COLORS[i % ECD_PIE_COLORS.length]}
+                    opacity={
+                      cfg.selectedEcdSlice != null && cfg.selectedEcdSlice !== r.key ? 0.35 : 1
+                    }
+                  />
                 ))}
               </Pie>
               <Tooltip />
@@ -220,9 +324,29 @@ function EcdPieWidget({ data, loading, error, config }: WidgetRenderProps<Source
   );
 }
 
-function ComplexityBarWidget({ data, loading, error, config }: WidgetRenderProps<Source>) {
+type ComplexityBarRow = {
+  bucketKey: string;
+  bucketLabel: string;
+  funded: number;
+  notFunded: number;
+};
+
+function complexityBarRowsFromChartData(data: ChartData | null): ComplexityBarRow[] {
+  if (!data?.data?.length) return [];
+  return data.data.map((row) => {
+    const r = row as Record<string, unknown>;
+    return {
+      bucketKey: String(r.bucketKey ?? ""),
+      bucketLabel: String(r.bucketLabel ?? ""),
+      funded: Number(r.funded ?? 0),
+      notFunded: Number(r.notFunded ?? 0),
+    };
+  });
+}
+
+function ComplexityBarWidget({ data, loading, error, config }: WidgetRenderProps<ChartData>) {
   const cfg = (config ?? {}) as RiskConfig;
-  const rows = data?.maxPossibleFundingByComplexity ?? [];
+  const rows = complexityBarRowsFromChartData(data);
   const active = getActiveFilterLabels(cfg);
   return (
     <Card className="h-full border border-slate-200/70 dark:border-slate-700/70">
@@ -244,7 +368,9 @@ function ComplexityBarWidget({ data, loading, error, config }: WidgetRenderProps
               <Bar
                 dataKey="funded"
                 stackId="funding"
-                fill="#22c55e"
+                fill="#3b82f6"
+                name="Funded"
+                className="cursor-pointer"
                 onClick={(entry: unknown) =>
                   cfg.onSelectComplexityBucket?.(
                     toComplexityBucketKey(getStringField(entry, "bucketKey")),
@@ -254,23 +380,15 @@ function ComplexityBarWidget({ data, loading, error, config }: WidgetRenderProps
               <Bar
                 dataKey="notFunded"
                 stackId="funding"
+                fill="#ef4444"
+                name="Not Funded"
+                className="cursor-pointer"
                 onClick={(entry: unknown) =>
                   cfg.onSelectComplexityBucket?.(
                     toComplexityBucketKey(getStringField(entry, "bucketKey")),
                   )
                 }
-              >
-                {rows.map((r) => (
-                  <Cell
-                    key={r.bucketKey}
-                    fill={
-                      cfg.selectedComplexityBucket === r.bucketKey
-                        ? "#16a34a"
-                        : "#3b82f6"
-                    }
-                  />
-                ))}
-              </Bar>
+              />
             </BarChart>
           </ResponsiveContainer>
         )}
@@ -307,20 +425,26 @@ const remainingByComplexityTable: WidgetDefinition<TableData> = {
   dataSelector: (raw) => ({
     title: "Remaining to Fund, Experience by Complexity",
     columns: [
-      { key: "complexityGroup", label: "Complexity", sortable: true },
-      { key: "unitsRemainingToFund", label: "Units", align: "right", sortable: true, format: "number" },
-      { key: "historicalFalloutLast13Months", label: "Fallout %", align: "right", sortable: true },
+      { key: "complexityGroup", label: "Complexity Group", sortable: true },
+      { key: "unitsRemainingToFund", label: "Units Remaining", align: "right", sortable: true, format: "number" },
+      {
+        key: "historicalFalloutLast13Months",
+        label: "Historical % Fallout (13M)",
+        align: "right",
+        sortable: true,
+        format: "percent",
+      },
     ],
     rows: (toSource(raw)?.remainingToFundByComplexity ?? []).map((r) => ({
       complexityGroup: r.complexityGroup,
       unitsRemainingToFund: r.unitsRemainingToFund,
       historicalFalloutLast13Months:
-        r.historicalFalloutLast13Months == null ? "—" : `${(r.historicalFalloutLast13Months * 100).toFixed(1)}%`,
+        r.historicalFalloutLast13Months == null ? null : r.historicalFalloutLast13Months,
     })),
   }),
   defaultSize: { w: 24, h: 22 },
   minSize: { w: 16, h: 14 },
-  component: DataTable as ComponentType<WidgetRenderProps<unknown>>,
+  component: DataTable as ComponentType<WidgetRenderProps<TableData>>,
 };
 
 const remainingByStageTable: WidgetDefinition<TableData> = {
@@ -330,22 +454,50 @@ const remainingByStageTable: WidgetDefinition<TableData> = {
   category: "table",
   group: "Estimated Closings & Risk",
   dataSource: "estimated-closings-risk",
-  dataSelector: (raw) => ({
-    title: "Remaining to Fund, Experience by Processing Stage",
-    columns: [
-      { key: "processingStage", label: "Stage", sortable: true },
-      { key: "unitsRemainingToFund", label: "Units", align: "right", sortable: true, format: "number" },
-      { key: "historicalFallout", label: "Fallout %", align: "right", sortable: true },
-    ],
-    rows: (toSource(raw)?.remainingToFundByProcessingStage ?? []).map((r) => ({
-      processingStage: r.processingStage,
-      unitsRemainingToFund: r.unitsRemainingToFund,
-      historicalFallout: r.historicalFallout == null ? "—" : `${(r.historicalFallout * 100).toFixed(1)}%`,
-    })),
-  }),
+  dataSelector: (raw) => {
+    const daysLeft = daysRemainingInCurrentMonth();
+    return {
+      title: "Remaining to Fund, Experience by Current Processing Stage",
+      columns: [
+        { key: "processingStage", label: "Processing Stage", sortable: true },
+        { key: "unitsRemainingToFund", label: "Units Remaining", align: "right", sortable: true, format: "number" },
+        {
+          key: "daysRemainingInCurrentMonth",
+          label: "Days Remaining in Current Month",
+          align: "right",
+          sortable: false,
+          format: "number",
+        },
+        {
+          key: "historicalFallout",
+          label: "Historical Fallout",
+          align: "right",
+          sortable: true,
+          format: "percent",
+        },
+        {
+          key: "historicalStatusToFundDays",
+          label: "Historical Status to Fund Days",
+          align: "right",
+          sortable: true,
+          format: "number",
+        },
+      ],
+      rows: (toSource(raw)?.remainingToFundByProcessingStage ?? []).map((r) => ({
+        processingStage: r.processingStage,
+        unitsRemainingToFund: r.unitsRemainingToFund,
+        daysRemainingInCurrentMonth: daysLeft,
+        historicalFallout: r.historicalFallout == null ? null : r.historicalFallout,
+        historicalStatusToFundDays:
+          r.historicalStatusToFundDays == null
+            ? null
+            : Math.round(Number(r.historicalStatusToFundDays) * 10) / 10,
+      })),
+    };
+  },
   defaultSize: { w: 24, h: 22 },
   minSize: { w: 16, h: 14 },
-  component: DataTable as ComponentType<WidgetRenderProps<unknown>>,
+  component: DataTable as ComponentType<WidgetRenderProps<TableData>>,
 };
 
 function EstimatedClosingsDetailTableWidget({
@@ -353,12 +505,9 @@ function EstimatedClosingsDetailTableWidget({
   loading,
   error,
   config,
-}: WidgetRenderProps<Source>) {
+}: WidgetRenderProps<TableData>) {
   const cfg = (config ?? {}) as RiskConfig;
-  const rows = useMemo(
-    () => (data?.detail.rows ?? []) as Record<string, unknown>[],
-    [data?.detail.rows],
-  );
+  const rows = useMemo(() => (data?.rows ?? []) as Record<string, unknown>[], [data?.rows]);
   const columns = ESTIMATED_CLOSINGS_DETAIL_COLUMNS.slice(0, 10);
   const [openColumn, setOpenColumn] = React.useState<string | null>(null);
   const [searchByColumn, setSearchByColumn] = React.useState<Record<string, string>>({});
@@ -396,7 +545,7 @@ function EstimatedClosingsDetailTableWidget({
     <div className="h-full flex flex-col min-h-0">
       <Card className="h-full border border-slate-200/70 dark:border-slate-700/70">
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Loan Detail</CardTitle>
+          <CardTitle className="text-sm">{data?.title ?? "Loan Detail"}</CardTitle>
         </CardHeader>
         <CardContent className="min-h-0 h-[calc(100%-48px)] overflow-auto p-0">
           {error ? <div className="p-4 text-xs text-red-600">{error}</div> : null}
@@ -601,17 +750,19 @@ function ActiveFiltersWidget({ config }: WidgetRenderProps<Source>) {
   );
 }
 
-const detailTable: WidgetDefinition<Source> = {
+const detailTable: WidgetDefinition<TableData> = {
   id: "estimated-closings-detail-table",
   name: "Estimated Closings Detail",
   description: "Loan-level detail table",
   category: "table",
   group: "Estimated Closings & Risk",
   dataSource: "estimated-closings-risk",
-  dataSelector: (raw) => toSource(raw),
+  dataSelector: (raw) => selectLoanDetailTableData(raw),
   defaultSize: { w: 36, h: 24 },
   minSize: { w: 24, h: 14 },
-  component: EstimatedClosingsDetailTableWidget as ComponentType<WidgetRenderProps<unknown>>,
+  component: EstimatedClosingsDetailTableWidget as ComponentType<
+    WidgetRenderProps<TableData>
+  >,
 };
 
 export const estimatedClosingsRiskWidgets: WidgetDefinition[] = [
@@ -644,10 +795,10 @@ export const estimatedClosingsRiskWidgets: WidgetDefinition[] = [
     category: "chart",
     group: "Estimated Closings & Risk",
     dataSource: "estimated-closings-risk",
-    dataSelector: (raw) => toSource(raw),
+    dataSelector: (raw) => selectEcdPieChartData(raw),
     defaultSize: { w: 18, h: 20 },
     minSize: { w: 12, h: 12 },
-    component: EcdPieWidget as ComponentType<WidgetRenderProps<unknown>>,
+    component: EcdPieWidget as ComponentType<WidgetRenderProps<ChartData>>,
   },
   {
     id: "estimated-closings-complexity-bar",
@@ -656,10 +807,10 @@ export const estimatedClosingsRiskWidgets: WidgetDefinition[] = [
     category: "chart",
     group: "Estimated Closings & Risk",
     dataSource: "estimated-closings-risk",
-    dataSelector: (raw) => toSource(raw),
+    dataSelector: (raw) => selectComplexityBarChartData(raw),
     defaultSize: { w: 18, h: 20 },
     minSize: { w: 12, h: 12 },
-    component: ComplexityBarWidget as ComponentType<WidgetRenderProps<unknown>>,
+    component: ComplexityBarWidget as ComponentType<WidgetRenderProps<ChartData>>,
   },
   remainingByComplexityTable,
   remainingByStageTable,

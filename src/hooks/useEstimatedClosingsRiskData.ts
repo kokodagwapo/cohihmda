@@ -161,9 +161,23 @@ export function useEstimatedClosingsRiskData(params: {
   dimensionFilters?: Array<{ column: string; value: string }>;
   pageSliceFilters?: EstimatedClosingsPageSliceFilters;
   detailColumnFilters?: ColumnFilterState;
+  /**
+   * When true, loads every detail row via sequential API chunks (same cap as CSV export).
+   * Omit `limit` / `offset`; detail totals match the full row set.
+   */
+  fetchAllDetailRows?: boolean;
 }) {
-  const { tenantId, channelGroup, dateRangeType, limit, offset, dimensionFilters, pageSliceFilters, detailColumnFilters } =
-    params;
+  const {
+    tenantId,
+    channelGroup,
+    dateRangeType,
+    limit,
+    offset,
+    dimensionFilters,
+    pageSliceFilters,
+    detailColumnFilters,
+    fetchAllDetailRows = false,
+  } = params;
   const [data, setData] = useState<EstimatedClosingsRiskResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -206,25 +220,80 @@ export function useEstimatedClosingsRiskData(params: {
     const ac = new AbortController();
     setLoading(true);
     setError(null);
-    api
-      .request<EstimatedClosingsRiskResponse>(`/api/dashboard/estimated-closings-risk?${query}`, {
-        signal: ac.signal,
-        headers: { "Cache-Control": "no-cache" },
-      })
-      .then((res) => {
-        setData(res);
-      })
-      .catch((err: unknown) => {
+
+    if (!fetchAllDetailRows) {
+      api
+        .request<EstimatedClosingsRiskResponse>(`/api/dashboard/estimated-closings-risk?${query}`, {
+          signal: ac.signal,
+          headers: { "Cache-Control": "no-cache" },
+        })
+        .then((res) => {
+          setData(res);
+        })
+        .catch((err: unknown) => {
+          if (ac.signal.aborted) return;
+          setError(err instanceof Error ? err.message : "Failed to load Estimated Closings and Risk data.");
+        })
+        .finally(() => {
+          if (!ac.signal.aborted) setLoading(false);
+        });
+      return () => {
+        ac.abort();
+      };
+    }
+
+    void (async () => {
+      try {
+        let merged: EstimatedClosingsRiskResponse | null = null;
+        const allRows: Array<Record<string, unknown>> = [];
+        let chunkOffset = 0;
+        for (;;) {
+          const chunkQuery = buildEstimatedClosingsRiskQueryString({
+            tenantId,
+            channelGroup,
+            dateRangeType,
+            limit: ESTIMATED_CLOSINGS_DETAIL_EXPORT_CHUNK,
+            offset: chunkOffset,
+            dimensionFilters,
+            pageSliceFilters,
+            detailFiltersJson,
+          });
+          const res = await api.request<EstimatedClosingsRiskResponse>(
+            `/api/dashboard/estimated-closings-risk?${chunkQuery}`,
+            {
+              signal: ac.signal,
+              headers: { "Cache-Control": "no-cache" },
+            },
+          );
+          if (ac.signal.aborted) return;
+          if (!merged) merged = res;
+          allRows.push(...res.detail.rows);
+          chunkOffset += res.detail.rows.length;
+          if (allRows.length >= res.detail.total || res.detail.rows.length === 0) break;
+        }
+        if (ac.signal.aborted || !merged) return;
+        setData({
+          ...merged,
+          detail: {
+            ...merged.detail,
+            rows: allRows,
+            total: merged.detail.total,
+            limit: allRows.length,
+            offset: 0,
+          },
+        });
+      } catch (err: unknown) {
         if (ac.signal.aborted) return;
         setError(err instanceof Error ? err.message : "Failed to load Estimated Closings and Risk data.");
-      })
-      .finally(() => {
+      } finally {
         if (!ac.signal.aborted) setLoading(false);
-      });
+      }
+    })();
+
     return () => {
       ac.abort();
     };
-  }, [query]);
+  }, [fetchAllDetailRows, query]);
 
   return { data, loading, error };
 }
