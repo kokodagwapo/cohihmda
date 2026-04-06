@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -87,6 +88,10 @@ function sortRowsByConfig<T extends Record<string, unknown>>(rows: T[], sort: So
 
 const PIE_COLORS = ["#94a3b8", "#ef4444", "#3b82f6", "#10b981"];
 const LOAN_NUMBER_FILTER_MAX_OPTIONS = 200;
+/** Fixed row height for virtualized loan detail rows (must match estimateSize). */
+const DETAIL_VIRTUAL_ROW_HEIGHT = 44;
+const DETAIL_VIRTUAL_OVERSCAN = 10;
+const DETAIL_COLUMN_COUNT = ESTIMATED_CLOSINGS_DETAIL_COLUMNS.length;
 const KPI_DESCRIPTIONS: Record<string, string> = {
   totalActivePipeline:
     "Count of active loans using the canonical site definition: Active Loan status, application date present, and not archived.",
@@ -277,6 +282,8 @@ export function EstimatedClosingsRiskView({
   const [detailCsvExporting, setDetailCsvExporting] = useState(false);
   const pieChartContainerRef = useRef<HTMLDivElement | null>(null);
   const barChartContainerRef = useRef<HTMLDivElement | null>(null);
+  /** State (not ref) so row virtualizer re-runs after the scroll container mounts — getScrollElement() was null on first paint. */
+  const [detailScrollElement, setDetailScrollElement] = useState<HTMLDivElement | null>(null);
   const [filterSearchByColumn, setFilterSearchByColumn] = useState<Record<string, string>>({});
   const [debouncedFilterSearchByColumn, setDebouncedFilterSearchByColumn] = useState<Record<string, string>>({});
   const searchDebounceTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -650,6 +657,23 @@ export function EstimatedClosingsRiskView({
       avgAppToDispositionDays: averageNonZero(detailRowsSorted, "appToDispositionDays"),
     };
   }, [detailRowsSorted]);
+
+  const detailRowVirtualizer = useVirtualizer({
+    count: detailRowsSorted.length,
+    getScrollElement: () => detailScrollElement,
+    estimateSize: () => DETAIL_VIRTUAL_ROW_HEIGHT,
+    overscan: DETAIL_VIRTUAL_OVERSCAN,
+  });
+  const virtualDetailRows = detailRowVirtualizer.getVirtualItems();
+  const detailPaddingTop = virtualDetailRows.length > 0 ? virtualDetailRows[0].start : 0;
+  const detailPaddingBottom =
+    virtualDetailRows.length > 0
+      ? detailRowVirtualizer.getTotalSize() - virtualDetailRows[virtualDetailRows.length - 1].end
+      : 0;
+
+  useEffect(() => {
+    detailScrollElement?.scrollTo({ top: 0 });
+  }, [detailRowsSorted, detailScrollElement]);
 
   const DETAIL_TOTALS_TAIL_COLSPAN = 17;
 
@@ -1584,7 +1608,10 @@ export function EstimatedClosingsRiskView({
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="overflow-auto max-h-[620px] border-t border-slate-200 dark:border-slate-700">
+          <div
+            ref={setDetailScrollElement}
+            className="overflow-auto max-h-[620px] min-h-[200px] border-t border-slate-200 dark:border-slate-700"
+          >
             <table className="w-full caption-bottom text-sm">
               <TableHeader className="sticky top-0 z-20 border-b border-slate-200 bg-slate-50 shadow-sm dark:border-slate-700 dark:bg-slate-800 [&_th]:bg-slate-50 [&_th]:shadow-sm dark:[&_th]:bg-slate-800">
                 <TableRow className="border-b border-slate-200 dark:border-slate-700 hover:bg-transparent">
@@ -1647,170 +1674,189 @@ export function EstimatedClosingsRiskView({
                   </TableCell>
                   <TableCell colSpan={DETAIL_TOTALS_TAIL_COLSPAN} />
                 </TableRow>
-                {detailRowsSorted.map((row, idx) => (
-                  <TableRow key={`${row.loanNumber as string}-${idx}`}>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "loanNumber") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("loanNumber", row)}>
-                        {String(row.loanNumber ?? "")}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "complexityGroup") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("complexityGroup", row)}>
-                        {String(row.complexityGroup ?? "")}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "complexity") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("complexity", row)}>
-                        {row.complexity != null ? Number(row.complexity).toFixed(1) : "-"}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "closingProjectionGroup") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("closingProjectionGroup", row)}>
-                        {String(row.closingProjectionGroup ?? "")}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "units") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("units", row)}>
-                        {Number(row.units ?? 1).toLocaleString()}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "volume") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("volume", row)}>
-                        {formatCurrency(Number(row.volume ?? 0))}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "occupancyType") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("occupancyType", row)}>
-                        {String(row.occupancyType ?? "")}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "fico") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("fico", row)}>
-                        {row.fico != null ? Number(row.fico).toLocaleString() : "-"}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "ltv") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("ltv", row)}>
-                        {row.ltv != null ? Number(row.ltv).toFixed(1) : "-"}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "beDti") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("beDti", row)}>
-                        {row.beDti != null ? Number(row.beDti).toFixed(1) : "-"}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "borrowerSelfEmployed") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("borrowerSelfEmployed", row)}>
-                        {formatBooleanish(row.borrowerSelfEmployed)}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "qmLoanType") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("qmLoanType", row)}>
-                        {String(row.qmLoanType ?? "")}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "propertyType") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("propertyType", row)}>
-                        {String(row.propertyType ?? "")}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "loanProgram") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("loanProgram", row)}>
-                        {String(row.loanProgram ?? "")}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "appToDispositionDays") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("appToDispositionDays", row)}>
-                        {row.appToDispositionDays != null ? Number(row.appToDispositionDays).toLocaleString() : "-"}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "currentLoanStatus") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("currentLoanStatus", row)}>
-                        {String(row.currentLoanStatus ?? "")}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "currentStatusDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("currentStatusDate", row)}>
-                        {String(row.currentStatusDate ?? "")}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "lastCompletedMilestone") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("lastCompletedMilestone", row)}>
-                        {String(row.lastCompletedMilestone ?? "")}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "loanFolder") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("loanFolder", row)}>
-                        {String(row.loanFolder ?? "")}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "applicationDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("applicationDate", row)}>
-                        {String(row.applicationDate ?? "")}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "fundingDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("fundingDate", row)}>
-                        {String(row.fundingDate ?? "")}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "lockDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("lockDate", row)}>
-                        {String(row.lockDate ?? "")}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "investorLockDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("investorLockDate", row)}>
-                        {String(row.investorLockDate ?? "")}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "estimatedClosingDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("estimatedClosingDate", row)}>
-                        {String(row.estimatedClosingDate ?? "")}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "ctcDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("ctcDate", row)}>
-                        {String(row.ctcDate ?? "")}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "uwFinalApprovalDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("uwFinalApprovalDate", row)}>
-                        {String(row.uwFinalApprovalDate ?? "")}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "deniedDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("deniedDate", row)}>
-                        {String(row.deniedDate ?? "")}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "conditionalApprovalDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("conditionalApprovalDate", row)}>
-                        {String(row.conditionalApprovalDate ?? "")}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "branch") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("branch", row)}>
-                        {String(row.branch ?? "")}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "loanOfficer") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("loanOfficer", row)}>
-                        {String(row.loanOfficer ?? "")}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "processor") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("processor", row)}>
-                        {String(row.processor ?? "")}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" className={cn(clickableCellClass, cellHighlight(row, "underwriter") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("underwriter", row)}>
-                        {String(row.underwriter ?? "")}
-                      </button>
-                    </TableCell>
+                {detailPaddingTop > 0 ? (
+                  <TableRow className="hover:bg-transparent border-0 pointer-events-none" aria-hidden>
+                    <TableCell colSpan={DETAIL_COLUMN_COUNT} className="p-0" style={{ height: detailPaddingTop }} />
                   </TableRow>
-                ))}
+                ) : null}
+                {virtualDetailRows.map((virtualRow) => {
+                  const row = detailRowsSorted[virtualRow.index];
+                  if (!row) return null;
+                  return (
+                    <TableRow
+                      key={virtualRow.key}
+                      data-index={virtualRow.index}
+                      className="[&_td]:whitespace-nowrap [&_td]:align-middle"
+                      style={{ height: virtualRow.size }}
+                    >
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "loanNumber") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("loanNumber", row)}>
+                          {String(row.loanNumber ?? "")}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "complexityGroup") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("complexityGroup", row)}>
+                          {String(row.complexityGroup ?? "")}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "complexity") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("complexity", row)}>
+                          {row.complexity != null ? Number(row.complexity).toFixed(1) : "-"}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "closingProjectionGroup") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("closingProjectionGroup", row)}>
+                          {String(row.closingProjectionGroup ?? "")}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "units") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("units", row)}>
+                          {Number(row.units ?? 1).toLocaleString()}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "volume") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("volume", row)}>
+                          {formatCurrency(Number(row.volume ?? 0))}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "occupancyType") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("occupancyType", row)}>
+                          {String(row.occupancyType ?? "")}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "fico") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("fico", row)}>
+                          {row.fico != null ? Number(row.fico).toLocaleString() : "-"}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "ltv") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("ltv", row)}>
+                          {row.ltv != null ? Number(row.ltv).toFixed(1) : "-"}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "beDti") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("beDti", row)}>
+                          {row.beDti != null ? Number(row.beDti).toFixed(1) : "-"}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "borrowerSelfEmployed") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("borrowerSelfEmployed", row)}>
+                          {formatBooleanish(row.borrowerSelfEmployed)}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "qmLoanType") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("qmLoanType", row)}>
+                          {String(row.qmLoanType ?? "")}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "propertyType") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("propertyType", row)}>
+                          {String(row.propertyType ?? "")}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "loanProgram") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("loanProgram", row)}>
+                          {String(row.loanProgram ?? "")}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "appToDispositionDays") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("appToDispositionDays", row)}>
+                          {row.appToDispositionDays != null ? Number(row.appToDispositionDays).toLocaleString() : "-"}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "currentLoanStatus") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("currentLoanStatus", row)}>
+                          {String(row.currentLoanStatus ?? "")}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "currentStatusDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("currentStatusDate", row)}>
+                          {String(row.currentStatusDate ?? "")}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "lastCompletedMilestone") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("lastCompletedMilestone", row)}>
+                          {String(row.lastCompletedMilestone ?? "")}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "loanFolder") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("loanFolder", row)}>
+                          {String(row.loanFolder ?? "")}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "applicationDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("applicationDate", row)}>
+                          {String(row.applicationDate ?? "")}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "fundingDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("fundingDate", row)}>
+                          {String(row.fundingDate ?? "")}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "lockDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("lockDate", row)}>
+                          {String(row.lockDate ?? "")}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "investorLockDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("investorLockDate", row)}>
+                          {String(row.investorLockDate ?? "")}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "estimatedClosingDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("estimatedClosingDate", row)}>
+                          {String(row.estimatedClosingDate ?? "")}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "ctcDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("ctcDate", row)}>
+                          {String(row.ctcDate ?? "")}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "uwFinalApprovalDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("uwFinalApprovalDate", row)}>
+                          {String(row.uwFinalApprovalDate ?? "")}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "deniedDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("deniedDate", row)}>
+                          {String(row.deniedDate ?? "")}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "conditionalApprovalDate") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("conditionalApprovalDate", row)}>
+                          {String(row.conditionalApprovalDate ?? "")}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "branch") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("branch", row)}>
+                          {String(row.branch ?? "")}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "loanOfficer") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("loanOfficer", row)}>
+                          {String(row.loanOfficer ?? "")}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "processor") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("processor", row)}>
+                          {String(row.processor ?? "")}
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "underwriter") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("underwriter", row)}>
+                          {String(row.underwriter ?? "")}
+                        </button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {detailPaddingBottom > 0 ? (
+                  <TableRow className="hover:bg-transparent border-0 pointer-events-none" aria-hidden>
+                    <TableCell colSpan={DETAIL_COLUMN_COUNT} className="p-0" style={{ height: detailPaddingBottom }} />
+                  </TableRow>
+                ) : null}
               </TableBody>
             </table>
           </div>
