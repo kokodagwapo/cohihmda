@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DATE_FILTER_BLANK_SHORTCUT,
   EMPTY_FILTER_TOKEN,
   evaluateLoanDetailFilters,
   isFilterActive,
@@ -76,5 +77,16 @@ describe("loanDetailFilters", () => {
 
     expect(evaluateLoanDetailFilters(rows, blankBranch, (r, c) => r[c as keyof Row])).toHaveLength(1);
     expect(evaluateLoanDetailFilters(rows, blankFico, (r, c) => r[c as keyof Row])).toHaveLength(1);
+  });
+
+  it("supports date blank-only shortcut for null dates", () => {
+    type DateRow = { loanDate: string | null };
+    const dateRows: DateRow[] = [{ loanDate: "2025-06-01" }, { loanDate: null }];
+    const blankDate: ColumnFilterState = {
+      loanDate: { kind: "date", shortcut: DATE_FILTER_BLANK_SHORTCUT, from: "", to: "" },
+    };
+    const filtered = evaluateLoanDetailFilters(dateRows, blankDate, (row, columnId) => row[columnId as keyof DateRow]);
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].loanDate).toBeNull();
   });
 });
