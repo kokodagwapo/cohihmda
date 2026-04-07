@@ -1,4 +1,4 @@
-import { pool as managementPool } from "../config/managementDatabase.js";
+﻿import { pool as managementPool } from "../config/managementDatabase.js";
 import { tenantDbManager } from "../config/tenantDatabaseManager.js";
 import {
   getPlatformSetting,
@@ -7,25 +7,25 @@ import {
 
 const POLL_INTERVAL_MS = Math.max(
   10_000,
-  Number(process.env.ALETHEIA_PREFETCH_POLL_MS || 60_000)
+  Number(process.env.Cohi_PREFETCH_POLL_MS || 60_000)
 );
 const MAX_JOBS_PER_TICK = Math.max(
   1,
-  Number(process.env.ALETHEIA_PREFETCH_MAX_JOBS_PER_TICK || 2)
+  Number(process.env.Cohi_PREFETCH_MAX_JOBS_PER_TICK || 2)
 );
 const NIGHTLY_HOUR_UTC = Math.max(
   0,
-  Math.min(23, Number(process.env.ALETHEIA_NIGHTLY_PREFETCH_HOUR_UTC || 2))
+  Math.min(23, Number(process.env.Cohi_NIGHTLY_PREFETCH_HOUR_UTC || 2))
 );
-const NIGHTLY_ENABLED_KEY = "aletheia_nightly_prefetch_enabled";
-const NIGHTLY_LAST_RUN_KEY = "aletheia_nightly_prefetch_last_run_at";
+const NIGHTLY_ENABLED_KEY = "Cohi_nightly_prefetch_enabled";
+const NIGHTLY_LAST_RUN_KEY = "Cohi_nightly_prefetch_last_run_at";
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let isTickRunning = false;
 let nightlyRunStamp = "";
 
 function isPrefetchWorkerEnabled(): boolean {
-  return process.env.ALETHEIA_PREFETCH_WORKER_ENABLED === "true";
+  return process.env.Cohi_PREFETCH_WORKER_ENABLED === "true";
 }
 
 type ClaimedJob = {
@@ -35,7 +35,7 @@ type ClaimedJob = {
   briefingContext: any;
 };
 
-export async function enqueueAletheiaPrefetchJob(input: {
+export async function enqueueCohiPrefetchJob(input: {
   tenantId: string;
   contextHash: string;
   briefingContext: unknown;
@@ -46,7 +46,7 @@ export async function enqueueAletheiaPrefetchJob(input: {
     `INSERT INTO public.podcast_prefetch_jobs (
         job_type, context_hash, briefing_context, status, requested_by, run_after
      ) VALUES (
-        'aletheia_briefing', $1, $2::jsonb, 'pending', $3, NOW()
+        'Cohi_briefing', $1, $2::jsonb, 'pending', $3, NOW()
      )
      RETURNING id`,
     [
@@ -143,7 +143,7 @@ async function failJob(
 
 async function processOneJob(job: ClaimedJob): Promise<void> {
   const mod = await import("../routes/podcast.js");
-  await mod.prefetchAletheiaBriefing(job.tenantId, job.briefingContext);
+  await mod.prefetchCohiBriefing(job.tenantId, job.briefingContext);
 }
 
 async function maybeRunNightlyPrefetch(tenantIds: string[]): Promise<void> {
@@ -162,9 +162,9 @@ async function maybeRunNightlyPrefetch(tenantIds: string[]): Promise<void> {
 
   for (const tenantId of tenantIds) {
     try {
-      const briefingContext = await mod.buildDefaultAletheiaBriefingContext(tenantId);
+      const briefingContext = await mod.buildDefaultCohiBriefingContext(tenantId);
       const contextHash = mod.hashBriefingContext(briefingContext);
-      await enqueueAletheiaPrefetchJob({
+      await enqueueCohiPrefetchJob({
         tenantId,
         contextHash,
         briefingContext,
@@ -173,7 +173,7 @@ async function maybeRunNightlyPrefetch(tenantIds: string[]): Promise<void> {
       queuedCount += 1;
     } catch (error: any) {
       console.warn(
-        `[AletheiaPrefetchWorker] Nightly enqueue failed for tenant ${tenantId}:`,
+        `[CohiPrefetchWorker] Nightly enqueue failed for tenant ${tenantId}:`,
         error?.message || error
       );
     }
@@ -181,7 +181,7 @@ async function maybeRunNightlyPrefetch(tenantIds: string[]): Promise<void> {
 
   await setPlatformSetting(NIGHTLY_LAST_RUN_KEY, new Date().toISOString());
   console.log(
-    `[AletheiaPrefetchWorker] Nightly prefetch enqueued for ${queuedCount}/${tenantIds.length} tenants`
+    `[CohiPrefetchWorker] Nightly prefetch enqueued for ${queuedCount}/${tenantIds.length} tenants`
   );
 }
 
@@ -208,16 +208,16 @@ async function pollOnce(): Promise<void> {
       }
     }
   } catch (error) {
-    console.warn("[AletheiaPrefetchWorker] Poll failed:", error);
+    console.warn("[CohiPrefetchWorker] Poll failed:", error);
   } finally {
     isTickRunning = false;
   }
 }
 
-export function startAletheiaPrefetchWorker(): void {
+export function startCohiPrefetchWorker(): void {
   if (!isPrefetchWorkerEnabled() || pollTimer) return;
   console.log(
-    `[AletheiaPrefetchWorker] Starting poller (interval=${POLL_INTERVAL_MS}ms, maxJobsPerTick=${MAX_JOBS_PER_TICK})`
+    `[CohiPrefetchWorker] Starting poller (interval=${POLL_INTERVAL_MS}ms, maxJobsPerTick=${MAX_JOBS_PER_TICK})`
   );
   pollTimer = setInterval(() => {
     void pollOnce();

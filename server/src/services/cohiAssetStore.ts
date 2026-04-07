@@ -1,8 +1,8 @@
-import crypto from "crypto";
+﻿import crypto from "crypto";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { tenantDbManager } from "../config/tenantDatabaseManager.js";
 
-const PODCAST_ASSET_TYPE = "aletheia_briefing";
+const PODCAST_ASSET_TYPE = "Cohi_briefing";
 const PODCAST_STORAGE_PROVIDER = "s3";
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -13,7 +13,7 @@ function getPodcastBucket(): string {
 }
 
 function getPodcastPrefix(): string {
-  const raw = (process.env.PODCAST_AUDIO_PREFIX || "aletheia").trim();
+  const raw = (process.env.PODCAST_AUDIO_PREFIX || "Cohi").trim();
   return raw.replace(/^\/+|\/+$/g, "");
 }
 
@@ -63,7 +63,7 @@ async function readBodyToBuffer(body: unknown): Promise<Buffer> {
   return Buffer.alloc(0);
 }
 
-export type PersistedAletheiaAsset = {
+export type PersistedCohiAsset = {
   script: string;
   contextHash: string;
   createdAt: number;
@@ -75,10 +75,10 @@ export type PersistedAletheiaAsset = {
   voiceName?: string;
 };
 
-export async function loadPersistedAletheiaAsset(
+export async function loadPersistedCohiAsset(
   tenantId: string,
   contextHash: string
-): Promise<PersistedAletheiaAsset | null> {
+): Promise<PersistedCohiAsset | null> {
   const bucket = getPodcastBucket();
   if (!bucket) return null;
 
@@ -126,16 +126,16 @@ export async function loadPersistedAletheiaAsset(
       return null;
     }
     console.warn(
-      `[AletheiaAssetStore] Failed to load persisted asset for tenant ${tenantId}:`,
+      `[CohiAssetStore] Failed to load persisted asset for tenant ${tenantId}:`,
       error?.message || error
     );
     return null;
   }
 }
 
-export async function loadLatestPersistedAletheiaAsset(
+export async function loadLatestPersistedCohiAsset(
   tenantId: string
-): Promise<PersistedAletheiaAsset | null> {
+): Promise<PersistedCohiAsset | null> {
   const bucket = getPodcastBucket();
   if (!bucket) return null;
 
@@ -182,14 +182,14 @@ export async function loadLatestPersistedAletheiaAsset(
       return null;
     }
     console.warn(
-      `[AletheiaAssetStore] Failed to load latest persisted asset for tenant ${tenantId}:`,
+      `[CohiAssetStore] Failed to load latest persisted asset for tenant ${tenantId}:`,
       error?.message || error
     );
     return null;
   }
 }
 
-export async function hasPersistedAletheiaAsset(
+export async function hasPersistedCohiAsset(
   tenantId: string
 ): Promise<{ available: boolean; createdAt?: string; durationSec?: number }> {
   const bucket = getPodcastBucket();
@@ -223,7 +223,7 @@ export async function hasPersistedAletheiaAsset(
   }
 }
 
-export async function persistAletheiaAsset(input: {
+export async function persistCohiAsset(input: {
   tenantId: string;
   contextHash: string;
   script: string;
@@ -294,7 +294,7 @@ export async function persistAletheiaAsset(input: {
     );
   } catch (error: any) {
     console.error(
-      `[AletheiaAssetStore] Failed to persist asset for tenant ${input.tenantId}:`,
+      `[CohiAssetStore] Failed to persist asset for tenant ${input.tenantId}:`,
       error?.message || error
     );
     throw error;

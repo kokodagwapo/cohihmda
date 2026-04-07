@@ -1,4 +1,4 @@
-import { WebSocketServer, WebSocket } from "ws";
+﻿import { WebSocketServer, WebSocket } from "ws";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 import { fileURLToPath } from "url";
@@ -22,10 +22,10 @@ function getJwtSecret(): string {
 const JWT_SECRET = getJwtSecret();
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const ALETHEIA_AI_PROVIDER = process.env.ALETHEIA_AI_PROVIDER || "openai"; // 'openai' or 'gemini'
+const Cohi_AI_PROVIDER = process.env.Cohi_AI_PROVIDER || "openai"; // 'openai' or 'gemini'
 
-// Aletheia system prompt for executive intelligence
-const ALETHEIA_SYSTEM_PROMPT = `You are Cohi, a neutral, objective data analyst for the Coheus Executive Intelligence Platform.
+// Cohi system prompt for executive intelligence
+const Cohi_SYSTEM_PROMPT = `You are Cohi, a neutral, objective data analyst for the Coheus Executive Intelligence Platform.
 
 CORE IDENTITY:
 - Objective data reporter: you present numbers and facts without editorializing
@@ -53,7 +53,7 @@ You are Cohi — you report the data clearly and let the listener draw their own
 // Qlik Migration Context - Enhanced system prompt for Qlik migration questions
 const QLIK_MIGRATION_CONTEXT = `
 QLIK MIGRATION EXPERTISE:
-You are Cohi (formerly Aletheia), an expert on Qlik to Coheus v2 migration. You have comprehensive knowledge of:
+You are Cohi (formerly Cohi), an expert on Qlik to Coheus v2 migration. You have comprehensive knowledge of:
 
 DATA DICTIONARY:
 - 272+ fields organized into 14 categories: Core Loan Fields, Date Fields, Status Fields, Performance Fields, Financial Fields, Risk Fields, Employee Fields, Property Fields, Channel Fields, Borrower Fields, Underwriting Fields, Aggregated Fields, Grouping Fields, Time Fields
@@ -67,7 +67,7 @@ QLIK FORMULAS & LOGIC:
 - Formulas are used in: Cohi (insights), Business Overview, Closing & FallOut Forecast, TopTiering, Leaderboard
 
 MODULES:
-1. Cohi (formerly Aletheia) - AI-powered insights with Qlik complexity scores and pull-through patterns
+1. Cohi (formerly Cohi) - AI-powered insights with Qlik complexity scores and pull-through patterns
 2. Business Overview - Core dashboard with active loans, cycle times, pull-through rates, revenue
 3. Closing & FallOut Forecast - Forecasting based on historical pull-through and active aging
 4. TopTiering - Performance ranking with productivity, profitability, and complexity scoring
@@ -154,7 +154,7 @@ export function setupWebSocket(wss: WebSocketServer) {
     if (
       path.includes("maylin") ||
       path.includes("luna") ||
-      (path.includes("aletheia") && ALETHEIA_AI_PROVIDER === "openai")
+      (path.includes("Cohi") && Cohi_AI_PROVIDER === "openai")
     ) {
       // Load RAG settings from database for this tenant BEFORE connecting
       (async () => {
@@ -190,7 +190,7 @@ export function setupWebSocket(wss: WebSocketServer) {
           return;
         }
 
-        const isAletheia = path.includes("aletheia");
+        const isCohi = path.includes("Cohi");
         const openAIUrl =
           "wss://api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview-2024-12-17";
         openAISocket = new WebSocket(openAIUrl, ["realtime"], {
@@ -206,22 +206,22 @@ export function setupWebSocket(wss: WebSocketServer) {
 
         openAISocket.on("open", () => {
           console.log(
-            `Connected to OpenAI Realtime API for ${isAletheia ? "Aletheia" : "Maylin/Luna"}`,
+            `Connected to OpenAI Realtime API for ${isCohi ? "Cohi" : "Maylin/Luna"}`,
           );
 
-          // Send session update with Aletheia-specific configuration
-          if (isAletheia && openAISocket) {
+          // Send session update with Cohi-specific configuration
+          if (isCohi && openAISocket) {
             const sessionUpdate = {
               type: "session.update",
               session: {
-                instructions: ALETHEIA_SYSTEM_PROMPT,
+                instructions: Cohi_SYSTEM_PROMPT,
                 voice: "alloy", // Neutral, reliable voice
                 output_audio_format: "pcm16",
                 modalities: ["text", "audio"],
               },
             };
             openAISocket.send(JSON.stringify(sessionUpdate));
-            console.log("Sent Aletheia session configuration to OpenAI");
+            console.log("Sent Cohi session configuration to OpenAI");
           }
         });
 
@@ -309,7 +309,7 @@ export function setupWebSocket(wss: WebSocketServer) {
           }
         });
       })();
-    } else if (path.includes("aletheia") && ALETHEIA_AI_PROVIDER === "gemini") {
+    } else if (path.includes("Cohi") && Cohi_AI_PROVIDER === "gemini") {
       // Queue for messages received before Gemini is ready
       const messageQueue: any[] = [];
       let geminiReady = false;
@@ -363,7 +363,7 @@ export function setupWebSocket(wss: WebSocketServer) {
 
           geminiSocket.on("open", async () => {
             console.log(
-              `Connected to Gemini Live API for Aletheia${isV2Context ? " (V2 Backend Architecture)" : ""}${tenantGeminiApiKey ? " (using tenant-specific API key)" : " (using environment API key)"}`,
+              `Connected to Gemini Live API for Cohi${isV2Context ? " (V2 Backend Architecture)" : ""}${tenantGeminiApiKey ? " (using tenant-specific API key)" : " (using environment API key)"}`,
             );
 
             // Build dynamic system prompt from RAG settings
@@ -466,7 +466,7 @@ BUILD TIMELINE:
 - Week 2: Core Backend (Authentication, SSO, multi-tenant isolation, API Gateway)
 - Week 3: LOS Connectors (Universal schema, Encompass/Calyx/MeridianLink connectors)
 - Week 4: Vendors & Security (Vendor framework, encryption, SOC 2 controls)
-- Week 5: RAG & AI (Document pipeline, embeddings, Pinecone, Aletheia integration)
+- Week 5: RAG & AI (Document pipeline, embeddings, Pinecone, Cohi integration)
 - Week 6: Launch Prep (Onboarding system, video training, documentation, testing)
 
 COMMUNICATION APPROACH FOR V2 CONTEXT:

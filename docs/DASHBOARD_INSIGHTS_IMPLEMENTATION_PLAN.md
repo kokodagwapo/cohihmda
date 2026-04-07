@@ -1,15 +1,15 @@
-# Dashboard Insights — Full Implementation Plan
+﻿# Dashboard Insights — Full Implementation Plan
 
 ## 1. Overview and principles
 
 **Purpose**
-Dashboard Insights is a **separate** feature from the existing Aletheia/executive insights. It produces **1–3 insights per dashboard page** that call out what's noteworthy (good or bad), using only that page's data and all combinations of its existing filters. Each insight ties to the page's own widgets via **evidence_refs** (no SQL evidence). High-risk (critical sentiment) insights also surface in the main Critical Issues bucket with a link back to the originating dashboard page.
+Dashboard Insights is a **separate** feature from the existing Cohi/executive insights. It produces **1–3 insights per dashboard page** that call out what's noteworthy (good or bad), using only that page's data and all combinations of its existing filters. Each insight ties to the page's own widgets via **evidence_refs** (no SQL evidence). High-risk (critical sentiment) insights also surface in the main Critical Issues bucket with a link back to the originating dashboard page.
 
 **Design principles**
 
 - **Dimension-agnostic:** The generator does not assume fixed comparison types. It looks at all filter dimensions the dashboard exposes and surfaces what's important along any combination.
 - **Page-scoped or widget-scoped:** Insights can be about the dashboard page as a whole (overall observations) or about specific widgets (tables, charts, KPIs) on it.
-- **Page-local + critical escalation:** Most insights appear only on their dashboard page. Critical-sentiment insights additionally surface in the main Aletheia Critical Issues bucket with a "Go to [page name]" link that restores the exact filter state that produced the insight.
+- **Page-local + critical escalation:** Most insights appear only on their dashboard page. Critical-sentiment insights additionally surface in the main Cohi Critical Issues bucket with a "Go to [page name]" link that restores the exact filter state that produced the insight.
 - **Evidence = widget refs only:** Pass 4 outputs references into the page's existing widgets — no evidence SQL.
 - **Reuse pattern, not coupling:** Same 4-pass pattern and infra, but separate prompts, services, and API.
 - **Precomputed, not on-demand:** Dashboard insights are generated on the same schedule as regular insights (post-sync hook after data reload), not on every page load or filter change. An optional "Generate Insights" button per page allows on-demand fresh generation.
@@ -403,14 +403,14 @@ OUTPUT FORMAT (strict JSON):
 
 ---
 
-## 8. Critical escalation to Aletheia
+## 8. Critical escalation to Cohi
 
 When a dashboard insight has **`escalate: true`** (set by the Curator for critical-sentiment insights):
 
 - The insight is stored in the `dashboard_generated_insights` table with `escalate = true`.
-- The Aletheia insights card (`AletheiaPromptsCard`) is updated to **also query** the `dashboard_generated_insights` table for rows where `escalate = true`, and display those in the **Critical Issues** bucket alongside regular critical insights.
+- The Cohi insights card (`CohiPromptsCard`) is updated to **also query** the `dashboard_generated_insights` table for rows where `escalate = true`, and display those in the **Critical Issues** bucket alongside regular critical insights.
 - The UI renders a **"Go to [sourcePageName]"** button on escalated dashboard insights (when `source_page_id` is present). Clicking it navigates to the originating dashboard page **and restores the exact `filter_context`** that produced the insight (e.g. the date period and channel).
-- Dashboard insights are **not** duplicated into the `generated_insights` table. They live only in `dashboard_generated_insights`; the Aletheia card reads from both tables.
+- Dashboard insights are **not** duplicated into the `generated_insights` table. They live only in `dashboard_generated_insights`; the Cohi card reads from both tables.
 - Escalated insights persist until the next time dashboard insights are regenerated (same lifecycle as non-escalated dashboard insights).
 
 ---
@@ -468,7 +468,7 @@ CREATE INDEX IF NOT EXISTS idx_dashboard_insights_batch
 
 ## 10. Scheduling and generation triggers
 
-Dashboard insights are generated on the **same schedule** as regular Aletheia insights — via the **post-sync hook** system.
+Dashboard insights are generated on the **same schedule** as regular Cohi insights — via the **post-sync hook** system.
 
 ### How current insights are triggered (for reference)
 
@@ -573,9 +573,9 @@ When a user clicks an insight or its "Show me" button:
 3. If `target` exists (e.g. `{ type: "row", label: "Branch A" }`), highlight that specific row or chart series with a temporary visual treatment (e.g. pulse animation, background highlight that fades after 3 seconds).
 4. Supporting widgets get a lighter highlight or border glow.
 
-### Escalated insights in Aletheia
+### Escalated insights in Cohi
 
-In the main `AletheiaPromptsCard` (Critical Issues bucket):
+In the main `CohiPromptsCard` (Critical Issues bucket):
 - Query `dashboard_generated_insights WHERE escalate = true` alongside regular `generated_insights WHERE bucket = 'critical'`.
 - Escalated dashboard insights render with a **"Go to [sourcePageName]"** button.
 - Clicking the button navigates to `/[page-route]` and restores the `filter_context` from the insight (e.g. sets the date picker to MTD, the channel to Retail, etc.).
@@ -662,7 +662,7 @@ Implemented end-to-end alongside Leaderboard:
 - **Prompts** (`defaultPromptConfigs.ts`): Loan Complexity block uses **`filter_context`** for this page only (`datePeriod`, optional `channelGroup`); no Leaderboard cross-links or `leaderName` for navigation.
 - **Frontend** (`LoanComplexityView.tsx`): **`DashboardInsightsStrip`**, generate POST `pageId: loan-complexity`, evidence scroll/highlight to **`loan-complexity-bar-chart`** and **`loan-complexity-pivot-*`** (pivot section expands when targeting a pivot widget).
 - **Leaderboard deep-link** (`LeaderBoardSection.tsx`): Reads **`location.state.dashboardInsightFilterContext`** when navigating from **Leaderboard**-sourced insights (period/channel/LO). Loan Complexity insights do not pass this state—**one insight → one destination** via `sourcePageId`.
-- **Navigation helper** (`src/lib/dashboardInsightRoutes.ts`): **`getDashboardInsightPath`** / **`getDashboardInsightNavigateState`** centralize `pageId` → route; used by **`DashboardInsightEvidenceModal`** and **`AletheiaPromptsCard`** so critical/main-page “Go to dashboard” opens the correct URL (`/loan-complexity` vs `/insights#leaderboard`).
+- **Navigation helper** (`src/lib/dashboardInsightRoutes.ts`): **`getDashboardInsightPath`** / **`getDashboardInsightNavigateState`** centralize `pageId` → route; used by **`DashboardInsightEvidenceModal`** and **`CohiPromptsCard`** so critical/main-page “Go to dashboard” opens the correct URL (`/loan-complexity` vs `/insights#leaderboard`).
 
 ### Pre-computed signals
 
@@ -739,18 +739,18 @@ Before a dashboard page can support Dashboard Insights, it needs:
   - Build adapter: call existing APIs, construct page context with dimensions (timeframe/time period, channel group, and structural dimensions like branch vs loan officer), data (summary + per-leader breakdowns), widget catalog (for the leaderboard table, any supporting charts/KPIs).
 - Add `dashboard-insight-generation` post-sync hook (priority 150).
 - Add GET and POST routes for `/api/dashboard-insights`.
-- Wire critical escalation: update Aletheia card query to also pull from `dashboard_generated_insights WHERE escalate = true`.
+- Wire critical escalation: update Cohi card query to also pull from `dashboard_generated_insights WHERE escalate = true`.
 
 **Frontend (Leaderboard dashboard):**
 - Add stable widget IDs to all widgets on the Leaderboard dashboard view (e.g. main leaderboard table, supporting KPIs/charts).
 - Add `DashboardInsightsStrip` component (1–3 insights, expandable detail with what_changed/why/business_impact).
 - Implement "Show me" → scroll + highlight using evidence_refs.
 - Add "Generate Insights" button.
-- Add "Go to [page]" button in AletheiaPromptsCard for escalated dashboard insights.
+- Add "Go to [page]" button in CohiPromptsCard for escalated dashboard insights.
 
 ### Phase 2 — Validation + feedback
 
-- Validate end-to-end: scheduled generation after sync, on-demand generation, filter context restoration, widget highlighting, escalation to Aletheia.
+- Validate end-to-end: scheduled generation after sync, on-demand generation, filter context restoration, widget highlighting, escalation to Cohi.
 - Add feedback mechanism (thumbs up/down for tenant_admin role).
 - Tune prompts based on output quality.
 

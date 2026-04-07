@@ -1,4 +1,4 @@
-# Admin Panel Architecture
+﻿# Admin Panel Architecture
 
 This document details the admin panel architecture for Cohi, supporting two distinct user experiences: TVMA internal administrators and client tenant administrators.
 
@@ -185,7 +185,7 @@ Complete LOS connection management:
 | Section | Key Capabilities |
 |---------|------------------|
 | **Synapse Connect** | Vendor API integrations, catalog management |
-| **RAG & Voice** | Aletheia settings, topics, rules, API keys, costs |
+| **RAG & Voice** | Cohi settings, topics, rules, API keys, costs |
 | **Demo Data** | Upload anonymized test data for demos |
 | **System** | Server config, environment, feature flags |
 | **Security** | Auth stats, failed logins, API keys, audit |

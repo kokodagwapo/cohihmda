@@ -1,4 +1,4 @@
-# Tracked Insights / Watchlist Implementation Plan
+﻿# Tracked Insights / Watchlist Implementation Plan
 
 This plan is the prior implementation plan, updated only with the requested clarifications and scope changes.
 
@@ -45,7 +45,7 @@ Before the tracked-insight ticket work, align dashboard insights implementation 
 
 - Tracked routes, history endpoint, evaluator, watchlist UI, and tracked detail modal exist.
 - `display_metadata` migration exists in branch as `097_tracked_insights_display_meta.sql`.
-- Bookmark button in `AletheiaPromptsCard.tsx` bucket lane is already not admin-gated.
+- Bookmark button in `CohiPromptsCard.tsx` bucket lane is already not admin-gated.
 - Main full agent generation path (`runInsightGeneration`) already calls `evaluateTrackedInsights` after persistence.
 
 ### Partially done (important clarification)
@@ -224,7 +224,7 @@ Before the tracked-insight ticket work, align dashboard insights implementation 
 **Files**
 
 - `src/components/dashboard/DashboardInsightsStrip.tsx`
-- `src/components/dashboard/AletheiaPromptsCard.tsx` (minor alignment only)
+- `src/components/dashboard/CohiPromptsCard.tsx` (minor alignment only)
 
 **Changes**
 
@@ -280,6 +280,6 @@ Plan retains polarity/trend improvements, history/timeline, pause/resume, archiv
 - `src/components/dashboard/TrackedInsightDetailModal.tsx`
 - `src/components/dashboard/TrackedInsightsWatchlist.tsx`
 - `src/components/dashboard/DashboardInsightsStrip.tsx`
-- `src/components/dashboard/AletheiaPromptsCard.tsx` (minimal alignment)
+- `src/components/dashboard/CohiPromptsCard.tsx` (minimal alignment)
 - `src/lib/api.ts` (typing/status values only if required)
 

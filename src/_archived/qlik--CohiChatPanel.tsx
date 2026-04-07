@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+﻿import { useState, useEffect, useRef } from 'react';
 import { Send, Mic, MicOff, Loader2, Brain, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -80,7 +80,7 @@ export function CohiChatPanel({ qlikContext }: CohiChatPanelProps) {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
     try {
-      const endpoint = aiProvider === 'openai' ? '/ws/aletheia?context=qlik&qlik=true' : '/ws/gemini?context=qlik&qlik=true';
+      const endpoint = aiProvider === 'openai' ? '/ws/Cohi?context=qlik&qlik=true' : '/ws/gemini?context=qlik&qlik=true';
       const ws = api.createBackendWebSocket(endpoint);
       
       ws.onopen = () => {

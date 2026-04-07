@@ -1,6 +1,6 @@
-/**
+﻿/**
  * Single source of truth: dashboard insight sourcePageId → app route and navigation state.
- * Ensures "Go to [dashboard]" from evidence modal, Aletheia, etc. lands on the correct page.
+ * Ensures "Go to [dashboard]" from evidence modal, Cohi, etc. lands on the correct page.
  *
  * filter_context / dashboardInsightFilterContext is only applied where a section reads it
  * (currently Leaderboard on /insights).

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Workbench section configuration
  *
  * Shared constants that define which dashboard sections and standalone widgets
@@ -44,7 +44,7 @@ export type DashboardSectionItem = {
 // ---------------------------------------------------------------------------
 
 export const STANDALONE_WIDGETS: Record<string, { defId: string; w: number; h: number }> = {
-  aletheiaInsights:       { defId: 'aletheia-insights-embed', w: 600, h: 500 },
+  CohiInsights:       { defId: 'Cohi-insights-embed', w: 600, h: 500 },
   industryNews:           { defId: 'industry-news-embed',     w: 600, h: 500 },
   financialModeling:      { defId: 'financial-modeling-embed', w: 800, h: 650 },
   closingFalloutForecast: { defId: 'closing-forecast-embed',  w: 900, h: 600 },

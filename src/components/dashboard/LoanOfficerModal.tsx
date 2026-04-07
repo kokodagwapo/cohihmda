@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+﻿import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   Dialog,
   DialogContent,
@@ -579,7 +579,7 @@ export const LoanOfficerModal: React.FC<LoanOfficerModalProps> = ({
               </div>
             </div>
 
-            {/* Alethia Portfolio Analysis */}
+            {/* Cohi Portfolio Analysis */}
             <div
               className={`p-6 rounded-xl border bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700`}
             >

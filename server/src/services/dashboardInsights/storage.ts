@@ -1,9 +1,9 @@
-/**
+﻿/**
  * Dashboard Insights — persistence helpers
  *
  * saveDashboardInsights: insert batch for a page+filter combo (replaces previous for same combo).
  * loadDashboardInsights: fetch most recent insights for pageId + filter subset.
- * loadEscalatedDashboardInsights: fetch all escalated insights for Aletheia.
+ * loadEscalatedDashboardInsights: fetch all escalated insights for Cohi.
  */
 
 import pg from "pg";
@@ -328,7 +328,7 @@ export async function loadDashboardInsightById(
 }
 
 /**
- * Load all escalated dashboard insights (for Aletheia Critical Issues bucket).
+ * Load all escalated dashboard insights (for Cohi Critical Issues bucket).
  */
 export async function loadEscalatedDashboardInsights(
   tenantPool: pg.Pool

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Widget Registry – central catalog of all available widget definitions.
  *
  * Import widget definition sets from each domain and combine them into
@@ -19,7 +19,7 @@ import { leaderboardWidgets } from './leaderboardWidgets';
 import { executiveDashboardWidgets } from './executiveDashboardWidgets';
 import { closingForecastWidgets } from './closingForecastWidgets';
 import { financialModelingWidgets } from './financialModelingWidgets';
-import { aletheiaInsightsWidgets } from './aletheiaInsightsWidgets';
+import { CohiInsightsWidgets } from './CohiInsightsWidgets';
 import { industryNewsWidgets } from './industryNewsWidgets';
 import { loanDetailWidgets } from './loanDetailWidgets';
 import { workflowConversionWidgets } from './workflowConversionWidgets';
@@ -60,7 +60,7 @@ const allWidgets: WidgetDefinition[] = [
   ...executiveDashboardWidgets,
   ...closingForecastWidgets,
   ...financialModelingWidgets,
-  ...aletheiaInsightsWidgets,
+  ...CohiInsightsWidgets,
   ...industryNewsWidgets,
   ...loanDetailWidgets,
   ...workflowConversionWidgets,

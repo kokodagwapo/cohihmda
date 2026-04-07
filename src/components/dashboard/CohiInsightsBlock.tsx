@@ -1,10 +1,10 @@
-import React from "react";
+﻿import React from "react";
 import type {
-  AlethiaInsights,
-  AlethiaSectionKey,
-} from "@/utils/alethiaInsights";
+  CohiInsights,
+  CohiSectionKey,
+} from "@/utils/CohiInsights";
 
-function sectionStyle(title: AlethiaSectionKey, isDarkMode: boolean) {
+function sectionStyle(title: CohiSectionKey, isDarkMode: boolean) {
   const base = {
     bg: isDarkMode ? "bg-slate-800/40" : "bg-white",
     border: isDarkMode ? "border-slate-700" : "border-slate-200",
@@ -65,8 +65,8 @@ function sectionStyle(title: AlethiaSectionKey, isDarkMode: boolean) {
   }
 }
 
-export function AlethiaSectionCard(props: {
-  section: { title: AlethiaSectionKey; items: string[] };
+export function CohiSectionCard(props: {
+  section: { title: CohiSectionKey; items: string[] };
   isDarkMode: boolean;
 }) {
   const { section, isDarkMode } = props;
@@ -94,13 +94,13 @@ export function AlethiaSectionCard(props: {
   );
 }
 
-export function AlethiaInsightsBlock(props: {
-  insights: AlethiaInsights | null;
+export function CohiInsightsBlock(props: {
+  insights: CohiInsights | null;
   isDarkMode: boolean;
   subtitle?: string;
   loading?: boolean;
   emptyText?: string;
-  filterSections?: AlethiaSectionKey[];
+  filterSections?: CohiSectionKey[];
 }) {
   const {
     insights,
@@ -163,7 +163,7 @@ export function AlethiaInsightsBlock(props: {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {sectionsToShow.map((section) => (
-              <AlethiaSectionCard
+              <CohiSectionCard
                 key={section.title}
                 section={section}
                 isDarkMode={isDarkMode}

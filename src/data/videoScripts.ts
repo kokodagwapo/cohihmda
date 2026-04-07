@@ -1,4 +1,4 @@
-export interface VideoScript {
+﻿export interface VideoScript {
   id: string;
   series: string;
   number: number;
@@ -592,7 +592,7 @@ export const videoScripts: VideoScript[] = [
       'Workbench AI: widget creation, modification, report generation.',
       'Research Lab: deep investigation, multi-step analysis, follow-ups.',
       'Fallout Predictions: ML model, risk scoring, reason codes.',
-      'Voice AI (Aletheia): real-time voice conversations.',
+      'Voice AI (Cohi): real-time voice conversations.',
       'Knowledge Base RAG: how uploaded documents enhance AI responses.',
       'Tips for getting the best results from AI features.',
     ],

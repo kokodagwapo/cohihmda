@@ -1,4 +1,4 @@
-# Cohi Architecture Overview
+﻿# Cohi Architecture Overview
 
 This document provides a high-level overview of the Cohi platform architecture, supporting both multi-tenant SaaS and self-hosted deployment modes.
 
@@ -132,7 +132,7 @@ DB_NAME=cohi
 | Metrics Service | Pre-defined metrics catalog with SQL implementations |
 | Analytics Service | Dashboard data aggregation and calculations |
 | Tenant Manager | Database connection routing for multi-tenant mode |
-| WebSocket Server | Real-time AI voice assistant (Aletheia) |
+| WebSocket Server | Real-time AI voice assistant (Cohi) |
 | SSO Service | Qlik Bridge + Cognito SAML federation |
 
 **Key Technologies:**

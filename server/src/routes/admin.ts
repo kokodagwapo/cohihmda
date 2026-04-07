@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Admin Routes
  * Admin-only endpoints for system management
  */
@@ -25,11 +25,11 @@ import {
   setPlatformSetting,
 } from "../services/platformSettingsService.js";
 import {
-  buildDefaultAletheiaBriefingContext,
+  buildDefaultCohiBriefingContext,
   hashBriefingContext,
-  prefetchAletheiaBriefing,
+  prefetchCohiBriefing,
 } from "./podcast.js";
-import { enqueueAletheiaPrefetchJob } from "../services/aletheiaPrefetchWorker.js";
+import { enqueueCohiPrefetchJob } from "../services/CohiPrefetchWorker.js";
 import {
   type LoanScope,
   type TenantPersona,
@@ -2631,10 +2631,10 @@ router.get(
       };
 
       const nightlyEnabled =
-        ((await getPlatformSetting("aletheia_nightly_prefetch_enabled")) || "false")
+        ((await getPlatformSetting("Cohi_nightly_prefetch_enabled")) || "false")
           .toLowerCase() === "true";
       const nightlyLastRunAt =
-        (await getPlatformSetting("aletheia_nightly_prefetch_last_run_at")) ||
+        (await getPlatformSetting("Cohi_nightly_prefetch_last_run_at")) ||
         null;
 
       return res.json({
@@ -2676,7 +2676,7 @@ router.put(
       }
 
       const ok = await setPlatformSetting(
-        "aletheia_nightly_prefetch_enabled",
+        "Cohi_nightly_prefetch_enabled",
         nightly_enabled ? "true" : "false"
       );
       if (!ok) {
@@ -2711,9 +2711,9 @@ router.post(
         return res.status(400).json({ error: "tenant_id is required" });
       }
 
-      const briefingContext = await buildDefaultAletheiaBriefingContext(tenant_id);
+      const briefingContext = await buildDefaultCohiBriefingContext(tenant_id);
       const contextHash = hashBriefingContext(briefingContext);
-      const jobId = await enqueueAletheiaPrefetchJob({
+      const jobId = await enqueueCohiPrefetchJob({
         tenantId: tenant_id,
         contextHash,
         briefingContext,

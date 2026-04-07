@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Store for dashboards pinned from the top nav DASHBOARD menu.
  * Pinned items appear in the sidebar under "Dashboard".
  * Sidebar is empty until user pins; pin action is on top nav only.
@@ -8,7 +8,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 export type SectionId =
-  | 'aletheiaInsights'
+  | 'CohiInsights'
   | 'industryNews'
   | 'leaderboard'
   | 'executiveDashboard'

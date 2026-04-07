@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+﻿import { useState, useEffect, useRef, useCallback } from "react";
 import {
   PlayCircle,
   Mic,
@@ -33,7 +33,7 @@ const AudioWaveIcon = ({ className = "w-6 h-6" }: { className?: string }) => {
   );
 };
 
-export interface AletheiaBriefingControlsProps {
+export interface CohiBriefingControlsProps {
   briefingContext?: {
     dialogues?: Array<{ message: string; type: string; priority: string }>;
     funnelStory?: {
@@ -50,12 +50,12 @@ export interface AletheiaBriefingControlsProps {
 
 const OUTPUT_SAMPLE_RATE = 24000;
 
-export function AletheiaBriefingControls({
+export function CohiBriefingControls({
   briefingContext,
   tenantId,
   onChatToggle,
   showChat = false,
-}: AletheiaBriefingControlsProps) {
+}: CohiBriefingControlsProps) {
   const [podcastAvailable, setPodcastAvailable] = useState<boolean | null>(null);
   const [isInCall, setIsInCall] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
@@ -156,7 +156,7 @@ export function AletheiaBriefingControls({
     async function checkAvailability() {
       try {
         const res = await api.fetchWithAuth(
-          `/api/podcast/cohi/aletheia/status?tenantId=${encodeURIComponent(tenantId!)}`
+          `/api/podcast/cohi/Cohi/status?tenantId=${encodeURIComponent(tenantId!)}`
         );
         if (!cancelled && res.ok) {
           const data = await res.json();
@@ -358,7 +358,7 @@ export function AletheiaBriefingControls({
       const timezone = getActiveTimezone();
 
       const response = await api.fetchWithAuth(
-        "/api/podcast/cohi/aletheia/stream",
+        "/api/podcast/cohi/Cohi/stream",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -464,7 +464,7 @@ export function AletheiaBriefingControls({
         }
 
         const response = await api.fetchWithAuth(
-          "/api/podcast/cohi/aletheia/ask",
+          "/api/podcast/cohi/Cohi/ask",
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },

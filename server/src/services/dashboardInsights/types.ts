@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Dashboard Insights — TypeScript types
  *
  * Page context (input to the pipeline) and pipeline output (per insight)
@@ -210,7 +210,7 @@ export interface DashboardInsight {
 }
 
 /**
- * Map dashboard pageId → functional_category for the Aletheia tabbed view.
+ * Map dashboard pageId → functional_category for the Cohi tabbed view.
  */
 export const DASHBOARD_PAGE_CATEGORY_MAP: Record<string, string> = {
   "leaderboard": "sales",

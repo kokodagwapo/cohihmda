@@ -1,4 +1,4 @@
-import { test, expect } from "./fixtures";
+﻿import { test, expect } from "./fixtures";
 import type { Page } from "@playwright/test";
 
 async function expectInsightsSections(page: Page) {
@@ -6,11 +6,11 @@ async function expectInsightsSections(page: Page) {
     .poll(
       async () => {
         const sectionCandidates = [
-          page.locator("#aletheiaInsights"),
+          page.locator("#CohiInsights"),
           page.locator("#industryNews"),
           page.locator("#leaderboard"),
           page.getByRole("heading", { name: /insights|news|leaderboard/i }).first(),
-          page.getByText(/industry news|market news|leaderboard|aletheia/i).first(),
+          page.getByText(/industry news|market news|leaderboard|Cohi/i).first(),
         ];
         for (const candidate of sectionCandidates) {
           if (await candidate.isVisible().catch(() => false)) return true;

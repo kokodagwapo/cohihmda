@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Register Insight Hooks
  *
  * Registers post-sync hooks in order: prediction pipeline (so market data is populated)
@@ -10,8 +10,8 @@ import { registerPostSyncHook, type PostSyncContext } from "./postSyncHookServic
 import { logInfo, logError } from "../logger.js";
 import { queueAutoRefreshForSourceTenant } from "../tenantRefreshService.js";
 import {
-  enqueueAletheiaPrefetchJob,
-} from "../aletheiaPrefetchWorker.js";
+  enqueueCohiPrefetchJob,
+} from "../CohiPrefetchWorker.js";
 
 let registered = false;
 
@@ -142,15 +142,15 @@ export function registerInsightHooks(): void {
           return;
         }
 
-        const { buildDefaultAletheiaBriefingContext, hashBriefingContext } =
+        const { buildDefaultCohiBriefingContext, hashBriefingContext } =
           await import("../../routes/podcast.js");
 
         logInfo(
           `[PostSyncHook] Enqueuing podcast generation for tenant ${ctx.tenantId}`,
         );
-        const briefingContext = await buildDefaultAletheiaBriefingContext(ctx.tenantId);
+        const briefingContext = await buildDefaultCohiBriefingContext(ctx.tenantId);
         const contextHash = hashBriefingContext(briefingContext);
-        const jobId = await enqueueAletheiaPrefetchJob({
+        const jobId = await enqueueCohiPrefetchJob({
           tenantId: ctx.tenantId,
           contextHash,
           briefingContext,

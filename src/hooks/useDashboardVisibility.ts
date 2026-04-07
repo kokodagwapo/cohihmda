@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { api } from '@/lib/api';
 import { DashboardVisibility } from '@/components/dashboard/ReportsSidebar';
 
@@ -11,7 +11,7 @@ export interface UseDashboardVisibilityReturn {
 const defaultVisibility: DashboardVisibility = {
   executiveDashboard: true,
   industryNews: true,
-  aletheiaInsights: true,
+  CohiInsights: true,
   leaderboard: true,
   topTiering: true,
   closingFalloutForecast: true,

@@ -1,4 +1,4 @@
-// Dashboard main insights page
+﻿// Dashboard main insights page
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { api } from "@/lib/api";
@@ -114,7 +114,7 @@ import {
   AreaChart,
 } from "recharts";
 import { Copy, Code2, Sparkles } from "lucide-react";
-import { AletheiaVoiceAssistant } from "@/components/aletheia/AletheiaVoiceAssistant";
+import { CohiVoiceAssistant } from "@/components/Cohi/CohiVoiceAssistant";
 import { motion, AnimatePresence } from "framer-motion";
 import { generatePDF } from "@/utils/pdfExport";
 import {
@@ -151,7 +151,7 @@ import { BusinessDataTable } from "@/components/dashboard/BusinessDataTable";
 import { DashboardCard } from "@/components/dashboard/DashboardCard";
 import { DataTable } from "@/components/dashboard/DataTable";
 import { ExecutiveDashboard } from "@/components/dashboard/ExecutiveDashboard";
-import { AletheiaPromptsCard } from "@/components/dashboard/AletheiaPromptsCard";
+import { CohiPromptsCard } from "@/components/dashboard/CohiPromptsCard";
 import { LeaderBoardSection } from "@/components/dashboard/LeaderBoardSection";
 import { LoanFunnelView } from "@/components/views/LoanFunnelView";
 import { TopTieringModal } from "@/components/dashboard/modals/TopTieringModal";
@@ -1326,12 +1326,12 @@ const Dashboard = () => {
           {isAuthenticated && (
             <div className="section-insights mb-16 md:mb-20 w-full min-w-0 max-w-full">
               {/* Cohi Insights */}
-              {dashboardVisibility.aletheiaInsights && (
+              {dashboardVisibility.CohiInsights && (
                 <div
-                  id="aletheiaInsights"
-                  className="section-aletheia-insights mb-8 md:mb-12"
+                  id="CohiInsights"
+                  className="section-Cohi-insights mb-8 md:mb-12"
                 >
-                  <AletheiaPromptsCard
+                  <CohiPromptsCard
                     dateFilter={dateFilter}
                     briefingContext={briefingContext || undefined}
                     selectedTenantId={selectedTenantId}
@@ -1340,10 +1340,10 @@ const Dashboard = () => {
                       window.dispatchEvent(new Event("cohi-chat-open"))
                     }
                     onDataAvailabilityChange={(hasData) => {
-                      if (!hasData && dashboardVisibility.aletheiaInsights) {
+                      if (!hasData && dashboardVisibility.CohiInsights) {
                         handleVisibilityChange({
                           ...dashboardVisibility,
-                          aletheiaInsights: false,
+                          CohiInsights: false,
                         });
                       }
                     }}
@@ -1455,7 +1455,7 @@ const Dashboard = () => {
         />
 
         {/* Hidden for now - Cohi Avatar
-       <AletheiaVoiceAssistant dashboardContext={{
+       <CohiVoiceAssistant dashboardContext={{
         stats,
         riskCases,
         topPerformers: topPerformers.slice(0, 5), // Top 5 for context

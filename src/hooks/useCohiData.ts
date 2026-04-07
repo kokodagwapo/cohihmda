@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
+﻿import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
 import { CheckCircle2, Info, AlertTriangle, AlertCircle } from "lucide-react";
 
-export interface AletheiaInsight {
+export interface CohiInsight {
   /** DB row id from generated_insights — used for exact drill-down queries */
   insightId?: number;
   type: "success" | "info" | "warning" | "error" | "critical";
@@ -69,13 +69,13 @@ const getIconForType = (type: string) => {
   }
 };
 
-export const useAletheiaData = (
+export const useCohiData = (
   dateFilter: "today" | "mtd" | "ytd" | "custom",
   onDataAvailabilityChange?: (hasData: boolean) => void,
   selectedTenantId?: string | null,
   selectedChannel?: string | null
 ) => {
-  const [allInsights, setAllInsights] = useState<AletheiaInsight[]>([]);
+  const [allInsights, setAllInsights] = useState<CohiInsight[]>([]);
   const [insightsLoading, setInsightsLoading] = useState(true);
   const [insightsError, setInsightsError] = useState<string | null>(null);
   const [funnelData, setFunnelData] = useState<any>(null);
@@ -83,7 +83,7 @@ export const useAletheiaData = (
   const [needsGeneration, setNeedsGeneration] = useState(false);
 
   // Map API response insights to component format
-  const mapInsights = (data: any): AletheiaInsight[] => {
+  const mapInsights = (data: any): CohiInsight[] => {
     if (
       !data.insights ||
       !Array.isArray(data.insights) ||
