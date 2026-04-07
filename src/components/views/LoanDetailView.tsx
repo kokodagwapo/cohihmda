@@ -42,12 +42,16 @@ import {
   type NumericFilterMode,
   type TextColumnFilter,
   EMPTY_FILTER_TOKEN,
+  DATE_FILTER_BLANK_LABEL,
+  DATE_FILTER_BLANK_SHORTCUT,
   areFilterStatesEquivalent,
   normalizeFilterState,
   parseFilterDate,
   parseNumericValue,
   evaluateLoanDetailFilters,
   isFilterActive,
+  isDateFilterBlankOnlyShortcut,
+  isLoanDetailDateMissing,
 } from "@/utils/loanDetailFilters";
 import { useLoanDetailFilterBookmarks, type LoanDetailFilterBookmark } from "@/hooks/useLoanDetailFilterBookmarks";
 import { Loader2, Download, ArrowUp, ArrowDown, Filter, X, Check, Bookmark, Pencil, Trash2, Share2, SlidersHorizontal } from "lucide-react";
@@ -365,6 +369,9 @@ function matchesAppliedNumberFilter(filter: NumberColumnFilter, token: string, r
 function matchesAppliedDateFilter(filter: DateColumnFilter, rawValue: unknown): boolean {
   const hasDateFilter = Boolean(filter.shortcut?.trim() || filter.from?.trim() || filter.to?.trim());
   if (!hasDateFilter) return false;
+  if (isDateFilterBlankOnlyShortcut(filter.shortcut)) {
+    return isLoanDetailDateMissing(rawValue);
+  }
   const valueDate = parseFilterDate(rawValue);
   if (!valueDate) return false;
   valueDate.setHours(0, 0, 0, 0);
@@ -413,6 +420,11 @@ function matchesAppliedBooleanFilter(filter: BooleanColumnFilter, rawValue: unkn
   if (filter.value === "all") return false;
   const yes = String(rawValue ?? "").trim().toLowerCase() === "yes" || rawValue === true;
   return filter.value === "yes" ? yes : !yes;
+}
+
+function dateFilterSummaryLabel(filter: DateColumnFilter): string {
+  if (isDateFilterBlankOnlyShortcut(filter.shortcut)) return DATE_FILTER_BLANK_LABEL;
+  return filter.shortcut || `${filter.from || ""} to ${filter.to || ""}`;
 }
 
 /** Format volume (loan amount) with commas and 2 decimals (e.g. 3,093,200.00). Used only for volume column. */
@@ -1110,7 +1122,7 @@ export function LoanDetailView({
           continue;
         }
         if (filter.kind === "date") {
-          lines.push(`${col.label}: ${filter.shortcut || `${filter.from || ""} to ${filter.to || ""}`}`);
+          lines.push(`${col.label}: ${dateFilterSummaryLabel(filter)}`);
           continue;
         }
         lines.push(`${col.label}: ${filter.value === "yes" ? "Yes" : "No"}`);
@@ -1140,7 +1152,7 @@ export function LoanDetailView({
         continue;
       }
       if (filter.kind === "date") {
-        lines.push(`${col.label}: ${filter.shortcut || `${filter.from || ""} to ${filter.to || ""}`}`);
+        lines.push(`${col.label}: ${dateFilterSummaryLabel(filter)}`);
         continue;
       }
       lines.push(`${col.label}: ${filter.value === "yes" ? "Yes" : "No"}`);
@@ -1500,7 +1512,7 @@ export function LoanDetailView({
       if (filter.kind === "date") {
         chips.push({
           key: `${col.id}:date`,
-          label: `${col.label}: ${filter.shortcut || `${filter.from || ""} to ${filter.to || ""}`}`,
+          label: `${col.label}: ${dateFilterSummaryLabel(filter)}`,
           onRemove: () => {
             setFilterFeedback({ message: "Removing filter...", nonce: Date.now() });
             runFilterUpdate(() => {
@@ -1662,16 +1674,36 @@ export function LoanDetailView({
       ];
       return (
         <div className="space-y-3">
+          <Button
+            type="button"
+            size="sm"
+            variant={isDateFilterBlankOnlyShortcut(dateFilter.shortcut) ? "default" : "outline"}
+            className="w-full justify-start"
+            onClick={() =>
+              setDraftFilter(col.id, {
+                kind: "date",
+                shortcut: DATE_FILTER_BLANK_SHORTCUT,
+                from: "",
+                to: "",
+              })
+            }
+          >
+            {DATE_FILTER_BLANK_LABEL}
+          </Button>
           <div className="grid grid-cols-2 gap-2">
             <Input
               type="date"
               value={dateFilter.from ?? ""}
-              onChange={(e) => setDraftFilter(col.id, { kind: "date", from: e.target.value, to: dateFilter.to })}
+              onChange={(e) =>
+                setDraftFilter(col.id, { kind: "date", from: e.target.value, to: dateFilter.to, shortcut: undefined })
+              }
             />
             <Input
               type="date"
               value={dateFilter.to ?? ""}
-              onChange={(e) => setDraftFilter(col.id, { kind: "date", from: dateFilter.from, to: e.target.value })}
+              onChange={(e) =>
+                setDraftFilter(col.id, { kind: "date", from: dateFilter.from, to: e.target.value, shortcut: undefined })
+              }
             />
           </div>
           <div className="grid grid-cols-2 gap-2">
@@ -1857,6 +1889,7 @@ export function LoanDetailView({
 
   const getValueToken = useCallback((row: LoanDetailRow, col: ColumnDef): string => {
     const raw = getFilterRawValue(row, col);
+    if (getColumnFilterKind(col) === "date" && isLoanDetailDateMissing(raw)) return EMPTY_FILTER_TOKEN;
     if (raw == null || String(raw).trim() === "") return EMPTY_FILTER_TOKEN;
     return String(raw).trim();
   }, [getFilterRawValue]);
@@ -1888,6 +1921,19 @@ export function LoanDetailView({
       });
       return;
     }
+    if (token === EMPTY_FILTER_TOKEN) {
+      setDraftFilters((prev) => {
+        const current = prev[col.id];
+        if (current?.kind === "date" && isDateFilterBlankOnlyShortcut(current.shortcut)) {
+          return { ...prev, [col.id]: { kind: "date" } };
+        }
+        return {
+          ...prev,
+          [col.id]: { kind: "date", shortcut: DATE_FILTER_BLANK_SHORTCUT, from: "", to: "" },
+        };
+      });
+      return;
+    }
     setDraftFilters((prev) => {
       const current = prev[col.id];
       const currentFrom = current?.kind === "date" ? current.from : undefined;
@@ -1895,7 +1941,7 @@ export function LoanDetailView({
       if (currentFrom === token && currentTo === token) {
         return { ...prev, [col.id]: { kind: "date" } };
       }
-      return { ...prev, [col.id]: { kind: "date", from: token, to: token } };
+      return { ...prev, [col.id]: { kind: "date", from: token, to: token, shortcut: undefined } };
     });
   }, [beginDraft, getValueToken, toggleDraftValue]);
 

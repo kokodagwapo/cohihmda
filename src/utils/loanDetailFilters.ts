@@ -3,6 +3,20 @@ export type NumericFilterMode = "all" | "range" | "min" | "max";
 export type BooleanFilterValue = "all" | "yes" | "no";
 export const EMPTY_FILTER_TOKEN = "__EMPTY__";
 
+/** Stored on `DateColumnFilter.shortcut` for blank-only filters (matches missing dates, same as table "-"). */
+export const DATE_FILTER_BLANK_SHORTCUT = "-";
+
+/** User-facing label for chips, summaries, and the date filter button. */
+export const DATE_FILTER_BLANK_LABEL = "No Date (Blank)";
+
+export function isLoanDetailDateMissing(value: unknown): boolean {
+  return isEmptyLike(value);
+}
+
+export function isDateFilterBlankOnlyShortcut(shortcut: string | undefined): boolean {
+  return (shortcut ?? "").trim() === DATE_FILTER_BLANK_SHORTCUT;
+}
+
 export type TextColumnFilter = {
   kind: "text";
   selectedValues: string[];
@@ -187,6 +201,9 @@ function matchesNumberFilter(filter: NumberColumnFilter, rawValue: unknown): boo
 
 function matchesDateFilter(filter: DateColumnFilter, rawValue: unknown): boolean {
   if (!hasDateFilter(filter)) return true;
+  if (isDateFilterBlankOnlyShortcut(filter.shortcut)) {
+    return isLoanDetailDateMissing(rawValue);
+  }
   const valueDate = parseFilterDate(rawValue);
   if (!valueDate) return false;
   valueDate.setHours(0, 0, 0, 0);

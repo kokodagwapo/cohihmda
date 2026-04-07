@@ -194,6 +194,9 @@ function sqlLowerTrimExpr(expr: string): string {
 
 const EMPTY_FILTER_TOKEN = "__EMPTY__";
 
+/** Matches loan detail / Estimated Closings UI: blank-only date filter stored as shortcut "-". */
+const DATE_FILTER_BLANK_SHORTCUT = "-";
+
 function buildTextFilterSql(exprSql: string, filter: TextFilter): string {
   const parts: string[] = [];
   for (const v of filter.selectedValues) {
@@ -267,6 +270,9 @@ function resolveShortcutRangeIso(shortcut: string): { start: string; end: string
 }
 
 function buildDateFilterSql(dateExprSql: string, filter: DateFilter): string {
+  if (filter.shortcut?.trim() === DATE_FILTER_BLANK_SHORTCUT) {
+    return `(${dateExprSql} IS NULL OR TRIM(COALESCE(${dateExprSql}::text, '')) = '' OR TRIM(COALESCE(${dateExprSql}::text, '')) IN ('-', '–'))`;
+  }
   let from = filter.from?.trim() || "";
   let to = filter.to?.trim() || "";
   if (filter.shortcut?.trim()) {

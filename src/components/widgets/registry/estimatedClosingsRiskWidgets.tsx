@@ -21,11 +21,14 @@ import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, BarChart, Bar, XAxis
 import type { EstimatedClosingsRiskResponse } from "@/hooks/useEstimatedClosingsRiskData";
 import { ESTIMATED_CLOSINGS_DETAIL_COLUMNS } from "@/config/estimatedClosingsDetailColumns";
 import {
+  DATE_FILTER_BLANK_LABEL,
+  DATE_FILTER_BLANK_SHORTCUT,
   type ColumnFilterState,
   type ColumnFilter,
   type NumericFilterMode,
   normalizeFilterState,
   isFilterActive,
+  isDateFilterBlankOnlyShortcut,
 } from "@/utils/loanDetailFilters";
 
 type Source = EstimatedClosingsRiskResponse | null;
@@ -646,27 +649,62 @@ function EstimatedClosingsDetailTableWidget({
                                 </div>
                               )}
                               {c.kind === "date" && (
-                                <div className="flex gap-2">
-                                  <Input
-                                    type="date"
-                                    value={filter?.kind === "date" ? filter.from ?? "" : ""}
-                                    onChange={(e) =>
+                                <div className="space-y-2">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant={
+                                      filter?.kind === "date" && isDateFilterBlankOnlyShortcut(filter.shortcut)
+                                        ? "default"
+                                        : "outline"
+                                    }
+                                    className="w-full justify-start h-8 text-xs"
+                                    onClick={() =>
                                       setDraftFilter((p) => ({
                                         ...p,
-                                        [c.id]: { kind: "date", from: e.target.value, to: filter?.kind === "date" ? filter.to : "" },
+                                        [c.id]: {
+                                          kind: "date",
+                                          shortcut: DATE_FILTER_BLANK_SHORTCUT,
+                                          from: "",
+                                          to: "",
+                                        },
                                       }))
                                     }
-                                  />
-                                  <Input
-                                    type="date"
-                                    value={filter?.kind === "date" ? filter.to ?? "" : ""}
-                                    onChange={(e) =>
-                                      setDraftFilter((p) => ({
-                                        ...p,
-                                        [c.id]: { kind: "date", from: filter?.kind === "date" ? filter.from : "", to: e.target.value },
-                                      }))
-                                    }
-                                  />
+                                  >
+                                    {DATE_FILTER_BLANK_LABEL}
+                                  </Button>
+                                  <div className="flex gap-2">
+                                    <Input
+                                      type="date"
+                                      value={filter?.kind === "date" ? filter.from ?? "" : ""}
+                                      onChange={(e) =>
+                                        setDraftFilter((p) => ({
+                                          ...p,
+                                          [c.id]: {
+                                            kind: "date",
+                                            from: e.target.value,
+                                            to: filter?.kind === "date" ? filter.to ?? "" : "",
+                                            shortcut: undefined,
+                                          },
+                                        }))
+                                      }
+                                    />
+                                    <Input
+                                      type="date"
+                                      value={filter?.kind === "date" ? filter.to ?? "" : ""}
+                                      onChange={(e) =>
+                                        setDraftFilter((p) => ({
+                                          ...p,
+                                          [c.id]: {
+                                            kind: "date",
+                                            from: filter?.kind === "date" ? filter.from ?? "" : "",
+                                            to: e.target.value,
+                                            shortcut: undefined,
+                                          },
+                                        }))
+                                      }
+                                    />
+                                  </div>
                                 </div>
                               )}
                               {c.kind === "boolean" && (
