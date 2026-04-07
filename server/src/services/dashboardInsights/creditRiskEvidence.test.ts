@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { DashboardInsight, DashboardPageContext } from "./types.js";
-import { buildCreditRiskSupportingDataForInsight, selectCreditRiskEvidenceIntent } from "./creditRiskEvidence.js";
+import {
+  buildCreditRiskCohortSubjectRowsSync,
+  buildCreditRiskSupportingDataForInsight,
+  selectCreditRiskEvidenceIntent,
+} from "./creditRiskEvidence.js";
 
 vi.mock("../metrics/metricsService.js", () => ({
   queryCreditRiskDrilldownLoans: vi.fn().mockResolvedValue([
@@ -89,6 +93,18 @@ describe("creditRiskEvidence", () => {
   it("selects cohort trend for distribution insights", () => {
     const intent = selectCreditRiskEvidenceIntent(baseInsight);
     expect(intent.profile).toBe("cohort_period_trend");
+  });
+
+  it("buildCreditRiskCohortSubjectRowsSync matches bucket across periods", () => {
+    const rows = buildCreditRiskCohortSubjectRowsSync(
+      baseInsight,
+      baseContext,
+      ">50.00"
+    );
+    expect(rows).not.toBeNull();
+    expect(rows!.length).toBe(2);
+    expect(rows![0].bucketLabel).toBe(">50.00");
+    expect(rows![0].totalUnits).toBe(156);
   });
 
   it("builds cohort trend rows from page context", async () => {

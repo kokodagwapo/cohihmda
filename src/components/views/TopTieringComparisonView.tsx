@@ -776,12 +776,15 @@ export function TopTieringComparisonView({
         loading={dashboardInsightsLoading}
         generating={generateLoading}
         generateError={generateError}
+        onClearGenerateError={() => setGenerateError(null)}
         onGenerate={handleGenerateInsights}
         showGenerateButton
         onShowInsight={handleShowInsight}
         onRefreshInsights={refreshDashboardInsights}
         showFeedback
         onSubmitFeedback={handleDashboardInsightFeedback}
+        dateFilter="ytd"
+        selectedTenantId={selectedTenantId ?? undefined}
       />
 
       {/* Demo data indicator */}

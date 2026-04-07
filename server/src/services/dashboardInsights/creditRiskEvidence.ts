@@ -9,6 +9,7 @@ import type { EvidenceIntent } from "./evidenceProfiles.js";
 import { selectDefaultEvidenceIntent } from "./evidenceProfileSelector.js";
 import { executeEvidenceIntent, type EvidenceQueryProvider } from "./evidenceQueryExecutor.js";
 import { queryCreditRiskDrilldownLoans } from "../metrics/metricsService.js";
+import { computeCreditRiskPeriodDateRange } from "./adapters/creditRiskManagementAdapter.js";
 
 type CreditRiskPeriodApplicationData = {
   kpis?: {
@@ -763,6 +764,204 @@ async function buildCohortDetail(
       waLtv: avg(validLtv, "ltvRatio"),
       waDti: avg(validDti, "dtiRatio"),
     },
+  };
+}
+
+function normalizeCreditRiskPeriodKeyForHandler(raw: string): string {
+  const r = String(raw ?? "").trim().toLowerCase();
+  if (!r) return "ytd";
+  if (r === "l13m" || r === "l12m" || r === "ytd") return r;
+  if (/^y_\d{4}$/.test(r)) return r;
+  return `y_${new Date().getFullYear()}`;
+}
+
+/**
+ * Build per-period cohort rows for a bucket / loan-mix category (sync, page context only).
+ * Used by dashboard insight detail hydrator for tracked subject insights.
+ */
+export function buildCreditRiskCohortSubjectRowsSync(
+  insight: DashboardInsight,
+  pageContext: DashboardPageContext,
+  subjectName: string
+): Array<Record<string, unknown>> | null {
+  const intent = selectCreditRiskEvidenceIntent(insight);
+  const target = (subjectName || intent.targetLabel || "").trim();
+  if (!target) return null;
+  if (intent.profile !== "cohort_period_trend") return null;
+
+  const widgetId = intent.widgetId || "";
+  if (
+    widgetId !== "credit-risk-fico-distribution" &&
+    widgetId !== "credit-risk-ltv-distribution" &&
+    widgetId !== "credit-risk-dti-distribution" &&
+    widgetId !== "credit-risk-loan-mix-table"
+  ) {
+    return null;
+  }
+
+  const byPeriod = pageContext.data?.by_time_period as
+    | Record<string, CreditRiskPeriodData>
+    | undefined;
+  if (!byPeriod || typeof byPeriod !== "object") return null;
+
+  const appType = intent.applicationType || "Applications Taken";
+  const focusPeriod = getFocusPeriodKey(intent.datePeriod);
+  const periods = getOrderedPeriods(byPeriod, focusPeriod);
+  const inferredLoanMixDim =
+    widgetId === "credit-risk-loan-mix-table"
+      ? inferLoanMixDimension(byPeriod, appType, target, intent.loanMixDimension)
+      : undefined;
+
+  const rows: Array<Record<string, unknown>> = [];
+
+  for (const [period, data] of periods) {
+    const appData = data.byApplicationType?.[appType];
+    if (!appData) continue;
+    const k = appData.kpis;
+
+    if (
+      widgetId === "credit-risk-fico-distribution" ||
+      widgetId === "credit-risk-ltv-distribution" ||
+      widgetId === "credit-risk-dti-distribution"
+    ) {
+      const arr =
+        widgetId === "credit-risk-fico-distribution"
+          ? appData.distributions?.fico
+          : widgetId === "credit-risk-ltv-distribution"
+            ? appData.distributions?.ltv
+            : appData.distributions?.dti;
+      if (!Array.isArray(arr)) continue;
+      const bucket = arr.find((x) => x.range === target);
+      if (!bucket) continue;
+      rows.push({
+        period,
+        periodLabel: data.periodLabel ?? period,
+        isFocusPeriod: focusPeriod === period,
+        applicationType: appType,
+        cohortDimension:
+          widgetId === "credit-risk-fico-distribution"
+            ? "fico"
+            : widgetId === "credit-risk-ltv-distribution"
+              ? "ltv"
+              : "dti",
+        bucketLabel: bucket.range ?? target,
+        totalUnits: bucket.units ?? 0,
+        unitsPercent: bucket.percentage ?? 0,
+        totalVolume: bucket.volume ?? 0,
+        volumePercent:
+          (k?.volume ?? 0) > 0
+            ? Number((((bucket.volume ?? 0) * 100) / (k?.volume ?? 1)).toFixed(1))
+            : 0,
+        waFico: 0,
+        waLtv: 0,
+        waDti: 0,
+        originatedPercent: 0,
+        deniedPercent: 0,
+        withdrawnPercent: 0,
+        activePercent: 0,
+      });
+      continue;
+    }
+
+    if (widgetId === "credit-risk-loan-mix-table") {
+      const dim = inferredLoanMixDim ?? "loan_type";
+      const arr =
+        dim === "loan_purpose"
+          ? appData.loanMix?.byPurpose
+          : dim === "occupancy"
+            ? appData.loanMix?.byOccupancy
+            : appData.loanMix?.byType;
+      if (!Array.isArray(arr) || arr.length === 0) continue;
+      const item = arr.find((x) => x.category === target);
+      if (!item) continue;
+      rows.push({
+        period,
+        periodLabel: data.periodLabel ?? period,
+        isFocusPeriod: focusPeriod === period,
+        applicationType: appType,
+        cohortDimension: dim,
+        bucketLabel: item.category ?? target,
+        totalUnits: item.units ?? 0,
+        unitsPercent: item.unitsPercent ?? 0,
+        totalVolume: item.volume ?? 0,
+        volumePercent: item.volumePercent ?? 0,
+        wac: item.wac ?? 0,
+        waFico: item.waFico ?? 0,
+        waLtv: item.waLtv ?? 0,
+        waDti: item.waDti ?? 0,
+        originatedPercent: 0,
+        deniedPercent: 0,
+        withdrawnPercent: 0,
+        activePercent: 0,
+      });
+    }
+  }
+
+  return rows.length > 0 ? rows : null;
+}
+
+/** Single-row cohort metrics for tracked-insight handler refresh. */
+export async function fetchCreditRiskCohortSubjectSnapshotForTracking(
+  tenantPool: Pool,
+  filterContextSnapshot: Record<string, unknown>
+): Promise<Record<string, unknown> | null> {
+  const period = normalizeCreditRiskPeriodKeyForHandler(
+    String(filterContextSnapshot.datePeriod ?? "ytd")
+  );
+  const { start, end } = computeCreditRiskPeriodDateRange(period);
+  const appType = String(filterContextSnapshot.applicationType ?? "Applications Taken");
+  const widgetId = String(
+    filterContextSnapshot.creditRiskTrackedWidgetId ??
+      filterContextSnapshot.creditRiskEvidenceWidgetId ??
+      ""
+  ).trim();
+  const target = String(
+    filterContextSnapshot.creditRiskTrackedBucketLabel ??
+      filterContextSnapshot.cohortBucketLabel ??
+      filterContextSnapshot.category ??
+      ""
+  ).trim();
+  if (!widgetId || !target) return null;
+
+  const periodData: CreditRiskPeriodData = { dateRange: `${start} to ${end}` };
+  const intent: EvidenceIntent = {
+    profile: "cohort_period_trend",
+    widgetId,
+    targetLabel: target,
+    applicationType: appType,
+    datePeriod: String(filterContextSnapshot.datePeriod ?? "ytd"),
+    loanMixDimension:
+      typeof filterContextSnapshot.loanMixDimension === "string"
+        ? filterContextSnapshot.loanMixDimension
+        : undefined,
+  };
+
+  const m = await queryCohortMetricsForPeriod(tenantPool, periodData, intent);
+  if (!m) {
+    return {
+      totalUnits: 0,
+      unitsPercent: 0,
+      totalVolume: 0,
+      waFico: 0,
+      waLtv: 0,
+      waDti: 0,
+      originatedPercent: 0,
+      deniedPercent: 0,
+      withdrawnPercent: 0,
+      activePercent: 0,
+    };
+  }
+  return {
+    totalUnits: m.units,
+    unitsPercent: m.unitsPercent,
+    totalVolume: m.volume,
+    waFico: m.waFico,
+    waLtv: m.waLtv,
+    waDti: m.waDti,
+    originatedPercent: m.originatedPercent,
+    deniedPercent: m.deniedPercent,
+    withdrawnPercent: m.withdrawnPercent,
+    activePercent: m.activePercent,
   };
 }
 

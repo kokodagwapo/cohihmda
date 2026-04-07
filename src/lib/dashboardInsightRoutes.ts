@@ -25,13 +25,18 @@ export function isKnownDashboardInsightPageId(pageId: string): pageId is Dashboa
  * Path to open for an insight's source dashboard (hash for /insights sections, full path for standalone routes).
  */
 export function getDashboardInsightPath(pageId: string): string {
-  if (!pageId) return "/insights";
-  if (pageId === "loan-complexity") return "/loan-complexity";
-  if (pageId === "company-scorecard") return "/company-scorecard";
-  if (pageId === "credit-risk-management") return "/credit-risk-management";
-  if (pageId === "workflow-conversion") return "/workflow-conversion";
-  if (pageId === "top-tiering-comparison") return "/top-tiering-comparison";
-  return `/insights#${pageId}`;
+  const raw = (pageId || "").trim();
+  if (!raw) return "/insights";
+  const id = raw.toLowerCase();
+  if (id === "loan-complexity") return "/loan-complexity";
+  if (id === "company-scorecard") return "/company-scorecard";
+  if (id === "credit-risk-management") return "/credit-risk-management";
+  if (id === "workflow-conversion") return "/workflow-conversion";
+  /** Matches App.tsx: <Route path="/performance/toptiering-comparison" ... /> */
+  if (id === "top-tiering-comparison" || id === "toptiering-comparison") {
+    return "/performance/toptiering-comparison";
+  }
+  return `/insights#${raw}`;
 }
 
 /**
@@ -44,36 +49,38 @@ export function getDashboardInsightNavigateState(
   pageId: string,
   filterContext?: Record<string, unknown>
 ): Record<string, unknown> {
-  if (!pageId) return {};
+  const raw = (pageId || "").trim();
+  if (!raw) return {};
+  const id = raw.toLowerCase();
 
-  if (pageId === "loan-complexity") {
+  if (id === "loan-complexity") {
     return {};
   }
 
-  if (pageId === "company-scorecard") {
+  if (id === "company-scorecard") {
     return {};
   }
 
-  if (pageId === "credit-risk-management") {
+  if (id === "credit-risk-management") {
     return {};
   }
 
-  if (pageId === "workflow-conversion") {
+  if (id === "workflow-conversion") {
     return {};
   }
 
-  if (pageId === "top-tiering-comparison") {
+  if (id === "top-tiering-comparison" || id === "toptiering-comparison") {
     return {};
   }
 
   const state: Record<string, unknown> = {
-    scrollToSection: pageId,
+    scrollToSection: raw,
   };
 
   const hasFilters = filterContext && Object.keys(filterContext).length > 0;
-  if (hasFilters && pageId === "leaderboard") {
+  if (hasFilters && id === "leaderboard") {
     state.dashboardInsightFilterContext = filterContext;
-    state.sourcePageId = pageId;
+    state.sourcePageId = raw;
   }
 
   return state;

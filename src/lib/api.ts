@@ -1282,7 +1282,8 @@ export class ApiClient {
   async trackInsight(data: {
     headline: string;
     understory?: string;
-    metric_signature: any;
+    /** Omitted for `dashboard_insights`; server derives from source row (plan §0). */
+    metric_signature?: any;
     source_insight_id?: number;
     source_type?: string;
     tags?: string[];
@@ -1297,6 +1298,15 @@ export class ApiClient {
     return this.request(`/api/insights/tracked${tenantParam}`);
   }
 
+  /** Platform staff only — runs evaluateTrackedInsights for the current tenant. */
+  async runTrackedReevaluation(tenantId?: string | null) {
+    const tenantParam = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request<{ evaluated: number; errors: number }>(
+      `/api/insights/tracked/reevaluate${tenantParam}`,
+      { method: "POST" }
+    );
+  }
+
   async getTrackedInsightHistory(id: string, limit = 50, tenantId?: string | null) {
     const tenantParam = tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : "";
     return this.request(`/api/insights/tracked/${id}/history?limit=${limit}${tenantParam}`);
@@ -1304,7 +1314,12 @@ export class ApiClient {
 
   async updateTrackedInsight(
     id: string,
-    data: { status?: string; alert_threshold?: any; tags?: string[] },
+    data: {
+      /** `resolved` = paused (no auto-eval); `archived` = reference only */
+      status?: "active" | "resolved" | "archived";
+      alert_threshold?: any;
+      tags?: string[];
+    },
     tenantId?: string | null
   ) {
     const tenantParam = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";

@@ -49,7 +49,7 @@ function startOfMonthLocal(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), 1);
 }
 
-function resolveDateFieldAndFilters(applicationType: ApplicationType): {
+export function resolveCreditRiskDateFieldAndFilters(applicationType: string): {
   dateField: string;
   additionalFilters: Record<string, unknown>;
 } {
@@ -65,8 +65,8 @@ function resolveDateFieldAndFilters(applicationType: ApplicationType): {
   return { dateField: "application_date", additionalFilters: {} };
 }
 
-function computePeriodDateRange(
-  period: CreditRiskPeriodKey
+export function computeCreditRiskPeriodDateRange(
+  period: CreditRiskPeriodKey | string
 ): { start: string; end: string; periodLabel: string } {
   const now = new Date();
   const end = toYmdLocal(now);
@@ -185,11 +185,11 @@ export const creditRiskManagementAdapter: DashboardAdapter = {
     const loanMixValues = new Set<string>();
 
     for (const period of periods) {
-      const date = computePeriodDateRange(period);
+      const date = computeCreditRiskPeriodDateRange(period);
       const byApplicationType: Record<string, unknown> = {};
 
       for (const appType of APPLICATION_TYPES) {
-        const { dateField, additionalFilters } = resolveDateFieldAndFilters(appType);
+        const { dateField, additionalFilters } = resolveCreditRiskDateFieldAndFilters(appType);
         const options = {
           dateRange: { start: date.start, end: date.end },
           dateField,
