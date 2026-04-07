@@ -38,10 +38,15 @@ import {
 } from "@/config/estimatedClosingsDetailColumns";
 import { cn } from "@/lib/utils";
 import {
+  DATE_FILTER_BLANK_LABEL,
+  DATE_FILTER_BLANK_SHORTCUT,
   EMPTY_FILTER_TOKEN,
+  isDateFilterBlankOnlyShortcut,
   isFilterActive,
+  isLoanDetailDateMissing,
   normalizeFilterState,
   type ColumnFilterState,
+  type DateColumnFilter,
   type LoanDetailFilterKind,
   type NumericFilterMode,
   valueMatchesColumnFilter,
@@ -229,11 +234,18 @@ function getDetailRaw(row: Record<string, unknown>, columnId: string): unknown {
 }
 
 function getCellToken(columnId: string, raw: unknown): string {
+  const col = ESTIMATED_CLOSINGS_DETAIL_COLUMN_BY_ID[columnId];
+  if (col?.kind === "date" && isLoanDetailDateMissing(raw)) return EMPTY_FILTER_TOKEN;
   if (raw == null || String(raw).trim() === "" || String(raw) === "-") return EMPTY_FILTER_TOKEN;
   if (columnId === "borrowerSelfEmployed") {
     return formatBooleanish(raw).toLowerCase() === "yes" ? "yes" : "no";
   }
   return String(raw).trim();
+}
+
+function estimatedClosingsDateFilterChipLabel(filter: DateColumnFilter): string {
+  if (isDateFilterBlankOnlyShortcut(filter.shortcut)) return DATE_FILTER_BLANK_LABEL;
+  return filter.shortcut?.trim() ? filter.shortcut : `${filter.from ?? ""} → ${filter.to ?? ""}`;
 }
 
 function cloneFilter(filter: ColumnFilterState[string]): ColumnFilterState[string] | undefined {
@@ -573,7 +585,7 @@ export function EstimatedClosingsRiskView({
       } else if (filter.kind === "date") {
         chips.push({
           key: `${col.id}:d`,
-          label: `${col.label}: ${filter.shortcut?.trim() ? filter.shortcut : `${filter.from ?? ""} → ${filter.to ?? ""}`}`,
+          label: `${col.label}: ${estimatedClosingsDateFilterChipLabel(filter)}`,
           onRemove: () =>
             setDetailColumnFilters((prev) => {
               const next = { ...prev };
@@ -830,19 +842,45 @@ export function EstimatedClosingsRiskView({
         ];
         return (
           <div className="space-y-3">
+            <Button
+              type="button"
+              size="sm"
+              variant={isDateFilterBlankOnlyShortcut(dateFilter.shortcut) ? "default" : "outline"}
+              className="w-full justify-start"
+              onClick={() =>
+                setDraftDetailFilter(col.id, {
+                  kind: "date",
+                  shortcut: DATE_FILTER_BLANK_SHORTCUT,
+                  from: "",
+                  to: "",
+                })
+              }
+            >
+              {DATE_FILTER_BLANK_LABEL}
+            </Button>
             <div className="grid grid-cols-2 gap-2">
               <Input
                 type="date"
                 value={dateFilter.from ?? ""}
                 onChange={(e) =>
-                  setDraftDetailFilter(col.id, { kind: "date", from: e.target.value, to: dateFilter.to })
+                  setDraftDetailFilter(col.id, {
+                    kind: "date",
+                    from: e.target.value,
+                    to: dateFilter.to,
+                    shortcut: undefined,
+                  })
                 }
               />
               <Input
                 type="date"
                 value={dateFilter.to ?? ""}
                 onChange={(e) =>
-                  setDraftDetailFilter(col.id, { kind: "date", from: dateFilter.from, to: e.target.value })
+                  setDraftDetailFilter(col.id, {
+                    kind: "date",
+                    from: dateFilter.from,
+                    to: e.target.value,
+                    shortcut: undefined,
+                  })
                 }
               />
             </div>
@@ -867,7 +905,12 @@ export function EstimatedClosingsRiskView({
                     }
                     const preset = opt.token as PeriodPreset;
                     const range = computePresetDateRange(preset);
-                    setDraftDetailFilter(col.id, { kind: "date", shortcut: opt.token, from: range.start, to: range.end });
+                    setDraftDetailFilter(col.id, {
+                      kind: "date",
+                      shortcut: opt.token,
+                      from: range.start,
+                      to: range.end,
+                    });
                   }}
                 >
                   {opt.label}
@@ -1109,15 +1152,32 @@ export function EstimatedClosingsRiskView({
         else next[columnId] = { kind: "boolean", value: option };
         return next;
       }
-      const dateStr = raw != null && String(raw).trim() !== "" && String(raw) !== "-" ? String(raw).trim() : "";
-      if (!dateStr) return prev;
-      const cur = prev[columnId];
-      if (cur?.kind === "date" && cur.from === dateStr && cur.to === dateStr) {
-        const next = { ...prev };
-        delete next[columnId];
-        return next;
+      if (col.kind === "date") {
+        if (token === EMPTY_FILTER_TOKEN) {
+          const cur = prev[columnId];
+          if (cur?.kind === "date" && isDateFilterBlankOnlyShortcut(cur.shortcut)) {
+            const next = { ...prev };
+            delete next[columnId];
+            return next;
+          }
+          return {
+            ...prev,
+            [columnId]: { kind: "date", shortcut: DATE_FILTER_BLANK_SHORTCUT, from: "", to: "" },
+          };
+        }
+        const dateStr = String(raw).trim().slice(0, 10);
+        const cur = prev[columnId];
+        if (cur?.kind === "date" && cur.from === dateStr && cur.to === dateStr) {
+          const next = { ...prev };
+          delete next[columnId];
+          return next;
+        }
+        return {
+          ...prev,
+          [columnId]: { kind: "date", from: dateStr, to: dateStr, shortcut: undefined },
+        };
       }
-      return { ...prev, [columnId]: { kind: "date", from: dateStr, to: dateStr } };
+      return prev;
     });
   }, []);
 
