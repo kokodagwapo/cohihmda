@@ -681,18 +681,57 @@ export async function loadUploadRecord(
 // Build LLM context string for context-strategy uploads
 // ============================================================================
 
+/**
+ * Detect and strip footer/summary/blank rows that appear after the real data in
+ * trial-balance and similar CSVs. These rows (e.g. PORTFOLIO_TOTAL, Reporting_Entity,
+ * blank separators) pollute inline context and cause the LLM to miscount records.
+ *
+ * A row is considered a footer/blank when ANY of:
+ *   - Every column value is null, undefined, or empty string (blank separator row)
+ *   - More than 80% of column values are null/empty (sparse trailer row)
+ *   - The first non-empty column value matches a known footer label pattern
+ */
+const FOOTER_LABEL_PATTERN = /^(PORTFOLIO_TOTAL|Reporting_Entity|Report_Date|Total_|TOTAL_|Grand.?Total|Summary|Sub.?Total|Page\s)/i;
+
+function isFooterOrBlankRow(row: Record<string, unknown>): boolean {
+  const values = Object.values(row);
+  if (values.length === 0) return true;
+
+  // Count non-empty values
+  const nonEmpty = values.filter((v) => v != null && String(v).trim() !== "");
+  if (nonEmpty.length === 0) return true; // all-blank row
+  if (nonEmpty.length / values.length < 0.2) return true; // >80% empty = sparse trailer
+
+  // Check if the first non-empty value matches a footer label
+  const firstValue = String(nonEmpty[0]).trim();
+  return FOOTER_LABEL_PATTERN.test(firstValue);
+}
+
 export function buildUploadContextString(
   upload: ProcessedUpload & { id: string; originalFileName: string },
   maxRows = 200
 ): string {
-  const rows = upload.dataJson || upload.sampleRows;
-  const displayRows = rows.slice(0, maxRows);
+  const rawRows = upload.dataJson || upload.sampleRows;
+
+  // Strip footer/summary/blank rows before presenting to the LLM
+  const cleanRows = rawRows.filter((row) => !isFooterOrBlankRow(row));
+  const strippedCount = rawRows.length - cleanRows.length;
+  const displayRows = cleanRows.slice(0, maxRows);
 
   let ctx = `\n## User-Uploaded Dataset (INLINE — analyze directly, do NOT query via SQL): "${upload.originalFileName}"\n`;
   ctx += `IMPORTANT: This dataset is embedded as structured JSON below. It is NOT stored in a database table.\n`;
   ctx += `Do NOT attempt any SELECT queries to find this data. Read and analyze the JSON rows below directly.\n`;
-  ctx += `- Rows: ${upload.rowCount}, Columns: ${upload.columnCount}\n`;
-  ctx += `- Upload ID: ${upload.id}\n\n`;
+  ctx += `- Total rows in file: ${upload.rowCount}`;
+  if (strippedCount > 0) {
+    ctx += ` (${strippedCount} footer/summary/blank rows removed)`;
+  }
+  ctx += `\n- Data rows (use this as your authoritative count): ${cleanRows.length}\n`;
+  ctx += `- Columns: ${upload.columnCount}\n`;
+  ctx += `- Upload ID: ${upload.id}\n`;
+  if (strippedCount > 0) {
+    ctx += `- NOTE: The JSON below contains ONLY data rows. Footer and summary rows have been pre-filtered out. When counting records, use ${cleanRows.length} as the total, not ${upload.rowCount}.\n`;
+  }
+  ctx += `\n`;
 
   ctx += `### Column Schema\n`;
   for (const col of upload.columns) {
@@ -706,7 +745,7 @@ export function buildUploadContextString(
 
   // Render key columns as a compact markdown table for easy scanning
   const keyColumns = selectKeyColumns(upload.columns);
-  ctx += `\n### Data (${displayRows.length} of ${upload.rowCount} rows)\n`;
+  ctx += `\n### Data Preview (${displayRows.length} of ${cleanRows.length} data rows shown)\n`;
   ctx += `Key columns shown in table; full row JSON follows.\n\n`;
 
   // Markdown table for key columns
@@ -720,7 +759,7 @@ export function buildUploadContextString(
   }
 
   // Full row data as JSON array for precise parsing
-  ctx += `\n### Full Row Data (JSON)\n`;
+  ctx += `\n### Full Row Data (JSON — ${displayRows.length} data rows, footers/blanks excluded)\n`;
   ctx += "```json\n";
   ctx += JSON.stringify(displayRows, null, 0);
   ctx += "\n```\n";
@@ -729,12 +768,26 @@ export function buildUploadContextString(
 }
 
 /**
- * Select up to 8 key columns for the compact markdown table preview.
- * Prioritizes identifier columns, then categorical/status columns, then numeric columns.
+ * Select key columns for the compact markdown table preview.
+ *
+ * For narrow datasets (≤15 cols): show up to 8 columns.
+ * For medium datasets (16–20 cols): show up to 12 columns.
+ * For wide datasets (>20 cols): show up to 14 columns, and always include ALL
+ * identifier + categorical columns regardless of count, since the LLM needs them
+ * for grouping and filtering operations (e.g. aggregate by Investor type).
+ *
+ * Priority: identifiers → categoricals/status → numerics → rest.
  */
-function selectKeyColumns(columns: ColumnMeta[], max = 8): ColumnMeta[] {
+function selectKeyColumns(columns: ColumnMeta[], max?: number): ColumnMeta[] {
+  // Dynamically size the preview based on dataset width
+  const effectiveMax = max ?? (
+    columns.length > 20 ? 14 :
+    columns.length > 15 ? 12 :
+    8
+  );
+
   const idPatterns = /^(loan|id|number|name|account|borrower|servicer)/i;
-  const statusPatterns = /^(status|delinquency|flag|type|investor|state)/i;
+  const statusPatterns = /^(status|delinquency|flag|type|investor|state|rating|priority|category|department|level)/i;
 
   const ids = columns.filter((c) => idPatterns.test(c.name) || idPatterns.test(c.displayName));
   const statuses = columns.filter((c) =>
@@ -745,8 +798,17 @@ function selectKeyColumns(columns: ColumnMeta[], max = 8): ColumnMeta[] {
   );
   const rest = columns.filter((c) => !ids.includes(c) && !statuses.includes(c) && !numerics.includes(c));
 
+  // For wide datasets: always include all identifiers and all categorical/status
+  // columns since they are critical for grouping — only cap the numeric/rest overflow
+  if (columns.length > 20) {
+    const mustInclude = [...ids, ...statuses];
+    const remaining = [...numerics, ...rest];
+    const slots = Math.max(effectiveMax - mustInclude.length, 0);
+    return [...mustInclude, ...remaining.slice(0, slots)];
+  }
+
   const selected = [...ids, ...statuses, ...numerics, ...rest];
-  return selected.slice(0, max);
+  return selected.slice(0, effectiveMax);
 }
 
 // ============================================================================

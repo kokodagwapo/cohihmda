@@ -640,7 +640,9 @@ export async function runResearchPipeline(
           "Answer the user's question directly. " +
           "One or more user-uploaded datasets are available as inline text in your knowledge context " +
           "(labelled 'User-Uploaded Dataset (INLINE)'). " +
+          "Footer and summary rows have been pre-filtered — use the authoritative data row count stated in each dataset's context header. " +
           "For those datasets, do NOT run SQL — read the rows directly from context and compute your answer. " +
+          "Before counting or aggregating, verify your row count matches the stated authoritative count. " +
           "Produce two evidence items: (1) a summary table with computed aggregates, and " +
           "(2) a detail table with the individual rows most relevant to the finding (include all original columns). " +
           "You may also use SQL against the loans table for supplementary LOS context if relevant. " +
@@ -962,7 +964,9 @@ export async function runFollowUp(
         `Investigate the user's specific question. ` +
         `One or more user-uploaded datasets are available as inline text in your knowledge context ` +
         `(labelled 'User-Uploaded Dataset (INLINE)'). ` +
+        `Footer and summary rows have been pre-filtered — use the authoritative data row count stated in each dataset's context header. ` +
         `For those datasets, do NOT run SQL — read the rows directly from context. ` +
+        `Before counting or aggregating, verify your row count matches the stated authoritative count. ` +
         `Produce two evidence items: (1) a summary table with computed aggregates, and ` +
         `(2) a detail table with the individual rows most relevant to the finding (all original columns).`;
       if (followUpUploadSchemaAddendum) {
