@@ -153,20 +153,12 @@ export async function runPlannerAgent(
 
   if (uploadContext) {
     userPrompt += `## User-Uploaded Dataset Context\n`;
-    userPrompt += `The user has uploaded data files for analysis. TWO types of uploads may be present:\n`;
-    userPrompt += `- INLINE (small files, ≤200 rows): The full dataset is embedded as text in the analyst's knowledge context. `
-      + `Footer and summary rows (e.g. PORTFOLIO_TOTAL, Reporting_Entity, blank separators) have been pre-filtered out. `
-      + `The context header states the authoritative data row count — the analyst must use that count, not recount from scratch. `
-      + `For questions involving inline data, the analyst will read it directly from context — they do NOT run SQL. `
-      + `In the question "approach", say: "Analyze the inline CSV data from the knowledge context — do NOT use SQL for this. `
-      + `Use the authoritative data row count from the context header. `
-      + `Produce two evidence items: (1) a summary table with computed aggregates, and (2) a detail table with the `
-      + `individual rows most relevant to this finding (e.g. all delinquent loans, all flagged records, top entries). `
-      + `Include all original columns in the detail table. When computing aggregations, verify your count matches the stated row count." `
-      + `These are labelled "User-Uploaded Dataset (INLINE)" in the context.\n`;
-    userPrompt += `- SQL TABLE (large files, >200 rows): The data is loaded into a queryable table named upload_<name>. `
-      + `For questions involving table data, the analyst CAN use SQL. `
-      + `These are labelled "User-Uploaded Dataset Table: upload_..." in the schema context.\n\n`;
+    userPrompt += `The user has uploaded data files for analysis. All uploaded files are stored as SQL tables `
+      + `(named upload_<name>) that the analyst can query directly. `
+      + `The table schemas, column types, and sample values are included in the schema context.\n\n`;
+    userPrompt += `For questions involving uploaded data, the analyst should use SQL to query the upload tables. `
+      + `Produce at least two evidence queries: (1) a summary table with computed aggregates, and `
+      + `(2) a detail table with the individual rows most relevant to the finding.\n\n`;
     userPrompt += `Prioritize investigation questions that leverage these datasets. Cross-reference with existing loan/warehouse data where column semantics overlap.\n${uploadContext}\n\n`;
   }
 
