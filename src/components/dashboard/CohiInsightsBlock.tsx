@@ -1,8 +1,8 @@
-﻿import React from "react";
+import React from "react";
 import type {
   CohiInsights,
   CohiSectionKey,
-} from "@/utils/CohiInsights";
+} from "@/utils/cohiInsights";
 
 function sectionStyle(title: CohiSectionKey, isDarkMode: boolean) {
   const base = {

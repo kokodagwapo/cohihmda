@@ -1,4 +1,4 @@
-﻿import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 import { Dialog } from '@/components/ui/dialog';
@@ -7,7 +7,7 @@ import { LoanCardContent, type LoanCardContentLoan } from '@/components/dashboar
 import { CohiInsightsBlock, CohiSectionCard } from '@/components/dashboard/CohiInsightsBlock';
 import { transformLoanToCard, type LoanCard } from '@/utils/loanDataTransform';
 import { PeriodValue, getLoanAmountNumber, inferLoanStatus, isFundedInPeriod } from '@/utils/closingFalloutFilters';
-import { generateCohiInsightsForMetric, type MetricKey } from '@/utils/CohiInsights';
+import { generateCohiInsightsForMetric, type MetricKey } from '@/utils/cohiInsights';
 
 function normalizeMetricLabel(label: string): MetricKey | null {
   if (label.startsWith('Funded Loans')) return 'Funded Loans';
