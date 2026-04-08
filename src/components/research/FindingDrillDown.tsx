@@ -181,6 +181,14 @@ function inferFormatFromValue(key: string, value: string | number, agentFormat?:
   return inferFormat(key);
 }
 
+const ID_COLUMN_PATTERN = /^(loan|id|number|account|borrower|servicer|pool|investor|branch|zip|fips|census|ssn|ein|fico|phone|fax)/i;
+const ID_COLUMN_SUFFIX_PATTERN = /(_id|_number|_num|_no|_code|_ln|_key|_ref)$/i;
+
+function isIdentifierColumn(columnName: string): boolean {
+  const normalized = columnName.replace(/[\s-]+/g, "_");
+  return ID_COLUMN_PATTERN.test(normalized) || ID_COLUMN_SUFFIX_PATTERN.test(normalized);
+}
+
 /**
  * Format a value using the field format type.
  */
@@ -238,6 +246,7 @@ function formatValue(value: any, format: FieldFormat): string {
       return value ? "Yes" : "No";
     case "badge":
     case "text":
+      return strVal;
     default:
       if (typeof value === "number") return value.toLocaleString();
       return strVal;
@@ -337,7 +346,8 @@ function EvidenceTable({ evidence, index, findingTitle, sessionId, onSaveToWorkb
       }
       const sample = evidence.rows.find((r) => r[f] != null)?.[f];
       if (sample != null) {
-        if (typeof sample === "number") formats[f] = "number";
+        if (typeof sample === "number" && !isIdentifierColumn(f)) formats[f] = "number";
+        else if (typeof sample === "number" && isIdentifierColumn(f)) formats[f] = "text";
         else if (typeof sample === "boolean") formats[f] = "boolean";
         else {
           const s = String(sample);
@@ -732,7 +742,8 @@ export function EvidencePreviewTable({ evidence, maxRows = EVIDENCE_PREVIEW_MAX_
       }
       const sample = evidence.rows.find((r) => r[f] != null)?.[f];
       if (sample != null) {
-        if (typeof sample === "number") formats[f] = "number";
+        if (typeof sample === "number" && !isIdentifierColumn(f)) formats[f] = "number";
+        else if (typeof sample === "number" && isIdentifierColumn(f)) formats[f] = "text";
         else if (typeof sample === "boolean") formats[f] = "boolean";
         else {
           const s = String(sample);

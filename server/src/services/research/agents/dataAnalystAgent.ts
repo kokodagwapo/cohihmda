@@ -355,6 +355,23 @@ MODE A — INLINE DATA (context-window strategy, small files ≤200 rows):
   There is no database table for it. Any SELECT query will fail with "table not found".
 - Instead: read the inline JSON rows directly, compute statistics in your reasoning (counts, sums, averages,
   percentages), and produce your finding using the embedded data as your evidence.
+
+STEP 1 — FILTER BEFORE COUNTING (CRITICAL):
+- Before performing ANY count or aggregation, first filter the JSON rows to exclude footer, summary, and blank rows.
+- Footer/blank rows include: rows where the primary identifier field (e.g. Loan_Number, Employee_ID, SKU) is empty
+  or null; rows where a known footer label appears in the first column (e.g. "PORTFOLIO_TOTAL", "Reporting_Entity",
+  "Total_Loans", "Grand Total", "Summary", "Sub Total"); rows where the vast majority of fields are empty.
+- The context header states "Data rows (use this as your authoritative count): N". Always use that N as your
+  ground truth. Your own filtered count must match it — if it doesn't, re-examine your filter logic.
+- State explicitly in your thinking: "After filtering footer/blank rows, I have N data rows to analyze."
+
+STEP 2 — DEFINE CATEGORICAL ORDERINGS BEFORE SELECTING/RANKING:
+- When ranking or filtering by a categorical column, explicitly define its ordering in your thinking first.
+  Example for Performance_Rating: Outstanding > Exceeds Expectations > Meets Expectations > Needs Improvement.
+  Then select the top N rows according to that ordering — do NOT use numeric columns as a proxy for category rank.
+- Example for Delinquency_Status: "90+ Days" > "60 Days" > "30 Days" > "Current".
+
+STEP 3 — PRODUCE EVIDENCE ACTIONS:
 - For inline data, you MUST use action "query" with sql set to a comment (not real SQL) and include the
   computed data directly. Produce AT LEAST TWO "query" actions before your final "finding":
 
@@ -364,21 +381,34 @@ MODE A — INLINE DATA (context-window strategy, small files ≤200 rows):
     "sql": "-- INLINE_DATA: summary computed from uploaded CSV (not executed as SQL)",
     "explanation": "Summary aggregates from the uploaded dataset",
     "inlineRows": [ { "metric": "Total Loans", "value": 80 }, ... ],
-    "columnFormats": { "metric": "text", "value": "number" }
+    "columnFormats": { "metric": "text", "value": "number" },
+    "chartHint": { "type": "bar", "xKey": "metric", "yKey": "value", "xLabel": "Metric", "yLabel": "Value" }
   }
 
   Action 2 — DETAIL query:
   {
     "action": "query",
     "sql": "-- INLINE_DATA: row-level detail from uploaded CSV (not executed as SQL)",
-    "explanation": "Delinquent loan detail (19 loans)",
+    "explanation": "Delinquent loan detail (18 loans)",
     "inlineRows": [ ...actual row objects extracted from the JSON data... ],
-    "columnFormats": { "loan_number": "text", "current_upb": "currency", ... }
+    "columnFormats": { "loan_number": "text", "current_upb": "currency", ... },
+    "chartHint": { "type": "bar", "xKey": "delinquency_status", "yKey": "current_upb", "xLabel": "Status", "yLabel": "UPB ($)" }
   }
 
   The "inlineRows" field is ONLY used for inline data. Include ALL relevant columns from the original
   dataset in the detail rows. The system will detect the "-- INLINE_DATA:" prefix in the sql field
   and use inlineRows instead of executing SQL.
+
+STEP 4 — VALUE QUALITY:
+- Every value in inlineRows and keyMetrics MUST be computed and populated with a real value.
+  NEVER produce empty strings, underscores ("_"), dashes, or placeholder text as a metric value.
+  If a metric cannot be computed from the available data, omit that key entirely and briefly note
+  the reason in your explanation or finding summary.
+
+STEP 5 — CHART TYPE FOR TIME SERIES:
+- When the user asks for a "trend" over time, or the data contains a temporal column (month, quarter,
+  date, period), set chartHint type to "line" with xKey set to the temporal column.
+  Do NOT use "bar" for time series data. The x-axis should be sorted chronologically.
 
 - After producing the summary and detail query actions, produce the "finding" action as normal.
 
