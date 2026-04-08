@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Widget definitions for Cohi Insights (Cohi Insights).
  * Single full-component embed.
  */
@@ -6,7 +6,7 @@
 import type { WidgetDefinition } from './types';
 import { CohiInsightsEmbed } from '../components/CohiInsightsEmbed';
 
-const CohiInsightsEmbed: WidgetDefinition = {
+const cohiInsightsEmbedWidget: WidgetDefinition = {
   id: 'Cohi-insights-embed',
   name: 'Cohi Insights',
   description: 'AI-generated daily briefings and insights from your pipeline data',
@@ -19,4 +19,4 @@ const CohiInsightsEmbed: WidgetDefinition = {
   component: CohiInsightsEmbed as any,
 };
 
-export const CohiInsightsWidgets: WidgetDefinition[] = [CohiInsightsEmbed];
+export const CohiInsightsWidgets: WidgetDefinition[] = [cohiInsightsEmbedWidget];
