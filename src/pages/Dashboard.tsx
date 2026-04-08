@@ -1,4 +1,4 @@
-﻿// Dashboard main insights page
+// Dashboard main insights page
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { api } from "@/lib/api";
@@ -114,7 +114,7 @@ import {
   AreaChart,
 } from "recharts";
 import { Copy, Code2, Sparkles } from "lucide-react";
-import { CohiVoiceAssistant } from "@/components/Cohi/CohiVoiceAssistant";
+import { CohiVoiceAssistant } from "@/components/cohi/CohiVoiceAssistant";
 import { motion, AnimatePresence } from "framer-motion";
 import { generatePDF } from "@/utils/pdfExport";
 import {

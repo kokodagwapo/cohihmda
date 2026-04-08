@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useMemo, useRef, useCallback } from "react";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import {
@@ -112,7 +112,7 @@ import {
   AreaChart,
 } from "recharts";
 import { Copy, Code2 } from "lucide-react";
-import { CohiVoiceAssistant } from "@/components/Cohi/CohiVoiceAssistant";
+import { CohiVoiceAssistant } from "@/components/cohi/CohiVoiceAssistant";
 import { motion, AnimatePresence } from "framer-motion";
 import { generatePDF } from "@/utils/pdfExport";
 import {

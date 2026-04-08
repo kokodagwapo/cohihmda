@@ -1,4 +1,4 @@
-﻿import crypto from "crypto";
+import crypto from "crypto";
 import { Router, Response } from "express";
 import { WebSocket } from "ws";
 import { authenticateToken, AuthRequest } from "../middleware/auth.js";
@@ -15,8 +15,8 @@ import {
   loadLatestPersistedCohiAsset,
   loadPersistedCohiAsset,
   persistCohiAsset,
-} from "../services/CohiAssetStore.js";
-import { enqueueCohiPrefetchJob } from "../services/CohiPrefetchWorker.js";
+} from "../services/cohiAssetStore.js";
+import { enqueueCohiPrefetchJob } from "../services/cohiPrefetchWorker.js";
 import { logLLMUsage } from "../services/llmUsageTracker.js";
 
 const router = Router();

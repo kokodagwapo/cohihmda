@@ -1,4 +1,4 @@
-﻿import React, {
+import React, {
   useState,
   useEffect,
   useMemo,
@@ -46,7 +46,7 @@ import { useJobStatus } from "@/hooks/useJobStatus";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 import { JobProgress } from "@/components/ui/JobProgress";
-import { CohiBriefingControl } from "@/components/Cohi/CohiBriefingControl";
+import { CohiBriefingControl } from "@/components/cohi/CohiBriefingControl";
 import { InsightDetailModal } from "./InsightDetailModal";
 import { DashboardInsightEvidenceModal, type DashboardInsightEvidenceModalInsight } from "./DashboardInsightEvidenceModal";
 import { TrackedInsightsWatchlist } from "./TrackedInsightsWatchlist";
