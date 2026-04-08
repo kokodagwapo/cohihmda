@@ -379,11 +379,11 @@ export function TopTieringComparisonView({
         id: actor.id,
         name: actor.name,
         tier: actor.tier,
-        revenue: actor.revenue,
-        units: actor.units,
-        volume: actor.volume,
-        revenueBPS: actor.revenueBPS,
-        revenuePerLoan: actor.revenuePerLoan,
+        revenue: Number(actor.revenue ?? 0),
+        units: Number(actor.units ?? 0),
+        volume: Number(actor.volume ?? 0),
+        revenueBPS: Number(actor.revenueBPS ?? 0),
+        revenuePerLoan: Number(actor.revenuePerLoan ?? 0),
       }));
     }
     // Return empty array when no API data available
@@ -414,6 +414,23 @@ export function TopTieringComparisonView({
 
   // Calculate statistical insights
   const statisticalInsights = useMemo(() => {
+    if (currentData.length === 0) {
+      const emptyBlock = {
+        mean: 0,
+        median: 0,
+        q1: 0,
+        q3: 0,
+        stdDev: 0,
+        min: 0,
+        max: 0,
+      };
+      return {
+        revenue: emptyBlock,
+        units: emptyBlock,
+        revenueBPS: emptyBlock,
+      };
+    }
+
     const revenues = currentData.map((d) => d.revenue).sort((a, b) => a - b);
     const units = currentData.map((d) => d.units).sort((a, b) => a - b);
     const revenueBPS = currentData
@@ -540,8 +557,10 @@ export function TopTieringComparisonView({
   const totalUnits = currentData.reduce((sum, item) => sum + item.units, 0);
   const totalVolume = currentData.reduce((sum, item) => sum + item.volume, 0);
   const totalRevenueBPS =
-    currentData.reduce((sum, item) => sum + item.revenueBPS, 0) /
-    currentData.length;
+    currentData.length > 0
+      ? currentData.reduce((sum, item) => sum + item.revenueBPS, 0) /
+        currentData.length
+      : 0;
 
   // Calculate tier summaries dynamically
   const topTierItems = currentData.filter((item) => item.tier === "top");
@@ -561,9 +580,12 @@ export function TopTieringComparisonView({
     0
   );
 
-  const topTierPercent = (topTierRevenue / totalRevenue) * 100;
-  const secondTierPercent = (secondTierRevenue / totalRevenue) * 100;
-  const bottomTierPercent = (bottomTierRevenue / totalRevenue) * 100;
+  const topTierPercent =
+    totalRevenue > 0 ? (topTierRevenue / totalRevenue) * 100 : 0;
+  const secondTierPercent =
+    totalRevenue > 0 ? (secondTierRevenue / totalRevenue) * 100 : 0;
+  const bottomTierPercent =
+    totalRevenue > 0 ? (bottomTierRevenue / totalRevenue) * 100 : 0;
 
   // Get actor label
   const actorLabel = selectedActor === "branch" ? "Branch" : "Loan Officer";
@@ -1406,8 +1428,8 @@ export function TopTieringComparisonView({
                           isDarkMode ? "text-emerald-400" : "text-emerald-600"
                         }`}
                       >
-                        {yoyGrowth > 0 ? "+" : ""}
-                        {yoyGrowth.toFixed(1)}% YoY
+                        {Number(yoyGrowth) > 0 ? "+" : ""}
+                        {Number(yoyGrowth ?? 0).toFixed(1)}% YoY
                       </span>
                     </div>
                   </div>
@@ -1458,7 +1480,11 @@ export function TopTieringComparisonView({
                     >
                       Avg:{" "}
                       {formatNumber(
-                        Math.round(totalUnits / currentData.length)
+                        Math.round(
+                          currentData.length > 0
+                            ? totalUnits / currentData.length
+                            : 0
+                        )
                       )}{" "}
                       per {actorLabelSingular.toLowerCase()}
                     </p>
@@ -1732,7 +1758,9 @@ export function TopTieringComparisonView({
                             stroke={isDarkMode ? "#3b82f6" : "#3b82f6"}
                             tick={{ fontSize: 10 }}
                             domain={[0, 100]}
-                            tickFormatter={(value) => `${value.toFixed(1)}%`}
+                            tickFormatter={(value) =>
+                              `${Number(value ?? 0).toFixed(1)}%`
+                            }
                             width={50}
                           />
                           <Tooltip
@@ -1767,7 +1795,10 @@ export function TopTieringComparisonView({
                                 ];
                               }
                               if (name === "Accumulated %")
-                                return [`${Number(value).toFixed(1)}%`, "Cumulative %"];
+                                return [
+                                  `${Number(value ?? 0).toFixed(1)}%`,
+                                  "Cumulative %",
+                                ];
                               return [value, name];
                             }}
                             labelFormatter={(label) => {
@@ -2079,7 +2110,7 @@ export function TopTieringComparisonView({
                                   {formatCurrency(actor.revenue)}
                                 </td>
                                 <td className="text-right py-2 px-3 tabular-nums">
-                                  {actor.revenueBPS.toFixed(0)}
+                                  {(actor.revenueBPS ?? 0).toFixed(0)}
                                 </td>
                                 <td className="text-right py-2 px-3 tabular-nums">
                                   {formatCurrency(
@@ -2176,7 +2207,9 @@ export function TopTieringComparisonView({
                               stroke={isDarkMode ? "#3b82f6" : "#3b82f6"}
                               tick={{ fontSize: 11 }}
                               domain={[0, 100]}
-                              tickFormatter={(value) => `${value.toFixed(1)}%`}
+                              tickFormatter={(value) =>
+                                `${Number(value ?? 0).toFixed(1)}%`
+                              }
                               width={60}
                             />
                             <Tooltip
@@ -2226,7 +2259,7 @@ export function TopTieringComparisonView({
                                 }
                                 if (name === "Accumulated %")
                                   return [
-                                    `${value.toFixed(1)}%`,
+                                    `${Number(value ?? 0).toFixed(1)}%`,
                                     "Cumulative %",
                                   ];
                                 return [value, name];
@@ -2730,7 +2763,9 @@ export function TopTieringComparisonView({
                       stroke={isDarkMode ? "#3b82f6" : "#3b82f6"}
                       tick={{ fontSize: 12 }}
                       domain={[0, 100]}
-                      tickFormatter={(value) => `${value.toFixed(0)}%`}
+                      tickFormatter={(value) =>
+                        `${Number(value ?? 0).toFixed(0)}%`
+                      }
                       width={60}
                     />
                     <Tooltip
@@ -2759,7 +2794,10 @@ export function TopTieringComparisonView({
                           ];
                         }
                         if (name === "Accumulated %")
-                          return [`${Number(value).toFixed(1)}%`, "Cumulative %"];
+                          return [
+                            `${Number(value ?? 0).toFixed(1)}%`,
+                            "Cumulative %",
+                          ];
                         return [value, name];
                       }}
                       labelFormatter={(label) => {
@@ -2873,7 +2911,9 @@ export function TopTieringComparisonView({
                       stroke={isDarkMode ? "#3b82f6" : "#3b82f6"}
                       tick={{ fontSize: 12 }}
                       domain={[0, 100]}
-                      tickFormatter={(value) => `${value.toFixed(0)}%`}
+                      tickFormatter={(value) =>
+                        `${Number(value ?? 0).toFixed(0)}%`
+                      }
                       width={60}
                     />
                     <Tooltip
@@ -2914,7 +2954,10 @@ export function TopTieringComparisonView({
                           ];
                         }
                         if (name === "Accumulated %")
-                          return [`${value.toFixed(1)}%`, "Cumulative %"];
+                          return [
+                            `${Number(value ?? 0).toFixed(1)}%`,
+                            "Cumulative %",
+                          ];
                         return [value, name];
                       }}
                       labelFormatter={(label) => {
