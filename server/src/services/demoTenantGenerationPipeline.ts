@@ -1,7 +1,7 @@
-﻿import type { Pool } from "pg";
+import type { Pool } from "pg";
 import { runPredictionPipeline } from "./dashboard/predictionPipelineService.js";
 import { runInsightGeneration } from "./insights/agents/insightOrchestrator.js";
-import { enqueueCohiPrefetchJob } from "./CohiPrefetchWorker.js";
+import { enqueueCohiPrefetchJob } from "./cohiPrefetchWorker.js";
 import {
   buildDefaultCohiBriefingContext,
   hashBriefingContext,

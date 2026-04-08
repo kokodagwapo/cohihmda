@@ -1,4 +1,4 @@
-﻿import express from "express";
+import express from "express";
 import { createServer } from "http";
 import { WebSocketServer } from "ws";
 import cors from "cors";
@@ -400,7 +400,7 @@ async function startWorker() {
 
   try {
     const { startCohiPrefetchWorker } = await import(
-      "./services/CohiPrefetchWorker.js"
+      "./services/cohiPrefetchWorker.js"
     );
     startCohiPrefetchWorker();
   } catch (error) {
@@ -503,7 +503,7 @@ if (SKIP_DB) {
 
         try {
           const { startCohiPrefetchWorker } = await import(
-            "./services/CohiPrefetchWorker.js"
+            "./services/cohiPrefetchWorker.js"
           );
           startCohiPrefetchWorker();
         } catch (error) {

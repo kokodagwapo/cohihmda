@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Admin Routes
  * Admin-only endpoints for system management
  */
@@ -29,7 +29,7 @@ import {
   hashBriefingContext,
   prefetchCohiBriefing,
 } from "./podcast.js";
-import { enqueueCohiPrefetchJob } from "../services/CohiPrefetchWorker.js";
+import { enqueueCohiPrefetchJob } from "../services/cohiPrefetchWorker.js";
 import {
   type LoanScope,
   type TenantPersona,

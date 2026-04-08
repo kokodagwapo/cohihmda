@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Register Insight Hooks
  *
  * Registers post-sync hooks in order: prediction pipeline (so market data is populated)
@@ -11,7 +11,7 @@ import { logInfo, logError } from "../logger.js";
 import { queueAutoRefreshForSourceTenant } from "../tenantRefreshService.js";
 import {
   enqueueCohiPrefetchJob,
-} from "../CohiPrefetchWorker.js";
+} from "../cohiPrefetchWorker.js";
 
 let registered = false;
 
