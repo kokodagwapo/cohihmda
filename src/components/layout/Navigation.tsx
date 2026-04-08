@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button";
+﻿import { Button } from "@/components/ui/button";
 import { CoheusLogo } from "@/components/ui/CoheusLogo";
 import { UserMenu } from "@/components/layout/UserMenu";
 import { useAuth } from "@/contexts/AuthContext";
@@ -63,7 +63,7 @@ export interface NavigationProps {
 
 // Dashboard section configuration (matching ReportsSidebar)
 const dashboardSectionsConfig = [
-  { id: "aletheiaInsights", label: "Cohi Insights", icon: Zap },
+  { id: "CohiInsights", label: "Cohi Insights", icon: Zap },
   { id: "industryNews", label: "Cohi Mortgage News", icon: Newspaper },
   { id: "leaderboard", label: "Leaderboard", icon: Trophy },
   { id: "executiveDashboard", label: "Business Overview", icon: Target },
@@ -76,7 +76,7 @@ const dashboardSectionsConfig = [
 
 // Insights top nav dropdown: only Cohi Insights + Cohi Mortgage News (Leaderboard, Business Overview, Closing & Fallout hidden)
 const insightsMenuConfig = dashboardSectionsConfig.filter(
-  (s) => s.id === "aletheiaInsights" || s.id === "industryNews",
+  (s) => s.id === "CohiInsights" || s.id === "industryNews",
 );
 
 // Reorganized Top Tiering menu structure with better grouping (iconColor matches sidemenu)
@@ -520,7 +520,7 @@ export function Navigation(
   // Map section IDs to actual HTML element IDs
   const getSectionElementId = (sectionId: string): string => {
     const sectionIdMap: Record<string, string> = {
-      aletheiaInsights: "aletheiaInsights",
+      CohiInsights: "CohiInsights",
       industryNews: "industryNews",
       leaderboard: "leaderboard",
       executiveDashboard: "executiveDashboard",
@@ -1024,7 +1024,7 @@ export function Navigation(
                           {insightsMenuConfig.map((section, index) => {
                             const Icon = section.icon;
                             const style =
-                              section.id === "aletheiaInsights"
+                              section.id === "CohiInsights"
                                 ? iconStyleMap.indigo
                                 : iconStyleMap.amber;
                             const isSectionActive =

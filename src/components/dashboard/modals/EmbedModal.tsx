@@ -1,4 +1,4 @@
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+﻿import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Code } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -12,7 +12,7 @@ export function EmbedModal({ open, onOpenChange }: EmbedModalProps) {
   const { toast } = useToast();
 
   const embedCode = `<iframe 
-  src="https://aletheia.app/dashboard/embed"
+  src="https://Cohi.app/dashboard/embed"
   width="100%" 
   height="800"
   frameborder="0"
@@ -20,7 +20,7 @@ export function EmbedModal({ open, onOpenChange }: EmbedModalProps) {
 </iframe>`;
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(`<iframe src="https://aletheia.app/dashboard/embed" width="100%" height="800" frameborder="0" allowfullscreen></iframe>`);
+    navigator.clipboard.writeText(`<iframe src="https://Cohi.app/dashboard/embed" width="100%" height="800" frameborder="0" allowfullscreen></iframe>`);
     toast({
       title: 'Copied!',
       description: 'Embed code copied to clipboard'

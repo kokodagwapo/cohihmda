@@ -1,4 +1,4 @@
-# Cohi Full Stack Architecture
+﻿# Cohi Full Stack Architecture
 
 A comprehensive review of the backend architecture and frontend-backend interaction patterns.
 
@@ -547,7 +547,7 @@ export function useDataHook(filters) {
 | `useCreditRiskData.ts` | Credit risk | `/api/loans/credit-risk` |
 | `useLeaderboardData.ts` | Leaderboard | `/api/dashboard/analytics/leaderboard` |
 | `useFunnelData.ts` | Funnel visualization | `/api/loans/funnel` |
-| `useAletheiaData.ts` | AI insights | `/api/dashboard/insights` |
+| `useCohiData.ts` | AI insights | `/api/dashboard/insights` |
 
 ---
 

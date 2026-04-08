@@ -1,4 +1,4 @@
-# Cohi Insights Architecture Review
+﻿# Cohi Insights Architecture Review
 
 ## Overview
 Cohi Insights is an executive intelligence system that provides AI-powered insights and voice briefings for mortgage executives. It integrates with RAG (Retrieval-Augmented Generation) and supports both OpenAI and Gemini Live API for voice generation.
@@ -7,29 +7,29 @@ Cohi Insights is an executive intelligence system that provides AI-powered insig
 
 ### 1. Frontend Components
 
-#### AletheiaPromptsCard (`src/components/dashboard/AletheiaPromptsCard.tsx`)
+#### CohiPromptsCard (`src/components/dashboard/CohiPromptsCard.tsx`)
 - **Purpose**: Displays AI-generated insights in a rotating card format
 - **Features**:
   - Rotates through insight sets every 6 seconds
   - Supports pinning/unpinning insights
   - Groups insights by priority (high, medium, standard)
   - Color-coded by type (success, info, warning, error)
-  - Integrates with `AletheiaBriefingControls` for voice briefings
+  - Integrates with `CohiBriefingControls` for voice briefings
 
-#### AletheiaBriefingControls (`src/components/aletheia/AletheiaBriefingControls.tsx`)
+#### CohiBriefingControls (`src/components/Cohi/CohiBriefingControls.tsx`)
 - **Purpose**: Controls voice briefing generation and playback
 - **Key Features**:
-  - WebSocket connection to backend (`/ws/aletheia`)
+  - WebSocket connection to backend (`/ws/Cohi`)
   - Real-time audio playback (PCM16 format, 24kHz sample rate)
   - Speech recognition for voice input (Web Speech API)
   - Text chat interface for follow-up questions
   - Audio context management for seamless playback
 
-#### useAletheiaData Hook (`src/hooks/useAletheiaData.ts`)
+#### useCohiData Hook (`src/hooks/useCohiData.ts`)
 - **Purpose**: Fetches insights from backend API
 - **Data Flow**:
   1. Calls `/api/dashboard/insights?dateFilter={filter}`
-  2. Maps API response to `AletheiaInsight` format
+  2. Maps API response to `CohiInsight` format
   3. Falls back to demo data if API fails
   4. Also fetches funnel data for briefing context
 
@@ -53,7 +53,7 @@ Cohi Insights is an executive intelligence system that provides AI-powered insig
   - **OpenAI Realtime API**: `gpt-4o-mini-realtime-preview-2024-12-17`
   - **Gemini Live API**: `models/gemini-2.0-flash-exp`
 - **Connection Flow**:
-  1. Client connects to `/ws/aletheia?token={jwt}`
+  1. Client connects to `/ws/Cohi?token={jwt}`
   2. Backend authenticates user and loads tenant RAG settings
   3. Backend connects to chosen AI provider (OpenAI or Gemini)
   4. Backend forwards messages bidirectionally
@@ -82,7 +82,7 @@ Client → Backend WebSocket → OpenAI Realtime API
 - Voice: `alloy` (neutral, reliable)
 - Audio Format: `pcm16`
 - Modalities: `['text', 'audio']`
-- System Prompt: `ALETHEIA_SYSTEM_PROMPT` (executive intelligence persona)
+- System Prompt: `Cohi_SYSTEM_PROMPT` (executive intelligence persona)
 
 #### Gemini Live API Path
 ```
@@ -102,7 +102,7 @@ Client → Backend WebSocket → Gemini Live API
 #### Step-by-Step Flow
 
 1. **User Clicks "Start Briefing"**:
-   - `AletheiaBriefingControls.startBriefing()` called
+   - `CohiBriefingControls.startBriefing()` called
    - WebSocket connection established to backend
    - Audio context initialized and pre-warmed
 
@@ -140,7 +140,7 @@ Client → Backend WebSocket → Gemini Live API
 
 #### Dynamic System Prompt Construction
 The system prompt is built from:
-1. **Base Aletheia Identity**: Executive intelligence persona
+1. **Base Cohi Identity**: Executive intelligence persona
 2. **RAG Settings**:
    - `allowed_topics`: Topics the AI can discuss
    - `conversation_rules`: Behavioral guidelines
@@ -178,16 +178,16 @@ You are Cohi, an executive-intelligent AI assistant...
 │  (Insights UI)  │
 └────────┬────────┘
          │
-         ├─→ useAletheiaData() ──→ GET /api/dashboard/insights
+         ├─→ useCohiData() ──→ GET /api/dashboard/insights
          │                                    │
          │                                    ├─→ analyticsService.getInsights()
          │                                    │   (Queries loans, calculates metrics)
          │                                    │
          │                                    └─→ Returns structured insights
          │
-         └─→ AletheiaBriefingControls
+         └─→ CohiBriefingControls
                     │
-                    ├─→ WebSocket /ws/aletheia
+                    ├─→ WebSocket /ws/Cohi
                     │         │
                     │         ├─→ websocket.ts
                     │         │   (Loads RAG settings, connects to AI provider)
@@ -224,7 +224,7 @@ You are Cohi, an executive-intelligent AI assistant...
 ### 8. Configuration Points
 
 #### Environment Variables
-- `ALETHEIA_AI_PROVIDER`: `'openai'` or `'gemini'` (default: `'openai'`)
+- `Cohi_AI_PROVIDER`: `'openai'` or `'gemini'` (default: `'openai'`)
 - `OPENAI_API_KEY`: Fallback API key (can be overridden by tenant settings)
 - `GEMINI_API_KEY`: Fallback API key (can be overridden by tenant settings)
 

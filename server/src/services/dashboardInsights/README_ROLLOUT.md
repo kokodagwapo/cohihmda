@@ -1,10 +1,10 @@
-# Dashboard Insights — Phase 1–2 Rollout
+﻿# Dashboard Insights — Phase 1–2 Rollout
 
 ## Scope (Phase 1 and 2 only)
 
 - **Leaderboard** is the only dashboard with insights in this phase.
 - Insights are generated **on-demand** via the "Generate Insights" button only. Automatic generation on data sync is **Phase 3**.
-- Escalated (critical) dashboard insights appear in the main Aletheia **Critical Issues** bucket with a "Go to [page]" link.
+- Escalated (critical) dashboard insights appear in the main Cohi **Critical Issues** bucket with a "Go to [page]" link.
 
 ## Rollout steps
 
@@ -21,7 +21,7 @@
    - Open Leaderboard, click "Generate Insights", confirm the modal shows loading then insights or an error.
    - Confirm the in-page strip shows stored insights after generation.
    - Confirm "Show on dashboard" scrolls to and highlights `#leaderboard-main-table`.
-   - Generate an insight with critical sentiment, set `escalate: true` (curator); confirm it appears in Aletheia Critical bucket with "Go to Leaderboard" and that the link navigates to `/insights#leaderboard`.
+   - Generate an insight with critical sentiment, set `escalate: true` (curator); confirm it appears in Cohi Critical bucket with "Go to Leaderboard" and that the link navigates to `/insights#leaderboard`.
 
 ## Phase 3 (later)
 

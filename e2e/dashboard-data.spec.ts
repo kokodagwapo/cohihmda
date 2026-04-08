@@ -1,4 +1,4 @@
-import { test, expect } from "./fixtures";
+﻿import { test, expect } from "./fixtures";
 import type { Page, Response } from "@playwright/test";
 
 async function waitForApi(
@@ -16,11 +16,11 @@ async function expectInsightsSections(page: Page): Promise<void> {
     .poll(
       async () => {
         const sectionCandidates = [
-          page.locator("#aletheiaInsights"),
+          page.locator("#CohiInsights"),
           page.locator("#industryNews"),
           page.locator("#leaderboard"),
           page.getByRole("heading", { name: /insights|news|leaderboard/i }).first(),
-          page.getByText(/industry news|market news|leaderboard|aletheia/i).first(),
+          page.getByText(/industry news|market news|leaderboard|Cohi/i).first(),
         ];
 
         for (const candidate of sectionCandidates) {

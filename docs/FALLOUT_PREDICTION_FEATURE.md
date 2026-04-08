@@ -1,4 +1,4 @@
-# Fallout Prediction Feature - Technical Documentation
+﻿# Fallout Prediction Feature - Technical Documentation
 
 ## Overview
 
@@ -229,7 +229,7 @@ return isLikelyCloseLate(loan, 30, now);
 Modal for drilling into any KPI (Active Loans, Funded Loans, Predicted Closing, Predicted Fallout).
 
 **Key Features:**
-- **Alethia Insights** - AI-generated Success/Warning/Critical insights
+- **Cohi Insights** - AI-generated Success/Warning/Critical insights
 - **Hero Stats** - Selected metric value + computed volume
 - **Priority Loans** - Top 8 loans by risk score
 - **TopTiering Insights** - Loan officer performance analysis
@@ -702,7 +702,7 @@ Fetches AI-generated recommendations for a specific loan.
 
 | KPI Clicked | Modal Opened | Content |
 |-------------|--------------|---------|
-| Active Loans Today | `ClosingFalloutMetricModal` | Alethia insights + priority loans |
+| Active Loans Today | `ClosingFalloutMetricModal` | Cohi insights + priority loans |
 | Predicted Closing | `ClosingFalloutMetricModal` | Closing forecast analysis |
 | Likely Close Late | `OutcomeLoansModal` (delayed) | Loans past expected close date |
 | Predicted Fallout | `OutcomeLoansModal` (fallout) | All predicted withdraw + decline |

@@ -1,4 +1,4 @@
-export interface HelpArticle {
+﻿export interface HelpArticle {
   id: string;
   slug: string;
   title: string;
@@ -903,7 +903,7 @@ Found in the **Cohi Mortgage News** section on the Insights page:
 - Controls: Play, Pause, Mute, End
 - Ask follow-up questions by voice (microphone) or text during playback
 
-### Pre-Generated Briefing (Aletheia Briefing)
+### Pre-Generated Briefing (Cohi Briefing)
 Found in the **Cohi Insights** section on the Insights page:
 - A **Play** button appears when a pre-generated briefing is available
 - Briefings are ~2–3 minutes and cover deeper insight analysis

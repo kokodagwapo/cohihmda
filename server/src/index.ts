@@ -1,4 +1,4 @@
-import express from "express";
+﻿import express from "express";
 import { createServer } from "http";
 import { WebSocketServer } from "ws";
 import cors from "cors";
@@ -399,12 +399,12 @@ async function startWorker() {
   }
 
   try {
-    const { startAletheiaPrefetchWorker } = await import(
-      "./services/aletheiaPrefetchWorker.js"
+    const { startCohiPrefetchWorker } = await import(
+      "./services/CohiPrefetchWorker.js"
     );
-    startAletheiaPrefetchWorker();
+    startCohiPrefetchWorker();
   } catch (error) {
-    console.warn("⚠️ Failed to start Aletheia prefetch worker:", error);
+    console.warn("⚠️ Failed to start Cohi prefetch worker:", error);
   }
 
   try {
@@ -502,12 +502,12 @@ if (SKIP_DB) {
         }
 
         try {
-          const { startAletheiaPrefetchWorker } = await import(
-            "./services/aletheiaPrefetchWorker.js"
+          const { startCohiPrefetchWorker } = await import(
+            "./services/CohiPrefetchWorker.js"
           );
-          startAletheiaPrefetchWorker();
+          startCohiPrefetchWorker();
         } catch (error) {
-          console.warn("⚠️ Failed to start Aletheia prefetch worker:", error);
+          console.warn("⚠️ Failed to start Cohi prefetch worker:", error);
         }
 
         try {

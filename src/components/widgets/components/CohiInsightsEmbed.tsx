@@ -1,16 +1,16 @@
-/**
- * AletheiaInsightsEmbed – Widget wrapper that renders the full
- * AletheiaPromptsCard component inside a WidgetGroup cell.
+﻿/**
+ * CohiInsightsEmbed – Widget wrapper that renders the full
+ * CohiPromptsCard component inside a WidgetGroup cell.
  */
 
 import React, { useCallback } from 'react';
-import { AletheiaPromptsCard } from '@/components/dashboard/AletheiaPromptsCard';
+import { CohiPromptsCard } from '@/components/dashboard/CohiPromptsCard';
 import { useTenantStore } from '@/stores/tenantStore';
 import { useChannelStore } from '@/stores/channelStore';
 import { useCanvasDataStore } from '@/stores/canvasDataStore';
 import type { WidgetRenderProps } from '../registry/types';
 
-function AletheiaInsightsEmbedInner({ width, height, config }: WidgetRenderProps) {
+function CohiInsightsEmbedInner({ width, height, config }: WidgetRenderProps) {
   const { selectedTenantId } = useTenantStore();
   const { selectedChannel } = useChannelStore();
   const canvasItemId = config?.canvasItemId as string | undefined;
@@ -32,7 +32,7 @@ function AletheiaInsightsEmbedInner({ width, height, config }: WidgetRenderProps
       className="h-full w-full overflow-auto bg-white dark:bg-slate-900/80"
       style={{ width, minHeight: height }}
     >
-      <AletheiaPromptsCard
+      <CohiPromptsCard
         dateFilter="mtd"
         selectedTenantId={selectedTenantId}
         selectedChannel={selectedChannel}
@@ -42,4 +42,4 @@ function AletheiaInsightsEmbedInner({ width, height, config }: WidgetRenderProps
   );
 }
 
-export const AletheiaInsightsEmbed = React.memo(AletheiaInsightsEmbedInner);
+export const CohiInsightsEmbed = React.memo(CohiInsightsEmbedInner);

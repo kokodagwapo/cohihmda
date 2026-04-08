@@ -1,4 +1,4 @@
-import pg from "pg";
+﻿import pg from "pg";
 import {
   queryMetrics,
   DateRange,
@@ -1344,7 +1344,7 @@ export async function getClosingFalloutForecast(
 }
 
 /**
- * Load escalated dashboard insights and map to Aletheia Insight format (Critical bucket).
+ * Load escalated dashboard insights and map to Cohi Insight format (Critical bucket).
  */
 async function loadEscalatedDashboardInsightsAsInsights(
   tenantPool: pg.Pool

@@ -1,4 +1,4 @@
-import crypto from "crypto";
+﻿import crypto from "crypto";
 import { Router, Response } from "express";
 import { WebSocket } from "ws";
 import { authenticateToken, AuthRequest } from "../middleware/auth.js";
@@ -11,12 +11,12 @@ import { apiLimiter } from "../middleware/rateLimiter.js";
 import { startSSEHeartbeat } from "../utils/sseUtils.js";
 import { getPlatformSetting } from "../services/platformSettingsService.js";
 import {
-  hasPersistedAletheiaAsset,
-  loadLatestPersistedAletheiaAsset,
-  loadPersistedAletheiaAsset,
-  persistAletheiaAsset,
-} from "../services/aletheiaAssetStore.js";
-import { enqueueAletheiaPrefetchJob } from "../services/aletheiaPrefetchWorker.js";
+  hasPersistedCohiAsset,
+  loadLatestPersistedCohiAsset,
+  loadPersistedCohiAsset,
+  persistCohiAsset,
+} from "../services/CohiAssetStore.js";
+import { enqueueCohiPrefetchJob } from "../services/CohiPrefetchWorker.js";
 import { logLLMUsage } from "../services/llmUsageTracker.js";
 
 const router = Router();
@@ -66,7 +66,7 @@ Rules:
 - Keep your answer under 60 seconds when read aloud.
 - No brackets, stage directions, or filler.`;
 
-const ALETHEIA_BRIEFING_PROMPT = `You are Cohi, a neutral, objective data analyst for the Coheus Executive Intelligence Platform.
+const Cohi_BRIEFING_PROMPT = `You are Cohi, a neutral, objective data analyst for the Coheus Executive Intelligence Platform.
 
 Write a spoken executive briefing script that runs about two to three minutes when read aloud for a mortgage industry executive.
 
@@ -90,10 +90,10 @@ FORMAT:
 - Close with one factual forward-looking data point if available.
 - Output ONLY the spoken script text.`;
 
-const ALETHEIA_QUESTION_PROMPT = `${QUESTION_SYSTEM_PROMPT}
+const Cohi_QUESTION_PROMPT = `${QUESTION_SYSTEM_PROMPT}
 - Keep responses concise and complete.
 - If you must stop due to length, end with a partial coverage note.`;
-const ALETHEIA_GEMINI_TTS_PROMPT = `You are a text-to-speech engine. Your ONLY job is to convert the provided text into spoken audio.
+const Cohi_GEMINI_TTS_PROMPT = `You are a text-to-speech engine. Your ONLY job is to convert the provided text into spoken audio.
 
 CRITICAL RULES:
 - Output ONLY the audio of the exact text provided. Nothing more.
@@ -103,8 +103,8 @@ CRITICAL RULES:
 - Tone: calm, professional, and objective.
 - Pace: natural broadcast cadence suitable for an executive briefing.`;
 
-const ALETHEIA_PREFETCH_TTL_MS = 24 * 60 * 60 * 1000;
-type AletheiaPrefetchEntry = {
+const Cohi_PREFETCH_TTL_MS = 24 * 60 * 60 * 1000;
+type CohiPrefetchEntry = {
   script: string;
   createdAt: number;
   contextHash: string;
@@ -115,10 +115,10 @@ type AletheiaPrefetchEntry = {
   model?: string;
   voiceName?: string;
 };
-const aletheiaPrefetchCache = new Map<string, AletheiaPrefetchEntry>();
+const CohiPrefetchCache = new Map<string, CohiPrefetchEntry>();
 
-function isAletheiaAsyncPrefetchEnabled(): boolean {
-  return process.env.ALETHEIA_PREFETCH_ASYNC === "true";
+function isCohiAsyncPrefetchEnabled(): boolean {
+  return process.env.Cohi_PREFETCH_ASYNC === "true";
 }
 
 function parseSampleRateFromMimeType(mimeType: string): number {
@@ -166,7 +166,7 @@ async function streamPcmBufferToSSE(
   }
 }
 
-function getAletheiaCacheKey(tenantId?: string): string {
+function getCohiCacheKey(tenantId?: string): string {
   return tenantId || "global";
 }
 
@@ -179,7 +179,7 @@ export function hashBriefingContext(briefingContext: unknown): string {
   }
 }
 
-export async function buildDefaultAletheiaBriefingContext(tenantId: string): Promise<{
+export async function buildDefaultCohiBriefingContext(tenantId: string): Promise<{
   dialogues: Array<{ message: string; type: string; priority: string }>;
   totalInsightCount: number;
   greeting: string;
@@ -238,7 +238,7 @@ export async function buildDefaultAletheiaBriefingContext(tenantId: string): Pro
   } catch (error: any) {
     if (error?.code !== "42P01") {
       console.warn(
-        `[Aletheia] Failed to build default briefing context for tenant ${tenantId}:`,
+        `[Cohi] Failed to build default briefing context for tenant ${tenantId}:`,
         error?.message || error
       );
     }
@@ -360,7 +360,7 @@ async function getGeminiVoiceConfig(
         }
       }
     } catch (err: any) {
-      console.error("[Aletheia] Error fetching Gemini tenant settings:", err.message);
+      console.error("[Cohi] Error fetching Gemini tenant settings:", err.message);
     }
   }
 
@@ -369,7 +369,7 @@ async function getGeminiVoiceConfig(
   );
   const envGeminiKey = sanitizeKey(process.env.GEMINI_API_KEY?.trim() || "");
   const selectedKey =
-    // Platform key is the primary key for all tenants in Aletheia podcast flows.
+    // Platform key is the primary key for all tenants in Cohi podcast flows.
     platformGeminiKey
       ? { apiKey: platformGeminiKey, keySource: "platform" as const }
       : !ignoreTenantKey && geminiApiKey
@@ -384,7 +384,7 @@ async function getGeminiVoiceConfig(
   }
   const { apiKey, keySource } = selectedKey;
   console.log(
-    `[Aletheia] Gemini key resolved: source=${keySource}, length=${apiKey.length}, prefix=${apiKey.slice(0, 8)}...`
+    `[Cohi] Gemini key resolved: source=${keySource}, length=${apiKey.length}, prefix=${apiKey.slice(0, 8)}...`
   );
 
   const normalizedModel = (() => {
@@ -394,7 +394,7 @@ async function getGeminiVoiceConfig(
     // Guard against stale/non-Gemini model values stored in rag_settings.
     if (!candidate.toLowerCase().includes("gemini")) {
       console.warn(
-        `[Aletheia] Ignoring non-Gemini voice_model "${raw}", using ${GEMINI_DEFAULT_MODEL}`
+        `[Cohi] Ignoring non-Gemini voice_model "${raw}", using ${GEMINI_DEFAULT_MODEL}`
       );
       return GEMINI_DEFAULT_MODEL;
     }
@@ -406,7 +406,7 @@ async function getGeminiVoiceConfig(
     if (!candidate) return GEMINI_DEFAULT_VOICE;
     if (GEMINI_VALID_VOICES.has(candidate)) return candidate;
     console.warn(
-      `[Aletheia] Ignoring invalid voice_name "${candidate}" (not in ${[...GEMINI_VALID_VOICES].join(", ")}), using ${GEMINI_DEFAULT_VOICE}`
+      `[Cohi] Ignoring invalid voice_name "${candidate}" (not in ${[...GEMINI_VALID_VOICES].join(", ")}), using ${GEMINI_DEFAULT_VOICE}`
     );
     return GEMINI_DEFAULT_VOICE;
   })();
@@ -423,7 +423,7 @@ async function streamGeminiToSSE(
   res: Response,
   config: { apiKey: string; model: string; voiceName: string },
   prompt: string,
-  systemInstruction = ALETHEIA_BRIEFING_PROMPT,
+  systemInstruction = Cohi_BRIEFING_PROMPT,
   abortSignal?: AbortSignal
 ): Promise<void> {
   const modelCandidates = [config.model, ...GEMINI_MODEL_FALLBACKS].filter(
@@ -451,7 +451,7 @@ async function streamGeminiToSSE(
         throw lastError;
       }
       console.warn(
-        `[Aletheia] Gemini model ${model} unsupported, retrying fallback...`
+        `[Cohi] Gemini model ${model} unsupported, retrying fallback...`
       );
     }
   }
@@ -463,7 +463,7 @@ async function streamGeminiToSSEOnce(
   res: Response,
   config: { apiKey: string; model: string; voiceName: string },
   prompt: string,
-  systemInstruction = ALETHEIA_BRIEFING_PROMPT,
+  systemInstruction = Cohi_BRIEFING_PROMPT,
   abortSignal?: AbortSignal
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
@@ -544,7 +544,7 @@ async function streamGeminiToSSEOnce(
 
         if (msg.setupComplete && !setupSentPrompt) {
           setupSentPrompt = true;
-          const isTTS = systemInstruction === ALETHEIA_GEMINI_TTS_PROMPT;
+          const isTTS = systemInstruction === Cohi_GEMINI_TTS_PROMPT;
           const userText = isTTS
             ? `[READ ALOUD VERBATIM — no preamble, no acknowledgment, start from the first word immediately]\n\n${prompt}`
             : prompt;
@@ -745,7 +745,7 @@ async function synthesizeGeminiSegmentToPCMOnce(
 
         if (msg.setupComplete && !setupSentPrompt) {
           setupSentPrompt = true;
-          const isTTS = systemInstruction === ALETHEIA_GEMINI_TTS_PROMPT;
+          const isTTS = systemInstruction === Cohi_GEMINI_TTS_PROMPT;
           const userText = isTTS
             ? `[READ ALOUD VERBATIM — no preamble, no acknowledgment, start from the first word immediately]\n\n${prompt}`
             : prompt;
@@ -806,7 +806,7 @@ async function fetchInsightsForBriefing(
     const tenantPool = await tenantDbManager.getTenantPool(tenantId);
     const result = await tenantPool.query(`
       SELECT headline, understory, bucket, severity_score, impact, evidence, priority
-      FROM aletheia_insights
+      FROM Cohi_insights
       WHERE for_podcast = true
       ORDER BY severity_score DESC NULLS LAST, generated_at DESC
       LIMIT 10
@@ -1188,9 +1188,9 @@ router.post(
   }
 );
 
-// ── Aletheia Insights Briefing (same TTS pipeline, different context) ──
+// ── Cohi Insights Briefing (same TTS pipeline, different context) ──
 
-function buildAletheiaBriefingPrompt(
+function buildCohiBriefingPrompt(
   briefingContext: {
     dialogues?: Array<{ message: string; type: string; priority: string }>;
     totalInsightCount?: number;
@@ -1245,7 +1245,7 @@ Deliver the spoken briefing now.`;
   return userPrompt;
 }
 
-async function generateAletheiaScriptText(
+async function generateCohiScriptText(
   openAIKey: string,
   briefingContext: {
     dialogues?: Array<{ message: string; type: string; priority: string }>;
@@ -1261,7 +1261,7 @@ async function generateAletheiaScriptText(
   },
   trackingCtx?: { tenantId: string; requestedBy?: string }
 ): Promise<string> {
-  const userPrompt = buildAletheiaBriefingPrompt(briefingContext);
+  const userPrompt = buildCohiBriefingPrompt(briefingContext);
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -1271,7 +1271,7 @@ async function generateAletheiaScriptText(
     body: JSON.stringify({
       model: CHAT_MODEL,
       messages: [
-        { role: "system", content: ALETHEIA_BRIEFING_PROMPT },
+        { role: "system", content: Cohi_BRIEFING_PROMPT },
         { role: "user", content: userPrompt },
       ],
       temperature: 0.6,
@@ -1304,7 +1304,7 @@ async function generateAletheiaScriptText(
           promptTokens,
           completionTokens,
           totalTokens: data.usage?.total_tokens,
-          requestedBy: trackingCtx.requestedBy ?? "aletheia-script",
+          requestedBy: trackingCtx.requestedBy ?? "Cohi-script",
         })
       ).catch(() => { /* best-effort */ });
     }
@@ -1313,7 +1313,7 @@ async function generateAletheiaScriptText(
   return data.choices?.[0]?.message?.content || "Briefing unavailable.";
 }
 
-async function generateAletheiaAnswerText(
+async function generateCohiAnswerText(
   openAIKey: string,
   questionText: string
 ): Promise<string> {
@@ -1326,7 +1326,7 @@ async function generateAletheiaAnswerText(
     body: JSON.stringify({
       model: CHAT_MODEL,
       messages: [
-        { role: "system", content: ALETHEIA_QUESTION_PROMPT },
+        { role: "system", content: Cohi_QUESTION_PROMPT },
         { role: "user", content: questionText },
       ],
       temperature: 0.5,
@@ -1363,7 +1363,7 @@ async function streamGeminiScriptInSegments(
     const clip = await synthesizeGeminiSegmentToPCM(
       geminiConfig,
       segment,
-      ALETHEIA_GEMINI_TTS_PROMPT,
+      Cohi_GEMINI_TTS_PROMPT,
       abortSignal
     );
     mimeType = clip.mimeType || mimeType;
@@ -1381,7 +1381,7 @@ async function streamGeminiScriptInSegments(
   });
 }
 
-export async function prefetchAletheiaBriefing(
+export async function prefetchCohiBriefing(
   tenantId: string | undefined,
   briefingContext: unknown
 ): Promise<{
@@ -1416,7 +1416,7 @@ export async function prefetchAletheiaBriefing(
       const clip = await synthesizeGeminiSegmentToPCM(
         geminiConfig,
         segment,
-        ALETHEIA_GEMINI_TTS_PROMPT
+        Cohi_GEMINI_TTS_PROMPT
       );
       mimeType = clip.mimeType || mimeType;
       sampleRate = clip.sampleRate || sampleRate;
@@ -1435,10 +1435,10 @@ export async function prefetchAletheiaBriefing(
   const safeTenantId = tenantId || "";
   const openAIKey = await getOpenAIKey(tenantId);
   let geminiConfig = await getGeminiVoiceConfig(tenantId);
-  const script = await generateAletheiaScriptText(
+  const script = await generateCohiScriptText(
     openAIKey,
     briefingContext as any,
-    safeTenantId ? { tenantId: safeTenantId, requestedBy: "aletheia-prefetch" } : undefined
+    safeTenantId ? { tenantId: safeTenantId, requestedBy: "Cohi-prefetch" } : undefined
   );
   let synthesis = await synthesizeWithConfig(geminiConfig).catch(async (error) => {
     if (
@@ -1449,7 +1449,7 @@ export async function prefetchAletheiaBriefing(
       const fallbackConfig = await getGeminiVoiceConfig(tenantId, true);
       if (fallbackConfig.apiKey !== geminiConfig.apiKey) {
         console.warn(
-          `[Aletheia] Tenant Gemini key invalid for ${tenantId}; retrying with ${fallbackConfig.keySource} key`
+          `[Cohi] Tenant Gemini key invalid for ${tenantId}; retrying with ${fallbackConfig.keySource} key`
         );
         geminiConfig = fallbackConfig;
         return synthesizeWithConfig(geminiConfig);
@@ -1460,9 +1460,9 @@ export async function prefetchAletheiaBriefing(
 
   const combined = synthesis.combined;
   const contextHash = hashBriefingContext(briefingContext);
-  const cacheKey = getAletheiaCacheKey(tenantId);
+  const cacheKey = getCohiCacheKey(tenantId);
 
-  aletheiaPrefetchCache.set(cacheKey, {
+  CohiPrefetchCache.set(cacheKey, {
     script,
     createdAt: Date.now(),
     contextHash,
@@ -1475,7 +1475,7 @@ export async function prefetchAletheiaBriefing(
   });
 
   if (safeTenantId) {
-    await persistAletheiaAsset({
+    await persistCohiAsset({
       tenantId: safeTenantId,
       contextHash,
       script,
@@ -1485,7 +1485,7 @@ export async function prefetchAletheiaBriefing(
       segmentsCount: synthesis.segmentsCount,
       model: synthesis.model,
       voiceName: synthesis.voiceName,
-      ttlMs: ALETHEIA_PREFETCH_TTL_MS,
+      ttlMs: Cohi_PREFETCH_TTL_MS,
     });
   }
 
@@ -1501,9 +1501,9 @@ export async function prefetchAletheiaBriefing(
   };
 }
 
-// GET /api/podcast/cohi/aletheia/status — check if a pre-generated podcast exists
+// GET /api/podcast/cohi/Cohi/status — check if a pre-generated podcast exists
 router.get(
-  "/aletheia/status",
+  "/Cohi/status",
   authenticateToken,
   async (req: AuthRequest, res) => {
     try {
@@ -1517,8 +1517,8 @@ router.get(
         return res.json({ available: false });
       }
 
-      const cacheKey = getAletheiaCacheKey(tenantId);
-      const cached = aletheiaPrefetchCache.get(cacheKey);
+      const cacheKey = getCohiCacheKey(tenantId);
+      const cached = CohiPrefetchCache.get(cacheKey);
       if (cached) {
         return res.json({
           available: true,
@@ -1527,18 +1527,18 @@ router.get(
         });
       }
 
-      const result = await hasPersistedAletheiaAsset(tenantId);
+      const result = await hasPersistedCohiAsset(tenantId);
       return res.json(result);
     } catch (error: any) {
-      console.error("[Aletheia] Status check failed:", error.message);
+      console.error("[Cohi] Status check failed:", error.message);
       return res.json({ available: false });
     }
   }
 );
 
-// POST /api/podcast/cohi/aletheia/stream — Aletheia Insights via Gemini audio over SSE
+// POST /api/podcast/cohi/Cohi/stream — Cohi Insights via Gemini audio over SSE
 router.post(
-  "/aletheia/stream",
+  "/Cohi/stream",
   apiLimiter,
   authenticateToken,
   async (req: AuthRequest, res) => {
@@ -1568,8 +1568,8 @@ router.post(
         return;
       }
 
-      const cacheKey = getAletheiaCacheKey(tenantId);
-      let cached = aletheiaPrefetchCache.get(cacheKey);
+      const cacheKey = getCohiCacheKey(tenantId);
+      let cached = CohiPrefetchCache.get(cacheKey);
       let script = "";
       let prefetchedAudio: Buffer | null = null;
       let prefetchedMime = "audio/pcm;rate=24000";
@@ -1578,7 +1578,7 @@ router.post(
       let voiceName = "";
       let model = "";
 
-      if (cached && cached.audioBase64 && Date.now() - cached.createdAt < ALETHEIA_PREFETCH_TTL_MS) {
+      if (cached && cached.audioBase64 && Date.now() - cached.createdAt < Cohi_PREFETCH_TTL_MS) {
         script = cached.script;
         prefetchedAudio = Buffer.from(cached.audioBase64, "base64");
         prefetchedMime = cached.mimeType || prefetchedMime;
@@ -1586,9 +1586,9 @@ router.post(
         prefetchedSegments = cached.segmentsCount || 1;
         voiceName = cached.voiceName || "";
         model = cached.model || "";
-        console.log(`[Aletheia] Serving cached audio for ${cacheKey}`);
+        console.log(`[Cohi] Serving cached audio for ${cacheKey}`);
       } else {
-        const persisted = await loadLatestPersistedAletheiaAsset(tenantId);
+        const persisted = await loadLatestPersistedCohiAsset(tenantId);
         if (persisted && persisted.pcm.length > 0) {
           script = persisted.script;
           prefetchedAudio = persisted.pcm;
@@ -1597,7 +1597,7 @@ router.post(
           prefetchedSegments = persisted.segmentsCount || 1;
           voiceName = persisted.voiceName || "";
           model = persisted.model || "";
-          aletheiaPrefetchCache.set(cacheKey, {
+          CohiPrefetchCache.set(cacheKey, {
             script: persisted.script,
             createdAt: persisted.createdAt,
             contextHash: persisted.contextHash,
@@ -1608,12 +1608,12 @@ router.post(
             model: persisted.model,
             voiceName: persisted.voiceName,
           });
-          console.log(`[Aletheia] Serving persisted audio for tenant ${tenantId}`);
+          console.log(`[Cohi] Serving persisted audio for tenant ${tenantId}`);
         }
       }
 
       if (!prefetchedAudio || prefetchedAudio.length === 0) {
-        console.log(`[Aletheia] No pre-generated podcast for tenant ${tenantId}`);
+        console.log(`[Cohi] No pre-generated podcast for tenant ${tenantId}`);
         await writeSSE(res, { type: "error", error: "No pre-generated Cohi podcast available. Generate one from the admin panel first." });
         res.end();
         return;
@@ -1631,7 +1631,7 @@ router.post(
       await writeSSE(res, { type: "done" });
       res.end();
     } catch (error: any) {
-      console.error("[Aletheia] Stream error:", error.message);
+      console.error("[Cohi] Stream error:", error.message);
       if (!abortController.signal.aborted) {
         await writeSSE(res, { type: "error", error: error.message });
       }
@@ -1645,9 +1645,9 @@ router.post(
   }
 );
 
-// POST /api/podcast/cohi/aletheia/ask — follow-up question via Gemini audio over SSE
+// POST /api/podcast/cohi/Cohi/ask — follow-up question via Gemini audio over SSE
 router.post(
-  "/aletheia/prefetch",
+  "/Cohi/prefetch",
   apiLimiter,
   authenticateToken,
   async (req: AuthRequest, res) => {
@@ -1656,7 +1656,7 @@ router.post(
       const briefingContext = req.body?.briefingContext || {};
       const contextHash = hashBriefingContext(briefingContext);
 
-      if (isAletheiaAsyncPrefetchEnabled()) {
+      if (isCohiAsyncPrefetchEnabled()) {
         if (!tenantId) {
           return res.status(400).json({
             error:
@@ -1664,7 +1664,7 @@ router.post(
           });
         }
         const requestedBy = req.userEmail || req.userId || null;
-        const jobId = await enqueueAletheiaPrefetchJob({
+        const jobId = await enqueueCohiPrefetchJob({
           tenantId,
           contextHash,
           briefingContext,
@@ -1679,7 +1679,7 @@ router.post(
         });
       }
 
-      const generated = await prefetchAletheiaBriefing(tenantId, briefingContext);
+      const generated = await prefetchCohiBriefing(tenantId, briefingContext);
 
       res.json({
         success: true,
@@ -1692,14 +1692,14 @@ router.post(
         voiceName: generated.voiceName,
       });
     } catch (error: any) {
-      console.error("[Aletheia] Prefetch error:", error.message);
+      console.error("[Cohi] Prefetch error:", error.message);
       res.status(500).json({ error: error.message });
     }
   }
 );
 
 router.post(
-  "/aletheia/ask",
+  "/Cohi/ask",
   apiLimiter,
   authenticateToken,
   async (req: AuthRequest, res) => {
@@ -1760,7 +1760,7 @@ router.post(
         return;
       }
 
-      const answerText = await generateAletheiaAnswerText(openAIKey, questionText);
+      const answerText = await generateCohiAnswerText(openAIKey, questionText);
 
       await writeSSE(res, { type: "transcript", data: answerText });
 
@@ -1774,7 +1774,7 @@ router.post(
       await writeSSE(res, { type: "done" });
       res.end();
     } catch (error: any) {
-      console.error("[Aletheia] Ask error:", error.message);
+      console.error("[Cohi] Ask error:", error.message);
       if (!abortController.signal.aborted) {
         await writeSSE(res, { type: "error", error: error.message });
       }

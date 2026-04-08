@@ -1,4 +1,4 @@
-# Dashboard Insights Template Plan for a New Dashboard
+﻿# Dashboard Insights Template Plan for a New Dashboard
 
 Use this template to implement Dashboard Insights for any dashboard page that does not currently support insights. This follows the production pattern already used by `leaderboard`, `loan-complexity`, and `company-scorecard`.
 
@@ -329,7 +329,7 @@ Spacing/layout:
 
 ### 6.3A Insight cards: bucket styling and headline-row actions (current implementation)
 
-Each insight is rendered by `InsightCard` inside `DashboardInsightsStrip`. Behavior matches the **Aletheia-style** criticality buckets and keeps **primary actions on the headline row** so users do not have to expand the card to track, rate, deep-dive, or remove.
+Each insight is rendered by `InsightCard` inside `DashboardInsightsStrip`. Behavior matches the **Cohi-style** criticality buckets and keeps **primary actions on the headline row** so users do not have to expand the card to track, rate, deep-dive, or remove.
 
 #### Bucket colors and labels (maps stored `sentiment`)
 
@@ -350,7 +350,7 @@ These controls use **`stopPropagation`** so they do not toggle expand/collapse:
 
 1. **Bookmark (track)** — Toggles the user watchlist via **`POST /api/insights/tracked`** (pin) and **`DELETE /api/insights/tracked/:id`** (unpin). The body uses **`source_type: "dashboard_insights"`** and **`source_insight_id`** = `dashboard_generated_insights.id` (no client **`metric_signature`**). The server derives **`metric_signature`** / **`display_metadata`** from stored **`detail_data`** and runs an **immediate baseline evaluation**; see **§4.7** and **§6.7**. Tracked rows are resolved on load by filtering tracked insights where `source_type === "dashboard_insights"`.  
    - **DB:** Tenant migration **`101_tracked_insights_polymorphic_source_id`** drops the old FK from `source_insight_id` to `generated_insights` so dashboard IDs are valid.
-2. **Feedback** — Shown when **`showFeedback`** is true. Thumbs open a popover for optional tags + comment, then submit via **`onSubmitFeedback`** or the client’s **`submitDashboardInsightFeedback`** → **`POST /api/dashboard-insights/:id/feedback`**. This is **separate** from Aletheia `generated_insights` feedback tables.
+2. **Feedback** — Shown when **`showFeedback`** is true. Thumbs open a popover for optional tags + comment, then submit via **`onSubmitFeedback`** or the client’s **`submitDashboardInsightFeedback`** → **`POST /api/dashboard-insights/:id/feedback`**. This is **separate** from Cohi `generated_insights` feedback tables.
 3. **Deep dive (Workbench)** — Shown for **platform staff** (`useAuth().isPlatformStaff()`). Calls **`POST /api/workbench/canvases/from-dashboard-insight`** then navigates to **`/my-dashboard/:canvasId`** (full insight dashboard widget group + `savedFilters` from `filter_context`).
 4. **Remove insight** — Same admin gate; **`DELETE /api/dashboard-insights/:id`**, then **`onRefreshInsights`**.
 
@@ -470,7 +470,7 @@ For all pages, ensure prompts/guidance enforce:
 6. Evidence/detail modal shows valid supporting rows and columns
    - Must open the same full Insight Detail modal used by other dashboard insights (not fallback evidence-only modal)
    - Verify older generated insights (without `detail_data`) still open full detail via `supporting_data` synthesis path
-7. Card chrome and actions (§6.3A): bucket badge/colors match `sentiment`; bookmark, thumbs, deep dive, and remove work from the **headline row** without expanding; dashboard feedback persists separately from Aletheia insight feedback
+7. Card chrome and actions (§6.3A): bucket badge/colors match `sentiment`; bookmark, thumbs, deep dive, and remove work from the **headline row** without expanding; dashboard feedback persists separately from Cohi insight feedback
 8. **Tracked insights (§4.7 / §6.7):** bookmark creates a watchlist row; **201** response includes **`latest_values`** and **`last_evaluated`** when evaluable; KPI cards in **`TrackedInsightDetailModal`** show numeric values (not all **“—”**) for evaluable signatures; non-evaluable bookmarks show explicit **not auto-updating** messaging
 9. Duplicate/near-duplicate insights not surfaced together
 

@@ -1,4 +1,4 @@
-# Cohi Insights Section - Architecture Documentation
+﻿# Cohi Insights Section - Architecture Documentation
 
 > **Last Updated:** January 28, 2026  
 > **Version:** 1.0  
@@ -30,10 +30,10 @@ src/
 │   └── Dashboard.tsx                           # Parent page (lines 1105-1121)
 ├── components/
 │   └── dashboard/
-│       ├── AletheiaPromptsCard.tsx            # Main component
-│       └── AletheiaBriefingControls.tsx       # Podcast/voice controls
+│       ├── CohiPromptsCard.tsx            # Main component
+│       └── CohiBriefingControls.tsx       # Podcast/voice controls
 └── hooks/
-    └── useAletheiaData.ts                      # Data fetching hook
+    └── useCohiData.ts                      # Data fetching hook
 ```
 
 ### Component Hierarchy
@@ -41,13 +41,13 @@ src/
 ```
 Dashboard.tsx
     │
-    └── AletheiaPromptsCard  (when dashboardVisibility.aletheiaInsights = true)
+    └── CohiPromptsCard  (when dashboardVisibility.CohiInsights = true)
             │
             ├── Header
             │   ├── Icon (Zap)
             │   ├── Title: "Cohi Insights"
             │   ├── Subtitle: "Executive Briefing"
-            │   └── AletheiaBriefingControls (podcast player)
+            │   └── CohiBriefingControls (podcast player)
             │
             ├── Pinned Insights (if any)
             │   └── InsightCard[] (pinned items stay visible)
@@ -68,9 +68,9 @@ Dashboard.tsx
 ┌─────────────────────────────────────────────────────────────┐
 │  Dashboard.tsx                                               │
 │  ┌─────────────────────────────────────────────────────────┐│
-│  │  AletheiaPromptsCard                                    ││
+│  │  CohiPromptsCard                                    ││
 │  │  ┌────────────────────────────────────────────────────┐ ││
-│  │  │  useAletheiaData(dateFilter, tenantId)             │ ││
+│  │  │  useCohiData(dateFilter, tenantId)             │ ││
 │  │  │  └── API: GET /api/dashboard/insights              │ ││
 │  │  │  └── API: GET /api/loans/funnel                    │ ││
 │  │  └────────────────────────────────────────────────────┘ ││
@@ -92,7 +92,7 @@ Dashboard.tsx
 
 ### 2. Component Props
 
-**AletheiaPromptsCard** (`src/components/dashboard/AletheiaPromptsCard.tsx`):
+**CohiPromptsCard** (`src/components/dashboard/CohiPromptsCard.tsx`):
 
 ```typescript
 interface Props {
@@ -112,7 +112,7 @@ interface Props {
 Each insight returned from the API has this structure:
 
 ```typescript
-interface AletheiaInsight {
+interface CohiInsight {
   type: 'success' | 'info' | 'warning' | 'error';  // Color coding
   icon: LucideIcon;                                 // CheckCircle2, Info, AlertTriangle
   message: string;                                  // Main insight text
@@ -300,10 +300,10 @@ const demoInsights = [
 
 | File | Purpose |
 |------|---------|
-| `src/pages/Dashboard.tsx` | Parent page, renders `AletheiaPromptsCard` at lines 1105-1121 |
-| `src/components/dashboard/AletheiaPromptsCard.tsx` | Main "Cohi Insights" card component |
-| `src/components/aletheia/AletheiaBriefingControls.tsx` | Podcast/voice player controls |
-| `src/hooks/useAletheiaData.ts` | Data fetching hook for insights |
+| `src/pages/Dashboard.tsx` | Parent page, renders `CohiPromptsCard` at lines 1105-1121 |
+| `src/components/dashboard/CohiPromptsCard.tsx` | Main "Cohi Insights" card component |
+| `src/components/Cohi/CohiBriefingControls.tsx` | Podcast/voice player controls |
+| `src/hooks/useCohiData.ts` | Data fetching hook for insights |
 | `server/src/services/dashboard/analyticsService.ts` | Backend `getInsights()` function (line 966) |
 | `server/src/routes/dashboard/analytics.ts` | API route handler |
 
@@ -346,10 +346,10 @@ The **Play button** (🎵) in the Cohi Insights header DOES use AI. It generates
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  Frontend: AletheiaBriefingControls.tsx                       │
+│  Frontend: CohiBriefingControls.tsx                       │
 │  ┌──────────────────────────────────────────────────────────┐│
 │  │  1. User clicks "Start Briefing" button                  ││
-│  │  2. WebSocket connects to /ws/aletheia                   ││
+│  │  2. WebSocket connects to /ws/Cohi                   ││
 │  │  3. Sends briefingPrompt with insight data               ││
 │  │  4. Receives PCM audio chunks, plays in real-time        ││
 │  └──────────────────────────────────────────────────────────┘│
@@ -369,7 +369,7 @@ The **Play button** (🎵) in the Cohi Insights header DOES use AI. It generates
                                   │ WebSocket
                                   ▼
 ┌──────────────────────────────────────────────────────────────┐
-│  AI Provider (configurable via ALETHEIA_AI_PROVIDER env var) │
+│  AI Provider (configurable via Cohi_AI_PROVIDER env var) │
 │  ┌────────────────────┐  OR  ┌────────────────────┐          │
 │  │  OpenAI Realtime   │      │  Gemini Live       │          │
 │  │  gpt-4o-mini-      │      │  gemini-2.0-       │          │
@@ -381,7 +381,7 @@ The **Play button** (🎵) in the Cohi Insights header DOES use AI. It generates
 ### The System Prompt (websocket.ts lines 27-54)
 
 ```typescript
-const ALETHEIA_SYSTEM_PROMPT = `You are Aletheia, an executive-intelligent, 
+const Cohi_SYSTEM_PROMPT = `You are Cohi, an executive-intelligent, 
 predictive, and proactive AI assistant designed for mortgage executives. 
 You are the voice of the Coheus Executive Intelligence Platform.
 
@@ -405,7 +405,7 @@ COMMUNICATION STYLE:
 `;
 ```
 
-### The Briefing Prompt (AletheiaBriefingControls.tsx lines 279-298)
+### The Briefing Prompt (CohiBriefingControls.tsx lines 279-298)
 
 When the user clicks "Start Briefing", this prompt is sent:
 
@@ -434,7 +434,7 @@ Briefing ID: ${Date.now()}`;
 
 ### Configuration Options
 
-**AI Provider** (`ALETHEIA_AI_PROVIDER` env var):
+**AI Provider** (`Cohi_AI_PROVIDER` env var):
 - `'openai'` - Uses OpenAI Realtime API (gpt-4o-mini-realtime-preview)
 - `'gemini'` - Uses Gemini Live API (gemini-2.0-flash-exp)
 
@@ -466,5 +466,5 @@ The **"Cohi Insights"** section has **two distinct parts**:
 - Uses OpenAI Realtime or Gemini Live (configurable)
 - WebSocket connection for real-time audio streaming
 - Customizable via tenant RAG settings
-- System prompt defines "Aletheia" persona
+- System prompt defines "Cohi" persona
 - User prompt includes insight data + briefing instructions

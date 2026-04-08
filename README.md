@@ -1,4 +1,4 @@
-# Cohi / Coheus
+﻿# Cohi / Coheus
 
 AI-powered loan origination system with voice AI, RAG (Retrieval-Augmented Generation), real-time cost tracking, and comprehensive SOC 2 Type II compliance features.
 
@@ -96,7 +96,7 @@ Cohi/
 │   ├── components/         # React components
 │   │   ├── admin/         # Admin panel components
 │   │   ├── dashboard/     # Dashboard components
-│   │   ├── aletheia/      # Voice AI components
+│   │   ├── Cohi/      # Voice AI components
 │   │   └── ui/            # shadcn/ui components
 │   ├── pages/              # Page components
 │   ├── lib/                # Utilities and API client

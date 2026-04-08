@@ -1,12 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+﻿import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import * as THREE from 'three';
 
-interface AletheiaAvatarProps {
+interface CohiAvatarProps {
   onClick: () => void;
 }
 
-export function AletheiaAvatar({ onClick }: AletheiaAvatarProps) {
+export function CohiAvatar({ onClick }: CohiAvatarProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -196,7 +196,7 @@ export function AletheiaAvatar({ onClick }: AletheiaAvatarProps) {
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       onClick={onClick}
-      data-aletheia-trigger
+      data-Cohi-trigger
       whileHover={{ scale: 1.05 }}
       whileTap={{ scale: 0.95 }}
       initial={{ opacity: 0, y: 20 }}

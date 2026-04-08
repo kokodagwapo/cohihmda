@@ -1,13 +1,13 @@
-import React, { useMemo, useState } from 'react';
+﻿import React, { useMemo, useState } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 import { Dialog } from '@/components/ui/dialog';
 import { LoanDrilldownModal } from '@/components/dashboard/LoanDrilldownModal';
 import { LoanCardContent, type LoanCardContentLoan } from '@/components/dashboard/LoanCardContent';
-import { AlethiaInsightsBlock, AlethiaSectionCard } from '@/components/dashboard/AlethiaInsightsBlock';
+import { CohiInsightsBlock, CohiSectionCard } from '@/components/dashboard/CohiInsightsBlock';
 import { transformLoanToCard, type LoanCard } from '@/utils/loanDataTransform';
 import { PeriodValue, getLoanAmountNumber, inferLoanStatus, isFundedInPeriod } from '@/utils/closingFalloutFilters';
-import { generateAlethiaInsightsForMetric, type MetricKey } from '@/utils/alethiaInsights';
+import { generateCohiInsightsForMetric, type MetricKey } from '@/utils/CohiInsights';
 
 function normalizeMetricLabel(label: string): MetricKey | null {
   if (label.startsWith('Funded Loans')) return 'Funded Loans';
@@ -150,12 +150,12 @@ export function ClosingFalloutMetricModal({
     ? 'Predicted withdraw or decline with risk score ≥ 80/100. Sorted by risk score.'
     : (content?.description || '');
 
-  const alethiaInsights = useMemo(() => {
+  const CohiInsights = useMemo(() => {
     if (!metricKey) return null;
     // Use fallbacks when computed values are 0 (e.g. loansRaw empty or still loading)
     const activeCount = (computed.active.count || fallbackActiveCount) ?? 0;
     const activeVolume = (computed.active.volume || fallbackActiveVolume) ?? 0;
-    return generateAlethiaInsightsForMetric({
+    return generateCohiInsightsForMetric({
       metricKey,
       loansRaw,
       dateFilter,
@@ -210,10 +210,10 @@ export function ClosingFalloutMetricModal({
                 </p>
               )}
 
-              {/* Alethia - Success/Warning/Critical at top */}
-              {metricKey && alethiaInsights && (
-                <AlethiaInsightsBlock
-                  insights={alethiaInsights}
+              {/* Cohi - Success/Warning/Critical at top */}
+              {metricKey && CohiInsights && (
+                <CohiInsightsBlock
+                  insights={CohiInsights}
                   isDarkMode={isDarkMode}
                   subtitle={title}
                   loading={loansLoading}
@@ -357,18 +357,18 @@ export function ClosingFalloutMetricModal({
               </div>
 
               {/* TopTiering Insights for Loan Officers - at bottom */}
-              {metricKey && alethiaInsights && (() => {
-                const topTieringSection = alethiaInsights.sections.find((s) => s.title === 'TopTiering Insights for Loan Officers');
+              {metricKey && CohiInsights && (() => {
+                const topTieringSection = CohiInsights.sections.find((s) => s.title === 'TopTiering Insights for Loan Officers');
                 return topTieringSection && topTieringSection.items.length > 0 ? (
-                  <AlethiaSectionCard section={topTieringSection} isDarkMode={isDarkMode} />
+                  <CohiSectionCard section={topTieringSection} isDarkMode={isDarkMode} />
                 ) : null;
               })()}
 
               {/* Borrower Coaching - at bottom */}
-              {metricKey && alethiaInsights && (() => {
-                const borrowerCoachingSection = alethiaInsights.sections.find((s) => s.title === 'Borrower Coaching');
+              {metricKey && CohiInsights && (() => {
+                const borrowerCoachingSection = CohiInsights.sections.find((s) => s.title === 'Borrower Coaching');
                 return borrowerCoachingSection && borrowerCoachingSection.items.length > 0 ? (
-                  <AlethiaSectionCard section={borrowerCoachingSection} isDarkMode={isDarkMode} />
+                  <CohiSectionCard section={borrowerCoachingSection} isDarkMode={isDarkMode} />
                 ) : null;
               })()}
             </div>

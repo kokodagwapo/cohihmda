@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Renders a single canvas widget by type (chart, kpi, table, dashboard_section, etc.)
  * Dashboard sections render directly in a floating card with pixel sizing.
  */
@@ -13,7 +13,7 @@ import { OperationsScorecardView } from "@/components/views/OperationsScorecardV
 import { OperationScorecardTrendsView } from "@/components/views/OperationScorecardTrendsView";
 import { FinancialModelingSandboxView } from "@/components/views/FinancialModelingSandboxView";
 import { LoanDetailView } from "@/components/views/LoanDetailView";
-import { AletheiaPromptsCard } from "@/components/dashboard/AletheiaPromptsCard";
+import { CohiPromptsCard } from "@/components/dashboard/CohiPromptsCard";
 import { IndustryNewsCard } from "@/components/dashboard/IndustryNewsCard";
 import { useTenantStore } from "@/stores/tenantStore";
 import { useChannelStore } from "@/stores/channelStore";
@@ -370,13 +370,13 @@ function DashboardSectionEmbed({
           </p>
         </div>
       );
-    case "aletheiaInsights":
+    case "CohiInsights":
       return (
         <div
           className="h-full w-full overflow-auto rounded-xl bg-white dark:bg-slate-900/80 border border-slate-200/70 dark:border-slate-700/70"
           style={scrollStyle}
         >
-          <AletheiaPromptsCard
+          <CohiPromptsCard
             dateFilter="mtd"
             selectedTenantId={selectedTenantId}
             selectedChannel={selectedChannel}

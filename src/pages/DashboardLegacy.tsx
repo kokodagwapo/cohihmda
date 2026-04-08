@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef, useCallback } from "react";
+﻿import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import {
@@ -112,7 +112,7 @@ import {
   AreaChart,
 } from "recharts";
 import { Copy, Code2 } from "lucide-react";
-import { AletheiaVoiceAssistant } from "@/components/aletheia/AletheiaVoiceAssistant";
+import { CohiVoiceAssistant } from "@/components/Cohi/CohiVoiceAssistant";
 import { motion, AnimatePresence } from "framer-motion";
 import { generatePDF } from "@/utils/pdfExport";
 import {
@@ -149,7 +149,7 @@ import { BusinessDataTable } from "@/components/dashboard/BusinessDataTable";
 import { DashboardCard } from "@/components/dashboard/DashboardCard";
 import { DataTable } from "@/components/dashboard/DataTable";
 import { ExecutiveDashboard } from "@/components/dashboard/ExecutiveDashboard";
-import { AletheiaPromptsCard } from "@/components/dashboard/AletheiaPromptsCard";
+import { CohiPromptsCard } from "@/components/dashboard/CohiPromptsCard";
 import { LeaderBoardSection } from "@/components/dashboard/LeaderBoardSection";
 import { LoanFunnelViewLegacy } from "@/components/views/LoanFunnelViewLegacy";
 import { ClosingFalloutForecast } from "@/components/dashboard/ClosingFalloutForecast";
@@ -1275,18 +1275,18 @@ const DashboardLegacy = () => {
           {isAuthenticated && (
             <div className="section-insights mb-16 md:mb-20">
               {/* Cohi Insights - First */}
-              {dashboardVisibility.aletheiaInsights && (
-                <div className="section-aletheia-insights mb-8 md:mb-12">
-                  <AletheiaPromptsCard
+              {dashboardVisibility.CohiInsights && (
+                <div className="section-Cohi-insights mb-8 md:mb-12">
+                  <CohiPromptsCard
                     dateFilter={dateFilter}
                     briefingContext={briefingContext || undefined}
                     selectedTenantId={selectedTenantId}
                     selectedChannel={selectedChannel}
                     onDataAvailabilityChange={(hasData) => {
-                      if (!hasData && dashboardVisibility.aletheiaInsights) {
+                      if (!hasData && dashboardVisibility.CohiInsights) {
                         handleVisibilityChange({
                           ...dashboardVisibility,
-                          aletheiaInsights: false,
+                          CohiInsights: false,
                         });
                       }
                     }}
@@ -1420,7 +1420,7 @@ const DashboardLegacy = () => {
         />
 
         {/* Hidden for now - Cohi Avatar
-       <AletheiaVoiceAssistant dashboardContext={{
+       <CohiVoiceAssistant dashboardContext={{
         stats,
         riskCases,
         topPerformers: topPerformers.slice(0, 5), // Top 5 for context

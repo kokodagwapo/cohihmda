@@ -1,9 +1,9 @@
-import type { Pool } from "pg";
+﻿import type { Pool } from "pg";
 import { runPredictionPipeline } from "./dashboard/predictionPipelineService.js";
 import { runInsightGeneration } from "./insights/agents/insightOrchestrator.js";
-import { enqueueAletheiaPrefetchJob } from "./aletheiaPrefetchWorker.js";
+import { enqueueCohiPrefetchJob } from "./CohiPrefetchWorker.js";
 import {
-  buildDefaultAletheiaBriefingContext,
+  buildDefaultCohiBriefingContext,
   hashBriefingContext,
 } from "../routes/podcast.js";
 import { logError, logInfo } from "./logger.js";
@@ -34,9 +34,9 @@ export async function runDemoTenantGenerationPipeline(
 
   try {
     logInfo(`[DemoRefresh] Enqueueing podcast generation for tenant ${tenantId}`);
-    const briefingContext = await buildDefaultAletheiaBriefingContext(tenantId);
+    const briefingContext = await buildDefaultCohiBriefingContext(tenantId);
     const contextHash = hashBriefingContext(briefingContext);
-    await enqueueAletheiaPrefetchJob({
+    await enqueueCohiPrefetchJob({
       tenantId,
       contextHash,
       briefingContext,

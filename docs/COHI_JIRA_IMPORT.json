@@ -1,4 +1,4 @@
-{
+﻿{
   "meta": {
     "format": "cohi-jira-bulk-v1",
     "projectKey": "COHI",
@@ -26,7 +26,7 @@
         "Create Epics in Jira UI and link flat-imported issues; see suggestedEpics below. Epic Link field IDs differ by project type—set manually after import."
       ],
       "suggestedEpics": [
-        "Executive & dashboard insights — page-scoped insights, category tabs, escalation to Aletheia",
+        "Executive & dashboard insights — page-scoped insights, category tabs, escalation to Cohi",
         "Tenant experience & segments — lender profile, Cohi Builder",
         "Data & integrations — CSV (servicing, compensation, chat CSV), webhooks, CRM",
         "Workbench & reporting — PowerPoint canvas, related exports",

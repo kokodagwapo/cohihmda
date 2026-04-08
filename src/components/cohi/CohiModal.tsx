@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+﻿import { useState, useEffect, useRef } from 'react';
 import { X, Mic, MicOff, Send, Settings, Loader2, Phone, PhoneOff, MessageSquare, Users, TrendingUp, TrendingDown, Activity, Upload, FileText, BarChart2, PieChart as PieChartIcon } from 'lucide-react';
 import { ParticleBackground } from '../maylin/ParticleBackground';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useToast } from '@/hooks/use-toast';
-import { getTodaysGreeting } from '@/utils/aletheiaGreetings';
+import { getTodaysGreeting } from '@/utils/CohiGreetings';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -51,13 +51,13 @@ interface PerformanceDetail {
   details: string;
 }
 
-interface AletheiaModalProps {
+interface CohiModalProps {
   isOpen: boolean;
   onClose: () => void;
   dashboardContext?: any;
 }
 
-export function AletheiaModal({ isOpen, onClose, dashboardContext }: AletheiaModalProps) {
+export function CohiModal({ isOpen, onClose, dashboardContext }: CohiModalProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isListening, setIsListening] = useState(false);
@@ -139,7 +139,7 @@ CURRENT INTELLIGENCE:
       // Use backend WebSocket endpoint
       let ws: WebSocket;
       try {
-        ws = api.createBackendWebSocket('/ws/aletheia');
+        ws = api.createBackendWebSocket('/ws/Cohi');
       } catch (error: any) {
         const msg = error?.message || 'Failed to create WebSocket connection.';
         const isSecurityError = msg.includes('wss://') || msg.includes('HTTPS listener') || msg.includes('SSL certificate');

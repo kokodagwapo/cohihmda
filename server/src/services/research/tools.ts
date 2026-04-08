@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Research Tools
  *
  * Shared utilities for the research analyst agentic system.
@@ -573,7 +573,7 @@ Sort LOs by revenue (descending). Assign tiers by cumulative revenue:
 
 ---
 
-### Insights / Aletheia Revenue Tiers
+### Insights / Cohi Revenue Tiers
 
 Sort LOs by revenue (descending). Assign by cumulative revenue:
   - Top tier:    cumulative revenue <= 50% of total

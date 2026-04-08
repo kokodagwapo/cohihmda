@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Core types for the Widget Architecture
  *
  * Widgets are atomic, self-describing UI components (a single KPI, chart, or table).
@@ -26,7 +26,7 @@ export type DataSourceId =
   | 'executive-dashboard'
   | 'closing-forecast'
   | 'financial-modeling'
-  | 'aletheia-insights'
+  | 'Cohi-insights'
   | 'industry-news'
   | 'loan-detail'
   | 'workflow-conversion'

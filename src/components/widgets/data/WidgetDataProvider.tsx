@@ -1,4 +1,4 @@
-/**
+﻿/**
  * WidgetDataProvider – React context that provides data to canvas widgets.
  *
  * Reads per-section filter state (including PeriodSelection) from
@@ -745,7 +745,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
       loading: false,
       error: null,
     },
-    'aletheia-insights': {
+    'Cohi-insights': {
       data: { ready: true },
       loading: false,
       error: null,

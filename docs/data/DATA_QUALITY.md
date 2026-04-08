@@ -1,4 +1,4 @@
-# Data Quality Framework
+﻿# Data Quality Framework
 
 This document describes Cohi's data quality monitoring, validation, and reporting capabilities for client administrators.
 
@@ -374,5 +374,5 @@ Admins can export affected loans for bulk correction in the LOS:
 - [CSV Import Guide](./CSV_IMPORT.md)
 - [Universal Connector](./UNIVERSAL_CONNECTOR.md)
 - [Client Admin Requirements](../architecture/CLIENT_ADMIN_REQUIREMENTS.md)
-- [AI Insights Architecture](../ALETHEIA_INSIGHTS_ARCHITECTURE_REVIEW.md)
+- [AI Insights Architecture](../Cohi_INSIGHTS_ARCHITECTURE_REVIEW.md)
 - [Status Date Fallback](../STATUS_DATE_FALLBACK.md) — for Denied/Withdrawn loans, when status-specific date is null, reporting uses `current_status_date`

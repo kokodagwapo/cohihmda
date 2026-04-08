@@ -1,4 +1,4 @@
-# Internal Admin (TVMA) Requirements
+﻿# Internal Admin (TVMA) Requirements
 
 This document specifies the requirements and feature set for TVMA internal administrators in Cohi. These are platform-level administrators who manage all tenants, system configuration, and platform health.
 
@@ -102,8 +102,8 @@ This document specifies the requirements and feature set for TVMA internal admin
 | ID | As a... | I want to... | So that... |
 |----|---------|--------------|------------|
 | RV-01 | Platform Admin | Configure OpenAI/Anthropic API keys | AI features work |
-| RV-02 | Platform Admin | Manage Aletheia topics | Voice assistant has relevant content |
-| RV-03 | Platform Admin | Configure voice rules | Aletheia responds appropriately |
+| RV-02 | Platform Admin | Manage Cohi topics | Voice assistant has relevant content |
+| RV-03 | Platform Admin | Configure voice rules | Cohi responds appropriately |
 | RV-04 | Platform Admin | View AI usage costs | I can track expenses |
 | RV-05 | Platform Admin | Upload RAG documents | Knowledge base is updated |
 | RV-06 | Platform Admin | Configure per-tenant AI settings | Each tenant has customized AI |

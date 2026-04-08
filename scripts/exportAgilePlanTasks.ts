@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Export AgilePlan Tasks to JSON and CSV
  * Compatible with Jira and Trello import formats
  * 
@@ -294,13 +294,13 @@ const allTasks: Task[] = [
   },
   {
     id: 'w5-5',
-    title: 'Aletheia voice AI integration',
+    title: 'Cohi voice AI integration',
     description: 'Gemini Live API integration',
     priority: 'high',
     dueDate: '2026-01-16',
     week: 'Week 5',
     dateRange: 'Jan 12-16',
-    tags: ['Week 5', 'January 2026', 'AI', 'Voice', 'Aletheia', 'Gemini'],
+    tags: ['Week 5', 'January 2026', 'AI', 'Voice', 'Cohi', 'Gemini'],
     status: 'Backlogs',
   },
 

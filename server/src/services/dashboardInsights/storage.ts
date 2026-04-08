@@ -3,7 +3,7 @@
  *
  * saveDashboardInsights: insert batch for a page+filter combo (replaces previous for same combo).
  * loadDashboardInsights: fetch most recent insights for pageId + filter subset.
- * loadEscalatedDashboardInsights: fetch all escalated insights for Aletheia.
+ * loadEscalatedDashboardInsights: fetch all escalated insights for Cohi.
  */
 
 import pg from "pg";
@@ -21,7 +21,7 @@ export async function saveDashboardInsights(
   pageId: string,
   pageName: string,
   insights: DashboardInsight[],
-  generationBatch: string
+  generationBatch: string,
 ): Promise<void> {
   if (insights.length === 0) return;
 
@@ -54,7 +54,7 @@ export async function saveDashboardInsights(
       ins.detail_data != null ? JSON.stringify(ins.detail_data) : null,
       ins.functional_category ?? DASHBOARD_PAGE_CATEGORY_MAP[pageId] ?? null,
       generationBatch,
-      new Date().toISOString()
+      new Date().toISOString(),
     );
   }
 
@@ -63,7 +63,7 @@ export async function saveDashboardInsights(
     filter_context, evidence_refs, cited_numbers, supporting_data, detail_data, functional_category, generation_batch, generated_at)`;
   await tenantPool.query(
     `INSERT INTO dashboard_generated_insights ${columns} VALUES ${placeholders.join(", ")}`,
-    values
+    values,
   );
 }
 
@@ -75,7 +75,7 @@ export async function saveDashboardInsights(
 export async function loadDashboardInsights(
   tenantPool: pg.Pool,
   pageId: string,
-  filterContext: Record<string, unknown>
+  filterContext: Record<string, unknown>,
 ): Promise<{ insights: DashboardInsight[]; generatedAt: string | null }> {
   const isPageLevel = Object.keys(filterContext).length === 0;
 
@@ -90,7 +90,7 @@ export async function loadDashboardInsights(
          WHERE page_id = $1
          ORDER BY generated_at DESC
          LIMIT 1`,
-        [pageId]
+        [pageId],
       )
     : await tenantPool.query(
         `SELECT generation_batch
@@ -98,10 +98,12 @@ export async function loadDashboardInsights(
          WHERE page_id = $1 AND filter_context @> $2::jsonb
          ORDER BY generated_at DESC
          LIMIT 1`,
-        [pageId, JSON.stringify(filterContext)]
+        [pageId, JSON.stringify(filterContext)],
       );
 
-  const latestBatch = latestBatchResult.rows?.[0]?.generation_batch as string | undefined;
+  const latestBatch = latestBatchResult.rows?.[0]?.generation_batch as
+    | string
+    | undefined;
   if (!latestBatch) {
     return { insights: [], generatedAt: null };
   }
@@ -116,7 +118,7 @@ export async function loadDashboardInsights(
            AND generation_batch = $2
          ORDER BY generated_at DESC
          LIMIT $3`,
-        [pageId, latestBatch, MAX_INSIGHTS_PER_PAGE_FILTER]
+        [pageId, latestBatch, MAX_INSIGHTS_PER_PAGE_FILTER],
       )
     : await tenantPool.query(
         `SELECT id, page_id, page_name, headline, understory, sentiment, severity_score, scope, escalate,
@@ -128,7 +130,12 @@ export async function loadDashboardInsights(
            AND filter_context @> $3::jsonb
          ORDER BY generated_at DESC
          LIMIT $4`,
-        [pageId, latestBatch, JSON.stringify(filterContext), MAX_INSIGHTS_PER_PAGE_FILTER]
+        [
+          pageId,
+          latestBatch,
+          JSON.stringify(filterContext),
+          MAX_INSIGHTS_PER_PAGE_FILTER,
+        ],
       );
 
   const rows = result.rows as Array<{
@@ -186,11 +193,14 @@ export async function loadDashboardInsights(
     owner: r.owner ?? "",
     scope: (r.scope === "widget" ? "widget" : "page") as "page" | "widget",
     filter_context: r.filter_context as DashboardInsight["filter_context"],
-    evidence_refs: Array.isArray(r.evidence_refs) ? (r.evidence_refs as DashboardInsight["evidence_refs"]) : [],
+    evidence_refs: Array.isArray(r.evidence_refs)
+      ? (r.evidence_refs as DashboardInsight["evidence_refs"])
+      : [],
     escalate: r.escalate,
     sourcePageId: r.page_id,
     sourcePageName: r.page_name,
-    functional_category: r.functional_category ?? DASHBOARD_PAGE_CATEGORY_MAP[r.page_id],
+    functional_category:
+      r.functional_category ?? DASHBOARD_PAGE_CATEGORY_MAP[r.page_id],
     supporting_data: r.supporting_data as DashboardInsight["supporting_data"],
     detail_data: r.detail_data as DashboardInsight["detail_data"],
   }));
@@ -212,7 +222,7 @@ export async function loadDashboardInsights(
 export async function loadTrackedDashboardInsightsForPage(
   tenantPool: pg.Pool,
   userId: number,
-  pageId: string
+  pageId: string,
 ): Promise<DashboardInsight[]> {
   const result = await tenantPool.query(
     `SELECT dgi.id AS id, dgi.page_id, dgi.page_name, dgi.headline, dgi.understory, dgi.sentiment, dgi.severity_score, dgi.scope, dgi.escalate,
@@ -225,7 +235,7 @@ export async function loadTrackedDashboardInsightsForPage(
        AND ti.source_type = 'dashboard_insights'
        AND dgi.page_id = $2
      ORDER BY dgi.generated_at DESC`,
-    [userId, pageId]
+    [userId, pageId],
   );
 
   const rows = result.rows as Array<{
@@ -281,7 +291,9 @@ export async function loadTrackedDashboardInsightsForPage(
     owner: r.owner ?? "",
     scope: (r.scope === "widget" ? "widget" : "page") as "page" | "widget",
     filter_context: r.filter_context as DashboardInsight["filter_context"],
-    evidence_refs: Array.isArray(r.evidence_refs) ? (r.evidence_refs as DashboardInsight["evidence_refs"]) : [],
+    evidence_refs: Array.isArray(r.evidence_refs)
+      ? (r.evidence_refs as DashboardInsight["evidence_refs"])
+      : [],
     escalate: r.escalate,
     sourcePageId: r.page_id,
     sourcePageName: r.page_name,
@@ -295,7 +307,7 @@ export async function loadTrackedDashboardInsightsForPage(
  */
 export async function loadDashboardInsightById(
   tenantPool: pg.Pool,
-  insightId: number
+  insightId: number,
 ): Promise<{
   id: number;
   page_id: string;
@@ -321,7 +333,7 @@ export async function loadDashboardInsightById(
             filter_context, evidence_refs, cited_numbers, supporting_data
      FROM dashboard_generated_insights
      WHERE id = $1`,
-    [insightId]
+    [insightId],
   );
   if (result.rows.length === 0) return null;
   return result.rows[0] as any;
@@ -332,7 +344,7 @@ export async function loadDashboardInsightById(
  */
 export async function loadDashboardInsightForTracking(
   tenantPool: pg.Pool,
-  insightId: number
+  insightId: number,
 ): Promise<{
   id: number;
   page_id: string;
@@ -348,7 +360,7 @@ export async function loadDashboardInsightForTracking(
     `SELECT id, page_id, page_name, headline, understory, sentiment, severity_score, detail_data, filter_context
      FROM dashboard_generated_insights
      WHERE id = $1`,
-    [insightId]
+    [insightId],
   );
   if (result.rows.length === 0) return null;
   const row = result.rows[0] as any;
@@ -362,10 +374,10 @@ export async function loadDashboardInsightForTracking(
 }
 
 /**
- * Load all escalated dashboard insights (for Aletheia Critical Issues bucket).
+ * Load all escalated dashboard insights (for Cohi Critical Issues bucket).
  */
 export async function loadEscalatedDashboardInsights(
-  tenantPool: pg.Pool
+  tenantPool: pg.Pool,
 ): Promise<DashboardInsight[]> {
   const result = await tenantPool.query(
     `WITH latest_batch_per_page AS (
@@ -383,7 +395,7 @@ export async function loadEscalatedDashboardInsights(
        ON lb.page_id = dgi.page_id
       AND lb.generation_batch = dgi.generation_batch
      WHERE dgi.escalate = true
-     ORDER BY dgi.generated_at DESC`
+     ORDER BY dgi.generated_at DESC`,
   );
 
   const rows = result.rows as Array<{
@@ -439,11 +451,14 @@ export async function loadEscalatedDashboardInsights(
     owner: r.owner ?? "",
     scope: (r.scope === "widget" ? "widget" : "page") as "page" | "widget",
     filter_context: r.filter_context as DashboardInsight["filter_context"],
-    evidence_refs: Array.isArray(r.evidence_refs) ? (r.evidence_refs as DashboardInsight["evidence_refs"]) : [],
+    evidence_refs: Array.isArray(r.evidence_refs)
+      ? (r.evidence_refs as DashboardInsight["evidence_refs"])
+      : [],
     escalate: r.escalate,
     sourcePageId: r.page_id,
     sourcePageName: r.page_name,
-    functional_category: r.functional_category ?? DASHBOARD_PAGE_CATEGORY_MAP[r.page_id],
+    functional_category:
+      r.functional_category ?? DASHBOARD_PAGE_CATEGORY_MAP[r.page_id],
     supporting_data: r.supporting_data as DashboardInsight["supporting_data"],
     detail_data: r.detail_data as DashboardInsight["detail_data"],
   }));

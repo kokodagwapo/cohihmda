@@ -1,4 +1,4 @@
-import { motion, AnimatePresence } from "framer-motion";
+﻿import { motion, AnimatePresence } from "framer-motion";
 import { X, AlertCircle, AlertTriangle, CheckCircle2, Info, ChevronRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -44,7 +44,7 @@ const SENTIMENT_STYLE = {
   neutral: "text-slate-500 dark:text-slate-400",
 };
 
-/** Insight shape that can come from the strip (DashboardInsightItem) or Aletheia (has same fields) */
+/** Insight shape that can come from the strip (DashboardInsightItem) or Cohi (has same fields) */
 export type DashboardInsightEvidenceModalInsight = Pick<
   DashboardInsightItem,
   | "headline"

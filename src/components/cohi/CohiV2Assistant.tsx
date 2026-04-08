@@ -1,15 +1,15 @@
-import { useState, useEffect, useRef } from 'react';
+﻿import { useState, useEffect, useRef } from 'react';
 import { Phone, PhoneOff, Mic, MicOff, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useToast } from '@/hooks/use-toast';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 
-interface AletheiaV2AssistantProps {
+interface CohiV2AssistantProps {
   className?: string;
 }
 
-export function AletheiaV2Assistant({ className }: AletheiaV2AssistantProps) {
+export function CohiV2Assistant({ className }: CohiV2AssistantProps) {
   const [isInCall, setIsInCall] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -179,7 +179,7 @@ When answering questions, be specific, reference the architecture details, and h
       const urlWithoutProtocol = backendUrl.replace(/^https?:\/\//, '');
       const wsProtocol = getWebSocketProtocol(backendUrl);
       const token = api.getToken() || '';
-      const wsUrl = `${wsProtocol}${urlWithoutProtocol}/ws/aletheia?token=${encodeURIComponent(token)}&context=v2`;
+      const wsUrl = `${wsProtocol}${urlWithoutProtocol}/ws/Cohi?token=${encodeURIComponent(token)}&context=v2`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 

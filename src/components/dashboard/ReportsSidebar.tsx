@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+﻿import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, Zap, BarChart3, Target, Trophy, X, Sun, FileText, LayoutGrid, TrendingUp, LayoutDashboard, Filter, ArrowLeftRight, Shield, ClipboardList, Calculator, LineChart, Pin, PinOff, FlaskConical, GripVertical, Lock, Layers, Mail, Users, MessageSquare, LayoutPanelLeft, Database } from 'lucide-react';
@@ -45,7 +45,7 @@ import { CSS } from '@dnd-kit/utilities';
 export interface DashboardVisibility {
   executiveDashboard: boolean;
   industryNews: boolean;
-  aletheiaInsights: boolean;
+  CohiInsights: boolean;
   leaderboard: boolean;
   topTiering: boolean;
   closingFalloutForecast: boolean;
@@ -187,7 +187,7 @@ const statusConfig = {
 
 // Dashboard section configuration
 const dashboardSectionsConfig = [
-  { id: 'aletheiaInsights' as SectionId, label: 'Cohi Insights', icon: Sun, color: 'text-emerald-500', section: 'main' },
+  { id: 'CohiInsights' as SectionId, label: 'Cohi Insights', icon: Sun, color: 'text-emerald-500', section: 'main' },
   { id: 'industryNews' as SectionId, label: 'Cohi Mortgage News', icon: FileText, color: 'text-blue-500', section: 'main' },
   { id: 'leaderboard' as SectionId, label: 'Leaderboard', icon: Trophy, color: 'text-amber-500', section: 'dashboards' },
   { id: 'executiveDashboard' as SectionId, label: 'Business Overview', icon: Target, color: 'text-blue-500', section: 'dashboards' },
@@ -195,7 +195,7 @@ const dashboardSectionsConfig = [
 
 // Default section order - matches actual display order on /insights page
 export const defaultSectionOrder: SectionId[] = [
-  'aletheiaInsights',
+  'CohiInsights',
   'industryNews',
   'leaderboard',
   'executiveDashboard',
@@ -203,7 +203,7 @@ export const defaultSectionOrder: SectionId[] = [
 
 // Nav menu structure mirroring top Navigation (keep sidemenu icons: Sun, FileText, Trophy, Target, BarChart3 for sections)
 const INSIGHTS_CHILDREN = [
-  { type: 'section' as const, id: 'aletheiaInsights' as SectionId, label: 'Cohi Insights', icon: Sun, color: 'text-emerald-500' },
+  { type: 'section' as const, id: 'CohiInsights' as SectionId, label: 'Cohi Insights', icon: Sun, color: 'text-emerald-500' },
   { type: 'section' as const, id: 'industryNews' as SectionId, label: 'Cohi Mortgage News', icon: FileText, color: 'text-blue-500' },
 ];
 
@@ -495,7 +495,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
   const defaultVisibility: DashboardVisibility = {
     executiveDashboard: false,
     industryNews: true,
-    aletheiaInsights: true,
+    CohiInsights: true,
     leaderboard: true,
     topTiering: true,
     closingFalloutForecast: false,
@@ -543,7 +543,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
 
   const getSectionElementId = (sectionId: string): string => {
     const sectionIdMap: Record<string, string> = {
-      aletheiaInsights: 'aletheiaInsights',
+      CohiInsights: 'CohiInsights',
       industryNews: 'industryNews',
       leaderboard: 'leaderboard',
       executiveDashboard: 'executiveDashboard',
@@ -632,7 +632,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                   </p>
                   <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 rounded-full text-[10px] font-thin text-slate-600 dark:text-slate-400">
                     {isInsightsPage
-                      ? `${[currentVisibility.aletheiaInsights, currentVisibility.industryNews].filter(Boolean).length} of 2`
+                      ? `${[currentVisibility.CohiInsights, currentVisibility.industryNews].filter(Boolean).length} of 2`
                       : `${activeCount} of ${dashboardSectionsConfig.length}`}
                   </span>
                 </div>
@@ -660,7 +660,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                         <div
                           className={cn(
                             'flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center',
-                            it.id === 'aletheiaInsights'
+                            it.id === 'CohiInsights'
                               ? 'bg-emerald-500/10 dark:bg-emerald-500/20'
                               : 'bg-blue-500/10 dark:bg-blue-500/20'
                           )}
@@ -668,7 +668,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                           <Icon
                             className={cn(
                               'w-5 h-5',
-                              it.id === 'aletheiaInsights'
+                              it.id === 'CohiInsights'
                                 ? 'text-emerald-500 dark:text-emerald-400'
                                 : 'text-blue-500 dark:text-blue-400'
                             )}

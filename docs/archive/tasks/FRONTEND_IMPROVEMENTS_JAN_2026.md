@@ -1,4 +1,4 @@
-# Frontend Improvements - January 2026
+﻿# Frontend Improvements - January 2026
 
 This document summarizes the frontend bug fixes and improvements made during the backend routes consolidation work.
 
@@ -352,8 +352,8 @@ The "Top Tiering" navigation button needed to be renamed to "Dashboard" with upd
 ### Issue B: Insights Page Sidebar
 The sidebar on the `/insights` page was using the old design instead of the new hierarchical navigation.
 
-### Issue C: Aletheia to Cohi Rebrand
-Various UI elements still referenced "Aletheia" instead of "Cohi".
+### Issue C: Cohi to Cohi Rebrand
+Various UI elements still referenced "Cohi" instead of "Cohi".
 
 ### Solution
 - Renamed navigation buttons and updated dropdown structures
@@ -363,7 +363,7 @@ Various UI elements still referenced "Aletheia" instead of "Cohi".
 ### Files Modified
 - `src/components/layout/Navigation.tsx`
 - `src/components/layout/ReportsSidebar.tsx`
-- Various components with Aletheia references
+- Various components with Cohi references
 
 ---
 

@@ -1,12 +1,12 @@
-# Cohi Insights Generation System - Complete Technical Documentation
+﻿# Cohi Insights Generation System - Complete Technical Documentation
 
 ## Table of Contents
 
 1. [Overview](#overview)
 2. [Architecture Diagram](#architecture-diagram)
 3. [Frontend Components](#frontend-components)
-   - [AletheiaPromptsCard](#aletheiapromptscard)
-   - [useAletheiaData Hook](#usealetheiadatahook)
+   - [CohiPromptsCard](#Cohipromptscard)
+   - [useCohiData Hook](#useCohidatahook)
    - [InsightDetailModal](#insightdetailmodal)
    - [CohiBriefingControl](#cohibriefingcontrol)
 4. [Backend API Endpoints](#backend-api-endpoints)
@@ -52,9 +52,9 @@ The system has **two insight generation tracks**:
 ```
 Dashboard.tsx
   |
-  +-- AletheiaPromptsCard (props: dateFilter, selectedTenantId, selectedChannel, briefingContext)
+  +-- CohiPromptsCard (props: dateFilter, selectedTenantId, selectedChannel, briefingContext)
         |
-        +-- useAletheiaData hook
+        +-- useCohiData hook
         |     |
         |     +-- GET /api/dashboard/insights?dateFilter=...&useLLM=false&tenant_id=...&channel_group=...
         |     |     |
@@ -91,9 +91,9 @@ Dashboard.tsx
 
 ## Frontend Components
 
-### AletheiaPromptsCard
+### CohiPromptsCard
 
-**File:** `src/components/dashboard/AletheiaPromptsCard.tsx`
+**File:** `src/components/dashboard/CohiPromptsCard.tsx`
 
 This is the main UI component that displays insights on the dashboard. It is a memoized React component (`React.memo`).
 
@@ -109,7 +109,7 @@ This is the main UI component that displays insights on the dashboard. It is a m
 | `selectedChannel` | `string \| null` | Channel filter (e.g. "Retail", "TPO") |
 
 **Behavior:**
-- Calls `useAletheiaData` hook to fetch insights from the API.
+- Calls `useCohiData` hook to fetch insights from the API.
 - Groups insights into **sets of 3** and auto-rotates every **15 seconds**.
 - Rotation pauses on mouse hover (`onMouseEnter`/`onMouseLeave`).
 - Users can **pin** insights to keep them visible at the top.
@@ -126,9 +126,9 @@ This is the main UI component that displays insights on the dashboard. It is a m
 - `warning` → Amber icon and background
 - `error` / `critical` → Rose/red icon and background
 
-### useAletheiaData Hook
+### useCohiData Hook
 
-**File:** `src/hooks/useAletheiaData.ts`
+**File:** `src/hooks/useCohiData.ts`
 
 Custom React hook that handles all data fetching for the insights card.
 
@@ -138,7 +138,7 @@ Custom React hook that handles all data fetching for the insights card.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `allInsights` | `AletheiaInsight[]` | Array of all insights |
+| `allInsights` | `CohiInsight[]` | Array of all insights |
 | `insightsLoading` | `boolean` | Loading state |
 | `insightsError` | `string \| null` | Error message if fetch failed |
 | `funnelData` | `any` | Funnel data for briefing context |
@@ -159,10 +159,10 @@ Custom React hook that handles all data fetching for the insights card.
 5. **Refetch triggers**: `dateFilter`, `selectedTenantId`, `selectedChannel`, `refreshCounter` changes.
 6. **Funnel data**: Fetched separately from `/api/loans/funnel` for the briefing context (independent of insights).
 
-**AletheiaInsight Interface:**
+**CohiInsight Interface:**
 
 ```typescript
-interface AletheiaInsight {
+interface CohiInsight {
   type: "success" | "info" | "warning" | "error" | "critical";
   icon: any;  // Lucide icon component
   message: string;
@@ -201,7 +201,7 @@ Modal component that shows detailed drill-down data when a user clicks on a dril
 
 ### CohiBriefingControl
 
-**File:** `src/components/aletheia/CohiBriefingControl.tsx` (re-exports `AletheiaBriefingControls`)
+**File:** `src/components/Cohi/CohiBriefingControl.tsx` (re-exports `CohiBriefingControls`)
 
 This component provides the audio briefing feature, passing insights dialogues and funnel data as context for voice-based executive briefings. It's a thin re-export wrapper.
 
@@ -487,8 +487,8 @@ interface GeneratedInsight {
 ### Frontend Insight Interface
 
 ```typescript
-// src/hooks/useAletheiaData.ts line 5
-interface AletheiaInsight {
+// src/hooks/useCohiData.ts line 5
+interface CohiInsight {
   type: "success" | "info" | "warning" | "error" | "critical";
   icon: any;        // Lucide icon component (added by frontend)
   message: string;
@@ -625,7 +625,7 @@ This requires changes in multiple files:
 2. **Server — Validation** (`llmInsightGenerator.ts`): Add to `validSources` array in `parseAndValidateLLMResponse()`.
 3. **Server — System prompt** (`llmInsightGenerator.ts`): Document the new source in `buildSystemPrompt()`.
 4. **Server — Insight interface** (`analyticsService.ts`): The `source` field is `string`, so no change needed.
-5. **Frontend — Drillable sources** (`AletheiaPromptsCard.tsx` lines 101-108 and 117-125): Add to the `drillableSources` arrays in both `handleInsightClick` and `isDrillable` callbacks.
+5. **Frontend — Drillable sources** (`CohiPromptsCard.tsx` lines 101-108 and 117-125): Add to the `drillableSources` arrays in both `handleInsightClick` and `isDrillable` callbacks.
 6. **Server — Detail endpoint** (`insightDetails.ts`): Add a new `case` in the `switch(source)` block with the appropriate SQL query.
 7. **Frontend — Detail modal** (`InsightDetailModal.tsx`): Add summary cards and table columns for the new source.
 
@@ -667,7 +667,7 @@ case 'compliance': {
    - Add table headers
    - Add table row rendering
 
-3. **Update drillable sources** in `AletheiaPromptsCard.tsx`:
+3. **Update drillable sources** in `CohiPromptsCard.tsx`:
 ```typescript
 const drillableSources = [
   "predictions", "credit_risk", "lost_opportunity",
@@ -746,11 +746,11 @@ const payload: InsightMetricsPayload = {
 
 | File | Role | Key Exports |
 |------|------|-------------|
-| `src/pages/Dashboard.tsx` | Page component, passes props to AletheiaPromptsCard | `Dashboard` (default) |
-| `src/components/dashboard/AletheiaPromptsCard.tsx` | UI component for displaying insights | `AletheiaPromptsCard` |
-| `src/hooks/useAletheiaData.ts` | Data fetching hook for insights | `useAletheiaData`, `AletheiaInsight`, `InsightsMetadata` |
+| `src/pages/Dashboard.tsx` | Page component, passes props to CohiPromptsCard | `Dashboard` (default) |
+| `src/components/dashboard/CohiPromptsCard.tsx` | UI component for displaying insights | `CohiPromptsCard` |
+| `src/hooks/useCohiData.ts` | Data fetching hook for insights | `useCohiData`, `CohiInsight`, `InsightsMetadata` |
 | `src/components/dashboard/InsightDetailModal.tsx` | Drill-down modal for insight details | `InsightDetailModal` |
-| `src/components/aletheia/CohiBriefingControl.tsx` | Audio briefing control (re-export) | `CohiBriefingControl` |
+| `src/components/Cohi/CohiBriefingControl.tsx` | Audio briefing control (re-export) | `CohiBriefingControl` |
 | `server/src/routes/dashboard/analytics.ts` | API route: `/api/dashboard/insights` | Express router |
 | `server/src/routes/dashboard/insightDetails.ts` | API route: `/api/dashboard/insights/details/:source` | Express router |
 | `server/src/services/dashboard/analyticsService.ts` | Core service: `getInsights()`, rule-based generation | `getInsights`, `Insight` |
@@ -779,6 +779,6 @@ LLM-powered insights are **enabled by default** (`useLLM=true`). The system auto
 - Per-tenant: Insert into `rag_settings.openai_api_key` (encrypted) in the tenant database
 - Global fallback: Set `OPENAI_API_KEY` environment variable in `server/.env`
 
-**To force rule-based insights only** (disable LLM), change `useLLM=true` to `useLLM=false` in `src/hooks/useAletheiaData.ts` (line 123).
+**To force rule-based insights only** (disable LLM), change `useLLM=true` to `useLLM=false` in `src/hooks/useCohiData.ts` (line 123).
 
 **Verification:** When LLM insights are active, an "AI" badge appears next to "Executive briefing" in the insights card header.

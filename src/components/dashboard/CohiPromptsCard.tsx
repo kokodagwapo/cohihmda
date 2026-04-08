@@ -1,4 +1,4 @@
-import React, {
+﻿import React, {
   useState,
   useEffect,
   useMemo,
@@ -41,12 +41,12 @@ import {
   Telescope,
 } from "lucide-react";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
-import { useAletheiaData, AletheiaInsight } from "@/hooks/useAletheiaData";
+import { useCohiData, CohiInsight } from "@/hooks/useCohiData";
 import { useJobStatus } from "@/hooks/useJobStatus";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 import { JobProgress } from "@/components/ui/JobProgress";
-import { CohiBriefingControl } from "@/components/aletheia/CohiBriefingControl";
+import { CohiBriefingControl } from "@/components/Cohi/CohiBriefingControl";
 import { InsightDetailModal } from "./InsightDetailModal";
 import { DashboardInsightEvidenceModal, type DashboardInsightEvidenceModalInsight } from "./DashboardInsightEvidenceModal";
 import { TrackedInsightsWatchlist } from "./TrackedInsightsWatchlist";
@@ -60,9 +60,9 @@ import type { Finding } from "@/hooks/useResearchSession";
 // Go to dashboard page (for escalated dashboard insights)
 // ============================================================================
 
-/** Map Aletheia insight (from API) to the shape expected by DashboardInsightEvidenceModal */
-function aletheiaInsightToEvidenceModalInsight(
-  i: AletheiaInsight
+/** Map Cohi insight (from API) to the shape expected by DashboardInsightEvidenceModal */
+function CohiInsightToEvidenceModalInsight(
+  i: CohiInsight
 ): DashboardInsightEvidenceModalInsight {
   const typeToSentiment = (
     t: string
@@ -258,7 +258,7 @@ const CATEGORY_TABS: CategoryTab[] = [
 // Props
 // ============================================================================
 
-interface AletheiaPromptsCardProps {
+interface CohiPromptsCardProps {
   dateFilter: "today" | "mtd" | "ytd" | "custom";
   onDataAvailabilityChange?: (hasData: boolean) => void;
   onOpenCohiPanel?: () => void;
@@ -336,16 +336,16 @@ const SOURCE_CHIP_LABELS: Record<string, string> = {
   other: "Insight",
 };
 
-function getInsightChipLabel(insight: AletheiaInsight): string {
+function getInsightChipLabel(insight: CohiInsight): string {
   const source = (insight.source || "").trim().toLowerCase();
   return SOURCE_CHIP_LABELS[source] ?? "Insight";
 }
 
 interface BucketLaneProps {
   config: BucketConfig;
-  insights: AletheiaInsight[];
-  onInsightClick: (insight: AletheiaInsight) => void;
-  isDrillable: (insight: AletheiaInsight) => boolean;
+  insights: CohiInsight[];
+  onInsightClick: (insight: CohiInsight) => void;
+  isDrillable: (insight: CohiInsight) => boolean;
   /** When non-null, overrides the local expanded state (driven by parent "Expand All / Collapse All"). */
   globalExpanded?: boolean | null;
   /** Bumped each time the global toggle fires, ensuring the effect re-runs even if the boolean value stays the same. */
@@ -361,9 +361,9 @@ interface BucketLaneProps {
   /** Deep-dive an insight in the workbench (admin only) */
   onInvestigate?: (insightId: number) => void;
   /** Whether this insight is already on the watchlist */
-  isTracked?: (insight: AletheiaInsight) => boolean;
+  isTracked?: (insight: CohiInsight) => boolean;
   /** Toggle track/untrack on the watchlist */
-  onToggleTrack?: (insight: AletheiaInsight) => void;
+  onToggleTrack?: (insight: CohiInsight) => void;
   /** Whether the user is a platform admin */
   isAdmin?: boolean;
 }
@@ -459,7 +459,7 @@ function BucketLane({
 
   // Render a single insight row
   const renderInsightRow = (
-    insight: AletheiaInsight,
+    insight: CohiInsight,
     idx: number,
     showUnderstory: boolean
   ) => {
@@ -894,7 +894,7 @@ function BucketLane({
 // Main component
 // ============================================================================
 
-export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
+export const CohiPromptsCard = React.memo(function CohiPromptsCard({
   dateFilter,
   onDataAvailabilityChange,
   onOpenCohiPanel,
@@ -902,11 +902,11 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
   selectedTenantId,
   selectedChannel,
   onDataReady,
-}: AletheiaPromptsCardProps) {
+}: CohiPromptsCardProps) {
   const sectionRef = useRef<HTMLDivElement>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedInsight, setSelectedInsight] =
-    useState<AletheiaInsight | null>(null);
+    useState<CohiInsight | null>(null);
   /** When true, show DashboardInsightEvidenceModal for dashboard_insights (fallback when details API returns 404). */
   const [useDashboardEvidenceModalFallback, setUseDashboardEvidenceModalFallback] = useState(false);
   useEffect(() => {
@@ -938,7 +938,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
     submitFeedback,
     loadInsightsByMethod,
     refreshByCategory,
-  } = useAletheiaData(
+  } = useCohiData(
     dateFilter,
     onDataAvailabilityChange,
     selectedTenantId,
@@ -948,7 +948,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
   const [activeTab, setActiveTab] = useState<"pipeline" | "agent" | "watchlist">("agent");
   const [activeCategoryId, setActiveCategoryId] = useState<string>("all");
   const [agentFinding, setAgentFinding] = useState<Finding | null>(null);
-  const [agentFindingInsight, setAgentFindingInsight] = useState<AletheiaInsight | null>(null);
+  const [agentFindingInsight, setAgentFindingInsight] = useState<CohiInsight | null>(null);
 
   const [refreshJobId, setRefreshJobId] = useState<string | null>(null);
   const refreshJob = useJobStatus(refreshJobId);
@@ -1086,7 +1086,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
 
   // Drill-down logic — all insights are drillable now (evidence tables are self-describing)
   const handleInsightClick = useCallback(
-    (insight: AletheiaInsight) => {
+    (insight: CohiInsight) => {
       if (insight.generation_method === "agent" && insight.detail_data?.type === "agent_finding") {
         const dd = insight.detail_data;
         const finding: Finding = {
@@ -1157,7 +1157,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
   }, [agentFinding, isCreatingResearch, selectedTenantId, navigate]);
 
   const handleToggleTrack = useCallback(
-    async (insight: AletheiaInsight) => {
+    async (insight: CohiInsight) => {
       if (insight.insightId == null) return;
       const sourceId = insight.insightId;
       const currentlyTracked = trackedPipelineMap.has(sourceId);
@@ -1272,7 +1272,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
   );
 
   const isDrillable = useCallback(
-    (insight: AletheiaInsight) => {
+    (insight: CohiInsight) => {
       return !!insight.source;
     },
     []
@@ -1298,7 +1298,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
 
   // Group filtered insights by bucket
   const bucketedInsights = useMemo(() => {
-    const map: Record<string, AletheiaInsight[]> = {
+    const map: Record<string, CohiInsight[]> = {
       critical: [],
       attention: [],
       working: [],
@@ -1349,7 +1349,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
   const activeCategoryDef = CATEGORY_TABS.find((c) => c.id === activeCategoryId);
 
   return (
-    <div className="mb-6 sm:mb-10 aletheia-prompts-card">
+    <div className="mb-6 sm:mb-10 Cohi-prompts-card">
       <motion.div
         ref={sectionRef}
         initial={{ opacity: 0, y: -8 }}
@@ -1771,7 +1771,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
           setSelectedInsight(null);
           setUseDashboardEvidenceModalFallback(false);
         }}
-        insight={selectedInsight?.source === "dashboard_insights" && selectedInsight ? aletheiaInsightToEvidenceModalInsight(selectedInsight) : null}
+        insight={selectedInsight?.source === "dashboard_insights" && selectedInsight ? CohiInsightToEvidenceModalInsight(selectedInsight) : null}
       />
 
       {/* Insight Detail Modal (pipeline + dashboard_insights; for dashboard_insights fallback to evidence modal on 404) */}

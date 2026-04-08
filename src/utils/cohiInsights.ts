@@ -1,4 +1,4 @@
-import { PeriodValue, getLoanAmountNumber, getLoanOfficerName, inferLoanStatus, isDateInPeriod, isFundedInPeriod } from '@/utils/closingFalloutFilters';
+﻿import { PeriodValue, getLoanAmountNumber, getLoanOfficerName, inferLoanStatus, isDateInPeriod, isFundedInPeriod } from '@/utils/closingFalloutFilters';
 import { transformLoanToCard } from '@/utils/loanDataTransform';
 
 export type MetricKey =
@@ -7,20 +7,20 @@ export type MetricKey =
   | 'Predicted Closing'
   | 'Predicted Fallout';
 
-export type AlethiaSectionKey =
+export type CohiSectionKey =
   | 'Success'
   | 'Warning'
   | 'Critical'
   | 'TopTiering Insights for Loan Officers'
   | 'Borrower Coaching';
 
-export interface AlethiaSection {
-  title: AlethiaSectionKey;
+export interface CohiSection {
+  title: CohiSectionKey;
   items: string[];
 }
 
-export interface AlethiaInsights {
-  sections: AlethiaSection[];
+export interface CohiInsights {
+  sections: CohiSection[];
 }
 
 function pct(n: number): number {
@@ -148,7 +148,7 @@ function topBorrowerCoachingTipsFromRisk(loans: any[]): string[] {
   return uniq.slice(0, 3);
 }
 
-export function generateAlethiaInsightsForMetric(args: {
+export function generateCohiInsightsForMetric(args: {
   metricKey: MetricKey;
   loansRaw: any[] | null;
   dateFilter: PeriodValue;
@@ -163,7 +163,7 @@ export function generateAlethiaInsightsForMetric(args: {
   };
   priorityLoansRaw?: any[];
   now?: Date;
-}): AlethiaInsights {
+}): CohiInsights {
   const {
     metricKey,
     loansRaw,
@@ -263,7 +263,7 @@ export function generateAlethiaInsightsForMetric(args: {
     { title: 'Critical', items: critical.slice(0, 3) },
     { title: 'TopTiering Insights for Loan Officers', items: topTiering.slice(0, 3) },
     { title: 'Borrower Coaching', items: borrowerCoaching.slice(0, 3) },
-  ] satisfies AlethiaSection[];
+  ] satisfies CohiSection[];
 
   const sections = rawSections.filter((s) => s.items.length > 0);
   return { sections };

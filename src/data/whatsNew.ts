@@ -1,4 +1,4 @@
-export interface WhatsNewEntry {
+﻿export interface WhatsNewEntry {
   id: string;
   date: string;
   title: string;
@@ -48,7 +48,7 @@ export const whatsNewEntries: WhatsNewEntry[] = [
   {
     id: 'wn-voice-ai',
     date: '2026-01-20',
-    title: 'Aletheia Voice AI',
+    title: 'Cohi Voice AI',
     description: 'Talk to your data. The new voice AI assistant lets you have real-time conversations about your pipeline metrics and insights.',
     category: 'feature',
   },

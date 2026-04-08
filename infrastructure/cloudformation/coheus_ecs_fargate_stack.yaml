@@ -1,4 +1,4 @@
-AWSTemplateFormatVersion: "2010-09-09"
+﻿AWSTemplateFormatVersion: "2010-09-09"
 Description: |
   Coheus ECS Fargate Backend Stack (Compute Only)
 
@@ -867,9 +867,9 @@ Resources:
               Value: !Ref PodcastAudioBucket
             - Name: PODCAST_AUDIO_PREFIX
               Value: !Sub "${Environment}/audio"
-            - Name: ALETHEIA_PREFETCH_ASYNC
+            - Name: Cohi_PREFETCH_ASYNC
               Value: "true"
-            - Name: ALETHEIA_PREFETCH_WORKER_ENABLED
+            - Name: Cohi_PREFETCH_WORKER_ENABLED
               Value: "false"
           Secrets:
             - Name: DB_USER
@@ -970,13 +970,13 @@ Resources:
               Value: !Ref PodcastAudioBucket
             - Name: PODCAST_AUDIO_PREFIX
               Value: !Sub "${Environment}/audio"
-            - Name: ALETHEIA_PREFETCH_ASYNC
+            - Name: Cohi_PREFETCH_ASYNC
               Value: "true"
-            - Name: ALETHEIA_PREFETCH_WORKER_ENABLED
+            - Name: Cohi_PREFETCH_WORKER_ENABLED
               Value: "true"
-            - Name: ALETHEIA_PREFETCH_POLL_MS
+            - Name: Cohi_PREFETCH_POLL_MS
               Value: "15000"
-            - Name: ALETHEIA_PREFETCH_MAX_JOBS_PER_TICK
+            - Name: Cohi_PREFETCH_MAX_JOBS_PER_TICK
               Value: "2"
           Secrets:
             - Name: DB_USER

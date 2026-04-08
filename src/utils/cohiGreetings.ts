@@ -1,7 +1,7 @@
-// 50 daily rotating AI greeting scripts for Cohi
+﻿// 50 daily rotating AI greeting scripts for Cohi
 // These rotate based on the day of the year (0-364) to ensure non-repeating daily greetings
 
-export const ALETHEIA_GREETINGS = [
+export const Cohi_GREETINGS = [
   "Good morning. I'm Cohi, your executive intelligence platform. What would you like to understand about your lending operation today?",
   "Hello. Cohi here. I've been analyzing your performance signals—shall we dive into what's driving your TopTier rankings?",
   "Welcome. I'm Cohi. I can see several opportunities emerging in your pipeline. Where should we start?",
@@ -61,7 +61,7 @@ export function getTodaysGreeting(): string {
   const now = new Date();
   const startOfYear = new Date(now.getFullYear(), 0, 1);
   const dayOfYear = Math.floor((now.getTime() - startOfYear.getTime()) / (1000 * 60 * 60 * 24));
-  const index = dayOfYear % ALETHEIA_GREETINGS.length;
-  return ALETHEIA_GREETINGS[index];
+  const index = dayOfYear % Cohi_GREETINGS.length;
+  return Cohi_GREETINGS[index];
 }
 

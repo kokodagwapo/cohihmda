@@ -1,4 +1,4 @@
-/**
+﻿/**
  * One-time script: create Jira issues documenting completed COHI platform work,
  * organize under epics, and transition everything to Done.
  *
@@ -127,7 +127,7 @@ const TASKS = [
     summary: "Database migration framework — 118 versioned migrations, CLI, checksums, and repair tooling",
     description: adf(
       "Built a migration runner (server/src/migrations/runner.ts) with versioned numbered SQL files, SHA-256 checksums in a schema_migrations table, transaction wrapping, and dry-run support. The CLI (server/src/migrations/cli.ts) supports up, status, tenant, tenant --all, and create commands with automatic database creation when missing.",
-      "27 management-database migrations cover platform schema (tenants, users, subscriptions, API keys, auth config, lockout, metrics, AI prompts, platform settings, analytics events, sync jobs, release notes, Cognito, email logs, global knowledge, Aletheia settings, insight training). 91 tenant-database migrations cover per-tenant schema (loans, LOS config, RAG, RBAC, Encompass, workbench, distributions, research, fallout, pricing dashboard, podcast, dashboard insights, and more).",
+      "27 management-database migrations cover platform schema (tenants, users, subscriptions, API keys, auth config, lockout, metrics, AI prompts, platform settings, analytics events, sync jobs, release notes, Cognito, email logs, global knowledge, Cohi settings, insight training). 91 tenant-database migrations cover per-tenant schema (loans, LOS config, RAG, RBAC, Encompass, workbench, distributions, research, fallout, pricing dashboard, podcast, dashboard insights, and more).",
       "Additional tooling: repair-tenant-schemas.ts, migrate-tenant-schemas.ts, audit-tenant-pricing-schema.ts, seed scripts (super admin, local dev, default AI prompts), cleanup-shadow-users.ts.",
       "Relevant paths: server/migrations/management/ (27 files), server/migrations/tenant/ (91 files), server/src/migrations/, server/scripts/, server/package.json (migrate:* scripts).",
     ),
@@ -165,19 +165,19 @@ const TASKS = [
   },
   {
     epicSlug: "app-features",
-    summary: "Executive dashboards, AI-generated insights, analytics suite, and Aletheia briefing",
+    summary: "Executive dashboards, AI-generated insights, analytics suite, and Cohi briefing",
     description: adf(
       "Dashboard system with template-based creation, data import, analytics endpoints, and insight detail hydration (server/src/routes/dashboard/). Dashboard insights pipeline (server/src/services/dashboardInsights/) with orchestrator, storage, and adapters for loan complexity, company scorecard, and leaderboard analysis. AI insight generation uses evaluator, investigator, and planner agents (server/src/services/insights/agents/) with LLM-backed generators and metrics collectors. Tracked insights watchlist for monitoring key indicators over time.",
       "Analytics portfolio: operations scorecard trends, sales scorecard, company scorecard, workflow conversion, fallout modeling (segment rates, numeric profiles, sequencer, historical aggregation), pricing dashboard, lock stratification, pipeline analysis, loan complexity scoring, top-tiering, credit risk management, high performers, and financial modeling sandbox. Each has dedicated routes, services, and frontend pages/views.",
-      "Aletheia daily briefing with podcast/TTS streaming, prefetch worker, and asset storage. News feed via RSS ingestion (newsService.ts, newsRefreshScheduler.ts). Scheduled report distributions with email delivery (distributionScheduler.ts, distributionContentResolver.ts, SES templates). Email system with SES sending, templates (daily-brief, distribution, fallout-alert, release-notes), and verification.",
-      "Relevant paths: server/src/routes/dashboard/, dashboardInsights.ts; server/src/services/dashboardInsights/, insights/, fallout/, scoring/, scorecard/, ai/; server/src/routes/podcast.ts, news.ts, distributions.ts, falloutAlerts.ts, email.ts; src/pages/ (Dashboard, scorecards, fallout, pricing, pipeline, etc.); src/components/dashboard/, widgets/, visualizations/, aletheia/.",
+      "Cohi daily briefing with podcast/TTS streaming, prefetch worker, and asset storage. News feed via RSS ingestion (newsService.ts, newsRefreshScheduler.ts). Scheduled report distributions with email delivery (distributionScheduler.ts, distributionContentResolver.ts, SES templates). Email system with SES sending, templates (daily-brief, distribution, fallout-alert, release-notes), and verification.",
+      "Relevant paths: server/src/routes/dashboard/, dashboardInsights.ts; server/src/services/dashboardInsights/, insights/, fallout/, scoring/, scorecard/, ai/; server/src/routes/podcast.ts, news.ts, distributions.ts, falloutAlerts.ts, email.ts; src/pages/ (Dashboard, scorecards, fallout, pricing, pipeline, etc.); src/components/dashboard/, widgets/, visualizations/, Cohi/.",
     ),
   },
   {
     epicSlug: "app-features",
     summary: "Workbench canvas, AI chat, research lab, RAG knowledge base, and report generation",
     description: adf(
-      "Workbench system: drag-and-drop canvas editor (react-grid-layout, @dnd-kit, react-rnd) with a widget registry containing 20+ widget types (company scorecard, credit risk, sales/ops, loan funnel, leaderboard, closing forecast, financial modeling, Aletheia, news, workflow conversion, high performers, pricing, pipeline, lock stratification, loan complexity, etc.). Canvas CRUD stored per-tenant with sharing via groups, team folders, favorites, and scheduled distributions. Widget adapter bridges visualization components to canvas data payloads.",
+      "Workbench system: drag-and-drop canvas editor (react-grid-layout, @dnd-kit, react-rnd) with a widget registry containing 20+ widget types (company scorecard, credit risk, sales/ops, loan funnel, leaderboard, closing forecast, financial modeling, Cohi, news, workflow conversion, high performers, pricing, pipeline, lock stratification, loan complexity, etc.). Canvas CRUD stored per-tenant with sharing via groups, team folders, favorites, and scheduled distributions. Widget adapter bridges visualization components to canvas data payloads.",
       "AI chat (Cohi Chat): global chat panel with conversation history, natural-language query builder, schema-aware context, dashboard image generation. Server-side: cohiChat.ts route, ai/ services. Research lab: multi-agent orchestrator with planner, data analyst, and synthesis agents. Research sessions with drill-down, timelines, and report output. Workbench-specific insight deep dive for drill-through from canvas widgets.",
       "RAG system: embedding service (embeddingService.ts), vector database abstraction (vectorDatabase.ts), document chunking (documentChunker.ts) and parsing (documentParser.ts supporting PDF, DOCX, HTML), knowledge base CRUD routes, global knowledge sync service, and help content seeding. Admin AI prompt management with default configs and force-seed tooling.",
       "Report generation: PPTX and PDF via pptxgenjs and jspdf (server/src/services/export/reportGenerationService.ts). Frontend report builder with slide editor, template gallery, and export utilities (canvas export, PDF export, XLSX). Workbench hub for discovery, plus dedicated pages for SharedWithMe, TeamFolders, Favorites, Distributions.",
