@@ -3339,9 +3339,6 @@ router.use("/sso", ssoConfigRoutes);
 /**
  * GET /api/admin/logs/insights?tenant_id=X&hook_run_id=Y&hours=2
  * Fetch recent insight pipeline log lines from CloudWatch.
- * Queries the ECS log group and filters by time window (from hook_run started_at/completed_at
- * when available, otherwise the last N hours). Requires CLOUDWATCH_LOG_GROUP env var or
- * falls back to /ecs/coheus-{NODE_ENV}.
  */
 router.get(
   "/logs/insights",
@@ -3361,7 +3358,6 @@ router.get(
       let startTime: number;
       let endTime: number = Date.now();
 
-      // If a hook_run_id is provided, use its start/end timestamps for a precise window
       if (hookRunId && tenantId) {
         try {
           const tenantPool = await tenantDbManager.getTenantPool(tenantId);
@@ -3371,7 +3367,6 @@ router.get(
           );
           if (runResult.rows.length > 0) {
             const row = runResult.rows[0];
-            // Give a 30-second buffer on each side for clock skew
             startTime = new Date(row.started_at).getTime() - 30_000;
             endTime = row.completed_at
               ? new Date(row.completed_at).getTime() + 30_000
@@ -3392,7 +3387,6 @@ router.get(
 
       const cwClient = new CloudWatchLogsClient({ region });
 
-      // Filter for insight pipeline messages; tenant ID is embedded in key lines
       const filterPattern = tenantId
         ? `?"[Agent]" ?"[PostSyncHooks]" ?"InsightOrchestrator" ?"${tenantId}"`
         : `?"[Agent]" ?"[PostSyncHooks]" ?"InsightOrchestrator"`;
@@ -3422,7 +3416,6 @@ router.get(
         count: events.length,
       });
     } catch (error: any) {
-      // If CloudWatch is unavailable (e.g. local dev without credentials), return gracefully
       if (
         error?.name === "CredentialsProviderError" ||
         error?.name === "AccessDeniedException" ||
@@ -3439,6 +3432,70 @@ router.get(
       return res.status(500).json({ error: "Failed to fetch logs" });
     }
   }
+);
+
+/* ------------------------------------------------------------------ */
+/*  Platform Usage Report (cross-tenant, mirrors old Coheus report)    */
+/* ------------------------------------------------------------------ */
+
+import {
+  generateUsageReport,
+  usageReportToCsv,
+} from "../services/usageReportService.js";
+
+/**
+ * GET /api/admin/usage-report
+ * Returns cross-tenant usage data (sessions, users, pages) as JSON.
+ */
+router.get(
+  "/usage-report",
+  authenticateToken,
+  requireRole("super_admin", "platform_admin"),
+  async (req: AuthRequest, res) => {
+    try {
+      const days = Math.min(parseInt(req.query.days as string) || 120, 365);
+      const report = await generateUsageReport(days);
+      return res.json(report);
+    } catch (error: any) {
+      logError("Error generating usage report", error, {
+        userId: req.userId,
+      });
+      return res
+        .status(500)
+        .json({ error: "Failed to generate usage report" });
+    }
+  },
+);
+
+/**
+ * GET /api/admin/usage-report/export
+ * Returns the same report as a downloadable CSV file.
+ */
+router.get(
+  "/usage-report/export",
+  authenticateToken,
+  requireRole("super_admin", "platform_admin"),
+  async (req: AuthRequest, res) => {
+    try {
+      const days = Math.min(parseInt(req.query.days as string) || 120, 365);
+      const report = await generateUsageReport(days);
+      const csv = usageReportToCsv(report);
+      const filename = `Cohi_Usage_Report_${new Date().toISOString().split("T")[0]}.csv`;
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${filename}"`,
+      );
+      return res.send(csv);
+    } catch (error: any) {
+      logError("Error exporting usage report", error, {
+        userId: req.userId,
+      });
+      return res
+        .status(500)
+        .json({ error: "Failed to export usage report" });
+    }
+  },
 );
 
 export default router;

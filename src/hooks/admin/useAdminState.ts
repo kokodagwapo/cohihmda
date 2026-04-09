@@ -28,6 +28,7 @@ export type AdminSection =
   | "sync-management" // Cross-tenant sync schedule management (platform admin)
   | "platform-settings" // Platform API keys and settings (platform admin)
   | "api-usage" // Per-tenant OpenAI token and cost tracking (platform admin)
+  | "usage-report" // Cross-tenant platform usage report (platform admin)
   | "analytics"; // User behavior analytics (page views, sessions, funnels, replays)
 
 // Admin mode: platform (Cohi internal management) vs tenant (tenant context/impersonation)

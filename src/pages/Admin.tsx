@@ -31,6 +31,7 @@ import { PlatformSettingsSection } from "@/components/admin/PlatformSettingsSect
 import { SyncManagementSection } from "@/components/admin/SyncManagementSection";
 import { AnalyticsSection } from "@/components/admin/AnalyticsSection";
 import { ApiUsageSection } from "@/components/admin/ApiUsageSection";
+import { PlatformUsageReport } from "@/components/admin/PlatformUsageReport";
 import { AdminModeSelector } from "@/components/admin/AdminModeSelector";
 import { Button } from "@/components/ui/button";
 import { Menu, Settings } from "lucide-react";
@@ -256,6 +257,8 @@ export const Admin = () => {
       { id: "insight-feedback", label: "Insight Feedback" },
       { id: "release-notes", label: "Release Notes" },
       { id: "platform-settings", label: "Platform Settings" },
+      { id: "api-usage", label: "API Usage" },
+      { id: "usage-report", label: "Usage Report" },
       { id: "analytics", label: "User Analytics" },
     ];
     return sections.find((s) => s.id === activeSection)?.label || "Overview";
@@ -589,6 +592,11 @@ export const Admin = () => {
               {/* API Usage Section (Platform Admin) */}
               {activeSection === "api-usage" && isPlatform && (
                 <ApiUsageSection />
+              )}
+
+              {/* Platform Usage Report (Platform Admin) */}
+              {activeSection === "usage-report" && isPlatform && (
+                <PlatformUsageReport />
               )}
 
               {/* User Analytics (tenant + platform in tenant mode) */}
