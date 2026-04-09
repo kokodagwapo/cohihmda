@@ -10,16 +10,17 @@
  * @returns Formatted string with currency symbol and compact notation
  */
 export const formatCompactNumber = (num: number): string => {
-  if (num >= 1_000_000_000) {
-    return `$${(num / 1_000_000_000).toFixed(1)}B`;
+  const n = typeof num === "number" && Number.isFinite(num) ? num : 0;
+  if (n >= 1_000_000_000) {
+    return `$${(n / 1_000_000_000).toFixed(1)}B`;
   }
-  if (num >= 1_000_000) {
-    return `$${(num / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000_000) {
+    return `$${(n / 1_000_000).toFixed(1)}M`;
   }
-  if (num >= 1_000) {
-    return `$${(num / 1_000).toFixed(1)}K`;
+  if (n >= 1_000) {
+    return `$${(n / 1_000).toFixed(1)}K`;
   }
-  return `$${num.toFixed(0)}`;
+  return `$${n.toFixed(0)}`;
 };
 
 /**
