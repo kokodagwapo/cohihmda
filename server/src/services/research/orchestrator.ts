@@ -29,8 +29,8 @@ import {
 } from "./agents/synthesisAgent.js";
 import {
   loadUploadRecord,
-  buildUploadContextString,
   buildUploadTableSchemaContext,
+  migrateContextUploadToTable,
 } from "./uploadProcessor.js";
 
 // ============================================================================
@@ -601,24 +601,40 @@ export async function runResearchPipeline(
       getTrackedInsightContext(tenantPool),
     ]);
 
-    // ── Load upload context ──
-    let uploadSchemaAddendum = "";   // appended to schemaContext for table-backed uploads
-    let uploadDataContext = "";      // appended to knowledgeContext for context-backed uploads
+    // ── Load upload context (all uploads are table-backed → schema addendum only) ──
+    let uploadSchemaAddendum = "";
     if (session.uploadIds && session.uploadIds.length > 0) {
       for (const uploadId of session.uploadIds) {
         try {
           const uploadRecord = await loadUploadRecord(uploadId, tenantPool);
-          if (!uploadRecord) continue;
+          if (!uploadRecord) {
+            console.warn(`[Research] Upload record ${uploadId} not found`);
+            continue;
+          }
           const rec = uploadRecord as typeof uploadRecord & { id: string; originalFileName: string };
           rec.id = uploadRecord.id;
-          if (uploadRecord.storageStrategy === "table") {
-            uploadSchemaAddendum += buildUploadTableSchemaContext(rec);
-          } else {
-            uploadDataContext += buildUploadContextString(rec);
+
+          // Auto-migrate legacy context-strategy uploads to table
+          if (!rec.tableName && rec.dataJson && rec.dataJson.length > 0) {
+            console.log(`[Research] Migrating context-strategy upload ${uploadId} to table...`);
+            const newTableName = await migrateContextUploadToTable(rec, tenantPool);
+            if (newTableName) {
+              rec.tableName = newTableName;
+              rec.storageStrategy = "table";
+              console.log(`[Research] Migrated upload ${uploadId} → table "${newTableName}"`);
+            }
           }
+
+          console.log(`[Research] Upload ${uploadId}: strategy=${rec.storageStrategy}, tableName=${rec.tableName}, file=${rec.originalFileName}`);
+          uploadSchemaAddendum += buildUploadTableSchemaContext(rec);
         } catch (uploadErr: any) {
           console.warn(`[Research] Failed to load upload ${uploadId}:`, uploadErr.message);
         }
+      }
+      if (uploadSchemaAddendum) {
+        console.log(`[Research] Upload schema addendum: ${uploadSchemaAddendum.length} chars`);
+      } else {
+        console.warn(`[Research] WARNING: ${session.uploadIds.length} upload(s) attached but schema addendum is empty`);
       }
     }
 
@@ -626,35 +642,21 @@ export async function runResearchPipeline(
       ? `${schemaContext}\n\n${uploadSchemaAddendum}`
       : schemaContext;
 
-    const enrichedKnowledgeContext = [knowledgeContext, priorSessionSummaries, trackedInsightContext, uploadDataContext]
+    const enrichedKnowledgeContext = [knowledgeContext, priorSessionSummaries, trackedInsightContext]
       .filter(Boolean)
       .join("\n\n") || undefined;
 
     if (isQuickMode) {
       // ── Quick Answer: single data analyst, no plan, no synthesis ──
-      // Build the approach based on whether inline or table-backed uploads are present
       let quickApproach = "Answer the user's question directly with one or more SQL queries. Produce a single finding with a clear title, summary, key metrics, and evidence tables. Be concise.";
-      if (uploadDataContext) {
-        // Inline (context-strategy) uploads are present — agent must NOT use SQL for them
-        quickApproach =
-          "Answer the user's question directly. " +
-          "One or more user-uploaded datasets are available as inline text in your knowledge context " +
-          "(labelled 'User-Uploaded Dataset (INLINE)'). " +
-          "Footer and summary rows have been pre-filtered — use the authoritative data row count stated in each dataset's context header. " +
-          "For those datasets, do NOT run SQL — read the rows directly from context and compute your answer. " +
-          "Before counting or aggregating, verify your row count matches the stated authoritative count. " +
-          "Produce two evidence items: (1) a summary table with computed aggregates, and " +
-          "(2) a detail table with the individual rows most relevant to the finding (include all original columns). " +
-          "You may also use SQL against the loans table for supplementary LOS context if relevant. " +
-          "Be concise but include both the summary and detail tables.";
-        if (uploadSchemaAddendum) {
-          quickApproach += " Additional upload tables are also available via SQL (listed in the schema context).";
-        }
-      } else if (uploadSchemaAddendum) {
+      if (uploadSchemaAddendum) {
         quickApproach =
           "Answer the user's question directly. " +
           "One or more user-uploaded datasets are queryable as SQL tables (listed in the schema context as upload_... tables). " +
-          "Use SQL to query them. Produce a single finding with a clear title, summary, key metrics, and evidence tables. Be concise.";
+          "Use SQL to query them — they contain the full uploaded data. " +
+          "Produce a finding with a clear title, summary, key metrics, and at least two evidence tables: " +
+          "(1) a summary table with computed aggregates, and (2) a detail table with the most relevant individual rows. " +
+          "Be concise.";
       }
 
       const quickQuestion: InvestigationQuestion = {
@@ -771,7 +773,7 @@ export async function runResearchPipeline(
       priorInvestigationContext,
       priorSessionSummaries: priorSessionSummaries || undefined,
       businessKnowledge,
-      uploadContext: [uploadSchemaAddendum, uploadDataContext].filter(Boolean).join("\n\n") || undefined,
+      uploadContext: uploadSchemaAddendum || undefined,
     });
 
     session.plan = plan;
@@ -923,7 +925,6 @@ export async function runFollowUp(
     const businessKnowledge = getDerivedMetricContext();
 
     // Re-load upload context for this session so follow-ups can still reference uploaded data
-    let followUpUploadDataContext = "";
     let followUpUploadSchemaAddendum = "";
     if (session.uploadIds && session.uploadIds.length > 0) {
       for (const uploadId of session.uploadIds) {
@@ -932,11 +933,14 @@ export async function runFollowUp(
           if (!uploadRecord) continue;
           const rec = uploadRecord as typeof uploadRecord & { id: string; originalFileName: string };
           rec.id = uploadRecord.id;
-          if (uploadRecord.storageStrategy === "table") {
-            followUpUploadSchemaAddendum += buildUploadTableSchemaContext(rec);
-          } else {
-            followUpUploadDataContext += buildUploadContextString(rec);
+          if (!rec.tableName && rec.dataJson && rec.dataJson.length > 0) {
+            const newTableName = await migrateContextUploadToTable(rec, tenantPool);
+            if (newTableName) {
+              rec.tableName = newTableName;
+              rec.storageStrategy = "table";
+            }
           }
+          followUpUploadSchemaAddendum += buildUploadTableSchemaContext(rec);
         } catch {
           // Skip failed uploads
         }
@@ -947,7 +951,7 @@ export async function runFollowUp(
       ? `${schemaContext}\n\n${followUpUploadSchemaAddendum}`
       : schemaContext;
 
-    const enrichedFollowUpContext = [knowledgeContext, trackedInsightCtx, followUpUploadDataContext]
+    const enrichedFollowUpContext = [knowledgeContext, trackedInsightCtx]
       .filter(Boolean)
       .join("\n\n") || undefined;
 
@@ -956,22 +960,14 @@ export async function runFollowUp(
       .map((f) => `- ${f.title}: ${f.summary}`)
       .join("\n");
 
-    // Tailor approach if inline uploads are present
     let followUpApproach = `Use the existing findings as context:\n${existingContext}\n\nInvestigate the user's specific question with targeted SQL queries.`;
-    if (followUpUploadDataContext) {
+    if (followUpUploadSchemaAddendum) {
       followUpApproach =
         `Use the existing findings as context:\n${existingContext}\n\n` +
         `Investigate the user's specific question. ` +
-        `One or more user-uploaded datasets are available as inline text in your knowledge context ` +
-        `(labelled 'User-Uploaded Dataset (INLINE)'). ` +
-        `Footer and summary rows have been pre-filtered — use the authoritative data row count stated in each dataset's context header. ` +
-        `For those datasets, do NOT run SQL — read the rows directly from context. ` +
-        `Before counting or aggregating, verify your row count matches the stated authoritative count. ` +
-        `Produce two evidence items: (1) a summary table with computed aggregates, and ` +
-        `(2) a detail table with the individual rows most relevant to the finding (all original columns).`;
-      if (followUpUploadSchemaAddendum) {
-        followUpApproach += " Additional upload tables are also queryable via SQL (listed in schema context).";
-      }
+        `One or more user-uploaded datasets are queryable as SQL tables (listed in the schema context as upload_... tables). ` +
+        `Use SQL to query them for precise results. ` +
+        `Produce at least two evidence tables: (1) a summary with aggregates, and (2) detail rows.`;
     }
 
     const followUpQuestion = {

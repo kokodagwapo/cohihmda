@@ -691,8 +691,8 @@ export default function ResearchAnalyst() {
         <div className="flex-1 flex flex-col overflow-hidden">
           {phase === "idle" ? (
             /* ── Idle: Topic Input + Mode ── */
-            <div className="flex-1 flex items-center justify-center p-8">
-              <div className="max-w-xl w-full space-y-6">
+            <div className="flex-1 overflow-y-auto p-8">
+              <div className="max-w-xl w-full space-y-6 mx-auto">
                 <div className="text-center space-y-2">
                   <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 mb-2">
                     <Sparkles className="h-8 w-8 text-primary" />

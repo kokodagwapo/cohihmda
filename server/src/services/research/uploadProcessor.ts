@@ -4,11 +4,8 @@
  * Handles parsing, type inference, and storage of user-uploaded CSV/XLSX files
  * for Research Lab and Data Explorer.
  *
- * Storage strategies:
- *   'context' — files <= CONTEXT_ROW_THRESHOLD rows: full data stored as JSONB,
- *               injected into LLM context window during research pipeline.
- *   'table'   — files > CONTEXT_ROW_THRESHOLD rows: data loaded into a dedicated
- *               PostgreSQL table in the tenant DB so the data analyst can query it with SQL.
+ * All uploads are stored as PostgreSQL temp tables so the Data Analyst agent
+ * can query them via SQL for deterministic, consistent results.
  *
  * PII detection: warns on upload if suspicious column names are detected.
  */
@@ -21,7 +18,8 @@ import crypto from "crypto";
 // Constants
 // ============================================================================
 
-export const CONTEXT_ROW_THRESHOLD = 200;
+/** @deprecated All uploads now use the table strategy. Kept for backward compat with type exports. */
+export const CONTEXT_ROW_THRESHOLD = 0;
 export const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
 export const MAX_ROWS = 500_000;
 export const MAX_COLUMNS = 200;
@@ -479,10 +477,16 @@ export async function processUpload(
   // Quick insights for visualization suggestions
   const quickInsights = generateQuickInsights(columns);
 
-  // Decide storage strategy
-  const storageStrategy: StorageStrategy = rowCount <= CONTEXT_ROW_THRESHOLD ? "context" : "table";
+  // Strip footer/summary/blank rows before inserting into the table
+  const cleanRows = rows.filter((row) => !isFooterOrBlankRow(row, columns.length));
+  const strippedCount = rows.length - cleanRows.length;
+  if (strippedCount > 0) {
+    console.log(`[UploadProcessor] Stripped ${strippedCount} footer/summary/blank rows from "${originalFileName}"`);
+  }
 
-  // Base name for both the filename record and the table name (if table strategy)
+  // Always use table strategy — SQL is deterministic and consistent
+  const storageStrategy: StorageStrategy = "table";
+
   const shortId = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
   const baseName = originalFileName
     .toLowerCase()
@@ -493,30 +497,15 @@ export async function processUpload(
     .slice(0, 30) || "upload";
   const fileName = `${baseName}_${shortId}`;
 
-  let dataJson: Record<string, any>[] | undefined;
-  let tableName: string | undefined;
-
-  if (storageStrategy === "context") {
-    // For small files: serialize all rows
-    dataJson = rows.map((row) => {
-      const record: Record<string, any> = {};
-      sanitizedHeaders.forEach((name, i) => {
-        const col = columns[i];
-        record[name] = castValue(String(row[i] ?? ""), col.inferredType);
-      });
-      return record;
-    });
-  } else {
-    // For large files: create a temp table and COPY data in
-    tableName = `upload_${shortId}_${baseName}`;
-    await createUploadTable(tableName, columns, rows, sanitizedHeaders, tenantPool);
-  }
+  const dataJson: Record<string, any>[] | undefined = undefined;
+  const tableName = `upload_${shortId}_${baseName}`;
+  await createUploadTable(tableName, columns, cleanRows, sanitizedHeaders, tenantPool);
 
   return {
     fileName,
     originalFileName,
     fileSizeBytes,
-    rowCount,
+    rowCount: cleanRows.length,
     columnCount,
     columns,
     storageStrategy,
@@ -583,6 +572,39 @@ async function createUploadTable(
   } finally {
     client.release();
   }
+}
+
+/**
+ * Migrate a legacy context-strategy upload to a table on-the-fly.
+ * Used when an old upload record has dataJson but no tableName.
+ */
+export async function migrateContextUploadToTable(
+  upload: ProcessedUpload & { id: string },
+  tenantPool: pg.Pool
+): Promise<string | null> {
+  if (upload.tableName || !upload.dataJson || upload.dataJson.length === 0) return null;
+
+  const shortId = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
+  const baseName = upload.fileName
+    .replace(/[^a-z0-9]/gi, "_")
+    .replace(/_+/g, "_")
+    .slice(0, 30) || "upload";
+  const tableName = `upload_${shortId}_${baseName}`;
+
+  const colNames = upload.columns.map((c) => c.name);
+  const rows: string[][] = upload.dataJson.map((row) =>
+    colNames.map((name) => (row[name] == null ? "" : String(row[name])))
+  );
+
+  await createUploadTable(tableName, upload.columns, rows, colNames, tenantPool);
+
+  await tenantPool.query(
+    `UPDATE research_uploads SET table_name = $1, storage_strategy = 'table',
+     expires_at = NOW() + INTERVAL '${UPLOAD_TTL_DAYS} days' WHERE id = $2`,
+    [tableName, upload.id]
+  );
+
+  return tableName;
 }
 
 // ============================================================================
@@ -678,137 +700,24 @@ export async function loadUploadRecord(
 }
 
 // ============================================================================
-// Build LLM context string for context-strategy uploads
+// Footer / summary / blank row detection
 // ============================================================================
 
+const FOOTER_LABEL_PATTERN = /^(PORTFOLIO_TOTAL|Reporting_Entity|Report_Date|Total_|TOTAL_|Grand.?Total|Summary|Sub.?Total|Page\s|Total_Loans)/i;
+
 /**
- * Detect and strip footer/summary/blank rows that appear after the real data in
- * trial-balance and similar CSVs. These rows (e.g. PORTFOLIO_TOTAL, Reporting_Entity,
- * blank separators) pollute inline context and cause the LLM to miscount records.
- *
- * A row is considered a footer/blank when ANY of:
- *   - Every column value is null, undefined, or empty string (blank separator row)
- *   - More than 80% of column values are null/empty (sparse trailer row)
- *   - The first non-empty column value matches a known footer label pattern
+ * Detect footer, summary, or blank rows in raw CSV data.
+ * Works on raw string[] rows (before casting to typed records).
  */
-const FOOTER_LABEL_PATTERN = /^(PORTFOLIO_TOTAL|Reporting_Entity|Report_Date|Total_|TOTAL_|Grand.?Total|Summary|Sub.?Total|Page\s)/i;
+function isFooterOrBlankRow(row: string[], colCount: number): boolean {
+  if (row.length === 0) return true;
 
-function isFooterOrBlankRow(row: Record<string, unknown>): boolean {
-  const values = Object.values(row);
-  if (values.length === 0) return true;
+  const nonEmpty = row.filter((v) => v != null && String(v).trim() !== "");
+  if (nonEmpty.length === 0) return true;
+  if (nonEmpty.length / colCount < 0.2) return true;
 
-  // Count non-empty values
-  const nonEmpty = values.filter((v) => v != null && String(v).trim() !== "");
-  if (nonEmpty.length === 0) return true; // all-blank row
-  if (nonEmpty.length / values.length < 0.2) return true; // >80% empty = sparse trailer
-
-  // Check if the first non-empty value matches a footer label
   const firstValue = String(nonEmpty[0]).trim();
   return FOOTER_LABEL_PATTERN.test(firstValue);
-}
-
-export function buildUploadContextString(
-  upload: ProcessedUpload & { id: string; originalFileName: string },
-  maxRows = 200
-): string {
-  const rawRows = upload.dataJson || upload.sampleRows;
-
-  // Strip footer/summary/blank rows before presenting to the LLM
-  const cleanRows = rawRows.filter((row) => !isFooterOrBlankRow(row));
-  const strippedCount = rawRows.length - cleanRows.length;
-  const displayRows = cleanRows.slice(0, maxRows);
-
-  let ctx = `\n## User-Uploaded Dataset (INLINE — analyze directly, do NOT query via SQL): "${upload.originalFileName}"\n`;
-  ctx += `IMPORTANT: This dataset is embedded as structured JSON below. It is NOT stored in a database table.\n`;
-  ctx += `Do NOT attempt any SELECT queries to find this data. Read and analyze the JSON rows below directly.\n`;
-  ctx += `- Total rows in file: ${upload.rowCount}`;
-  if (strippedCount > 0) {
-    ctx += ` (${strippedCount} footer/summary/blank rows removed)`;
-  }
-  ctx += `\n- Data rows (use this as your authoritative count): ${cleanRows.length}\n`;
-  ctx += `- Columns: ${upload.columnCount}\n`;
-  ctx += `- Upload ID: ${upload.id}\n`;
-  if (strippedCount > 0) {
-    ctx += `- NOTE: The JSON below contains ONLY data rows. Footer and summary rows have been pre-filtered out. When counting records, use ${cleanRows.length} as the total, not ${upload.rowCount}.\n`;
-  }
-  ctx += `\n`;
-
-  ctx += `### Column Schema\n`;
-  for (const col of upload.columns) {
-    ctx += `- **${col.displayName}** (${col.name}): ${col.inferredType}`;
-    if (col.isCategorical && col.sampleValues.length > 0) {
-      ctx += ` [categories: ${col.sampleValues.slice(0, 8).join(", ")}]`;
-    }
-    if (col.description) ctx += ` — ${col.description}`;
-    ctx += "\n";
-  }
-
-  // Render key columns as a compact markdown table for easy scanning
-  const keyColumns = selectKeyColumns(upload.columns);
-  ctx += `\n### Data Preview (${displayRows.length} of ${cleanRows.length} data rows shown)\n`;
-  ctx += `Key columns shown in table; full row JSON follows.\n\n`;
-
-  // Markdown table for key columns
-  ctx += "| " + keyColumns.map((c) => c.displayName).join(" | ") + " |\n";
-  ctx += "| " + keyColumns.map(() => "---").join(" | ") + " |\n";
-  for (const row of displayRows) {
-    ctx += "| " + keyColumns.map((c) => {
-      const v = row[c.name];
-      return v == null ? "" : String(v);
-    }).join(" | ") + " |\n";
-  }
-
-  // Full row data as JSON array for precise parsing
-  ctx += `\n### Full Row Data (JSON — ${displayRows.length} data rows, footers/blanks excluded)\n`;
-  ctx += "```json\n";
-  ctx += JSON.stringify(displayRows, null, 0);
-  ctx += "\n```\n";
-
-  return ctx;
-}
-
-/**
- * Select key columns for the compact markdown table preview.
- *
- * For narrow datasets (≤15 cols): show up to 8 columns.
- * For medium datasets (16–20 cols): show up to 12 columns.
- * For wide datasets (>20 cols): show up to 14 columns, and always include ALL
- * identifier + categorical columns regardless of count, since the LLM needs them
- * for grouping and filtering operations (e.g. aggregate by Investor type).
- *
- * Priority: identifiers → categoricals/status → numerics → rest.
- */
-function selectKeyColumns(columns: ColumnMeta[], max?: number): ColumnMeta[] {
-  // Dynamically size the preview based on dataset width
-  const effectiveMax = max ?? (
-    columns.length > 20 ? 14 :
-    columns.length > 15 ? 12 :
-    8
-  );
-
-  const idPatterns = /^(loan|id|number|name|account|borrower|servicer)/i;
-  const statusPatterns = /^(status|delinquency|flag|type|investor|state|rating|priority|category|department|level)/i;
-
-  const ids = columns.filter((c) => idPatterns.test(c.name) || idPatterns.test(c.displayName));
-  const statuses = columns.filter((c) =>
-    !ids.includes(c) && (statusPatterns.test(c.name) || statusPatterns.test(c.displayName) || c.isCategorical)
-  );
-  const numerics = columns.filter((c) =>
-    !ids.includes(c) && !statuses.includes(c) && c.isNumeric
-  );
-  const rest = columns.filter((c) => !ids.includes(c) && !statuses.includes(c) && !numerics.includes(c));
-
-  // For wide datasets: always include all identifiers and all categorical/status
-  // columns since they are critical for grouping — only cap the numeric/rest overflow
-  if (columns.length > 20) {
-    const mustInclude = [...ids, ...statuses];
-    const remaining = [...numerics, ...rest];
-    const slots = Math.max(effectiveMax - mustInclude.length, 0);
-    return [...mustInclude, ...remaining.slice(0, slots)];
-  }
-
-  const selected = [...ids, ...statuses, ...numerics, ...rest];
-  return selected.slice(0, effectiveMax);
 }
 
 // ============================================================================

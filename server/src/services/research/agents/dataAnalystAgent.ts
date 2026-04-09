@@ -346,76 +346,16 @@ Respond in JSON format:
     "buckets": 20
   },
 
-USER-UPLOADED DATASETS — TWO MODES (READ CAREFULLY):
-
-MODE A — INLINE DATA (context-window strategy, small files ≤200 rows):
-- These datasets appear in your context under a heading like:
-  "## User-Uploaded Dataset (INLINE — analyze directly, do NOT query via SQL): ..."
-- The full data is embedded as structured JSON in your context. DO NOT attempt any SQL queries for this data.
-  There is no database table for it. Any SELECT query will fail with "table not found".
-- Instead: read the inline JSON rows directly, compute statistics in your reasoning (counts, sums, averages,
-  percentages), and produce your finding using the embedded data as your evidence.
-
-STEP 1 — FILTER BEFORE COUNTING (CRITICAL):
-- Before performing ANY count or aggregation, first filter the JSON rows to exclude footer, summary, and blank rows.
-- Footer/blank rows include: rows where the primary identifier field (e.g. Loan_Number, Employee_ID, SKU) is empty
-  or null; rows where a known footer label appears in the first column (e.g. "PORTFOLIO_TOTAL", "Reporting_Entity",
-  "Total_Loans", "Grand Total", "Summary", "Sub Total"); rows where the vast majority of fields are empty.
-- The context header states "Data rows (use this as your authoritative count): N". Always use that N as your
-  ground truth. Your own filtered count must match it — if it doesn't, re-examine your filter logic.
-- State explicitly in your thinking: "After filtering footer/blank rows, I have N data rows to analyze."
-
-STEP 2 — DEFINE CATEGORICAL ORDERINGS BEFORE SELECTING/RANKING:
-- When ranking or filtering by a categorical column, explicitly define its ordering in your thinking first.
-  Example for Performance_Rating: Outstanding > Exceeds Expectations > Meets Expectations > Needs Improvement.
-  Then select the top N rows according to that ordering — do NOT use numeric columns as a proxy for category rank.
-- Example for Delinquency_Status: "90+ Days" > "60 Days" > "30 Days" > "Current".
-
-STEP 3 — PRODUCE EVIDENCE ACTIONS:
-- For inline data, you MUST use action "query" with sql set to a comment (not real SQL) and include the
-  computed data directly. Produce AT LEAST TWO "query" actions before your final "finding":
-
-  Action 1 — SUMMARY query:
-  {
-    "action": "query",
-    "sql": "-- INLINE_DATA: summary computed from uploaded CSV (not executed as SQL)",
-    "explanation": "Summary aggregates from the uploaded dataset",
-    "inlineRows": [ { "metric": "Total Loans", "value": 80 }, ... ],
-    "columnFormats": { "metric": "text", "value": "number" },
-    "chartHint": { "type": "bar", "xKey": "metric", "yKey": "value", "xLabel": "Metric", "yLabel": "Value" }
-  }
-
-  Action 2 — DETAIL query:
-  {
-    "action": "query",
-    "sql": "-- INLINE_DATA: row-level detail from uploaded CSV (not executed as SQL)",
-    "explanation": "Delinquent loan detail (18 loans)",
-    "inlineRows": [ ...actual row objects extracted from the JSON data... ],
-    "columnFormats": { "loan_number": "text", "current_upb": "currency", ... },
-    "chartHint": { "type": "bar", "xKey": "delinquency_status", "yKey": "current_upb", "xLabel": "Status", "yLabel": "UPB ($)" }
-  }
-
-  The "inlineRows" field is ONLY used for inline data. Include ALL relevant columns from the original
-  dataset in the detail rows. The system will detect the "-- INLINE_DATA:" prefix in the sql field
-  and use inlineRows instead of executing SQL.
-
-STEP 4 — VALUE QUALITY:
-- Every value in inlineRows and keyMetrics MUST be computed and populated with a real value.
-  NEVER produce empty strings, underscores ("_"), dashes, or placeholder text as a metric value.
-  If a metric cannot be computed from the available data, omit that key entirely and briefly note
-  the reason in your explanation or finding summary.
-
-STEP 5 — CHART TYPE FOR TIME SERIES:
-- When the user asks for a "trend" over time, or the data contains a temporal column (month, quarter,
-  date, period), set chartHint type to "line" with xKey set to the temporal column.
-  Do NOT use "bar" for time series data. The x-axis should be sorted chronologically.
-
-- After producing the summary and detail query actions, produce the "finding" action as normal.
-
-MODE B — SQL TABLE (table strategy, large files >200 rows):
-- These datasets appear in your schema context under:
+USER-UPLOADED DATASETS:
+- All user-uploaded CSV/TSV files are stored as SQL tables. They appear in your schema context under:
   "## User-Uploaded Dataset Table: upload_<name>"
-- Query them normally via SQL: SELECT ... FROM upload_<tablename>
+- Query them via SQL just like any other table: SELECT ... FROM "upload_<tablename>"
+- Always quote the table name in double quotes since it contains underscores and mixed case.
+- The upload table description lists all columns with their types, categorical values, and numeric ranges.
+- When the user asks about their uploaded data, the upload table is your PRIMARY data source.
+  You may also query the LOS loans table for supplementary context, but keep evidence from
+  each source clearly separated.
+- Produce AT LEAST TWO evidence queries: (1) a summary with aggregates, and (2) detail rows.
 - Prefer charts that reveal structure:
   - Single numeric column → histogram (type "histogram", xKey = numeric col, buckets = 20)
   - Numeric x categorical → bar or horizontal_bar grouped by category
@@ -425,10 +365,16 @@ MODE B — SQL TABLE (table strategy, large files >200 rows):
   - Hierarchical categorical data → treemap (type "treemap", labelKey = category, valueKey = numeric)
   - When analyzing distributions or outliers, ALWAYS include a histogram finding
 
-DETERMINING WHICH MODE TO USE:
-- If your question mentions an uploaded dataset and your schema context does NOT contain an "upload_" table,
-  the data MUST be in your knowledge context as inline text. Look for it there and use MODE A.
-- Never waste iterations trying to SQL-query inline data. Check your knowledge context first.
+VALUE QUALITY:
+- Every value in keyMetrics MUST be computed and populated with a real value.
+  NEVER produce empty strings, underscores ("_"), dashes, or placeholder text as a metric value.
+  If a metric cannot be computed from the available data, omit that key entirely and briefly note
+  the reason in your explanation or finding summary.
+
+CHART TYPE FOR TIME SERIES:
+- When the user asks for a "trend" over time, or the data contains a temporal column (month, quarter,
+  date, period), set chartHint type to "line" with xKey set to the temporal column.
+  Do NOT use "bar" for time series data. The x-axis should be sorted chronologically.
   "finding": {
     "title": "Concise finding title — must reflect the actual evidence",
     "summary": "2-4 sentence summary of what you found, with specific numbers",
@@ -526,21 +472,26 @@ export async function runDataAnalystAgent(
     // Call LLM
     const raw = await callLLM(conversationHistory, apiKey, {
       temperature: 0.2,
-      maxTokens: 4096,
+      maxTokens: 8192,
       jsonMode: true,
     });
 
     let parsed: any;
     try {
       parsed = JSON.parse(raw);
-    } catch {
+    } catch (parseErr) {
+      console.error(`[DataAnalyst] JSON parse failed on iteration ${iteration}. Raw response (first 500 chars): ${raw?.substring(0, 500)}`);
       onStep({
         iteration,
         type: "thinking",
-        content: `Failed to parse LLM response, attempting recovery...`,
+        content: `Failed to parse LLM response, retrying...`,
         timestamp: Date.now(),
       });
-      return buildFallbackFinding(question, evidence);
+      conversationHistory.push(
+        { role: "assistant", content: raw },
+        { role: "user", content: `Your response was not valid JSON. You MUST respond with a single JSON object containing "action" and other fields. Do NOT include any text outside the JSON object.` }
+      );
+      continue;
     }
 
     // Emit thinking step
@@ -703,7 +654,7 @@ export async function runDataAnalystAgent(
 
       const finalRaw = await callLLM(conversationHistory, apiKey, {
         temperature: 0.2,
-        maxTokens: 4096,
+        maxTokens: 8192,
         jsonMode: true,
       });
 
