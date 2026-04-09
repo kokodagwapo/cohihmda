@@ -43,7 +43,11 @@ import {
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { useCohiData, CohiInsight } from "@/hooks/useCohiData";
 import { useTenantLosLastSyncedAt } from "@/hooks/useTenantLosLastSyncedAt";
-import { formatDataLastSyncedLine } from "@/utils/losSyncDisplay";
+import {
+  formatDataLastSyncedLine,
+  formatEstimatedNextSyncLine,
+  formatEstimatedNextSyncTooltip,
+} from "@/utils/losSyncDisplay";
 import { useJobStatus } from "@/hooks/useJobStatus";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
@@ -923,7 +927,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
   // Auth context — admin controls only shown for platform staff
   const { isPlatformStaff } = useAuth();
   const isAdmin = isPlatformStaff();
-  const { lastSyncedAt: losLastSyncedAt } =
+  const { lastSyncedAt: losLastSyncedAt, syncFrequency: losSyncFrequency } =
     useTenantLosLastSyncedAt(selectedTenantId);
 
   // Data hook
@@ -1439,6 +1443,21 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
                       }
                     >
                       {formatDataLastSyncedLine(losLastSyncedAt)}
+                    </span>
+                  );
+                  trailing.push(
+                    <span
+                      key="los-next-sync"
+                      className={metaMuted}
+                      title={formatEstimatedNextSyncTooltip(
+                        losLastSyncedAt,
+                        losSyncFrequency
+                      )}
+                    >
+                      {formatEstimatedNextSyncLine(
+                        losLastSyncedAt,
+                        losSyncFrequency
+                      )}
                     </span>
                   );
                   return (
