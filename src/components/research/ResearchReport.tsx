@@ -149,6 +149,47 @@ function humanizeKeyQuick(key: string): string {
     .trim();
 }
 
+const CURRENCY_KEY = /(upb|balance|revenue|income|expense|cost|amount|price|value|margin|payment|fee|dollar|usd|proceeds|profit|loss|budget)/i;
+const PERCENT_KEY = /(rate|pct|percent|share|ratio|yield|ltv|dti)/i;
+const COUNT_KEY = /(count|total|num|quantity|loans|rows|records)/i;
+
+function formatMetricValue(key: string, value: string | number): string {
+  if (value == null || value === "") return "-";
+  const strVal = String(value);
+  if (strVal.startsWith("$")) return strVal;
+  if (strVal.endsWith("%")) return strVal;
+
+  const num = Number(strVal.replace(/[$,%]/g, ""));
+  if (isNaN(num)) return strVal;
+
+  // Split on underscores/spaces/camelCase to get individual tokens for matching
+  const tokens = key
+    .replace(/([a-z])([A-Z])/g, "$1_$2")
+    .toLowerCase()
+    .split(/[\s_-]+/)
+    .join(" ");
+
+  if (CURRENCY_KEY.test(tokens)) {
+    if (Math.abs(num) >= 1_000_000_000) return `$${(num / 1_000_000_000).toFixed(2)}B`;
+    if (Math.abs(num) >= 1_000_000) return `$${(num / 1_000_000).toFixed(2)}M`;
+    if (Math.abs(num) >= 1_000) return `$${(num / 1_000).toFixed(1)}K`;
+    return `$${num.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+  }
+
+  if (PERCENT_KEY.test(tokens) && !CURRENCY_KEY.test(tokens)) {
+    return `${num.toFixed(1)}%`;
+  }
+
+  if (COUNT_KEY.test(tokens) && !CURRENCY_KEY.test(tokens)) {
+    return Math.round(num).toLocaleString();
+  }
+
+  if (Math.abs(num) >= 1_000_000) return `${(num / 1_000_000).toFixed(2)}M`;
+  if (Math.abs(num) >= 1_000) return num.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  if (num % 1 !== 0) return num.toFixed(2);
+  return String(num);
+}
+
 export function QuickAnswerView({
   finding,
   onDrillDown,
@@ -194,7 +235,7 @@ export function QuickAnswerView({
                   <span className="text-muted-foreground font-medium">
                     {humanizeKeyQuick(k)}:
                   </span>
-                  <span className="font-semibold tabular-nums">{String(v)}</span>
+                  <span className="font-semibold tabular-nums">{formatMetricValue(k, v)}</span>
                 </div>
               ))}
             </div>
@@ -398,22 +439,6 @@ function KpiSummaryStrip({ findings }: { findings: Finding[] }) {
 
   if (aggregatedMetrics.length === 0) return null;
 
-  const formatKpiValue = (val: string | number): string => {
-    const num = Number(val);
-    if (isNaN(num)) return String(val);
-    if (Math.abs(num) >= 1_000_000)
-      return `$${(num / 1_000_000).toFixed(1)}M`;
-    if (Math.abs(num) >= 1_000) return num.toLocaleString();
-    if (num % 1 !== 0) return num.toFixed(2);
-    return String(num);
-  };
-
-  const humanizeKey = (key: string): string =>
-    key
-      .replace(/_/g, " ")
-      .replace(/([a-z])([A-Z])/g, "$1 $2")
-      .replace(/\b\w/g, (c) => c.toUpperCase());
-
   return (
     <div className="flex gap-3 overflow-x-auto pb-1 -mx-1 px-1">
       {aggregatedMetrics.map(([key, value]) => (
@@ -422,10 +447,10 @@ function KpiSummaryStrip({ findings }: { findings: Finding[] }) {
           className="flex-shrink-0 rounded-lg border bg-card px-4 py-3 min-w-[140px] shadow-sm"
         >
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide block truncate">
-            {humanizeKey(key)}
+            {humanizeKeyQuick(key)}
           </span>
           <span className="text-base font-bold mt-1 block tabular-nums">
-            {formatKpiValue(value)}
+            {formatMetricValue(key, value)}
           </span>
         </div>
       ))}
@@ -743,7 +768,7 @@ function InsightCard({
                   className="flex items-center gap-1.5 text-xs bg-muted/50 rounded px-2 py-1"
                 >
                   <span className="text-muted-foreground">{humanizeKey(m.key)}:</span>
-                  <span className="font-semibold">{String(m.value)}</span>
+                  <span className="font-semibold">{formatMetricValue(m.key, m.value)}</span>
                 </div>
               ))}
             </div>
