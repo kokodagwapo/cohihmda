@@ -30,6 +30,7 @@ import { ReleaseNotesSection } from "@/components/admin/ReleaseNotesSection";
 import { PlatformSettingsSection } from "@/components/admin/PlatformSettingsSection";
 import { SyncManagementSection } from "@/components/admin/SyncManagementSection";
 import { AnalyticsSection } from "@/components/admin/AnalyticsSection";
+import { PlatformUsageReport } from "@/components/admin/PlatformUsageReport";
 import { AdminModeSelector } from "@/components/admin/AdminModeSelector";
 import { Button } from "@/components/ui/button";
 import { Menu, Settings } from "lucide-react";
@@ -255,6 +256,7 @@ export const Admin = () => {
       { id: "insight-feedback", label: "Insight Feedback" },
       { id: "release-notes", label: "Release Notes" },
       { id: "platform-settings", label: "Platform Settings" },
+      { id: "usage-report", label: "Usage Report" },
       { id: "analytics", label: "User Analytics" },
     ];
     return sections.find((s) => s.id === activeSection)?.label || "Overview";
@@ -583,6 +585,11 @@ export const Admin = () => {
               {/* Sync Management Section (Platform Admin) */}
               {activeSection === "sync-management" && isPlatform && (
                 <SyncManagementSection />
+              )}
+
+              {/* Platform Usage Report (Platform Admin) */}
+              {activeSection === "usage-report" && isPlatform && (
+                <PlatformUsageReport />
               )}
 
               {/* User Analytics (tenant + platform in tenant mode) */}

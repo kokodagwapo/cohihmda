@@ -190,6 +190,16 @@ const allAdminSections: AdminSectionDef[] = [
     category: "Infrastructure",
     mode: "platform",
   },
+  {
+    id: "usage-report" as AdminSection,
+    label: "Usage Report",
+    icon: BarChart3,
+    description: "Cross-tenant session and engagement report",
+    color: "text-indigo-300 dark:text-indigo-400/70",
+    allowedRoles: ["super_admin", "platform_admin"],
+    category: "Infrastructure",
+    mode: "platform",
+  },
 
   // ============ TENANT CONTEXT (mode: tenant) ============
   // These sections are for managing a specific tenant (impersonation for platform admins)

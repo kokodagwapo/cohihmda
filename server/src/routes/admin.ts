@@ -3054,4 +3054,68 @@ router.get(
 // Mount SSO configuration routes
 router.use("/sso", ssoConfigRoutes);
 
+/* ------------------------------------------------------------------ */
+/*  Platform Usage Report (cross-tenant, mirrors old Coheus report)    */
+/* ------------------------------------------------------------------ */
+
+import {
+  generateUsageReport,
+  usageReportToCsv,
+} from "../services/usageReportService.js";
+
+/**
+ * GET /api/admin/usage-report
+ * Returns cross-tenant usage data (sessions, users, pages) as JSON.
+ */
+router.get(
+  "/usage-report",
+  authenticateToken,
+  requireRole("super_admin", "platform_admin"),
+  async (req: AuthRequest, res) => {
+    try {
+      const days = Math.min(parseInt(req.query.days as string) || 120, 365);
+      const report = await generateUsageReport(days);
+      return res.json(report);
+    } catch (error: any) {
+      logError("Error generating usage report", error, {
+        userId: req.userId,
+      });
+      return res
+        .status(500)
+        .json({ error: "Failed to generate usage report" });
+    }
+  },
+);
+
+/**
+ * GET /api/admin/usage-report/export
+ * Returns the same report as a downloadable CSV file.
+ */
+router.get(
+  "/usage-report/export",
+  authenticateToken,
+  requireRole("super_admin", "platform_admin"),
+  async (req: AuthRequest, res) => {
+    try {
+      const days = Math.min(parseInt(req.query.days as string) || 120, 365);
+      const report = await generateUsageReport(days);
+      const csv = usageReportToCsv(report);
+      const filename = `Cohi_Usage_Report_${new Date().toISOString().split("T")[0]}.csv`;
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${filename}"`,
+      );
+      return res.send(csv);
+    } catch (error: any) {
+      logError("Error exporting usage report", error, {
+        userId: req.userId,
+      });
+      return res
+        .status(500)
+        .json({ error: "Failed to export usage report" });
+    }
+  },
+);
+
 export default router;
