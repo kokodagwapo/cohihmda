@@ -393,6 +393,8 @@ export default function ResearchAnalyst() {
     uploadFile,
     isUploading,
     uploadProgress,
+    error: uploadError,
+    setError: setUploadError,
   } = useResearchUploads(effectiveTenantId);
   const [attachedUploadIds, setAttachedUploadIds] = useState<string[]>([]);
   const [showUploadPanel, setShowUploadPanel] = useState(false);
@@ -794,6 +796,7 @@ export default function ResearchAnalyst() {
                             {/* Drag-and-drop zone with file size info */}
                             <UploadDropZone
                               onFileSelected={async (file) => {
+                                setUploadError(null);
                                 const result = await uploadFile(file);
                                 if (result) {
                                   setAttachedUploadIds((prev) => [...prev, result.id]);
@@ -802,6 +805,13 @@ export default function ResearchAnalyst() {
                               isUploading={isUploading}
                               uploadProgress={uploadProgress}
                             />
+
+                            {uploadError && (
+                              <div className="flex items-start gap-2 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 px-3 py-2">
+                                <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
+                                <p className="text-xs text-red-700 dark:text-red-400">{uploadError}</p>
+                              </div>
+                            )}
 
                             {/* Previously uploaded files */}
                             {availableUploads.length > 0 && (

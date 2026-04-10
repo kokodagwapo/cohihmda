@@ -8,10 +8,7 @@ import { dirname, join } from "path";
 import { setupRoutes } from "./routes/index.js";
 import { setupWebSocket } from "./services/websocket.js";
 import { initDatabase } from "./config/database.js";
-import {
-  initSentry,
-  setupSentryErrorHandler,
-} from "./middleware/sentry.js";
+import { initSentry, setupSentryErrorHandler } from "./middleware/sentry.js";
 import { apiLimiter } from "./middleware/rateLimiter.js";
 import { devLogger, prodLogger } from "./middleware/logger.js";
 import {
@@ -47,9 +44,10 @@ if (
 
 const app = express();
 
-// Trust proxy - required when behind ALB/CloudFront to correctly identify client IPs
-// This fixes express-rate-limit ERR_ERL_UNEXPECTED_X_FORWARDED_FOR error
-app.set("trust proxy", 1);
+// Trust proxy - required when behind CloudFront → ALB to correctly identify client IPs.
+// Value of 2 accounts for both CloudFront and ALB in the proxy chain so that
+// express-rate-limit sees the real client IP, not a shared CloudFront edge IP.
+app.set("trust proxy", 2);
 
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
@@ -119,7 +117,12 @@ app.use(
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Cache-Control"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Requested-With",
+      "Cache-Control",
+    ],
   }),
 );
 
@@ -340,8 +343,12 @@ const startServer = async () => {
       console.log("✅ Environment variables validated");
     }
     const cognitoPasswordAuth = process.env.COGNITO_PASSWORD_AUTH === "true";
-    const cognitoSso = !!(process.env.COGNITO_USER_POOL_ID && process.env.COGNITO_DOMAIN);
-    console.log(`🔐 Auth: SSO=${cognitoSso ? "cognito" : "off"}, Password=${cognitoPasswordAuth ? "cognito" : "bcrypt"}`);
+    const cognitoSso = !!(
+      process.env.COGNITO_USER_POOL_ID && process.env.COGNITO_DOMAIN
+    );
+    console.log(
+      `🔐 Auth: SSO=${cognitoSso ? "cognito" : "off"}, Password=${cognitoPasswordAuth ? "cognito" : "bcrypt"}`,
+    );
   });
 };
 
@@ -363,9 +370,8 @@ async function startWorker() {
 
   if (process.env.ENCOMPASS_WEBHOOK_SCHEDULER_ENABLED !== "false") {
     try {
-      const { startEncompassWebhookScheduler } = await import(
-        "./services/encompassWebhookScheduler.js"
-      );
+      const { startEncompassWebhookScheduler } =
+        await import("./services/encompassWebhookScheduler.js");
       startEncompassWebhookScheduler();
     } catch (error) {
       console.warn("⚠️ Failed to start Encompass webhook scheduler:", error);
@@ -381,36 +387,31 @@ async function startWorker() {
   }
 
   try {
-    const { startNewsRefreshScheduler } = await import(
-      "./services/newsRefreshScheduler.js"
-    );
+    const { startNewsRefreshScheduler } =
+      await import("./services/newsRefreshScheduler.js");
     startNewsRefreshScheduler();
   } catch (error) {
     console.warn("⚠️ Failed to start news refresh scheduler:", error);
   }
 
   try {
-    const { startDistributionScheduler } = await import(
-      "./services/distributionScheduler.js"
-    );
+    const { startDistributionScheduler } =
+      await import("./services/distributionScheduler.js");
     startDistributionScheduler();
   } catch (error) {
     console.warn("⚠️ Failed to start distribution scheduler:", error);
   }
 
   try {
-    const { startCohiPrefetchWorker } = await import(
-      "./services/cohiPrefetchWorker.js"
-    );
+    const { startCohiPrefetchWorker } =
+      await import("./services/cohiPrefetchWorker.js");
     startCohiPrefetchWorker();
   } catch (error) {
     console.warn("⚠️ Failed to start Cohi prefetch worker:", error);
   }
 
   try {
-    const { startSyncJobPoller } = await import(
-      "./services/syncJobPoller.js"
-    );
+    const { startSyncJobPoller } = await import("./services/syncJobPoller.js");
     startSyncJobPoller();
     console.log("✅ Sync job poller started");
   } catch (error) {
@@ -430,9 +431,8 @@ async function startWorker() {
   }
 
   try {
-    const { startUploadCleanupScheduler } = await import(
-      "./services/research/uploadCleanupScheduler.js"
-    );
+    const { startUploadCleanupScheduler } =
+      await import("./services/research/uploadCleanupScheduler.js");
     startUploadCleanupScheduler();
   } catch (error) {
     console.warn("⚠️ Failed to start upload cleanup scheduler:", error);
@@ -466,12 +466,14 @@ if (SKIP_DB) {
 
         if (process.env.ENCOMPASS_WEBHOOK_SCHEDULER_ENABLED !== "false") {
           try {
-            const { startEncompassWebhookScheduler } = await import(
-              "./services/encompassWebhookScheduler.js"
-            );
+            const { startEncompassWebhookScheduler } =
+              await import("./services/encompassWebhookScheduler.js");
             startEncompassWebhookScheduler();
           } catch (error) {
-            console.warn("⚠️ Failed to start Encompass webhook scheduler:", error);
+            console.warn(
+              "⚠️ Failed to start Encompass webhook scheduler:",
+              error,
+            );
           }
         }
 
@@ -484,36 +486,32 @@ if (SKIP_DB) {
         }
 
         try {
-          const { startNewsRefreshScheduler } = await import(
-            "./services/newsRefreshScheduler.js"
-          );
+          const { startNewsRefreshScheduler } =
+            await import("./services/newsRefreshScheduler.js");
           startNewsRefreshScheduler();
         } catch (error) {
           console.warn("⚠️ Failed to start news refresh scheduler:", error);
         }
 
         try {
-          const { startDistributionScheduler } = await import(
-            "./services/distributionScheduler.js"
-          );
+          const { startDistributionScheduler } =
+            await import("./services/distributionScheduler.js");
           startDistributionScheduler();
         } catch (error) {
           console.warn("⚠️ Failed to start distribution scheduler:", error);
         }
 
         try {
-          const { startCohiPrefetchWorker } = await import(
-            "./services/cohiPrefetchWorker.js"
-          );
+          const { startCohiPrefetchWorker } =
+            await import("./services/cohiPrefetchWorker.js");
           startCohiPrefetchWorker();
         } catch (error) {
           console.warn("⚠️ Failed to start Cohi prefetch worker:", error);
         }
 
         try {
-          const { startSyncJobPoller } = await import(
-            "./services/syncJobPoller.js"
-          );
+          const { startSyncJobPoller } =
+            await import("./services/syncJobPoller.js");
           startSyncJobPoller();
         } catch (error) {
           console.warn("⚠️ Failed to start sync job poller:", error);
@@ -532,9 +530,8 @@ if (SKIP_DB) {
         }
 
         try {
-          const { startUploadCleanupScheduler } = await import(
-            "./services/research/uploadCleanupScheduler.js"
-          );
+          const { startUploadCleanupScheduler } =
+            await import("./services/research/uploadCleanupScheduler.js");
           startUploadCleanupScheduler();
         } catch (error) {
           console.warn("⚠️ Failed to start upload cleanup scheduler:", error);

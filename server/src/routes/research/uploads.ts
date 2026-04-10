@@ -8,7 +8,7 @@
  * DELETE /api/research/uploads/:id          — Delete upload + drop temp table if any
  * POST   /api/research/uploads/:id/attach   — Link upload to a research session
  *
- * Rate limits: 10 uploads per user per hour; 20 active uploads per tenant.
+ * Rate limits: 30 uploads per user per hour; 50 active uploads per tenant.
  */
 
 import { Router, type Response } from "express";
@@ -50,9 +50,9 @@ const upload = multer({
 // ============================================================================
 
 const uploadCountByUser = new Map<string, { count: number; windowStart: number }>();
-const RATE_LIMIT_MAX = 10;
+const RATE_LIMIT_MAX = 30;
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
-const MAX_ACTIVE_UPLOADS_PER_TENANT = 20;
+const MAX_ACTIVE_UPLOADS_PER_TENANT = 50;
 
 function checkUploadRateLimit(userId: string): boolean {
   const now = Date.now();
