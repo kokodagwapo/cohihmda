@@ -1,4 +1,4 @@
-﻿import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, Zap, BarChart3, Target, Trophy, X, Sun, FileText, LayoutGrid, TrendingUp, LayoutDashboard, Filter, ArrowLeftRight, Shield, ClipboardList, Calculator, LineChart, Pin, PinOff, FlaskConical, GripVertical, Lock, Layers, Mail, Users, MessageSquare, LayoutPanelLeft, Database } from 'lucide-react';
@@ -23,6 +23,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { usePinnedDashboardsStore, type PinnedItem } from '@/stores/pinnedDashboardsStore';
+import { useTenantStore } from '@/stores/tenantStore';
+import { useTenantLosLastSyncedAt } from '@/hooks/useTenantLosLastSyncedAt';
+import { formatDataLastSyncedLine } from '@/utils/losSyncDisplay';
 import { useWorkbenchNav } from '@/hooks/useWorkbenchNav';
 import {
   DndContext,
@@ -442,6 +445,9 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
   const { theme } = useTheme();
   const isDarkMode = theme === 'dark';
   const isExpanded = state !== 'collapsed';
+  const selectedTenantId = useTenantStore((s) => s.selectedTenantId);
+  const { lastSyncedAt: losLastSyncedAt } =
+    useTenantLosLastSyncedAt(selectedTenantId);
   const isInsightsPage = location.pathname === '/insights';
   const isDashboardPage = isInsightsPage; // dashboard content moved to /insights
   const [internalMobileOpen, setInternalMobileOpen] = useState(false);
@@ -643,6 +649,22 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                 >
                   <X className="w-5 h-5" strokeWidth={2} />
                 </button>
+              </div>
+
+              <div className="px-4 py-2 border-b border-slate-200 dark:border-slate-700 md:hidden">
+                <p
+                  className="text-sm text-slate-500 dark:text-slate-400 leading-snug"
+                  title={
+                    losLastSyncedAt
+                      ? new Date(losLastSyncedAt).toLocaleString(undefined, {
+                          dateStyle: 'full',
+                          timeStyle: 'medium',
+                        })
+                      : undefined
+                  }
+                >
+                  {formatDataLastSyncedLine(losLastSyncedAt)}
+                </p>
               </div>
               
               {isInsightsPage ? (
@@ -1047,9 +1069,11 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                   <div className="text-sm font-medium leading-none truncate">
                     Welcome{visitorFirstName ? ` ${visitorFirstName}` : ''}
                   </div>
+                  {/* Hidden: section visibility counter (restore if needed)
                   <div className="text-xs text-sidebar-foreground/60 truncate">
                     {activeCount} of {dashboardSectionsConfig.length} sections
                   </div>
+                  */}
                 </div>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -1068,6 +1092,35 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
             )}
           </div>
           <Separator className="bg-sidebar-border" />
+          {isExpanded ? (
+            <p
+              className="text-sm leading-snug text-sidebar-foreground/60 mt-2 px-0.5"
+              title={
+                losLastSyncedAt
+                  ? new Date(losLastSyncedAt).toLocaleString(undefined, {
+                      dateStyle: 'full',
+                      timeStyle: 'medium',
+                    })
+                  : undefined
+              }
+            >
+              {formatDataLastSyncedLine(losLastSyncedAt)}
+            </p>
+          ) : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex justify-center pt-2 pb-0.5" role="presentation">
+                  <Database
+                    className="h-4 w-4 text-sidebar-foreground/50"
+                    aria-label={formatDataLastSyncedLine(losLastSyncedAt)}
+                  />
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="right" className="max-w-[280px] text-sm">
+                {formatDataLastSyncedLine(losLastSyncedAt)}
+              </TooltipContent>
+            </Tooltip>
+          )}
         </SidebarHeader>
 
         <SidebarContent className={cn("pb-3 overflow-y-auto flex-1 min-h-0")}>

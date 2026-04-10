@@ -42,6 +42,12 @@ import {
 } from "lucide-react";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { useCohiData, CohiInsight } from "@/hooks/useCohiData";
+import { useTenantLosLastSyncedAt } from "@/hooks/useTenantLosLastSyncedAt";
+import {
+  formatDataLastSyncedLine,
+  formatEstimatedNextSyncLine,
+  formatEstimatedNextSyncTooltip,
+} from "@/utils/losSyncDisplay";
 import { useJobStatus } from "@/hooks/useJobStatus";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
@@ -921,6 +927,8 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
   // Auth context — admin controls only shown for platform staff
   const { isPlatformStaff } = useAuth();
   const isAdmin = isPlatformStaff();
+  const { lastSyncedAt: losLastSyncedAt, syncFrequency: losSyncFrequency } =
+    useTenantLosLastSyncedAt(selectedTenantId);
 
   // Data hook
   const {
@@ -1378,25 +1386,90 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
                     AI
                   </span>
                 )}
-                {hasInsights && (
-                  <span className="text-slate-400 dark:text-slate-500">
-                    {allInsights.length} insights
-                  </span>
-                )}
-                {metadata?.generatedAt && (
-                  <span className="text-slate-400 dark:text-slate-500 text-[10px] sm:text-xs" title={new Date(metadata.generatedAt).toLocaleString()}>
-                    Generated {(() => {
-                      const ms = Date.now() - new Date(metadata.generatedAt).getTime();
-                      const mins = Math.floor(ms / 60000);
-                      if (mins < 1) return "just now";
-                      if (mins < 60) return `${mins}m ago`;
-                      const hrs = Math.floor(mins / 60);
-                      if (hrs < 24) return `${hrs}h ago`;
-                      const days = Math.floor(hrs / 24);
-                      return `${days}d ago`;
-                    })()}
-                  </span>
-                )}
+                {(() => {
+                  const metaMuted = "text-slate-400 dark:text-slate-500";
+                  const divider = (key: string) => (
+                    <span
+                      key={key}
+                      aria-hidden
+                      className="inline-block h-3.5 w-px shrink-0 bg-slate-300 dark:bg-slate-600 self-center"
+                    />
+                  );
+                  const trailing: React.ReactNode[] = [];
+                  if (hasInsights) {
+                    trailing.push(
+                      <span key="ins-count" className={metaMuted}>
+                        {allInsights.length} insights
+                      </span>
+                    );
+                  }
+                  if (metadata?.generatedAt) {
+                    trailing.push(
+                      <span
+                        key="gen"
+                        className={metaMuted}
+                        title={new Date(metadata.generatedAt).toLocaleString()}
+                      >
+                        Insights Generated{" "}
+                        {(() => {
+                          const ms =
+                            Date.now() -
+                            new Date(metadata.generatedAt).getTime();
+                          const mins = Math.floor(ms / 60000);
+                          if (mins < 1) return "just now";
+                          if (mins < 60) return `${mins}m ago`;
+                          const hrs = Math.floor(mins / 60);
+                          if (hrs < 24) return `${hrs}h ago`;
+                          const days = Math.floor(hrs / 24);
+                          return `${days}d ago`;
+                        })()}
+                      </span>
+                    );
+                  }
+                  trailing.push(
+                    <span
+                      key="los-sync"
+                      className={metaMuted}
+                      title={
+                        losLastSyncedAt
+                          ? new Date(losLastSyncedAt).toLocaleString(
+                              undefined,
+                              {
+                                dateStyle: "full",
+                                timeStyle: "medium",
+                              }
+                            )
+                          : undefined
+                      }
+                    >
+                      {formatDataLastSyncedLine(losLastSyncedAt)}
+                    </span>
+                  );
+                  trailing.push(
+                    <span
+                      key="los-next-sync"
+                      className={metaMuted}
+                      title={formatEstimatedNextSyncTooltip(
+                        losLastSyncedAt,
+                        losSyncFrequency
+                      )}
+                    >
+                      {formatEstimatedNextSyncLine(
+                        losLastSyncedAt,
+                        losSyncFrequency
+                      )}
+                    </span>
+                  );
+                  return (
+                    <span className="inline-flex items-center flex-wrap gap-x-2 gap-y-1">
+                      {trailing.flatMap((node, i) =>
+                        i === 0
+                          ? [node]
+                          : [divider(`meta-div-${i}`), node]
+                      )}
+                    </span>
+                  );
+                })()}
               </p>
             </div>
           </div>
