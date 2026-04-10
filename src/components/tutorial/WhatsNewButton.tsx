@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { useTutorial } from '@/contexts/TutorialContext';
 import { getUnseenEntries, mergeWhatsNewEntries, whatsNewEntries } from '@/data/whatsNew';
@@ -6,10 +6,13 @@ import { useReleaseNotes } from '@/hooks/useReleaseNotes';
 import { WhatsNewModal } from './WhatsNewModal';
 import { Bell } from 'lucide-react';
 
+const AUTO_POPUP_DELAY_MS = 1500;
+
 export function WhatsNewButton() {
   const [open, setOpen] = useState(false);
-  const { prefs } = useTutorial();
-  const { whatsNewEntries: releaseNoteEntries } = useReleaseNotes();
+  const { prefs, isLoading: prefsLoading } = useTutorial();
+  const { whatsNewEntries: releaseNoteEntries, loading: notesLoading } = useReleaseNotes();
+  const autoPopupFired = useRef(false);
 
   const mergedEntries = useMemo(
     () => mergeWhatsNewEntries(releaseNoteEntries, whatsNewEntries),
@@ -20,6 +23,15 @@ export function WhatsNewButton() {
     () => getUnseenEntries(prefs.whats_new_last_seen, mergedEntries).length,
     [prefs.whats_new_last_seen, mergedEntries]
   );
+
+  useEffect(() => {
+    if (autoPopupFired.current || prefsLoading || notesLoading) return;
+    if (unseenCount === 0 || mergedEntries.length === 0) return;
+
+    autoPopupFired.current = true;
+    const timer = setTimeout(() => setOpen(true), AUTO_POPUP_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [unseenCount, mergedEntries.length, prefsLoading, notesLoading]);
 
   return (
     <>
