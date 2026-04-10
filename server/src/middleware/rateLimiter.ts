@@ -14,7 +14,7 @@ import { logError, logWarn } from '../services/logger.js';
  */
 export const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'production' ? 500 : 1000, // 500 requests per 15 mins in production
+  max: process.env.NODE_ENV === 'production' ? 2000 : 5000,
   message: 'Too many requests from this IP, please try again later.',
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers

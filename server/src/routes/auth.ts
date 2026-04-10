@@ -46,9 +46,7 @@ interface TenantUser {
   email: string;
   encrypted_password: string;
   full_name: string | null;
-  role:
-    | "tenant_admin"
-    | "user";
+  role: "tenant_admin" | "user";
   is_active: boolean;
   tenant_id: string;
   tenant_name: string;
@@ -123,7 +121,7 @@ async function getTenantPool(tenantSlug: string): Promise<pg.Pool | null> {
       `SELECT database_name, database_host, database_port, database_user, database_password_encrypted, status
        FROM coheus_tenants 
        WHERE slug = $1 AND status = 'active'`,
-      [tenantSlug]
+      [tenantSlug],
     );
 
     if (result.rows.length === 0) {
@@ -200,7 +198,7 @@ async function findSuperAdmin(email: string): Promise<
               failed_login_attempts, locked_until
        FROM coheus_users 
        WHERE email = $1`,
-      [email]
+      [email],
     );
 
     if (result.rows.length === 0) {
@@ -219,7 +217,7 @@ async function findSuperAdmin(email: string): Promise<
  */
 async function findTenantUser(
   email: string,
-  tenantSlug?: string
+  tenantSlug?: string,
 ): Promise<
   | (TenantUser & { failed_login_attempts: number; locked_until: Date | null })
   | null
@@ -238,13 +236,13 @@ async function findTenantUser(
     if (tenantSlug) {
       const result = await mgmtPool.query(
         `SELECT id, slug, name, database_name FROM coheus_tenants WHERE slug = $1 AND status = 'active'`,
-        [tenantSlug]
+        [tenantSlug],
       );
       tenants = result.rows;
     } else {
       // Search all tenants - in production, might want to limit this
       const result = await mgmtPool.query(
-        `SELECT id, slug, name, database_name FROM coheus_tenants WHERE status = 'active' ORDER BY name`
+        `SELECT id, slug, name, database_name FROM coheus_tenants WHERE status = 'active' ORDER BY name`,
       );
       tenants = result.rows;
     }
@@ -262,7 +260,7 @@ async function findTenantUser(
                   loan_scope
            FROM users 
            WHERE email = $1`,
-          [email]
+          [email],
         );
 
         if (userResult.rows.length > 0) {
@@ -326,10 +324,7 @@ async function issueAppToken(
     email: user.email,
     role: user.role,
     isSuperAdmin,
-    persona:
-      !isSuperAdmin && "persona" in user
-        ? user.persona
-        : undefined,
+    persona: !isSuperAdmin && "persona" in user ? user.persona : undefined,
   };
 
   if (!isSuperAdmin && "tenant_id" in user) {
@@ -454,9 +449,7 @@ router.post("/signin", authLimiter, async (req, res) => {
       // Cognito auth succeeded -- find user in DB
       const found = await findUserByEmail(email, tenantSlug);
       if (!found) {
-        return res
-          .status(401)
-          .json({ error: "User not found in application" });
+        return res.status(401).json({ error: "User not found in application" });
       }
 
       // Hardened enforcement: never issue an app token until Cognito MFA is enabled.
@@ -471,13 +464,16 @@ router.post("/signin", authLimiter, async (req, res) => {
           });
         }
       } catch (mfaStatusError: unknown) {
-        logWarn("[Auth] Failed to evaluate Cognito MFA status, failing closed", {
-          email,
-          error:
-            mfaStatusError instanceof Error
-              ? mfaStatusError.message
-              : String(mfaStatusError),
-        });
+        logWarn(
+          "[Auth] Failed to evaluate Cognito MFA status, failing closed",
+          {
+            email,
+            error:
+              mfaStatusError instanceof Error
+                ? mfaStatusError.message
+                : String(mfaStatusError),
+          },
+        );
         return res.status(403).json({
           mfaSetupRequired: true,
           email,
@@ -541,7 +537,9 @@ router.post("/new-password", authLimiter, async (req, res) => {
       .object({
         email: z.string().email(),
         session: z.string().min(1),
-        newPassword: z.string().min(10, "Password must be at least 10 characters"),
+        newPassword: z
+          .string()
+          .min(10, "Password must be at least 10 characters"),
       })
       .parse(req.body);
 
@@ -574,7 +572,9 @@ router.post("/new-password", authLimiter, async (req, res) => {
       return res.status(400).json({ error: error.errors[0].message });
     }
     const statusCode = error.statusCode || 400;
-    return res.status(statusCode).json({ error: error.message || "Failed to set new password" });
+    return res
+      .status(statusCode)
+      .json({ error: error.message || "Failed to set new password" });
   }
 });
 
@@ -619,11 +619,7 @@ router.post("/mfa/verify", authLimiter, async (req, res) => {
       ).catch(() => {});
     }
 
-    const { token } = await issueAppToken(
-      found.user,
-      found.isSuperAdmin,
-      req,
-    );
+    const { token } = await issueAppToken(found.user, found.isSuperAdmin, req);
 
     logInfo("[Auth] MFA verification successful", { email });
 
@@ -667,11 +663,7 @@ router.post("/refresh", async (req, res) => {
       return res.status(401).json({ error: "User not found" });
     }
 
-    const { token } = await issueAppToken(
-      found.user,
-      found.isSuperAdmin,
-      req,
-    );
+    const { token } = await issueAppToken(found.user, found.isSuperAdmin, req);
 
     return res.json({ token });
   } catch (error: any) {
@@ -694,14 +686,9 @@ function buildUserResponse(user: AuthUser, isSuperAdmin: boolean) {
     tenant_id: "tenant_id" in user ? user.tenant_id : null,
     tenant_name: "tenant_name" in user ? user.tenant_name : null,
     tenant_slug: "tenant_slug" in user ? user.tenant_slug : null,
-    persona:
-      !isSuperAdmin && "persona" in user
-        ? user.persona
-        : undefined,
+    persona: !isSuperAdmin && "persona" in user ? user.persona : undefined,
     loan_scope:
-      !isSuperAdmin && "loan_scope" in user
-        ? user.loan_scope
-        : undefined,
+      !isSuperAdmin && "loan_scope" in user ? user.loan_scope : undefined,
   };
 }
 
@@ -800,7 +787,7 @@ router.get("/me", async (req, res) => {
       const result = await mgmtPool.query(
         `SELECT id, email, full_name, role, is_active, last_login_at, created_at
          FROM coheus_users WHERE id = $1`,
-        [decoded.userId]
+        [decoded.userId],
       );
       if (result.rows.length > 0) {
         user = {
@@ -809,8 +796,8 @@ router.get("/me", async (req, res) => {
           tenant_id: null,
           tenant_name: null,
           tenant_slug: null,
-            persona: undefined,
-            loan_scope: undefined,
+          persona: undefined,
+          loan_scope: undefined,
         };
       }
     } else if (decoded.tenantSlug) {
@@ -820,14 +807,14 @@ router.get("/me", async (req, res) => {
           `SELECT id, email, full_name, role, is_active, last_login_at, created_at,
                   persona, loan_scope
            FROM users WHERE id = $1`,
-          [decoded.userId]
+          [decoded.userId],
         );
         if (result.rows.length > 0) {
           // Get tenant info
           const mgmtPool = getManagementPool();
           const tenantResult = await mgmtPool.query(
             `SELECT id, name, slug FROM coheus_tenants WHERE slug = $1`,
-            [decoded.tenantSlug]
+            [decoded.tenantSlug],
           );
           const tenant = tenantResult.rows[0];
 
@@ -902,7 +889,7 @@ router.get("/tenants", async (req, res) => {
   try {
     const mgmtPool = getManagementPool();
     const result = await mgmtPool.query(
-      `SELECT slug, name FROM coheus_tenants WHERE status = 'active' ORDER BY name`
+      `SELECT slug, name FROM coheus_tenants WHERE status = 'active' ORDER BY name`,
     );
 
     return res.json({ tenants: result.rows });
@@ -960,7 +947,8 @@ router.post("/password-reset/request", authLimiter, async (req, res) => {
     );
 
     try {
-      const { sendPasswordResetEmail } = await import("../services/emailService.js");
+      const { sendPasswordResetEmail } =
+        await import("../services/emailService.js");
       const { resolveFrontendUrl } = await import("../utils/frontendUrl.js");
       const frontendUrl = resolveFrontendUrl();
       const resetUrl = `${frontendUrl}/reset-password?email=${encodeURIComponent(email)}&code=${code}`;
@@ -968,7 +956,11 @@ router.post("/password-reset/request", authLimiter, async (req, res) => {
       await sendPasswordResetEmail(email, resetUrl, userName, { strict: true });
       logInfo("[Auth] Password reset email sent via SES", { email });
     } catch (emailError: any) {
-      logError("[Auth] Failed to send password reset email via SES", emailError, { email });
+      logError(
+        "[Auth] Failed to send password reset email via SES",
+        emailError,
+        { email },
+      );
     }
 
     return res.json({ message: successMsg, useCognito: true });
@@ -1066,7 +1058,9 @@ router.post("/password-reset/confirm", authLimiter, async (req, res) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors[0].message });
     }
-    logError("[Auth] Password reset confirm error", error, { email: req.body?.email });
+    logError("[Auth] Password reset confirm error", error, {
+      email: req.body?.email,
+    });
     const statusCode = error.statusCode || 500;
     return res
       .status(statusCode)
@@ -1103,7 +1097,7 @@ router.post("/impersonate", async (req, res) => {
     }
 
     const { targetUserId, targetTenantSlug } = impersonateSchema.parse(
-      req.body
+      req.body,
     );
 
     // Get target user from tenant DB
@@ -1114,7 +1108,7 @@ router.post("/impersonate", async (req, res) => {
 
     const userResult = await tenantPool.query(
       `SELECT id, email, full_name, role, is_active FROM users WHERE id = $1`,
-      [targetUserId]
+      [targetUserId],
     );
 
     if (userResult.rows.length === 0) {
@@ -1133,7 +1127,7 @@ router.post("/impersonate", async (req, res) => {
     const mgmtPool = getManagementPool();
     const tenantResult = await mgmtPool.query(
       `SELECT id, name, slug FROM coheus_tenants WHERE slug = $1`,
-      [targetTenantSlug]
+      [targetTenantSlug],
     );
     const tenant = tenantResult.rows[0];
 
