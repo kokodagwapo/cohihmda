@@ -1,0 +1,88 @@
+{
+  "version": "1.0",
+  "exportedAt": "2026-04-10T18:30:00.000Z",
+  "exportedBy": "release-notes-assistant",
+  "notes": [
+    {
+      "version": "2026.04.10",
+      "title": "Cohi Platform — April Product Update",
+      "isDraft": true,
+      "publishedAt": null,
+      "emailSentAt": null,
+      "entries": [
+        {
+          "title": "CSV Upload for Cohi Chat & Research Lab",
+          "description": "Upload freeform or semi-structured CSV files to ground Cohi Chat and Research Lab sessions in your own dataset. Headers and sample rows are parsed automatically with optional column confirmation. Data can be used as ephemeral session context or saved for reuse in research projects.",
+          "category": "feature",
+          "link": "/research",
+          "linkLabel": "Open Research Lab",
+          "sortOrder": 0
+        },
+        {
+          "title": "Estimated Closings & Risk Analysis Dashboard",
+          "description": "A new standalone dashboard and Workbench widget group for Estimated Closings and Risk Analysis. Includes KPI cards, Active Pipeline by ECD pie chart, Max Possible Funding by Complexity bar chart, summary tables by complexity and processing stage, and a full detail loan table with sort, filter, pagination, and CSV export. Supports Calendar Days and Business Days range types with cross-filtering across all visuals.",
+          "category": "feature",
+          "link": "/estimated-closings-risk",
+          "linkLabel": "View Estimated Closings",
+          "sortOrder": 1
+        },
+        {
+          "title": "Tracked Insights Watchlist",
+          "description": "Bookmark any insight to your watchlist and have it automatically re-evaluated on each data sync. View full metric history with trend charts, delta cards, and change summaries. Configure alert thresholds and receive notifications when tracked metrics cross your defined boundaries. Now available to all users, not just admins.",
+          "category": "feature",
+          "link": "/insights",
+          "linkLabel": "View Insights",
+          "sortOrder": 2
+        },
+        {
+          "title": "LLM-Assisted Metric Polarity",
+          "description": "Metrics that previously showed as neutral in trend analysis now benefit from AI-powered polarity detection. When headline and understory context clearly imply a direction (e.g., lower cycle time is good), the system automatically assigns higher-better or lower-better polarity with a confidence threshold, making trend labels like \"improving\" and \"worsening\" more accurate.",
+          "category": "improvement",
+          "link": null,
+          "linkLabel": null,
+          "sortOrder": 3
+        },
+        {
+          "title": "Blank Date Filtering in Loan Detail Tables",
+          "description": "Date columns in the Loan Detail, Estimated Closings, and Risk Analysis tables now fully support filtering by blank or empty values, consistent with how blank values work in text, numeric, and boolean columns. Use the date filter to include or exclude rows with missing dates.",
+          "category": "improvement",
+          "link": "/loan-detail",
+          "linkLabel": "Open Loan Detail",
+          "sortOrder": 4
+        },
+        {
+          "title": "Podcast Insight Integration Fix",
+          "description": "Resolved an issue where the AI-generated audio podcast was not pulling insights from the database, resulting in generic briefings. Podcasts now correctly incorporate your organization's latest tracked insights and metric snapshots.",
+          "category": "fix",
+          "link": "/insights",
+          "linkLabel": "Listen to Podcast",
+          "sortOrder": 6
+        },
+        {
+          "title": "Landing Page Toggle Labels Corrected",
+          "description": "Fixed mismatched toggle labels on the landing page. The \"Cohi Daily Briefings\" toggle now correctly reads \"Cohi Insights\" and the \"Mortgage News\" toggle now reads \"Cohi Daily Morning Brief\" to match the panels they control.",
+          "category": "fix",
+          "link": "/insights",
+          "linkLabel": "View Landing Page",
+          "sortOrder": 7
+        },
+        {
+          "title": "PowerPoint Builder in Workbench",
+          "description": "Build and export PowerPoint presentations directly from the Workbench canvas. Select widgets, arrange slides, and generate downloadable PPTX files with your dashboard visuals and data summaries.",
+          "category": "feature",
+          "link": "/my-dashboard",
+          "linkLabel": "Open Workbench",
+          "sortOrder": 8
+        },
+        {
+          "title": "Top Tiering Comparison Data Handling Fix",
+          "description": "Fixed an error in the Top Tiering Comparison view that occurred when actor counts were zero, improving data handling and formatting reliability.",
+          "category": "fix",
+          "link": null,
+          "linkLabel": null,
+          "sortOrder": 10
+        }
+      ]
+    }
+  ]
+}
