@@ -72,6 +72,7 @@ BALANCED COVERAGE — INCLUDE STRATEGIC REVIEW (POSITIVE SIGNALS):
 
 DATA QUALITY — FOCUS ON REAL PIPELINE:
 - The active pipeline filter (current_loan_status = 'Active Loan' AND application_date IS NOT NULL) is already applied. Loans without application_date are pre-excluded data artifacts — do NOT plan questions about missing application_date or count those records. That is a known data artifact, not a discovery.
+- Do NOT plan questions about missing uw_denied_date or denial_date — many lenders do not export these. The platform uses COALESCE(uw_denied_date, denial_date, current_status_date) as the effective denial date. This is a known convention, not a data quality issue.
 - Within the real active pipeline (loans WITH application_date), look for genuine data quality issues: missing lock dates on loans that should be locked, impossible date sequences, loans stuck in early milestones for abnormally long periods.
 - IMPORTANT: The "Stale Loan Data" section below will tell you whether this tenant has stale loans. If the tenant has virtually no stale loans, do NOT waste investigation questions on stale/abandoned pipeline. If stale loans are significant, you may include one question about it.
 - Data quality findings about the REAL pipeline are valuable. But "X% of Active Loan records have no application_date" is NOT — those are just import artifacts.

@@ -186,6 +186,42 @@ const FALLBACK_LOAN_FIELDS: {
         description: "Investor purchase date",
       },
       { name: "credit_pull_date", type: "DATE", description: "Credit pull date" },
+      {
+        name: "current_status_date",
+        type: "DATE",
+        description: "Date the current_loan_status was set (fallback for missing outcome dates)",
+      },
+      {
+        name: "uw_denied_date",
+        type: "DATE",
+        description: "Date loan was denied by underwriting (use COALESCE with denial_date, current_status_date)",
+      },
+      {
+        name: "denial_date",
+        type: "DATE",
+        description: "Date loan was denied (use COALESCE with uw_denied_date, current_status_date)",
+      },
+      {
+        name: "estimated_closing_date",
+        type: "DATE",
+        description: "Estimated closing date",
+      },
+      { name: "ctc_date", type: "DATE", description: "Clear-to-close date" },
+      {
+        name: "lock_expiration_date",
+        type: "DATE",
+        description: "Rate lock expiration date",
+      },
+      {
+        name: "cd_sent_date",
+        type: "DATE",
+        description: "Closing disclosure sent date",
+      },
+      {
+        name: "conditional_approval_date",
+        type: "DATE",
+        description: "Conditional approval date",
+      },
     ],
   },
 ];
@@ -437,6 +473,14 @@ function buildQuickReference(): string[] {
     "- Active: current_loan_status = 'Active Loan' AND application_date IS NOT NULL",
     "- Locked: lock_date IS NOT NULL",
     "- Originated: current_loan_status ILIKE '%Originated%' OR current_loan_status ILIKE '%purchased%'",
+    "",
+    "## Status Date Fallback Rules",
+    "When a loan has a terminal status but the status-specific date column is NULL, use current_status_date as the effective outcome date.",
+    "- Denied outcome date: COALESCE(uw_denied_date, denial_date, current_status_date)",
+    "- Withdrawn outcome date: COALESCE(withdrawal_date, current_status_date)",
+    "- Funded/Originated date: funding_date / closing_date (no fallback)",
+    "DO NOT report missing uw_denied_date or denial_date as a data quality issue — use current_status_date as fallback when those are NULL.",
+    "Many lenders do not populate uw_denied_date or denial_date; this is normal. Always apply the COALESCE fallback above.",
   ];
 }
 

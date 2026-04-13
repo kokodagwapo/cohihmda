@@ -2171,6 +2171,9 @@ const INSIGHT_CRITICAL_FIELDS = [
   "credit_pull_date",
   "submitted_to_processing_date",
   "submitted_to_underwriting_date",
+  "uw_denied_date",
+  "denial_date",
+  "current_status_date",
 ] as const;
 
 async function fetchFieldPopulationStats(

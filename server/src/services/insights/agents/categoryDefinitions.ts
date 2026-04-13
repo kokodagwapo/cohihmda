@@ -209,7 +209,7 @@ PRIORITIZE these topics — they are reliably answerable from date/status/milest
 LOWER PRIORITY — only include if field population stats confirm these columns are populated (>30% of active loans):
 - HMDA/fair lending signals: denial rate patterns by product type that may suggest disparate impact
 - Appraisal timing: loans with abnormally long or missing appraisal-to-close timelines
-- Data integrity for compliance: missing required fields (loan officer name, product type, denial reasons on denied loans)
+- Data integrity for compliance: missing required fields (loan officer name, product type, denial reasons on denied loans). NOTE: missing uw_denied_date or denial_date is NOT a data integrity issue — the platform uses current_status_date as fallback.
 
 RULES:
 - Before generating a question, mentally check: "Can this be answered from the loan date, status, and milestone columns in the schema?" If not, skip it.
