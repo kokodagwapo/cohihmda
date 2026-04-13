@@ -22,6 +22,7 @@ import {
 } from "../tools.js";
 import { pool as managementPool } from "../../../config/managementDatabase.js";
 import type { InvestigationQuestion } from "./plannerAgent.js";
+import { VIZ_STANDARDS_MEDIUM } from "../../../config/visualizationStandards.js";
 
 // ============================================================================
 // Types
@@ -408,7 +409,7 @@ export async function runDataAnalystAgent(
 
   // Fetch training examples for few-shot injection
   const trainingSection = await fetchTrainingExamples("research.analyst");
-  const systemPrompt = ANALYST_SYSTEM_PROMPT + trainingSection;
+  const systemPrompt = ANALYST_SYSTEM_PROMPT + VIZ_STANDARDS_MEDIUM + trainingSection;
 
   const userContentParts = [
     `Today: ${todayStr}. Current year: ${now.getFullYear()}.`,

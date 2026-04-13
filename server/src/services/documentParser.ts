@@ -153,6 +153,7 @@ function getMimeTypeFromExtension(extension: string): string {
     docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     doc: "application/msword",
     txt: "text/plain",
+    md: "text/plain",
     html: "text/html",
     htm: "text/html",
     csv: "text/csv",

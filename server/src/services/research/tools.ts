@@ -11,7 +11,7 @@ import { tenantDbManager } from "../../config/tenantDatabaseManager.js";
 import { getSchemaForTenant, getFallbackSchemaContext } from "../ai/schemaContextService.js";
 import { METRICS_CATALOG, type MetricDefinition } from "../metrics/metricsService.js";
 import { decryptAPIKeys } from "../encryption.js";
-import { generateEmbeddings } from "../embeddingService.js";
+import { getKnowledgeContext as sharedGetKnowledgeContext } from "../ai/ragRetrieval.js";
 import { logLLMUsage } from "../llmUsageTracker.js";
 import { getPlatformSetting } from "../platformSettingsService.js";
 
@@ -397,97 +397,17 @@ export async function callLLM(
 
 /**
  * Fetch relevant knowledge base context for the research topic.
- * Embeds the topic/question, searches rag_embeddings for similar chunks,
- * and returns a formatted context string for LLM injection.
+ * Delegates to the shared ragRetrieval module. Supports optional category
+ * scoping so agents can pull from specific knowledge domains.
  * Graceful: returns empty string on any failure.
  */
 export async function getKnowledgeContext(
   tenantPool: pg.Pool,
   tenantId: string,
-  topic?: string
+  topic?: string,
+  options: { categories?: string[] } = {}
 ): Promise<string> {
-  try {
-    // Check if rag_embeddings table exists
-    const tableCheck = await tenantPool.query(`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables
-        WHERE table_schema = 'public' AND table_name = 'rag_embeddings'
-      ) as exists
-    `);
-    if (!tableCheck.rows[0]?.exists) return "";
-
-    const countCheck = await tenantPool.query(`SELECT COUNT(*) as cnt FROM public.rag_embeddings`);
-    if (parseInt(countCheck.rows[0]?.cnt || "0") === 0) return "";
-
-    // Build query texts from the topic
-    const queryTexts: string[] = [];
-    if (topic) {
-      queryTexts.push(topic);
-      // Add a more specific phrasing for better recall
-      queryTexts.push(`mortgage lending analysis: ${topic}`);
-    } else {
-      queryTexts.push("mortgage pipeline performance and risk analysis");
-      queryTexts.push("loan conversion rates and fallout patterns");
-    }
-
-    const embedResults = await generateEmbeddings(queryTexts, "openai/text-embedding-3-large");
-    if (!embedResults || embedResults.length === 0) return "";
-
-    const allChunks: Array<{ text: string; score: number; source: string }> = [];
-    const seenTexts = new Set<string>();
-
-    for (const embedResult of embedResults) {
-      const embStr = `[${embedResult.embedding.join(",")}]`;
-      try {
-        const result = await tenantPool.query(
-          `SELECT
-            e.chunk_text,
-            d.title,
-            d.filename,
-            1 - (e.embedding <=> $1::vector) as similarity
-          FROM rag_embeddings e
-          JOIN rag_documents d ON e.document_id = d.id
-          WHERE d.status = 'indexed'
-            AND 1 - (e.embedding <=> $1::vector) >= 0.3
-          ORDER BY e.embedding <=> $1::vector
-          LIMIT 5`,
-          [embStr]
-        );
-
-        for (const row of result.rows) {
-          const text = row.chunk_text?.trim();
-          if (!text || seenTexts.has(text)) continue;
-          seenTexts.add(text);
-          allChunks.push({
-            text,
-            score: parseFloat(row.similarity),
-            source: row.title || row.filename || "Unknown",
-          });
-        }
-      } catch (queryErr: any) {
-        console.warn(`[Research-RAG] Knowledge query failed: ${queryErr.message}`);
-      }
-    }
-
-    if (allChunks.length === 0) return "";
-
-    // Sort by relevance and take top chunks
-    allChunks.sort((a, b) => b.score - a.score);
-    const topChunks = allChunks.slice(0, 8);
-
-    let context = "## Relevant Knowledge Base Context\n";
-    context += "The following excerpts from the tenant's uploaded documents may be relevant:\n\n";
-    for (const chunk of topChunks) {
-      context += `**[${chunk.source}]** (relevance: ${(chunk.score * 100).toFixed(0)}%)\n`;
-      context += `${chunk.text.substring(0, 500)}\n\n`;
-    }
-
-    console.log(`[Research-RAG] Found ${topChunks.length} relevant knowledge chunks for topic: "${topic || "general"}"`);
-    return context;
-  } catch (err: any) {
-    console.warn(`[Research-RAG] Knowledge context fetch failed (non-fatal): ${err.message}`);
-    return "";
-  }
+  return sharedGetKnowledgeContext(tenantPool, tenantId, topic, options);
 }
 
 // ============================================================================

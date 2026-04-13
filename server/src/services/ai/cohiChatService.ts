@@ -17,7 +17,7 @@ import {
 } from "../metrics/metricsService.js";
 import { tenantDbManager } from "../../config/tenantDatabaseManager.js";
 import { decryptAPIKeys } from "../encryption.js";
-import { generateEmbeddings } from "../embeddingService.js";
+import { retrieveRAGContext, type RAGSource } from "./ragRetrieval.js";
 import { getPromptConfig, buildPrompt } from "../promptConfigService.js";
 import {
   getSchemaForTenant,
@@ -272,17 +272,31 @@ async function callOpenAI(
 // RAG Context Retrieval
 // ============================================================================
 
-interface RAGSource {
-  name: string;
-  url: string | null;
-  category: string | null;
-  isGlobal: boolean;
-}
-
 interface RAGContext {
   chunks: string[];
   sources: RAGSource[];
+  formatted: string;
   totalChunks: number;
+}
+
+/**
+ * Retrieve relevant RAG context for a chat question (tenant-scoped).
+ * Delegates to the shared ragRetrieval module. Requires tenantId to
+ * resolve the tenant pool from tenantDbManager.
+ */
+async function retrieveRAGContextForTenant(
+  tenantId: string,
+  question: string,
+  topK: number = 5,
+  threshold: number = 0.3
+): Promise<RAGContext> {
+  try {
+    const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+    return await retrieveRAGContext(question, tenantPool, { topK, threshold, caller: "CohiChat-RAG" });
+  } catch (error: any) {
+    console.error("[CohiChat RAG] Error retrieving context:", error.message);
+    return { chunks: [], sources: [], totalChunks: 0, formatted: "" };
+  }
 }
 
 /**
@@ -303,102 +317,6 @@ function formatSourcesWithLinks(sources: RAGSource[]): string {
       }
     })
     .join(", ");
-}
-
-/**
- * Retrieve relevant context from the knowledge base using RAG
- */
-async function retrieveRAGContext(
-  tenantId: string,
-  question: string,
-  topK: number = 5,
-  similarityThreshold: number = 0.3 // Lowered for better recall in hybrid mode
-): Promise<RAGContext> {
-  try {
-    const tenantPool = await tenantDbManager.getTenantPool(tenantId);
-
-    // Check if the rag_embeddings table exists
-    const tableCheck = await tenantPool.query(`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables 
-        WHERE table_schema = 'public' AND table_name = 'rag_embeddings'
-      )
-    `);
-
-    if (!tableCheck.rows[0].exists) {
-      console.log("[CohiChat RAG] rag_embeddings table does not exist");
-      return { chunks: [], sources: [], totalChunks: 0 };
-    }
-
-    // Generate embedding for the question
-    const embeddingResults = await generateEmbeddings(
-      [question],
-      "openai/text-embedding-3-large"
-    );
-
-    if (!embeddingResults || embeddingResults.length === 0) {
-      console.log("[CohiChat RAG] Failed to generate embedding for question");
-      return { chunks: [], sources: [], totalChunks: 0 };
-    }
-
-    const queryEmbedding = embeddingResults[0].embedding;
-    const embeddingVector = `[${queryEmbedding.join(",")}]`;
-
-    // Search for similar chunks
-    const results = await tenantPool.query(
-      `SELECT 
-        e.chunk_text,
-        d.filename,
-        d.title,
-        d.is_global,
-        d.category,
-        d.source_url,
-        1 - (e.embedding <=> $1::vector) as similarity
-       FROM rag_embeddings e
-       JOIN rag_documents d ON e.document_id = d.id
-       WHERE d.status = 'indexed'
-         AND 1 - (e.embedding <=> $1::vector) >= $2
-       ORDER BY e.embedding <=> $1::vector
-       LIMIT $3`,
-      [embeddingVector, similarityThreshold, topK]
-    );
-
-    if (results.rows.length > 0) {
-      console.log(
-        `[CohiChat RAG] Found ${results.rows.length} relevant chunks:`,
-        results.rows.slice(0, 3).map((r: any) => ({
-          title: r.title,
-          similarity: r.similarity?.toFixed(4),
-        }))
-      );
-    }
-
-    const chunks = results.rows.map((r: any) => r.chunk_text);
-
-    // Build structured sources with URLs (deduplicated)
-    const sourceMap = new Map<string, RAGSource>();
-    for (const r of results.rows) {
-      const docName = r.title || r.filename;
-      if (!sourceMap.has(docName)) {
-        sourceMap.set(docName, {
-          name: docName,
-          url: r.source_url || null,
-          category: r.category || null,
-          isGlobal: r.is_global || false,
-        });
-      }
-    }
-    const sources = Array.from(sourceMap.values());
-
-    return {
-      chunks,
-      sources,
-      totalChunks: chunks.length,
-    };
-  } catch (error: any) {
-    console.error("[CohiChat RAG] Error retrieving context:", error.message);
-    return { chunks: [], sources: [], totalChunks: 0 };
-  }
 }
 
 // ============================================================================
@@ -1074,7 +992,7 @@ async function gatherAllContext(
 
   // Run all context gathering in parallel
   const [ragContext, queryConfig] = await Promise.all([
-    retrieveRAGContext(context.tenantId, question, 5, 0.3),
+    retrieveRAGContextForTenant(context.tenantId, question, 5, 0.3),
     generateQuery(question, context, conversationHistory),
   ]);
 

@@ -37,6 +37,7 @@ import {
   insightLog, insightLogWarn, insightLogError,
   insightLogStart, insightLogEnd, getInsightLogPath,
 } from "./insightLogger.js";
+import { VIZ_STANDARDS_MEDIUM } from "../../config/visualizationStandards.js";
 
 // ============================================================================
 // Types
@@ -2627,7 +2628,7 @@ async function runAllEvidenceAgents(
 
   try {
     const config = await getPromptConfig("insights.evidence_agent");
-    systemPrompt = config.system_prompt;
+    systemPrompt = config.system_prompt + VIZ_STANDARDS_MEDIUM;
     model = config.model || model;
     temperature = config.temperature ?? temperature;
     maxTokens = config.max_tokens || maxTokens;

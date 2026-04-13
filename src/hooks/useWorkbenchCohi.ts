@@ -88,6 +88,8 @@ export interface UseWorkbenchCohiOptions {
   sourceInsight?: SourceInsightContext | null;
   /** ID of the widget the user is editing (from "Edit with Cohi") — marked as selected in snapshot */
   selectedWidgetId?: string | null;
+  /** Active agent persona ID — sent to backend for persona-scoped prompt and RAG */
+  persona?: string;
   onError?: (error: Error) => void;
   /** Called when the AI returns executable actions — auto-executes them on the canvas */
   onAutoExecuteActions?: (actions: WidgetAction[]) => void;
@@ -98,7 +100,7 @@ export interface UseWorkbenchCohiOptions {
 // ---------------------------------------------------------------------------
 
 export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
-  const { tenantId, canvasItems = [], widgetCatalog = '', canvasId, sourceInsight, selectedWidgetId, onError, onAutoExecuteActions } = options;
+  const { tenantId, canvasItems = [], widgetCatalog = '', canvasId, sourceInsight, selectedWidgetId, persona, onError, onAutoExecuteActions } = options;
 
   const [messages, setMessages] = useState<WorkbenchChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -343,6 +345,7 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
               widgetCatalog,
               conversationHistory: history,
               tenantId: effectiveTid,
+              ...(persona ? { persona } : {}),
             }),
           }
         );

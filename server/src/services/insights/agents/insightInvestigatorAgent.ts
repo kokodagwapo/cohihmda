@@ -22,6 +22,7 @@ import {
 } from "../../research/tools.js";
 import type { InvestigationQuestion } from "../../research/agents/plannerAgent.js";
 import type { EvidenceItem } from "../../research/agents/dataAnalystAgent.js";
+import { VIZ_STANDARDS_MEDIUM } from "../../../config/visualizationStandards.js";
 
 // ============================================================================
 // Types
@@ -238,7 +239,7 @@ export async function runInsightInvestigator(
   );
 
   const conversation: LLMMessage[] = [
-    { role: "system", content: INVESTIGATOR_PROMPT },
+    { role: "system", content: INVESTIGATOR_PROMPT + VIZ_STANDARDS_MEDIUM },
     { role: "user", content: userContentParts.join("\n") },
   ];
 

@@ -5,7 +5,8 @@
  * upload tenant-specific documents, and search the knowledge base.
  */
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
+import { api } from "@/lib/api";
 import {
   Search,
   FileText,
@@ -93,6 +94,17 @@ export function KnowledgeCenterSection() {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Platform-level categories from global knowledge catalog (includes empty categories as upload targets)
+  const [platformCategories, setPlatformCategories] = useState<string[]>([]);
+
+  // Merged upload category list: platform taxonomy (always shown) + any tenant-only categories not in the platform list
+  const uploadCategoryOptions = [
+    ...platformCategories,
+    ...categories
+      .map((c) => c.category)
+      .filter((c) => !platformCategories.includes(c)),
+  ];
+
   // Tab state
   const [activeTab, setActiveTab] = useState("documents");
 
@@ -120,6 +132,32 @@ export function KnowledgeCenterSection() {
   const [uploadTitle, setUploadTitle] = useState("");
   const [uploadCategory, setUploadCategory] = useState("General");
   const [isUploading, setIsUploading] = useState(false);
+
+  // Fetch platform-level category taxonomy from admin API on mount
+  useEffect(() => {
+    api
+      .request<{ categories: Array<{ name: string }> }>(
+        "/api/admin/global-knowledge/categories"
+      )
+      .then((res) => {
+        setPlatformCategories(res.categories.map((c) => c.name));
+      })
+      .catch(() => {
+        // Fallback to sensible defaults if admin endpoint unavailable
+        setPlatformCategories([
+          "General",
+          "Regulations",
+          "Guidelines",
+          "Compliance",
+          "Products",
+          "Training",
+          "Market Intel",
+          "Best Practices",
+          "Policy",
+          "Analytics",
+        ]);
+      });
+  }, []);
 
   // Handle file selection
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -581,11 +619,15 @@ export function KnowledgeCenterSection() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="General">General</SelectItem>
-                  <SelectItem value="Policy">Policy</SelectItem>
-                  <SelectItem value="Training">Training</SelectItem>
-                  <SelectItem value="Guidelines">Guidelines</SelectItem>
-                  <SelectItem value="Other">Other</SelectItem>
+                  {uploadCategoryOptions.length > 0 ? (
+                    uploadCategoryOptions.map((cat) => (
+                      <SelectItem key={cat} value={cat}>
+                        {cat}
+                      </SelectItem>
+                    ))
+                  ) : (
+                    <SelectItem value="General">General</SelectItem>
+                  )}
                 </SelectContent>
               </Select>
             </div>

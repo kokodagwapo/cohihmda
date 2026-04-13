@@ -122,7 +122,7 @@ import { ImageToDashboardDialog } from "@/components/workbench/ImageToDashboardD
 import { Camera } from "lucide-react";
 
 /** Set to true to hide Cohi chat/panel in workbench (panel + toggle + empty-state entry points). */
-const WORKBENCH_COHI_HIDDEN = true;
+const WORKBENCH_COHI_HIDDEN = false;
 
 /**
  * Helper: make an authenticated POST that returns a Blob (for PPTX/PDF downloads).
@@ -956,6 +956,13 @@ export function WorkbenchCanvas({
     }
     return false;
   });
+  const [activePersonaId, setActivePersonaId] = useState<string>(() => {
+    return localStorage.getItem("cohi-workbench-persona") || "mortgage-expert";
+  });
+  const handlePersonaChange = useCallback((personaId: string) => {
+    setActivePersonaId(personaId);
+    localStorage.setItem("cohi-workbench-persona", personaId);
+  }, []);
   const [imageToDashboardOpen, setImageToDashboardOpen] = useState(false);
   const [aiBackgroundLoading, setAiBackgroundLoading] = useState(false);
   const [aiBackgroundResult, setAiBackgroundResult] = useState<{
@@ -1195,6 +1202,7 @@ export function WorkbenchCanvas({
     canvasId,
     sourceInsight,
     selectedWidgetId: editingWidgetId,
+    persona: activePersonaId,
     onAutoExecuteActions: useCallback(
       (actions: WidgetAction[]) => {
         // Batch-execute all canvas actions to avoid stale-state issues
@@ -5388,6 +5396,8 @@ Structure it as a narrative-first executive briefing:
             onSendMessage={cohiSendMessage}
             onClearMessages={cohiClearMessages}
             onExecuteAction={handleCohiAction}
+            activePersonaId={activePersonaId}
+            onPersonaChange={handlePersonaChange}
           />
         )}
 

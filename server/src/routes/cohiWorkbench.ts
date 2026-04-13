@@ -41,6 +41,8 @@ import { decryptAPIKeys } from "../services/encryption.js";
 import { tenantDbManager } from "../config/tenantDatabaseManager.js";
 import { loadSession as loadResearchSession } from "../services/research/orchestrator.js";
 import { callLLM, type LLMMessage } from "../services/research/tools.js";
+import { AGENT_PERSONAS, DEFAULT_PERSONA_ID, type AgentPersonaId } from "../config/agentPersonas.js";
+import { retrieveRAGContext } from "../services/ai/ragRetrieval.js";
 
 const router = Router();
 
@@ -761,8 +763,25 @@ When replacing a catalog widget with a SQL-backed widget, use the tenant schema 
 `;
 
 // ============================================================================
-// Route
+// Routes
 // ============================================================================
+
+/**
+ * GET /api/cohi-chat/workbench/personas
+ * Returns the available agent personas for the workbench panel UI.
+ */
+router.get("/personas", authenticateToken, (_req, res) => {
+  res.json({
+    personas: Object.values(AGENT_PERSONAS).map((p) => ({
+      id: p.id,
+      name: p.name,
+      description: p.description,
+      icon: p.icon,
+      suggestedQuestions: p.suggestedQuestions,
+    })),
+    defaultPersonaId: DEFAULT_PERSONA_ID,
+  });
+});
 
 router.post(
   "/",
@@ -776,13 +795,21 @@ router.post(
         canvasState,
         widgetCatalog,
         conversationHistory,
+        persona: personaId,
       } = req.body as {
         question: string;
         canvasState?: CanvasStateSnapshot;
         widgetCatalog?: string;
         conversationHistory?: { role: string; content: string }[];
         tenantId?: string;
+        persona?: AgentPersonaId;
       };
+
+      // Resolve active persona — falls back to default if not supplied or unrecognized
+      const activePersona =
+        personaId && AGENT_PERSONAS[personaId]
+          ? AGENT_PERSONAS[personaId]
+          : AGENT_PERSONAS[DEFAULT_PERSONA_ID];
 
       if (!question || typeof question !== "string") {
         return res.status(400).json({ error: "Question is required" });
@@ -824,6 +851,38 @@ router.post(
         console.warn("[CohiWorkbench] Could not load research context:", err);
       }
 
+      // Load persona prompt supplement from config (or fall back to inline definition)
+      let personaSupplement = activePersona
+        ? `\n\n## Active Agent Persona: ${activePersona.name}\n${activePersona.description}`
+        : "";
+      try {
+        if (activePersona) {
+          const personaConfig = await getPromptConfig(activePersona.promptConfigId);
+          personaSupplement = `\n\n${personaConfig.system_prompt}`;
+        }
+      } catch {
+        // Use the short fallback above — persona config not yet in DB is fine
+      }
+
+      // Fetch persona-scoped RAG context from the knowledge base
+      let knowledgeContext = "";
+      if (tenantId && activePersona) {
+        try {
+          const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+          const ragResult = await retrieveRAGContext(question, tenantPool, {
+            categories: activePersona.knowledgeCategories,
+            topK: 5,
+            threshold: 0.3,
+            caller: `CohiWorkbench-${activePersona.id}`,
+          });
+          if (ragResult.totalChunks > 0) {
+            knowledgeContext = `\n\n${ragResult.formatted}`;
+          }
+        } catch (err) {
+          console.warn("[CohiWorkbench] Could not load knowledge context:", err);
+        }
+      }
+
       // Build full system prompt
       const now = new Date();
       const systemPrompt = WORKBENCH_SYSTEM_PROMPT.replace(
@@ -838,7 +897,10 @@ router.post(
             .map(([src, hint]) => `- ${src}: ${hint}`)
             .join("\n") || "Use the schema context above and the widget's data source (e.g. company-scorecard, sales-scorecard) to write equivalent SQL."
         )
-        .replace("{{CANVAS_STATE}}", canvasContext + researchContext);
+        .replace(
+          "{{CANVAS_STATE}}",
+          canvasContext + researchContext + personaSupplement + knowledgeContext
+        );
 
       // Build message history
       const history: LLMMessage[] = (conversationHistory || [])

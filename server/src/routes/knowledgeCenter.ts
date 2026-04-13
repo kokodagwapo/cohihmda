@@ -498,11 +498,15 @@ router.post(
         return res.status(400).json({ error: "Tenant context required" });
       }
 
-      const { query, top_k = 10, threshold = 0.7 } = req.body;
+      const { query, top_k = 10, threshold = 0.7, categories } = req.body;
 
       if (!query || typeof query !== "string") {
         return res.status(400).json({ error: "Query is required" });
       }
+
+      // Optional category filter — accepts an array of category names
+      const categoryList: string[] | null =
+        Array.isArray(categories) && categories.length > 0 ? categories : null;
 
       // Generate embedding for query
       const embeddingResults = await generateEmbeddings(
@@ -510,6 +514,17 @@ router.post(
         "openai/text-embedding-3-large"
       );
       const queryEmbedding = embeddingResults[0].embedding;
+
+      // Build query with optional category filter
+      const queryParams: (string | number | string[])[] = [
+        embeddingToVector(queryEmbedding),
+        threshold,
+        top_k,
+      ];
+      const categoryClause = categoryList
+        ? `AND d.category = ANY($4::text[])`
+        : "";
+      if (categoryList) queryParams.push(categoryList);
 
       // Search using cosine similarity
       const results = await tenantPool.query(
@@ -527,9 +542,10 @@ router.post(
        JOIN rag_documents d ON e.document_id = d.id
        WHERE d.status = 'indexed'
          AND 1 - (e.embedding <=> $1::vector) >= $2
+         ${categoryClause}
        ORDER BY e.embedding <=> $1::vector
        LIMIT $3`,
-        [embeddingToVector(queryEmbedding), threshold, top_k]
+        queryParams
       );
 
       res.json({
