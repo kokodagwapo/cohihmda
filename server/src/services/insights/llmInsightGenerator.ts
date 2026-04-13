@@ -1019,6 +1019,9 @@ function buildFieldPopulationWarnings(metrics: InsightMetricsPayload): string {
     processor: "Processor",
     conditional_approval_date: "Conditional Approval Date",
     uw_approval_date: "UW Approval Date",
+    uw_denied_date: "UW Denied Date",
+    denial_date: "Denial Date",
+    current_status_date: "Current Status Date",
   };
 
   for (const [field, pct] of Object.entries(fp)) {
@@ -1042,7 +1045,8 @@ CRITICAL RULES for low-population fields:
 - DO NOT generate insights about CTC, closing risk, or lock expiration if ctc_date is below ${WARN_THRESHOLD}% populated — the data is unreliable.
 - DO NOT generate insights about TRID compliance if cd_sent_date is below ${WARN_THRESHOLD}% populated.
 - If a field is below ${WARN_THRESHOLD}%, it likely means this lender does not track that milestone. Insights referencing it are MISLEADING.
-- You MAY generate ONE data-quality insight noting the low population itself (e.g., "CTC date only tracked for 22% of loans — closing risk monitoring is incomplete").`;
+- You MAY generate ONE data-quality insight noting the low population itself (e.g., "CTC date only tracked for 22% of loans — closing risk monitoring is incomplete").
+- DO NOT report missing uw_denied_date or denial_date as a data quality problem. Many lenders do not export these fields. The platform uses COALESCE(uw_denied_date, denial_date, current_status_date) as the effective denied date. Use current_status_date as the fallback when the specific denial date columns are NULL.`;
 }
 
 function buildVolumeTrendsSections(metrics: InsightMetricsPayload, _channelGroup?: string): string {
@@ -2696,6 +2700,7 @@ async function runAllEvidenceAgents(
     ``,
     `DENIED loans only:`,
     `  WHERE (current_loan_status ILIKE '%denied%' OR current_loan_status ILIKE '%declined%')`,
+    `  Effective denial date: COALESCE(uw_denied_date, denial_date, current_status_date) — many lenders do not export uw_denied_date; this is normal, not a data issue.`,
     ``,
     `PULL-THROUGH RATE = funded / completed * 100 (application-cohort, scoped by application_date)`,
     `FALLOUT RATE = (completed - funded) / completed * 100 = 100 - pull_through_rate`,

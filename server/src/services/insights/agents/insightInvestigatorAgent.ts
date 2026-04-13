@@ -121,6 +121,7 @@ RULES:
 - PostgreSQL: DATE - DATE = integer days. Use ::date cast for date subtraction.
 - Limit to 100 rows max
 - Use COALESCE / NULLIF for NULL handling
+- STATUS DATE FALLBACK: When querying denied-loan dates, use COALESCE(uw_denied_date, denial_date, current_status_date) as the effective denial date. Many lenders do not export uw_denied_date or denial_date — this is normal, not a data quality issue. Similarly for withdrawn loans use COALESCE(withdrawal_date, current_status_date).
 - 3-4 queries is usually appropriate. Use up to 5 for complex investigations.
 - When action is "query", include columnFormats mapping each SELECT alias to its display format: "number" (counts/integers), "currency" (dollar amounts), "percent" (rates/percentages), "days" (day counts), "date" (calendar dates), or "text" (labels/names).
 - CONVERSION METRIC TIME WINDOWS: Pull-through and fallout rates only make sense on cohorts where most loans have had time to complete. Mortgage cycle times are 30-60+ days. For short windows (30D), caveat results with cycle time context. Prefer 90D or YTD cohorts for conversion metrics.
