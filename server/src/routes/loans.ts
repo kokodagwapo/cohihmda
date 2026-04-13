@@ -6902,7 +6902,7 @@ router.post(
             predictedOriginate: 0,
           },
           metadata: {
-            model: process.env.PREDICTION_MODEL || "gpt-4o",
+            model: process.env.PREDICTION_MODEL || "gpt-5.4",
             timestamp: new Date().toISOString(),
             processingTimeMs: 0,
           },
@@ -7672,7 +7672,7 @@ Example: ["Recommendation 1", "Recommendation 2", "Recommendation 3"]`;
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "gpt-4o-mini",
+      model: process.env.NEWS_MODEL || "gpt-5.4-nano",
       messages: [
         {
           role: "system",

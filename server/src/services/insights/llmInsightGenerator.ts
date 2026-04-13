@@ -1146,7 +1146,7 @@ async function callOpenAI(
   } = {}
 ): Promise<string> {
   const {
-    model = "gpt-5.2",
+    model = process.env.INSIGHTS_MODEL || "gpt-5.4",
     temperature = 0.5,
     maxTokens = 4500,
     tenantPool,
@@ -2622,7 +2622,7 @@ async function runAllEvidenceAgents(
 
   // Load prompt config once
   let systemPrompt = "";
-  let model = "gpt-5.2";
+  let model = process.env.INSIGHTS_MODEL || "gpt-5.4";
   let temperature = 0.1;
   let maxTokens = 4000;
 
@@ -3171,7 +3171,7 @@ export async function generateCategorizedInsights(
   // ── Pass 1: Generator ──
   const pass1Start = Date.now();
   let generatorSystem: string;
-  let generatorModel = "gpt-5.2";
+  let generatorModel = process.env.INSIGHTS_MODEL || "gpt-5.4";
   let generatorTemp = 0.7;
   let generatorMaxTokens = 8000;
 
@@ -3337,7 +3337,7 @@ export async function generateCategorizedInsights(
   // ── Pass 2b: Judge LLM ──
   const pass2bStart = Date.now();
   let judgeSystem: string;
-  let judgeModel = "gpt-5.2";
+  let judgeModel = process.env.INSIGHTS_MODEL || "gpt-5.4";
   let judgeTemp = 0.1;
   let judgeMaxTokens = 4000;
 
@@ -3437,7 +3437,7 @@ export async function generateCategorizedInsights(
   // ── Pass 3: Curator ──
   const pass3Start = Date.now();
   let curatorSystem: string;
-  let curatorModel = "gpt-5.2";
+  let curatorModel = process.env.INSIGHTS_MODEL || "gpt-5.4";
   let curatorTemp = 0.2;
   let curatorMaxTokens = 6000;
 

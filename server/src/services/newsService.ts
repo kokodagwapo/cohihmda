@@ -1086,7 +1086,7 @@ async function rankHeadlinesForExecutives(results: NewsSource[]): Promise<void> 
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
+        model: process.env.NEWS_MODEL || "gpt-5.4-nano",
         temperature: 0.2,
         max_tokens: 600,
         response_format: { type: "json_object" },
@@ -1585,7 +1585,7 @@ Provide 3 specific, actionable insights based on this article. If client data is
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
+        model: process.env.NEWS_MODEL || "gpt-5.4-nano",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },

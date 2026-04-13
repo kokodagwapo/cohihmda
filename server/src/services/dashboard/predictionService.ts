@@ -97,11 +97,11 @@ export interface PredictionResponse {
 }
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const PREDICTION_MODEL = process.env.PREDICTION_MODEL || 'gpt-5-mini';
+const PREDICTION_MODEL = process.env.PREDICTION_MODEL || 'gpt-5.4-mini';
 
 // Pricing (USD per 1M tokens) for cost logging — matches by model name prefix for snapshots (e.g. gpt-5-mini-2025-08-07)
 function getModelPricing(model: string): { input: number; output: number } {
-  if (model.includes('gpt-5-mini')) return { input: 0.25, output: 2.00 };
+  if (model.includes('gpt-5.4-mini') || model.includes('gpt-5-mini')) return { input: 0.25, output: 2.00 };
   if (model.includes('o4-mini')) return { input: 1.10, output: 4.40 };
   return { input: 0.25, output: 2.00 }; // default to gpt-5-mini pricing
 }
