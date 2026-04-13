@@ -505,6 +505,9 @@ function findFinalSelectOffset(sql: string): number {
  * If no WHERE exists, inserts one before GROUP BY / ORDER BY / LIMIT.
  */
 function injectConditionIntoBody(body: string, condition: string): string {
+  // Strip trailing semicolons so injected AND conditions don't land after ';'
+  body = body.trimEnd().replace(/;+\s*$/, '').trimEnd();
+
   const whereRegex = /\bWHERE\b/gi;
   let lastWhereIdx = -1;
   let m: RegExpExecArray | null;
@@ -567,7 +570,9 @@ router.post('/execute-sql', authenticateToken, attachTenantContext, async (req: 
       }
     }
 
-    let effectiveSql = sql;
+    // Strip trailing semicolons — they cause "syntax error at or near AND" when
+    // filter conditions are appended after the statement terminator.
+    let effectiveSql = sql.trimEnd().replace(/;+\s*$/, '').trimEnd();
     const queryParams: any[] = [];
     let paramIdx = 1;
 

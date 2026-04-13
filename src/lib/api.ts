@@ -654,7 +654,11 @@ export class ApiClient {
           this.forceLogoutAndRedirect();
         }
 
-        throw new Error(errorData.error || "Request failed");
+        throw new Error(
+          errorData.message
+            ? `${errorData.error || "Request failed"}: ${errorData.message}`
+            : errorData.error || "Request failed"
+        );
       }
 
       // Handle empty responses for successful requests

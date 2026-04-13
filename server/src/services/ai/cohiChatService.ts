@@ -553,6 +553,9 @@ function sanitizeGeneratedSQL(sql: string): string {
   sanitized = sanitized.replace(/::float\b/gi, "::numeric");
   sanitized = sanitized.replace(/::double precision\b/gi, "::numeric");
   sanitized = sanitized.replace(/\s{2,}/g, " ");
+  // Strip trailing semicolons — they cause "syntax error at or near AND" when
+  // conditions are injected after them by the execute-sql filter pipeline.
+  sanitized = sanitized.trimEnd().replace(/;+\s*$/, '');
   return sanitized.trim();
 }
 

@@ -618,17 +618,25 @@ The CURRENT CANVAS STATE section below includes LIVE DATA VALUES — actual numb
 - Always be concise but informative in your "message"
 - If you're unsure what the user wants, ask a clarifying question in "message" with no actions
 
+## Data Freshness (CRITICAL — READ FIRST)
+**The tenant's data is available through {{DATA_MAX_DATE}}. This is NOT today's date.**
+- ALWAYS use '{{DATA_MAX_DATE}}'::date as the reference date for "current", "MTD", "today", and recency calculations — **NEVER use CURRENT_DATE or NOW()** because the data does not extend to today and those queries will return zero rows.
+- For "month-to-date" → WHERE funding_date >= DATE_TRUNC('month', '{{DATA_MAX_DATE}}'::date) AND funding_date <= '{{DATA_MAX_DATE}}'::date
+- For "last 90 days" → WHERE date_col >= '{{DATA_MAX_DATE}}'::date - INTERVAL '90 days' AND date_col <= '{{DATA_MAX_DATE}}'::date
+- For "YTD" → WHERE date_col >= DATE_TRUNC('year', '{{DATA_MAX_DATE}}'::date) AND date_col <= '{{DATA_MAX_DATE}}'::date
+- For "last month" (the most recently completed month) → DATE_TRUNC('month', '{{DATA_MAX_DATE}}'::date - INTERVAL '1 month') to DATE_TRUNC('month', '{{DATA_MAX_DATE}}'::date) - INTERVAL '1 day'
+
 ## Time Scoping (CRITICAL)
-**RULE 1 — Respect explicit time ranges:** When the user specifies an exact time range (e.g. "last 12 months", "last 6 months", "Q3 2025", "trailing 12"), use EXACTLY that range. Convert to concrete dates:
-- "last 12 months" → CURRENT_DATE - INTERVAL '12 months' to CURRENT_DATE
-- "last 6 months" → CURRENT_DATE - INTERVAL '6 months' to CURRENT_DATE
-- "last 3 months" → CURRENT_DATE - INTERVAL '3 months' to CURRENT_DATE
-- "YTD" / "this year" → January 1 of current year to CURRENT_DATE
-- "last year" → January 1 to December 31 of prior year
+**RULE 1 — Respect explicit time ranges:** When the user specifies an exact time range (e.g. "last 12 months", "last 6 months", "Q3 2025", "trailing 12"), use EXACTLY that range. Anchor all relative ranges to '{{DATA_MAX_DATE}}'::date (NOT CURRENT_DATE):
+- "last 12 months" → '{{DATA_MAX_DATE}}'::date - INTERVAL '12 months' to '{{DATA_MAX_DATE}}'::date
+- "last 6 months" → '{{DATA_MAX_DATE}}'::date - INTERVAL '6 months' to '{{DATA_MAX_DATE}}'::date
+- "last 3 months" → '{{DATA_MAX_DATE}}'::date - INTERVAL '3 months' to '{{DATA_MAX_DATE}}'::date
+- "YTD" / "this year" → January 1 of {{DATA_MAX_DATE_YEAR}} to '{{DATA_MAX_DATE}}'::date
+- "last year" → January 1 to December 31 of the prior year
 - NEVER override an explicit user-specified time range with a default.
 
-**RULE 2 — Default for ambiguous questions:** Only when the user does NOT specify a time range, default to a recent window:
-- "What's important?" / "How are we doing?" → Last 90 days
+**RULE 2 — Default for ambiguous questions:** Only when the user does NOT specify a time range, default to a recent window anchored to '{{DATA_MAX_DATE}}'::date:
+- "What's important?" / "How are we doing?" → Last 90 days before '{{DATA_MAX_DATE}}'::date
 - "Performance update" / "Show me key metrics" → Last 90 days vs. prior 90 days
 - "Top performers" / "Leaderboard" → Last 90 days of recent activity
 - "Any issues?" → Current pipeline only (active loans)
@@ -663,12 +671,13 @@ When computing metrics like Revenue, Pull-Through Rate, Volume, Fallout, Cycle T
 9. Use COALESCE for null handling when needed
 10. WHERE clause rules (CRITICAL — violations cause PostgreSQL errors):
     - NEVER write "WHERE TRUE" — it evaluates to a boolean, not a date, so "WHERE TRUE - INTERVAL '1 month'" is a type error
+    - NEVER use CURRENT_DATE or NOW() — the data does not extend to today. Always anchor to '{{DATA_MAX_DATE}}'::date.
     - ALWAYS write concrete date conditions:
-      GOOD: WHERE l.application_date >= CURRENT_DATE - INTERVAL '1 month'
+      GOOD: WHERE l.application_date >= '{{DATA_MAX_DATE}}'::date - INTERVAL '1 month'
       GOOD: WHERE l.application_date >= '2026-01-01'::date
+      BAD:  WHERE l.application_date >= CURRENT_DATE - INTERVAL '1 month'  ← returns 0 rows
       BAD:  WHERE TRUE AND l.application_date >= CURRENT_DATE - INTERVAL '1 month'
       BAD:  WHERE TRUE - INTERVAL '1 month'
-    - Use CURRENT_DATE (not NOW()) for date comparisons: l.application_date >= CURRENT_DATE - INTERVAL '90 days'
     - Always prefix column names with the table alias: l.application_date, l.funding_date, l.loan_amount
 
 ## Chart Data Rules for create_widget
@@ -825,14 +834,32 @@ router.post(
 
       // Inject verified metrics SQL so Cohi uses the same formulas as insights
       let verifiedMetricsBlock = "";
+      let dataMaxDate = ""; // latest date in the tenant's data
       if (tenantId) {
         try {
           const tenantPool = await tenantDbManager.getTenantPool(tenantId);
           const revenueExpr = await getTenantRevenueExpression(tenantPool);
           verifiedMetricsBlock = "\n\n" + getVerifiedMetricsSQL(revenueExpr);
+
+          // Query the most recent date in the data so the LLM anchors time ranges correctly
+          const dateResult = await tenantPool.query<{ max_date: Date | null }>(
+            `SELECT GREATEST(
+               MAX(funding_date),
+               MAX(application_date),
+               MAX(started_date)
+             ) AS max_date FROM public.loans`
+          );
+          const raw = dateResult.rows[0]?.max_date;
+          if (raw) {
+            dataMaxDate = new Date(raw).toISOString().split("T")[0];
+          }
         } catch (err) {
-          console.warn("[CohiWorkbench] Could not load verified metrics SQL:", err);
+          console.warn("[CohiWorkbench] Could not load verified metrics SQL or data max date:", err);
         }
+      }
+      // Fall back to a reasonable recent default if query failed
+      if (!dataMaxDate) {
+        dataMaxDate = new Date().toISOString().split("T")[0];
       }
 
       // Build canvas context
@@ -885,10 +912,13 @@ router.post(
 
       // Build full system prompt
       const now = new Date();
+      const dataMaxYear = dataMaxDate.split("-")[0];
       const systemPrompt = WORKBENCH_SYSTEM_PROMPT.replace(
         "{{currentDate}}",
         now.toISOString().split("T")[0]
       )
+        .replaceAll("{{DATA_MAX_DATE}}", dataMaxDate)
+        .replaceAll("{{DATA_MAX_DATE_YEAR}}", dataMaxYear)
         .replace("{{SCHEMA_CONTEXT}}", schemaContext + verifiedMetricsBlock)
         .replace("{{WIDGET_CATALOG}}", widgetCatalog || "No widget catalog provided.")
         .replace(
