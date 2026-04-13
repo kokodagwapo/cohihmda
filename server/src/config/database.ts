@@ -1565,7 +1565,7 @@ async function runMigrations() {
           enable_reranking BOOLEAN DEFAULT false,
           reranking_model TEXT,
           context_window INTEGER DEFAULT 8000,
-          chat_model TEXT DEFAULT 'gpt-4o-mini',
+          chat_model TEXT DEFAULT 'gpt-5.4-mini',
           voice_model TEXT DEFAULT 'gpt-4o-mini',
           temperature NUMERIC DEFAULT 0.7,
           custom_system_prompt TEXT,

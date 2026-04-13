@@ -23,7 +23,7 @@ const router = Router();
 
 const TTS_MODEL = "gpt-4o-mini-tts";
 const TTS_VOICE = "cedar";
-const CHAT_MODEL = "gpt-4o";
+const CHAT_MODEL = process.env.PODCAST_MODEL || "gpt-5.4";
 const GEMINI_DEFAULT_MODEL = "models/gemini-2.5-flash-native-audio-latest";
 const GEMINI_DEFAULT_VOICE = "Aoede";
 const GEMINI_VALID_VOICES = new Set([

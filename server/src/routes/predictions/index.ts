@@ -1457,7 +1457,7 @@ For each recommendation:
 
 Return ONLY a JSON array of strings. Each string is one complete recommendation (2–4 sentences).`;
 
-  const model = process.env.RECOMMENDATION_MODEL || "gpt-4o";
+  const model = process.env.RECOMMENDATION_MODEL || "gpt-5.4";
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",

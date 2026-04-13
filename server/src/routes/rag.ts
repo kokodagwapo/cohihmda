@@ -81,7 +81,7 @@ async function createRagSettingsTable(tenantPool: pg.Pool): Promise<void> {
       reranking_model TEXT,
       context_window INTEGER DEFAULT 8000,
       -- Chat model configuration
-      chat_model TEXT DEFAULT 'gpt-4o-mini',
+      chat_model TEXT DEFAULT 'gpt-5.4-mini',
       temperature NUMERIC DEFAULT 0.7,
       custom_system_prompt TEXT,
       -- PII/Privacy settings
@@ -266,7 +266,7 @@ router.get("/settings", authenticateToken, async (req: AuthRequest, res) => {
         settings: {
           // Return default values so the UI can display them
           embedding_model: "text-embedding-3-small",
-          chat_model: "gpt-4o-mini",
+          chat_model: "gpt-5.4-mini",
           temperature: 0.7,
           chunk_size: 1000,
           chunk_overlap: 200,

@@ -232,7 +232,7 @@ export async function callLLM(
   options: LLMOptions = {}
 ): Promise<string> {
   const {
-    model = "gpt-5.2",
+    model = process.env.RESEARCH_MODEL || "gpt-5.4",
     temperature = 0.4,
     maxTokens = 4000,
     jsonMode = false,

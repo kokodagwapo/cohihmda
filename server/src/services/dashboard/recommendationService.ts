@@ -44,7 +44,7 @@ export interface RecommendationResponse {
 }
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const RECOMMENDATION_MODEL = process.env.RECOMMENDATION_MODEL || process.env.PREDICTION_MODEL || 'gpt-4o';
+const RECOMMENDATION_MODEL = process.env.RECOMMENDATION_MODEL || process.env.PREDICTION_MODEL || 'gpt-5.4';
 
 /**
  * Get the default recommendations prompt

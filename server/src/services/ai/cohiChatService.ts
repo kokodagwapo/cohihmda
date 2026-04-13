@@ -236,7 +236,7 @@ async function callOpenAI(
   options: { temperature?: number; maxTokens?: number; jsonMode?: boolean } = {}
 ): Promise<string> {
   const body: any = {
-    model: "gpt-4o",
+    model: process.env.COHI_CHAT_MODEL || "gpt-5.4",
     messages,
     temperature: options.temperature ?? 0.3,
     max_tokens: options.maxTokens ?? 2000,
