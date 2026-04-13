@@ -158,13 +158,17 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
         const conv = response.conversations?.[0];
         if (conv && conv.messages.length > 0) {
           setConversationId(conv.id);
-          setMessages(
-            conv.messages.map((m: any) => ({
-              ...m,
-              timestamp: new Date(m.timestamp),
-            }))
-          );
-          messageIdCounter.current = conv.messages.length;
+          const loadedMessages = conv.messages.map((m: any) => ({
+            ...m,
+            timestamp: new Date(m.timestamp),
+          }));
+          setMessages(loadedMessages);
+          // Set counter to the max numeric ID seen so new messages never collide
+          const maxId = loadedMessages.reduce((max: number, m: WorkbenchChatMessage) => {
+            const num = parseInt(String(m.id ?? '').replace('wb-msg-', ''), 10);
+            return isNaN(num) ? max : Math.max(max, num);
+          }, 0);
+          messageIdCounter.current = maxId;
         }
       } catch {
         // Silently fail – conversation persistence is optional

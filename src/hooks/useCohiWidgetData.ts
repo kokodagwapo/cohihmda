@@ -128,6 +128,9 @@ export function useCohiWidgetData(
         if (cancelled) return;
 
         if (response.error) {
+          if (response.message) {
+            console.error('[CohiWidget SQL Error]', response.message);
+          }
           setError(response.error);
           setData(null);
         } else {
