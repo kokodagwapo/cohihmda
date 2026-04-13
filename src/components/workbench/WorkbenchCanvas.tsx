@@ -3351,279 +3351,8 @@ export function WorkbenchCanvas({
     [toast],
   );
 
-  // ---- Report Generation: Quick Report from Canvas ----
-  const handleQuickReport = useCallback(
-    async (format: "pptx" | "pdf" = "pptx") => {
-      const snapshot = useCanvasDataStore.getState().getSnapshot();
-      if (!snapshot.length && !items.length) {
-        toast({
-          title: "Nothing to report",
-          description: "Add widgets to the canvas first.",
-          variant: "destructive",
-        });
-        return;
-      }
-      toast({
-        title: "Generating report...",
-        description: "Building multi-slide presentation from canvas data.",
-      });
-      try {
-        // Build a lookup from itemId → layout item so we can attach position + widgetType
-        const layoutById = new Map(items.map((it) => [it.i, it]));
-
-        const sectionState = useWidgetSectionStore.getState().sections;
-        const widgetData = snapshot.map((w) => {
-          let layoutItem = layoutById.get(w.itemId);
-          const groupId = w.itemId.includes('__') ? w.itemId.split('__')[0] : w.itemId;
-          if (!layoutItem && w.itemId.includes('__')) {
-            layoutItem = layoutById.get(groupId);
-          }
-          const periodLabel = derivePeriodLabel(sectionState[groupId]);
-          const wData = w.data;
-          const enrichedData =
-            periodLabel && typeof wData === 'object' && wData !== null && !(wData as any)._periodLabel
-              ? { ...(wData as any), _periodLabel: periodLabel }
-              : wData;
-          return {
-            itemId: w.itemId,
-            widgetName: w.widgetName,
-            category: w.category,
-            data: enrichedData,
-            widgetType: layoutItem?.type ?? (w.data as any)?.widgetType,
-            layoutPosition: layoutItem
-              ? {
-                  x: layoutItem.x,
-                  y: layoutItem.y,
-                  w: layoutItem.w,
-                  h: layoutItem.h,
-                }
-              : undefined,
-          };
-        });
-
-        // Also include canvas items that are not yet in the store (e.g. widget_group containers)
-        // by synthesising an entry for any layout item with no matching snapshot entry
-        const snapshotIds = new Set(snapshot.map((w) => w.itemId));
-        for (const it of items) {
-          if (!snapshotIds.has(it.i)) {
-            // Provide a minimal stub so the server can at least order the slide correctly
-            widgetData.push({
-              itemId: it.i,
-              widgetName:
-                (it.payload as any).title ||
-                (it.payload as any).label ||
-                it.type,
-              category: "other",
-              data: { widgetType: it.type, ...(it.payload as any) },
-              widgetType: it.type,
-              layoutPosition: { x: it.x, y: it.y, w: it.w, h: it.h },
-            });
-          }
-        }
-
-        const tenantParam = tenantId ? `?tenant_id=${tenantId}` : "";
-        const blob = await fetchBlob(
-          `/api/workbench/reports/from-canvas${tenantParam}`,
-          {
-            widgetData,
-            format,
-            options: { title: saveTitle || "Canvas Report" },
-          },
-        );
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${(saveTitle || "canvas_report").replace(/[^a-z0-9]/gi, "_")}.${format}`;
-        a.click();
-        URL.revokeObjectURL(url);
-        toast({
-          title: "Report downloaded",
-          description: `Report saved as ${format.toUpperCase()}.`,
-        });
-      } catch (err: any) {
-        console.error("[QuickReport] Error:", err);
-        toast({
-          title: "Report generation failed",
-          description:
-            err.response?.data?.error ||
-            err.message ||
-            "Could not generate report.",
-          variant: "destructive",
-        });
-      }
-    },
-    [items, saveTitle, tenantId, toast],
-  );
-
-  // ---- AI-Enhanced Report from Canvas ----
-  const [isGeneratingAiReport, setIsGeneratingAiReport] = useState(false);
-  const handleAiReport = useCallback(
-    async (format: "pptx" | "pdf" = "pptx") => {
-      const snapshot = useCanvasDataStore.getState().getSnapshot();
-      if (!snapshot.length && !items.length) {
-        toast({
-          title: "Nothing to report",
-          description: "Add widgets to the canvas first.",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      setIsGeneratingAiReport(true);
-      toast({
-        title: "Preparing your executive briefing...",
-        description:
-          "Cohi is analyzing your data and writing a board-ready presentation.",
-      });
-
-      try {
-        // Build canvas state snapshot (mirrors the logic from useWorkbenchCohi)
-        const sectionState = (
-          await import("@/stores/widgetSectionStore")
-        ).useWidgetSectionStore.getState().sections;
-        const groups: any[] = [];
-        const standaloneWidgets: any[] = [];
-
-        for (const item of items) {
-          if (item.payload.type === "widget_group") {
-            const sectionFilters = sectionState[item.payload.groupId];
-            groups.push({
-              groupId: item.payload.groupId,
-              title: item.payload.title,
-              sectionType: item.payload.sectionType,
-              widgetIds: item.payload.widgetIds,
-              filters: sectionFilters
-                ? {
-                    dateRange:
-                      sectionFilters.periodSelection?.preset ||
-                      (sectionFilters.dateRange
-                        ? `${sectionFilters.dateRange.start} to ${sectionFilters.dateRange.end}`
-                        : `${sectionFilters.year}`),
-                    dateField: sectionFilters.dateField || undefined,
-                    branch:
-                      sectionFilters.branch !== "all"
-                        ? sectionFilters.branch
-                        : undefined,
-                    loanOfficer:
-                      sectionFilters.loanOfficer !== "all"
-                        ? sectionFilters.loanOfficer
-                        : undefined,
-                  }
-                : undefined,
-            });
-          } else {
-            standaloneWidgets.push({
-              id: item.i,
-              type: item.payload.type,
-              title:
-                "title" in item.payload
-                  ? (item.payload as any).title
-                  : undefined,
-            });
-          }
-        }
-
-        const widgetData = snapshot.map((entry) => ({
-          itemId: entry.itemId,
-          widgetName: entry.widgetName,
-          category: entry.category,
-          data: entry.data,
-        }));
-
-        const canvasState = {
-          groups,
-          standaloneWidgets,
-          totalItems: items.length,
-          widgetData: widgetData.length > 0 ? widgetData : undefined,
-        };
-
-        // Call the Cohi workbench API directly with a report-generation prompt
-        const tenantParam = tenantId ? `?tenant_id=${tenantId}` : "";
-        const aiResponse = await api.request<{
-          message?: string;
-          actions?: Array<{
-            type: string;
-            reportDefinition?: any;
-            format?: string;
-          }>;
-        }>(`/api/cohi-chat/workbench${tenantParam}`, {
-          method: "POST",
-          body: JSON.stringify({
-            question: `Prepare a board-ready executive presentation from everything on this canvas. Use ALL the live data currently visible — KPI values, charts, tables — and embed the actual numbers into the report.
-
-Structure it as a narrative-first executive briefing:
-- Slide 1: Title slide with "${saveTitle || "Executive Performance Summary"}" and today's date
-- Slide 2: Executive Summary — write a full 3-5 sentence narrative paragraph summarizing what happened, why it matters, and what requires attention. Include 4-6 top KPIs.
-- Slides 3-N: One topic per slide, each LEADING with a narrative paragraph explaining the insight, followed by a supporting chart or table. Write like a senior analyst preparing a board memo.
-- Final Slide: "Executive Focus & Recommendations" — 3-5 specific, data-driven recommendations with context.
-- Add detailed speaker notes with talking points on every slide.
-- Use mortgage industry language: "pull-through resilience", "margin compression", "pipeline velocity", "fallout pressure", "lock-to-close efficiency".
-- Cite specific numbers throughout: "$842M (+2% MoM)" not "volume increased".
-- Make it immediately exportable — no rework needed. This must be defensible in a board meeting.`,
-            canvasState,
-            widgetCatalog: "",
-            conversationHistory: [],
-          }),
-        });
-
-        // Extract the generate_report action from the AI response
-        const reportAction = aiResponse.actions?.find(
-          (a) => a.type === "generate_report",
-        );
-
-        if (!reportAction?.reportDefinition?.slides?.length) {
-          // Fallback: if AI didn't produce a report action, use the structural conversion
-          toast({
-            title: "Falling back to structured report",
-            description:
-              "AI couldn't generate a custom report. Opening Report Builder with canvas data.",
-          });
-          setShowReportBuilder(true);
-          return;
-        }
-
-        // Open the Report Builder with the AI-generated definition so the user
-        // can preview, edit, and then export — instead of downloading directly.
-        const reportDef = reportAction.reportDefinition;
-        const fullDef = {
-          id: `ai-report-${Date.now()}`,
-          ...reportDef,
-          metadata: {
-            createdAt: new Date().toISOString(),
-            dataAsOf: new Date().toISOString(),
-            generatedBy: "ai" as const,
-          },
-        };
-
-        setAiReportDefinition(fullDef);
-        setShowReportBuilder(true);
-
-        toast({
-          title: "Executive briefing ready",
-          description: `"${reportDef.title || "Report"}" is ready to review. Export to PowerPoint when satisfied.`,
-        });
-      } catch (err: any) {
-        console.error("[AiReport] Error:", err);
-        toast({
-          title: "AI report generation failed",
-          description:
-            err.response?.data?.error ||
-            err.message ||
-            "Could not generate AI report.",
-          variant: "destructive",
-        });
-      } finally {
-        setIsGeneratingAiReport(false);
-      }
-    },
-    [items, saveTitle, tenantId, toast, handleQuickReport],
-  );
-
   // ---- Report Builder mode toggle ----
   const [showReportBuilder, setShowReportBuilder] = useState(false);
-  const [aiReportDefinition, setAiReportDefinition] = useState<any | null>(
-    null,
-  );
 
   const getShareUrl = useCallback(() => {
     if (!canvasId) return "";
@@ -4612,93 +4341,23 @@ Structure it as a narrative-first executive briefing:
               )}
 
               <div className="ml-auto flex items-center gap-1">
-                {/* Secondary: AI-powered report builder (future feature) */}
-                {!WORKBENCH_COHI_HIDDEN && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className={cn(
-                          "h-8 gap-1.5 text-xs px-2.5 font-medium shrink-0",
-                          isGeneratingAiReport ? "cursor-wait opacity-70" : "",
-                        )}
-                        onClick={() => handleAiReport("pptx")}
-                        disabled={isGeneratingAiReport || !hasItems}
-                      >
-                        {isGeneratingAiReport ? (
-                          <>
-                            <svg
-                              className="h-3.5 w-3.5 animate-spin"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                            >
-                              <circle
-                                cx="12"
-                                cy="12"
-                                r="10"
-                                strokeDasharray="32"
-                                strokeDashoffset="12"
-                              />
-                            </svg>{" "}
-                            Preparing...
-                          </>
-                        ) : (
-                          <>
-                            <Sparkles className="h-3.5 w-3.5" /> AI Report
-                          </>
-                        )}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">
-                      Cohi prepares an executive presentation from your canvas
-                      data
-                    </TooltipContent>
-                  </Tooltip>
-                )}
-
-                {/* PowerPoint builder entry point */}
-                {aiReportDefinition ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-8 gap-1.5 text-xs px-2.5 font-medium shrink-0 bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 border-violet-300 dark:border-violet-700"
-                        onClick={() => setShowReportBuilder(true)}
-                      >
-                        <Presentation className="h-3.5 w-3.5" />
-                        View Report
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">
-                      Return to your generated report
-                    </TooltipContent>
-                  </Tooltip>
-                ) : (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        size="sm"
-                        className="h-8 gap-1.5 text-xs px-3 font-semibold shrink-0 shadow-sm bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white"
-                        onClick={() => {
-                          setAiReportDefinition(null);
-                          setShowReportBuilder(true);
-                        }}
-                        disabled={!hasItems}
-                      >
-                        <Presentation className="h-3.5 w-3.5" />
-                        PowerPoint Editor
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">
-                      Open the slide builder to preview, edit, and export a
-                      PowerPoint deck from canvas data
-                    </TooltipContent>
-                  </Tooltip>
-                )}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      size="sm"
+                      className="h-8 gap-1.5 text-xs px-3 font-semibold shrink-0 shadow-sm bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white"
+                      onClick={() => setShowReportBuilder(true)}
+                      disabled={!hasItems}
+                    >
+                      <Presentation className="h-3.5 w-3.5" />
+                      PowerPoint Editor
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    Open the slide builder to preview, edit, and export a
+                    PowerPoint deck from canvas data
+                  </TooltipContent>
+                </Tooltip>
               </div>
             </div>
             {/* Per-widget export is available in each widget's context menu */}
@@ -4718,7 +4377,6 @@ Structure it as a narrative-first executive briefing:
               canvasWidgetData={reportBuilderWidgetData}
               canvasTitle={saveTitle || "Untitled Canvas"}
               tenantId={tenantId}
-              initialDefinition={aiReportDefinition ?? undefined}
               inline
             />
           </div>
@@ -5734,7 +5392,6 @@ Structure it as a narrative-first executive briefing:
                   <Button
                     variant="outline"
                     onClick={() => {
-                      setAiReportDefinition(null);
                       setShowReportBuilder(true);
                       setShareDialogOpen(false);
                     }}

@@ -80,9 +80,6 @@ export interface SlideElement {
   /** Position in inches (for PPTX rendering). Origin is top-left of slide. */
   position: ElementPosition;
   config: SlideElementConfig;
-  dataSource?: DataSource;
-  /** Resolved data (populated after data fetch, not persisted in templates) */
-  resolvedData?: unknown;
 }
 
 export interface ElementPosition {
@@ -218,34 +215,6 @@ export interface ShapeElementConfig {
   strokeWidth?: number;
 }
 
-// ---------------------------------------------------------------------------
-// Data Sources
-// ---------------------------------------------------------------------------
-
-export interface DataSource {
-  type: 'metric' | 'sql' | 'static' | 'canvas_widget';
-  /** Metric IDs from METRICS_CATALOG (for type: 'metric') */
-  metricIds?: string[];
-  /** SQL SELECT query (for type: 'sql') */
-  sql?: string;
-  /** Query options */
-  options?: DataSourceOptions;
-  /** Pre-resolved static data (for type: 'static') */
-  staticData?: unknown;
-  /** Reference to a canvas widget ID (for type: 'canvas_widget') */
-  canvasWidgetId?: string;
-}
-
-export interface DataSourceOptions {
-  dateRange?: {
-    start: string;
-    end: string;
-  };
-  dateField?: string;
-  groupBy?: string[];
-  filters?: Record<string, unknown>;
-  limit?: number;
-}
 
 // ---------------------------------------------------------------------------
 // Report Theme
@@ -314,32 +283,6 @@ export const REPORT_THEMES: Record<string, ReportTheme> = {
   },
 };
 
-// ---------------------------------------------------------------------------
-// Report Templates
-// ---------------------------------------------------------------------------
-
-export type ReportTemplateCategory =
-  | 'pipeline'
-  | 'production'
-  | 'executive'
-  | 'pull-through'
-  | 'turn-times'
-  | 'scorecard'
-  | 'custom';
-
-export interface ReportTemplate {
-  id: string;
-  name: string;
-  description: string;
-  category: ReportTemplateCategory;
-  icon?: string;
-  /** Template source */
-  source: 'builtin' | 'custom' | 'uploaded';
-  /** The report definition (slides with DataSource references, not resolved data) */
-  definition: Omit<ReportDefinition, 'id' | 'metadata'>;
-  /** Preview thumbnail (base64) */
-  thumbnail?: string;
-}
 
 // ---------------------------------------------------------------------------
 // API Request/Response types

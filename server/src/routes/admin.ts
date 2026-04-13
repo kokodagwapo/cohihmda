@@ -3498,4 +3498,81 @@ router.get(
   },
 );
 
+// ============================================================================
+// Schema Cache — debug & invalidation endpoints
+// ============================================================================
+
+import {
+  getSchemaForTenant,
+  invalidateSchemaCache,
+} from "../services/ai/schemaContextService.js";
+
+/**
+ * GET /api/admin/schema-cache/status
+ * Returns what's currently cached per tenant (column count, cache age).
+ * Useful for diagnosing whether the AI is seeing real schema or the fallback.
+ */
+router.get(
+  "/schema-cache/status",
+  authenticateToken,
+  requirePlatformStaff,
+  async (req: AuthRequest, res) => {
+    try {
+      // The cache is module-private, so we surface info by re-running getSchemaForTenant
+      // for each known tenant and checking how the response was built.
+      // We can't introspect the Map directly, so we return a lightweight status.
+      const tenants = await listTenants();
+      const results: Record<string, { tenantId: string; status: string }> = {};
+      for (const t of tenants) {
+        const tid = String(t.id);
+        try {
+          const ctx = await getSchemaForTenant(tid);
+          const columnMatch = ctx.match(/### (?:Core|Personnel|Property|Financial|Key Dates|Other) Fields/g);
+          const isLive = ctx.includes("information_schema") === false &&
+            (columnMatch?.length ?? 0) > 0;
+          const isFallback = ctx.includes("Unique loan identifier") ||
+            ctx.includes("Total loan amount");
+          results[tid] = {
+            tenantId: tid,
+            status: isFallback ? "fallback (limited ~35 fields)" : `live (${columnMatch?.length ?? 0} field groups)`,
+          };
+        } catch (err: any) {
+          results[tid] = { tenantId: tid, status: `error: ${err.message}` };
+        }
+      }
+      return res.json({ schemaCacheStatus: results });
+    } catch (error: any) {
+      logError("Error fetching schema cache status", error);
+      return res.status(500).json({ error: "Failed to fetch schema cache status" });
+    }
+  }
+);
+
+/**
+ * POST /api/admin/schema-cache/invalidate
+ * Bust the schema cache for one tenant (body: { tenantId }) or all tenants (no body).
+ * Call this after a migration or column change so the AI sees the updated schema immediately.
+ */
+router.post(
+  "/schema-cache/invalidate",
+  authenticateToken,
+  requirePlatformStaff,
+  async (req: AuthRequest, res) => {
+    try {
+      const { tenantId } = req.body as { tenantId?: string };
+      invalidateSchemaCache(tenantId);
+      logInfo("Schema cache invalidated", { tenantId: tenantId ?? "all", userId: req.userId });
+      return res.json({
+        success: true,
+        message: tenantId
+          ? `Schema cache cleared for tenant ${tenantId}`
+          : "Schema cache cleared for all tenants",
+      });
+    } catch (error: any) {
+      logError("Error invalidating schema cache", error);
+      return res.status(500).json({ error: "Failed to invalidate schema cache" });
+    }
+  }
+);
+
 export default router;
