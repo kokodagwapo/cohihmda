@@ -16,12 +16,9 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import {
   ArrowLeft,
-  Download,
   Presentation,
   Mail,
   Palette,
-  LayoutTemplate,
-  Save,
   Sparkles,
   Send,
   Loader2,
@@ -51,7 +48,6 @@ async function fetchBlob(endpoint: string, body: object): Promise<Blob> {
 import { SlidePanel } from './SlidePanel';
 import { SlideEditor } from './SlideEditor';
 import { SlideElementRenderer } from './SlideElementRenderer';
-import { ReportTemplateGallery } from './ReportTemplateGallery';
 import type {
   ReportDefinition,
   SlideDefinition,
@@ -66,7 +62,6 @@ import type {
   KpiElementConfig,
   ImageElementConfig,
   ShapeElementConfig,
-  ReportTemplate,
   CanvasWidgetData,
 } from '@/types/reportTypes';
 import { REPORT_THEMES } from '@/types/reportTypes';
@@ -1041,7 +1036,6 @@ export function ReportBuilder({
     slides[0]?.id || null
   );
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
-  const [showTemplateGallery, setShowTemplateGallery] = useState(false);
   const [showThemePicker, setShowThemePicker] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
 
@@ -1263,27 +1257,6 @@ export function ReportBuilder({
   );
 
   // --- Template loading ---
-  const handleSelectTemplate = useCallback(
-    (template: ReportTemplate) => {
-      setReportTitle(template.definition.title || template.name);
-      setSlides(
-        template.definition.slides.map((s) => ({
-          ...s,
-          id: generateId('slide'),
-          elements: s.elements.map((e) => ({ ...e, id: generateId(e.type) })),
-        }))
-      );
-      if (template.definition.theme) {
-        setTheme(template.definition.theme);
-      }
-      setSelectedSlideId(null);
-      setSelectedElementId(null);
-      setShowTemplateGallery(false);
-      toast({ title: 'Template loaded', description: template.name });
-    },
-    [toast]
-  );
-
   // --- Cohi AI Assist ---
   const [aiPrompt, setAiPrompt] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
@@ -1512,14 +1485,18 @@ export function ReportBuilder({
           )}
         </div>
 
+        {/* AI generate — primary entry point for adding narratives/summaries */}
         <Button
-          variant="outline"
           size="sm"
-          className="gap-1.5 text-xs"
-          onClick={() => setShowTemplateGallery(true)}
+          className="gap-1.5 text-xs font-semibold bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white shadow-sm"
+          onClick={() => handleCohiAssist('Prepare a complete board-ready executive presentation from the canvas data. Lead every slide with a narrative paragraph explaining what happened, why it matters, and what requires attention. Use mortgage industry language and cite specific numbers. Include an executive summary, one topic per supporting slide, and a final recommendations slide with specific action items.')}
+          disabled={isAiLoading}
         >
-          <LayoutTemplate className="h-3.5 w-3.5" />
-          Templates
+          {isAiLoading ? (
+            <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Generating...</>
+          ) : (
+            <><Sparkles className="h-3.5 w-3.5" /> Generate with AI</>
+          )}
         </Button>
 
         <div className="h-6 w-px bg-slate-200 dark:bg-slate-700" />
@@ -1549,6 +1526,35 @@ export function ReportBuilder({
           Back to Canvas
         </Button>
       </div>
+
+      {/* AI nudge banner — shown when slides are structural (no AI text narratives yet) */}
+      {!isAiLoading && slides.length > 0 && !slides.some((s) => s.elements.some((e) => (e.config as any)?.type === 'text' && (e.config as any)?.content?.length > 80)) && (
+        <div className="shrink-0 flex items-center gap-3 px-4 py-2 bg-indigo-50 dark:bg-indigo-950/40 border-b border-indigo-100 dark:border-indigo-900/60 text-xs text-indigo-700 dark:text-indigo-300">
+          <Sparkles className="h-3.5 w-3.5 shrink-0" />
+          <span className="font-medium">Your slides were built from canvas data.</span>
+          <span className="text-indigo-500 dark:text-indigo-400">Add AI-written narratives to make them board-ready:</span>
+          <button
+            className="underline font-semibold hover:text-indigo-900 dark:hover:text-indigo-100 shrink-0"
+            onClick={() => handleCohiAssist('Enhance every slide with executive narrative commentary. For each slide, add a text element at the top explaining the insight: what the data shows, why it matters, and what the audience should take away. Write in mortgage industry language.')}
+          >
+            Add Narratives
+          </button>
+          <span className="text-indigo-300 dark:text-indigo-600">·</span>
+          <button
+            className="underline font-semibold hover:text-indigo-900 dark:hover:text-indigo-100 shrink-0"
+            onClick={() => handleCohiAssist('Add detailed speaker notes to every slide with 3-4 talking points each. Notes should help a mortgage executive present this to a board or committee. Include specific data points to mention and anticipate questions.')}
+          >
+            Speaker Notes
+          </button>
+          <span className="text-indigo-300 dark:text-indigo-600">·</span>
+          <button
+            className="underline font-semibold hover:text-indigo-900 dark:hover:text-indigo-100 shrink-0"
+            onClick={() => handleCohiAssist('Prepare a complete board-ready executive presentation from the canvas data. Lead every slide with a narrative paragraph explaining what happened, why it matters, and what requires attention. Use mortgage industry language. Include an executive summary, supporting visuals, and a final recommendations slide with specific action items.')}
+          >
+            Full Board Briefing
+          </button>
+        </div>
+      )}
 
       {/* Main content */}
       <div className="flex-1 flex min-h-0">
@@ -1648,14 +1654,6 @@ export function ReportBuilder({
         </div>
       </div>
 
-      {/* Template Gallery */}
-      {showTemplateGallery && (
-        <ReportTemplateGallery
-          onClose={() => setShowTemplateGallery(false)}
-          onSelectTemplate={handleSelectTemplate}
-          tenantId={tenantId}
-        />
-      )}
     </div>
   );
 }
