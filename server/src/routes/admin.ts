@@ -31,6 +31,10 @@ import {
 } from "./podcast.js";
 import { enqueueCohiPrefetchJob } from "../services/cohiPrefetchWorker.js";
 import {
+  getSchemaForTenant,
+  invalidateSchemaCache,
+} from "../services/ai/schemaContextService.js";
+import {
   type LoanScope,
   type TenantPersona,
 } from "../utils/userAccessProfile.js";
@@ -3501,11 +3505,6 @@ router.get(
 // ============================================================================
 // Schema Cache — debug & invalidation endpoints
 // ============================================================================
-
-import {
-  getSchemaForTenant,
-  invalidateSchemaCache,
-} from "../services/ai/schemaContextService.js";
 
 /**
  * GET /api/admin/schema-cache/status
