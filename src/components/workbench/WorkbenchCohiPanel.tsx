@@ -26,8 +26,6 @@ import {
   Database,
   Search,
   Code,
-  FlaskConical,
-  Landmark,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -41,33 +39,11 @@ import { SchemaExplorer } from './SchemaExplorer';
 
 export type CohiPanelTab = 'chat' | 'dashboards' | 'schema';
 
-export const PERSONA_META: Record<string, { name: string; description: string; Icon: React.ElementType; color: string }> = {
-  'mortgage-expert': {
-    name: 'Mortgage Expert',
-    description: 'Compliance, pipeline, industry context',
-    Icon: Landmark,
-    color: 'text-indigo-600 dark:text-indigo-400',
-  },
-  'data-scientist': {
-    name: 'Data Scientist',
-    description: 'Statistical analysis, distributions, trends',
-    Icon: FlaskConical,
-    color: 'text-violet-600 dark:text-violet-400',
-  },
-};
-
-export const PERSONA_SUGGESTIONS: Record<string, string[]> = {
-  'mortgage-expert': [
-    'Show loans at risk of lock expiration this week',
-    'What does our denial rate look like by product type?',
-    'Analyze pipeline velocity by loan officer vs. prior month',
-  ],
-  'data-scientist': [
-    'Analyze the distribution of loan amounts by product type',
-    'Show statistical outliers in processing times this quarter',
-    'Build a trend analysis of monthly volume with percentile breakdown',
-  ],
-};
+const DEFAULT_AUTO_SUGGESTIONS = [
+  'What is driving our biggest month-over-month change right now?',
+  'Break this down by branch and loan officer',
+  'Which metrics look abnormal and why?',
+];
 
 export interface WorkbenchCohiPanelProps {
   open: boolean;
@@ -82,10 +58,6 @@ export interface WorkbenchCohiPanelProps {
   editingWidget?: { id: string; title: string } | null;
   /** Called when user clicks X on the editing banner to stop editing */
   onStopEditing?: () => void;
-  /** Active agent persona ID */
-  activePersonaId?: string;
-  /** Called when user selects a different persona — parent should update state */
-  onPersonaChange?: (personaId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -330,30 +302,15 @@ export function WorkbenchCohiPanel({
   onExecuteAction,
   editingWidget = null,
   onStopEditing,
-  activePersonaId = 'mortgage-expert',
-  onPersonaChange,
 }: WorkbenchCohiPanelProps) {
   const [input, setInput] = useState('');
   const [activeTab, setActiveTab] = useState<CohiPanelTab>('chat');
 
-  const personaMeta = PERSONA_META[activePersonaId] ?? PERSONA_META['mortgage-expert'];
-  const PersonaIcon = personaMeta.Icon;
-
-  // Use persona-specific suggestions as fallback when none are provided by the hook
+  // Use generic agentic suggestions as fallback when none are provided by the hook
   const effectiveSuggestions =
     suggestedQuestions.length > 0
       ? suggestedQuestions
-      : (PERSONA_SUGGESTIONS[activePersonaId] ?? []);
-
-  const handlePersonaClick = useCallback(
-    (personaId: string) => {
-      if (personaId === activePersonaId) return;
-      onPersonaChange?.(personaId);
-      // Clear conversation when switching personas so context is fresh
-      onClearMessages();
-    },
-    [activePersonaId, onPersonaChange, onClearMessages]
-  );
+      : DEFAULT_AUTO_SUGGESTIONS;
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -430,30 +387,6 @@ export function WorkbenchCohiPanel({
               <Sparkles className="h-3 w-3 text-indigo-600 dark:text-indigo-400" />
             </div>
             <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Cohi</span>
-          </div>
-
-          {/* Persona toggle — segmented two-button selector */}
-          <div className="flex items-center gap-0.5 bg-white/60 dark:bg-slate-800/60 rounded-lg p-0.5 border border-slate-200 dark:border-slate-700">
-            {Object.entries(PERSONA_META).map(([id, meta]) => {
-              const Icon = meta.Icon;
-              const isActive = id === activePersonaId;
-              return (
-                <button
-                  key={id}
-                  onClick={() => handlePersonaClick(id)}
-                  title={`${meta.name}: ${meta.description}`}
-                  className={cn(
-                    'flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-all',
-                    isActive
-                      ? 'bg-indigo-600 text-white shadow-sm'
-                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700'
-                  )}
-                >
-                  <Icon className="h-3 w-3" />
-                  <span className="hidden sm:inline">{meta.name}</span>
-                </button>
-              );
-            })}
           </div>
 
           <div className="flex items-center gap-1">
@@ -545,14 +478,14 @@ export function WorkbenchCohiPanel({
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center px-4 gap-4">
             <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-md">
-              <PersonaIcon className="h-7 w-7 text-white" />
+              <Sparkles className="h-7 w-7 text-white" />
             </div>
             <div>
               <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">
-                {personaMeta.name} Mode
+                Intelligent Agent Mode
               </p>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                {personaMeta.description}. Ask me anything about your pipeline data.
+                Cohi automatically chooses the right specialist behavior for each request (or combines them). Ask anything about your data or ask to edit widgets.
               </p>
             </div>
             {/* Suggested questions */}

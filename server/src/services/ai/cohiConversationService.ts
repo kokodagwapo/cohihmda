@@ -292,6 +292,38 @@ export async function deleteConversation(
 }
 
 /**
+ * Rebind all conversations from one scope key to another for a user.
+ * Used when an unsaved draft canvas (draft:*) gets its first real id (canvas:*).
+ */
+export async function rebindConversationScope(
+  tenantId: string,
+  userId: string,
+  fromScopeId: string,
+  toScopeId: string
+): Promise<number> {
+  try {
+    const ready = await ensureTableExists(tenantId);
+    if (!ready) return 0;
+    if (!fromScopeId || !toScopeId || fromScopeId === toScopeId) return 0;
+
+    const pool = await tenantDbManager.getTenantPool(tenantId);
+    const result = await pool.query(
+      `UPDATE public.cohi_conversations
+       SET canvas_id = $1,
+           updated_at = NOW()
+       WHERE user_id = $2
+         AND canvas_id = $3`,
+      [toScopeId, userId, fromScopeId]
+    );
+
+    return result.rowCount || 0;
+  } catch (error: any) {
+    console.error("[CohiConversation] Rebind scope error:", error.message);
+    return 0;
+  }
+}
+
+/**
  * Prune old conversations to keep within limit
  */
 export async function pruneConversations(

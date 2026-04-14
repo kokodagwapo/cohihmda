@@ -33,7 +33,10 @@ import {
   columnToLabel,
 } from '../services/ai/schemaContextService.js';
 import { apiLimiter } from '../middleware/rateLimiter.js';
-import { safeExecuteSQL } from '../services/research/tools.js';
+import { safeExecuteSQL, callLLM } from '../services/research/tools.js';
+import { getSchemaForTenant, getFallbackSchemaContext } from '../services/ai/schemaContextService.js';
+import { tenantDbManager } from '../config/tenantDatabaseManager.js';
+import { sanitizeGeneratedSQL } from '../services/ai/cohiChatService.js';
 
 const router = Router();
 
@@ -482,6 +485,52 @@ router.delete('/sessions/:sessionId', authenticateToken, attachTenantContext, as
  * CTE definitions by tracking parenthesis depth. For non-CTE queries
  * returns 0 so the entire SQL is treated as the "final body".
  */
+/**
+ * Asks the LLM to fix a SQL query that failed execution.
+ * Returns the corrected SQL string, or null if fixing is not possible.
+ */
+async function autoFixSql(
+  originalSql: string,
+  errorMessage: string,
+  schemaContext: string,
+  apiKey: string,
+): Promise<string | null> {
+  const messages = [
+    {
+      role: 'system' as const,
+      content: `You are a PostgreSQL expert. A SQL query failed at runtime. Fix it so it executes successfully.
+Return ONLY the corrected SQL. No explanation, no markdown fences, no semicolon at the end.
+
+Rules:
+- Use table alias "l": FROM public.loans l
+- NEVER use CURRENT_DATE or NOW()
+- NEVER end with a semicolon
+- Fix only what is broken — preserve the original query intent
+
+Schema (first 2000 chars):
+${schemaContext.substring(0, 2000)}`,
+    },
+    {
+      role: 'user' as const,
+      content: `Failed SQL:\n${originalSql}\n\nError:\n${errorMessage}\n\nFixed SQL:`,
+    },
+  ];
+
+  try {
+    const raw = await callLLM(messages, apiKey, { temperature: 0.1, maxTokens: 1000 });
+    const fixed = raw.trim()
+      .replace(/^```sql\s*/i, '')
+      .replace(/^```\s*/i, '')
+      .replace(/```\s*$/, '')
+      .replace(/;+\s*$/, '')
+      .trim();
+    if (fixed && /^(SELECT|WITH)\s/i.test(fixed)) return fixed;
+  } catch {
+    // swallow — caller handles null
+  }
+  return null;
+}
+
 function findFinalSelectOffset(sql: string): number {
   if (!/^\s*WITH\b/i.test(sql)) return 0;
   let depth = 0;
@@ -539,8 +588,11 @@ function injectConditionIntoBody(body: string, condition: string): string {
  * Used by workbench canvas widgets to refresh data for saved visualizations.
  */
 router.post('/execute-sql', authenticateToken, attachTenantContext, async (req: AuthRequest, res) => {
+  let _executeSqlOriginal: string | undefined;
+  let _executeSqlTenantId: string | undefined;
   try {
     const { sql, dateFilter, dimensionFilters, runAsIs } = req.body;
+    _executeSqlOriginal = sql;
 
     if (!sql || typeof sql !== 'string') {
       return res.status(400).json({ error: 'sql is required' });
@@ -588,7 +640,7 @@ router.post('/execute-sql', authenticateToken, attachTenantContext, async (req: 
 
       // Check whether the date column is accessible in the final SELECT body.
       // For CTE queries where the column only exists inside CTEs (not the
-      // outer SELECT), injecting a filter would cause a runtime error.
+      // outer SELECT), injecting a filter there would cause a runtime error.
       const colEscaped = col.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const finalBody = effectiveSql.substring(finalSelectOffset);
       const colInFinalBody = new RegExp(`\\b(?:[a-zA-Z_][a-zA-Z0-9_]*\\.)?${colEscaped}\\b`, 'i').test(finalBody);
@@ -601,38 +653,12 @@ router.post('/execute-sql', authenticateToken, attachTenantContext, async (req: 
         queryParams.push(dateFilter.start, dateFilter.end);
         const cond = `${col} >= $${dateStartParam}::date AND ${col} <= $${dateEndParam}::date`;
 
-        const colPattern = `(?:[a-zA-Z_][a-zA-Z0-9_]*\\.)?${colEscaped}`;
-
-        const dateComparisonPattern = new RegExp(
-          `\\b${colPattern}\\s*(?:>=|<=|>|<)\\s*(?:'[^']*'(?:::(?:date|timestamp))?|DATE_TRUNC\\s*\\([^)]*\\)|CURRENT_DATE(?:\\s*-\\s*INTERVAL\\s*'[^']*')?)`,
-          'gi'
-        );
-        const betweenPattern = new RegExp(
-          `\\b${colPattern}\\s+BETWEEN\\s+'[^']*'(?:::(?:date|timestamp))?\\s+AND\\s+'[^']*'(?:::(?:date|timestamp))?`,
-          'gi'
-        );
-
-        // Step 1: Strip existing date conditions — only in the final body
+        // Additive-only injection — new widgets have clean base SQL without baked-in
+        // date ranges, so we only append. For legacy widgets (dates baked in), both
+        // conditions coexist; the injected range is always more restrictive and
+        // effectively overrides the wider baked-in range for filtered views.
         const ctePrefix = effectiveSql.substring(0, finalSelectOffset);
         let body = effectiveSql.substring(finalSelectOffset);
-
-        body = body.replace(betweenPattern, ' TRUE ');
-        body = body.replace(dateComparisonPattern, ' TRUE ');
-
-        for (let pass = 0; pass < 3; pass++) {
-          body = body
-            .replace(/\bTRUE\s+AND\s+TRUE\b/gi, 'TRUE')
-            .replace(/\bTRUE\s+OR\s+TRUE\b/gi, 'TRUE')
-            .replace(/\bAND\s+TRUE\b/gi, '')
-            .replace(/\bTRUE\s+AND\b/gi, '')
-            .replace(/\bOR\s+TRUE\b/gi, '')
-            .replace(/\bTRUE\s+OR\b/gi, '')
-            .replace(/\bWHERE\s+TRUE\s*(?=\bGROUP\b|\bORDER\b|\bLIMIT\b|\bHAVING\b|\bUNION\b|\bINTERSECT\b|\bEXCEPT\b|\)|$)/gi, '')
-            .replace(/\bWHERE\s+TRUE\s+(?=AND|OR)\s*/gi, 'WHERE ');
-        }
-        body = body.replace(/\bWHERE\s+(?=GROUP\s+BY|ORDER\s+BY|LIMIT|HAVING|UNION|INTERSECT|EXCEPT|\)|$)/gi, '');
-
-        // Step 2: Inject the new condition into the final body
         body = injectConditionIntoBody(body, cond);
         effectiveSql = ctePrefix + body;
 
@@ -677,6 +703,7 @@ router.post('/execute-sql', authenticateToken, attachTenantContext, async (req: 
     }
 
     const tenantContext = getTenantContext(req);
+    _executeSqlTenantId = tenantContext.tenantId;
     const context: ChatContext = {
       tenantId: tenantContext.tenantId,
       userId: req.userId!,
@@ -696,6 +723,39 @@ router.post('/execute-sql', authenticateToken, attachTenantContext, async (req: 
     });
   } catch (error: any) {
     console.error('[CohiChat] Error executing SQL:', error.message);
+
+    // Auto-fix: ask the LLM to repair the SQL and retry once
+    if (_executeSqlOriginal && _executeSqlTenantId) {
+      try {
+        const apiKeyRow = await tenantDbManager.getTenantPool(_executeSqlTenantId).then(p =>
+          p.query<{ openai_api_key?: string }>(`SELECT openai_api_key FROM public.rag_settings LIMIT 1`).catch(() => ({ rows: [] }))
+        );
+        const apiKey: string = apiKeyRow.rows[0]?.openai_api_key || process.env.OPENAI_API_KEY || '';
+        if (apiKey) {
+          const schemaCtx = await getSchemaForTenant(_executeSqlTenantId).catch(() => getFallbackSchemaContext());
+          const fixedSql = await autoFixSql(_executeSqlOriginal, error.message, schemaCtx, apiKey);
+          if (fixedSql) {
+            try {
+              const tenantPool = await tenantDbManager.getTenantPool(_executeSqlTenantId);
+              const fixedResult = await tenantPool.query(sanitizeGeneratedSQL(fixedSql));
+              const formattedRows = formatDataRows(fixedResult.rows);
+              console.log('[CohiChat] Auto-fix succeeded for SQL error');
+              return res.json({
+                data: formattedRows,
+                rowCount: fixedResult.rowCount,
+                fields: fixedResult.fields?.map((f: any) => f.name) ?? [],
+                fixedSql,
+              });
+            } catch (fixErr: any) {
+              console.warn('[CohiChat] Auto-fix SQL also failed:', fixErr.message);
+            }
+          }
+        }
+      } catch (autoFixErr: any) {
+        console.warn('[CohiChat] Auto-fix attempt failed:', autoFixErr.message);
+      }
+    }
+
     res.status(500).json({
       error: 'Failed to execute query',
       message: error.message,

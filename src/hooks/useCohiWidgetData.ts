@@ -31,6 +31,8 @@ export interface CohiWidgetDataState {
   loading: boolean;
   error: string | null;
   refetch: () => void;
+  /** If the server auto-fixed the SQL, this contains the corrected SQL string. */
+  fixedSql?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -79,10 +81,12 @@ export function useCohiWidgetData(
   dateFilter?: DateFilter | null,
   dimensionFilters?: DimensionFilter[] | null,
   runAsIs?: boolean,
+  onSqlFixed?: (newSql: string) => void,
 ): CohiWidgetDataState {
   const [data, setData] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fixedSql, setFixedSql] = useState<string | undefined>(undefined);
   const [trigger, setTrigger] = useState(0);
 
   const refetch = useCallback(() => setTrigger((t) => t + 1), []);
@@ -120,6 +124,7 @@ export function useCohiWidgetData(
           data?: any[];
           error?: string;
           message?: string;
+          fixedSql?: string;
         }>(endpoint, {
           method: 'POST',
           body: JSON.stringify(body),
@@ -136,6 +141,11 @@ export function useCohiWidgetData(
         } else {
           setData(response.data || []);
           setError(null);
+          // Server auto-fixed the SQL — notify the canvas so it can update the stored query
+          if (response.fixedSql) {
+            setFixedSql(response.fixedSql);
+            onSqlFixed?.(response.fixedSql);
+          }
         }
       } catch (err: any) {
         if (cancelled) return;
@@ -151,5 +161,5 @@ export function useCohiWidgetData(
     };
   }, [sql, tenantId, dateFilter?.column, dateFilter?.start, dateFilter?.end, dimKey, trigger, runAsIs]);
 
-  return { data, loading, error, refetch };
+  return { data, loading, error, refetch, fixedSql };
 }

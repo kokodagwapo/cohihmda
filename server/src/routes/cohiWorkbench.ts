@@ -29,11 +29,13 @@ import {
   listConversations,
   appendMessage,
   deleteConversation,
+  rebindConversationScope,
   type ConversationMessage,
 } from "../services/ai/cohiConversationService.js";
 import {
   executeQuery,
   formatDataRows,
+  sanitizeGeneratedSQL,
   type ChatContext,
 } from "../services/ai/cohiChatService.js";
 import { getPromptConfig, buildPrompt } from "../services/promptConfigService.js";
@@ -41,7 +43,7 @@ import { decryptAPIKeys } from "../services/encryption.js";
 import { tenantDbManager } from "../config/tenantDatabaseManager.js";
 import { loadSession as loadResearchSession } from "../services/research/orchestrator.js";
 import { callLLM, type LLMMessage } from "../services/research/tools.js";
-import { AGENT_PERSONAS, DEFAULT_PERSONA_ID, type AgentPersonaId } from "../config/agentPersonas.js";
+import { AGENT_PERSONAS, type AgentPersona } from "../config/agentPersonas.js";
 import { retrieveRAGContext } from "../services/ai/ragRetrieval.js";
 
 const router = Router();
@@ -107,6 +109,226 @@ function isValidWidgetSql(sql: string): boolean {
     if (lower.includes(phrase)) return false;
   }
   return true;
+}
+
+/**
+ * Minimal additive filter injection for validation purposes.
+ * Appends a WHERE/AND condition to the final SELECT body of a SQL string.
+ * Mirrors the logic in cohiChat.ts injectConditionIntoBody.
+ */
+function injectConditionForValidation(sql: string, condition: string): string {
+  const body = sql.trimEnd().replace(/;+\s*$/, '').trimEnd();
+  const whereRegex = /\bWHERE\b/gi;
+  let lastWhereIdx = -1;
+  let m: RegExpExecArray | null;
+  while ((m = whereRegex.exec(body)) !== null) lastWhereIdx = m.index;
+
+  if (lastWhereIdx >= 0) {
+    const afterWhere = body.substring(lastWhereIdx + 5);
+    const boundary = /\b(GROUP\s+BY|ORDER\s+BY|LIMIT|HAVING|UNION|INTERSECT|EXCEPT)\b/i.exec(afterWhere);
+    if (boundary) {
+      const insertAt = lastWhereIdx + 5 + boundary.index;
+      return body.substring(0, insertAt) + ` AND ${condition} ` + body.substring(insertAt);
+    }
+    return body + ` AND ${condition}`;
+  }
+  const boundary = /\b(GROUP\s+BY|ORDER\s+BY|LIMIT|HAVING)\b/i.exec(body);
+  if (boundary) {
+    return body.substring(0, boundary.index) + `WHERE ${condition} ` + body.substring(boundary.index);
+  }
+  return body + ` WHERE ${condition}`;
+}
+
+/**
+ * Validates widget SQL by running EXPLAIN against the tenant database.
+ * Phase 1: validates raw base SQL.
+ * Phase 2 (if filterable): validates SQL with a synthetic date filter injected.
+ * Returns { valid, error, phase } — phase indicates where the failure occurred.
+ */
+async function validateWidgetSql(
+  sql: string,
+  pool: import('pg').Pool,
+  dateColumn?: string,
+): Promise<{ valid: boolean; error?: string; phase?: 'base' | 'filtered' }> {
+  const sanitized = sanitizeGeneratedSQL(sql);
+
+  // Phase 1: base SQL must be parseable
+  try {
+    await pool.query(`EXPLAIN ${sanitized}`);
+  } catch (err: any) {
+    return { valid: false, error: err.message, phase: 'base' };
+  }
+
+  // Phase 2: SQL must remain valid after additive filter injection
+  if (dateColumn) {
+    try {
+      const withFilter = injectConditionForValidation(
+        sanitized,
+        `l.${dateColumn} >= '2025-01-01'::date AND l.${dateColumn} <= '2025-12-31'::date`,
+      );
+      await pool.query(`EXPLAIN ${withFilter}`);
+    } catch (err: any) {
+      return { valid: false, error: err.message, phase: 'filtered' };
+    }
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Asks the LLM to fix a SQL query that failed validation.
+ * Returns the corrected SQL string, or null if the fix attempt failed.
+ */
+async function attemptSqlFix(
+  originalSql: string,
+  errorMessage: string,
+  schemaContext: string,
+  apiKey: string,
+  phase: 'base' | 'filtered',
+): Promise<string | null> {
+  const phaseNote = phase === 'filtered'
+    ? 'The SQL itself is syntactically valid, but it breaks when a date range filter (AND date_col >= $1 AND date_col <= $2) is appended to the WHERE clause. The most common cause is that the WHERE clause in the outermost SELECT does not reference the date column directly.'
+    : 'The SQL failed to parse or plan.';
+
+  const fixMessages: LLMMessage[] = [
+    {
+      role: 'system',
+      content: `You are a PostgreSQL expert. Fix the SQL query so it passes EXPLAIN validation.
+${phaseNote}
+Return ONLY the corrected SQL. No explanation, no markdown fences, no semicolon at the end.
+
+Schema context:
+${schemaContext.substring(0, 3000)}`,
+    },
+    {
+      role: 'user',
+      content: `Original SQL:\n${originalSql}\n\nError:\n${errorMessage}\n\nFixed SQL:`,
+    },
+  ];
+
+  try {
+    const raw = await callLLM(fixMessages, apiKey, { temperature: 0.1, maxTokens: 1500 });
+    const fixed = raw.trim().replace(/^```sql\s*/i, '').replace(/```\s*$/, '').replace(/;+\s*$/, '').trim();
+    if (fixed && isValidWidgetSql(fixed)) return fixed;
+  } catch {
+    // swallow — caller handles null
+  }
+  return null;
+}
+
+function isPullThroughAction(action: any): boolean {
+  const hay = `${action?.title || ""} ${action?.explanation || ""} ${action?.sql || ""}`.toLowerCase();
+  return hay.includes("pull-through") || hay.includes("pull through") || hay.includes("pullthrough");
+}
+
+/**
+ * Basic semantic guardrails for pull-through SQL so we avoid misleading 100% rates.
+ * Returns null when SQL passes, otherwise a short error string used by auto-fix.
+ */
+function validatePullThroughSqlGuardrails(
+  sql: string,
+  opts?: { filterable?: boolean; dateColumn?: string },
+): string | null {
+  const normalized = sql.toLowerCase().replace(/\s+/g, " ");
+  const hasNumerator =
+    normalized.includes("current_loan_status ilike '%originated%'") &&
+    normalized.includes("current_loan_status ilike '%purchased%'");
+  const hasCompletedDenominator =
+    normalized.includes("current_loan_status not in ('active loan','active','locked','submitted','approved')") ||
+    normalized.includes("current_loan_status not in ('active loan', 'active', 'locked', 'submitted', 'approved')");
+  const hasNullIf = normalized.includes("nullif(");
+  const dangerousFundedBaseFilter =
+    /\bwhere\b[^;]*(current_loan_status\s+ilike\s+'%originated%'|current_loan_status\s+ilike\s+'%purchased%')/i.test(sql) &&
+    !/count\s*\(\s*case\s+when/i.test(sql); // allow inside CASE expression counts
+  const isSegmented =
+    /\bgroup\s+by\b/i.test(sql) &&
+    /\b(branch|loan_officer|loan officer|product|investor|channel)\b/i.test(sql);
+  const hasFundedCountAlias = /\bas\s+funded_count\b/i.test(sql);
+  const hasCompletedCountAlias = /\bas\s+completed_count\b/i.test(sql);
+  const hasRateAlias = /\bas\s+(pull[_\s-]?through(_rate)?)\b/i.test(sql);
+  const hasSampleSizeHaving =
+    /\bhaving\b[^;]*(completed_count\s*>=\s*(5|10))/i.test(sql) ||
+    /\bhaving\b[^;]*count\s*\(\s*case\s+when\s+l?\.?current_loan_status\s+not\s+in\s*\('active loan'\s*,\s*'active'\s*,\s*'locked'\s*,\s*'submitted'\s*,\s*'approved'\)\s*then\s*1\s*end\s*\)\s*>=\s*(5|10)/i.test(sql);
+
+  if (!hasNumerator) {
+    return "Pull-through SQL missing canonical funded numerator (Originated/purchased statuses).";
+  }
+  if (!hasCompletedDenominator) {
+    return "Pull-through SQL missing canonical completed denominator (NOT IN active statuses).";
+  }
+  if (!hasNullIf) {
+    return "Pull-through SQL must use NULLIF in denominator to avoid invalid division.";
+  }
+  if (dangerousFundedBaseFilter) {
+    return "Pull-through SQL incorrectly filters base rows to funded statuses in WHERE.";
+  }
+  if (opts?.filterable !== false && opts?.dateColumn && opts.dateColumn !== "application_date") {
+    return "Pull-through widgets must use filterConfig.dateColumn = application_date.";
+  }
+  if (isSegmented) {
+    if (!hasFundedCountAlias || !hasCompletedCountAlias || !hasRateAlias) {
+      return "Segmented pull-through SQL must select funded_count, completed_count, and pull_through_rate aliases.";
+    }
+    if (!hasSampleSizeHaving) {
+      return "Segmented pull-through SQL must include HAVING completed_count >= 5 (or >= 10) to avoid tiny-denominator artifacts.";
+    }
+  }
+  return null;
+}
+
+/**
+ * Auto-selects which persona(s) should guide this request.
+ * We intentionally allow blended behavior: many questions need both
+ * domain/compliance reasoning and statistical/analytical depth.
+ */
+function resolveAutoPersonas(
+  question: string,
+  canvasState?: CanvasStateSnapshot,
+): AgentPersona[] {
+  const q = (question || "").toLowerCase();
+  const selectedWidgetPresent = !!canvasState?.standaloneWidgets?.some((w) => w.selected);
+
+  const dataScientistSignals = [
+    "distribution",
+    "outlier",
+    "variance",
+    "percentile",
+    "correlation",
+    "regression",
+    "statistical",
+    "anomaly",
+    "cohort",
+    "decomposition",
+  ];
+  const mortgageSignals = [
+    "compliance",
+    "trid",
+    "regulation",
+    "guideline",
+    "policy",
+    "lock",
+    "pipeline",
+    "fallout",
+    "underwriting",
+    "denial",
+    "product",
+  ];
+
+  const dsScore = dataScientistSignals.reduce((n, k) => n + (q.includes(k) ? 1 : 0), 0);
+  const meScore = mortgageSignals.reduce((n, k) => n + (q.includes(k) ? 1 : 0), 0);
+
+  // If user is editing and asks explanatory/analytical questions, blend both.
+  const questionLikeWhileEditing =
+    selectedWidgetPresent &&
+    /\b(why|what|explain|analyze|break down|show|compare|trend)\b/i.test(question);
+
+  const dataScientist = AGENT_PERSONAS["data-scientist"];
+  const mortgageExpert = AGENT_PERSONAS["mortgage-expert"];
+
+  if (questionLikeWhileEditing) return [mortgageExpert, dataScientist];
+  if (Math.abs(dsScore - meScore) <= 1) return [mortgageExpert, dataScientist];
+  if (dsScore > meScore) return [dataScientist];
+  return [mortgageExpert];
 }
 
 async function getOpenAIKey(tenantId?: string): Promise<string> {
@@ -410,6 +632,14 @@ Do NOT ask when:
 - The user is clearly referring to the [SELECTED] widget and the change is unambiguous
 - You can confidently infer intent from context (canvas state, conversation history)
 
+## Intent Routing (CRITICAL)
+When a [SELECTED] widget exists, do NOT assume every message is an edit request.
+You must infer intent from the user's wording:
+- Use modify_widget ONLY when the user explicitly asks to change the widget (e.g. "edit", "change", "update", "replace", "remove column", "convert chart type", "fix this widget")
+- If the user asks an analytical question (e.g. "why is this down?", "what is driving this?", "compare by branch", "break this down"), answer the question with query_data and/or explanation actions. Do not modify the widget unless asked.
+- If the user asks both (question + change), do both in one response: first answer the question, then include the requested modify_widget action.
+- If intent is unclear, ask one concise clarifying question.
+
 ## Response Format
 You MUST respond with valid JSON in this exact format:
 {
@@ -431,8 +661,9 @@ Each action in the "actions" array must be one of:
    {"type": "suggest_dashboard", "sectionKey": "<key like companyScorecard, salesScorecard, etc.>", "explanation": "Why this dashboard is useful"}
 
 3. **create_widget**: Generate a new visualization from SQL
-   {"type": "create_widget", "sql": "SELECT ...", "title": "Chart Title", "config": {"type": "bar|line|pie|area|table|kpi|donut|horizontal_bar|stacked_bar|grouped_bar|treemap|pivot", "title": "...", "data": [], "xKey": "...", "yKey": "...", "yKeys": ["...", "..."], "pivotConfig": {"rowKey":"...","columnKey":"...","valueKey":"...","aggregation":"sum"}}, "explanation": "What this shows"}
+   {"type": "create_widget", "sql": "SELECT ...", "title": "Chart Title", "config": {"type": "bar|line|pie|area|table|kpi|donut|horizontal_bar|stacked_bar|grouped_bar|treemap|pivot", "title": "...", "data": [], "xKey": "...", "yKey": "...", "yKeys": ["...", "..."], "pivotConfig": {"rowKey":"...","columnKey":"...","valueKey":"...","aggregation":"sum"}}, "filterConfig": {"filterable": true, "dateColumn": "funding_date", "defaultPreset": "L12M"}, "explanation": "What this shows"}
    IMPORTANT: The config.type MUST be one of: bar, line, pie, area, table, kpi, donut, horizontal_bar, stacked_bar, grouped_bar, treemap, pivot. NEVER use "chart" as a type.
+   IMPORTANT: Every create_widget MUST include "filterConfig". See the Filter Configuration section below.
 
 4. **modify_widget**: Change an existing canvas widget
    {"type": "modify_widget", "instanceId": "<canvas item id>", "changes": {...}, "sql": "SELECT ...", "title": "New Title", "explanation": "What changed"}
@@ -620,26 +851,21 @@ The CURRENT CANVAS STATE section below includes LIVE DATA VALUES — actual numb
 
 ## Data Freshness (CRITICAL — READ FIRST)
 **The tenant's data is available through {{DATA_MAX_DATE}}. This is NOT today's date.**
-- ALWAYS use '{{DATA_MAX_DATE}}'::date as the reference date for "current", "MTD", "today", and recency calculations — **NEVER use CURRENT_DATE or NOW()** because the data does not extend to today and those queries will return zero rows.
-- For "month-to-date" → WHERE funding_date >= DATE_TRUNC('month', '{{DATA_MAX_DATE}}'::date) AND funding_date <= '{{DATA_MAX_DATE}}'::date
-- For "last 90 days" → WHERE date_col >= '{{DATA_MAX_DATE}}'::date - INTERVAL '90 days' AND date_col <= '{{DATA_MAX_DATE}}'::date
-- For "YTD" → WHERE date_col >= DATE_TRUNC('year', '{{DATA_MAX_DATE}}'::date) AND date_col <= '{{DATA_MAX_DATE}}'::date
-- For "last month" (the most recently completed month) → DATE_TRUNC('month', '{{DATA_MAX_DATE}}'::date - INTERVAL '1 month') to DATE_TRUNC('month', '{{DATA_MAX_DATE}}'::date) - INTERVAL '1 day'
+- NEVER use CURRENT_DATE or NOW() — the data does not extend to today and those queries return zero rows.
+- For filterable:false widgets that must hard-code a date range, always anchor to '{{DATA_MAX_DATE}}'::date.
+- For all filterable:true widgets, do NOT bake date ranges into the SQL — declare the intended range in filterConfig.defaultPreset instead. The filter system handles the actual date injection.
 
-## Time Scoping (CRITICAL)
-**RULE 1 — Respect explicit time ranges:** When the user specifies an exact time range (e.g. "last 12 months", "last 6 months", "Q3 2025", "trailing 12"), use EXACTLY that range. Anchor all relative ranges to '{{DATA_MAX_DATE}}'::date (NOT CURRENT_DATE):
-- "last 12 months" → '{{DATA_MAX_DATE}}'::date - INTERVAL '12 months' to '{{DATA_MAX_DATE}}'::date
-- "last 6 months" → '{{DATA_MAX_DATE}}'::date - INTERVAL '6 months' to '{{DATA_MAX_DATE}}'::date
-- "last 3 months" → '{{DATA_MAX_DATE}}'::date - INTERVAL '3 months' to '{{DATA_MAX_DATE}}'::date
-- "YTD" / "this year" → January 1 of {{DATA_MAX_DATE_YEAR}} to '{{DATA_MAX_DATE}}'::date
-- "last year" → January 1 to December 31 of the prior year
-- NEVER override an explicit user-specified time range with a default.
-
-**RULE 2 — Default for ambiguous questions:** Only when the user does NOT specify a time range, default to a recent window anchored to '{{DATA_MAX_DATE}}'::date:
-- "What's important?" / "How are we doing?" → Last 90 days before '{{DATA_MAX_DATE}}'::date
-- "Performance update" / "Show me key metrics" → Last 90 days vs. prior 90 days
-- "Top performers" / "Leaderboard" → Last 90 days of recent activity
-- "Any issues?" → Current pipeline only (active loans)
+## Time Scoping and filterConfig.defaultPreset
+Map the user's requested time range to the correct defaultPreset in filterConfig:
+- "last 12 months" / no explicit range (default) → "L12M"
+- "last 6 months" → "L6M"
+- "last 3 months" / "last 90 days" → "L3M"
+- "YTD" / "this year" / "year to date" → "YTD"
+- "MTD" / "this month" / "month to date" → "MTD"
+- "current year" / "CY" / "2025" / "2026" → "CY"
+- "last year" / "prior year" / "PY" → "PY"
+- No time constraint / "all time" / "since inception" → null
+NEVER hard-code date ranges in SQL for filterable:true widgets. Use filterConfig.defaultPreset.
 
 ## Metric Consistency (CRITICAL)
 When computing metrics like Revenue, Pull-Through Rate, Volume, Fallout, Cycle Time:
@@ -647,6 +873,48 @@ When computing metrics like Revenue, Pull-Through Rate, Volume, Fallout, Cycle T
 - Revenue is GAIN-ON-SALE (the tenant-specific expression), NOT loan_amount. They are fundamentally different metrics.
 - Pull-Through Rate = funded / completed * 100. "Completed" = loans NOT in active statuses ('Active Loan','active','locked','submitted','approved').
 - For time-series charts showing monthly trends, GROUP BY DATE_TRUNC('month', l.application_date) and use the verified metric formulas within each month's aggregation.
+
+## Pull-Through Guardrails (CRITICAL)
+For ANY pull-through widget (especially by branch / loan officer / product), SQL MUST:
+1) Use canonical numerator:
+   COUNT(CASE WHEN (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%') THEN 1 END)
+2) Use canonical denominator:
+   COUNT(CASE WHEN l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END)
+3) Compute rate with NULLIF denominator:
+   funded_count * 100.0 / NULLIF(completed_count, 0)
+4) Expose validation counts in SELECT for segmented views:
+   include funded_count and completed_count alongside pull_through_rate
+5) Avoid tiny-denominator artifacts for segmented views:
+   add HAVING completed_count >= 5 (or >= 10 for very noisy data)
+6) NEVER filter the base WHERE clause to only funded statuses for pull-through charts.
+7) For segmented pull-through views (by branch / LO / product), SELECT MUST include:
+   - funded_count
+   - completed_count
+   - pull_through_rate
+   These counts are mandatory for auditability.
+8) For filterable pull-through widgets, filterConfig.dateColumn MUST be "application_date".
+
+## Filter Configuration for create_widget (CRITICAL)
+Every create_widget action MUST include a filterConfig object. This separates the SQL logic from the time-scoping so filters can be changed without rewriting SQL.
+
+  filterConfig: {
+    "filterable": true | false,
+    "dateColumn": "application_date" | "funding_date" | "lock_date" | "started_date" | ...,
+    "defaultPreset": "L12M" | "L6M" | "L3M" | "YTD" | "MTD" | "CY" | "PY" | null
+  }
+
+Rules:
+1. filterable:true — for all time-series, KPI, and trend widgets. The filter system appends AND l.<dateColumn> >= $1 AND l.<dateColumn> <= $2 — do NOT put date ranges in the SQL.
+2. filterable:false — ONLY for static snapshots that must never be date-filtered: current active loan count, all-time pipeline totals, status distributions. If false, the SQL must include its own date scoping using '{{DATA_MAX_DATE}}'::date.
+3. dateColumn: pick the column that semantically matches the widget:
+   - Pipeline / pull-through / application counts → "application_date"
+   - Funded volume / revenue / cycle time → "funding_date"
+   - Lock activity / fallout → "lock_date"
+4. SQL for filterable:true widgets — NEVER include date-range conditions. Write only the structural query:
+   - DO include: WHERE l.funding_date IS NOT NULL  (structural — keeps nulls out)
+   - DO include: WHERE l.current_loan_status NOT IN (...)  (status filter — not a date)
+   - DO NOT include: WHERE l.funding_date >= '2025-01-01'  (date range — the filter system handles this)
+   - DO NOT include: WHERE l.application_date >= '{{DATA_MAX_DATE}}'::date - INTERVAL '12 months'
 
 ## SQL Generation Rules for create_widget and query_data (CRITICAL)
 1. ALWAYS use table alias "l": FROM public.loans l
@@ -670,15 +938,14 @@ When computing metrics like Revenue, Pull-Through Rate, Volume, Fallout, Cycle T
    - For non-date ordering: ORDER BY 2 DESC (positional reference)
 9. Use COALESCE for null handling when needed
 10. WHERE clause rules (CRITICAL — violations cause PostgreSQL errors):
-    - NEVER write "WHERE TRUE" — it evaluates to a boolean, not a date, so "WHERE TRUE - INTERVAL '1 month'" is a type error
-    - NEVER use CURRENT_DATE or NOW() — the data does not extend to today. Always anchor to '{{DATA_MAX_DATE}}'::date.
-    - ALWAYS write concrete date conditions:
-      GOOD: WHERE l.application_date >= '{{DATA_MAX_DATE}}'::date - INTERVAL '1 month'
-      GOOD: WHERE l.application_date >= '2026-01-01'::date
-      BAD:  WHERE l.application_date >= CURRENT_DATE - INTERVAL '1 month'  ← returns 0 rows
-      BAD:  WHERE TRUE AND l.application_date >= CURRENT_DATE - INTERVAL '1 month'
-      BAD:  WHERE TRUE - INTERVAL '1 month'
+    - NEVER write "WHERE TRUE" — it evaluates to a boolean, not a date
+    - NEVER use CURRENT_DATE or NOW() — the data does not extend to today
+    - For filterable:true widgets — DO NOT write date range conditions. The filter system injects them.
+    - For filterable:false widgets — anchor dates to '{{DATA_MAX_DATE}}'::date:
+      GOOD: WHERE l.current_loan_status = 'Active Loan' AND l.application_date IS NOT NULL
+      GOOD (filterable:false only): WHERE l.application_date >= '{{DATA_MAX_DATE}}'::date - INTERVAL '1 year'
     - Always prefix column names with the table alias: l.application_date, l.funding_date, l.loan_amount
+    - NEVER end SQL with a semicolon
 
 ## Chart Data Rules for create_widget
 - Time series (dates) → "line" or "area" chart, ALWAYS aggregate by date period
@@ -788,7 +1055,7 @@ router.get("/personas", authenticateToken, (_req, res) => {
       icon: p.icon,
       suggestedQuestions: p.suggestedQuestions,
     })),
-    defaultPersonaId: DEFAULT_PERSONA_ID,
+    defaultPersonaId: "mortgage-expert",
   });
 });
 
@@ -804,21 +1071,13 @@ router.post(
         canvasState,
         widgetCatalog,
         conversationHistory,
-        persona: personaId,
       } = req.body as {
         question: string;
         canvasState?: CanvasStateSnapshot;
         widgetCatalog?: string;
         conversationHistory?: { role: string; content: string }[];
         tenantId?: string;
-        persona?: AgentPersonaId;
       };
-
-      // Resolve active persona — falls back to default if not supplied or unrecognized
-      const activePersona =
-        personaId && AGENT_PERSONAS[personaId]
-          ? AGENT_PERSONAS[personaId]
-          : AGENT_PERSONAS[DEFAULT_PERSONA_ID];
 
       if (!question || typeof question !== "string") {
         return res.status(400).json({ error: "Question is required" });
@@ -878,29 +1137,34 @@ router.post(
         console.warn("[CohiWorkbench] Could not load research context:", err);
       }
 
-      // Load persona prompt supplement from config (or fall back to inline definition)
-      let personaSupplement = activePersona
-        ? `\n\n## Active Agent Persona: ${activePersona.name}\n${activePersona.description}`
-        : "";
-      try {
-        if (activePersona) {
-          const personaConfig = await getPromptConfig(activePersona.promptConfigId);
-          personaSupplement = `\n\n${personaConfig.system_prompt}`;
+      // Auto-select persona behavior for this request (single or blended).
+      const activePersonas = resolveAutoPersonas(question, canvasState);
+      const personaSummary = activePersonas.map((p) => p.name).join(" + ");
+
+      // Load persona prompt supplements from config (blended when needed)
+      let personaSupplement = `\n\n## Active Agent Mode (Auto): ${personaSummary}`;
+      for (const p of activePersonas) {
+        try {
+          const personaConfig = await getPromptConfig(p.promptConfigId);
+          personaSupplement += `\n\n${personaConfig.system_prompt}`;
+        } catch {
+          personaSupplement += `\n\n## ${p.name}\n${p.description}`;
         }
-      } catch {
-        // Use the short fallback above — persona config not yet in DB is fine
       }
 
-      // Fetch persona-scoped RAG context from the knowledge base
+      // Fetch knowledge context scoped to all active persona categories (union)
       let knowledgeContext = "";
-      if (tenantId && activePersona) {
+      if (tenantId && activePersonas.length > 0) {
         try {
           const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+          const categories = Array.from(
+            new Set(activePersonas.flatMap((p) => p.knowledgeCategories)),
+          );
           const ragResult = await retrieveRAGContext(question, tenantPool, {
-            categories: activePersona.knowledgeCategories,
+            categories,
             topK: 5,
             threshold: 0.3,
-            caller: `CohiWorkbench-${activePersona.id}`,
+            caller: `CohiWorkbench-auto-${activePersonas.map((p) => p.id).join("+")}`,
           });
           if (ragResult.totalChunks > 0) {
             knowledgeContext = `\n\n${ragResult.formatted}`;
@@ -947,7 +1211,7 @@ router.post(
       ];
 
       console.log(
-        `[CohiWorkbench] Processing question: "${question.substring(0, 80)}..." (tenant: ${tenantId || "none"})`
+        `[CohiWorkbench] Processing question: "${question.substring(0, 80)}..." (tenant: ${tenantId || "none"}, personas: ${personaSummary})`
       );
 
       // Use higher token limit when user appears to be requesting a report
@@ -1035,6 +1299,7 @@ router.post(
       let finalSuggestions = parsed.suggestedQuestions || [];
 
       // SQL pre-validation: drop create_widget/modify_widget actions with invalid SQL
+      // Step 1: Quick structural check (syntax, hallucinated tables)
       const invalidSqlActions: string[] = [];
       validActions = validActions.filter((a: any) => {
         if ((a.type !== "create_widget" && a.type !== "modify_widget") || !a.sql) return true;
@@ -1048,6 +1313,87 @@ router.post(
         console.log(
           `[CohiWorkbench] SQL pre-validation stripped ${invalidSqlActions.length} action(s): ${invalidSqlActions.join(", ")}`
         );
+      }
+
+      // Step 2: EXPLAIN validation for create_widget/modify_widget that passed structural check
+      // Validates both the base SQL and the SQL with a sample filter injected.
+      // Failed actions are retried with the LLM (max 2 attempts) then dropped.
+      if (tenantId) {
+        try {
+          const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+          const actionsToValidate = validActions.filter(
+            (a: any) => (a.type === "create_widget" || a.type === "modify_widget") && a.sql,
+          );
+
+          for (const action of actionsToValidate) {
+            const dateCol = action.filterConfig?.filterable !== false
+              ? (action.filterConfig?.dateColumn ?? 'application_date')
+              : undefined;
+
+            let validation = await validateWidgetSql(String(action.sql), tenantPool, dateCol);
+
+            // Pull-through-specific semantic guardrails
+            if (action.type === "create_widget" && isPullThroughAction(action)) {
+              const guardError = validatePullThroughSqlGuardrails(String(action.sql), {
+                filterable: action.filterConfig?.filterable !== false,
+                dateColumn: action.filterConfig?.dateColumn ?? "application_date",
+              });
+              if (guardError) {
+                validation = { valid: false, error: guardError, phase: "base" };
+              }
+            }
+
+            if (!validation.valid) {
+              console.warn(`[CohiWorkbench] EXPLAIN validation failed (phase=${validation.phase}) for "${action.title}": ${validation.error}`);
+
+              // Retry up to 2 times
+              let fixed: string | null = null;
+              for (let attempt = 1; attempt <= 2 && !fixed; attempt++) {
+                console.log(`[CohiWorkbench] SQL fix attempt ${attempt} for "${action.title}"`);
+                fixed = await attemptSqlFix(
+                  String(action.sql),
+                  validation.error ?? 'Unknown error',
+                  schemaContext,
+                  apiKey,
+                  validation.phase ?? 'base',
+                );
+                if (fixed) {
+                  const revalidation = await validateWidgetSql(fixed, tenantPool, dateCol);
+                  if (!revalidation.valid) {
+                    console.warn(`[CohiWorkbench] Fix attempt ${attempt} still invalid: ${revalidation.error}`);
+                    fixed = null;
+                    validation = revalidation;
+                  } else if (action.type === "create_widget" && isPullThroughAction(action)) {
+                    const postFixGuardError = validatePullThroughSqlGuardrails(fixed, {
+                      filterable: action.filterConfig?.filterable !== false,
+                      dateColumn: action.filterConfig?.dateColumn ?? "application_date",
+                    });
+                    if (postFixGuardError) {
+                      console.warn(`[CohiWorkbench] Fix attempt ${attempt} failed pull-through guardrails: ${postFixGuardError}`);
+                      fixed = null;
+                      validation = { valid: false, error: postFixGuardError, phase: "base" };
+                    }
+                  }
+                }
+              }
+
+              if (fixed) {
+                action.sql = fixed;
+                console.log(`[CohiWorkbench] SQL auto-fixed for "${action.title}"`);
+              } else {
+                // Drop the action — can't produce a valid widget
+                validActions = validActions.filter((a: any) => a !== action);
+                finalMessage += `\n\nI couldn't generate a valid query for "${action.title || 'a widget'}" — please try rephrasing your request.`;
+                console.warn(`[CohiWorkbench] Dropped action "${action.title}" after failed SQL validation`);
+              }
+            } else {
+              console.log(`[CohiWorkbench] EXPLAIN validation passed for "${action.title}"`);
+            }
+          }
+        } catch (validationErr: any) {
+          // If validation itself fails (e.g. pool unavailable), log and continue
+          console.warn('[CohiWorkbench] SQL validation step failed, skipping:', validationErr.message);
+        }
       }
 
       if (queryActions.length > 0 && tenantId) {
@@ -1213,6 +1559,37 @@ router.post(
  * POST /api/cohi-chat/workbench/conversations
  * Create a new conversation
  */
+router.post(
+  "/conversations/rebind-scope",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.tenantContext?.tenantId || req.tenantId;
+      if (!tenantId) return res.status(400).json({ error: "No tenant context" });
+
+      const { fromScopeId, toScopeId } = req.body as {
+        fromScopeId?: string;
+        toScopeId?: string;
+      };
+      if (!fromScopeId || !toScopeId) {
+        return res.status(400).json({ error: "fromScopeId and toScopeId are required" });
+      }
+
+      const moved = await rebindConversationScope(
+        tenantId,
+        req.userId!,
+        fromScopeId,
+        toScopeId
+      );
+      res.json({ success: true, moved });
+    } catch (error: any) {
+      console.error("[CohiWorkbench] Rebind scope error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
 router.post(
   "/conversations",
   authenticateToken,

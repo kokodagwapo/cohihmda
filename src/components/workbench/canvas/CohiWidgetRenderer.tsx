@@ -238,6 +238,12 @@ interface CohiWidgetRendererProps {
   hideTitle?: boolean;
   /** Source type — research widgets skip the date filter bar entirely. */
   sourceType?: 'research' | 'chat';
+  /**
+   * Called when the server auto-fixed a broken SQL query.
+   * The parent should update the widget's stored SQL to the fixed version
+   * so future renders don't trigger the same fix cycle.
+   */
+  onSqlFixed?: (newSql: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -1109,6 +1115,7 @@ export function CohiWidgetRenderer({
   canvasItemId,
   hideTitle,
   sourceType,
+  onSqlFixed,
 }: CohiWidgetRendererProps) {
   const reportWidgetData = useCanvasDataStore((s) => s.reportWidgetData);
   const removeWidgetFromStore = useCanvasDataStore((s) => s.removeWidget);
@@ -1201,7 +1208,7 @@ export function CohiWidgetRenderer({
   const effectiveDateFilter = isResearch ? null : (filterSyncEnabled ? (groupDateFilter ?? null) : localDateFilter);
   const effectiveDimFilters = isResearch ? null : (filterSyncEnabled ? (groupDimensionFilters ?? null) : null);
 
-  const { data, loading, error, refetch } = useCohiWidgetData(sql, tenantId, effectiveDateFilter, effectiveDimFilters, isResearch);
+  const { data, loading, error, refetch } = useCohiWidgetData(sql, tenantId, effectiveDateFilter, effectiveDimFilters, isResearch, onSqlFixed);
   const effectiveConfig = { ...vizConfig, type: chartType };
 
   // Compute compatible viz types based on actual data shape
