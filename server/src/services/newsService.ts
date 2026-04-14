@@ -1,6 +1,7 @@
 import Parser from "rss-parser";
 import axios from "axios";
 import * as cheerio from "cheerio";
+import { postOpenAIChatCompletions } from "./openai/chatCompletionsCompat.js";
 
 /**
  * News Service
@@ -1079,16 +1080,11 @@ async function rankHeadlinesForExecutives(results: NewsSource[]): Promise<void> 
       .map((entry) => `${entry.id} | ${entry.source} | ${entry.date} | ${entry.title}`)
       .join("\n");
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+    const response = await postOpenAIChatCompletions(
+      apiKey,
+      {
         model: process.env.NEWS_MODEL || "gpt-5.4-nano",
         temperature: 0.2,
-        max_tokens: 600,
         response_format: { type: "json_object" },
         messages: [
           {
@@ -1101,8 +1097,9 @@ async function rankHeadlinesForExecutives(results: NewsSource[]): Promise<void> 
             content: `Rank these headlines by relevance:\n${payload}`,
           },
         ],
-      }),
-    });
+      },
+      600,
+    );
 
     if (!response.ok) return;
     const data = (await response.json()) as {
@@ -1578,23 +1575,19 @@ ${metrics ? formatMetricsForPrompt(metrics) : ""}
 Provide 3 specific, actionable insights based on this article. If client data is provided, include one insight that specifically relates to their data.`;
 
   try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+    const response = await postOpenAIChatCompletions(
+      apiKey,
+      {
         model: process.env.NEWS_MODEL || "gpt-5.4-nano",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
         temperature: 0.7,
-        max_tokens: 800,
         response_format: { type: "json_object" },
-      }),
-    });
+      },
+      800,
+    );
 
     if (!response.ok) {
       const error = (await response.json()) as { error?: { message?: string } };

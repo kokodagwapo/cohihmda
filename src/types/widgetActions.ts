@@ -50,6 +50,12 @@ export interface CreateWidgetAction {
   title: string;
   /** LLM-generated explanation */
   explanation: string;
+  /**
+   * Optional explicit override for pull-through segmented views.
+   * When true, low-sample segments are allowed (no minimum completed_count HAVING gate).
+   * Use only when the user explicitly asks to include small-sample branches/LOs.
+   */
+  allowLowSamplePullThrough?: boolean;
 }
 
 export interface ModifyWidgetAction {

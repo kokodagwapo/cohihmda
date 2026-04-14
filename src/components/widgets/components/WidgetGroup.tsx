@@ -2312,6 +2312,7 @@ function GridCellCohiWidget({
         groupDimensionFilters={dimensionFilters}
         filterSyncEnabled={filterSyncEnabled}
         initialFilters={item.savedFilters}
+        allowLowSamplePullThrough={item.allowLowSamplePullThrough}
         onFilterChange={onFilterChange}
         onVizTypeChange={onVizTypeChange}
         canvasItemId={canvasItemId}
@@ -2431,6 +2432,7 @@ function MaximizeCohiWidget({
       groupDimensionFilters={dimensionFilters}
       filterSyncEnabled={filterSyncEnabled}
       initialFilters={item.savedFilters}
+      allowLowSamplePullThrough={item.allowLowSamplePullThrough}
       hideTitle
     />
   );

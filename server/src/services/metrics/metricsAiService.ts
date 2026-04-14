@@ -6,6 +6,7 @@
 import { tenantDbManager } from '../../config/tenantDatabaseManager.js';
 import { decryptAPIKeys } from '../encryption.js';
 import { METRICS_CATALOG, MetricDefinition } from './metricsService.js';
+import { postOpenAIChatCompletions } from '../openai/chatCompletionsCompat.js';
 
 export interface MetricExplanation {
   summary: string;
@@ -95,19 +96,15 @@ async function callOpenAI(
   apiKey: string,
   options: { temperature?: number; maxTokens?: number } = {}
 ): Promise<string> {
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
+  const response = await postOpenAIChatCompletions(
+    apiKey,
+    {
       model: 'gpt-4o-mini',
       messages: messages.map(m => ({ role: m.role, content: m.content })),
       temperature: options.temperature ?? 0.7,
-      max_tokens: options.maxTokens ?? 1000,
-    }),
-  });
+    },
+    options.maxTokens ?? 1000,
+  );
 
   if (!response.ok) {
     const error = await response.json() as { error?: { message?: string } };

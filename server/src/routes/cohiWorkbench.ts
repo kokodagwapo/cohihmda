@@ -227,7 +227,7 @@ function isPullThroughAction(action: any): boolean {
  */
 function validatePullThroughSqlGuardrails(
   sql: string,
-  opts?: { filterable?: boolean; dateColumn?: string },
+  opts?: { filterable?: boolean; dateColumn?: string; allowLowSamplePullThrough?: boolean },
 ): string | null {
   const normalized = sql.toLowerCase().replace(/\s+/g, " ");
   const hasNumerator =
@@ -269,7 +269,7 @@ function validatePullThroughSqlGuardrails(
     if (!hasFundedCountAlias || !hasCompletedCountAlias || !hasRateAlias) {
       return "Segmented pull-through SQL must select funded_count, completed_count, and pull_through_rate aliases.";
     }
-    if (!hasSampleSizeHaving) {
+    if (!opts?.allowLowSamplePullThrough && !hasSampleSizeHaving) {
       return "Segmented pull-through SQL must include HAVING completed_count >= 5 (or >= 10) to avoid tiny-denominator artifacts.";
     }
   }
@@ -661,7 +661,7 @@ Each action in the "actions" array must be one of:
    {"type": "suggest_dashboard", "sectionKey": "<key like companyScorecard, salesScorecard, etc.>", "explanation": "Why this dashboard is useful"}
 
 3. **create_widget**: Generate a new visualization from SQL
-   {"type": "create_widget", "sql": "SELECT ...", "title": "Chart Title", "config": {"type": "bar|line|pie|area|table|kpi|donut|horizontal_bar|stacked_bar|grouped_bar|treemap|pivot", "title": "...", "data": [], "xKey": "...", "yKey": "...", "yKeys": ["...", "..."], "pivotConfig": {"rowKey":"...","columnKey":"...","valueKey":"...","aggregation":"sum"}}, "filterConfig": {"filterable": true, "dateColumn": "funding_date", "defaultPreset": "L12M"}, "explanation": "What this shows"}
+   {"type": "create_widget", "sql": "SELECT ...", "title": "Chart Title", "config": {"type": "bar|line|pie|area|table|kpi|donut|horizontal_bar|stacked_bar|grouped_bar|treemap|pivot", "title": "...", "data": [], "xKey": "...", "yKey": "...", "yKeys": ["...", "..."], "pivotConfig": {"rowKey":"...","columnKey":"...","valueKey":"...","aggregation":"sum"}}, "filterConfig": {"filterable": true, "dateColumn": "funding_date", "defaultPreset": "L12M"}, "allowLowSamplePullThrough": false, "explanation": "What this shows"}
    IMPORTANT: The config.type MUST be one of: bar, line, pie, area, table, kpi, donut, horizontal_bar, stacked_bar, grouped_bar, treemap, pivot. NEVER use "chart" as a type.
    IMPORTANT: Every create_widget MUST include "filterConfig". See the Filter Configuration section below.
 
@@ -893,6 +893,10 @@ For ANY pull-through widget (especially by branch / loan officer / product), SQL
    - pull_through_rate
    These counts are mandatory for auditability.
 8) For filterable pull-through widgets, filterConfig.dateColumn MUST be "application_date".
+9) allowLowSamplePullThrough override:
+   - Default is false (enforce minimum denominator HAVING completed_count >= 5 or 10).
+   - Set "allowLowSamplePullThrough": true ONLY when the user explicitly asks to include small-sample segments.
+   - Even when override=true, still include funded_count and completed_count columns for transparency.
 
 ## Filter Configuration for create_widget (CRITICAL)
 Every create_widget action MUST include a filterConfig object. This separates the SQL logic from the time-scoping so filters can be changed without rewriting SQL.
@@ -1337,6 +1341,7 @@ router.post(
               const guardError = validatePullThroughSqlGuardrails(String(action.sql), {
                 filterable: action.filterConfig?.filterable !== false,
                 dateColumn: action.filterConfig?.dateColumn ?? "application_date",
+                allowLowSamplePullThrough: !!action.allowLowSamplePullThrough,
               });
               if (guardError) {
                 validation = { valid: false, error: guardError, phase: "base" };
@@ -1367,6 +1372,7 @@ router.post(
                     const postFixGuardError = validatePullThroughSqlGuardrails(fixed, {
                       filterable: action.filterConfig?.filterable !== false,
                       dateColumn: action.filterConfig?.dateColumn ?? "application_date",
+                      allowLowSamplePullThrough: !!action.allowLowSamplePullThrough,
                     });
                     if (postFixGuardError) {
                       console.warn(`[CohiWorkbench] Fix attempt ${attempt} failed pull-through guardrails: ${postFixGuardError}`);

@@ -238,6 +238,8 @@ interface CohiWidgetRendererProps {
   hideTitle?: boolean;
   /** Source type — research widgets skip the date filter bar entirely. */
   sourceType?: 'research' | 'chat';
+  /** User-approved override to allow low-sample pull-through segments. */
+  allowLowSamplePullThrough?: boolean;
   /**
    * Called when the server auto-fixed a broken SQL query.
    * The parent should update the widget's stored SQL to the fixed version
@@ -1115,6 +1117,7 @@ export function CohiWidgetRenderer({
   canvasItemId,
   hideTitle,
   sourceType,
+  allowLowSamplePullThrough = false,
   onSqlFixed,
 }: CohiWidgetRendererProps) {
   const reportWidgetData = useCanvasDataStore((s) => s.reportWidgetData);
@@ -1297,6 +1300,27 @@ export function CohiWidgetRenderer({
       ? String(activeYear)
       : null;
 
+  const pullThroughQuality = useMemo(() => {
+    const text = `${title || ''} ${explanation || ''} ${sql || ''}`.toLowerCase();
+    const isPullThrough = /pull[\s-]?through/.test(text);
+    if (!isPullThrough) return null;
+    const havingMatch =
+      /having[\s\S]*?completed_count\s*>=\s*(\d+)/i.exec(sql) ||
+      /having[\s\S]*?count\s*\(\s*case[\s\S]*?current_loan_status[\s\S]*?not in[\s\S]*?\)\s*>=\s*(\d+)/i.exec(sql);
+    const minCompleted = havingMatch ? Number(havingMatch[1]) : null;
+    const rows = Array.isArray(data) ? data : [];
+    const hasAuditCounts =
+      rows.length > 0 &&
+      Object.prototype.hasOwnProperty.call(rows[0], 'funded_count') &&
+      Object.prototype.hasOwnProperty.call(rows[0], 'completed_count');
+    const over100 = rows.some((r: any) =>
+      Object.entries(r).some(
+        ([k, v]) => /pull[\s_-]?through/.test(k.toLowerCase()) && typeof v === 'number' && v > 100,
+      ),
+    );
+    return { minCompleted, hasAuditCounts, over100 };
+  }, [title, explanation, sql, data]);
+
   return (
     <div className="h-full w-full flex flex-col bg-white dark:bg-slate-900 rounded-lg overflow-hidden">
       {/* ─── Compact title bar for standalone widgets (not inside a group) ─── */}
@@ -1453,6 +1477,22 @@ export function CohiWidgetRenderer({
       )}
 
       {/* Body – minimal padding so charts fill available space */}
+      {pullThroughQuality && (
+        <div className={cn(
+          "shrink-0 px-2 py-1 text-[10px] border-b",
+          pullThroughQuality.over100
+            ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800/40"
+            : "bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800/40 dark:text-slate-300 dark:border-slate-700/60",
+        )}>
+          {pullThroughQuality.minCompleted
+            ? `Pull-through safeguard: min completed_count >= ${pullThroughQuality.minCompleted}`
+            : allowLowSamplePullThrough
+              ? "Pull-through safeguard override active: low-sample segments included by explicit request"
+              : "Pull-through safeguard: no minimum denominator detected"}
+          {!pullThroughQuality.hasAuditCounts ? " · Warning: funded_count/completed_count columns not present in result." : ""}
+          {pullThroughQuality.over100 ? " · Data quality warning: rate > 100 detected." : ""}
+        </div>
+      )}
       <div className="flex-1 min-h-0 overflow-hidden px-1 py-0.5">
         {loading ? (
           <div className="flex items-center justify-center h-full gap-1.5 text-slate-500">

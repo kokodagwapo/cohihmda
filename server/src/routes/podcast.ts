@@ -18,6 +18,7 @@ import {
 } from "../services/cohiAssetStore.js";
 import { enqueueCohiPrefetchJob } from "../services/cohiPrefetchWorker.js";
 import { logLLMUsage } from "../services/llmUsageTracker.js";
+import { postOpenAIChatCompletions } from "../services/openai/chatCompletionsCompat.js";
 
 const router = Router();
 
@@ -834,22 +835,18 @@ async function generateBriefingScript(
     ? `Here are today's key insights for the executive briefing:\n\n${insightsSummary}\n\nDeliver the spoken briefing.`
     : `No specific insights are available today. Deliver a brief general mortgage market update based on your knowledge.`;
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
+  const response = await postOpenAIChatCompletions(
+    apiKey,
+    {
       model: CHAT_MODEL,
       messages: [
         { role: "system", content: BRIEFING_SYSTEM_PROMPT },
         { role: "user", content: userPrompt },
       ],
       temperature: 0.7,
-      max_tokens: 1500,
-    }),
-  });
+    },
+    1500,
+  );
 
   if (!response.ok) {
     const err = (await response.json()) as { error?: { message?: string } };
@@ -1140,24 +1137,17 @@ router.post(
       }
 
       // Generate answer
-      const chatRes = await fetch(
-        "https://api.openai.com/v1/chat/completions",
+      const chatRes = await postOpenAIChatCompletions(
+        apiKey,
         {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: CHAT_MODEL,
-            messages: [
-              { role: "system", content: QUESTION_SYSTEM_PROMPT },
-              { role: "user", content: questionText },
-            ],
-            temperature: 0.5,
-            max_tokens: 1000,
-          }),
-        }
+          model: CHAT_MODEL,
+          messages: [
+            { role: "system", content: QUESTION_SYSTEM_PROMPT },
+            { role: "user", content: questionText },
+          ],
+          temperature: 0.5,
+        },
+        1000,
       );
 
       if (!chatRes.ok) {
@@ -1262,22 +1252,18 @@ async function generateCohiScriptText(
   trackingCtx?: { tenantId: string; requestedBy?: string }
 ): Promise<string> {
   const userPrompt = buildCohiBriefingPrompt(briefingContext);
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${openAIKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
+  const response = await postOpenAIChatCompletions(
+    openAIKey,
+    {
       model: CHAT_MODEL,
       messages: [
         { role: "system", content: Cohi_BRIEFING_PROMPT },
         { role: "user", content: userPrompt },
       ],
       temperature: 0.6,
-      max_tokens: 2400,
-    }),
-  });
+    },
+    2400,
+  );
 
   if (!response.ok) {
     const err = (await response.json()) as { error?: { message?: string } };
@@ -1317,22 +1303,18 @@ async function generateCohiAnswerText(
   openAIKey: string,
   questionText: string
 ): Promise<string> {
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${openAIKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
+  const response = await postOpenAIChatCompletions(
+    openAIKey,
+    {
       model: CHAT_MODEL,
       messages: [
         { role: "system", content: Cohi_QUESTION_PROMPT },
         { role: "user", content: questionText },
       ],
       temperature: 0.5,
-      max_tokens: 1200,
-    }),
-  });
+    },
+    1200,
+  );
 
   if (!response.ok) {
     const err = (await response.json()) as { error?: { message?: string } };

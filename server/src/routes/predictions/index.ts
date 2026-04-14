@@ -24,6 +24,7 @@ import {
 import { calculatePullthroughForRole } from "../../services/dashboard/predictionService.js";
 import { runPredictionPipeline } from "../../services/dashboard/predictionPipelineService.js";
 import { generateEmbeddings } from "../../services/embeddingService.js";
+import { postOpenAIChatCompletions } from "../../services/openai/chatCompletionsCompat.js";
 
 const router = Router();
 
@@ -1459,22 +1460,18 @@ Return ONLY a JSON array of strings. Each string is one complete recommendation 
 
   const model = process.env.RECOMMENDATION_MODEL || "gpt-5.4";
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
+  const response = await postOpenAIChatCompletions(
+    apiKey,
+    {
       model,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
       temperature: 0.4,
-      max_tokens: 1800,
-    }),
-  });
+    },
+    1800,
+  );
 
   if (!response.ok) {
     throw new Error(`OpenAI API error: ${response.status}`);

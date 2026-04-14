@@ -33,6 +33,7 @@ import { getPromptConfig, buildPrompt } from "../promptConfigService.js";
 import { getSchemaForTenant } from "../ai/schemaContextService.js";
 import { getTenantRevenueExpression } from "../../utils/scorecard-utils.js";
 import { getStandardDateRanges } from "../metrics/canonicalMetrics.js";
+import { postOpenAIChatCompletions } from "../openai/chatCompletionsCompat.js";
 import {
   insightLog, insightLogWarn, insightLogError,
   insightLogStart, insightLogEnd, getInsightLogPath,
@@ -1154,23 +1155,19 @@ async function callOpenAI(
     requestedBy,
   } = options;
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
+  const response = await postOpenAIChatCompletions(
+    apiKey,
+    {
       model,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
       temperature,
-      max_completion_tokens: maxTokens,
       response_format: { type: "json_object" },
-    }),
-  });
+    },
+    maxTokens,
+  );
 
   if (!response.ok) {
     const error = (await response.json()) as {

@@ -56,9 +56,9 @@
 
 ### Personnel Performance Metrics
 
-**Total Team Score (TTS) — Sales** — A composite score evaluating loan officer performance across six equally-weighted components (20% each). The score creates three tiers: Elite (≥120), Strong (≥80), and Developing (<80).
+**Top Tiering Score (TTS alias) — Sales** — A composite score evaluating loan officer performance across six components (volume, margin, units, pull-through, turn time, concession). These weights are tenant-configurable in **Admin > Scoring & Weights** (the 20% each mix is only the default baseline). The score creates three tiers: Elite (≥120), Strong (≥80), and Developing (<80).
 
-**Total Team Score (TTS) — Operations** — A composite for operations staff weighted 70% on units processed, 15% on turn time, and 15% on loan complexity handled. Same tier thresholds: ≥120 Elite, ≥80 Strong, <80 Developing.
+**Top Tiering Score (TTS alias) — Operations** — A composite for operations staff using units, turn time, and loan complexity components. Weights are tenant-configurable in **Admin > Scoring & Weights** (70/15/15 is the default baseline). Same tier thresholds: ≥120 Elite, ≥80 Strong, <80 Developing.
 
 **Loan Complexity Score** — A points-based measure of how difficult a loan is to process, starting at 100 and adding points for each complicating factor: government loan type (+10), purchase transaction (+5), FICO below 680 (+10), LTV above 80% (+5), DTI above 43% (+5), non-primary occupancy (+5), self-employed borrower (+5). Higher scores indicate more complex loans.
 

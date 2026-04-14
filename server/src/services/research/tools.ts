@@ -14,6 +14,7 @@ import { decryptAPIKeys } from "../encryption.js";
 import { getKnowledgeContext as sharedGetKnowledgeContext } from "../ai/ragRetrieval.js";
 import { logLLMUsage } from "../llmUsageTracker.js";
 import { getPlatformSetting } from "../platformSettingsService.js";
+import { postOpenAIChatCompletions } from "../openai/chatCompletionsCompat.js";
 
 // ============================================================================
 // Types
@@ -249,7 +250,6 @@ export async function callLLM(
       model,
       messages,
       temperature,
-      max_completion_tokens: currentMaxTokens,
     };
 
     if (jsonMode) {
@@ -258,14 +258,11 @@ export async function callLLM(
 
     let response: Response;
     try {
-      response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
-      });
+      response = await postOpenAIChatCompletions(
+        apiKey,
+        body,
+        currentMaxTokens,
+      );
     } catch (networkErr: any) {
       console.warn(
         `[LLM] Network error${tag ? ` [${tag}]` : ""} (attempt ${attempt}/${MAX_LLM_RETRIES}): ${networkErr.message}`
