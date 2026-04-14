@@ -90,6 +90,30 @@ export interface WidgetFilterState {
 }
 
 // ---------------------------------------------------------------------------
+// WidgetFilterConfig – AI-declared filter capabilities for a Cohi widget
+// ---------------------------------------------------------------------------
+
+/**
+ * Declared at widget creation time by the AI. Describes whether the widget
+ * supports external filter injection and which date column + default preset
+ * to use. Filters are applied additively (no SQL rewriting).
+ */
+export interface WidgetFilterConfig {
+  /** When true, date and dimension filters can be injected into this widget's SQL. */
+  filterable: boolean;
+  /**
+   * The primary date column to filter on.
+   * e.g. "application_date", "funding_date", "lock_date"
+   */
+  dateColumn?: string;
+  /**
+   * The default time preset to apply when the widget is first rendered.
+   * Maps to period presets: "L12M" | "L6M" | "L3M" | "YTD" | "MTD" | "CY" | "PY" | null
+   */
+  defaultPreset?: string | null;
+}
+
+// ---------------------------------------------------------------------------
 // GroupWidgetItem – polymorphic items that live inside a WidgetGroup
 // ---------------------------------------------------------------------------
 
@@ -104,6 +128,11 @@ export type GroupWidgetItem =
       title: string;
       vizConfig: VisualizationConfig;
       explanation?: string;
+      /**
+       * AI-declared filter config (set at creation, never changes).
+       * Determines whether filters can be applied and which date column to use.
+       */
+      filterConfig?: WidgetFilterConfig;
       /** Per-widget filter state. When present, the widget uses its own filters. */
       savedFilters?: WidgetFilterState;
     };

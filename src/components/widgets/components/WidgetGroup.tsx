@@ -1565,6 +1565,7 @@ function GridCellWidget({
   onVizTypeChange,
   onOpenEditDialog,
   onRegistryConfigChange,
+  onSqlChanged,
 }: {
   item: GroupWidgetItem;
   /** Stable unique ID used for canvasDataStore reporting */
@@ -1586,6 +1587,8 @@ function GridCellWidget({
   onOpenEditDialog?: () => void;
   /** For registry widgets: persist config changes (e.g. workflow dropdown state). */
   onRegistryConfigChange?: (config: Record<string, unknown>) => void;
+  /** Called when the server auto-fixed the widget's SQL. Persist the new SQL on the item. */
+  onSqlChanged?: (newSql: string) => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const [moveMenuOpen, setMoveMenuOpen] = useState(false);
@@ -1768,6 +1771,7 @@ function GridCellWidget({
             filterSyncEnabled={filterSyncEnabled}
             onFilterChange={onFilterChange}
             onVizTypeChange={onVizTypeChange}
+            onSqlChanged={onSqlChanged}
           />
         )}
       </div>
@@ -2280,6 +2284,7 @@ function GridCellCohiWidget({
   filterSyncEnabled,
   onFilterChange,
   onVizTypeChange,
+  onSqlChanged,
 }: {
   item: Extract<GroupWidgetItem, { kind: "cohi" }>;
   canvasItemId: string;
@@ -2290,6 +2295,7 @@ function GridCellCohiWidget({
   filterSyncEnabled: boolean;
   onFilterChange?: (filters: WidgetFilterState) => void;
   onVizTypeChange?: (type: string) => void;
+  onSqlChanged?: (newSql: string) => void;
 }) {
   const { selectedTenantId } = useTenantStore();
   return (
@@ -2310,6 +2316,7 @@ function GridCellCohiWidget({
         onVizTypeChange={onVizTypeChange}
         canvasItemId={canvasItemId}
         hideTitle
+        onSqlFixed={onSqlChanged}
       />
     </div>
   );
@@ -2987,6 +2994,19 @@ export function WidgetGroup({
       };
       const next = items.map((it, i) => (i === index ? updated : it));
       persistItems(next);
+    },
+    [items, persistItems],
+  );
+
+  /** Persist a server-auto-fixed SQL change for a single cohi widget */
+  const handleCohiWidgetSqlChanged = useCallback(
+    (index: number, newSql: string) => {
+      const item = items[index];
+      if (item.kind !== "cohi") return;
+      const updated: GroupWidgetItem = { ...item, sql: newSql };
+      const next = items.map((it, i) => (i === index ? updated : it));
+      persistItems(next);
+      console.log(`[WidgetGroup] Auto-fixed SQL persisted for widget "${item.title}"`);
     },
     [items, persistItems],
   );
@@ -4536,6 +4556,11 @@ export function WidgetGroup({
                       onRegistryConfigChange={
                         item.kind === "registry"
                           ? (config) => handleRegistryConfigChange(idx, config)
+                          : undefined
+                      }
+                      onSqlChanged={
+                        item.kind === "cohi"
+                          ? (newSql) => handleCohiWidgetSqlChanged(idx, newSql)
                           : undefined
                       }
                     />

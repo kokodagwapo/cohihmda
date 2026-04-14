@@ -96,7 +96,10 @@ import {
   type CanvasUpload,
   type CanvasBackground,
   type CanvasAnnotation,
+  type WidgetFilterConfig,
+  type WidgetFilterState,
 } from "@/components/workbench/canvas/types";
+import { computePresetDateRange } from "@/components/ui/DatePeriodPicker";
 import { getWidgetDefinition } from "@/components/widgets/registry";
 import { WidgetDataProvider } from "@/components/widgets/data";
 import { WorkbenchCohiPanel } from "@/components/workbench/WorkbenchCohiPanel";
@@ -123,6 +126,85 @@ import { Camera } from "lucide-react";
 
 /** Set to true to hide Cohi chat/panel in workbench (panel + toggle + empty-state entry points). */
 const WORKBENCH_COHI_HIDDEN = false;
+
+function generateDraftScopeId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * Converts a WidgetFilterConfig returned by the AI into an initial WidgetFilterState.
+ * The savedFilters drives the group's initial filter bar selection.
+ */
+function filterConfigToInitialState(fc: WidgetFilterConfig | undefined): WidgetFilterState | undefined {
+  if (!fc || !fc.filterable) return undefined;
+  const state: WidgetFilterState = {};
+  if (fc.dateColumn && fc.dateColumn !== 'application_date') {
+    state.dateField = fc.dateColumn;
+  }
+  if (fc.defaultPreset) {
+    try {
+      // Validate it's a known preset key before storing
+      computePresetDateRange(fc.defaultPreset as any);
+      state.preset = fc.defaultPreset;
+    } catch {
+      // Unknown preset — omit, widget will use its default
+    }
+  }
+  return Object.keys(state).length > 0 ? state : undefined;
+}
+
+/**
+ * Wraps a single AI-generated cohi widget in a lightweight widget_group so it
+ * gets the full group filter bar (date, dimension, "add filter") instead of the
+ * limited standalone toolbar.
+ */
+function wrapCohiWidgetInGroup(
+  action: { sql: string; title: string; config: any; explanation?: string; filterConfig?: WidgetFilterConfig },
+  idx: string,
+  pos: { x: number; y: number; w: number; h: number },
+): CanvasLayoutItem {
+  const groupId = `cohi-group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const widgetId = `cohi-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`;
+  const filterConfig: WidgetFilterConfig = action.filterConfig ?? { filterable: true, dateColumn: 'application_date' };
+  const initialFilters = filterConfigToInitialState(filterConfig);
+
+  // Use filterConfig.dateColumn to initialise the group's own savedFilters so
+  // the filter bar starts on the right date column & preset.
+  const groupSavedFilters = filterConfig.filterable && filterConfig.dateColumn
+    ? {
+        dateField: filterConfig.dateColumn,
+        ...(filterConfig.defaultPreset ? { periodSelection: { preset: filterConfig.defaultPreset as any } } : {}),
+      }
+    : undefined;
+
+  return createLayoutItem(
+    groupId,
+    'widget_group',
+    {
+      type: 'widget_group' as const,
+      groupId,
+      title: action.title,
+      sectionType: 'company-scorecard' as SectionType,
+      widgetIds: [],
+      items: [{
+        kind: 'cohi' as const,
+        id: widgetId,
+        sql: action.sql,
+        title: action.title,
+        vizConfig: action.config,
+        explanation: action.explanation,
+        filterConfig,
+        savedFilters: initialFilters,
+      }],
+      filterSync: true,
+      ...(groupSavedFilters ? { savedFilters: groupSavedFilters } : {}),
+    },
+    pos,
+  );
+}
 
 /**
  * Helper: make an authenticated POST that returns a Blob (for PPTX/PDF downloads).
@@ -887,6 +969,9 @@ export function WorkbenchCanvas({
   const [canvasBackground, setCanvasBackground] =
     useState<CanvasBackground>(DEFAULT_BACKGROUND);
   const [canvasId, setCanvasId] = useState<string | null>(null);
+  const [draftScopeId, setDraftScopeId] = useState<string>(() =>
+    generateDraftScopeId(),
+  );
   const [canvasLoading, setCanvasLoading] = useState(!!loadCanvasId);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [saveTitle, setSaveTitle] = useState("Untitled canvas");
@@ -956,13 +1041,6 @@ export function WorkbenchCanvas({
     }
     return false;
   });
-  const [activePersonaId, setActivePersonaId] = useState<string>(() => {
-    return localStorage.getItem("cohi-workbench-persona") || "mortgage-expert";
-  });
-  const handlePersonaChange = useCallback((personaId: string) => {
-    setActivePersonaId(personaId);
-    localStorage.setItem("cohi-workbench-persona", personaId);
-  }, []);
   const [imageToDashboardOpen, setImageToDashboardOpen] = useState(false);
   const [aiBackgroundLoading, setAiBackgroundLoading] = useState(false);
   const [aiBackgroundResult, setAiBackgroundResult] = useState<{
@@ -1111,6 +1189,10 @@ export function WorkbenchCanvas({
   useEffect(() => {
     const previousLoadCanvasId = previousLoadCanvasIdRef.current;
     const nextLoadCanvasId = loadCanvasId ?? null;
+    if (previousLoadCanvasId !== nextLoadCanvasId && nextLoadCanvasId === null) {
+      // Switching to a fresh unsaved canvas gets a new draft scope key.
+      setDraftScopeId(generateDraftScopeId());
+    }
     if (
       previousLoadCanvasId !== null &&
       previousLoadCanvasId !== nextLoadCanvasId &&
@@ -1199,10 +1281,10 @@ export function WorkbenchCanvas({
     tenantId,
     canvasItems: items,
     widgetCatalog,
+    conversationScopeId: canvasId ? `canvas:${canvasId}` : `draft:${draftScopeId}`,
     canvasId,
     sourceInsight,
     selectedWidgetId: editingWidgetId,
-    persona: activePersonaId,
     onAutoExecuteActions: useCallback(
       (actions: WidgetAction[]) => {
         // Batch-execute all canvas actions to avoid stale-state issues
@@ -1240,33 +1322,26 @@ export function WorkbenchCanvas({
           cohiActionRef.current(action);
         }
 
-        // Handle create_widget actions: single → standalone, multiple → group
+        // Handle create_widget actions: single → group-of-1, multiple → group
         if (createWidgetActions.length === 1) {
-          // Single widget → standalone cohi_widget on canvas
+          // Single widget → wrapped in a widget_group for full filter bar
           const action = createWidgetActions[0];
           setItemsWithHistory((prev) => {
             const yBottom = prev.reduce(
               (max, it) => Math.max(max, it.y + it.h),
               0,
             );
-            const standaloneItem = createLayoutItem(
-              `cohi-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-              "cohi_widget",
-              {
-                type: "cohi_widget" as const,
-                sql: action.sql,
-                title: action.title,
-                vizConfig: action.config,
-                explanation: action.explanation,
-              },
+            const groupItem = wrapCohiWidgetInGroup(
+              action as any,
+              Math.random().toString(36).slice(2, 6),
               {
                 x: 12,
                 y: yBottom + 16,
                 w: Math.min(Math.max(width - 56, 400), 700),
-                h: 420,
+                h: 440,
               },
             );
-            return [...prev, standaloneItem];
+            return [...prev, groupItem];
           });
           toast({
             title: "Widget added",
@@ -1275,15 +1350,20 @@ export function WorkbenchCanvas({
         } else if (createWidgetActions.length > 1) {
           // Multiple widgets → group them together in a widget_group
           setItemsWithHistory((prev) => {
-            // Build all cohi widget items
-            const cohiItems = createWidgetActions.map((action, idx) => ({
-              kind: "cohi" as const,
-              id: `cohi-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
-              sql: action.sql,
-              title: action.title,
-              vizConfig: action.config,
-              explanation: action.explanation,
-            }));
+            // Build all cohi widget items with filterConfig
+            const cohiItems = createWidgetActions.map((action, idx) => {
+              const fc: WidgetFilterConfig = (action as any).filterConfig ?? { filterable: true, dateColumn: 'application_date' };
+              return {
+                kind: "cohi" as const,
+                id: `cohi-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+                sql: action.sql,
+                title: action.title,
+                vizConfig: action.config,
+                explanation: action.explanation,
+                filterConfig: fc,
+                savedFilters: filterConfigToInitialState(fc),
+              };
+            });
 
             const newItems = [...prev];
             let yOffset = 20;
@@ -1775,12 +1855,15 @@ export function WorkbenchCanvas({
                 return { kind: "registry" as const, defId: w.defId };
               }
               const id = `cohi-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+              const fc: WidgetFilterConfig = (w as any).filterConfig ?? { filterable: true, dateColumn: 'application_date' };
               return {
                 kind: "cohi" as const,
                 id,
                 sql: w.sql,
                 title: w.title,
                 vizConfig: w.vizConfig,
+                filterConfig: fc,
+                savedFilters: filterConfigToInitialState(fc),
               };
             });
             const pos = group.canvasPosition ?? {
@@ -1820,21 +1903,12 @@ export function WorkbenchCanvas({
             const pos = spec.canvasPosition ?? {
               x: 20,
               y: yOffset,
-              w: 360,
-              h: 240,
+              w: 700,
+              h: 440,
             };
-            const cohiItem = createLayoutItem(
-              `cohi-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-              "cohi_widget",
-              {
-                type: "cohi_widget",
-                sql: spec.sql,
-                title: spec.title,
-                vizConfig: spec.vizConfig,
-              },
-              pos,
-            );
-            newItems.push(cohiItem);
+            // Standalone cohi specs also get auto-grouped for the filter bar
+            const groupItem = wrapCohiWidgetInGroup(spec as any, Math.random().toString(36).slice(2, 6), pos);
+            newItems.push(groupItem);
             yOffset = pos.y + pos.h + groupGap;
           }
 
@@ -1848,30 +1922,22 @@ export function WorkbenchCanvas({
           break;
         }
         case "create_widget": {
-          // Create a standalone cohi_widget on the canvas.
-          // Users can wrap it in a group or move it to an existing group later.
+          // Wrap in a widget_group for the full filter bar experience.
           const yBottom = items.reduce(
             (max, it) => Math.max(max, it.y + it.h),
             0,
           );
-          const standaloneItem = createLayoutItem(
-            `cohi-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-            "cohi_widget",
-            {
-              type: "cohi_widget",
-              sql: action.sql,
-              title: action.title,
-              vizConfig: action.config,
-              explanation: action.explanation,
-            },
+          const groupItem = wrapCohiWidgetInGroup(
+            action as any,
+            Math.random().toString(36).slice(2, 6),
             {
               x: 12,
               y: yBottom + 16,
               w: Math.min(Math.max(width - 56, 400), 700),
-              h: 420,
+              h: 440,
             },
           );
-          setItemsWithHistory((prev) => [...prev, standaloneItem]);
+          setItemsWithHistory((prev) => [...prev, groupItem]);
           toast({ title: "Widget added", description: action.title });
           break;
         }
@@ -3678,6 +3744,20 @@ export function WorkbenchCanvas({
           },
         );
         setCanvasId(data.id);
+        try {
+          await api.request(
+            `/api/cohi-chat/workbench/conversations/rebind-scope${tenantQs}`,
+            {
+              method: "POST",
+              body: JSON.stringify({
+                fromScopeId: `draft:${draftScopeId}`,
+                toScopeId: `canvas:${data.id}`,
+              }),
+            },
+          );
+        } catch (err) {
+          console.warn("[WorkbenchCanvas] Could not rebind draft conversation scope:", err);
+        }
         toast({ title: "Canvas saved", description: title });
         onSaved?.(data.id, title);
       }
@@ -3710,6 +3790,7 @@ export function WorkbenchCanvas({
     annotations,
     canvasBackground,
     uploads,
+    draftScopeId,
     saveTitle,
     toast,
     tenantQs,
@@ -5054,8 +5135,6 @@ export function WorkbenchCanvas({
             onSendMessage={cohiSendMessage}
             onClearMessages={cohiClearMessages}
             onExecuteAction={handleCohiAction}
-            activePersonaId={activePersonaId}
-            onPersonaChange={handlePersonaChange}
           />
         )}
 

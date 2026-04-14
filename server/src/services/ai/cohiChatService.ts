@@ -538,7 +538,7 @@ Respond with the same JSON format:
 // Query Sanitization & Execution
 // ============================================================================
 
-function sanitizeGeneratedSQL(sql: string): string {
+export function sanitizeGeneratedSQL(sql: string): string {
   let sanitized = sql;
   sanitized = sanitized.replace(
     /INTERVAL\s*'(\d+)\s*quarters?'/gi,

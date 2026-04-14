@@ -82,14 +82,14 @@ export interface UseWorkbenchCohiOptions {
   canvasItems?: CanvasLayoutItem[];
   /** Widget catalog summary string (from widgetCatalogSerializer) */
   widgetCatalog?: string;
-  /** Canvas ID for conversation persistence */
+  /** Stable conversation scope key: canvas:<id> or draft:<uuid> */
+  conversationScopeId?: string | null;
+  /** Real canvas id (if saved) for payload context */
   canvasId?: string | null;
   /** Source insight context when canvas was created via deep-dive */
   sourceInsight?: SourceInsightContext | null;
   /** ID of the widget the user is editing (from "Edit with Cohi") — marked as selected in snapshot */
   selectedWidgetId?: string | null;
-  /** Active agent persona ID — sent to backend for persona-scoped prompt and RAG */
-  persona?: string;
   onError?: (error: Error) => void;
   /** Called when the AI returns executable actions — auto-executes them on the canvas */
   onAutoExecuteActions?: (actions: WidgetAction[]) => void;
@@ -100,7 +100,7 @@ export interface UseWorkbenchCohiOptions {
 // ---------------------------------------------------------------------------
 
 export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
-  const { tenantId, canvasItems = [], widgetCatalog = '', canvasId, sourceInsight, selectedWidgetId, persona, onError, onAutoExecuteActions } = options;
+  const { tenantId, canvasItems = [], widgetCatalog = '', conversationScopeId, canvasId, sourceInsight, selectedWidgetId, onError, onAutoExecuteActions } = options;
 
   const [messages, setMessages] = useState<WorkbenchChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -138,13 +138,21 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
   // -------------------------------------------------------------------------
   useEffect(() => {
     let cancelled = false;
+    // Scope-scoped chat: reset when switching canvas/draft scope.
+    setConversationId(null);
+    setMessages([]);
 
     (async () => {
       try {
+        // Must have a concrete scope key (canvas:* or draft:*).
+        if (!conversationScopeId) {
+          setConversationId(null);
+          return;
+        }
         const tid = await resolveEffectiveTenantId(tenantId);
         if (!tid || cancelled) return;
 
-        const base = `/api/cohi-chat/workbench/conversations?canvasId=${canvasId || ''}&limit=1`;
+        const base = `/api/cohi-chat/workbench/conversations?canvasId=${encodeURIComponent(conversationScopeId)}&limit=1`;
         const response = await api.request<{
           conversations: {
             id: string;
@@ -178,7 +186,7 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
     return () => {
       cancelled = true;
     };
-  }, [tenantId, canvasId]);
+  }, [tenantId, conversationScopeId]);
 
   // -------------------------------------------------------------------------
   // Auto-seed intro message when canvas has a sourceInsight and no history
@@ -349,7 +357,6 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
               widgetCatalog,
               conversationHistory: history,
               tenantId: effectiveTid,
-              ...(persona ? { persona } : {}),
             }),
           }
         );
@@ -387,7 +394,7 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
         }
 
         // Persist messages (fire-and-forget)
-        if (effectiveTid) {
+        if (effectiveTid && conversationScopeId) {
           (async () => {
             try {
               let convId = conversationId;
@@ -398,7 +405,7 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
                   {
                     method: 'POST',
                     body: JSON.stringify({
-                      canvasId: canvasId || null,
+                      canvasId: conversationScopeId,
                       title: content.trim().substring(0, 60),
                     }),
                   }
@@ -459,7 +466,7 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
         setIsLoading(false);
       }
     },
-    [isLoading, messages, buildCanvasSnapshot, widgetCatalog, tenantId, canvasId, conversationId, onError]
+    [isLoading, messages, buildCanvasSnapshot, widgetCatalog, tenantId, conversationScopeId, canvasId, conversationId, onError]
   );
 
   // -------------------------------------------------------------------------

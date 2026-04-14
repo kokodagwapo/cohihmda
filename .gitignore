@@ -205,3 +205,5 @@ docs/due-diligence/
 
 # Sample/test CSV data for Research Lab upload testing (local only)
 sample-data/
+.obsidian/workspace.json
+INTERNAL_DISCOVERY.md
