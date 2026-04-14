@@ -38,6 +38,41 @@ export interface RAGOptions {
   caller?: string;
 }
 
+function buildQueryVariants(question: string): string[] {
+  const base = (question || "").trim();
+  if (!base) return [];
+
+  const variants: string[] = [base];
+  variants.push(`mortgage lending analysis: ${base}`);
+
+  const lower = base.toLowerCase();
+
+  // Domain synonym expansion improves recall when users use product nicknames
+  // that differ from wording inside uploaded docs.
+  if (
+    lower.includes("toptiering") ||
+    lower.includes("top tiering") ||
+    lower.includes("top tier score") ||
+    lower.includes("tts")
+  ) {
+    variants.push(
+      `total team score tts definition formula tier thresholds sales scorecard operations scorecard`
+    );
+    variants.push(
+      `explain how top tier score is calculated for loan officers and operations staff`
+    );
+  }
+
+  if (lower.includes("pull through") || lower.includes("pull-through")) {
+    variants.push(
+      `pull-through rate denominator completed loans funded count fallout rate definition`
+    );
+  }
+
+  // Deduplicate while preserving order.
+  return Array.from(new Set(variants));
+}
+
 /**
  * Check whether the rag_embeddings table exists and has rows.
  * Returns false if the tenant has no knowledge base set up.
@@ -199,7 +234,8 @@ export async function retrieveRAGContext(
   pool: pg.Pool,
   options: RAGOptions = {}
 ): Promise<{ chunks: string[]; sources: RAGSource[]; formatted: string; totalChunks: number }> {
-  const result = await retrieveKnowledge([question], pool, {
+  const queryTexts = buildQueryVariants(question);
+  const result = await retrieveKnowledge(queryTexts.length > 0 ? queryTexts : [question], pool, {
     caller: "CohiChat-RAG",
     ...options,
   });

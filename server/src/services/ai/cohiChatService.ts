@@ -23,6 +23,7 @@ import {
   getSchemaForTenant,
   getFallbackSchemaContext,
 } from "./schemaContextService.js";
+import { OPS_TTS_WEIGHTS, SALES_TTS_WEIGHTS } from "../../utils/scorecard-utils.js";
 
 // ============================================================================
 // Types
@@ -235,25 +236,69 @@ async function callOpenAI(
   apiKey: string,
   options: { temperature?: number; maxTokens?: number; jsonMode?: boolean } = {}
 ): Promise<string> {
-  const body: any = {
-    model: process.env.COHI_CHAT_MODEL || "gpt-5.4",
+  const model = process.env.COHI_CHAT_MODEL || "gpt-5.4";
+  const maxTokens = options.maxTokens ?? 2000;
+  const baseBody: any = {
+    model,
     messages,
     temperature: options.temperature ?? 0.3,
-    max_tokens: options.maxTokens ?? 2000,
   };
 
   if (options.jsonMode) {
-    body.response_format = { type: "json_object" };
+    baseBody.response_format = { type: "json_object" };
   }
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
+  // GPT-5/o-series models require max_completion_tokens instead of max_tokens.
+  const prefersCompletionTokens =
+    /^(gpt-5|o3|o4)/i.test(model);
+
+  async function post(body: any): Promise<Response> {
+    return fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+  }
+
+  let response = await post({
+    ...baseBody,
+    ...(prefersCompletionTokens
+      ? { max_completion_tokens: maxTokens }
+      : { max_tokens: maxTokens }),
   });
+
+  // Backward/forward compatibility fallback:
+  // If OpenAI rejects one token param style, retry once with the other.
+  if (!response.ok) {
+    let firstErrMsg = "";
+    try {
+      const firstErr = (await response.json()) as { error?: { message?: string } };
+      firstErrMsg = firstErr.error?.message || "";
+    } catch {
+      // ignore parse failures
+    }
+
+    const unsupportedMaxTokens =
+      /unsupported parameter:\s*'max_tokens'/i.test(firstErrMsg);
+    const unsupportedMaxCompletionTokens =
+      /unsupported parameter:\s*'max_completion_tokens'/i.test(firstErrMsg);
+
+    if (unsupportedMaxTokens || unsupportedMaxCompletionTokens) {
+      response = await post({
+        ...baseBody,
+        ...(unsupportedMaxTokens
+          ? { max_completion_tokens: maxTokens }
+          : { max_tokens: maxTokens }),
+      });
+    } else {
+      // Recreate a response-like flow for the existing error handling below
+      const errorObj = { error: { message: firstErrMsg || "Unknown error" } };
+      throw new Error(`OpenAI API error: ${errorObj.error.message}`);
+    }
+  }
 
   if (!response.ok) {
     const error = (await response.json()) as { error?: { message?: string } };
@@ -981,6 +1026,93 @@ interface GatheredContext {
   };
   ragContext: RAGContext;
   insightMetrics?: Record<string, any>;
+  topTieringWeightsContext?: string;
+}
+
+function isTopTieringQuestion(question: string): boolean {
+  return /(top[\s-]?tiering|top[\s-]?tier(?:ing)?\s*score|\btts\b|team score|scorecard weights?)/i.test(
+    question
+  );
+}
+
+async function getTopTieringWeightsContext(
+  tenantId: string
+): Promise<string | undefined> {
+  try {
+    const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+    const result = await tenantPool.query<{
+      scorecard_type: "sales" | "operations";
+      metric_name: string;
+      weight: string | number;
+    }>(
+      `SELECT scorecard_type, metric_name, weight
+       FROM public.scoring_weights
+       WHERE is_active = true
+         AND persona_id IS NULL
+         AND scorecard_type IN ('sales', 'operations')`
+    );
+
+    const sales: {
+      volume: number;
+      margin: number;
+      unit: number;
+      pullThrough: number;
+      turnTime: number;
+      concession: number;
+    } = { ...SALES_TTS_WEIGHTS };
+    const operations: {
+      units: number;
+      turnTime: number;
+      complexity: number;
+    } = { ...OPS_TTS_WEIGHTS };
+    let foundDbWeights = false;
+
+    for (const row of result.rows) {
+      const w = Number(row.weight);
+      if (!Number.isFinite(w)) continue;
+      foundDbWeights = true;
+
+      if (row.scorecard_type === "sales") {
+        const metricMap: Record<string, keyof typeof sales> = {
+          volume: "volume",
+          margin: "margin",
+          unit: "unit",
+          pull_through: "pullThrough",
+          turn_time: "turnTime",
+          concession: "concession",
+        };
+        const key = metricMap[row.metric_name];
+        if (key) sales[key] = w;
+      } else if (row.scorecard_type === "operations") {
+        const metricMap: Record<string, keyof typeof operations> = {
+          units: "units",
+          turn_time: "turnTime",
+          complexity: "complexity",
+        };
+        const key = metricMap[row.metric_name];
+        if (key) operations[key] = w;
+      }
+    }
+
+    return [
+      "## Top Tiering Score Configuration",
+      "Use the term Top Tiering Score (TTS alias in code), not Total Team Score.",
+      foundDbWeights
+        ? "These weights were loaded from this tenant's Admin Scoring & Weights configuration."
+        : "No tenant-specific rows were found in scoring_weights; defaults are shown.",
+      `Sales weights: volume=${sales.volume}, margin=${sales.margin}, unit=${sales.unit}, pullThrough=${sales.pullThrough}, turnTime=${sales.turnTime}, concession=${sales.concession}`,
+      `Operations weights: units=${operations.units}, turnTime=${operations.turnTime}, complexity=${operations.complexity}`,
+      "If a user asks where to change this, direct them to Admin > Scoring & Weights.",
+    ].join("\n");
+  } catch (error: any) {
+    console.warn("[CohiChat] Failed to load Top Tiering weights:", error.message);
+    return [
+      "## Top Tiering Score Configuration",
+      "Use the term Top Tiering Score (TTS alias in code), not Total Team Score.",
+      "Could not load tenant-specific weights from scoring_weights.",
+      "Direct the user to Admin > Scoring & Weights to view/update current weights.",
+    ].join("\n");
+  }
 }
 
 /**
@@ -993,10 +1125,15 @@ async function gatherAllContext(
 ): Promise<GatheredContext> {
   console.log(`[CohiChat] Gathering context for: "${question}"`);
 
+  const includeTopTieringContext = isTopTieringQuestion(question);
+
   // Run all context gathering in parallel
-  const [ragContext, queryConfig] = await Promise.all([
+  const [ragContext, queryConfig, topTieringWeightsContext] = await Promise.all([
     retrieveRAGContextForTenant(context.tenantId, question, 5, 0.3),
     generateQuery(question, context, conversationHistory),
+    includeTopTieringContext
+      ? getTopTieringWeightsContext(context.tenantId)
+      : Promise.resolve(undefined),
   ]);
 
   let dataQueryResult: GatheredContext["dataQueryResult"] = undefined;
@@ -1081,6 +1218,7 @@ async function gatherAllContext(
     dataQueryResult,
     ragContext,
     insightMetrics,
+    topTieringWeightsContext,
   };
 }
 
@@ -1147,6 +1285,10 @@ async function generateUnifiedResponse(
             .join(", ")
       );
     }
+  }
+
+  if (gathered.topTieringWeightsContext) {
+    contextParts.push(`\n${gathered.topTieringWeightsContext}`);
   }
 
   const hasAnyContext = contextParts.length > 0;

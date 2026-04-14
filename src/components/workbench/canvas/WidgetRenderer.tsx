@@ -893,6 +893,7 @@ function CohiWidgetRendererWithTenant({
         height={height}
         canvasItemId={canvasItemId}
         sourceType={payload.sourceType}
+        allowLowSamplePullThrough={payload.allowLowSamplePullThrough}
       />
     </div>
   );
@@ -1194,6 +1195,7 @@ export function WidgetRenderer({
           onMoveItemOut={onMoveItemOut}
           savedFilters={payload.savedFilters}
           filtersCollapsed={payload.filtersCollapsed}
+          filterSync={payload.filterSync}
           filterLocked={payload.filterLocked}
           canEdit={canEdit}
         />

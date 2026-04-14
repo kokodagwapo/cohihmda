@@ -68,6 +68,7 @@ import {
 import { getStaffingUnitTargets } from "../utils/staffingUnitTargets.js";
 import { resolveLoanComplexityScoreForRead } from "../services/scoring/persistedLoanComplexity.js";
 import { LoanComplexityService } from "../services/scoring/loanComplexityService.js";
+import { postOpenAIChatCompletions } from "../services/openai/chatCompletionsCompat.js";
 
 // Helper function to calculate days between dates
 function daysBetween(
@@ -7665,13 +7666,9 @@ Provide recommendations as a JSON array of strings. Focus on:
 Return ONLY a JSON array of recommendation strings, no other text.
 Example: ["Recommendation 1", "Recommendation 2", "Recommendation 3"]`;
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
+  const response = await postOpenAIChatCompletions(
+    apiKey,
+    {
       model: process.env.NEWS_MODEL || "gpt-5.4-nano",
       messages: [
         {
@@ -7682,9 +7679,9 @@ Example: ["Recommendation 1", "Recommendation 2", "Recommendation 3"]`;
         { role: "user", content: prompt },
       ],
       temperature: 0.7,
-      max_tokens: 500,
-    }),
-  });
+    },
+    500,
+  );
 
   if (!response.ok) {
     throw new Error(`OpenAI API error: ${response.status}`);

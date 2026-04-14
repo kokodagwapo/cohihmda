@@ -134,6 +134,22 @@ function generateDraftScopeId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function compactFiltersForPersistence(
+  filters: Partial<SectionFilters> | undefined,
+): Partial<SectionFilters> | undefined {
+  if (!filters) return undefined;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(filters)) {
+    if (v == null) continue;
+    if (Array.isArray(v) && v.length === 0) continue;
+    if (typeof v === "object" && !Array.isArray(v)) {
+      if (Object.keys(v as Record<string, unknown>).length === 0) continue;
+    }
+    out[k] = v;
+  }
+  return Object.keys(out).length > 0 ? (out as Partial<SectionFilters>) : undefined;
+}
+
 /**
  * Converts a WidgetFilterConfig returned by the AI into an initial WidgetFilterState.
  * The savedFilters drives the group's initial filter bar selection.
@@ -162,7 +178,7 @@ function filterConfigToInitialState(fc: WidgetFilterConfig | undefined): WidgetF
  * limited standalone toolbar.
  */
 function wrapCohiWidgetInGroup(
-  action: { sql: string; title: string; config: any; explanation?: string; filterConfig?: WidgetFilterConfig },
+  action: { sql: string; title: string; config: any; explanation?: string; filterConfig?: WidgetFilterConfig; allowLowSamplePullThrough?: boolean },
   idx: string,
   pos: { x: number; y: number; w: number; h: number },
 ): CanvasLayoutItem {
@@ -197,6 +213,7 @@ function wrapCohiWidgetInGroup(
         vizConfig: action.config,
         explanation: action.explanation,
         filterConfig,
+        allowLowSamplePullThrough: !!action.allowLowSamplePullThrough,
         savedFilters: initialFilters,
       }],
       filterSync: true,
@@ -1083,20 +1100,44 @@ export function WorkbenchCanvas({
     }
   }, [items, annotations, canvasBackground, uploads, saveTitle]);
 
+  const buildLayoutWithLatestGroupFilters = useCallback(
+    (layoutItems: CanvasLayoutItem[]): CanvasLayoutItem[] => {
+      const sections = useWidgetSectionStore.getState().sections;
+      return layoutItems.map((it) => {
+        if (it.type !== "widget_group" || it.payload.type !== "widget_group") return it;
+        const current = sections[it.payload.groupId];
+        if (!current) return it;
+        const mergedSavedFilters = compactFiltersForPersistence({
+          ...(it.payload.savedFilters || {}),
+          ...current,
+        });
+        return {
+          ...it,
+          payload: {
+            ...it.payload,
+            ...(mergedSavedFilters ? { savedFilters: mergedSavedFilters } : {}),
+          },
+        };
+      });
+    },
+    [],
+  );
+
   const persistExistingCanvas = useCallback(
     async (options?: { keepalive?: boolean }) => {
       if (!canvasId || !isOwner) return null;
 
       const title = saveTitle.trim() || "Untitled canvas";
+      const persistedLayout = buildLayoutWithLatestGroupFilters(items);
       const content = {
         layoutVersion: "freeform-v1",
-        layout: items,
+        layout: persistedLayout,
         annotations,
         background: canvasBackground,
         uploadsMeta: uploads,
       };
       const snapshot = JSON.stringify({
-        items,
+        items: persistedLayout,
         annotations,
         bg: canvasBackground,
         uploads,
@@ -1128,6 +1169,7 @@ export function WorkbenchCanvas({
       annotations,
       canvasBackground,
       canvasId,
+      buildLayoutWithLatestGroupFilters,
       isOwner,
       items,
       onSaved,
@@ -1361,6 +1403,7 @@ export function WorkbenchCanvas({
                 vizConfig: action.config,
                 explanation: action.explanation,
                 filterConfig: fc,
+                allowLowSamplePullThrough: !!(action as any).allowLowSamplePullThrough,
                 savedFilters: filterConfigToInitialState(fc),
               };
             });
@@ -1863,6 +1906,7 @@ export function WorkbenchCanvas({
                 title: w.title,
                 vizConfig: w.vizConfig,
                 filterConfig: fc,
+                allowLowSamplePullThrough: !!(w as any).allowLowSamplePullThrough,
                 savedFilters: filterConfigToInitialState(fc),
               };
             });
@@ -3729,6 +3773,7 @@ export function WorkbenchCanvas({
         await persistExistingCanvas();
         toast({ title: "Canvas saved", description: title });
       } else {
+        const persistedLayout = buildLayoutWithLatestGroupFilters(items);
         const data = await api.request<{ id: string }>(
           `/api/workbench/canvases${tenantQs}`,
           {
@@ -3736,7 +3781,7 @@ export function WorkbenchCanvas({
             body: JSON.stringify({
               title,
               layoutVersion: "freeform-v1",
-              layout: items,
+              layout: persistedLayout,
               annotations,
               background: canvasBackground,
               uploadsMeta: uploads,
@@ -3763,8 +3808,9 @@ export function WorkbenchCanvas({
       }
       // Update snapshot so dirty-state resets
       if (!canvasId) {
+        const persistedLayout = buildLayoutWithLatestGroupFilters(items);
         lastSavedSnapshotRef.current = JSON.stringify({
-          items,
+          items: persistedLayout,
           annotations,
           bg: canvasBackground,
           uploads,
@@ -3789,6 +3835,7 @@ export function WorkbenchCanvas({
     items,
     annotations,
     canvasBackground,
+    buildLayoutWithLatestGroupFilters,
     uploads,
     draftScopeId,
     saveTitle,
