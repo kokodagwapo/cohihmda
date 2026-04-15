@@ -3,7 +3,8 @@
  *
  * Machine-to-machine endpoint called by the pipeline QA runner after each
  * Playwright execution. Records the run in ai_control_plane.audit_ledger for
- * SOC 2 traceability.
+ * SOC 2 traceability, including resolved Jira issue keys and generated
+ * Confluence QA page URLs when available.
  *
  * Auth: HMAC-SHA256 signed request (X-QA-Runner-Key + X-QA-Timestamp +
  * X-QA-Signature). No JWT — pipeline machines do not hold user credentials.
@@ -42,6 +43,8 @@ const QaRunBodySchema = z.object({
   commitHash: z.string(),
   triggeredBy: z.string(),
   confluencePageUrl: z.string().url().optional(),
+  confluencePageUrls: z.array(z.string().url()).optional(),
+  jiraIssueKeys: z.array(z.string()).optional(),
   s3ReportKey: z.string().optional(),
   failedTests: z
     .array(
@@ -172,6 +175,8 @@ router.post("/", async (req: Request, res: Response) => {
         commitHash: body.commitHash,
         triggeredBy: body.triggeredBy,
         ...(body.confluencePageUrl && { confluencePageUrl: body.confluencePageUrl }),
+        ...(body.confluencePageUrls && { confluencePageUrls: body.confluencePageUrls }),
+        ...(body.jiraIssueKeys && { jiraIssueKeys: body.jiraIssueKeys }),
       },
     });
   } catch (err) {

@@ -541,6 +541,63 @@ Resources:
       KmsKeyId: !Ref EncryptionKey
       SecretString: !Sub '{"secret":"${JwtSecret}"}'
 
+  QaRunnerApiKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ProjectName}/${Environment}/qa-runner/api-key"
+      Description: Shared API key for the internal QA runner ingestion endpoint
+      KmsKeyId: !Ref EncryptionKey
+      GenerateSecretString:
+        ExcludePunctuation: true
+        PasswordLength: 48
+
+  QaRunnerHmacSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ProjectName}/${Environment}/qa-runner/hmac"
+      Description: HMAC signing secret for the internal QA runner ingestion endpoint
+      KmsKeyId: !Ref EncryptionKey
+      GenerateSecretString:
+        ExcludePunctuation: true
+        PasswordLength: 64
+
+  QaAtlassianApiTokenSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ProjectName}/${Environment}/qa-runner/atlassian-api-token"
+      Description: Atlassian API token used by the QA runner for Jira and Confluence reporting
+      KmsKeyId: !Ref EncryptionKey
+      SecretString: "__SET_ATLASSIAN_API_TOKEN__"
+
+  QaArtifactsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "${ProjectName}-${Environment}-qa-artifacts-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt EncryptionKey.Arn
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireOldQaArtifacts
+            Status: Enabled
+            ExpirationInDays: 30
+          - Id: AbortIncompleteMultipartUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-${Environment}-qa-artifacts"
+
   PodcastAudioBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
@@ -690,6 +747,8 @@ Resources:
                 Resource:
                   - !Ref AuroraSecretArn
                   - !Ref JWTSecret
+                  - !Ref QaRunnerApiKeySecret
+                  - !Ref QaRunnerHmacSecret
                   - !If [HasOpenAISecret, !Ref OpenAIApiKeySecretArn, !Ref AWS::NoValue]
               - Effect: Allow
                 Action:
@@ -723,6 +782,8 @@ Resources:
                 Resource:
                   - !Ref AuroraSecretArn
                   - !Ref JWTSecret
+                  - !Ref QaRunnerApiKeySecret
+                  - !Ref QaRunnerHmacSecret
                   - !If [HasOpenAISecret, !Ref OpenAIApiKeySecretArn, !Ref AWS::NoValue]
               - Effect: Allow
                 Action:
@@ -736,10 +797,20 @@ Resources:
                 Resource: !GetAtt PodcastAudioBucket.Arn
               - Effect: Allow
                 Action:
+                  - s3:ListBucket
+                Resource: !GetAtt QaArtifactsBucket.Arn
+              - Effect: Allow
+                Action:
                   - s3:GetObject
                   - s3:PutObject
                   - s3:DeleteObject
                 Resource: !Sub "${PodcastAudioBucket.Arn}/*"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub "${QaArtifactsBucket.Arn}/*"
               # ECS Exec permissions (for running migrations via aws ecs execute-command)
               - Effect: Allow
                 Action:
@@ -867,6 +938,8 @@ Resources:
               Value: !Ref PodcastAudioBucket
             - Name: PODCAST_AUDIO_PREFIX
               Value: !Sub "${Environment}/audio"
+            - Name: AI_ARTIFACTS_BUCKET
+              Value: !Ref QaArtifactsBucket
             - Name: Cohi_PREFETCH_ASYNC
               Value: "true"
             - Name: Cohi_PREFETCH_WORKER_ENABLED
@@ -881,6 +954,10 @@ Resources:
               - Name: OPENAI_API_KEY
                 ValueFrom: !Ref OpenAIApiKeySecretArn
               - !Ref AWS::NoValue
+            - Name: QA_RUNNER_API_KEY
+              ValueFrom: !Ref QaRunnerApiKeySecret
+            - Name: QA_RUNNER_HMAC_SECRET
+              ValueFrom: !Ref QaRunnerHmacSecret
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -970,6 +1047,8 @@ Resources:
               Value: !Ref PodcastAudioBucket
             - Name: PODCAST_AUDIO_PREFIX
               Value: !Sub "${Environment}/audio"
+            - Name: AI_ARTIFACTS_BUCKET
+              Value: !Ref QaArtifactsBucket
             - Name: Cohi_PREFETCH_ASYNC
               Value: "true"
             - Name: Cohi_PREFETCH_WORKER_ENABLED
@@ -1249,6 +1328,22 @@ Outputs:
   PodcastAudioBucketName:
     Description: Private bucket storing generated podcast audio assets
     Value: !Ref PodcastAudioBucket
+
+  QaArtifactsBucketName:
+    Description: Private bucket storing QA reports, screenshots, traces, and videos
+    Value: !Ref QaArtifactsBucket
+
+  QaRunnerApiKeySecretArn:
+    Description: Secrets Manager ARN for the QA runner API key
+    Value: !Ref QaRunnerApiKeySecret
+
+  QaRunnerHmacSecretArn:
+    Description: Secrets Manager ARN for the QA runner HMAC signing secret
+    Value: !Ref QaRunnerHmacSecret
+
+  QaAtlassianApiTokenSecretArn:
+    Description: Secrets Manager ARN for the Atlassian API token used by the QA runner
+    Value: !Ref QaAtlassianApiTokenSecret
 
   AlertsTopicArn:
     Description: SNS alerts topic ARN
