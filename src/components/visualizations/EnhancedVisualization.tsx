@@ -198,6 +198,12 @@ function formatLabel(key: string): string {
   return key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 }
 
+function truncateAxisLabel(value: unknown, maxLength: number): string {
+  const raw = String(value ?? '');
+  if (raw.length <= maxLength) return raw;
+  return `${raw.slice(0, Math.max(1, maxLength - 1))}…`;
+}
+
 // ============================================================================
 // Animated Tooltip
 // ============================================================================
@@ -325,9 +331,19 @@ const ChartSkeleton: React.FC<{ height: number; type?: 'bar' | 'line' | 'pie' }>
 // KPI Grid Component
 // ============================================================================
 
-const KPIGrid: React.FC<{ kpis: KPIData[] }> = ({ kpis }) => {
+const KPIGrid: React.FC<{ kpis: KPIData[]; compact?: boolean }> = ({
+  kpis,
+  compact = false,
+}) => {
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+    <div
+      className={cn(
+        "grid w-full min-w-0",
+        compact
+          ? "grid-cols-1 gap-3"
+          : "grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"
+      )}
+    >
       {kpis.map((kpi, index) => {
         const Icon = kpi.icon || DollarSign;
         const isPositive = (kpi.change || 0) > 0;
@@ -342,8 +358,8 @@ const KPIGrid: React.FC<{ kpis: KPIData[] }> = ({ kpis }) => {
             whileHover={{ scale: 1.02, y: -2 }}
             className="relative overflow-hidden"
           >
-            <Card className="bg-gradient-to-br from-white to-slate-50 dark:from-slate-800 dark:to-slate-900 border-slate-200/50 dark:border-slate-700/50 shadow-lg hover:shadow-xl transition-all duration-300">
-              <CardContent className="p-4">
+            <Card className="bg-gradient-to-br from-white to-slate-50 dark:from-slate-800 dark:to-slate-900 border-slate-200/50 dark:border-slate-700/50 shadow-lg hover:shadow-xl transition-all duration-300 min-w-0">
+              <CardContent className={compact ? "p-3" : "p-4"}>
                 <div className="flex items-start justify-between mb-3">
                   <div 
                     className="p-2.5 rounded-xl"
@@ -375,7 +391,10 @@ const KPIGrid: React.FC<{ kpis: KPIData[] }> = ({ kpis }) => {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: index * 0.1 + 0.1 }}
-                  className="text-2xl font-bold text-slate-900 dark:text-white mb-1"
+                  className={cn(
+                    "font-bold text-slate-900 dark:text-white mb-1 break-words",
+                    compact ? "text-xl" : "text-2xl"
+                  )}
                 >
                   {formatValue(kpi.value, kpi.format)}
                 </motion.div>
@@ -705,6 +724,9 @@ const AnimatedBarChart: React.FC<{
 }> = ({ data, xKey, yKey, colors, height, showGrid, showLegend, onBarClick, chartTheme, compact }) => {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const t = chartTheme || CHART_THEME.light;
+  const xTickInterval = compact
+    ? Math.max(0, Math.ceil(data.length / 6) - 1)
+    : Math.max(0, Math.ceil(data.length / 10) - 1);
 
   const getBarStroke = (index: number) => {
     const colorSet = PASTEL_COLORS[index % PASTEL_COLORS.length];
@@ -713,7 +735,7 @@ const AnimatedBarChart: React.FC<{
 
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={data} margin={compact ? { top: 10, right: 10, left: 5, bottom: 45 } : { top: 20, right: 30, left: 20, bottom: 60 }}>
+      <BarChart data={data} margin={compact ? { top: 8, right: 8, left: 6, bottom: 58 } : { top: 20, right: 30, left: 20, bottom: 60 }}>
         <defs>
           {PASTEL_COLORS.map((g, i) => (
             <linearGradient key={i} id={`barGradient${i}`} x1="0" y1="0" x2="0" y2="1">
@@ -734,15 +756,18 @@ const AnimatedBarChart: React.FC<{
           tick={{ fontSize: compact ? 9 : 11, fill: t.axis, fontWeight: 500 }}
           tickLine={false}
           axisLine={{ stroke: t.grid, strokeWidth: 1 }}
-          angle={compact ? -60 : -45}
+          angle={compact ? -32 : -45}
           textAnchor="end"
-          height={compact ? 50 : 60}
+          height={compact ? 58 : 60}
+          interval={xTickInterval}
+          minTickGap={compact ? 8 : 14}
+          tickFormatter={(v) => truncateAxisLabel(v, compact ? 11 : 18)}
         />
         <YAxis
           tick={{ fontSize: compact ? 9 : 11, fill: t.axis, fontWeight: 500 }}
           tickLine={false}
           axisLine={false}
-          width={compact ? 40 : undefined}
+          width={compact ? 52 : undefined}
           tickFormatter={(v) => formatValue(v)}
         />
         <Tooltip content={<AnimatedTooltip />} cursor={{ fill: t.cursor }} />
@@ -792,7 +817,7 @@ const AnimatedHorizontalBarChart: React.FC<{
 
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <BarChart layout="vertical" data={data} margin={compact ? { top: 5, right: 10, left: 5, bottom: 5 } : { top: 10, right: 30, left: 80, bottom: 10 }}>
+      <BarChart layout="vertical" data={data} margin={compact ? { top: 6, right: 10, left: 8, bottom: 6 } : { top: 10, right: 30, left: 80, bottom: 10 }}>
         <defs>
           {PASTEL_COLORS.map((g, i) => (
             <linearGradient key={i} id={`hBarGradient${i}`} x1="0" y1="0" x2="1" y2="0">
@@ -808,7 +833,16 @@ const AnimatedHorizontalBarChart: React.FC<{
           <CartesianGrid strokeDasharray="3 3" stroke={t.grid} strokeOpacity={0.5} horizontal={false} />
         )}
         <XAxis type="number" tick={{ fontSize: compact ? 9 : 11, fill: t.axis }} tickLine={false} axisLine={{ stroke: t.grid }} tickFormatter={(v) => formatValue(v)} />
-        <YAxis type="category" dataKey={categoryKey} width={compact ? 50 : 70} tick={{ fontSize: compact ? 9 : 11, fill: t.axis }} tickLine={false} axisLine={{ stroke: t.grid }} />
+        <YAxis
+          type="category"
+          dataKey={categoryKey}
+          width={compact ? 86 : 120}
+          tick={{ fontSize: compact ? 9 : 11, fill: t.axis }}
+          tickLine={false}
+          axisLine={{ stroke: t.grid }}
+          tickFormatter={(v) => truncateAxisLabel(v, compact ? 16 : 24)}
+          interval={0}
+        />
         <Tooltip content={<AnimatedTooltip />} cursor={{ fill: t.cursor }} />
         <Bar
           dataKey={valueKey}
@@ -854,9 +888,12 @@ const AnimatedAreaChart: React.FC<{
   compact?: boolean;
 }> = ({ data, xKey, yKeys, colors, height, showGrid, showLegend, stacked, chartTheme, compact }) => {
   const t = chartTheme || CHART_THEME.light;
+  const xTickInterval = compact
+    ? Math.max(0, Math.ceil(data.length / 6) - 1)
+    : Math.max(0, Math.ceil(data.length / 10) - 1);
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <AreaChart data={data} margin={compact ? { top: 10, right: 10, left: 5, bottom: 10 } : { top: 20, right: 30, left: 20, bottom: 20 }}>
+      <AreaChart data={data} margin={compact ? { top: 10, right: 10, left: 6, bottom: 22 } : { top: 20, right: 30, left: 20, bottom: 20 }}>
         <defs>
           {PASTEL_COLORS.map((g, i) => (
             <linearGradient key={i} id={`areaGradient${i}`} x1="0" y1="0" x2="0" y2="1">
@@ -869,8 +906,16 @@ const AnimatedAreaChart: React.FC<{
         {showGrid && (
           <CartesianGrid strokeDasharray="3 3" stroke={t.grid} strokeOpacity={0.5} vertical={false} />
         )}
-        <XAxis dataKey={xKey} tick={{ fontSize: compact ? 9 : 11, fill: t.axis, fontWeight: 500 }} tickLine={false} axisLine={{ stroke: t.grid, strokeWidth: 1 }} />
-        <YAxis tick={{ fontSize: compact ? 9 : 11, fill: t.axis, fontWeight: 500 }} tickLine={false} axisLine={false} width={compact ? 40 : undefined} tickFormatter={(v) => formatValue(v)} />
+        <XAxis
+          dataKey={xKey}
+          tick={{ fontSize: compact ? 9 : 11, fill: t.axis, fontWeight: 500 }}
+          tickLine={false}
+          axisLine={{ stroke: t.grid, strokeWidth: 1 }}
+          interval={xTickInterval}
+          minTickGap={compact ? 8 : 14}
+          tickFormatter={(v) => truncateAxisLabel(v, compact ? 10 : 18)}
+        />
+        <YAxis tick={{ fontSize: compact ? 9 : 11, fill: t.axis, fontWeight: 500 }} tickLine={false} axisLine={false} width={compact ? 52 : undefined} tickFormatter={(v) => formatValue(v)} />
         <Tooltip content={<AnimatedTooltip />} cursor={{ stroke: t.grid, strokeWidth: 1, strokeDasharray: '4 4' }} />
         {showLegend && <Legend />}
         {yKeys.map((key, index) => (
@@ -1080,7 +1125,7 @@ export const EnhancedVisualization: React.FC<EnhancedVisualizationProps> = ({
         
       case 'kpi-grid':
       case 'kpi':
-        return <KPIGrid kpis={config.kpis || []} />;
+        return <KPIGrid kpis={config.kpis || []} compact={compact} />;
         
       case 'drilldown-table':
       case 'table':
@@ -1146,7 +1191,14 @@ export const EnhancedVisualization: React.FC<EnhancedVisualizationProps> = ({
       transition={{ duration: 0.25 }}
       className={cn("space-y-0", className)}
     >
-      <div className="overflow-hidden rounded-xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-700/80 bg-white dark:bg-slate-900/50 shadow-sm">
+      <div
+        className={cn(
+          "rounded-xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-700/80 bg-white dark:bg-slate-900/50 shadow-sm",
+          config.type === "kpi-grid" || config.type === "kpi"
+            ? "overflow-x-auto overflow-y-visible"
+            : "overflow-x-hidden overflow-y-visible"
+        )}
+      >
         {/* Header – minimal */}
         <div className="px-4 py-3 sm:px-5 sm:py-3.5 border-b border-slate-200/70 dark:border-slate-700/70">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-white truncate">{config.title}</h3>
@@ -1174,7 +1226,7 @@ export const EnhancedVisualization: React.FC<EnhancedVisualizationProps> = ({
 
           {showInsights && config.insights && config.insights.length > 0 && (
             <div className={compact
-              ? "w-full pt-3 pb-3 px-3 bg-slate-50/60 dark:bg-slate-800/40 border-t border-slate-200/70 dark:border-slate-700/70"
+              ? "w-full min-w-0 pt-3 pb-3 px-3 bg-slate-50/60 dark:bg-slate-800/40 border-t border-slate-200/70 dark:border-slate-700/70 max-h-[min(420px,50vh)] overflow-y-auto overscroll-contain"
               : "w-full lg:w-[280px] lg:flex-shrink-0 lg:border-l border-slate-200/70 dark:border-slate-700/70 pt-4 pb-4 px-4 sm:px-5 lg:pt-5 lg:pb-5 lg:pl-0 bg-slate-50/60 dark:bg-slate-800/40 border-t border-slate-200/70 lg:border-t-0"
             }>
               <CohiInsightsPanel

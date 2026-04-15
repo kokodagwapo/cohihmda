@@ -59,7 +59,7 @@ export function renderMarkdownText(text: string): React.ReactNode {
   const sections = text.split(/\n\n+/);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 min-w-0 break-words [overflow-wrap:anywhere]">
       {sections.map((section, sectionIdx) => {
         const lines = section.split("\n");
 
@@ -110,7 +110,7 @@ export function renderMarkdownText(text: string): React.ReactNode {
         }
 
         return (
-          <p key={sectionIdx}>
+          <p key={sectionIdx} className="min-w-0 break-words [overflow-wrap:anywhere]">
             {renderInlineMarkdown(
               section.replace(/\n/g, " "),
               `p-${sectionIdx}`
@@ -143,12 +143,12 @@ function renderLine(
     return (
       <div
         key={`${sectionIdx}-${lineIdx}`}
-        className={`flex gap-2 ${marginClass}`}
+        className={`flex items-start gap-2 min-w-0 ${marginClass}`}
       >
         <span className="text-slate-500 dark:text-slate-400 font-medium shrink-0">
           {numberedMatch[1]}.
         </span>
-        <span>
+        <span className="min-w-0 break-words [overflow-wrap:anywhere]">
           {renderInlineMarkdown(numberedMatch[2], `${sectionIdx}-${lineIdx}`)}
         </span>
       </div>
@@ -157,17 +157,20 @@ function renderLine(
     return (
       <div
         key={`${sectionIdx}-${lineIdx}`}
-        className={`flex gap-2 ${marginClass}`}
+        className={`flex items-start gap-2 min-w-0 ${marginClass}`}
       >
         <span className="text-slate-400 dark:text-slate-500 shrink-0">•</span>
-        <span>
+        <span className="min-w-0 break-words [overflow-wrap:anywhere]">
           {renderInlineMarkdown(bulletMatch[1], `${sectionIdx}-${lineIdx}`)}
         </span>
       </div>
     );
   } else {
     return (
-      <div key={`${sectionIdx}-${lineIdx}`} className={marginClass}>
+      <div
+        key={`${sectionIdx}-${lineIdx}`}
+        className={`${marginClass} min-w-0 break-words [overflow-wrap:anywhere]`}
+      >
         {renderInlineMarkdown(trimmed, `${sectionIdx}-${lineIdx}`)}
       </div>
     );

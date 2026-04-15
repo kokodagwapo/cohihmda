@@ -11,8 +11,6 @@ import {
   MessageSquare,
   Send,
   X,
-  Minimize2,
-  Maximize2,
   Save,
   RefreshCw,
   Trash2,
@@ -34,13 +32,13 @@ import {
   Mic,
   MicOff,
   Volume2,
-  VolumeX,
   BarChart3,
   PieChart,
   Activity,
   Paperclip,
   Expand,
   Shrink,
+  MoreHorizontal,
   FileSpreadsheet,
   Image,
   File,
@@ -73,7 +71,6 @@ import { DynamicVisualization } from "@/components/visualizations/DynamicVisuali
 import {
   EnhancedVisualization,
   EnhancedVisualizationConfig,
-  CohiInsight,
 } from "@/components/visualizations/EnhancedVisualization";
 import { useToast } from "@/components/ui/use-toast";
 import { convertChatToCanvasItems } from "@/utils/chatToCanvas";
@@ -108,101 +105,12 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuLabel,
+  DropdownMenuCheckboxItem,
 } from "@/components/ui/dropdown-menu";
 
 // ============================================================================
 // Helper Functions
 // ============================================================================
-
-function generateCohiInsights(
-  visualization: VisualizationConfig
-): CohiInsight[] {
-  const insights: CohiInsight[] = [];
-  const data = visualization.data || [];
-
-  if (data.length === 0) return insights;
-
-  const valueKey = visualization.yKey || visualization.valueKey || "value";
-  const nameKey = visualization.xKey || visualization.nameKey || "name";
-
-  const values = data
-    .map((d) =>
-      typeof d[valueKey] === "number"
-        ? d[valueKey]
-        : parseFloat(d[valueKey]) || 0
-    )
-    .filter((v) => !isNaN(v) && isFinite(v));
-
-  if (values.length === 0) return insights;
-
-  const total = values.reduce((sum, v) => sum + v, 0);
-  const avg = values.length > 0 ? total / values.length : 0;
-  const max = Math.max(...values);
-  const min = Math.min(...values);
-  const maxItem = data.find((d) => (d[valueKey] || 0) === max);
-  const minItem = data.find((d) => (d[valueKey] || 0) === min);
-
-  if (avg === 0 || !isFinite(avg)) return insights;
-
-  if (maxItem) {
-    insights.push({
-      type: "success",
-      title: "Top Performer",
-      description: `${maxItem[nameKey]} leads with ${formatInsightValue(max)}`,
-      metric: `${((max / total) * 100).toFixed(1)}% of total`,
-      trend: "up",
-      payload: maxItem,
-    });
-  }
-
-  if (minItem && values.length > 2) {
-    const avgDiff = ((avg - min) / avg) * 100;
-    if (avgDiff > 20) {
-      insights.push({
-        type: "warning",
-        title: "Needs Attention",
-        description: `${minItem[nameKey]} is ${avgDiff.toFixed(
-          0
-        )}% below average`,
-        metric: formatInsightValue(min),
-        trend: "down",
-        payload: minItem,
-      });
-    }
-  }
-
-  const variance =
-    values.reduce((sum, v) => sum + Math.pow(v - avg, 2), 0) / values.length;
-  const stdDev = Math.sqrt(variance);
-  const cv = (stdDev / avg) * 100;
-
-  if (cv > 50) {
-    insights.push({
-      type: "info",
-      title: "High Variance",
-      description: "Performance varies significantly across the dataset",
-      metric: `CV: ${cv.toFixed(1)}%`,
-      payload: data[0],
-    });
-  } else if (cv < 15) {
-    insights.push({
-      type: "success",
-      title: "Consistent Performance",
-      description: "Values are tightly clustered around the average",
-      metric: `Avg: ${formatInsightValue(avg)}`,
-      payload: data[0],
-    });
-  }
-
-  return insights.slice(0, 4);
-}
-
-function formatInsightValue(value: number): string {
-  if (value >= 1000000) return `$${(value / 1000000).toFixed(2)}M`;
-  if (value >= 1000) return `$${(value / 1000).toFixed(1)}K`;
-  if (value < 1 && value > 0) return `${(value * 100).toFixed(1)}%`;
-  return value.toLocaleString();
-}
 
 // ============================================================================
 // Types
@@ -483,7 +391,6 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const [input, setInput] = useState("");
-  const [isExpanded, setIsExpanded] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -509,9 +416,31 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     if (!isOpen) return;
     if (isMobile) {
       setIsFullscreen(true);
-      setIsExpanded(false);
     }
   }, [isMobile, isOpen]);
+
+  // When the panel is docked (not fullscreen / not mobile), reserve matching width on #root so KPIs and main content stay visible.
+  useEffect(() => {
+    const docEl = document.documentElement;
+    const docked = isOpen && !isFullscreen && !isMobile;
+    if (!docked) {
+      docEl.style.setProperty("--cohi-global-chat-reserve", "0px");
+      docEl.removeAttribute("data-cohi-chat-open");
+      return;
+    }
+    const apply = () => {
+      const reservePx = Math.min(480, Math.max(0, window.innerWidth - 16));
+      docEl.style.setProperty("--cohi-global-chat-reserve", `${reservePx}px`);
+      docEl.setAttribute("data-cohi-chat-open", "");
+    };
+    apply();
+    window.addEventListener("resize", apply);
+    return () => {
+      window.removeEventListener("resize", apply);
+      docEl.style.setProperty("--cohi-global-chat-reserve", "0px");
+      docEl.removeAttribute("data-cohi-chat-open");
+    };
+  }, [isOpen, isFullscreen, isMobile]);
 
   const {
     messages,
@@ -1657,53 +1586,47 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
           "shadow-[0_-4px_24px_-4px_rgba(139,92,246,0.06),0_0_1px_rgba(0,0,0,0.02)] dark:shadow-[0_-4px_32px_-4px_rgba(99,102,241,0.12),0_0_1px_rgba(255,255,255,0.04)]",
           isFullscreen || isMobile
             ? "left-0 right-0 top-0 bottom-0 z-[9999] w-full h-full"
-            : "right-0 top-[70px] h-[calc(100%-70px)] z-[100] rounded-l-2xl",
-          !isFullscreen && (isExpanded ? "w-[480px]" : "w-[380px]"),
+            : "right-2 top-[70px] h-[calc(100%-70px)] z-[100] rounded-2xl",
+          !isFullscreen &&
+            "w-[min(520px,calc(100vw-24px))] sm:w-[496px]",
           className
         )}
       >
         {/* Header – pastel, modern */}
-        <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-violet-100/80 dark:border-indigo-900/60 bg-gradient-to-r from-violet-50/90 to-indigo-50/80 dark:from-indigo-950/50 dark:to-violet-950/40">
-          <div className="flex items-center gap-3 min-w-0">
+        <div className="relative z-[20] flex items-center justify-between gap-2 sm:gap-3 px-4 sm:px-5 py-3.5 border-b border-violet-100/80 dark:border-indigo-900/60 bg-gradient-to-r from-violet-50/90 to-indigo-50/80 dark:from-indigo-950/50 dark:to-violet-950/40">
+          <div className="flex items-start gap-2 sm:gap-3 min-w-0 flex-1">
             <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shrink-0 shadow-lg shadow-violet-500/25 ring-1 ring-white/30">
               <Sparkles className="w-5 h-5 text-white" strokeWidth={2} />
             </div>
-            <div className="min-w-0">
-              <h2 className="text-[15px] sm:text-base font-semibold text-slate-800 dark:text-white tracking-tight truncate">
-                Cohi Insights
-              </h2>
-              <p className="text-[11px] sm:text-xs text-slate-600/90 dark:text-slate-400/90 truncate font-normal">
+            <div className="min-w-0 flex-1 py-0.5">
+              <div className="flex items-center gap-2 min-w-0">
+                <h2 className="text-[15px] sm:text-base font-semibold text-slate-800 dark:text-white tracking-tight truncate min-w-0">
+                  Cohi Insights
+                </h2>
+                <Badge
+                  variant="secondary"
+                  className="bg-violet-100 dark:bg-violet-500/20 text-violet-700 dark:text-violet-300 text-[10px] px-2.5 py-0.5 border-0 shrink-0 font-medium rounded-full"
+                >
+                  AI
+                </Badge>
+              </div>
+              <p className="text-[11px] sm:text-xs text-slate-600/90 dark:text-slate-400/90 font-normal mt-0.5 leading-snug line-clamp-2 sm:line-clamp-1 sm:truncate">
                 Ask about your pipeline & performance
               </p>
             </div>
-            <Badge
-              variant="secondary"
-              className="bg-violet-100 dark:bg-violet-500/20 text-violet-700 dark:text-violet-300 text-[10px] px-2.5 py-0.5 border-0 shrink-0 font-medium rounded-full"
-            >
-              AI
-            </Badge>
           </div>
-          <div className="flex items-center gap-1 shrink-0">
-            {/* Voice Toggle */}
+          <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 rounded-xl text-slate-500 hover:text-violet-700 dark:text-violet-300 hover:bg-violet-100/80 dark:hover:bg-violet-500/20 transition-colors"
-              onClick={() => setVoiceEnabled(!voiceEnabled)}
-              title={voiceEnabled ? "Disable voice" : "Enable voice"}
-            >
-              {voiceEnabled ? (
-                <Volume2 className="w-4 h-4" />
-              ) : (
-                <VolumeX className="w-4 h-4" />
+              data-chat-history-toggle="true"
+              className={cn(
+                "h-8 w-8 rounded-xl text-slate-500 hover:text-violet-700 dark:text-violet-300 hover:bg-violet-100/80 dark:hover:bg-violet-500/20 transition-colors",
+                showHistory && "bg-violet-100/80 dark:bg-violet-500/20 text-violet-700 dark:text-violet-300"
               )}
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 rounded-xl text-slate-500 hover:text-violet-700 dark:hover:text-violet-300 hover:bg-violet-100/80 dark:hover:bg-violet-500/20 transition-colors"
-              onClick={() => setShowHistory(true)}
+              onClick={() => setShowHistory((prev) => !prev)}
               title="Chat history"
+              aria-pressed={showHistory}
             >
               <Clock className="w-4 h-4" />
             </Button>
@@ -1715,15 +1638,6 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
               title="New conversation"
             >
               <RefreshCw className="w-4 h-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 rounded-xl text-slate-500 hover:text-violet-700 dark:hover:text-violet-300 hover:bg-violet-100/80 dark:hover:bg-violet-500/20 transition-colors"
-              onClick={() => clearMessages()}
-              title="Clear chat"
-            >
-              <Trash2 className="w-4 h-4" />
             </Button>
             {hasVisualizationMessages && (
               <Button
@@ -1741,21 +1655,6 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                 )}
               </Button>
             )}
-            {!isFullscreen && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 rounded-xl text-slate-500 hover:text-violet-700 dark:hover:text-violet-300 hover:bg-violet-100/80 dark:hover:bg-violet-500/20 transition-colors"
-                onClick={() => setIsExpanded(!isExpanded)}
-                title={isExpanded ? "Minimize width" : "Expand width"}
-              >
-                {isExpanded ? (
-                  <Minimize2 className="w-4 h-4" />
-                ) : (
-                  <Maximize2 className="w-4 h-4" />
-                )}
-              </Button>
-            )}
             <Button
               variant="ghost"
               size="icon"
@@ -1769,6 +1668,37 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                 <Expand className="w-4 h-4" />
               )}
             </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 rounded-xl text-slate-500 hover:text-violet-700 dark:text-violet-300 hover:bg-violet-100/80 dark:hover:bg-violet-500/20 transition-colors"
+                  title="More options"
+                >
+                  <MoreHorizontal className="w-4 h-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56 z-[10001]" sideOffset={4}>
+                <DropdownMenuLabel className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                  Chat
+                </DropdownMenuLabel>
+                <DropdownMenuCheckboxItem
+                  checked={voiceEnabled}
+                  onCheckedChange={(v) => setVoiceEnabled(v === true)}
+                  onSelect={(e) => e.preventDefault()}
+                >
+                  Read responses aloud
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuItem
+                  onClick={() => clearMessages()}
+                  className="gap-2 text-rose-600 dark:text-rose-400 focus:text-rose-600 dark:focus:text-rose-400"
+                >
+                  <Trash2 className="w-4 h-4 shrink-0" />
+                  Clear chat
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button
               variant="ghost"
               size="icon"
@@ -1798,7 +1728,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
 
         {/* Messages */}
         <ScrollArea className="flex-1 p-4 sm:p-5">
-          <div className="space-y-5">
+          <div className="space-y-5 min-w-0 pr-1">
             <AnimatePresence>
               {messages.length === 0 && (
                 <motion.div
@@ -1842,7 +1772,6 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                   onSave={(viz, q, sql) => handleSaveToWorkbench(viz, q, sql)}
                   onSpeak={speakResponse}
                   onDrilldown={handleDrilldown}
-                  isExpanded={isExpanded}
                   isFullscreen={isFullscreen}
                   voiceEnabled={voiceEnabled}
                   vizTypeOverride={vizTypeOverrides[message.id]}
@@ -2268,7 +2197,6 @@ interface EnhancedChatMessageBubbleProps {
   onSave: (visualization: VisualizationConfig, question: string, sqlQuery?: string) => void;
   onSpeak: (text: string) => void;
   onDrilldown: (item: any, level: string) => void;
-  isExpanded: boolean;
   isFullscreen: boolean;
   voiceEnabled: boolean;
   vizTypeOverride?: VisualizationConfig["type"];
@@ -2290,7 +2218,6 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
   onSave,
   onSpeak,
   onDrilldown,
-  isExpanded,
   isFullscreen,
   voiceEnabled,
   vizTypeOverride,
@@ -2311,13 +2238,19 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
   const messageContent = message.content;
 
   return (
-    <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
+    <div
+      className={cn(
+        "flex w-full min-w-0 pr-2",
+        isUser ? "justify-end" : "justify-start"
+      )}
+    >
       <div
         className={cn(
-          "max-w-[95%] rounded-2xl",
+          "rounded-2xl min-w-0",
+          isUser ? "max-w-[88%] w-auto" : "w-full max-w-[calc(100%-8px)]",
           isUser
             ? "bg-gradient-to-br from-blue-500 to-indigo-600 text-white px-4 py-2.5 shadow-sm"
-            : "border border-slate-200/80 dark:border-slate-700/80 bg-slate-50/80 dark:bg-slate-800/60 shadow-sm overflow-hidden"
+            : "border border-slate-200/80 dark:border-slate-700/80 bg-slate-50/80 dark:bg-slate-800/60 shadow-sm min-w-0 overflow-x-auto overflow-y-visible"
         )}
       >
         {message.isLoading ? (
@@ -2380,7 +2313,7 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
             {messageContent && (
               <div
                 className={cn(
-                  "text-sm whitespace-pre-wrap leading-relaxed text-slate-800 dark:text-slate-200",
+                  "text-sm whitespace-pre-wrap leading-relaxed text-slate-800 dark:text-slate-200 min-w-0 break-words [overflow-wrap:anywhere]",
                   isUser ? "" : "px-4 pt-3 pb-3"
                 )}
               >
@@ -2429,38 +2362,40 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
                         stacked: vizConfig.stacked,
                         animated: true,
                         drilldownEnabled: true,
-                        insights: generateCohiInsights(vizConfig),
+                        insights: [],
                       }}
-                      height={isExpanded ? 300 : 220}
-                      showInsights={true}
+                      height={isFullscreen ? 320 : 236}
+                      showInsights={false}
                       onDrilldown={onDrilldown}
                       compact={!isFullscreen}
                     />
 
                     {/* Design options – click to change chart type */}
-                    <div className="flex flex-wrap items-center gap-2 px-4 py-2 border-t border-slate-200/50 dark:border-slate-700/50 bg-slate-50/80 dark:bg-slate-800/40">
-                      <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider mr-1">
-                        Design:
-                      </span>
-                      {VIZ_DESIGN_OPTIONS.map(({ type, label, Icon }) => (
-                        <Button
-                          key={type}
-                          variant="ghost"
-                          size="sm"
-                          className={cn(
-                            "h-7 px-2 text-xs rounded-lg",
-                            effectiveType === type
-                              ? "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium"
-                              : "text-slate-600 dark:text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
-                          )}
-                          onClick={() =>
-                            onDesignOptionClick?.(message.id, type)
-                          }
-                        >
-                          <Icon className="w-3 h-3 mr-1" />
-                          {label}
-                        </Button>
-                      ))}
+                    <div className="border-t border-slate-200/50 dark:border-slate-700/50 bg-slate-50/80 dark:bg-slate-800/40 px-3 py-2 overflow-x-auto">
+                      <div className="flex items-center gap-1.5 min-w-max">
+                        <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider mr-1.5 shrink-0">
+                          Design
+                        </span>
+                        {VIZ_DESIGN_OPTIONS.map(({ type, label, Icon }) => (
+                          <Button
+                            key={type}
+                            variant="ghost"
+                            size="sm"
+                            className={cn(
+                              "h-6 px-2 text-[11px] rounded-md shrink-0",
+                              effectiveType === type
+                                ? "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium"
+                                : "text-slate-600 dark:text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
+                            )}
+                            onClick={() =>
+                              onDesignOptionClick?.(message.id, type)
+                            }
+                          >
+                            <Icon className="w-3 h-3 mr-1" />
+                            {label}
+                          </Button>
+                        ))}
+                      </div>
                     </div>
 
                     {/* Show SQL toggle */}
@@ -2481,8 +2416,8 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
                       </div>
                     )}
 
-                    <div className="flex flex-wrap justify-between items-center gap-2 px-4 py-3 bg-slate-100/60 dark:bg-slate-800/30">
-                      <div className="flex items-center gap-2">
+                    <div className="flex items-center justify-between gap-2 px-3 py-2.5 bg-slate-100/60 dark:bg-slate-800/30">
+                      <div className="flex items-center gap-2 min-w-0">
                         <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                           {effectiveType}
                         </span>
@@ -2495,7 +2430,7 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="text-xs h-8 rounded-lg text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                            className="text-[11px] h-7 px-2.5 rounded-md text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white shrink-0"
                           >
                             <Save className="w-3 h-3 mr-1.5" />
                             Save & export

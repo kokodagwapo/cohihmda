@@ -68,6 +68,7 @@ All colors MUST be HSL.
        close naturally (click-outside) before the modal backdrop is visible. */
     --z-popover: 10080;
     --z-tooltip: 10090;
+    --cohi-global-chat-reserve: 0px;
   }
 
   .dark {
@@ -118,6 +119,12 @@ All colors MUST be HSL.
 @layer base {
   * {
     @apply border-border;
+  }
+
+  html[data-cohi-chat-open] #root {
+    padding-right: var(--cohi-global-chat-reserve);
+    transition: padding-right 0.2s ease;
+    box-sizing: border-box;
   }
 
   body {

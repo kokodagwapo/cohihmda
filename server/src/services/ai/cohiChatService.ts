@@ -430,6 +430,59 @@ interface GeneratedQuery {
   chartConfig: Partial<VisualizationConfig>;
 }
 
+function buildHeuristicDataQuery(question: string): GeneratedQuery | null {
+  const q = question.toLowerCase();
+
+  // Deterministic fallback for a known regression:
+  // "Top 5 branches by pull-through rate this quarter"
+  const branchPullThroughQuarter =
+    /\btop\b/.test(q) &&
+    /\bbranches?\b/.test(q) &&
+    /\bpull[\s-]?through\b/.test(q) &&
+    /\bquarter\b/.test(q);
+
+  if (branchPullThroughQuarter) {
+    const topMatch = q.match(/\btop\s+(\d{1,2})\b/);
+    const requestedTop = topMatch ? Number.parseInt(topMatch[1], 10) : 5;
+    const topN = Number.isFinite(requestedTop)
+      ? Math.min(Math.max(requestedTop, 1), 25)
+      : 5;
+
+    return {
+      sql: `SELECT
+  COALESCE(NULLIF(TRIM(l.branch), ''), 'Unknown') AS branch,
+  COUNT(*) FILTER (WHERE l.funding_date IS NOT NULL) AS funded_count,
+  COUNT(*) FILTER (WHERE l.current_loan_status IS DISTINCT FROM 'Active Loan') AS completed_count,
+  ROUND(
+    (
+      COUNT(*) FILTER (WHERE l.funding_date IS NOT NULL)::numeric
+      / NULLIF(COUNT(*) FILTER (WHERE l.current_loan_status IS DISTINCT FROM 'Active Loan'), 0)
+    ) * 100,
+    1
+  ) AS pull_through_rate
+FROM public.loans l
+WHERE l.application_date >= DATE_TRUNC('quarter', CURRENT_DATE)
+  AND l.application_date < DATE_TRUNC('quarter', CURRENT_DATE) + INTERVAL '3 months'
+GROUP BY 1
+HAVING COUNT(*) FILTER (WHERE l.current_loan_status IS DISTINCT FROM 'Active Loan') >= 5
+ORDER BY pull_through_rate DESC, completed_count DESC
+LIMIT ${topN}`,
+      params: [],
+      explanation: `Top ${topN} branches by pull-through rate for the current quarter using an application-date cohort.`,
+      visualizationType: "horizontal_bar",
+      chartConfig: {
+        title: `Top ${topN} branches by pull-through rate — this quarter (application cohort)`,
+        xKey: "branch",
+        yKey: "pull_through_rate",
+        xLabel: "Branch",
+        yLabel: "Pull-Through Rate (%)",
+      },
+    };
+  }
+
+  return null;
+}
+
 async function generateQuery(
   question: string,
   context: ChatContext,
@@ -482,10 +535,31 @@ async function generateQuery(
 
     const parsed = JSON.parse(response);
 
+    const heuristicFallback = buildHeuristicDataQuery(question);
+
     // Check if this was determined to not be a data query
     if (parsed.isDataQuery === false) {
+      if (heuristicFallback) {
+        console.warn(
+          "[CohiChat] Query generator returned isDataQuery=false for a deterministic data question; using heuristic fallback query."
+        );
+        return heuristicFallback;
+      }
       console.log(
         `[CohiChat] Query generator determined this is not a data query: ${parsed.reason}`
+      );
+      return null;
+    }
+
+    if (!parsed.sql || typeof parsed.sql !== "string") {
+      if (heuristicFallback) {
+        console.warn(
+          "[CohiChat] Query generator omitted SQL for deterministic data question; using heuristic fallback query."
+        );
+        return heuristicFallback;
+      }
+      console.log(
+        "[CohiChat] Query generator omitted SQL (expected when isDataQuery is true)"
       );
       return null;
     }
@@ -498,6 +572,14 @@ async function generateQuery(
       chartConfig: parsed.chartConfig || {},
     };
   } catch (error: any) {
+    const heuristicFallback = buildHeuristicDataQuery(question);
+    if (heuristicFallback) {
+      console.warn(
+        "[CohiChat] Query generation failed for deterministic data question; using heuristic fallback query."
+      );
+      return heuristicFallback;
+    }
+
     // This is expected for knowledge-only questions - not a real error
     if (error instanceof SyntaxError) {
       console.log("[CohiChat] No data query needed (knowledge-only question)");
@@ -1141,6 +1223,7 @@ async function gatherAllContext(
   // If we got a valid query, try to execute it (with one auto-retry on failure)
   if (queryConfig?.sql) {
     const effectiveConfig = queryConfig;
+    const heuristicFallback = buildHeuristicDataQuery(question);
     try {
       const result = await executeQuery(
         effectiveConfig.sql,
@@ -1152,6 +1235,25 @@ async function gatherAllContext(
         dataQueryResult = {
           query: effectiveConfig,
           result,
+          formattedData,
+        };
+      } else if (
+        heuristicFallback &&
+        sanitizeGeneratedSQL(effectiveConfig.sql) !==
+          sanitizeGeneratedSQL(heuristicFallback.sql)
+      ) {
+        console.warn(
+          "[CohiChat] Primary query returned 0 rows for deterministic data question; trying heuristic fallback query."
+        );
+        const fallbackResult = await executeQuery(
+          heuristicFallback.sql,
+          heuristicFallback.params,
+          context
+        );
+        const formattedData = formatDataRows(fallbackResult.rows);
+        dataQueryResult = {
+          query: heuristicFallback,
+          result: fallbackResult,
           formattedData,
         };
       }
@@ -1191,16 +1293,41 @@ async function gatherAllContext(
           `[CohiChat] Retry also failed: ${retryError.message}`
         );
       }
+
+      // Last chance for deterministic question families.
+      if (!dataQueryResult && heuristicFallback) {
+        try {
+          console.warn(
+            "[CohiChat] Using heuristic fallback query after execution failures."
+          );
+          const fallbackResult = await executeQuery(
+            heuristicFallback.sql,
+            heuristicFallback.params,
+            context
+          );
+          const formattedData = formatDataRows(fallbackResult.rows);
+          dataQueryResult = {
+            query: heuristicFallback,
+            result: fallbackResult,
+            formattedData,
+          };
+        } catch (fallbackErr: any) {
+          console.log(
+            `[CohiChat] Heuristic fallback failed: ${fallbackErr.message}`
+          );
+        }
+      }
     }
   }
 
-  // Gather insight metrics for open-ended questions
+  // Gather insight metrics for open-ended questions only when we did not run a data query.
+  // Otherwise the response model can mix precomputed "top performers" with SQL rows and contradict the chart.
   let insightMetrics: Record<string, any> | undefined;
   const isOpenEnded =
     /how are we|what.*(important|happening|know)|status|update|overview/i.test(
       question
     );
-  if (isOpenEnded) {
+  if (isOpenEnded && !dataQueryResult) {
     try {
       insightMetrics = await gatherInsightMetrics(context);
     } catch (error) {
@@ -1232,6 +1359,60 @@ async function generateUnifiedResponse(
 ): Promise<CohiChatResponse> {
   const apiKey = await getOpenAIKey(context.tenantId);
 
+  // Deterministic no-rows handling for executed SQL:
+  // avoid model responses that ask the user to provide "query JSON" even though
+  // we already ran the query in this request.
+  if (
+    gathered.dataQueryResult &&
+    gathered.dataQueryResult.result.rowCount === 0
+  ) {
+    const emptyViz = buildVisualizationConfig(
+      gathered.dataQueryResult.formattedData,
+      gathered.dataQueryResult.query
+    );
+
+    let noDataMessage =
+      "I ran your request against your portfolio, but there are no rows for this exact filter window.";
+
+    if (/quarter/i.test(question)) {
+      noDataMessage +=
+        " For this quarter, there may be no completed records yet for that breakdown.";
+    }
+
+    noDataMessage +=
+      " Try widening the period (for example: last 90 days or year-to-date) to see ranked results.";
+
+    if (gathered.ragContext.sources.length > 0) {
+      noDataMessage += `\n\n📚 **Sources:** ${formatSourcesWithLinks(
+        gathered.ragContext.sources
+      )}`;
+    }
+
+    return {
+      message: noDataMessage,
+      visualization: emptyViz,
+      data: gathered.dataQueryResult.formattedData,
+      sqlQuery: sanitizeGeneratedSQL(gathered.dataQueryResult.query.sql),
+      suggestedQuestions: generateSuggestedQuestions(
+        question,
+        gathered.ragContext.totalChunks > 0
+      ),
+      sources: {
+        dataQuery: true,
+        knowledgeBase:
+          gathered.ragContext.sources.length > 0
+            ? gathered.ragContext.sources.map((s) => {
+                const categoryStr = s.category ? ` (${s.category})` : "";
+                const typeStr = s.isGlobal ? " [Global]" : "";
+                return s.url
+                  ? `[${s.name}${categoryStr}](${s.url})${typeStr}`
+                  : `${s.name}${categoryStr}${typeStr}`;
+              })
+            : undefined,
+      },
+    };
+  }
+
   // Build context sections for the LLM
   const contextParts: string[] = [];
 
@@ -1250,17 +1431,17 @@ async function generateUnifiedResponse(
 
   // Add loan data if available
   if (gathered.dataQueryResult) {
+    const dq = gathered.dataQueryResult;
     contextParts.push("\n## Your Loan Data (Query Results)");
-    const preview = gathered.dataQueryResult.formattedData.slice(0, 15);
-    contextParts.push(`Query: ${gathered.dataQueryResult.query.explanation}`);
+    const preview = dq.formattedData.slice(0, 15);
+    contextParts.push(`Query: ${dq.query.explanation}`);
     contextParts.push(
-      `Results (${gathered.dataQueryResult.result.rowCount} rows):`
+      `Planned visualization: ${dq.query.visualizationType} — ${(dq.query.chartConfig as { title?: string })?.title || "see chartConfig"}. Narration must match this intent and these rows only.`
     );
+    contextParts.push(`Results (${dq.result.rowCount} rows):`);
     contextParts.push(JSON.stringify(preview, null, 2));
-    if (gathered.dataQueryResult.result.rowCount > 15) {
-      contextParts.push(
-        `... and ${gathered.dataQueryResult.result.rowCount - 15} more rows`
-      );
+    if (dq.result.rowCount > 15) {
+      contextParts.push(`... and ${dq.result.rowCount - 15} more rows`);
     }
   }
 
@@ -1337,7 +1518,9 @@ async function generateUnifiedResponse(
     message,
     visualization,
     data,
-    sqlQuery: gathered.dataQueryResult?.query?.sql || undefined,
+    sqlQuery: gathered.dataQueryResult?.query?.sql
+      ? sanitizeGeneratedSQL(gathered.dataQueryResult.query.sql)
+      : undefined,
     suggestedQuestions: generateSuggestedQuestions(
       question,
       gathered.ragContext.totalChunks > 0

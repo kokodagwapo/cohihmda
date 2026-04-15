@@ -302,6 +302,7 @@ export function ChatHistorySidebar({
   onNewSession,
 }: ChatHistorySidebarProps) {
   const [searchQuery, setSearchQuery] = useState("");
+  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -318,6 +319,32 @@ export function ChatHistorySidebar({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handlePointerDownOutside = (e: PointerEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+
+      // Let the toggle button handle its own open/close state to avoid
+      // close-then-immediate-reopen races during rapid clicks.
+      if (target.closest('[data-chat-history-toggle="true"]')) return;
+
+      if (panelRef.current && !panelRef.current.contains(target)) {
+        onClose();
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDownOutside, true);
+    return () => {
+      document.removeEventListener(
+        "pointerdown",
+        handlePointerDownOutside,
+        true
+      );
+    };
   }, [isOpen, onClose]);
 
   const filteredSessions = searchQuery.trim()
@@ -339,15 +366,17 @@ export function ChatHistorySidebar({
             exit={{ opacity: 0 }}
             transition={{ duration: 0.15 }}
             className="absolute inset-0 z-[10] bg-black/10 dark:bg-black/20"
-            onClick={onClose}
+            onPointerDown={onClose}
           />
           {/* Sidebar panel */}
           <motion.div
+            ref={panelRef}
             initial={{ x: "-100%", opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: "-100%", opacity: 0 }}
             transition={{ type: "spring", damping: 28, stiffness: 340 }}
             className="absolute left-0 top-0 bottom-0 z-[11] w-[280px] max-w-[85%] flex flex-col bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-700 shadow-xl"
+            onPointerDown={(e) => e.stopPropagation()}
           >
             {/* Header */}
             <div className="flex items-center justify-between gap-2 px-3 py-3 border-b border-slate-200 dark:border-slate-700">
