@@ -10,7 +10,12 @@ export default defineConfig({
   workers: isCI ? 2 : undefined,
   retries: isCI ? 1 : 0,
   reporter: isCI
-    ? [["list"], ["html", { open: "never" }], ["junit", { outputFile: "test-results/junit.xml" }]]
+    ? [
+        ["list"],
+        ["html", { open: "never" }],
+        ["json", { outputFile: "test-results/results.json" }],
+        ["junit", { outputFile: "test-results/junit.xml" }],
+      ]
     : [["html", { open: "never" }]],
   timeout: 60_000,
   expect: {

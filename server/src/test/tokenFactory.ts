@@ -12,6 +12,8 @@ interface JwtTokenPayload {
   tenantId?: string;
   tenantSlug?: string;
   persona?: Persona;
+  // AI Control Plane: optional claim that activates the AI identity path.
+  sub_type?: string;
 }
 
 export function makeToken(overrides: Partial<JwtTokenPayload> = {}): string {
@@ -51,5 +53,25 @@ export function tokenForCanvasOnlyUser(): string {
     persona: "tenant_canvas_only_user",
     tenantId: TEST_TENANT_ID,
     tenantSlug: "test-tenant",
+  });
+}
+
+/**
+ * Mint a JWT that carries sub_type: "ai_agent".
+ * This activates req.isAiAgent in authenticateToken and triggers the AI
+ * security guard on mutating routes.  The base role is "user" with the
+ * tenant_user persona so the underlying RBAC would otherwise allow access —
+ * the guard is the only thing that blocks mutations without an approved action.
+ */
+export function tokenForAiAgent(overrides: Partial<JwtTokenPayload> = {}): string {
+  return makeToken({
+    role: "user",
+    userId: overrides.userId || "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    email: overrides.email || "ai-agent@coheus.test",
+    persona: "tenant_user",
+    tenantId: TEST_TENANT_ID,
+    tenantSlug: "test-tenant",
+    sub_type: "ai_agent",
+    ...overrides,
   });
 }
