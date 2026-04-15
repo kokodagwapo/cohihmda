@@ -220,6 +220,17 @@ definitions:
             else
               echo ">>> Skipping Backend (no changes)"
             fi
+          # Auto-migrate after backend deploy. Runner is idempotent (tracks applied
+          # versions in schema_migrations), so re-runs are safe on every deploy.
+          - |
+            if [ -n "$BACKEND_CHANGED" ] || [ -n "$INFRA_CHANGED" ]; then
+              echo ">>> Running database migrations..."
+              apt-get update -qq && apt-get install -y -qq curl
+              chmod +x ./scripts/bitbucket/run-migrations.sh
+              ./scripts/bitbucket/run-migrations.sh
+            else
+              echo ">>> Skipping Migrations (no backend/infra changes)"
+            fi
 
     - step: &deploy-prod
         name: Deploy to Production
@@ -337,6 +348,26 @@ definitions:
           - npm ci
           - *e2e-env-preflight
           - npm run test:e2e:all
+        artifacts:
+          - playwright-report/**
+          - test-results/**
+
+    - step: &run-ai-qa-dev
+        name: AI QA Agent (Dev)
+        oidc: true
+        deployment: dev
+        image: *playwright_docker_image
+        caches:
+          - npm
+          - server-npm
+        script:
+          - *setup-oidc
+          - npm ci
+          - cd server && npm ci && cd ..
+          - *e2e-env-preflight
+          - export QA_SUITE="${QA_SUITE:-critical}"
+          - chmod +x ./scripts/bitbucket/run-ai-qa.sh
+          - ./scripts/bitbucket/run-ai-qa.sh
         artifacts:
           - playwright-report/**
           - test-results/**
@@ -492,6 +523,12 @@ pipelines:
 
     e2e-prod-smoke:
       - step: *test-e2e-prod-smoke
+
+    # AI QA Agent — governed Playwright run with S3/Confluence/Jira reporting
+    # Trigger manually from Bitbucket for full QA governance cycle.
+    # Set QA_SUITE variable before running (smoke | critical | regression | all).
+    ai-qa-dev:
+      - step: *run-ai-qa-dev
 
     # Database migrations
     run-migrations-dev:

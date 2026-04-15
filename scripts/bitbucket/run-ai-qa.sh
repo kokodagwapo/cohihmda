@@ -1,0 +1,91 @@
+#!/bin/bash
+# ============================================================================
+# AI QA Runner — Pipeline Entry Point
+# ============================================================================
+# Validates required environment variables, then delegates to the TypeScript
+# runner via tsx from the server/ workspace (which has tsx in devDependencies).
+#
+# Required (validated below):
+#   E2E_BASE_URL, E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, E2E_ADMIN_TOTP_SECRET
+#
+# Optional (graceful degradation if missing):
+#   QA_SUITE                  - Suite tag to run (default: critical)
+#   ATLASSIAN_API_TOKEN       - Confluence + Jira auth
+#   ATLASSIAN_EMAIL
+#   ATLASSIAN_SITE_URL
+#   CONFLUENCE_QA_PAGE_ID
+#   QA_JIRA_PROJECT_KEY
+#   QA_JIRA_PARENT_ISSUE
+#   QA_JIRA_TRACKING_ISSUE
+#   AI_ARTIFACTS_BUCKET       - S3 bucket for artifact upload
+#   QA_RUNNER_API_KEY         - Shared secret for ledger endpoint
+#   QA_RUNNER_HMAC_SECRET     - HMAC signing secret for ledger endpoint
+#   QA_CREATE_BUGS_IN_PROD    - Set to "true" to enable Jira bug creation in prod
+# ============================================================================
+
+set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+log_info()    { echo -e "${BLUE}[INFO]${NC} $1"; }
+log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
+log_warn()    { echo -e "${YELLOW}[WARN]${NC} $1"; }
+log_error()   { echo -e "${RED}[ERROR]${NC} $1"; }
+
+# ---- Required env validation ------------------------------------------------
+log_info "Validating required environment variables..."
+
+REQUIRED_VARS="E2E_BASE_URL E2E_ADMIN_EMAIL E2E_ADMIN_PASSWORD E2E_ADMIN_TOTP_SECRET"
+for var in $REQUIRED_VARS; do
+  value="${!var:-}"
+  if [ -z "$value" ]; then
+    log_error "Required variable $var is not set"
+    exit 1
+  fi
+  # Guard against literal placeholder values (same pattern as e2e-env-preflight)
+  case "$value" in
+    \$*) log_error "Variable $var appears to be an unresolved placeholder: $value"; exit 1 ;;
+  esac
+done
+
+log_success "Environment validated"
+
+# ---- Optional variable warnings ---------------------------------------------
+OPTIONAL_VARS="ATLASSIAN_API_TOKEN AI_ARTIFACTS_BUCKET QA_RUNNER_API_KEY QA_RUNNER_HMAC_SECRET"
+for var in $OPTIONAL_VARS; do
+  if [ -z "${!var:-}" ]; then
+    log_warn "$var not set — related reporting step will be skipped"
+  fi
+done
+
+# ---- Resolve args -----------------------------------------------------------
+SUITE="${QA_SUITE:-critical}"
+BUILD="${BITBUCKET_BUILD_NUMBER:-local}"
+COMMIT="${BITBUCKET_COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')}"
+
+log_info "Suite:       $SUITE"
+log_info "Build:       #$BUILD"
+log_info "Commit:      $COMMIT"
+log_info "Base URL:    $E2E_BASE_URL"
+
+# ---- Install server deps if needed ------------------------------------------
+if [ ! -d "server/node_modules" ]; then
+  log_info "Installing server dependencies..."
+  cd server && npm ci --prefer-offline && cd ..
+fi
+
+# ---- Run the TypeScript runner from server/ ---------------------------------
+log_info "Starting AI QA runner..."
+
+cd server
+npx tsx scripts/qa/aiQaRunner.ts \
+  --suite="$SUITE" \
+  --base-url="$E2E_BASE_URL" \
+  --build-number="$BUILD" \
+  --commit-hash="$COMMIT"
+
+# Exit code from tsx propagates automatically (set -e)

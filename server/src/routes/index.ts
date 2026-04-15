@@ -49,6 +49,7 @@ import falloutAlertsRoutes from "./falloutAlerts.js";
 import falloutResponseRoutes from "./falloutResponse.js";
 import podcastRoutes from "./podcast.js";
 import cohibuilderPortfolioRoutes from "./cohibuilderPortfolio.js";
+import qaResultsRoutes from "./internal/qaResults.js";
 import { pool, resetPool } from "../config/database.js";
 import { setupMockLosApi } from "../services/mockLosApi.js";
 import { getVersionInfo } from "../services/versionService.js";
@@ -152,6 +153,8 @@ export function setupRoutes(app: Express) {
   app.use("/api/fallout-response", falloutResponseRoutes); // Public one-time fallout response links
   app.use("/api/podcast/cohi", podcastRoutes); // Cohi Daily Briefing podcast (TTS streaming)
   app.use("/api/cohibuilder/portfolio", cohibuilderPortfolioRoutes); // Cohi Builder portfolio CRUD
+  // Internal machine-to-machine endpoints (HMAC-signed, no JWT)
+  app.use("/api/internal/qa-run", qaResultsRoutes);
 
   // Health check handler (shared by both /health and /api/health)
   const healthCheckHandler = async (req: any, res: any) => {

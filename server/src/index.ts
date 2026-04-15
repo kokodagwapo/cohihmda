@@ -11,6 +11,7 @@ import { initDatabase } from "./config/database.js";
 import { initSentry, setupSentryErrorHandler } from "./middleware/sentry.js";
 import { apiLimiter } from "./middleware/rateLimiter.js";
 import { devLogger, prodLogger } from "./middleware/logger.js";
+import { requestIdMiddleware } from "./middleware/requestId.js";
 import {
   assertMfaConfigurationReady,
   isCognitoAuthEnabled,
@@ -86,6 +87,10 @@ const allowedOrigins = (
     }
     return [origin];
   });
+
+// Request correlation ID — must be registered before Morgan so every access-log
+// line and all downstream control-plane logs share the same X-Request-Id value.
+app.use(requestIdMiddleware);
 
 // CORS - Allow CloudFront and all configured origins
 app.use(
