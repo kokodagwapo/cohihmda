@@ -19,6 +19,13 @@
 #   - CF_STACK_BACKEND             - CloudFormation stack name (e.g., coheus-dev-backend)
 #   - COGNITO_PASSWORD_AUTH        - Set to "true" (Cognito-only password auth policy)
 #   - E2E_ADMIN_EMAIL / E2E_ADMIN_PASSWORD / E2E_ADMIN_TOTP_SECRET
+#   - CONFLUENCE_QA_PARENT_PAGE_ID - Parent Confluence page for per-issue QA pages
+#   - QA_JIRA_PROJECT_KEY          - Jira project used for issue resolution and bug creation
+#   - QA_JIRA_FALLBACK_ISSUE       - Optional fallback issue when commits contain no Jira key
+#   - QA_COMMIT_RANGE              - Optional explicit git range for Jira-key discovery
+#   - QA_COMMIT_LOOKBACK           - Fallback commit lookback window when no range is provided
+#   - ATLASSIAN_EMAIL / ATLASSIAN_SITE_URL
+#   - Atlassian API token is fetched from Secrets Manager via backend stack output
 #   - (Optional) E2E_MANAGED_EMAIL_PREFIX      - defaults to "e2e.auto"
 # ============================================================================
 
@@ -365,6 +372,9 @@ definitions:
           - npm ci
           - cd server && npm ci && cd ..
           - *e2e-env-preflight
+          # QA runner discovers Jira targets from commit messages. It also fetches
+          # QA runner secrets + artifact bucket from the backend CloudFormation stack.
+          # Override QA_COMMIT_RANGE if you want a narrower/wider issue scan.
           - export QA_SUITE="${QA_SUITE:-critical}"
           - chmod +x ./scripts/bitbucket/run-ai-qa.sh
           - ./scripts/bitbucket/run-ai-qa.sh
@@ -524,9 +534,11 @@ pipelines:
     e2e-prod-smoke:
       - step: *test-e2e-prod-smoke
 
-    # AI QA Agent — governed Playwright run with S3/Confluence/Jira reporting
-    # Trigger manually from Bitbucket for full QA governance cycle.
-    # Set QA_SUITE variable before running (smoke | critical | regression | all).
+    # AI QA Agent — governed Playwright run with S3/Confluence/Jira reporting.
+    # The runner discovers Jira keys from the commit range, then creates or
+    # updates one Confluence QA page per resolved Jira issue.
+    # Set QA_SUITE before running (smoke | critical | regression | all).
+    # Optionally set QA_COMMIT_RANGE / QA_COMMIT_LOOKBACK to control issue discovery.
     ai-qa-dev:
       - step: *run-ai-qa-dev
 

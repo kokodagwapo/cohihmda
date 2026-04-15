@@ -8,18 +8,19 @@
 # Required (validated below):
 #   E2E_BASE_URL, E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, E2E_ADMIN_TOTP_SECRET
 #
-# Optional (graceful degradation if missing):
+# Required from Bitbucket deployment/repo config:
 #   QA_SUITE                  - Suite tag to run (default: critical)
-#   ATLASSIAN_API_TOKEN       - Confluence + Jira auth
+#   CF_STACK_BACKEND          - Backend CloudFormation stack to query for QA resources
+#   AWS_REGION / AWS_DEFAULT_REGION
+#
+# Optional (graceful degradation if missing):
+#   QA_COMMIT_RANGE           - Explicit git range to inspect for Jira keys
+#   QA_COMMIT_LOOKBACK        - Fallback commit lookback when range is not set
 #   ATLASSIAN_EMAIL
 #   ATLASSIAN_SITE_URL
-#   CONFLUENCE_QA_PAGE_ID
+#   CONFLUENCE_QA_PARENT_PAGE_ID - Parent page for per-issue Confluence QA pages
 #   QA_JIRA_PROJECT_KEY
-#   QA_JIRA_PARENT_ISSUE
-#   QA_JIRA_TRACKING_ISSUE
-#   AI_ARTIFACTS_BUCKET       - S3 bucket for artifact upload
-#   QA_RUNNER_API_KEY         - Shared secret for ledger endpoint
-#   QA_RUNNER_HMAC_SECRET     - HMAC signing secret for ledger endpoint
+#   QA_JIRA_FALLBACK_ISSUE    - Optional fallback if no Jira key is found in commits
 #   QA_CREATE_BUGS_IN_PROD    - Set to "true" to enable Jira bug creation in prod
 # ============================================================================
 
@@ -36,6 +37,99 @@ log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
 log_warn()    { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error()   { echo -e "${RED}[ERROR]${NC} $1"; }
 
+install_aws_cli() {
+  if command -v aws >/dev/null 2>&1; then
+    return
+  fi
+
+  log_info "Installing AWS CLI..."
+  apt-get update -qq
+  apt-get install -y -qq unzip curl >/dev/null
+  curl -sS "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+  unzip -qq awscliv2.zip
+  ./aws/install --update >/dev/null
+  rm -rf awscliv2.zip aws/
+}
+
+require_aws_context() {
+  if [ -z "${CF_STACK_BACKEND:-}" ]; then
+    log_error "CF_STACK_BACKEND is required so the QA runner can fetch AWS-managed QA resources"
+    exit 1
+  fi
+
+  if [ -z "${AWS_WEB_IDENTITY_TOKEN_FILE:-}" ] && [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then
+    log_error "AWS credentials are not available. Run setup-oidc before this script."
+    exit 1
+  fi
+
+  export AWS_DEFAULT_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-2}}"
+}
+
+get_stack_output() {
+  local output_key="$1"
+  aws cloudformation describe-stacks \
+    --stack-name "$CF_STACK_BACKEND" \
+    --region "$AWS_DEFAULT_REGION" \
+    --query "Stacks[0].Outputs[?OutputKey=='${output_key}'].OutputValue | [0]" \
+    --output text
+}
+
+load_aws_managed_qa_config() {
+  log_info "Loading QA pipeline AWS resources from CloudFormation stack..."
+
+  export AI_ARTIFACTS_BUCKET
+  AI_ARTIFACTS_BUCKET="$(get_stack_output "QaArtifactsBucketName")"
+  local api_key_secret_arn
+  local hmac_secret_arn
+  local atlassian_token_secret_arn
+  api_key_secret_arn="$(get_stack_output "QaRunnerApiKeySecretArn")"
+  hmac_secret_arn="$(get_stack_output "QaRunnerHmacSecretArn")"
+  atlassian_token_secret_arn="$(get_stack_output "QaAtlassianApiTokenSecretArn")"
+
+  if [ -z "$AI_ARTIFACTS_BUCKET" ] || [ "$AI_ARTIFACTS_BUCKET" = "None" ]; then
+    log_error "QaArtifactsBucketName output not found on stack $CF_STACK_BACKEND"
+    exit 1
+  fi
+
+  if [ -z "$api_key_secret_arn" ] || [ "$api_key_secret_arn" = "None" ]; then
+    log_error "QaRunnerApiKeySecretArn output not found on stack $CF_STACK_BACKEND"
+    exit 1
+  fi
+
+  if [ -z "$hmac_secret_arn" ] || [ "$hmac_secret_arn" = "None" ]; then
+    log_error "QaRunnerHmacSecretArn output not found on stack $CF_STACK_BACKEND"
+    exit 1
+  fi
+
+  export QA_RUNNER_API_KEY
+  export QA_RUNNER_HMAC_SECRET
+  QA_RUNNER_API_KEY="$(aws secretsmanager get-secret-value --secret-id "$api_key_secret_arn" --region "$AWS_DEFAULT_REGION" --query SecretString --output text)"
+  QA_RUNNER_HMAC_SECRET="$(aws secretsmanager get-secret-value --secret-id "$hmac_secret_arn" --region "$AWS_DEFAULT_REGION" --query SecretString --output text)"
+
+  if [ -z "$QA_RUNNER_API_KEY" ] || [ "$QA_RUNNER_API_KEY" = "None" ]; then
+    log_error "Failed to load QA_RUNNER_API_KEY from Secrets Manager"
+    exit 1
+  fi
+
+  if [ -z "$QA_RUNNER_HMAC_SECRET" ] || [ "$QA_RUNNER_HMAC_SECRET" = "None" ]; then
+    log_error "Failed to load QA_RUNNER_HMAC_SECRET from Secrets Manager"
+    exit 1
+  fi
+
+  if [ -n "$atlassian_token_secret_arn" ] && [ "$atlassian_token_secret_arn" != "None" ]; then
+    export ATLASSIAN_API_TOKEN
+    ATLASSIAN_API_TOKEN="$(aws secretsmanager get-secret-value --secret-id "$atlassian_token_secret_arn" --region "$AWS_DEFAULT_REGION" --query SecretString --output text)"
+    if [ "$ATLASSIAN_API_TOKEN" = "__SET_ATLASSIAN_API_TOKEN__" ]; then
+      unset ATLASSIAN_API_TOKEN
+      log_warn "Atlassian API token secret still has placeholder value — Jira/Confluence reporting will be skipped"
+    fi
+  else
+    log_warn "QaAtlassianApiTokenSecretArn output not found on stack $CF_STACK_BACKEND — Jira/Confluence reporting will be skipped"
+  fi
+
+  log_success "Loaded AWS-managed QA secrets and artifact bucket"
+}
+
 # ---- Required env validation ------------------------------------------------
 log_info "Validating required environment variables..."
 
@@ -46,7 +140,6 @@ for var in $REQUIRED_VARS; do
     log_error "Required variable $var is not set"
     exit 1
   fi
-  # Guard against literal placeholder values (same pattern as e2e-env-preflight)
   case "$value" in
     \$*) log_error "Variable $var appears to be an unresolved placeholder: $value"; exit 1 ;;
   esac
@@ -54,8 +147,13 @@ done
 
 log_success "Environment validated"
 
+# ---- AWS-managed QA config --------------------------------------------------
+require_aws_context
+install_aws_cli
+load_aws_managed_qa_config
+
 # ---- Optional variable warnings ---------------------------------------------
-OPTIONAL_VARS="ATLASSIAN_API_TOKEN AI_ARTIFACTS_BUCKET QA_RUNNER_API_KEY QA_RUNNER_HMAC_SECRET"
+OPTIONAL_VARS="ATLASSIAN_EMAIL ATLASSIAN_SITE_URL CONFLUENCE_QA_PARENT_PAGE_ID QA_JIRA_PROJECT_KEY"
 for var in $OPTIONAL_VARS; do
   if [ -z "${!var:-}" ]; then
     log_warn "$var not set — related reporting step will be skipped"
@@ -71,6 +169,8 @@ log_info "Suite:       $SUITE"
 log_info "Build:       #$BUILD"
 log_info "Commit:      $COMMIT"
 log_info "Base URL:    $E2E_BASE_URL"
+log_info "Backend CF:  $CF_STACK_BACKEND"
+log_info "QA bucket:   $AI_ARTIFACTS_BUCKET"
 
 # ---- Install server deps if needed ------------------------------------------
 if [ ! -d "server/node_modules" ]; then

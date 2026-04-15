@@ -1,11 +1,10 @@
 /**
  * Atlassian Reporter for QA Runner
  *
- * Handles two integrations:
- *   1. Confluence — updates a living "QA Results" page per environment.
- *      Uses GET-then-PUT with version+1 to avoid conflict errors.
- *   2. Jira — creates a Bug issue on failure (deduplicated via JQL) or
- *      posts a success comment on the tracking ticket.
+ * Handles three integrations:
+ *   1. Jira target resolution from discovered issue keys.
+ *   2. Confluence QA pages, one child page per Jira issue.
+ *   3. Jira bug/comment reporting against those resolved issues.
  *
  * All operations are best-effort: failures are logged as warnings and do
  * NOT cause the runner to exit with a non-zero code.
@@ -13,21 +12,25 @@
  * Auth: Basic auth (email:apiToken) against ATLASSIAN_SITE_URL.
  */
 
-import { QaRunSummary, FailedTest } from "./resultParser.js";
-
-// ---------------------------------------------------------------------------
-// Config
-// ---------------------------------------------------------------------------
+import { QaRunSummary } from "./resultParser.js";
 
 interface AtlassianConfig {
-  siteUrl: string;   // e.g. "cohi.atlassian.net"
+  siteUrl: string;
   email: string;
   apiToken: string;
-  confluencePageId: string;
+  confluenceParentPageId: string;
   jiraProjectKey: string;
-  jiraParentIssue: string;
-  jiraTrackingIssue: string;
+  jiraFallbackIssue: string;
   createBugsInProd: boolean;
+}
+
+export interface QaTargetIssue {
+  issueKey: string;
+  issueSummary: string;
+  issueStatus: string;
+  issueUrl: string;
+  confluencePageId?: string | null;
+  confluencePageUrl?: string | null;
 }
 
 function loadConfig(): AtlassianConfig | null {
@@ -46,18 +49,12 @@ function loadConfig(): AtlassianConfig | null {
     siteUrl,
     email,
     apiToken,
-    confluencePageId: process.env.CONFLUENCE_QA_PAGE_ID ?? "",
+    confluenceParentPageId: process.env.CONFLUENCE_QA_PARENT_PAGE_ID ?? "",
     jiraProjectKey: process.env.QA_JIRA_PROJECT_KEY ?? "COHI",
-    jiraParentIssue: process.env.QA_JIRA_PARENT_ISSUE ?? "",
-    jiraTrackingIssue: process.env.QA_JIRA_TRACKING_ISSUE ?? "",
-    // Default to false in prod to prevent alert noise
+    jiraFallbackIssue: process.env.QA_JIRA_FALLBACK_ISSUE ?? "",
     createBugsInProd: process.env.QA_CREATE_BUGS_IN_PROD === "true",
   };
 }
-
-// ---------------------------------------------------------------------------
-// HTTP helpers
-// ---------------------------------------------------------------------------
 
 function authHeader(email: string, token: string): string {
   return "Basic " + Buffer.from(`${email}:${token}`).toString("base64");
@@ -117,11 +114,16 @@ async function jiraRequest(
   return null;
 }
 
-// ---------------------------------------------------------------------------
-// Confluence
-// ---------------------------------------------------------------------------
+function unique(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function buildConfluencePageTitle(target: QaTargetIssue): string {
+  return `QA - ${target.issueKey}`;
+}
 
 function buildConfluenceMarkdown(opts: {
+  target: QaTargetIssue;
   summary: QaRunSummary;
   suite: string;
   environment: string;
@@ -130,11 +132,10 @@ function buildConfluenceMarkdown(opts: {
   s3ReportKey: string | null;
   bucket: string | null;
 }): string {
-  const { summary, suite, environment, buildNumber, commitHash, s3ReportKey, bucket } = opts;
+  const { target, summary, suite, environment, buildNumber, commitHash, s3ReportKey, bucket } = opts;
   const passRate = summary.total > 0 ? Math.round((summary.passed / summary.total) * 100) : 0;
   const status = summary.failed > 0 ? "FAILED" : "PASSED";
   const ts = new Date().toISOString();
-
   const reportLink =
     s3ReportKey && bucket
       ? `[Download Report](https://${bucket}.s3.amazonaws.com/${s3ReportKey})`
@@ -146,21 +147,24 @@ function buildConfluenceMarkdown(opts: {
           "## Failed Tests",
           "",
           ...summary.failedTests.map(
-            (t) =>
-              `- **${t.title}** (\`${t.file}\`)\n  \`\`\`\n  ${t.error}\n  \`\`\``
+            (t) => `- **${t.title}** (\`${t.file}\`)\n  \`\`\`\n  ${t.error}\n  \`\`\``
           ),
         ].join("\n")
-      : "";
+      : "## Failed Tests\n\n_No failing tests in this run._";
 
   return [
-    `# QA Results — ${environment.toUpperCase()} | ${status}`,
+    `# ${buildConfluencePageTitle(target)}`,
     "",
+    `> Jira issue: [${target.issueKey}](${target.issueUrl})`,
+    `> Issue summary: ${target.issueSummary}`,
+    `> Issue status: ${target.issueStatus}`,
     `> Last updated: ${ts}`,
     "",
     "## Summary",
     "",
     `| | |`,
     `|---|---|`,
+    `| Environment | ${environment} |`,
     `| Suite | ${suite} |`,
     `| Build | #${buildNumber} |`,
     `| Commit | \`${commitHash.slice(0, 8)}\` |`,
@@ -173,40 +177,74 @@ function buildConfluenceMarkdown(opts: {
     `| Report | ${reportLink} |`,
     "",
     failureSection,
-  ]
-    .filter((l) => l !== undefined)
-    .join("\n");
+  ].join("\n");
 }
 
-export async function updateConfluencePage(opts: {
-  summary: QaRunSummary;
-  suite: string;
-  environment: string;
-  buildNumber: string;
-  commitHash: string;
-  s3ReportKey: string | null;
-}): Promise<string | null> {
-  const cfg = loadConfig();
-  if (!cfg || !cfg.confluencePageId) {
-    console.warn("[AtlassianReporter] CONFLUENCE_QA_PAGE_ID not set, skipping Confluence update");
-    return null;
-  }
+function toAdfParagraph(text: string) {
+  return {
+    type: "paragraph",
+    content: [{ type: "text", text }],
+  };
+}
 
-  try {
-    // Step 1: GET current page to read version number (required for updates)
-    const current = await confluenceRequest(cfg, "GET", `/api/v2/pages/${cfg.confluencePageId}`);
+async function getConfluenceParent(cfg: AtlassianConfig): Promise<{ id: string; spaceId: string }> {
+  const parent = await confluenceRequest(cfg, "GET", `/api/v2/pages/${cfg.confluenceParentPageId}`);
+  return {
+    id: String(parent?.id ?? cfg.confluenceParentPageId),
+    spaceId: String(parent?.spaceId ?? ""),
+  };
+}
+
+async function findConfluencePageByTitle(
+  cfg: AtlassianConfig,
+  title: string,
+  spaceId: string
+): Promise<string | null> {
+  const result = await confluenceRequest(
+    cfg,
+    "GET",
+    `/api/v2/pages?title=${encodeURIComponent(title)}&space-id=${encodeURIComponent(spaceId)}`
+  );
+  const pages = result?.results ?? [];
+  const page = pages.find((entry: any) => entry?.title === title);
+  return page?.id ? String(page.id) : null;
+}
+
+async function upsertConfluencePageForTarget(
+  cfg: AtlassianConfig,
+  target: QaTargetIssue,
+  opts: {
+    summary: QaRunSummary;
+    suite: string;
+    environment: string;
+    buildNumber: string;
+    commitHash: string;
+    s3ReportKey: string | null;
+    parent: { id: string; spaceId: string };
+  }
+): Promise<QaTargetIssue> {
+  const title = buildConfluencePageTitle(target);
+  const markdown = buildConfluenceMarkdown({
+    target,
+    summary: opts.summary,
+    suite: opts.suite,
+    environment: opts.environment,
+    buildNumber: opts.buildNumber,
+    commitHash: opts.commitHash,
+    s3ReportKey: opts.s3ReportKey,
+    bucket: process.env.AI_ARTIFACTS_BUCKET ?? null,
+  });
+
+  const existingPageId = await findConfluencePageByTitle(cfg, title, opts.parent.spaceId);
+
+  if (existingPageId) {
+    const current = await confluenceRequest(cfg, "GET", `/api/v2/pages/${existingPageId}`);
     const currentVersion: number = current?.version?.number ?? 0;
 
-    const markdown = buildConfluenceMarkdown({
-      ...opts,
-      bucket: process.env.AI_ARTIFACTS_BUCKET ?? null,
-    });
-
-    // Step 2: PUT with version+1
-    await confluenceRequest(cfg, "PUT", `/api/v2/pages/${cfg.confluencePageId}`, {
-      id: cfg.confluencePageId,
+    await confluenceRequest(cfg, "PUT", `/api/v2/pages/${existingPageId}`, {
+      id: existingPageId,
       status: "current",
-      title: `QA Results — ${opts.environment.toUpperCase()}`,
+      title,
       body: {
         representation: "wiki",
         value: markdown,
@@ -214,26 +252,135 @@ export async function updateConfluencePage(opts: {
       version: { number: currentVersion + 1, message: `Build #${opts.buildNumber}` },
     });
 
-    const pageUrl = `https://${cfg.siteUrl}/wiki/pages/${cfg.confluencePageId}`;
-    console.log(`[AtlassianReporter] Confluence page updated: ${pageUrl}`);
-    return pageUrl;
-  } catch (err) {
-    console.warn("[AtlassianReporter] Confluence update failed:", err);
-    return null;
+    return {
+      ...target,
+      confluencePageId: existingPageId,
+      confluencePageUrl: `https://${cfg.siteUrl}/wiki/pages/${existingPageId}`,
+    };
   }
+
+  const created = await confluenceRequest(cfg, "POST", "/api/v2/pages", {
+    spaceId: opts.parent.spaceId,
+    status: "current",
+    title,
+    parentId: opts.parent.id,
+    body: {
+      representation: "wiki",
+      value: markdown,
+    },
+  });
+
+  const createdPageId = String(created?.id ?? "");
+  return {
+    ...target,
+    confluencePageId: createdPageId,
+    confluencePageUrl: createdPageId
+      ? `https://${cfg.siteUrl}/wiki/pages/${createdPageId}`
+      : null,
+  };
 }
 
-// ---------------------------------------------------------------------------
-// Jira
-// ---------------------------------------------------------------------------
+function findFallbackIssueKeys(cfg: AtlassianConfig, issueKeys: string[]): string[] {
+  if (issueKeys.length > 0) return issueKeys;
+  return cfg.jiraFallbackIssue ? [cfg.jiraFallbackIssue] : [];
+}
+
+export async function resolveQaTargets(issueKeys: string[]): Promise<QaTargetIssue[]> {
+  const cfg = loadConfig();
+  if (!cfg) return [];
+
+  const keys = unique(findFallbackIssueKeys(cfg, issueKeys));
+  if (keys.length === 0) {
+    console.warn("[AtlassianReporter] No Jira issue keys discovered and no fallback issue configured");
+    return [];
+  }
+
+  const targets: QaTargetIssue[] = [];
+
+  for (const issueKey of keys) {
+    try {
+      const issue = await jiraRequest(
+        cfg,
+        "GET",
+        `/issue/${encodeURIComponent(issueKey)}?fields=summary,status`
+      );
+      targets.push({
+        issueKey,
+        issueSummary: String(issue?.fields?.summary ?? "Unknown issue"),
+        issueStatus: String(issue?.fields?.status?.name ?? "Unknown"),
+        issueUrl: `https://${cfg.siteUrl}/browse/${issueKey}`,
+      });
+    } catch (err) {
+      console.warn(`[AtlassianReporter] Failed to resolve Jira issue ${issueKey}:`, err);
+    }
+  }
+
+  return targets;
+}
+
+export async function updateConfluencePages(opts: {
+  targets: QaTargetIssue[];
+  summary: QaRunSummary;
+  suite: string;
+  environment: string;
+  buildNumber: string;
+  commitHash: string;
+  s3ReportKey: string | null;
+}): Promise<QaTargetIssue[]> {
+  const cfg = loadConfig();
+  if (!cfg) return opts.targets;
+
+  if (!cfg.confluenceParentPageId) {
+    console.warn(
+      "[AtlassianReporter] CONFLUENCE_QA_PARENT_PAGE_ID not set, skipping Confluence updates"
+    );
+    return opts.targets;
+  }
+
+  if (opts.targets.length === 0) {
+    console.warn("[AtlassianReporter] No resolved Jira targets, skipping Confluence page creation");
+    return opts.targets;
+  }
+
+  try {
+    const parent = await getConfluenceParent(cfg);
+    const enrichedTargets: QaTargetIssue[] = [];
+
+    for (const target of opts.targets) {
+      try {
+        const enriched = await upsertConfluencePageForTarget(cfg, target, {
+          summary: opts.summary,
+          suite: opts.suite,
+          environment: opts.environment,
+          buildNumber: opts.buildNumber,
+          commitHash: opts.commitHash,
+          s3ReportKey: opts.s3ReportKey,
+          parent,
+        });
+        console.log(`[AtlassianReporter] Confluence page synced for ${target.issueKey}: ${enriched.confluencePageUrl}`);
+        enrichedTargets.push(enriched);
+      } catch (err) {
+        console.warn(`[AtlassianReporter] Confluence sync failed for ${target.issueKey}:`, err);
+        enrichedTargets.push(target);
+      }
+    }
+
+    return enrichedTargets;
+  } catch (err) {
+    console.warn("[AtlassianReporter] Confluence update failed:", err);
+    return opts.targets;
+  }
+}
 
 async function findOpenFailureBug(
   cfg: AtlassianConfig,
   suite: string,
-  environment: string
+  environment: string,
+  target: QaTargetIssue
 ): Promise<string | null> {
-  const label = `qa-automated-${environment}-${suite}`;
-  const jql = `project = ${cfg.jiraProjectKey} AND issuetype = Bug AND labels = "${label}" AND statusCategory != Done ORDER BY created DESC`;
+  const runLabel = `qa-automated-${environment}-${suite}`;
+  const targetLabel = `qa-target-${target.issueKey.toLowerCase()}`;
+  const jql = `project = ${cfg.jiraProjectKey} AND issuetype = Bug AND labels = "${runLabel}" AND labels = "${targetLabel}" AND statusCategory != Done ORDER BY created DESC`;
 
   try {
     const result = await jiraRequest(cfg, "GET", `/search?jql=${encodeURIComponent(jql)}&maxResults=1`);
@@ -245,26 +392,39 @@ async function findOpenFailureBug(
   }
 }
 
-function buildJiraBugDescription(summary: QaRunSummary, suite: string, buildNumber: string, s3ReportKey: string | null): string {
-  const failureLines = summary.failedTests
+function buildJiraBugDescription(opts: {
+  summary: QaRunSummary;
+  suite: string;
+  buildNumber: string;
+  s3ReportKey: string | null;
+  target: QaTargetIssue;
+}): string {
+  const failureLines = opts.summary.failedTests
     .slice(0, 20)
     .map((t) => `* *${t.title}* (${t.file})\n{noformat}${t.error}{noformat}`)
     .join("\n");
 
-  const reportNote = s3ReportKey
-    ? `\nReport: s3://${process.env.AI_ARTIFACTS_BUCKET ?? ""}/${s3ReportKey}`
+  const reportNote = opts.s3ReportKey
+    ? `\nReport: s3://${process.env.AI_ARTIFACTS_BUCKET ?? ""}/${opts.s3ReportKey}`
+    : "";
+
+  const confluenceNote = opts.target.confluencePageUrl
+    ? `\nConfluence QA page: ${opts.target.confluencePageUrl}`
     : "";
 
   return [
-    `Automated QA detected *${summary.failed}* failing test(s) in suite *${suite}* (Build #${buildNumber}).`,
+    `Automated QA detected *${opts.summary.failed}* failing test(s) in suite *${opts.suite}* (Build #${opts.buildNumber}).`,
+    `Related Jira item: ${opts.target.issueKey} - ${opts.target.issueSummary}`,
     "",
     "h3. Failed Tests",
     failureLines || "_No failure details available_",
     reportNote,
+    confluenceNote,
   ].join("\n");
 }
 
 export async function reportFailuresToJira(opts: {
+  targets: QaTargetIssue[];
   summary: QaRunSummary;
   suite: string;
   environment: string;
@@ -274,73 +434,72 @@ export async function reportFailuresToJira(opts: {
   const cfg = loadConfig();
   if (!cfg) return;
 
-  // Safety switch: in prod, only create bugs if explicitly enabled
   if (opts.environment === "production" && !cfg.createBugsInProd) {
     console.log("[AtlassianReporter] QA_CREATE_BUGS_IN_PROD=false — skipping bug creation in prod");
     return;
   }
 
-  const { summary } = opts;
-
-  if (summary.failed === 0) {
+  if (opts.summary.failed === 0) {
     console.log("[AtlassianReporter] No failures, skipping Jira bug creation");
     return;
   }
-  const label = `qa-automated-${opts.environment}-${opts.suite}`;
 
-  try {
-    const existingKey = await findOpenFailureBug(cfg, opts.suite, opts.environment);
+  if (opts.targets.length === 0) {
+    console.warn("[AtlassianReporter] No resolved Jira targets, skipping Jira failure reporting");
+    return;
+  }
 
-    if (existingKey) {
-      // Deduplication: add comment to existing bug
-      const commentText = `Build #${opts.buildNumber}: *${summary.failed}* test(s) still failing (${summary.passed}/${summary.total} passed).`;
-      await jiraRequest(cfg, "POST", `/issue/${existingKey}/comment`, {
-        body: {
-          type: "doc",
-          version: 1,
-          content: [
-            {
-              type: "paragraph",
-              content: [{ type: "text", text: commentText }],
-            },
-          ],
-        },
-      });
-      console.log(`[AtlassianReporter] Failure comment added to existing bug ${existingKey}`);
-    } else {
-      // Create new bug
-      const issueBody: Record<string, unknown> = {
+  for (const target of opts.targets) {
+    const runLabel = `qa-automated-${opts.environment}-${opts.suite}`;
+    const targetLabel = `qa-target-${target.issueKey.toLowerCase()}`;
+
+    try {
+      const existingKey = await findOpenFailureBug(cfg, opts.suite, opts.environment, target);
+
+      if (existingKey) {
+        const commentText =
+          `Build #${opts.buildNumber}: *${opts.summary.failed}* test(s) still failing ` +
+          `for ${target.issueKey} (${opts.summary.passed}/${opts.summary.total} passed).`;
+        await jiraRequest(cfg, "POST", `/issue/${existingKey}/comment`, {
+          body: {
+            type: "doc",
+            version: 1,
+            content: [toAdfParagraph(commentText)],
+          },
+        });
+        console.log(`[AtlassianReporter] Failure comment added to existing bug ${existingKey}`);
+        continue;
+      }
+
+      const created = await jiraRequest(cfg, "POST", "/issue", {
         fields: {
           project: { key: cfg.jiraProjectKey },
           issuetype: { name: "Bug" },
-          summary: `[QA] ${summary.failed} test(s) failed — ${opts.suite} / Build #${opts.buildNumber}`,
+          summary: `[QA][${target.issueKey}] ${opts.summary.failed} test(s) failed — ${opts.suite} / Build #${opts.buildNumber}`,
           description: {
             type: "doc",
             version: 1,
             content: [
-              {
-                type: "paragraph",
-                content: [
-                  {
-                    type: "text",
-                    text: buildJiraBugDescription(summary, opts.suite, opts.buildNumber, opts.s3ReportKey),
-                  },
-                ],
-              },
+              toAdfParagraph(
+                buildJiraBugDescription({
+                  summary: opts.summary,
+                  suite: opts.suite,
+                  buildNumber: opts.buildNumber,
+                  s3ReportKey: opts.s3ReportKey,
+                  target,
+                })
+              ),
             ],
           },
-          labels: [label, "qa-automated", `environment:${opts.environment}`],
+          labels: [runLabel, targetLabel, "qa-automated", `environment:${opts.environment}`],
         },
-      };
+      });
 
-      const created = await jiraRequest(cfg, "POST", "/issue", issueBody);
       const issueKey = created?.key;
-      console.log(`[AtlassianReporter] Jira bug created: ${issueKey}`);
+      console.log(`[AtlassianReporter] Jira bug created for ${target.issueKey}: ${issueKey}`);
 
-      // Link to tracking issue if configured (best-effort, don't break on failure)
-      if (issueKey && cfg.jiraTrackingIssue) {
+      if (issueKey) {
         try {
-          // Get available link types
           const linkTypes = await jiraRequest(cfg, "GET", "/issueLinkType");
           const relatesType = (linkTypes?.issueLinkTypes ?? []).find(
             (lt: any) => lt.name === "Relates" || lt.inward === "is related to"
@@ -350,55 +509,57 @@ export async function reportFailuresToJira(opts: {
             await jiraRequest(cfg, "POST", "/issueLink", {
               type: { id: relatesType.id },
               inwardIssue: { key: issueKey },
-              outwardIssue: { key: cfg.jiraTrackingIssue },
+              outwardIssue: { key: target.issueKey },
             });
-            console.log(`[AtlassianReporter] Linked ${issueKey} → ${cfg.jiraTrackingIssue}`);
+            console.log(`[AtlassianReporter] Linked ${issueKey} → ${target.issueKey}`);
           }
         } catch (linkErr) {
           console.warn("[AtlassianReporter] Failed to create issue link:", linkErr);
         }
       }
+    } catch (err) {
+      console.warn(`[AtlassianReporter] Jira bug creation/comment failed for ${target.issueKey}:`, err);
     }
-  } catch (err) {
-    console.warn("[AtlassianReporter] Jira bug creation/comment failed:", err);
   }
 }
 
 export async function reportSuccessToJira(opts: {
+  targets: QaTargetIssue[];
   summary: QaRunSummary;
   suite: string;
   environment: string;
   buildNumber: string;
-  confluencePageUrl: string | null;
 }): Promise<void> {
   const cfg = loadConfig();
-  if (!cfg || !cfg.jiraTrackingIssue) return;
+  if (!cfg) return;
+
+  if (opts.targets.length === 0) {
+    console.warn("[AtlassianReporter] No resolved Jira targets, skipping Jira success comments");
+    return;
+  }
 
   const passRate = opts.summary.total > 0
     ? Math.round((opts.summary.passed / opts.summary.total) * 100)
     : 0;
   const duration = (opts.summary.durationMs / 1000).toFixed(1);
 
-  const text =
-    `Build #${opts.buildNumber} ✅ ${opts.summary.passed}/${opts.summary.total} tests passed ` +
-    `(${passRate}%) in suite *${opts.suite}* (${opts.environment}, ${duration}s).` +
-    (opts.confluencePageUrl ? ` [View Report](${opts.confluencePageUrl})` : "");
+  for (const target of opts.targets) {
+    const text =
+      `Build #${opts.buildNumber} passed ${opts.summary.passed}/${opts.summary.total} tests ` +
+      `(${passRate}%) in suite *${opts.suite}* (${opts.environment}, ${duration}s).` +
+      (target.confluencePageUrl ? ` QA page: ${target.confluencePageUrl}` : "");
 
-  try {
-    await jiraRequest(cfg, "POST", `/issue/${cfg.jiraTrackingIssue}/comment`, {
-      body: {
-        type: "doc",
-        version: 1,
-        content: [
-          {
-            type: "paragraph",
-            content: [{ type: "text", text }],
-          },
-        ],
-      },
-    });
-    console.log(`[AtlassianReporter] Success comment posted on ${cfg.jiraTrackingIssue}`);
-  } catch (err) {
-    console.warn("[AtlassianReporter] Failed to post success comment:", err);
+    try {
+      await jiraRequest(cfg, "POST", `/issue/${target.issueKey}/comment`, {
+        body: {
+          type: "doc",
+          version: 1,
+          content: [toAdfParagraph(text)],
+        },
+      });
+      console.log(`[AtlassianReporter] Success comment posted on ${target.issueKey}`);
+    } catch (err) {
+      console.warn(`[AtlassianReporter] Failed to post success comment on ${target.issueKey}:`, err);
+    }
   }
 }
