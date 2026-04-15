@@ -99,6 +99,8 @@ export const VIZ_STANDARDS_LIGHT = `
 ## Visualization Guidelines
 
 When producing charts or tables:
+- Pick the chart **for this question** (ranking → ordered bar/horizontal_bar + LIMIT; trend → line/area; single number → kpi; drill list → table). Avoid a generic default chart.
+- Narration must match the **same** rows and ordering as the query result the user will see in the app and Workbench.
 - Use **bar charts** for category comparisons, **line charts** for trends over time, **tables** for detail.
 - Always label axes clearly with units (count, %, $, days).
 - Start Y-axis at 0 for bar charts — do not truncate to exaggerate differences.
