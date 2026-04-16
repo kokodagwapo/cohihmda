@@ -197,7 +197,7 @@ describe("atlassianReporter.updateConfluencePages", () => {
     expect(enriched.map((target) => target.confluencePageId)).toEqual(["12345", "67890"]);
     const putCalls = fetchMock.mock.calls.filter(([, opts]: [string, any]) => opts?.method === "PUT");
     expect(putCalls).toHaveLength(2);
-    expect(JSON.parse(putCalls[0][1].body).body.representation).toBe("storage");
+    expect(JSON.parse(putCalls[0][1].body).body.representation).toBe("wiki");
   });
 });
 
