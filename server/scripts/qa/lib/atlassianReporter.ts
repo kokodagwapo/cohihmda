@@ -380,10 +380,8 @@ async function upsertConfluencePageForTarget(
       status: "current",
       title,
       body: {
-        editor: {
-          representation: "atlas_doc_format",
-          value: JSON.stringify(adfBody),
-        },
+        representation: "atlas_doc_format",
+        value: JSON.stringify(adfBody),
       },
       version: { number: currentVersion + 1, message: `Build #${opts.buildNumber}` },
     });
@@ -401,10 +399,8 @@ async function upsertConfluencePageForTarget(
     title,
     parentId: opts.parent.id,
     body: {
-      editor: {
-        representation: "atlas_doc_format",
-        value: JSON.stringify(adfBody),
-      },
+      representation: "atlas_doc_format",
+      value: JSON.stringify(adfBody),
     },
   });
 
