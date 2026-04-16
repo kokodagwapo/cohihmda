@@ -23,6 +23,21 @@ export interface UploadedArtifact {
   localPath: string;
 }
 
+export function buildS3ConsoleUrl(bucket: string, s3Key: string, region: string): string {
+  return `https://s3.console.aws.amazon.com/s3/object/${bucket}?region=${encodeURIComponent(region)}&bucketType=general-purpose&prefix=${encodeURIComponent(s3Key)}`;
+}
+
+export function buildS3DirectUrl(bucket: string, s3Key: string, region: string): string {
+  const encodedKey = s3Key
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  const host = region === "us-east-1"
+    ? `${bucket}.s3.amazonaws.com`
+    : `${bucket}.s3.${region}.amazonaws.com`;
+  return `https://${host}/${encodedKey}`;
+}
+
 function getS3Client(): S3Client {
   return new S3Client({ region: process.env.AWS_REGION ?? "us-east-2" });
 }

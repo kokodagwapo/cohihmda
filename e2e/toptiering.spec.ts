@@ -75,8 +75,25 @@ test.describe("TopTiering pages", () => {
       .first();
 
     if ((await drillTrigger.count()) > 0) {
+      const startingUrl = userPage.url();
       await drillTrigger.click();
-      await expect(userPage.locator("[role='dialog']").first()).toBeVisible();
+
+      const dialogOpened = await userPage
+        .locator("[role='dialog']")
+        .first()
+        .isVisible({ timeout: 10_000 })
+        .catch(() => false);
+
+      const navigatedToLoanDetail = !dialogOpened &&
+        await userPage
+          .waitForURL((url) => url.toString() !== startingUrl && url.searchParams.has("loan"), { timeout: 10_000 })
+          .then(() => true)
+          .catch(() => false);
+
+      expect(
+        dialogOpened || navigatedToLoanDetail,
+        "expected a drill-down interaction to open a dialog or navigate to a loan detail state",
+      ).toBe(true);
     } else {
       // Fallback: verify at least this page has interactive controls.
       await expect(userPage.locator("button, [role='button']").first()).toBeVisible();

@@ -31,6 +31,8 @@ import { parseResults } from "./lib/resultParser.js";
 import {
   uploadHtmlReport,
   uploadFailureArtifacts,
+  buildS3ConsoleUrl,
+  buildS3DirectUrl,
 } from "./lib/s3Upload.js";
 import {
   resolveQaTargets,
@@ -283,9 +285,24 @@ async function main(): Promise<void> {
   // Step 3: Upload S3 artifacts (best-effort)
   // ---------------------------------------------------------------------------
   let s3ReportKey: string | null = null;
+  let reportConsoleUrl: string | null = null;
+  let uploadedArtifacts: Array<{
+    label: string;
+    s3Key: string;
+    consoleUrl: string;
+    directUrl: string;
+    contentType?: string;
+  }> = [];
   if (bucket) {
     try {
       s3ReportKey = await uploadHtmlReport({ repoRoot, environment, buildNumber, bucket });
+      if (s3ReportKey) {
+        reportConsoleUrl = buildS3ConsoleUrl(
+          bucket,
+          s3ReportKey,
+          process.env.AWS_REGION ?? "us-east-2",
+        );
+      }
 
       const failurePaths = summary.failedTests.flatMap((t) => [
         ...t.screenshotPaths,
@@ -294,7 +311,28 @@ async function main(): Promise<void> {
       ]);
 
       if (failurePaths.length > 0) {
-        await uploadFailureArtifacts({ repoRoot, environment, buildNumber, bucket, failurePaths });
+        const uploaded = await uploadFailureArtifacts({
+          repoRoot,
+          environment,
+          buildNumber,
+          bucket,
+          failurePaths,
+        });
+        uploadedArtifacts = uploaded.map((artifact) => ({
+          label: artifact.localPath.split(/[/\\]/).pop() ?? artifact.s3Key,
+          s3Key: artifact.s3Key,
+          consoleUrl: buildS3ConsoleUrl(
+            bucket,
+            artifact.s3Key,
+            process.env.AWS_REGION ?? "us-east-2",
+          ),
+          directUrl: buildS3DirectUrl(
+            bucket,
+            artifact.s3Key,
+            process.env.AWS_REGION ?? "us-east-2",
+          ),
+          contentType: artifact.contentType,
+        }));
       }
     } catch (err) {
       console.warn("[QaRunner] S3 upload step failed:", err);
@@ -316,6 +354,8 @@ async function main(): Promise<void> {
       buildNumber,
       commitHash,
       s3ReportKey,
+      reportConsoleUrl,
+      artifacts: uploadedArtifacts,
     });
     confluencePageUrls = qaTargets
       .map((target) => target.confluencePageUrl)
@@ -336,6 +376,8 @@ async function main(): Promise<void> {
         environment,
         buildNumber,
         s3ReportKey,
+        reportConsoleUrl,
+        artifacts: uploadedArtifacts,
       });
     } else {
       await reportSuccessToJira({
