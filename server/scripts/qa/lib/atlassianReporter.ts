@@ -145,16 +145,7 @@ function buildConfluencePageTitle(target: QaTargetIssue): string {
   return `QA - ${target.issueKey}`;
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function buildConfluenceStorageHtml(opts: {
+function buildConfluenceWikiMarkup(opts: {
   target: QaTargetIssue;
   summary: QaRunSummary;
   suite: string;
@@ -182,58 +173,57 @@ function buildConfluenceStorageHtml(opts: {
   const ts = new Date().toISOString();
   const reportLink =
     s3ReportKey && bucket
-      ? [
-          `<a href="${escapeHtml(reportConsoleUrl ?? `https://${bucket}.s3.amazonaws.com/${s3ReportKey}`)}">Open report in AWS Console</a>`,
-          ` (<code>s3://${escapeHtml(bucket)}/${escapeHtml(s3ReportKey)}</code>)`,
-        ].join("")
-      : "Report not uploaded";
+      ? `[Open report in AWS Console|${reportConsoleUrl ?? `https://${bucket}.s3.amazonaws.com/${s3ReportKey}`}]`
+      : "_Report not uploaded_";
 
-  const failureSection =
+  const failureLines =
     summary.failedTests.length > 0
-      ? [
-          "<h2>Failed Tests</h2>",
-          "<ul>",
-          ...summary.failedTests.map(
-            (t) =>
-              `<li><strong>${escapeHtml(t.title)}</strong> (<code>${escapeHtml(t.file)}</code>)<pre>${escapeHtml(t.error)}</pre></li>`
-          ),
-          "</ul>",
-        ].join("")
-      : "<h2>Failed Tests</h2><p>No failing tests in this run.</p>";
+      ? summary.failedTests
+          .map((t) => `* *${t.title}* ({{${t.file}}})\n{noformat}${t.error}{noformat}`)
+          .join("\n")
+      : "_No failing tests in this run._";
 
-  const artifactSection =
+  const artifactLines =
     artifacts.length > 0
-      ? [
-          "<h2>Artifacts</h2>",
-          "<ul>",
-          ...artifacts.map(
-            (artifact) =>
-              `<li><strong>${escapeHtml(artifact.label)}</strong>: <a href="${escapeHtml(artifact.consoleUrl)}">AWS Console</a> | <a href="${escapeHtml(artifact.directUrl)}">Direct object URL</a> | <code>s3://${escapeHtml(bucket ?? "")}/${escapeHtml(artifact.s3Key)}</code></li>`
-          ),
-          "</ul>",
-        ].join("")
-      : "<h2>Artifacts</h2><p>No failure artifacts were uploaded for this run.</p>";
+      ? artifacts
+          .map(
+            (a) =>
+              `* *${a.label}*: [AWS Console|${a.consoleUrl}] | [Direct link|${a.directUrl}]`
+          )
+          .join("\n")
+      : "_No failure artifacts were uploaded for this run._";
 
   return [
-    `<h1>${escapeHtml(buildConfluencePageTitle(target))}</h1>`,
-    `<p>Jira issue: <a href="${escapeHtml(target.issueUrl)}">${escapeHtml(target.issueKey)}</a><br/>Issue summary: ${escapeHtml(target.issueSummary)}<br/>Issue status: ${escapeHtml(target.issueStatus)}<br/>Last updated: ${escapeHtml(ts)}</p>`,
-    "<h2>Summary</h2>",
-    "<table><tbody>",
-    `<tr><th>Environment</th><td>${escapeHtml(environment)}</td></tr>`,
-    `<tr><th>Suite</th><td>${escapeHtml(suite)}</td></tr>`,
-    `<tr><th>Build</th><td>#${escapeHtml(buildNumber)}</td></tr>`,
-    `<tr><th>Commit</th><td><code>${escapeHtml(commitHash.slice(0, 8))}</code></td></tr>`,
-    `<tr><th>Total Tests</th><td>${summary.total}</td></tr>`,
-    `<tr><th>Passed</th><td>${summary.passed}</td></tr>`,
-    `<tr><th>Failed</th><td>${summary.failed}</td></tr>`,
-    `<tr><th>Skipped</th><td>${summary.skipped}</td></tr>`,
-    `<tr><th>Pass Rate</th><td>${passRate}%</td></tr>`,
-    `<tr><th>Duration</th><td>${(summary.durationMs / 1000).toFixed(1)}s</td></tr>`,
-    `<tr><th>Report</th><td>${reportLink}</td></tr>`,
-    "</tbody></table>",
-    failureSection,
-    artifactSection,
-  ].join("");
+    `h1. ${buildConfluencePageTitle(target)}`,
+    "",
+    `Jira issue: [${target.issueKey}|${target.issueUrl}]`,
+    `Issue summary: ${target.issueSummary}`,
+    `Issue status: ${target.issueStatus}`,
+    `Last updated: ${ts}`,
+    "",
+    "h2. Summary",
+    "",
+    "||Property||Value||",
+    `|Environment|${environment}|`,
+    `|Suite|${suite}|`,
+    `|Build|#${buildNumber}|`,
+    `|Commit|{{${commitHash.slice(0, 8)}}}|`,
+    `|Total Tests|${summary.total}|`,
+    `|Passed|${summary.passed}|`,
+    `|Failed|${summary.failed}|`,
+    `|Skipped|${summary.skipped}|`,
+    `|Pass Rate|${passRate}%|`,
+    `|Duration|${(summary.durationMs / 1000).toFixed(1)}s|`,
+    `|Report|${reportLink}|`,
+    "",
+    "h2. Failed Tests",
+    "",
+    failureLines,
+    "",
+    "h2. Artifacts",
+    "",
+    artifactLines,
+  ].join("\n");
 }
 
 function toAdfParagraph(text: string) {
@@ -282,7 +272,7 @@ async function upsertConfluencePageForTarget(
   }
 ): Promise<QaTargetIssue> {
   const title = buildConfluencePageTitle(target);
-  const storageHtml = buildConfluenceStorageHtml({
+  const wikiMarkup = buildConfluenceWikiMarkup({
     target,
     summary: opts.summary,
     suite: opts.suite,
@@ -306,8 +296,8 @@ async function upsertConfluencePageForTarget(
       status: "current",
       title,
       body: {
-        representation: "storage",
-        value: storageHtml,
+        representation: "wiki",
+        value: wikiMarkup,
       },
       version: { number: currentVersion + 1, message: `Build #${opts.buildNumber}` },
     });
@@ -325,8 +315,8 @@ async function upsertConfluencePageForTarget(
     title,
     parentId: opts.parent.id,
     body: {
-      representation: "storage",
-      value: storageHtml,
+      representation: "wiki",
+      value: wikiMarkup,
     },
   });
 
