@@ -52,6 +52,8 @@ function setAtlassianEnv() {
   process.env.ATLASSIAN_API_TOKEN = "test-token-abc";
   process.env.CONFLUENCE_QA_PARENT_PAGE_ID = "99999";
   process.env.QA_JIRA_PROJECT_KEY = "COHI";
+  process.env.AI_ARTIFACTS_BUCKET = "cohi-qa-artifacts";
+  process.env.AWS_REGION = "us-east-2";
 }
 
 function clearAtlassianEnv() {
@@ -62,6 +64,8 @@ function clearAtlassianEnv() {
   delete process.env.QA_JIRA_PROJECT_KEY;
   delete process.env.QA_JIRA_FALLBACK_ISSUE;
   delete process.env.QA_CREATE_BUGS_IN_PROD;
+  delete process.env.AI_ARTIFACTS_BUCKET;
+  delete process.env.AWS_REGION;
 }
 
 function makeFetchMock(responses: Record<string, any> = {}) {
@@ -186,11 +190,14 @@ describe("atlassianReporter.updateConfluencePages", () => {
       buildNumber: "42",
       commitHash: "abc1234",
       s3ReportKey: null,
+      reportConsoleUrl: null,
+      artifacts: [],
     });
 
     expect(enriched.map((target) => target.confluencePageId)).toEqual(["12345", "67890"]);
     const putCalls = fetchMock.mock.calls.filter(([, opts]: [string, any]) => opts?.method === "PUT");
     expect(putCalls).toHaveLength(2);
+    expect(JSON.parse(putCalls[0][1].body).body.representation).toBe("storage");
   });
 });
 
@@ -206,7 +213,7 @@ describe("atlassianReporter.reportFailuresToJira", () => {
 
   it("creates and links a bug for each target issue when no open bug exists", async () => {
     const fetchMock = makeFetchMock({
-      "/search": { ok: true, body: { issues: [] } },
+      "/search/jql": { ok: true, body: { issues: [] } },
       "/issueLinkType": {
         ok: true,
         body: { issueLinkTypes: [{ id: "10001", name: "Relates", inward: "is related to" }] },
@@ -218,7 +225,7 @@ describe("atlassianReporter.reportFailuresToJira", () => {
       },
       "POST https://cohi.atlassian.net/rest/api/3/issueLink": {
         ok: true,
-        body: {},
+        body: undefined,
       },
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -231,6 +238,8 @@ describe("atlassianReporter.reportFailuresToJira", () => {
       environment: "dev",
       buildNumber: "42",
       s3ReportKey: null,
+      reportConsoleUrl: null,
+      artifacts: [],
     });
 
     const issueCalls = fetchMock.mock.calls.filter(
@@ -241,6 +250,10 @@ describe("atlassianReporter.reportFailuresToJira", () => {
     );
     expect(issueCalls).toHaveLength(1);
     expect(linkCalls).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/rest/api/3/search/jql?jql="),
+      expect.any(Object)
+    );
   });
 });
 

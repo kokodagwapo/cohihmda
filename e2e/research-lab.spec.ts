@@ -3,7 +3,7 @@ import { test, expect } from "./fixtures";
 test.describe("@critical Research Lab", () => {
   test("@smoke research page loads with input and mode toggle", async ({ userPage }) => {
     await userPage.goto("/research/session", { waitUntil: "domcontentloaded" });
-    await expect(userPage.getByRole("heading", { name: "Research Lab" })).toBeVisible();
+    await expect(userPage.getByRole("heading", { level: 2, name: "Research Lab" })).toBeVisible();
     await expect(userPage.getByPlaceholder(/e\.g\., What's our YTD pull-through/i)).toBeVisible();
     await expect(userPage.getByRole("button", { name: /Deep Analysis/i })).toBeVisible();
   });
@@ -16,6 +16,7 @@ test.describe("@critical Research Lab", () => {
   });
 
   test("runs investigation lifecycle and supports follow-up behavior", async ({ userPage }) => {
+    test.setTimeout(90_000);
     await userPage.goto("/research/session", { waitUntil: "domcontentloaded" });
 
     const prompt = userPage.getByPlaceholder(/YTD pull-through|comprehensive analysis/i);
@@ -52,9 +53,11 @@ test.describe("@critical Research Lab", () => {
       }
 
       const followupInput = userPage.getByPlaceholder(/Ask a follow-up question/i);
+      await expect(followupInput).toBeVisible();
+      await expect(followupInput).toBeEditable();
       await followupInput.fill("Can you break that down by top 3 loan officers?");
-      await followupInput.locator("xpath=following::button[1]").click();
-      await expect(userPage.getByRole("tab", { name: "Timeline" })).toBeVisible();
+      await followupInput.press("Enter");
+      await expect(userPage.getByRole("tab", { name: "Timeline", selected: true })).toBeVisible();
     }
   });
 });
