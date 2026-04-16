@@ -34,16 +34,20 @@ export interface QaTargetIssue {
 }
 
 function loadConfig(): AtlassianConfig | null {
-  const siteUrl = process.env.ATLASSIAN_SITE_URL;
+  const rawSiteUrl = process.env.ATLASSIAN_SITE_URL;
   const email = process.env.ATLASSIAN_EMAIL;
   const apiToken = process.env.ATLASSIAN_API_TOKEN;
 
-  if (!siteUrl || !email || !apiToken) {
+  if (!rawSiteUrl || !email || !apiToken) {
     console.warn(
       "[AtlassianReporter] ATLASSIAN_SITE_URL, ATLASSIAN_EMAIL, or ATLASSIAN_API_TOKEN not set — skipping Atlassian reporting"
     );
     return null;
   }
+
+  const siteUrl = rawSiteUrl
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/+$/, "");
 
   return {
     siteUrl,

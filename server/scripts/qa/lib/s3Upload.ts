@@ -11,8 +11,8 @@
  */
 
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
-import { createReadStream, statSync, existsSync, readdirSync } from "fs";
-import { join, basename } from "path";
+import { createReadStream, statSync, existsSync } from "fs";
+import { join, basename, extname } from "path";
 import { createHash } from "crypto";
 import { execSync } from "child_process";
 
@@ -48,6 +48,13 @@ function buildKey(
     artifactType,
     filename,
   ].join("/");
+}
+
+function buildUniqueArtifactFilename(localPath: string): string {
+  const ext = extname(localPath);
+  const base = basename(localPath, ext);
+  const pathHash = createHash("sha1").update(localPath).digest("hex").slice(0, 10);
+  return `${base}-${pathHash}${ext}`;
 }
 
 function guessMimeType(filePath: string): string {
@@ -155,7 +162,7 @@ export async function uploadFailureArtifacts(opts: {
       opts.environment,
       opts.buildNumber,
       artifactType,
-      basename(localPath)
+      buildUniqueArtifactFilename(localPath)
     );
 
     try {
