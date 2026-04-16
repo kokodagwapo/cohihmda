@@ -43,9 +43,30 @@ install_aws_cli() {
   fi
 
   log_info "Installing AWS CLI..."
-  apt-get update -qq
-  apt-get install -y -qq unzip curl >/dev/null
-  curl -sS "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+
+  if ! command -v curl >/dev/null 2>&1 || ! command -v unzip >/dev/null 2>&1; then
+    log_info "Installing apt prerequisites (curl, unzip)..."
+    local attempts=0
+    local max_attempts=3
+    # Tolerate transient Ubuntu mirror sync failures: retry with apt's built-in
+    # retries, then fall back to cached indexes if the mirror is still flaky.
+    until apt-get update -qq -o Acquire::Retries=3; do
+      attempts=$((attempts + 1))
+      if [ "$attempts" -ge "$max_attempts" ]; then
+        log_warn "apt-get update failed ${max_attempts}x — continuing with cached indexes"
+        break
+      fi
+      log_warn "apt-get update failed (attempt ${attempts}/${max_attempts}) — retrying in 5s"
+      sleep 5
+    done
+    if ! apt-get install -y -qq --no-install-recommends unzip curl >/dev/null; then
+      log_error "Failed to install curl/unzip via apt"
+      exit 1
+    fi
+  fi
+
+  curl -sSfL --retry 5 --retry-delay 2 \
+    "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
   unzip -qq awscliv2.zip
   ./aws/install --update >/dev/null
   rm -rf awscliv2.zip aws/
