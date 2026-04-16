@@ -112,6 +112,26 @@ describe("atlassianReporter.resolveQaTargets", () => {
     expect(targets.map((target) => target.issueKey)).toEqual(["COHI-106", "COHI-14"]);
     expect(targets[0].issueSummary).toBe("AI control plane");
   });
+
+  it("normalizes ATLASSIAN_SITE_URL when configured with https scheme", async () => {
+    process.env.ATLASSIAN_SITE_URL = "https://cohi.atlassian.net/";
+    const fetchMock = makeFetchMock({
+      "GET https://cohi.atlassian.net/rest/api/3/issue/COHI-106?fields=summary,status": {
+        ok: true,
+        body: { fields: { summary: "AI control plane", status: { name: "In Progress" } } },
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { resolveQaTargets } = await import("../../../scripts/qa/lib/atlassianReporter.js");
+    const targets = await resolveQaTargets(["COHI-106"]);
+
+    expect(targets).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://cohi.atlassian.net/rest/api/3/issue/COHI-106?fields=summary,status",
+      expect.any(Object)
+    );
+  });
 });
 
 describe("atlassianReporter.updateConfluencePages", () => {
