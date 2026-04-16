@@ -145,16 +145,50 @@ function buildConfluencePageTitle(target: QaTargetIssue): string {
   return `QA - ${target.issueKey}`;
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+function adfText(text: string, href?: string) {
+  return href
+    ? {
+        type: "text",
+        text,
+        marks: [{ type: "link", attrs: { href } }],
+      }
+    : { type: "text", text };
 }
 
-function buildConfluenceStorageHtml(opts: {
+function adfParagraph(content: Array<Record<string, unknown>> | string) {
+  return {
+    type: "paragraph",
+    content: typeof content === "string" ? [adfText(content)] : content,
+  };
+}
+
+function adfHeading(level: number, text: string) {
+  return {
+    type: "heading",
+    attrs: { level },
+    content: [adfText(text)],
+  };
+}
+
+function adfTableCell(text: string, isHeader = false) {
+  return {
+    type: isHeader ? "tableHeader" : "tableCell",
+    attrs: { colspan: 1, rowspan: 1 },
+    content: [adfParagraph(text)],
+  };
+}
+
+function adfBulletList(items: Array<Array<Record<string, unknown>> | string>) {
+  return {
+    type: "bulletList",
+    content: items.map((item) => ({
+      type: "listItem",
+      content: [adfParagraph(item)],
+    })),
+  };
+}
+
+function buildConfluenceAdf(opts: {
   target: QaTargetIssue;
   summary: QaRunSummary;
   suite: string;
@@ -180,63 +214,100 @@ function buildConfluenceStorageHtml(opts: {
   } = opts;
   const passRate = summary.total > 0 ? Math.round((summary.passed / summary.total) * 100) : 0;
   const ts = new Date().toISOString();
-  const reportLink = s3ReportKey && bucket
-    ? `<a href="${escapeHtml(reportConsoleUrl ?? `https://${bucket}.s3.amazonaws.com/${s3ReportKey}`)}">Open report in AWS Console</a>`
-    : "Report not uploaded";
+  const reportTarget = reportConsoleUrl ?? (
+    s3ReportKey && bucket ? `https://${bucket}.s3.amazonaws.com/${s3ReportKey}` : undefined
+  );
 
-  const failureItems = summary.failedTests.length > 0
-    ? summary.failedTests
-        .map((t) =>
-          [
-            "<li>",
-            `<p><strong>${escapeHtml(t.title)}</strong> (${escapeHtml(t.file)})</p>`,
-            `<p>${escapeHtml(t.error).replace(/\n+/g, "<br/>")}</p>`,
-            "</li>",
-          ].join("")
-        )
-        .join("")
-    : "<li><p>No failing tests in this run.</p></li>";
-
-  const artifactItems = artifacts.length > 0
-    ? artifacts
-        .map((a) =>
-          [
-            "<li>",
-            `<p><strong>${escapeHtml(a.label)}</strong>: `,
-            `<a href="${escapeHtml(a.consoleUrl)}">AWS Console</a> | `,
-            `<a href="${escapeHtml(a.directUrl)}">Direct link</a></p>`,
-            "</li>",
-          ].join("")
-        )
-        .join("")
-    : "<li><p>No failure artifacts were uploaded for this run.</p></li>";
-
-  return [
-    `<h1>${escapeHtml(buildConfluencePageTitle(target))}</h1>`,
-    `<p>Jira issue: <a href="${escapeHtml(target.issueUrl)}">${escapeHtml(target.issueKey)}</a></p>`,
-    `<p>Issue summary: ${escapeHtml(target.issueSummary)}</p>`,
-    `<p>Issue status: ${escapeHtml(target.issueStatus)}</p>`,
-    `<p>Last updated: ${escapeHtml(ts)}</p>`,
-    "<h2>Summary</h2>",
-    '<table data-layout="default"><tbody>',
-    `<tr><th><p>Property</p></th><th><p>Value</p></th></tr>`,
-    `<tr><td><p>Environment</p></td><td><p>${escapeHtml(environment)}</p></td></tr>`,
-    `<tr><td><p>Suite</p></td><td><p>${escapeHtml(suite)}</p></td></tr>`,
-    `<tr><td><p>Build</p></td><td><p>#${escapeHtml(buildNumber)}</p></td></tr>`,
-    `<tr><td><p>Commit</p></td><td><p>${escapeHtml(commitHash.slice(0, 8))}</p></td></tr>`,
-    `<tr><td><p>Total Tests</p></td><td><p>${summary.total}</p></td></tr>`,
-    `<tr><td><p>Passed</p></td><td><p>${summary.passed}</p></td></tr>`,
-    `<tr><td><p>Failed</p></td><td><p>${summary.failed}</p></td></tr>`,
-    `<tr><td><p>Skipped</p></td><td><p>${summary.skipped}</p></td></tr>`,
-    `<tr><td><p>Pass Rate</p></td><td><p>${passRate}%</p></td></tr>`,
-    `<tr><td><p>Duration</p></td><td><p>${(summary.durationMs / 1000).toFixed(1)}s</p></td></tr>`,
-    `<tr><td><p>Report</p></td><td><p>${reportLink}</p></td></tr>`,
-    "</tbody></table>",
-    "<h2>Failed Tests</h2>",
-    `<ul>${failureItems}</ul>`,
-    "<h2>Artifacts</h2>",
-    `<ul>${artifactItems}</ul>`,
-  ].join("");
+  return {
+    type: "doc",
+    version: 1,
+    content: [
+      adfHeading(1, buildConfluencePageTitle(target)),
+      adfParagraph([adfText("Jira issue: "), adfText(target.issueKey, target.issueUrl)]),
+      adfParagraph(`Issue summary: ${target.issueSummary}`),
+      adfParagraph(`Issue status: ${target.issueStatus}`),
+      adfParagraph(`Last updated: ${ts}`),
+      adfHeading(2, "Summary"),
+      {
+        type: "table",
+        attrs: { layout: "default" },
+        content: [
+          {
+            type: "tableRow",
+            content: [adfTableCell("Property", true), adfTableCell("Value", true)],
+          },
+          {
+            type: "tableRow",
+            content: [adfTableCell("Environment"), adfTableCell(environment)],
+          },
+          {
+            type: "tableRow",
+            content: [adfTableCell("Suite"), adfTableCell(suite)],
+          },
+          {
+            type: "tableRow",
+            content: [adfTableCell("Build"), adfTableCell(`#${buildNumber}`)],
+          },
+          {
+            type: "tableRow",
+            content: [adfTableCell("Commit"), adfTableCell(commitHash.slice(0, 8))],
+          },
+          {
+            type: "tableRow",
+            content: [adfTableCell("Total Tests"), adfTableCell(String(summary.total))],
+          },
+          {
+            type: "tableRow",
+            content: [adfTableCell("Passed"), adfTableCell(String(summary.passed))],
+          },
+          {
+            type: "tableRow",
+            content: [adfTableCell("Failed"), adfTableCell(String(summary.failed))],
+          },
+          {
+            type: "tableRow",
+            content: [adfTableCell("Skipped"), adfTableCell(String(summary.skipped))],
+          },
+          {
+            type: "tableRow",
+            content: [adfTableCell("Pass Rate"), adfTableCell(`${passRate}%`)],
+          },
+          {
+            type: "tableRow",
+            content: [adfTableCell("Duration"), adfTableCell(`${(summary.durationMs / 1000).toFixed(1)}s`)],
+          },
+          {
+            type: "tableRow",
+            content: [
+              adfTableCell("Report"),
+              {
+                type: "tableCell",
+                attrs: { colspan: 1, rowspan: 1 },
+                content: [adfParagraph(reportTarget ? [adfText("Open report in AWS Console", reportTarget)] : "Report not uploaded")],
+              },
+            ],
+          },
+        ],
+      },
+      adfHeading(2, "Failed Tests"),
+      adfBulletList(
+        summary.failedTests.length > 0
+          ? summary.failedTests.map((t) => `${t.title} (${t.file}) - ${t.error}`)
+          : ["No failing tests in this run."]
+      ),
+      adfHeading(2, "Artifacts"),
+      adfBulletList(
+        artifacts.length > 0
+          ? artifacts.map((a) => [
+              adfText(`${a.label}: `),
+              adfText("AWS Console", a.consoleUrl),
+              adfText(" | "),
+              adfText("Direct link", a.directUrl),
+            ])
+          : ["No failure artifacts were uploaded for this run."]
+      ),
+    ],
+  };
 }
 
 function toAdfParagraph(text: string) {
@@ -285,7 +356,7 @@ async function upsertConfluencePageForTarget(
   }
 ): Promise<QaTargetIssue> {
   const title = buildConfluencePageTitle(target);
-  const storageHtml = buildConfluenceStorageHtml({
+  const adfBody = buildConfluenceAdf({
     target,
     summary: opts.summary,
     suite: opts.suite,
@@ -309,8 +380,10 @@ async function upsertConfluencePageForTarget(
       status: "current",
       title,
       body: {
-        representation: "storage",
-        value: storageHtml,
+        editor: {
+          representation: "atlas_doc_format",
+          value: JSON.stringify(adfBody),
+        },
       },
       version: { number: currentVersion + 1, message: `Build #${opts.buildNumber}` },
     });
@@ -328,8 +401,10 @@ async function upsertConfluencePageForTarget(
     title,
     parentId: opts.parent.id,
     body: {
-      representation: "storage",
-      value: storageHtml,
+      editor: {
+        representation: "atlas_doc_format",
+        value: JSON.stringify(adfBody),
+      },
     },
   });
 
