@@ -70,12 +70,15 @@ test.describe("TopTiering pages", () => {
     await userPage.goto("/fallout-forecast", { waitUntil: "domcontentloaded" });
     await userPage.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
 
-    // The fallout page renders clickable outcome tiles (div.cursor-pointer)
-    // for "High Risk", "Likely Withdraw", etc. that open a metric modal.
-    // These render with the page layout and don't depend on loan data loading.
-    const outcomeTile = userPage.locator("div.cursor-pointer").first();
-    await expect(outcomeTile).toBeVisible({ timeout: 10_000 });
-    await outcomeTile.click();
+    // The reliable drill-down is the loan-officer button on the critical loan cards.
+    const officerButton = userPage
+      .getByRole("button", { name: /MLO\/AE:.*(Top Tier|Second Tier|Bottom Tier)\s+–\s+\d+/i })
+      .first();
+    await expect(officerButton).toBeVisible({ timeout: 15_000 });
+    await officerButton.scrollIntoViewIfNeeded();
+    await officerButton.click();
+
+    await expect(userPage.getByText("Portfolio Analysis")).toBeVisible({ timeout: 10_000 });
     await expect(userPage.locator("[role='dialog']").first()).toBeVisible({ timeout: 10_000 });
   });
 });
