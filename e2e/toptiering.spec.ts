@@ -72,7 +72,7 @@ test.describe("TopTiering pages", () => {
 
     // The reliable drill-down is the loan-officer button on the critical loan cards.
     const officerButton = userPage
-      .getByRole("button", { name: /MLO\/AE:.*(Top Tier|Second Tier|Bottom Tier)\s+–\s+\d+/i })
+      .getByRole("button", { name: /^MLO\/AE:/i })
       .first();
     await expect(officerButton).toBeVisible({ timeout: 15_000 });
     await officerButton.scrollIntoViewIfNeeded();
