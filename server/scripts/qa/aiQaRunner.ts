@@ -248,7 +248,6 @@ async function main(): Promise<void> {
   const pwArgs = [
     "playwright",
     "test",
-    "--reporter=json,html",
     `--grep=@${suite}`,
     "--project=chromium",
   ];
