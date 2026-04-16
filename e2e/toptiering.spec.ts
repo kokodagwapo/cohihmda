@@ -70,26 +70,12 @@ test.describe("TopTiering pages", () => {
     await userPage.goto("/fallout-forecast", { waitUntil: "domcontentloaded" });
     await userPage.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
 
-    // The fallout page renders interactive table rows (cursor-pointer) that
-    // open loan detail/drilldown modals. Look for a clickable table row first,
-    // then fall back to a button with drill-like text.
-    const clickableRow = userPage.locator("tr.cursor-pointer").first();
-    const drillButton = userPage
-      .locator("button, [role='button']")
-      .filter({ hasText: /view|detail|drill|open/i })
-      .first();
-
-    const hasClickableRow = (await clickableRow.count()) > 0;
-    const hasDrillButton = !hasClickableRow && (await drillButton.count()) > 0;
-
-    if (hasClickableRow) {
-      await clickableRow.click();
-      await expect(userPage.locator("[role='dialog']").first()).toBeVisible({ timeout: 10_000 });
-    } else if (hasDrillButton) {
-      await drillButton.click();
-      await expect(userPage.locator("[role='dialog']").first()).toBeVisible({ timeout: 10_000 });
-    } else {
-      await expect(userPage.locator("button, [role='button']").first()).toBeVisible();
-    }
+    // The fallout page renders clickable outcome tiles (div.cursor-pointer)
+    // for "High Risk", "Likely Withdraw", etc. that open a metric modal.
+    // These render with the page layout and don't depend on loan data loading.
+    const outcomeTile = userPage.locator("div.cursor-pointer").first();
+    await expect(outcomeTile).toBeVisible({ timeout: 10_000 });
+    await outcomeTile.click();
+    await expect(userPage.locator("[role='dialog']").first()).toBeVisible({ timeout: 10_000 });
   });
 });

@@ -179,7 +179,7 @@ function buildConfluenceWikiMarkup(opts: {
   const failureLines =
     summary.failedTests.length > 0
       ? summary.failedTests
-          .map((t) => `* *${t.title}* ({{${t.file}}})\n{noformat}${t.error}{noformat}`)
+          .map((t) => `* *${t.title}* (${t.file})\n${t.error.replace(/\n/g, "\n ")}`)
           .join("\n")
       : "_No failing tests in this run._";
 
@@ -207,7 +207,7 @@ function buildConfluenceWikiMarkup(opts: {
     `|Environment|${environment}|`,
     `|Suite|${suite}|`,
     `|Build|#${buildNumber}|`,
-    `|Commit|{{${commitHash.slice(0, 8)}}}|`,
+    `|Commit|${commitHash.slice(0, 8)}|`,
     `|Total Tests|${summary.total}|`,
     `|Passed|${summary.passed}|`,
     `|Failed|${summary.failed}|`,
