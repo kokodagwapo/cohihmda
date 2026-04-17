@@ -90,5 +90,25 @@
         { "id": "ac1-assert-next-sync", "kind": "assert", "locator": "body", "toContainText": "Next sync" }
       ]
     }
+  },
+  {
+    "issueKey": "COHI-42",
+    "acceptanceCriteria": [
+      "1. [ROUTE] Navigating to /workbench loads the workbench hub",
+      "2. [API] GET /api/workbench/canvases returns HTTP 200 with an array of canvases for the current user",
+      "3. [ASSERTION] The response payload includes a field named \"canvases\""
+    ],
+    "plan": {
+      "planVersion": 1,
+      "issueKey": "COHI-42",
+      "modelName": "gpt-5.4",
+      "modelTemperature": 0,
+      "generatedAt": "2026-04-17T00:00:00.000Z",
+      "steps": [
+        { "id": "ac1-goto-workbench", "kind": "goto", "url": "/workbench", "expect": { "text": "Workbench" } },
+        { "id": "ac2-get-canvases", "kind": "api", "method": "GET", "path": "/api/workbench/canvases", "expectStatus": 200 },
+        { "id": "ac3-assert-canvases-field", "kind": "api", "method": "GET", "path": "/api/workbench/canvases", "expectStatus": 200, "expectBodyContains": "canvases" }
+      ]
+    }
   }
 ]
