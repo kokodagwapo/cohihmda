@@ -23,7 +23,7 @@ test.describe("Workbench", () => {
     expect(hasPrimaryWorkbenchControl).toBe(true);
   });
 
-  test("opens save dialog and supports basic canvas editing flow", async ({ userPage }) => {
+  test("@critical @COHI-77 opens save dialog and supports basic canvas editing flow", async ({ userPage }) => {
     await userPage.goto("/my-dashboard", { waitUntil: "domcontentloaded" });
 
     // Rename the current canvas

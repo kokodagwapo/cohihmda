@@ -70,6 +70,20 @@ describe("qaResults internal route", () => {
     s3ReportKey: "ai-control-plane/dev/2026/04/14/qa-runs/42/report.tar.gz",
     jiraIssueKeys: ["COHI-106"],
     confluencePageUrls: ["https://cohi.atlassian.net/wiki/pages/12345"],
+    issueBreakdowns: [
+      {
+        issueKey: "COHI-106",
+        tests: [
+          {
+            title: "@critical @COHI-106 example test",
+            status: "failed",
+            durationMs: 1234,
+          },
+        ],
+        confluencePageUrl: "https://cohi.atlassian.net/wiki/pages/12345",
+        hasEvidenceGap: false,
+      },
+    ],
     failedTests: [
       {
         title: "example test",
@@ -138,6 +152,7 @@ describe("qaResults internal route", () => {
       metadata: expect.objectContaining({
         suite: "critical",
         jiraIssueKeys: ["COHI-106"],
+        issueBreakdowns: body.issueBreakdowns,
       }),
     }));
 
@@ -152,6 +167,7 @@ describe("qaResults internal route", () => {
       ],
       metadata: expect.objectContaining({
         passRate: 90,
+        issueBreakdowns: body.issueBreakdowns,
       }),
     }));
   });

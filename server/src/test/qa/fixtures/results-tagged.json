@@ -1,0 +1,94 @@
+{
+  "stats": {
+    "expected": 2,
+    "unexpected": 1,
+    "skipped": 1,
+    "duration": 9100
+  },
+  "suites": [
+    {
+      "title": "Workbench",
+      "file": "e2e/workbench.spec.ts",
+      "suites": [],
+      "specs": [
+        {
+          "title": "@critical @COHI-77 opens save dialog and supports basic canvas editing flow",
+          "tests": [
+            {
+              "results": [
+                {
+                  "status": "passed",
+                  "duration": 2100,
+                  "attachments": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "title": "@critical @COHI-77 @COHI-96 shared workbench signal",
+          "tests": [
+            {
+              "results": [
+                {
+                  "status": "passed",
+                  "duration": 1800,
+                  "attachments": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "TopTiering",
+      "file": "e2e/toptiering.spec.ts",
+      "suites": [],
+      "specs": [
+        {
+          "title": "@critical @COHI-96 supports at least one drill-down style interaction",
+          "tests": [
+            {
+              "results": [
+                {
+                  "status": "failed",
+                  "duration": 3200,
+                  "error": {
+                    "message": "Expected Portfolio Analysis drawer to be visible"
+                  },
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "path": "/tmp/toptiering-failure.png",
+                      "contentType": "image/png"
+                    },
+                    {
+                      "name": "trace",
+                      "path": "/tmp/toptiering-trace.zip",
+                      "contentType": "application/zip"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "title": "@regression renders /fallout-forecast",
+          "tests": [
+            {
+              "results": [
+                {
+                  "status": "skipped",
+                  "duration": 0,
+                  "attachments": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

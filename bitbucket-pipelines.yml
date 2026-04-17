@@ -21,9 +21,9 @@
 #   - E2E_ADMIN_EMAIL / E2E_ADMIN_PASSWORD / E2E_ADMIN_TOTP_SECRET
 #   - CONFLUENCE_QA_PARENT_PAGE_ID - Parent Confluence page for per-issue QA pages
 #   - QA_JIRA_PROJECT_KEY          - Jira project used for issue resolution and bug creation
-#   - QA_JIRA_FALLBACK_ISSUE       - Optional fallback issue when commits contain no Jira key
 #   - QA_COMMIT_RANGE              - Optional explicit git range for Jira-key discovery
 #   - QA_COMMIT_LOOKBACK           - Fallback commit lookback window when no range is provided
+#   - QA_ENABLE_AC_VALIDATOR       - Optional; defaults to "false" and enables Jira AC validation when true
 #   - ATLASSIAN_EMAIL / ATLASSIAN_SITE_URL
 #   - Atlassian API token is fetched from Secrets Manager via backend stack output
 #   - (Optional) E2E_MANAGED_EMAIL_PREFIX      - defaults to "e2e.auto"
@@ -128,6 +128,13 @@ definitions:
           - postgres
         script:
           - cd server && npm ci && npm run test:integration
+
+    - step: &lint-test-tags
+        name: Lint QA Test Tags
+        caches:
+          - server-npm
+        script:
+          - cd server && npm ci && npm run lint:test-tags
 
     - step: &test-e2e-smoke
         name: Test E2E Smoke (Chromium)
@@ -360,7 +367,7 @@ definitions:
           - test-results/**
 
     - step: &run-ai-qa-dev
-        name: AI QA Agent (Dev)
+        name: QA Pipeline (Hybrid, Dev)
         oidc: true
         deployment: dev
         image: *playwright_docker_image
@@ -372,10 +379,11 @@ definitions:
           - npm ci
           - cd server && npm ci && cd ..
           - *e2e-env-preflight
-          # QA runner discovers Jira targets from commit messages. It also fetches
+          # QA runner discovers Jira targets from commit messages and tagged tests. It also fetches
           # QA runner secrets + artifact bucket from the backend CloudFormation stack.
           # Override QA_COMMIT_RANGE if you want a narrower/wider issue scan.
           - export QA_SUITE="${QA_SUITE:-critical}"
+          - export QA_ENABLE_AC_VALIDATOR="${QA_ENABLE_AC_VALIDATOR:-false}"
           - chmod +x ./scripts/bitbucket/run-ai-qa.sh
           - ./scripts/bitbucket/run-ai-qa.sh
         artifacts:
@@ -439,6 +447,7 @@ pipelines:
           - step: *build-frontend
           - step: *build-backend
       - parallel:
+          - step: *lint-test-tags
           - step: *test-frontend
           - step: *test-backend
           - step: *test-backend-integration
@@ -450,6 +459,7 @@ pipelines:
           - step: *build-frontend
           - step: *build-backend
       - parallel:
+          - step: *lint-test-tags
           - step: *test-frontend
           - step: *test-backend
           - step: *test-backend-integration
@@ -462,6 +472,7 @@ pipelines:
           - step: *build-frontend
           - step: *build-backend
       - parallel:
+          - step: *lint-test-tags
           - step: *test-frontend
           - step: *test-backend
           - step: *test-backend-integration
@@ -471,6 +482,7 @@ pipelines:
           - step: *build-frontend
           - step: *build-backend
       - parallel:
+          - step: *lint-test-tags
           - step: *test-frontend
           - step: *test-backend
           - step: *test-backend-integration
@@ -534,12 +546,29 @@ pipelines:
     e2e-prod-smoke:
       - step: *test-e2e-prod-smoke
 
-    # AI QA Agent — governed Playwright run with S3/Confluence/Jira reporting.
-    # The runner discovers Jira keys from the commit range, then creates or
-    # updates one Confluence QA page per resolved Jira issue.
-    # Set QA_SUITE before running (smoke | critical | regression | all).
-    # Optionally set QA_COMMIT_RANGE / QA_COMMIT_LOOKBACK to control issue discovery.
+    # Hybrid QA pipeline — regression reporting always runs, AC validation is
+    # gated behind QA_ENABLE_AC_VALIDATOR=true.
+    # The `variables:` block below surfaces input fields in the Bitbucket
+    # "Run pipeline" dialog so you can flip the AC validator on for a single
+    # run without editing YAML or adding deployment-level variables.
     ai-qa-dev:
+      - variables:
+          - name: QA_SUITE
+            default: "critical"
+            allowed-values:
+              - "smoke"
+              - "critical"
+              - "regression"
+              - "all"
+          - name: QA_ENABLE_AC_VALIDATOR
+            default: "false"
+            allowed-values:
+              - "false"
+              - "true"
+          - name: QA_COMMIT_RANGE
+            default: ""
+          - name: QA_COMMIT_LOOKBACK
+            default: ""
       - step: *run-ai-qa-dev
 
     # Database migrations

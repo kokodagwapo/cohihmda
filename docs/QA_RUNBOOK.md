@@ -2,6 +2,12 @@
 
 This runbook defines how QA is executed for Cohi today and how new features must be tested going forward.
 
+Related docs:
+
+- `docs/QA_TEST_TAGGING.md`
+- `docs/QA_ACCEPTANCE_CRITERIA_CONVENTION.md`
+- `docs/AI_AC_VALIDATOR_RUNBOOK.md`
+
 ## Objectives
 
 - Catch regressions before deployment.
@@ -20,11 +26,13 @@ Primary commands:
 - `npm run test:e2e:critical`
 - `npm run test:e2e:regression`
 - `npm run test:e2e`
+- `npm run lint:qa:test-tags`
 
 ## Bitbucket Execution Model
 
 - **Pull Requests / merges:** run `@smoke` (blocking).
 - **Dev deploy pipeline:** run `@critical` in Chromium (blocking).
+- **Hybrid QA pipeline (`ai-qa-dev`):** runs regression reporting for issue-tagged Playwright evidence, and optionally the AC validator when `QA_ENABLE_AC_VALIDATOR=true`.
 - **Nightly schedule on dev:** run `@regression` (blocking for nightly signal).
 - **Cross-browser (Firefox/WebKit):** run in nightly/regression lane, not PR gate.
 - **Artifacts always retained:** traces, screenshots, videos, junit reports.

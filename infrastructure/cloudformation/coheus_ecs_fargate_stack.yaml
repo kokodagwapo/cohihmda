@@ -569,6 +569,14 @@ Resources:
       KmsKeyId: !Ref EncryptionKey
       SecretString: "__SET_ATLASSIAN_API_TOKEN__"
 
+  QaAiOpenAiKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ProjectName}/${Environment}/qa-runner/openai-api-key"
+      Description: OpenAI API key used by the AI AC validator in the QA pipeline
+      KmsKeyId: !Ref EncryptionKey
+      SecretString: "__SET_OPENAI_API_KEY__"
+
   QaArtifactsBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
@@ -749,6 +757,7 @@ Resources:
                   - !Ref JWTSecret
                   - !Ref QaRunnerApiKeySecret
                   - !Ref QaRunnerHmacSecret
+                  - !Ref QaAiOpenAiKeySecret
                   - !If [HasOpenAISecret, !Ref OpenAIApiKeySecretArn, !Ref AWS::NoValue]
               - Effect: Allow
                 Action:
@@ -784,6 +793,7 @@ Resources:
                   - !Ref JWTSecret
                   - !Ref QaRunnerApiKeySecret
                   - !Ref QaRunnerHmacSecret
+                  - !Ref QaAiOpenAiKeySecret
                   - !If [HasOpenAISecret, !Ref OpenAIApiKeySecretArn, !Ref AWS::NoValue]
               - Effect: Allow
                 Action:
@@ -1344,6 +1354,10 @@ Outputs:
   QaAtlassianApiTokenSecretArn:
     Description: Secrets Manager ARN for the Atlassian API token used by the QA runner
     Value: !Ref QaAtlassianApiTokenSecret
+
+  QaAiOpenAiKeySecretArn:
+    Description: Secrets Manager ARN for the OpenAI API key used by the QA AC validator
+    Value: !Ref QaAiOpenAiKeySecret
 
   AlertsTopicArn:
     Description: SNS alerts topic ARN

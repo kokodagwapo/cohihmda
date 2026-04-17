@@ -1,13 +1,6 @@
-/**
- * Unit tests for scripts/qa/lib/resultParser.ts
- *
- * Uses a temporary fixture file to simulate the Playwright JSON reporter output
- * without needing an actual Playwright run.
- */
-
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
-import { join } from "path";
+import { describe, it, expect, afterEach } from "vitest";
+import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from "fs";
+import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { randomUUID } from "crypto";
 
@@ -24,90 +17,12 @@ function buildFixtureRoot(report: object): string {
   return root;
 }
 
-const PASSING_REPORT = {
-  stats: {
-    expected: 5,
-    unexpected: 0,
-    skipped: 1,
-    duration: 12300,
-  },
-  suites: [
-    {
-      title: "Auth",
-      file: "e2e/auth.spec.ts",
-      suites: [],
-      specs: [
-        {
-          title: "should login",
-          tests: [
-            {
-              results: [
-                {
-                  status: "passed",
-                  attachments: [],
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-  ],
-};
-
-const FAILING_REPORT = {
-  stats: {
-    expected: 3,
-    unexpected: 2,
-    skipped: 0,
-    duration: 8500,
-  },
-  suites: [
-    {
-      title: "Dashboard",
-      file: "e2e/dashboard.spec.ts",
-      suites: [],
-      specs: [
-        {
-          title: "renders KPI cards",
-          tests: [
-            {
-              results: [
-                {
-                  status: "failed",
-                  error: {
-                    message: "Expected element to be visible but it was hidden",
-                    snippet: "  42 | await expect(page.locator('.kpi-card')).toBeVisible();",
-                  },
-                  attachments: [
-                    { name: "screenshot", path: "/tmp/screenshot.png", contentType: "image/png" },
-                    { name: "trace", path: "/tmp/trace.zip", contentType: "application/zip" },
-                  ],
-                },
-              ],
-            },
-          ],
-        },
-        {
-          title: "shows trend chart",
-          tests: [
-            {
-              results: [
-                {
-                  status: "failed",
-                  error: {
-                    message: "TimeoutError: waiting for selector .trend-chart",
-                  },
-                  attachments: [],
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-  ],
-};
+const TAGGED_REPORT_FIXTURE = JSON.parse(
+  readFileSync(
+    resolve(process.cwd(), "src/test/qa/fixtures/results-tagged.json"),
+    "utf8",
+  ),
+);
 
 describe("resultParser.parseResults", () => {
   let roots: string[] = [];
@@ -119,43 +34,37 @@ describe("resultParser.parseResults", () => {
     roots = [];
   });
 
-  it("parses a fully-passing report correctly", async () => {
+  it("parses tagged tests across passed, failed, and skipped states", async () => {
     const parseResults = await loadParser();
-    const root = buildFixtureRoot(PASSING_REPORT);
+    const root = buildFixtureRoot(TAGGED_REPORT_FIXTURE);
     roots.push(root);
 
     const summary = parseResults(root);
 
-    expect(summary.total).toBe(6); // expected + skipped
-    expect(summary.passed).toBe(5);
-    expect(summary.failed).toBe(0);
+    expect(summary.total).toBe(4);
+    expect(summary.passed).toBe(2);
+    expect(summary.failed).toBe(1);
     expect(summary.skipped).toBe(1);
-    expect(summary.durationMs).toBe(12300);
-    expect(summary.failedTests).toHaveLength(0);
-  });
+    expect(summary.durationMs).toBe(9100);
+    expect(summary.tests).toHaveLength(4);
+    expect(summary.failedTests).toHaveLength(1);
 
-  it("parses a failing report and extracts failure details", async () => {
-    const parseResults = await loadParser();
-    const root = buildFixtureRoot(FAILING_REPORT);
-    roots.push(root);
+    const workbench = summary.tests.find((test) => test.title.includes("opens save dialog"));
+    expect(workbench?.jiraKeys).toEqual(["COHI-77"]);
+    expect(workbench?.status).toBe("passed");
 
-    const summary = parseResults(root);
+    const shared = summary.tests.find((test) => test.title.includes("shared workbench signal"));
+    expect(shared?.jiraKeys).toEqual(["COHI-77", "COHI-96"]);
 
-    expect(summary.total).toBe(5); // expected + unexpected
-    expect(summary.passed).toBe(3);
-    expect(summary.failed).toBe(2);
-    expect(summary.skipped).toBe(0);
-    expect(summary.failedTests).toHaveLength(2);
+    const failure = summary.failedTests[0];
+    expect(failure.title).toContain("@COHI-96");
+    expect(failure.file).toBe("e2e/toptiering.spec.ts");
+    expect(failure.error).toContain("Portfolio Analysis");
+    expect(failure.screenshotPaths).toContain("/tmp/toptiering-failure.png");
+    expect(failure.tracePaths).toContain("/tmp/toptiering-trace.zip");
 
-    const [first, second] = summary.failedTests;
-    expect(first.title).toBe("renders KPI cards");
-    expect(first.file).toBe("e2e/dashboard.spec.ts");
-    expect(first.error).toContain("Expected element to be visible");
-    expect(first.screenshotPaths).toContain("/tmp/screenshot.png");
-    expect(first.tracePaths).toContain("/tmp/trace.zip");
-
-    expect(second.title).toBe("shows trend chart");
-    expect(second.error).toContain("TimeoutError");
+    const skipped = summary.tests.find((test) => test.status === "skipped");
+    expect(skipped?.jiraKeys).toEqual([]);
   });
 
   it("truncates error messages longer than 500 chars", async () => {
@@ -207,6 +116,7 @@ describe("resultParser.parseResults", () => {
 
     const summary = parseResults(root);
     expect(summary.total).toBe(0);
+    expect(summary.tests).toHaveLength(0);
     expect(summary.failedTests).toHaveLength(0);
   });
 });
