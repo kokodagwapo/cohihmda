@@ -439,6 +439,9 @@ async function main(): Promise<void> {
       console.warn("[QaRunner] QA_ENABLE_AC_VALIDATOR=true but no Jira targets resolved — skipping AC validation");
     } else {
       try {
+        console.log(
+          `[QaRunner] Invoking AC validator — targets=${qaTargets.length}, dryRun=${process.env.QA_AC_DRY_RUN === "true"}`,
+        );
         const acResults = await runAcValidator({
           targets: qaTargets,
           environment,
@@ -447,6 +450,11 @@ async function main(): Promise<void> {
           llmClient: new OpenAiLlmClient(),
         });
         qaTargets = mergeAcIntoTargets(qaTargets, acResults);
+        for (const r of acResults) {
+          console.log(
+            `[QaRunner] AC result ${r.issueKey}: status=${r.status}, approvalStatus=${r.approvalStatus ?? "n/a"}${r.planHash ? `, planHash=${r.planHash.slice(0, 12)}…` : ""}`,
+          );
+        }
       } catch (err) {
         console.warn("[QaRunner] AC validation failed:", err);
       }

@@ -185,6 +185,10 @@ export async function runAcValidator(params: RunAcValidatorParams): Promise<Issu
 
   const runnableTargets = params.targets.slice(0, maxIssuesPerRun);
   const skippedTargets = params.targets.slice(maxIssuesPerRun);
+
+  console.log(
+    `[AcValidator] Starting — issues=${params.targets.length} (running=${runnableTargets.length}, over-limit=${skippedTargets.length}), dryRun=${dryRun}, maxWritesPerIssue=${maxWritesPerIssue}, maxWritesPerRun=${maxWritesPerRun}`,
+  );
   skippedTargets.forEach((target) => {
     results.push({
       issueKey: target.issueKey,
@@ -199,6 +203,7 @@ export async function runAcValidator(params: RunAcValidatorParams): Promise<Issu
 
   for (const target of runnableTargets) {
     const requestId = createRequestId(target.issueKey, params.buildNumber);
+    console.log(`[AcValidator] ${target.issueKey} — begin (requestId=${requestId})`);
     const parentActionId = await startAction({
       agentId: "ai-ac-validator",
       actionType: "ac_validation",
@@ -221,6 +226,7 @@ export async function runAcValidator(params: RunAcValidatorParams): Promise<Issu
       );
 
       if ("error" in issue && issue.error) {
+        console.warn(`[AcValidator] ${target.issueKey} — AC parse error: ${issue.error}`);
         await postJiraComment(
           target.issueKey,
           `AI AC Validator could not parse the approved Acceptance Criteria block: ${issue.error}. Please normalize the Jira description format and retry.`,
@@ -261,6 +267,9 @@ export async function runAcValidator(params: RunAcValidatorParams): Promise<Issu
       if (statements.length === 0) {
         throw new Error(`No acceptance criteria statements found for ${target.issueKey}`);
       }
+      console.log(
+        `[AcValidator] ${target.issueKey} — parsed ${statements.length} AC statement(s); generating plan...`,
+      );
 
       const generatedPlan = await recordStageAction<GeneratedPlanResult>(
         parentActionId,
@@ -283,6 +292,9 @@ export async function runAcValidator(params: RunAcValidatorParams): Promise<Issu
       if (consumedTokens > maxTokensPerRun) {
         throw new Error(`QA_AC_MAX_TOKENS_PER_RUN exceeded (${consumedTokens} > ${maxTokensPerRun})`);
       }
+      console.log(
+        `[AcValidator] ${target.issueKey} — plan generated: model=${generatedPlan.modelName}, steps=${generatedPlan.plan.steps.length}, tokensIn=${generatedPlan.tokensIn ?? "?"}, tokensOut=${generatedPlan.tokensOut ?? "?"}`,
+      );
 
       const validation = await recordStageAction<PlanApprovalDecision & { stepCount: number }>(
         parentActionId,
@@ -330,6 +342,10 @@ export async function runAcValidator(params: RunAcValidatorParams): Promise<Issu
         },
       );
 
+      console.log(
+        `[AcValidator] ${target.issueKey} — plan approved: approvalStatus=${validation.approvalStatus}, writesPlanned≈${validation.stepCount}, elevatedSteps=${(validation.elevatedSteps ?? []).length}`,
+      );
+
       if (dryRun) {
         const dryRunResult: IssueAcValidationResult = {
           issueKey: target.issueKey,
@@ -362,6 +378,9 @@ export async function runAcValidator(params: RunAcValidatorParams): Promise<Issu
           },
         });
 
+        console.log(
+          `[AcValidator] ${target.issueKey} — dry run complete: planHash=${dryRunResult.planHash?.slice(0, 12)}…, status=inconclusive (execution skipped)`,
+        );
         results.push(dryRunResult);
         continue;
       }
@@ -533,6 +552,9 @@ export async function runAcValidator(params: RunAcValidatorParams): Promise<Issu
           },
         });
 
+        console.log(
+          `[AcValidator] ${target.issueKey} — execution complete: status=${issueResult.status}, writes=${execution.writesPerformed}, evidenceManifest=${evidencePackage?.manifestS3Url ?? "local"}, jiraMovedToEvidenceReview=${jiraMovedToEvidenceReview}`,
+        );
         results.push(issueResult);
       } finally {
         const teardown = await teardownQaAgentTenant({
@@ -567,6 +589,7 @@ export async function runAcValidator(params: RunAcValidatorParams): Promise<Issu
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[AcValidator] ${target.issueKey} — failed: ${message}`);
       await transitionAction({
         actionId: parentActionId,
         status: "failed",
@@ -588,6 +611,18 @@ export async function runAcValidator(params: RunAcValidatorParams): Promise<Issu
       });
     }
   }
+
+  const byStatus = results.reduce<Record<string, number>>((acc, r) => {
+    const key = `${r.status}/${r.approvalStatus ?? "n/a"}`;
+    acc[key] = (acc[key] ?? 0) + 1;
+    return acc;
+  }, {});
+  const summary = Object.entries(byStatus)
+    .map(([k, v]) => `${k}=${v}`)
+    .join(", ");
+  console.log(
+    `[AcValidator] Run complete — ${results.length} issue(s): ${summary || "no results"}`,
+  );
 
   return results;
 }
