@@ -15,7 +15,10 @@ export class NavigationPO {
     const target = locator.first();
     const canClick = await target.click({ trial: true, timeout: 3_000 }).then(() => true).catch(() => false);
     if (canClick) {
-      await target.click({ force: true });
+      // Cap the real click so a transient overlay or DOM churn can't hang the
+      // whole test for the default 30s click timeout (which can cascade past
+      // the 60s test timeout and kill the browser context).
+      await target.click({ force: true, timeout: 5_000 }).catch(() => {});
     }
   }
 

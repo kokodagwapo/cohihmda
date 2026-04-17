@@ -1,6 +1,5 @@
 import { test, expect } from "./fixtures";
 import type { Locator } from "@playwright/test";
-import { expectAuthenticatedRoute } from "./helpers";
 
 async function isAnyVisible(candidates: Locator[]) {
   for (const candidate of candidates) {
@@ -13,7 +12,10 @@ async function isAnyVisible(candidates: Locator[]) {
 
 test.describe("Workbench", () => {
   test("@smoke loads my-dashboard and core canvas controls", async ({ userPage }) => {
-    await expectAuthenticatedRoute(userPage, "/my-dashboard");
+    // /my-dashboard (no canvas id) now redirects to the /workbench hub; accept either route.
+    await userPage.goto("/my-dashboard", { waitUntil: "domcontentloaded" });
+    await expect(userPage).toHaveURL(/\/(my-dashboard|workbench)/);
+    await expect(userPage.getByRole("navigation", { name: /main navigation/i })).toBeVisible();
     const hasPrimaryWorkbenchControl = await isAnyVisible([
       userPage.getByTitle("New canvas"),
       userPage.getByTestId("workbench-canvas-title-input"),
