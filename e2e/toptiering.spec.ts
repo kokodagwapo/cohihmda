@@ -78,7 +78,13 @@ test.describe("TopTiering pages", () => {
     await officerButton.scrollIntoViewIfNeeded();
     await officerButton.click();
 
-    await expect(userPage.getByText("Portfolio Analysis")).toBeVisible({ timeout: 10_000 });
-    await expect(userPage.locator("[role='dialog']").first()).toBeVisible({ timeout: 10_000 });
+    // Drill-down renders "Portfolio Analysis" in at least two places (tooltip
+    // label + side panel caption). Assert the dialog-scoped one first so we
+    // don't trip strict-mode on multiple matches.
+    const dialog = userPage.locator("[role='dialog']").first();
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
+    await expect(
+      dialog.getByText("Portfolio Analysis").first(),
+    ).toBeVisible({ timeout: 10_000 });
   });
 });
