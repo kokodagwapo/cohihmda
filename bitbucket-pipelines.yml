@@ -548,9 +548,27 @@ pipelines:
 
     # Hybrid QA pipeline — regression reporting always runs, AC validation is
     # gated behind QA_ENABLE_AC_VALIDATOR=true.
-    # Set QA_SUITE before running (smoke | critical | regression | all).
-    # Optionally set QA_COMMIT_RANGE / QA_COMMIT_LOOKBACK to control issue discovery.
+    # The `variables:` block below surfaces input fields in the Bitbucket
+    # "Run pipeline" dialog so you can flip the AC validator on for a single
+    # run without editing YAML or adding deployment-level variables.
     ai-qa-dev:
+      - variables:
+          - name: QA_SUITE
+            default: "critical"
+            allowed-values:
+              - "smoke"
+              - "critical"
+              - "regression"
+              - "all"
+          - name: QA_ENABLE_AC_VALIDATOR
+            default: "false"
+            allowed-values:
+              - "false"
+              - "true"
+          - name: QA_COMMIT_RANGE
+            default: ""
+          - name: QA_COMMIT_LOOKBACK
+            default: ""
       - step: *run-ai-qa-dev
 
     # Database migrations
