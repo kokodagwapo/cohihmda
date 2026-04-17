@@ -47,6 +47,7 @@ import {
   formatDataLastSyncedLine,
   formatEstimatedNextSyncLine,
   formatEstimatedNextSyncTooltip,
+  getEstimatedNextSyncAt,
 } from "@/utils/losSyncDisplay";
 import { useJobStatus } from "@/hooks/useJobStatus";
 import { useAuth } from "@/contexts/AuthContext";
@@ -1445,21 +1446,27 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
                       {formatDataLastSyncedLine(losLastSyncedAt)}
                     </span>
                   );
-                  trailing.push(
-                    <span
-                      key="los-next-sync"
-                      className={metaMuted}
-                      title={formatEstimatedNextSyncTooltip(
-                        losLastSyncedAt,
-                        losSyncFrequency
-                      )}
-                    >
-                      {formatEstimatedNextSyncLine(
-                        losLastSyncedAt,
-                        losSyncFrequency
-                      )}
-                    </span>
+                  const nextSyncAt = getEstimatedNextSyncAt(
+                    losLastSyncedAt,
+                    losSyncFrequency
                   );
+                  if (nextSyncAt && nextSyncAt.getTime() > Date.now()) {
+                    trailing.push(
+                      <span
+                        key="los-next-sync"
+                        className={metaMuted}
+                        title={formatEstimatedNextSyncTooltip(
+                          losLastSyncedAt,
+                          losSyncFrequency
+                        )}
+                      >
+                        {formatEstimatedNextSyncLine(
+                          losLastSyncedAt,
+                          losSyncFrequency
+                        )}
+                      </span>
+                    );
+                  }
                   return (
                     <span className="inline-flex items-center flex-wrap gap-x-2 gap-y-1">
                       {trailing.flatMap((node, i) =>
