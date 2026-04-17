@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# AI QA Runner — Pipeline Entry Point
+# QA Pipeline Runner — Pipeline Entry Point
 # ============================================================================
 # Validates required environment variables, then delegates to the TypeScript
 # runner via tsx from the server/ workspace (which has tsx in devDependencies).
@@ -16,11 +16,11 @@
 # Optional (graceful degradation if missing):
 #   QA_COMMIT_RANGE           - Explicit git range to inspect for Jira keys
 #   QA_COMMIT_LOOKBACK        - Fallback commit lookback when range is not set
+#   QA_ENABLE_AC_VALIDATOR    - Set to "true" to enable Jira AC validation
 #   ATLASSIAN_EMAIL
 #   ATLASSIAN_SITE_URL
 #   CONFLUENCE_QA_PARENT_PAGE_ID - Parent page for per-issue Confluence QA pages
 #   QA_JIRA_PROJECT_KEY
-#   QA_JIRA_FALLBACK_ISSUE    - Optional fallback if no Jira key is found in commits
 #   QA_CREATE_BUGS_IN_PROD    - Set to "true" to enable Jira bug creation in prod
 # ============================================================================
 
@@ -103,9 +103,11 @@ load_aws_managed_qa_config() {
   local api_key_secret_arn
   local hmac_secret_arn
   local atlassian_token_secret_arn
+  local openai_secret_arn
   api_key_secret_arn="$(get_stack_output "QaRunnerApiKeySecretArn")"
   hmac_secret_arn="$(get_stack_output "QaRunnerHmacSecretArn")"
   atlassian_token_secret_arn="$(get_stack_output "QaAtlassianApiTokenSecretArn")"
+  openai_secret_arn="$(get_stack_output "QaAiOpenAiKeySecretArn")"
 
   if [ -z "$AI_ARTIFACTS_BUCKET" ] || [ "$AI_ARTIFACTS_BUCKET" = "None" ]; then
     log_error "QaArtifactsBucketName output not found on stack $CF_STACK_BACKEND"
@@ -148,6 +150,20 @@ load_aws_managed_qa_config() {
     log_warn "QaAtlassianApiTokenSecretArn output not found on stack $CF_STACK_BACKEND — Jira/Confluence reporting will be skipped"
   fi
 
+  if [ "${QA_ENABLE_AC_VALIDATOR:-false}" = "true" ]; then
+    if [ -z "$openai_secret_arn" ] || [ "$openai_secret_arn" = "None" ]; then
+      log_error "QaAiOpenAiKeySecretArn output not found on stack $CF_STACK_BACKEND but QA_ENABLE_AC_VALIDATOR=true"
+      exit 1
+    fi
+
+    export OPENAI_API_KEY
+    OPENAI_API_KEY="$(aws secretsmanager get-secret-value --secret-id "$openai_secret_arn" --region "$AWS_DEFAULT_REGION" --query SecretString --output text)"
+    if [ -z "$OPENAI_API_KEY" ] || [ "$OPENAI_API_KEY" = "None" ] || [ "$OPENAI_API_KEY" = "__SET_OPENAI_API_KEY__" ]; then
+      log_error "Failed to load a usable OPENAI_API_KEY from Secrets Manager while QA_ENABLE_AC_VALIDATOR=true"
+      exit 1
+    fi
+  fi
+
   log_success "Loaded AWS-managed QA secrets and artifact bucket"
 }
 
@@ -185,6 +201,7 @@ done
 SUITE="${QA_SUITE:-critical}"
 BUILD="${BITBUCKET_BUILD_NUMBER:-local}"
 COMMIT="${BITBUCKET_COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')}"
+export QA_ENABLE_AC_VALIDATOR="${QA_ENABLE_AC_VALIDATOR:-false}"
 
 log_info "Suite:       $SUITE"
 log_info "Build:       #$BUILD"
@@ -192,6 +209,7 @@ log_info "Commit:      $COMMIT"
 log_info "Base URL:    $E2E_BASE_URL"
 log_info "Backend CF:  $CF_STACK_BACKEND"
 log_info "QA bucket:   $AI_ARTIFACTS_BUCKET"
+log_info "AC Validator:$QA_ENABLE_AC_VALIDATOR"
 
 # ---- Install server deps if needed ------------------------------------------
 if [ ! -d "server/node_modules" ]; then
@@ -200,7 +218,7 @@ if [ ! -d "server/node_modules" ]; then
 fi
 
 # ---- Run the TypeScript runner from server/ ---------------------------------
-log_info "Starting AI QA runner..."
+log_info "Starting QA pipeline runner..."
 
 cd server
 npx tsx scripts/qa/aiQaRunner.ts \

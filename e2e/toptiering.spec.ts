@@ -66,7 +66,7 @@ test.describe("TopTiering pages", () => {
     });
   }
 
-  test("@critical supports at least one drill-down style interaction", async ({ userPage }) => {
+  test("@critical @COHI-96 supports at least one drill-down style interaction", async ({ userPage }) => {
     await userPage.goto("/fallout-forecast", { waitUntil: "domcontentloaded" });
     await userPage.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
 

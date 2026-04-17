@@ -12,7 +12,8 @@
  * Auth: Basic auth (email:apiToken) against ATLASSIAN_SITE_URL.
  */
 
-import { QaRunSummary } from "./resultParser.js";
+import { QaRunSummary, type TestResult } from "./resultParser.js";
+import type { IssueAcValidationResult } from "../ai/types.js";
 
 interface AtlassianConfig {
   siteUrl: string;
@@ -20,7 +21,6 @@ interface AtlassianConfig {
   apiToken: string;
   confluenceParentPageId: string;
   jiraProjectKey: string;
-  jiraFallbackIssue: string;
   createBugsInProd: boolean;
 }
 
@@ -31,6 +31,8 @@ export interface QaTargetIssue {
   issueUrl: string;
   confluencePageId?: string | null;
   confluencePageUrl?: string | null;
+  hasEvidenceGap?: boolean;
+  acValidation?: IssueAcValidationResult;
 }
 
 export interface QaArtifactLink {
@@ -39,6 +41,13 @@ export interface QaArtifactLink {
   consoleUrl: string;
   directUrl: string;
   contentType?: string;
+  localPath?: string;
+}
+
+export interface QaRelatedCommit {
+  hash: string;
+  shortHash: string;
+  subject: string;
 }
 
 function loadConfig(): AtlassianConfig | null {
@@ -63,7 +72,6 @@ function loadConfig(): AtlassianConfig | null {
     apiToken,
     confluenceParentPageId: process.env.CONFLUENCE_QA_PARENT_PAGE_ID ?? "",
     jiraProjectKey: process.env.QA_JIRA_PROJECT_KEY ?? "COHI",
-    jiraFallbackIssue: process.env.QA_JIRA_FALLBACK_ISSUE ?? "",
     createBugsInProd: process.env.QA_CREATE_BUGS_IN_PROD === "true",
   };
 }
@@ -170,6 +178,17 @@ function adfHeading(level: number, text: string) {
   };
 }
 
+function adfPanel(
+  panelType: "info" | "note" | "warning" | "success" | "error",
+  content: Array<Record<string, unknown>>,
+) {
+  return {
+    type: "panel",
+    attrs: { panelType },
+    content,
+  };
+}
+
 function adfTableCell(text: string, isHeader = false) {
   return {
     type: isHeader ? "tableHeader" : "tableCell",
@@ -188,6 +207,32 @@ function adfBulletList(items: Array<Array<Record<string, unknown>> | string>) {
   };
 }
 
+function adfTable(rows: Array<Array<ReturnType<typeof adfTableCell>>>) {
+  return {
+    type: "table",
+    attrs: { layout: "default" },
+    content: rows.map((cells) => ({
+      type: "tableRow",
+      content: cells,
+    })),
+  };
+}
+
+function getTestsForIssue(summary: QaRunSummary, issueKey: string): TestResult[] {
+  return summary.tests.filter((test) => test.jiraKeys.includes(issueKey));
+}
+
+function getFailedTestsForIssue(summary: QaRunSummary, issueKey: string): TestResult[] {
+  return summary.failedTests.filter((test) => test.jiraKeys.includes(issueKey));
+}
+
+function getArtifactsForIssue(tests: TestResult[], artifacts: QaArtifactLink[]): QaArtifactLink[] {
+  const relevantPaths = new Set(
+    tests.flatMap((test) => [...test.screenshotPaths, ...test.tracePaths, ...test.videoPaths]),
+  );
+  return artifacts.filter((artifact) => artifact.localPath && relevantPaths.has(artifact.localPath));
+}
+
 function buildConfluenceAdf(opts: {
   target: QaTargetIssue;
   summary: QaRunSummary;
@@ -199,7 +244,8 @@ function buildConfluenceAdf(opts: {
   bucket: string | null;
   reportConsoleUrl: string | null;
   artifacts: QaArtifactLink[];
-}): string {
+  relatedCommits: QaRelatedCommit[];
+}): Record<string, unknown> {
   const {
     target,
     summary,
@@ -211,9 +257,29 @@ function buildConfluenceAdf(opts: {
     bucket,
     reportConsoleUrl,
     artifacts,
+    relatedCommits,
   } = opts;
   const passRate = summary.total > 0 ? Math.round((summary.passed / summary.total) * 100) : 0;
   const ts = new Date().toISOString();
+  const testsForIssue = getTestsForIssue(summary, target.issueKey);
+  const failedTestsForIssue = getFailedTestsForIssue(summary, target.issueKey);
+  const artifactsForIssue = getArtifactsForIssue(testsForIssue, artifacts);
+  const hasEvidenceGap = testsForIssue.length === 0;
+  const evidenceForTest = (test: TestResult): Array<Record<string, unknown>> | string => {
+    const paths = new Set([...test.screenshotPaths, ...test.tracePaths, ...test.videoPaths]);
+    const matchingArtifacts = artifactsForIssue.filter(
+      (artifact) => artifact.localPath && paths.has(artifact.localPath),
+    );
+    if (matchingArtifacts.length === 0) {
+      return "n/a";
+    }
+    const content: Array<Record<string, unknown>> = [];
+    matchingArtifacts.forEach((artifact, index) => {
+      if (index > 0) content.push(adfText(" | "));
+      content.push(adfText(artifact.label, artifact.consoleUrl));
+    });
+    return content;
+  };
   const reportTarget = reportConsoleUrl ?? (
     s3ReportKey && bucket ? `https://${bucket}.s3.amazonaws.com/${s3ReportKey}` : undefined
   );
@@ -227,78 +293,105 @@ function buildConfluenceAdf(opts: {
       adfParagraph(`Issue summary: ${target.issueSummary}`),
       adfParagraph(`Issue status: ${target.issueStatus}`),
       adfParagraph(`Last updated: ${ts}`),
+      ...(hasEvidenceGap
+        ? [
+            adfPanel("warning", [
+              adfParagraph(
+                "Evidence gap: no tests currently verify this issue. Run-level results and related commits are still recorded below."
+              ),
+            ]),
+          ]
+        : []),
       adfHeading(2, "Summary"),
-      {
-        type: "table",
-        attrs: { layout: "default" },
-        content: [
+      adfTable([
+        [adfTableCell("Property", true), adfTableCell("Value", true)],
+        [adfTableCell("Environment"), adfTableCell(environment)],
+        [adfTableCell("Suite"), adfTableCell(suite)],
+        [adfTableCell("Build"), adfTableCell(`#${buildNumber}`)],
+        [adfTableCell("Commit"), adfTableCell(commitHash.slice(0, 8))],
+        [adfTableCell("Total Tests"), adfTableCell(String(summary.total))],
+        [adfTableCell("Passed"), adfTableCell(String(summary.passed))],
+        [adfTableCell("Failed"), adfTableCell(String(summary.failed))],
+        [adfTableCell("Skipped"), adfTableCell(String(summary.skipped))],
+        [adfTableCell("Pass Rate"), adfTableCell(`${passRate}%`)],
+        [adfTableCell("Duration"), adfTableCell(`${(summary.durationMs / 1000).toFixed(1)}s`)],
+        [
+          adfTableCell("Report"),
           {
-            type: "tableRow",
-            content: [adfTableCell("Property", true), adfTableCell("Value", true)],
-          },
-          {
-            type: "tableRow",
-            content: [adfTableCell("Environment"), adfTableCell(environment)],
-          },
-          {
-            type: "tableRow",
-            content: [adfTableCell("Suite"), adfTableCell(suite)],
-          },
-          {
-            type: "tableRow",
-            content: [adfTableCell("Build"), adfTableCell(`#${buildNumber}`)],
-          },
-          {
-            type: "tableRow",
-            content: [adfTableCell("Commit"), adfTableCell(commitHash.slice(0, 8))],
-          },
-          {
-            type: "tableRow",
-            content: [adfTableCell("Total Tests"), adfTableCell(String(summary.total))],
-          },
-          {
-            type: "tableRow",
-            content: [adfTableCell("Passed"), adfTableCell(String(summary.passed))],
-          },
-          {
-            type: "tableRow",
-            content: [adfTableCell("Failed"), adfTableCell(String(summary.failed))],
-          },
-          {
-            type: "tableRow",
-            content: [adfTableCell("Skipped"), adfTableCell(String(summary.skipped))],
-          },
-          {
-            type: "tableRow",
-            content: [adfTableCell("Pass Rate"), adfTableCell(`${passRate}%`)],
-          },
-          {
-            type: "tableRow",
-            content: [adfTableCell("Duration"), adfTableCell(`${(summary.durationMs / 1000).toFixed(1)}s`)],
-          },
-          {
-            type: "tableRow",
-            content: [
-              adfTableCell("Report"),
-              {
-                type: "tableCell",
-                attrs: { colspan: 1, rowspan: 1 },
-                content: [adfParagraph(reportTarget ? [adfText("Open report in AWS Console", reportTarget)] : "Report not uploaded")],
-              },
-            ],
+            type: "tableCell",
+            attrs: { colspan: 1, rowspan: 1 },
+            content: [adfParagraph(reportTarget ? [adfText("Open report in AWS Console", reportTarget)] : "Report not uploaded")],
           },
         ],
-      },
+      ]),
+      adfHeading(2, "Tests Verifying This Issue"),
+      ...(testsForIssue.length > 0
+        ? [
+            adfTable([
+              [
+                adfTableCell("Test", true),
+                adfTableCell("File", true),
+                adfTableCell("Status", true),
+                adfTableCell("Duration", true),
+                adfTableCell("Evidence", true),
+              ],
+              ...testsForIssue.map((test) => {
+                const evidence = evidenceForTest(test);
+                return [
+                  adfTableCell(test.title),
+                  adfTableCell(test.file),
+                  adfTableCell(test.status),
+                  adfTableCell(`${(test.durationMs / 1000).toFixed(1)}s`),
+                  {
+                    type: "tableCell",
+                    attrs: { colspan: 1, rowspan: 1 },
+                    content: [adfParagraph(evidence)],
+                  },
+                ];
+              }),
+            ]),
+          ]
+        : [adfParagraph("No tagged tests verified this issue in this run.")]),
+      adfHeading(2, "Related Commits"),
+      ...(relatedCommits.length > 0
+        ? [
+            adfBulletList(
+              relatedCommits.map((commit) => [
+                adfText(`${commit.shortHash}: ${commit.subject}`),
+              ]),
+            ),
+          ]
+        : [adfParagraph("No commits mentioning this issue key were found in the scanned range.")]),
+      ...(target.acValidation
+        ? [
+            adfHeading(2, "Acceptance Criteria Validation"),
+            adfParagraph(target.acValidation.confluenceSummary ?? "AC validation completed."),
+            adfTable([
+              [
+                adfTableCell("AC", true),
+                adfTableCell("Category", true),
+                adfTableCell("Status", true),
+                adfTableCell("Statement", true),
+              ],
+              ...target.acValidation.statements.map((statement) => [
+                adfTableCell(String(statement.index)),
+                adfTableCell(statement.category),
+                adfTableCell(statement.status),
+                adfTableCell(statement.statement),
+              ]),
+            ]),
+          ]
+        : []),
       adfHeading(2, "Failed Tests"),
       adfBulletList(
-        summary.failedTests.length > 0
-          ? summary.failedTests.map((t) => `${t.title} (${t.file}) - ${t.error}`)
+        failedTestsForIssue.length > 0
+          ? failedTestsForIssue.map((t) => `${t.title} (${t.file}) - ${t.error}`)
           : ["No failing tests in this run."]
       ),
       adfHeading(2, "Artifacts"),
       adfBulletList(
-        artifacts.length > 0
-          ? artifacts.map((a) => [
+        artifactsForIssue.length > 0
+          ? artifactsForIssue.map((a) => [
               adfText(`${a.label}: `),
               adfText("AWS Console", a.consoleUrl),
               adfText(" | "),
@@ -352,10 +445,13 @@ async function upsertConfluencePageForTarget(
     s3ReportKey: string | null;
     reportConsoleUrl: string | null;
     artifacts: QaArtifactLink[];
+    relatedCommitsByIssueKey: Record<string, QaRelatedCommit[]>;
     parent: { id: string; spaceId: string };
   }
 ): Promise<QaTargetIssue> {
   const title = buildConfluencePageTitle(target);
+  const testsForIssue = getTestsForIssue(opts.summary, target.issueKey);
+  const hasEvidenceGap = testsForIssue.length === 0;
   const adfBody = buildConfluenceAdf({
     target,
     summary: opts.summary,
@@ -367,10 +463,12 @@ async function upsertConfluencePageForTarget(
     bucket: process.env.AI_ARTIFACTS_BUCKET ?? null,
     reportConsoleUrl: opts.reportConsoleUrl,
     artifacts: opts.artifacts,
+    relatedCommits: opts.relatedCommitsByIssueKey[target.issueKey] ?? [],
   });
 
   const existingPageId = await findConfluencePageByTitle(cfg, title, opts.parent.spaceId);
 
+  let enrichedTarget: QaTargetIssue;
   if (existingPageId) {
     const current = await confluenceRequest(cfg, "GET", `/api/v2/pages/${existingPageId}`);
     const currentVersion: number = current?.version?.number ?? 0;
@@ -386,46 +484,64 @@ async function upsertConfluencePageForTarget(
       version: { number: currentVersion + 1, message: `Build #${opts.buildNumber}` },
     });
 
-    return {
+    enrichedTarget = {
       ...target,
       confluencePageId: existingPageId,
       confluencePageUrl: `https://${cfg.siteUrl}/wiki/pages/${existingPageId}`,
+      hasEvidenceGap,
+    };
+  } else {
+    const created = await confluenceRequest(cfg, "POST", "/api/v2/pages", {
+      spaceId: opts.parent.spaceId,
+      status: "current",
+      title,
+      parentId: opts.parent.id,
+      body: {
+        representation: "atlas_doc_format",
+        value: JSON.stringify(adfBody),
+      },
+    });
+
+    const createdPageId = String(created?.id ?? "");
+    enrichedTarget = {
+      ...target,
+      confluencePageId: createdPageId,
+      confluencePageUrl: createdPageId
+        ? `https://${cfg.siteUrl}/wiki/pages/${createdPageId}`
+        : null,
+      hasEvidenceGap,
     };
   }
 
-  const created = await confluenceRequest(cfg, "POST", "/api/v2/pages", {
-    spaceId: opts.parent.spaceId,
-    status: "current",
-    title,
-    parentId: opts.parent.id,
-    body: {
-      representation: "atlas_doc_format",
-      value: JSON.stringify(adfBody),
-    },
-  });
+  if (hasEvidenceGap) {
+    try {
+      await jiraRequest(cfg, "POST", `/issue/${target.issueKey}/comment`, {
+        body: {
+          type: "doc",
+          version: 1,
+          content: [
+            toAdfParagraph(
+              `Evidence gap for build #${opts.buildNumber}: no tests tagged ${target.issueKey} verified this issue in suite ${opts.suite}.` +
+              (enrichedTarget.confluencePageUrl ? ` QA page: ${enrichedTarget.confluencePageUrl}` : "")
+            ),
+          ],
+        },
+      });
+    } catch (err) {
+      console.warn(`[AtlassianReporter] Failed to post evidence-gap comment on ${target.issueKey}:`, err);
+    }
+  }
 
-  const createdPageId = String(created?.id ?? "");
-  return {
-    ...target,
-    confluencePageId: createdPageId,
-    confluencePageUrl: createdPageId
-      ? `https://${cfg.siteUrl}/wiki/pages/${createdPageId}`
-      : null,
-  };
-}
-
-function findFallbackIssueKeys(cfg: AtlassianConfig, issueKeys: string[]): string[] {
-  if (issueKeys.length > 0) return issueKeys;
-  return cfg.jiraFallbackIssue ? [cfg.jiraFallbackIssue] : [];
+  return enrichedTarget;
 }
 
 export async function resolveQaTargets(issueKeys: string[]): Promise<QaTargetIssue[]> {
   const cfg = loadConfig();
   if (!cfg) return [];
 
-  const keys = unique(findFallbackIssueKeys(cfg, issueKeys));
+  const keys = unique(issueKeys);
   if (keys.length === 0) {
-    console.warn("[AtlassianReporter] No Jira issue keys discovered and no fallback issue configured");
+    console.warn("[AtlassianReporter] No Jira issue keys discovered");
     return [];
   }
 
@@ -462,6 +578,7 @@ export async function updateConfluencePages(opts: {
   s3ReportKey: string | null;
   reportConsoleUrl: string | null;
   artifacts: QaArtifactLink[];
+  relatedCommitsByIssueKey: Record<string, QaRelatedCommit[]>;
 }): Promise<QaTargetIssue[]> {
   const cfg = loadConfig();
   if (!cfg) return opts.targets;
@@ -493,6 +610,7 @@ export async function updateConfluencePages(opts: {
           s3ReportKey: opts.s3ReportKey,
           reportConsoleUrl: opts.reportConsoleUrl,
           artifacts: opts.artifacts,
+          relatedCommitsByIssueKey: opts.relatedCommitsByIssueKey,
           parent,
         });
         console.log(`[AtlassianReporter] Confluence page synced for ${target.issueKey}: ${enriched.confluencePageUrl}`);
@@ -531,7 +649,7 @@ async function findOpenFailureBug(
 }
 
 function buildJiraBugDescription(opts: {
-  summary: QaRunSummary;
+  failedTests: TestResult[];
   suite: string;
   buildNumber: string;
   s3ReportKey: string | null;
@@ -539,7 +657,7 @@ function buildJiraBugDescription(opts: {
   reportConsoleUrl: string | null;
   artifacts: QaArtifactLink[];
 }): string {
-  const failureLines = opts.summary.failedTests
+  const failureLines = opts.failedTests
     .slice(0, 20)
     .map((t) => `- ${t.title} (${t.file})\n${t.error}`)
     .join("\n");
@@ -559,7 +677,7 @@ function buildJiraBugDescription(opts: {
     : "";
 
   return [
-    `Automated QA detected *${opts.summary.failed}* failing test(s) in suite *${opts.suite}* (Build #${opts.buildNumber}).`,
+    `Automated QA detected *${opts.failedTests.length}* failing test(s) for *${opts.target.issueKey}* in suite *${opts.suite}* (Build #${opts.buildNumber}).`,
     `Related Jira item: ${opts.target.issueKey} - ${opts.target.issueSummary}`,
     "",
     "h3. Failed Tests",
@@ -599,6 +717,12 @@ export async function reportFailuresToJira(opts: {
   }
 
   for (const target of opts.targets) {
+    const failedTestsForIssue = getFailedTestsForIssue(opts.summary, target.issueKey);
+    const artifactsForIssue = getArtifactsForIssue(failedTestsForIssue, opts.artifacts);
+    if (failedTestsForIssue.length === 0) {
+      continue;
+    }
+
     const runLabel = `qa-automated-${opts.environment}-${opts.suite}`;
     const targetLabel = `qa-target-${target.issueKey.toLowerCase()}`;
 
@@ -607,8 +731,8 @@ export async function reportFailuresToJira(opts: {
 
       if (existingKey) {
         const commentText =
-          `Build #${opts.buildNumber}: *${opts.summary.failed}* test(s) still failing ` +
-          `for ${target.issueKey} (${opts.summary.passed}/${opts.summary.total} passed).`;
+          `Build #${opts.buildNumber}: *${failedTestsForIssue.length}* tagged test(s) still failing ` +
+          `for ${target.issueKey}.`;
         await jiraRequest(cfg, "POST", `/issue/${existingKey}/comment`, {
           body: {
             type: "doc",
@@ -624,20 +748,20 @@ export async function reportFailuresToJira(opts: {
         fields: {
           project: { key: cfg.jiraProjectKey },
           issuetype: { name: "Bug" },
-          summary: `[QA][${target.issueKey}] ${opts.summary.failed} test(s) failed — ${opts.suite} / Build #${opts.buildNumber}`,
+          summary: `[QA][${target.issueKey}] ${failedTestsForIssue.length} tagged test(s) failed — ${opts.suite} / Build #${opts.buildNumber}`,
           description: {
             type: "doc",
             version: 1,
             content: [
               toAdfParagraph(
                 buildJiraBugDescription({
-                  summary: opts.summary,
+                  failedTests: failedTestsForIssue,
                   suite: opts.suite,
                   buildNumber: opts.buildNumber,
                   s3ReportKey: opts.s3ReportKey,
                   target,
                   reportConsoleUrl: opts.reportConsoleUrl,
-                  artifacts: opts.artifacts,
+                  artifacts: artifactsForIssue,
                 })
               ),
             ],
@@ -695,9 +819,16 @@ export async function reportSuccessToJira(opts: {
   const duration = (opts.summary.durationMs / 1000).toFixed(1);
 
   for (const target of opts.targets) {
+    const failedTestsForIssue = getFailedTestsForIssue(opts.summary, target.issueKey);
+    if (failedTestsForIssue.length > 0) {
+      continue;
+    }
+
+    const testsForIssue = getTestsForIssue(opts.summary, target.issueKey);
     const text =
-      `Build #${opts.buildNumber} passed ${opts.summary.passed}/${opts.summary.total} tests ` +
-      `(${passRate}%) in suite *${opts.suite}* (${opts.environment}, ${duration}s).` +
+      `Build #${opts.buildNumber} recorded ${testsForIssue.length} tagged test(s) for ${target.issueKey}; ` +
+      `${testsForIssue.length === 0 ? "no tagged tests verified this issue" : "all tagged tests passed"} ` +
+      `within suite *${opts.suite}* (${opts.environment}, ${duration}s, overall run pass rate ${passRate}%).` +
       (target.confluencePageUrl ? ` QA page: ${target.confluencePageUrl}` : "");
 
     try {

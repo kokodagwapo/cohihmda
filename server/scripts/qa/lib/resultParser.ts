@@ -11,13 +11,23 @@
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 
-export interface FailedTest {
+export type TestStatus = "passed" | "failed" | "timedOut" | "skipped";
+
+export interface TestResult {
   title: string;
   file: string;
-  error: string;
+  status: TestStatus;
+  durationMs: number;
+  jiraKeys: string[];
+  error?: string;
   screenshotPaths: string[];
   tracePaths: string[];
   videoPaths: string[];
+}
+
+export interface FailedTest extends TestResult {
+  status: "failed" | "timedOut";
+  error: string;
 }
 
 export interface QaRunSummary {
@@ -26,10 +36,12 @@ export interface QaRunSummary {
   failed: number;
   skipped: number;
   durationMs: number;
+  tests: TestResult[];
   failedTests: FailedTest[];
 }
 
 const MAX_ERROR_LENGTH = 500;
+const JIRA_KEY_REGEX = /\b[A-Z][A-Z0-9]+-\d+\b/g;
 
 function truncate(str: string, max: number): string {
   if (str.length <= max) return str;
@@ -37,23 +49,44 @@ function truncate(str: string, max: number): string {
 }
 
 function collectAttachments(
-  result: any,
+  results: any[],
   type: "screenshot" | "trace" | "video"
 ): string[] {
-  if (!Array.isArray(result.attachments)) return [];
-  return result.attachments
-    .filter((a: any) => {
-      if (type === "screenshot") return a.name === "screenshot" || a.contentType?.startsWith("image/");
-      if (type === "trace") return a.name === "trace" || a.path?.endsWith(".zip");
-      if (type === "video") return a.name === "video" || a.contentType?.startsWith("video/");
-      return false;
-    })
-    .map((a: any) => a.path ?? a.body ?? "")
-    .filter(Boolean);
+  const attachments: string[] = [];
+  for (const result of results) {
+    if (!Array.isArray(result.attachments)) continue;
+    for (const attachment of result.attachments) {
+      const matchesType =
+        type === "screenshot"
+          ? attachment.name === "screenshot" || attachment.contentType?.startsWith("image/")
+          : type === "trace"
+            ? attachment.name === "trace" || attachment.path?.endsWith(".zip")
+            : attachment.name === "video" || attachment.contentType?.startsWith("video/");
+      if (matchesType) {
+        const path = attachment.path ?? attachment.body ?? "";
+        if (path) attachments.push(path);
+      }
+    }
+  }
+  return attachments;
 }
 
-function walkSuites(suites: any[]): FailedTest[] {
-  const failures: FailedTest[] = [];
+function extractJiraKeys(title: string): string[] {
+  return [...new Set(title.match(JIRA_KEY_REGEX) ?? [])].sort();
+}
+
+function normalizeStatus(status: string): TestStatus | null {
+  if (status === "passed" || status === "failed" || status === "timedOut" || status === "skipped") {
+    return status;
+  }
+  if (status === "interrupted") {
+    return "skipped";
+  }
+  return null;
+}
+
+function walkSuites(suites: any[]): TestResult[] {
+  const tests: TestResult[] = [];
 
   function walk(suite: any, fileHint: string): void {
     const file = suite.file ?? suite.title ?? fileHint;
@@ -65,25 +98,30 @@ function walkSuites(suites: any[]): FailedTest[] {
 
         for (const test of spec.tests) {
           if (!Array.isArray(test.results)) continue;
+          const finalResult = [...test.results].reverse().find((result) => normalizeStatus(result?.status));
+          const status = normalizeStatus(finalResult?.status);
+          if (!finalResult || !status) continue;
 
-          for (const result of test.results) {
-            if (result.status !== "failed" && result.status !== "timedOut") continue;
+          const rawError =
+            finalResult.error?.message ??
+            finalResult.error?.value ??
+            finalResult.error?.snippet ??
+            (status === "failed" || status === "timedOut" ? "Unknown error" : undefined);
 
-            const rawError =
-              result.error?.message ??
-              result.error?.value ??
-              result.error?.snippet ??
-              "Unknown error";
-
-            failures.push({
-              title,
-              file,
-              error: truncate(String(rawError), MAX_ERROR_LENGTH),
-              screenshotPaths: collectAttachments(result, "screenshot"),
-              tracePaths: collectAttachments(result, "trace"),
-              videoPaths: collectAttachments(result, "video"),
-            });
-          }
+          tests.push({
+            title,
+            file,
+            status,
+            durationMs: test.results.reduce(
+              (sum: number, result: any) => sum + (typeof result?.duration === "number" ? result.duration : 0),
+              0,
+            ),
+            jiraKeys: extractJiraKeys(title),
+            ...(rawError && { error: truncate(String(rawError), MAX_ERROR_LENGTH) }),
+            screenshotPaths: collectAttachments(test.results, "screenshot"),
+            tracePaths: collectAttachments(test.results, "trace"),
+            videoPaths: collectAttachments(test.results, "video"),
+          });
         }
       }
     }
@@ -99,7 +137,7 @@ function walkSuites(suites: any[]): FailedTest[] {
     walk(suite, suite.file ?? suite.title ?? "");
   }
 
-  return failures;
+  return tests;
 }
 
 export function parseResults(repoRoot: string): QaRunSummary {
@@ -121,7 +159,10 @@ export function parseResults(repoRoot: string): QaRunSummary {
   const skipped = stats.skipped ?? 0;
   const durationMs = Math.round((stats.duration ?? 0));
 
-  const failedTests = walkSuites(Array.isArray(raw.suites) ? raw.suites : []);
+  const tests = walkSuites(Array.isArray(raw.suites) ? raw.suites : []);
+  const failedTests = tests.filter(
+    (test): test is FailedTest => test.status === "failed" || test.status === "timedOut",
+  );
 
-  return { total, passed, failed, skipped, durationMs, failedTests };
+  return { total, passed, failed, skipped, durationMs, tests, failedTests };
 }

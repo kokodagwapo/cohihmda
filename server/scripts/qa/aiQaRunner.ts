@@ -27,7 +27,7 @@ import { createHmac } from "crypto";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-import { parseResults } from "./lib/resultParser.js";
+import { parseResults, type QaRunSummary } from "./lib/resultParser.js";
 import {
   uploadHtmlReport,
   uploadFailureArtifacts,
@@ -39,7 +39,12 @@ import {
   updateConfluencePages,
   reportFailuresToJira,
   reportSuccessToJira,
+  type QaRelatedCommit,
+  type QaTargetIssue,
 } from "./lib/atlassianReporter.js";
+import { runAcValidator } from "./ai/acValidator.js";
+import { mergeAcIntoTargets } from "./ai/acReporter.js";
+import { OpenAiLlmClient } from "./ai/llm/openAiClient.js";
 
 // ---------------------------------------------------------------------------
 // CLI arg parsing
@@ -72,6 +77,13 @@ function parseArgs(): {
 
 const JIRA_KEY_REGEX = /\b[A-Z][A-Z0-9]+-\d+\b/g;
 
+interface IssueBreakdown {
+  issueKey: string;
+  tests: Array<{ title: string; status: string; durationMs: number }>;
+  confluencePageUrl?: string;
+  hasEvidenceGap: boolean;
+}
+
 function readGitStdout(repoRoot: string, args: string[]): string {
   const result = spawnSync("git", args, {
     cwd: repoRoot,
@@ -87,28 +99,88 @@ function readGitStdout(repoRoot: string, args: string[]): string {
   return result.stdout ?? "";
 }
 
-function discoverJiraIssueKeys(repoRoot: string, commitRange: string): string[] {
+function unique(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function discoverCommitContext(
+  repoRoot: string,
+  commitRange: string
+): { issueKeys: string[]; relatedCommitsByIssueKey: Record<string, QaRelatedCommit[]> } {
   try {
-    const commitMessages = commitRange
-      ? readGitStdout(repoRoot, ["log", "--format=%B", commitRange])
+    const rawLog = commitRange
+      ? readGitStdout(repoRoot, ["log", "--format=%H%x1f%s%x1f%B%x1e", commitRange])
       : readGitStdout(repoRoot, [
           "log",
-          "--format=%B",
+          "--format=%H%x1f%s%x1f%B%x1e",
           `-n${process.env.QA_COMMIT_LOOKBACK ?? "20"}`,
           "HEAD",
         ]);
 
-    const issueKeys = [...new Set((commitMessages.match(JIRA_KEY_REGEX) ?? []).sort())];
+    const relatedCommitsByIssueKey: Record<string, QaRelatedCommit[]> = {};
+    const discoveredIssueKeys = new Set<string>();
+
+    for (const entry of rawLog.split("\x1e").map((item) => item.trim()).filter(Boolean)) {
+      const [hash = "", subject = "", body = ""] = entry.split("\x1f");
+      const shortHash = hash.slice(0, 8);
+      const commitText = `${subject}\n${body}`;
+      const issueKeys = unique(commitText.match(JIRA_KEY_REGEX) ?? []);
+
+      for (const issueKey of issueKeys) {
+        discoveredIssueKeys.add(issueKey);
+        const commits = relatedCommitsByIssueKey[issueKey] ?? [];
+        if (!commits.some((commit) => commit.hash === hash)) {
+          commits.push({
+            hash,
+            shortHash,
+            subject: subject.trim() || shortHash,
+          });
+        }
+        relatedCommitsByIssueKey[issueKey] = commits;
+      }
+    }
+
+    const issueKeys = [...discoveredIssueKeys].sort();
     if (issueKeys.length > 0) {
       console.log(`[QaRunner] Discovered Jira issues from commit history: ${issueKeys.join(", ")}`);
     } else {
       console.warn("[QaRunner] No Jira issues discovered from commit messages");
     }
-    return issueKeys;
+    return { issueKeys, relatedCommitsByIssueKey };
   } catch (err) {
     console.warn("[QaRunner] Failed to inspect git commit messages for Jira keys:", err);
-    return [];
+    return { issueKeys: [], relatedCommitsByIssueKey: {} };
   }
+}
+
+function extractIssueKeysFromTests(summary: QaRunSummary): string[] {
+  return unique(summary.tests.flatMap((test) => test.jiraKeys)).sort();
+}
+
+function buildIssueBreakdowns(
+  issueKeys: string[],
+  summary: QaRunSummary,
+  targets: QaTargetIssue[]
+): IssueBreakdown[] {
+  const pageUrlByIssueKey = new Map(
+    targets
+      .filter((target) => target.confluencePageUrl)
+      .map((target) => [target.issueKey, target.confluencePageUrl as string]),
+  );
+
+  return issueKeys.map((issueKey) => {
+    const tests = summary.tests.filter((test) => test.jiraKeys.includes(issueKey));
+    return {
+      issueKey,
+      tests: tests.map((test) => ({
+        title: test.title,
+        status: test.status,
+        durationMs: test.durationMs,
+      })),
+      ...(pageUrlByIssueKey.has(issueKey) && { confluencePageUrl: pageUrlByIssueKey.get(issueKey) }),
+      hasEvidenceGap: tests.length === 0,
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +203,7 @@ async function recordToLedger(opts: {
   jiraIssueKeys: string[];
   s3ReportKey: string | null;
   failedTests: Array<{ title: string; file: string; error?: string }>;
+  issueBreakdowns: IssueBreakdown[];
 }): Promise<void> {
   const apiKey = process.env.QA_RUNNER_API_KEY;
   const hmacSecret = process.env.QA_RUNNER_HMAC_SECRET;
@@ -156,6 +229,7 @@ async function recordToLedger(opts: {
     ...(opts.confluencePageUrls.length > 0 && { confluencePageUrls: opts.confluencePageUrls }),
     ...(opts.jiraIssueKeys.length > 0 && { jiraIssueKeys: opts.jiraIssueKeys }),
     ...(opts.s3ReportKey && { s3ReportKey: opts.s3ReportKey }),
+    ...(opts.issueBreakdowns.length > 0 && { issueBreakdowns: opts.issueBreakdowns }),
     failedTests: opts.failedTests.map((t) => ({
       title: t.title,
       file: t.file,
@@ -269,7 +343,7 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------------
   // Step 2: Parse results
   // ---------------------------------------------------------------------------
-  let summary;
+  let summary: QaRunSummary;
   try {
     summary = parseResults(repoRoot);
   } catch (err) {
@@ -278,8 +352,20 @@ async function main(): Promise<void> {
   }
 
   const bucket = process.env.AI_ARTIFACTS_BUCKET ?? "";
-  const discoveredIssueKeys = discoverJiraIssueKeys(repoRoot, commitRange);
-  let qaTargets = await resolveQaTargets(discoveredIssueKeys);
+  const { issueKeys: commitIssueKeys, relatedCommitsByIssueKey } = discoverCommitContext(repoRoot, commitRange);
+  const taggedIssueKeys = extractIssueKeysFromTests(summary);
+  const allIssueKeys = unique([...commitIssueKeys, ...taggedIssueKeys]).sort();
+  let qaTargets: QaTargetIssue[] = [];
+
+  if (taggedIssueKeys.length > 0) {
+    console.log(`[QaRunner] Discovered Jira issues from test tags: ${taggedIssueKeys.join(", ")}`);
+  }
+
+  if (allIssueKeys.length > 0) {
+    qaTargets = await resolveQaTargets(allIssueKeys);
+  } else {
+    console.warn("[QaRunner] No Jira issues discovered from commits or tagged tests — Atlassian reporting will be skipped");
+  }
 
   // ---------------------------------------------------------------------------
   // Step 3: Upload S3 artifacts (best-effort)
@@ -321,6 +407,7 @@ async function main(): Promise<void> {
         uploadedArtifacts = uploaded.map((artifact) => ({
           label: artifact.localPath.split(/[/\\]/).pop() ?? artifact.s3Key,
           s3Key: artifact.s3Key,
+          localPath: artifact.localPath,
           consoleUrl: buildS3ConsoleUrl(
             bucket,
             artifact.s3Key,
@@ -342,33 +429,58 @@ async function main(): Promise<void> {
   }
 
   // ---------------------------------------------------------------------------
-  // Step 4: Confluence per-issue page updates (best-effort)
+  // Step 4: AI AC validator (best-effort, gated)
   // ---------------------------------------------------------------------------
-  let confluencePageUrls: string[] = [];
-  try {
-    qaTargets = await updateConfluencePages({
-      targets: qaTargets,
-      summary,
-      suite,
-      environment,
-      buildNumber,
-      commitHash,
-      s3ReportKey,
-      reportConsoleUrl,
-      artifacts: uploadedArtifacts,
-    });
-    confluencePageUrls = qaTargets
-      .map((target) => target.confluencePageUrl)
-      .filter((value): value is string => Boolean(value));
-  } catch (err) {
-    console.warn("[QaRunner] Confluence update failed:", err);
+  if (process.env.QA_ENABLE_AC_VALIDATOR === "true") {
+    if (qaTargets.length === 0) {
+      console.warn("[QaRunner] QA_ENABLE_AC_VALIDATOR=true but no Jira targets resolved — skipping AC validation");
+    } else {
+      try {
+        const acResults = await runAcValidator({
+          targets: qaTargets,
+          environment,
+          buildNumber,
+          baseUrl,
+          llmClient: new OpenAiLlmClient(),
+        });
+        qaTargets = mergeAcIntoTargets(qaTargets, acResults);
+      } catch (err) {
+        console.warn("[QaRunner] AC validation failed:", err);
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
-  // Step 5: Jira reporting (best-effort)
+  // Step 5: Confluence per-issue page updates (best-effort)
+  // ---------------------------------------------------------------------------
+  let confluencePageUrls: string[] = [];
+  if (allIssueKeys.length > 0) {
+    try {
+      qaTargets = await updateConfluencePages({
+        targets: qaTargets,
+        summary,
+        suite,
+        environment,
+        buildNumber,
+        commitHash,
+        s3ReportKey,
+        reportConsoleUrl,
+        artifacts: uploadedArtifacts,
+        relatedCommitsByIssueKey,
+      });
+      confluencePageUrls = qaTargets
+        .map((target) => target.confluencePageUrl)
+        .filter((value): value is string => Boolean(value));
+    } catch (err) {
+      console.warn("[QaRunner] Confluence update failed:", err);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Step 6: Jira reporting (best-effort)
   // ---------------------------------------------------------------------------
   try {
-    if (summary.failed > 0) {
+    if (allIssueKeys.length > 0) {
       await reportFailuresToJira({
         targets: qaTargets,
         summary,
@@ -379,7 +491,6 @@ async function main(): Promise<void> {
         reportConsoleUrl,
         artifacts: uploadedArtifacts,
       });
-    } else {
       await reportSuccessToJira({
         targets: qaTargets,
         summary,
@@ -393,7 +504,7 @@ async function main(): Promise<void> {
   }
 
   // ---------------------------------------------------------------------------
-  // Step 6: Record in audit ledger (best-effort)
+  // Step 7: Record in audit ledger (best-effort)
   // ---------------------------------------------------------------------------
   try {
     await recordToLedger({
@@ -405,20 +516,21 @@ async function main(): Promise<void> {
       ...summary,
       confluencePageUrl: confluencePageUrls[0] ?? null,
       confluencePageUrls,
-      jiraIssueKeys: qaTargets.map((target) => target.issueKey),
+      jiraIssueKeys: allIssueKeys,
       s3ReportKey,
       failedTests: summary.failedTests.map((t) => ({
         title: t.title,
         file: t.file,
         error: t.error,
       })),
+      issueBreakdowns: buildIssueBreakdowns(allIssueKeys, summary, qaTargets),
     });
   } catch (err) {
     console.warn("[QaRunner] Ledger recording failed:", err);
   }
 
   // ---------------------------------------------------------------------------
-  // Step 7: Print summary and exit
+  // Step 8: Print summary and exit
   // ---------------------------------------------------------------------------
   printSummary({
     suite,
@@ -427,7 +539,7 @@ async function main(): Promise<void> {
     ...summary,
     s3ReportKey,
     confluencePageUrls,
-    jiraIssueKeys: qaTargets.map((target) => target.issueKey),
+    jiraIssueKeys: allIssueKeys,
   });
 
   // Exit with Playwright's exit code so the pipeline step fails on test failures

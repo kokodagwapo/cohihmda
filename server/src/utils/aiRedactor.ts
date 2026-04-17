@@ -48,6 +48,13 @@ export const AI_SAFE_FIELDS = new Set([
   'action_id',
   'action_type',
   'agent_id',
+  'issueKey',
+  'issueSummary',
+  'environment',
+  'statements',
+  'index',
+  'statement',
+  'category',
 ]);
 
 const REDACTED = '[REDACTED]';

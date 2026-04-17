@@ -15,7 +15,7 @@ test.describe("@critical Research Lab", () => {
     await expect(prompt).toHaveValue("What are the top 5 conversion bottlenecks this month?");
   });
 
-  test("runs investigation lifecycle and supports follow-up behavior", async ({ userPage }) => {
+  test("@critical @COHI-106 runs investigation lifecycle and supports follow-up behavior", async ({ userPage }) => {
     test.setTimeout(90_000);
     await userPage.goto("/research/session", { waitUntil: "domcontentloaded" });
 
