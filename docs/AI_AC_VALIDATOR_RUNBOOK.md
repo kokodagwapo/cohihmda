@@ -41,6 +41,13 @@ Default is `false`.
 - `QA_AC_URL_ALLOWLIST`
 - `QA_EVIDENCE_SIGNING_SECRET`
 - `JIRA_WEBHOOK_SECRET`
+- `QA_LEDGER_BACKEND_URL` — required when the validator runs outside the
+  backend process (e.g. Bitbucket pipelines). Points at the deployed
+  backend (`https://cohi-dev.coheus1.com`) so that fail-closed audit-ledger
+  writes go through `/api/internal/ai-ledger` instead of a direct pg
+  connection. `run-ai-qa.sh` defaults this to `E2E_BASE_URL` automatically.
+  Uses the same `QA_RUNNER_API_KEY` / `QA_RUNNER_HMAC_SECRET` pair as
+  `/api/internal/qa-run`.
 
 ## Execution safety model
 

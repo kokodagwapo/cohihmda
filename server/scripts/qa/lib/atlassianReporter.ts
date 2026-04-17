@@ -436,6 +436,35 @@ async function getConfluenceParent(cfg: AtlassianConfig): Promise<{ id: string; 
   };
 }
 
+/**
+ * Build a browser-friendly Confluence page URL from a v2 page response.
+ *
+ * Confluence v2 page responses include `_links.webui` which is a space-aware
+ * relative path such as `/spaces/SRS/pages/1351024641/QA+-+COHI-77`. The bare
+ * `/wiki/pages/{id}` form Confluence redirects to works for logged-in users
+ * with space access, but it is fragile and shows up as a broken link for
+ * users landing without a session. Always prefer the webui path.
+ */
+function buildConfluencePageUrl(
+  cfg: AtlassianConfig,
+  page: any,
+  fallbackPageId?: string | null,
+): string | null {
+  const webui: unknown = page?._links?.webui;
+  const base: unknown = page?._links?.base;
+  if (typeof webui === "string" && webui.length > 0) {
+    const normalizedWebui = webui.startsWith("/") ? webui : `/${webui}`;
+    const baseUrl =
+      typeof base === "string" && base.length > 0
+        ? base.replace(/\/$/, "")
+        : `https://${cfg.siteUrl}/wiki`;
+    return `${baseUrl}${normalizedWebui}`;
+  }
+  const pageId = String(page?.id ?? fallbackPageId ?? "");
+  if (!pageId) return null;
+  return `https://${cfg.siteUrl}/wiki/pages/${pageId}`;
+}
+
 async function findConfluencePageByTitle(
   cfg: AtlassianConfig,
   title: string,
@@ -491,7 +520,7 @@ async function upsertConfluencePageForTarget(
     const current = await confluenceRequest(cfg, "GET", `/api/v2/pages/${existingPageId}`);
     const currentVersion: number = current?.version?.number ?? 0;
 
-    await confluenceRequest(cfg, "PUT", `/api/v2/pages/${existingPageId}`, {
+    const updated = await confluenceRequest(cfg, "PUT", `/api/v2/pages/${existingPageId}`, {
       id: existingPageId,
       status: "current",
       title,
@@ -505,7 +534,9 @@ async function upsertConfluencePageForTarget(
     enrichedTarget = {
       ...target,
       confluencePageId: existingPageId,
-      confluencePageUrl: `https://${cfg.siteUrl}/wiki/pages/${existingPageId}`,
+      confluencePageUrl:
+        buildConfluencePageUrl(cfg, updated, existingPageId) ??
+        buildConfluencePageUrl(cfg, current, existingPageId),
       hasEvidenceGap,
     };
   } else {
@@ -525,7 +556,7 @@ async function upsertConfluencePageForTarget(
       ...target,
       confluencePageId: createdPageId,
       confluencePageUrl: createdPageId
-        ? `https://${cfg.siteUrl}/wiki/pages/${createdPageId}`
+        ? buildConfluencePageUrl(cfg, created, createdPageId)
         : null,
       hasEvidenceGap,
     };
