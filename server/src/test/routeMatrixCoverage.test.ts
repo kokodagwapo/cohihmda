@@ -7,6 +7,7 @@ const MATRIX_EXEMPT_PATHS = new Set([
   // Internal machine-to-machine routes are authenticated via HMAC/API keys,
   // not by the human RBAC role matrix.
   "/api/internal/qa-run",
+  "/api/webhooks/jira-transition",
 ]);
 
 function extractMountedApiPaths(fileContent: string): string[] {
