@@ -40,9 +40,11 @@ export async function postOpenAIChatCompletions(
   let response = await post(withTokenParam(prefersCompletionTokens));
   if (response.ok) return response;
 
+  // IMPORTANT: clone before reading the body. The original `response` must stay
+  // intact so the caller can inspect the full error payload if we return it.
   let errMsg = "";
   try {
-    const err = (await response.json()) as { error?: { message?: string } };
+    const err = (await response.clone().json()) as { error?: { message?: string } };
     errMsg = err.error?.message || "";
   } catch {
     // Ignore parse errors; return original response below.
@@ -54,7 +56,6 @@ export async function postOpenAIChatCompletions(
     /unsupported parameter:\s*'max_completion_tokens'/i.test(errMsg);
 
   if (!unsupportedMaxTokens && !unsupportedMaxCompletionTokens) {
-    // Return first response as-is for caller to handle.
     return response;
   }
 
