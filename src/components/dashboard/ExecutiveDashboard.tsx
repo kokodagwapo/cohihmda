@@ -2023,8 +2023,8 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
           </div>
         </div>
 
-        {/* KPI Cards Grid - 6 cards in a row */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+        {/* KPI Cards Grid - 2 rows on large screens */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 gap-3 sm:gap-4">
           {kpiCards.map((card) => {
             const hasTimeframe = card.id !== "activeLoans";
             const selectedPeriod = kpiTimeframes[card.id] || "mtd";

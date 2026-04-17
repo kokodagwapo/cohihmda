@@ -150,9 +150,7 @@ import { IndustryNewsCard } from "@/components/dashboard/IndustryNewsCard";
 import { BusinessDataTable } from "@/components/dashboard/BusinessDataTable";
 import { DashboardCard } from "@/components/dashboard/DashboardCard";
 import { DataTable } from "@/components/dashboard/DataTable";
-import { ExecutiveDashboard } from "@/components/dashboard/ExecutiveDashboard";
 import { CohiPromptsCard } from "@/components/dashboard/CohiPromptsCard";
-import { LeaderBoardSection } from "@/components/dashboard/LeaderBoardSection";
 import { LoanFunnelView } from "@/components/views/LoanFunnelView";
 import { TopTieringModal } from "@/components/dashboard/modals/TopTieringModal";
 import { TrendsModal } from "@/components/dashboard/modals/TrendsModal";
@@ -1358,37 +1356,6 @@ const Dashboard = () => {
                 </div>
               )}
 
-              {/* Dashboards Section */}
-              <div className="section-dashboards mt-12 sm:mt-16 w-full min-w-0 max-w-full">
-                  <h2 className="text-2xl font-semibold mb-6 text-slate-900 dark:text-white">
-                    Dashboards
-                  </h2>
-
-                  {/* Leaderboard - First under Dashboards heading */}
-                  <div id="leaderboard" className="section-leaderboard mb-8">
-                    <LeaderBoardSection
-                      dateFilter={dateFilter}
-                      selectedTenantId={selectedTenantId}
-                      selectedChannel={selectedChannel}
-                    />
-                  </div>
-
-                  {/* Business Overview */}
-                  {dashboardVisibility.executiveDashboard && (
-                    <div
-                      id="executiveDashboard"
-                      className="section-business-overview"
-                    >
-                      <ExecutiveDashboard
-                        dateFilter={dateFilter}
-                        year={funnelYear}
-                        selectedTenantId={selectedTenantId}
-                        selectedChannel={selectedChannel}
-                      />
-                    </div>
-                  )}
-
-                </div>
             </div>
           )}
         </div>
