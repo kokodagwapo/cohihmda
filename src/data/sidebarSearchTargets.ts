@@ -9,8 +9,8 @@ export function getSidebarSearchTargets(): SidebarRouteSearchTarget[] {
   const sectionTargets: SidebarRouteSearchTarget[] = [
     { id: 'section:CohiInsights', label: 'Cohi Insights', group: 'Insights', kind: 'section', sectionId: 'CohiInsights', keywords: ['insights', 'dashboard'] },
     { id: 'section:industryNews', label: 'Cohi Mortgage News', group: 'Insights', kind: 'section', sectionId: 'industryNews', keywords: ['insights', 'dashboard'] },
-    { id: 'section:leaderboard', label: 'Leaderboard', group: 'Dashboards', kind: 'section', sectionId: 'leaderboard', keywords: ['dashboards', 'insights'] },
-    { id: 'section:executiveDashboard', label: 'Business Overview', group: 'Dashboards', kind: 'section', sectionId: 'executiveDashboard', keywords: ['dashboards', 'insights'] },
+    { id: 'route:leaderboard-dashboard', label: 'Leaderboard', group: 'Dashboards', kind: 'route', path: '/leaderboard', keywords: ['dashboards', 'insights'] },
+    { id: 'route:business-overview-dashboard', label: 'Business Overview', group: 'Dashboards', kind: 'route', path: '/business-overview', keywords: ['dashboards', 'insights'] },
     { id: 'section:closingFalloutForecast', label: 'Closing & Fallout Forecast', group: 'Dashboards', kind: 'section', sectionId: 'closingFalloutForecast', keywords: ['dashboards', 'insights'] },
   ];
 

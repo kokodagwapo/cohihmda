@@ -51,6 +51,8 @@ import LockStratification from "./pages/LockStratification";
 import PipelineAnalysisDashboard from "./pages/PipelineAnalysisDashboard";
 import DataQualityDashboard from "./pages/DataQualityDashboard";
 import LoanComplexity from "./pages/LoanComplexity";
+import LeaderboardDashboard from "./pages/LeaderboardDashboard";
+import BusinessOverviewDashboard from "./pages/BusinessOverviewDashboard";
 import Actors from "./pages/Actors";
 import FalloutForecast from "./pages/FalloutForecast";
 import FalloutLoanDetail from "./pages/FalloutLoanDetail";
@@ -207,6 +209,8 @@ const App = () => (
               <Route path="/pipeline-analysis" element={<PipelineAnalysisDashboard />} />
               <Route path="/data-quality" element={<DataQualityDashboard />} />
               <Route path="/loan-complexity" element={<LoanComplexity />} />
+              <Route path="/leaderboard" element={<LeaderboardDashboard />} />
+              <Route path="/business-overview" element={<BusinessOverviewDashboard />} />
               <Route path="/credit-risk-management" element={<CreditRiskManagement />} />
                 <Route path="/company-scorecard" element={<CompanyScorecard />} />
               <Route path="/high-performers" element={<HighPerformers />} />

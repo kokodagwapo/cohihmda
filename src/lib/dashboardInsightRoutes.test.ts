@@ -9,14 +9,13 @@ describe("dashboardInsightRoutes", () => {
     expect(getDashboardInsightPath("loan-complexity")).toBe("/loan-complexity");
   });
 
-  it("getDashboardInsightPath maps leaderboard to insights hash", () => {
-    expect(getDashboardInsightPath("leaderboard")).toBe("/insights#leaderboard");
+  it("getDashboardInsightPath maps leaderboard to standalone route", () => {
+    expect(getDashboardInsightPath("leaderboard")).toBe("/leaderboard");
   });
 
   it("getDashboardInsightNavigateState applies filter context only for leaderboard", () => {
     const fc = { datePeriod: "qtd", leaderName: "Jane Doe" };
     expect(getDashboardInsightNavigateState("leaderboard", fc)).toEqual({
-      scrollToSection: "leaderboard",
       dashboardInsightFilterContext: fc,
       sourcePageId: "leaderboard",
     });

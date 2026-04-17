@@ -2,8 +2,7 @@
  * Single source of truth: dashboard insight sourcePageId → app route and navigation state.
  * Ensures "Go to [dashboard]" from evidence modal, Cohi, etc. lands on the correct page.
  *
- * filter_context / dashboardInsightFilterContext is only applied where a section reads it
- * (currently Leaderboard on /insights).
+ * filter_context / dashboardInsightFilterContext is only applied where a destination page reads it.
  */
 
 /** Registered dashboard insight page ids (extend when adding new insight-enabled dashboards). */
@@ -28,6 +27,7 @@ export function getDashboardInsightPath(pageId: string): string {
   const raw = (pageId || "").trim();
   if (!raw) return "/insights";
   const id = raw.toLowerCase();
+  if (id === "leaderboard") return "/leaderboard";
   if (id === "loan-complexity") return "/loan-complexity";
   if (id === "company-scorecard") return "/company-scorecard";
   if (id === "credit-risk-management") return "/credit-risk-management";
@@ -41,7 +41,7 @@ export function getDashboardInsightPath(pageId: string): string {
 
 /**
  * React Router location.state for navigate() after "Go to dashboard".
- * - Leaderboard: scroll + optional filter_context for LeaderBoardSection.
+ * - Leaderboard: optional filter_context for LeaderBoardSection.
  * - Loan Complexity: no filter state in router (page does not consume it yet).
  * - Other /insights#section: scroll only.
  */
@@ -52,6 +52,16 @@ export function getDashboardInsightNavigateState(
   const raw = (pageId || "").trim();
   if (!raw) return {};
   const id = raw.toLowerCase();
+
+  if (id === "leaderboard") {
+    const state: Record<string, unknown> = {};
+    const hasFilters = filterContext && Object.keys(filterContext).length > 0;
+    if (hasFilters) {
+      state.dashboardInsightFilterContext = filterContext;
+      state.sourcePageId = raw;
+    }
+    return state;
+  }
 
   if (id === "loan-complexity") {
     return {};
@@ -76,12 +86,6 @@ export function getDashboardInsightNavigateState(
   const state: Record<string, unknown> = {
     scrollToSection: raw,
   };
-
-  const hasFilters = filterContext && Object.keys(filterContext).length > 0;
-  if (hasFilters && id === "leaderboard") {
-    state.dashboardInsightFilterContext = filterContext;
-    state.sourcePageId = raw;
-  }
 
   return state;
 }

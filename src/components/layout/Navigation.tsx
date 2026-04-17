@@ -120,6 +120,12 @@ const topTieringMenuGroups = {
         icon: BarChart3,
         iconColor: "emerald" as const,
       },
+      {
+        id: "businessOverview",
+        label: "Business Overview",
+        icon: Target,
+        iconColor: "blue" as const,
+      },
     ],
   },
   performance: {
@@ -305,6 +311,7 @@ const routeMap: Record<string, string> = {
   companyScorecard: "/company-scorecard",
   topTieringComparison: "/performance/toptiering-comparison",
   workflowConversion: "/workflow-conversion",
+  businessOverview: "/business-overview",
   pipelineAnalysis: "/pipeline-analysis",
   loanComplexity: "/loan-complexity",
   loanDetail: "/loan-detail",
@@ -312,7 +319,7 @@ const routeMap: Record<string, string> = {
   pricingDashboard: "/pricing-dashboard",
   lockStratification: "/lock-stratification",
   highPerformers: "/high-performers",
-  leaderboard: "/insights",
+  leaderboard: "/leaderboard",
   actors: "/actors",
   salesScorecard: "/sales-scorecard",
   salesScorecardOverview: "/sales-scorecard-overview",
@@ -596,6 +603,8 @@ export function Navigation(
       "/company-scorecard",
       "/performance/toptiering-comparison",
       "/workflow-conversion",
+      "/business-overview",
+      "/leaderboard",
       "/pipeline-analysis",
       "/loan-complexity",
       "/loan-detail",
@@ -1150,7 +1159,7 @@ export function Navigation(
                       <div className="px-4 sm:px-5 lg:px-6 py-4 overflow-y-auto scrollbar-hide flex-1 min-h-0">
                         <div className="grid w-full grid-cols-4 gap-x-4 gap-y-0">
 
-                        {/* Column 1: General (with Business Overview at top) */}
+                        {/* Column 1: General */}
                         <div>
                           <div className="px-1 py-1 mb-1 flex items-center gap-1.5">
                             <div className="w-0.5 h-3.5 rounded-full bg-gradient-to-b from-blue-500 to-indigo-500 opacity-70" />
@@ -1159,36 +1168,6 @@ export function Navigation(
                             </span>
                           </div>
                           <div className="space-y-0.5">
-                            <button
-                              onClick={() => scrollToSection("executiveDashboard")}
-                              className={cn(
-                                compactItemBase,
-                                location.pathname === "/insights" && location.hash === "#section-executiveDashboard"
-                                  ? compactItemActive
-                                  : compactItemDefault,
-                              )}
-                              role="menuitem"
-                            >
-                              <div className={cn("w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0", iconStyleMap.blue.bg)}>
-                                <Target className={cn("w-3 h-3", iconStyleMap.blue.icon)} />
-                              </div>
-                              <div className="flex items-center gap-1 flex-1 min-w-0">
-                                <span className="truncate text-left">Business Overview</span>
-                                <button
-                                  type="button"
-                                  onClick={(e) => { e.stopPropagation(); togglePinned({ type: "section", id: "executiveDashboard" } as PinnedItem); }}
-                                  className="shrink-0 ml-auto p-0.5 rounded hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
-                                  title={isPinned({ type: "section", id: "executiveDashboard" } as PinnedItem) ? "Unpin from sidebar" : "Pin to sidebar"}
-                                  aria-label={isPinned({ type: "section", id: "executiveDashboard" } as PinnedItem) ? "Unpin" : "Pin to sidebar"}
-                                >
-                                  {isPinned({ type: "section", id: "executiveDashboard" } as PinnedItem) ? (
-                                    <PinOff className="w-3 h-3 text-amber-500" />
-                                  ) : (
-                                    <Pin className="w-3 h-3 text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300" />
-                                  )}
-                                </button>
-                              </div>
-                            </button>
                             {topTieringMenuGroups.general.items.map((item) => {
                               const Icon = item.icon;
                               const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
