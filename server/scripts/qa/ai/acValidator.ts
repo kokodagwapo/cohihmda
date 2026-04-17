@@ -61,6 +61,23 @@ function isDryRun(): boolean {
   return process.env.QA_AC_DRY_RUN === "true";
 }
 
+/**
+ * Comma-separated list of Jira keys the AC validator should skip without
+ * attempting to parse or plan — e.g. infrastructure/control-plane tickets
+ * whose acceptance criteria describe architecture rather than user-visible
+ * behavior an agent could exercise. Parsing those tickets produces noisy
+ * `parse_error` ledger rows without any QA value.
+ */
+function getSkipIssueKeys(): Set<string> {
+  const raw = process.env.QA_AC_SKIP_ISSUES ?? "";
+  return new Set(
+    raw
+      .split(",")
+      .map((s) => s.trim().toUpperCase())
+      .filter((s) => s.length > 0),
+  );
+}
+
 async function recordStageAction<T extends object>(
   parentActionId: string,
   requestId: string,
@@ -179,15 +196,38 @@ export async function runAcValidator(params: RunAcValidatorParams): Promise<Issu
   const maxDurationSecPerIssue = getMaxDurationSecPerIssue();
   const mustTeardownCleanly = requireTeardownSuccess();
   const dryRun = isDryRun();
+  const skipIssueKeys = getSkipIssueKeys();
   let consumedTokens = 0;
   let writesPerformedThisRun = 0;
   const results: IssueAcValidationResult[] = [];
 
-  const runnableTargets = params.targets.slice(0, maxIssuesPerRun);
-  const skippedTargets = params.targets.slice(maxIssuesPerRun);
+  // Peel off opt-out tickets (infra/meta) before applying the per-run cap so
+  // they don't consume capacity.
+  const candidateTargets = params.targets.filter((target) => {
+    if (skipIssueKeys.has(target.issueKey.toUpperCase())) {
+      results.push({
+        issueKey: target.issueKey,
+        issueSummary: target.issueSummary,
+        status: "inconclusive",
+        statements: [],
+        approvalStatus: "skipped_opt_out",
+        confluenceSummary:
+          "Skipped AC validation because this issue is listed in QA_AC_SKIP_ISSUES (infrastructure/meta ticket with non-behavioral acceptance criteria).",
+        screenshotPaths: [],
+      });
+      console.log(
+        `[AcValidator] ${target.issueKey} — skipped via QA_AC_SKIP_ISSUES`,
+      );
+      return false;
+    }
+    return true;
+  });
+
+  const runnableTargets = candidateTargets.slice(0, maxIssuesPerRun);
+  const skippedTargets = candidateTargets.slice(maxIssuesPerRun);
 
   console.log(
-    `[AcValidator] Starting — issues=${params.targets.length} (running=${runnableTargets.length}, over-limit=${skippedTargets.length}), dryRun=${dryRun}, maxWritesPerIssue=${maxWritesPerIssue}, maxWritesPerRun=${maxWritesPerRun}`,
+    `[AcValidator] Starting — issues=${params.targets.length} (running=${runnableTargets.length}, over-limit=${skippedTargets.length}, opt-out=${skipIssueKeys.size}), dryRun=${dryRun}, maxWritesPerIssue=${maxWritesPerIssue}, maxWritesPerRun=${maxWritesPerRun}`,
   );
   skippedTargets.forEach((target) => {
     results.push({

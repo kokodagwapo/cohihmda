@@ -48,6 +48,12 @@ Default is `false`.
   connection. `run-ai-qa.sh` defaults this to `E2E_BASE_URL` automatically.
   Uses the same `QA_RUNNER_API_KEY` / `QA_RUNNER_HMAC_SECRET` pair as
   `/api/internal/qa-run`.
+- `QA_AC_SKIP_ISSUES` — comma-separated Jira keys to skip (e.g.
+  `COHI-106,COHI-14,COHI-13`). Use this for infrastructure/meta tickets
+  whose acceptance criteria describe architecture rather than user-visible
+  behavior an agent could exercise. Skipped issues produce an
+  `inconclusive` result with `approvalStatus=skipped_opt_out` instead of a
+  noisy `parse_error`.
 
 ## Execution safety model
 

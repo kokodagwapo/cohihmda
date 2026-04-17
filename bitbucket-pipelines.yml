@@ -385,6 +385,11 @@ definitions:
           - export QA_SUITE="${QA_SUITE:-critical}"
           - export QA_ENABLE_AC_VALIDATOR="${QA_ENABLE_AC_VALIDATOR:-false}"
           - export QA_AC_DRY_RUN="${QA_AC_DRY_RUN:-false}"
+          # Infrastructure/meta tickets whose acceptance criteria describe
+          # architecture (not user-visible behavior) should be opted out so
+          # the agent does not waste a plan-generation call trying to parse
+          # them. COHI-106 is the AI control plane itself.
+          - export QA_AC_SKIP_ISSUES="${QA_AC_SKIP_ISSUES:-COHI-106,COHI-14,COHI-13}"
           - chmod +x ./scripts/bitbucket/run-ai-qa.sh
           - ./scripts/bitbucket/run-ai-qa.sh
         artifacts:
@@ -573,6 +578,8 @@ pipelines:
               - "true"
           - name: QA_AC_ALLOW_BROAD_SCOPE_TOKEN
             default: ""
+          - name: QA_AC_SKIP_ISSUES
+            default: "COHI-106,COHI-14,COHI-13"
           - name: QA_COMMIT_RANGE
             default: ""
           - name: QA_COMMIT_LOOKBACK
