@@ -59,6 +59,16 @@ const QaRunBodySchema = z.object({
         ),
         confluencePageUrl: z.string().url().optional(),
         hasEvidenceGap: z.boolean(),
+        evidencePackage: z
+          .object({
+            manifestS3Key: z.string().optional(),
+            manifestS3Url: z.string().url(),
+            manifestHash: z.string(),
+            signature: z.string(),
+          })
+          .optional(),
+        writesPerformed: z.number().int().nonnegative().optional(),
+        elevatedSteps: z.array(z.string()).optional(),
       })
     )
     .optional(),

@@ -4,14 +4,17 @@
 
 The AI AC Validator adds issue-specific acceptance-criteria evidence to the existing QA pipeline.
 
-It does not drive the browser autonomously in open-ended loops. It:
+It now supports deterministic autonomous execution, including safe self-scoped writes, while preserving a human evidence-approval checkpoint. It:
 
 1. reads approved Acceptance Criteria from Jira
 2. redacts the input
 3. asks OpenAI for a strict JSON test plan
 4. validates the plan against deny-lists and guardrails
-5. executes the plan deterministically
-6. writes evidence back into the QA reporting flow
+5. seeds a disposable QA fixture set for the target issue
+6. executes the plan deterministically
+7. packages signed evidence artifacts
+8. moves the Jira issue into Evidence Review for human approval
+9. tears down the QA-scoped resources it created
 
 ## Enablement
 
@@ -31,19 +34,36 @@ Default is `false`.
 - `QA_AC_MAX_TOKENS_PER_RUN`
 - `QA_AC_MAX_STEPS_PER_ISSUE`
 - `QA_AC_MAX_ISSUES_PER_RUN`
+- `QA_AC_MAX_WRITES_PER_ISSUE`
+- `QA_AC_MAX_WRITES_PER_RUN`
+- `QA_AC_MAX_DURATION_SEC_PER_ISSUE`
+- `QA_AC_REQUIRE_TEARDOWN_SUCCESS`
 - `QA_AC_URL_ALLOWLIST`
+- `QA_EVIDENCE_SIGNING_SECRET`
+- `JIRA_WEBHOOK_SECRET`
 
-## Read-only safety model
+## Execution safety model
 
-v1 permits only:
+The validator supports:
 
 - `goto`
-- `api` with `GET` or `HEAD`
+- `api` with `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`
 - `click`
 - `fill`
 - `assert`
+- `waitFor`
+- `upload`
+- `select`
+- `press`
+- `expectDownload`
 
-Rejected plans never execute.
+Plans are classified into:
+
+- `readonly`
+- `self_scoped`
+- `broad_scope`
+
+Broad-scope plans require a valid `QA_AC_ALLOW_BROAD_SCOPE_TOKEN` before execution. Executed plans move to `pending_evidence_review` until a human reviewer approves or rejects the evidence.
 
 ## Audit trail
 
@@ -55,7 +75,10 @@ Each issue validation records:
 - plan hash
 - execution result hash
 - per-statement pass/fail status
-- approval status (`auto_read_only` in v1)
+- evidence manifest hash + signature
+- writes performed
+- elevated steps
+- approval status (`auto_self_scoped`, `human_pre_approved`, `pending_pre_approval`, `pending_evidence_review`)
 
 ## Debugging rejected or failed runs
 
@@ -63,6 +86,7 @@ Each issue validation records:
 2. Check Jira comments for parse errors or evidence-gap notes.
 3. Inspect the audit ledger row for the issue validation metadata.
 4. Re-run with `QA_ENABLE_AC_VALIDATOR=true` against the same issue after fixing the Jira AC block.
+5. If the run reached `pending_evidence_review`, inspect the evidence manifest and either approve or reject it in Jira.
 
 ## Replay guidance
 
@@ -70,7 +94,7 @@ The validator stores hashes for the redacted prompt, plan, and result payloads s
 
 ## SOC 2 posture
 
-This is the Tier 1 + Tier 2 version:
+Current controls include:
 
 - fail-closed orchestrator
 - HMAC-protected runner ingestion
@@ -78,13 +102,16 @@ This is the Tier 1 + Tier 2 version:
 - pinned model with fallback
 - deny-listed plan validation
 - immutable audit rows
+- signed evidence manifests
+- webhook/poller-based approval state sync
+- teardown enforcement for QA-scoped fixtures
 
-Formal control mapping and longer-term retention policy stay in the deferred SOC 2 backlog.
+See `docs/QA_AGENT_V2_SOC2_CONTROLS.md` for the control mapping summary.
 
 ## Rollout
 
 1. Merge with `QA_ENABLE_AC_VALIDATOR=false`.
 2. Confirm regression-only QA pages still land on the correct Jira issues.
-3. Flip `QA_ENABLE_AC_VALIDATOR=true` in dev only.
-4. Review the first issue-level AC validation by hand in Jira, Confluence, and the audit ledger.
-5. Keep prod disabled until the deferred program controls are pulled in.
+3. Run `QA_ENABLE_AC_VALIDATOR=true` with `QA_AC_DRY_RUN=true` in dev.
+4. Enable real execution for a small issue set and review the evidence package by hand.
+5. Keep production autonomous execution disabled unless a separate approval policy is in place.

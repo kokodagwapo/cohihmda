@@ -4,11 +4,14 @@ import { startAction, transitionAction } from "../../../src/services/aiAgentOrch
 import { redactToJson } from "../../../src/utils/aiRedactor.js";
 import { uploadFailureArtifacts, buildS3ConsoleUrl, buildS3DirectUrl } from "../lib/s3Upload.js";
 import type { QaTargetIssue, QaArtifactLink } from "../lib/atlassianReporter.js";
+import { transitionJiraIssueToEvidenceReview } from "../lib/atlassianReporter.js";
+import { seedQaAgentTenant, teardownQaAgentTenant } from "../lib/qaFixtureSeeder.js";
 import { readIssueAcceptanceCriteria, postJiraComment, type JiraAcReadResult } from "./jiraAcReader.js";
 import { generatePlan, type GeneratedPlanResult } from "./planGenerator.js";
 import { validatePlan } from "./planValidator.js";
 import { executePlan, type ExecutePlanResult } from "./planExecutor.js";
 import { approvePlan, type PlanApprovalDecision } from "./planApprover.js";
+import { buildEvidencePackage } from "./evidencePackager.js";
 import type { IssueAcValidationResult, StatementResult, TestPlan } from "./types.js";
 import type { LlmClient } from "./llm/openAiClient.js";
 
@@ -36,6 +39,26 @@ function getMaxTokensPerRun(): number {
 
 function getMaxIssuesPerRun(): number {
   return Number(process.env.QA_AC_MAX_ISSUES_PER_RUN || "10");
+}
+
+function getMaxWritesPerIssue(): number {
+  return Number(process.env.QA_AC_MAX_WRITES_PER_ISSUE || "10");
+}
+
+function getMaxWritesPerRun(): number {
+  return Number(process.env.QA_AC_MAX_WRITES_PER_RUN || "25");
+}
+
+function getMaxDurationSecPerIssue(): number {
+  return Number(process.env.QA_AC_MAX_DURATION_SEC_PER_ISSUE || "900");
+}
+
+function requireTeardownSuccess(): boolean {
+  return process.env.QA_AC_REQUIRE_TEARDOWN_SUCCESS === "true";
+}
+
+function isDryRun(): boolean {
+  return process.env.QA_AC_DRY_RUN === "true";
 }
 
 async function recordStageAction<T extends object>(
@@ -151,7 +174,13 @@ async function uploadAcArtifacts(
 export async function runAcValidator(params: RunAcValidatorParams): Promise<IssueAcValidationResult[]> {
   const maxIssuesPerRun = getMaxIssuesPerRun();
   const maxTokensPerRun = getMaxTokensPerRun();
+  const maxWritesPerIssue = getMaxWritesPerIssue();
+  const maxWritesPerRun = getMaxWritesPerRun();
+  const maxDurationSecPerIssue = getMaxDurationSecPerIssue();
+  const mustTeardownCleanly = requireTeardownSuccess();
+  const dryRun = isDryRun();
   let consumedTokens = 0;
+  let writesPerformedThisRun = 0;
   const results: IssueAcValidationResult[] = [];
 
   const runnableTargets = params.targets.slice(0, maxIssuesPerRun);
@@ -183,15 +212,6 @@ export async function runAcValidator(params: RunAcValidatorParams): Promise<Issu
     });
 
     try {
-      await transitionAction({
-        actionId: parentActionId,
-        status: "approved",
-        metadata: {
-          issueKey: target.issueKey,
-          approvalStatus: "auto_read_only",
-        },
-      });
-
       const issue = await recordStageAction<JiraAcReadResult>(
         parentActionId,
         requestId,
@@ -271,114 +291,280 @@ export async function runAcValidator(params: RunAcValidatorParams): Promise<Issu
         { issueKey: target.issueKey },
         async () => {
           const planValidation = validatePlan(generatedPlan.plan);
-          const approval = approvePlan(generatedPlan.plan);
+          generatedPlan.plan = planValidation.plan;
+          if (planValidation.writesPlanned > maxWritesPerIssue) {
+            throw new Error(
+              `QA_AC_MAX_WRITES_PER_ISSUE exceeded by plan (${planValidation.writesPlanned} > ${maxWritesPerIssue})`,
+            );
+          }
+          if (writesPerformedThisRun + planValidation.writesPlanned > maxWritesPerRun) {
+            throw new Error(
+              `QA_AC_MAX_WRITES_PER_RUN exceeded by plan (${writesPerformedThisRun + planValidation.writesPlanned} > ${maxWritesPerRun})`,
+            );
+          }
+          const approval = approvePlan(planValidation.plan);
           if (!planValidation.ok) {
             throw new Error(planValidation.errors.join("; "));
           }
           if (!approval.approved) {
             throw new Error(approval.reason ?? "Plan approval failed");
           }
-          return {
-            approvalStatus: approval.approvalStatus,
-            stepCount: generatedPlan.plan.steps.length,
-          };
-        },
-      );
-
-      const execution = await recordStageAction<ExecutePlanResult>(
-        parentActionId,
-        requestId,
-        "plan_execution",
-        { issueKey: target.issueKey },
-        async () => {
-          const result = await executePlan({
-            plan: generatedPlan.plan,
-            issueKey: target.issueKey,
-            baseUrl: params.baseUrl,
-            buildNumber: params.buildNumber,
+          await transitionAction({
+            actionId: parentActionId,
+            status: "approved",
+            metadata: {
+              issueKey: target.issueKey,
+              planHash: approval.planHash,
+              approvalStatus: approval.approvalStatus,
+              elevatedSteps: approval.elevatedSteps,
+            },
           });
           return {
-            stepResults: result.stepResults,
-            screenshotPaths: result.screenshotPaths,
+            approved: true,
+            approvalStatus: approval.approvalStatus,
+            planHash: approval.planHash,
+            elevatedSteps: approval.elevatedSteps,
+            tokenMatched: approval.tokenMatched,
+            stepCount: planValidation.plan.steps.length,
           };
         },
       );
 
-      const artifactLinksByPath = await uploadAcArtifacts(
-        execution.screenshotPaths ?? [],
-        params.environment,
-        params.buildNumber,
-        target.issueKey,
-      );
-
-      const statementResults = buildStatementResults(
-        statements,
-        generatedPlan.plan,
-        execution.stepResults,
-        new Map([...artifactLinksByPath.entries()].map(([path, artifact]) => [path, artifact.consoleUrl])),
-      );
-      const overallStatus = statementResults.some((statement) => statement.status === "failed")
-        ? "failed"
-        : "passed";
-      const resultHash = sha256({ statementResults, stepResults: execution.stepResults });
-
-      await recordStageAction(
-        parentActionId,
-        requestId,
-        "result_reporting",
-        { issueKey: target.issueKey },
-        async () => ({
-          overallStatus,
-          statementResults,
-          resultHash,
-        }),
-      );
-
-      const issueResult: IssueAcValidationResult = {
-        issueKey: target.issueKey,
-        issueSummary: target.issueSummary,
-        status: overallStatus,
-        statements: statementResults,
-        modelName: generatedPlan.modelName,
-        modelTemperature: 0,
-        tokensIn: generatedPlan.tokensIn,
-        tokensOut: generatedPlan.tokensOut,
-        promptHash: sha256(generatedPlan.redactedInput),
-        planHash: sha256(generatedPlan.plan),
-        resultHash,
-        approvalStatus: validation.approvalStatus as string,
-        confluenceSummary:
-          overallStatus === "passed"
-            ? `${statementResults.length} AC statement(s) validated successfully.`
-            : "One or more AC statements failed validation.",
-        screenshotPaths: [...artifactLinksByPath.values()].map((artifact) => artifact.consoleUrl),
-      };
-
-      await transitionAction({
-        actionId: parentActionId,
-        status: overallStatus === "passed" ? "executed" : "failed",
-        metadata: {
+      if (dryRun) {
+        const dryRunResult: IssueAcValidationResult = {
           issueKey: target.issueKey,
           issueSummary: target.issueSummary,
-          environment: params.environment,
+          status: "inconclusive",
+          statements: [],
           modelName: generatedPlan.modelName,
           modelTemperature: 0,
           tokensIn: generatedPlan.tokensIn,
           tokensOut: generatedPlan.tokensOut,
-          promptHash: issueResult.promptHash,
-          planHash: issueResult.planHash,
-          resultHash: issueResult.resultHash,
-          perStatementResults: statementResults,
-          approvalStatus: issueResult.approvalStatus,
-          redactedAcText: generatedPlan.redactedInput,
-        },
-        errorMessage:
-          overallStatus === "failed"
-            ? "One or more acceptance criteria statements failed validation."
-            : undefined,
-      });
+          promptHash: sha256(generatedPlan.redactedInput),
+          planHash: validation.planHash,
+          approvalStatus: "dry_run",
+          confluenceSummary: "Plan generated and approved, but execution was skipped because QA_AC_DRY_RUN=true.",
+          screenshotPaths: [],
+          elevatedSteps: validation.elevatedSteps,
+        };
 
-      results.push(issueResult);
+        await transitionAction({
+          actionId: parentActionId,
+          status: "executed",
+          metadata: {
+            issueKey: target.issueKey,
+            issueSummary: target.issueSummary,
+            environment: params.environment,
+            dryRun: true,
+            approvalStatus: dryRunResult.approvalStatus,
+            planHash: dryRunResult.planHash,
+            elevatedSteps: validation.elevatedSteps,
+          },
+        });
+
+        results.push(dryRunResult);
+        continue;
+      }
+
+      let execution: ExecutePlanResult | null = null;
+      let evidencePackage: IssueAcValidationResult["evidencePackage"];
+      let teardownErrors: string[] = [];
+      let teardownDeletedIds: string[] = [];
+      let qaAgentRunTag = `qa-agent-run-${params.buildNumber}`;
+
+      try {
+        const fixtureSeed = await recordStageAction<{
+          qaAgentRunTag: string;
+          manifestPath: string;
+          resourceCount: number;
+        }>(
+          parentActionId,
+          requestId,
+          "fixture_seed",
+          { issueKey: target.issueKey },
+          async () => {
+            const seeded = await seedQaAgentTenant({
+              baseUrl: params.baseUrl,
+              buildNumber: params.buildNumber,
+              issueKey: target.issueKey,
+            });
+            qaAgentRunTag = seeded.qaAgentRunTag;
+            return {
+              qaAgentRunTag: seeded.qaAgentRunTag,
+              manifestPath: seeded.manifestPath,
+              resourceCount: seeded.resources.length,
+            };
+          },
+        );
+        qaAgentRunTag = fixtureSeed.qaAgentRunTag;
+
+        const executionStartedAt = Date.now();
+        execution = await recordStageAction<ExecutePlanResult>(
+          parentActionId,
+          requestId,
+          "plan_execution",
+          { issueKey: target.issueKey, qaAgentRunTag },
+          async () => {
+            const result = await executePlan({
+              plan: generatedPlan.plan,
+              issueKey: target.issueKey,
+              baseUrl: params.baseUrl,
+              buildNumber: params.buildNumber,
+            });
+            return result;
+          },
+        );
+        const executionDurationSec = (Date.now() - executionStartedAt) / 1000;
+        if (executionDurationSec > maxDurationSecPerIssue) {
+          throw new Error(
+            `QA_AC_MAX_DURATION_SEC_PER_ISSUE exceeded (${executionDurationSec.toFixed(1)}s > ${maxDurationSecPerIssue}s)`,
+          );
+        }
+        if (execution.writesPerformed > maxWritesPerIssue) {
+          throw new Error(
+            `QA_AC_MAX_WRITES_PER_ISSUE exceeded at execution time (${execution.writesPerformed} > ${maxWritesPerIssue})`,
+          );
+        }
+        writesPerformedThisRun += execution.writesPerformed;
+        if (writesPerformedThisRun > maxWritesPerRun) {
+          throw new Error(
+            `QA_AC_MAX_WRITES_PER_RUN exceeded (${writesPerformedThisRun} > ${maxWritesPerRun})`,
+          );
+        }
+
+        const artifactLinksByPath = await uploadAcArtifacts(
+          execution.screenshotPaths ?? [],
+          params.environment,
+          params.buildNumber,
+          target.issueKey,
+        );
+
+        evidencePackage = await recordStageAction(
+          parentActionId,
+          requestId,
+          "evidence_packaging",
+          { issueKey: target.issueKey, qaAgentRunTag },
+          async () =>
+            buildEvidencePackage({
+              issueKey: target.issueKey,
+              environment: params.environment,
+              buildNumber: params.buildNumber,
+              qaAgentRunTag,
+              stepResults: execution!.stepResults,
+              artifactPaths: [
+                ...execution!.screenshotPaths,
+                ...execution!.harPaths,
+                ...execution!.domSnapshotPaths,
+                ...execution!.stepResults
+                  .map((step) => step.downloadPath)
+                  .filter((path): path is string => Boolean(path)),
+              ],
+            }),
+        );
+
+        const statementResults = buildStatementResults(
+          statements,
+          generatedPlan.plan,
+          execution.stepResults,
+          new Map([...artifactLinksByPath.entries()].map(([path, artifact]) => [path, artifact.consoleUrl])),
+        );
+        const overallStatus = statementResults.some((statement) => statement.status === "failed")
+          ? "failed"
+          : "passed";
+        const resultHash = sha256({ statementResults, stepResults: execution.stepResults });
+
+        await recordStageAction(
+          parentActionId,
+          requestId,
+          "result_reporting",
+          { issueKey: target.issueKey },
+          async () => ({
+            overallStatus,
+            statementResults,
+            resultHash,
+          }),
+        );
+
+        const jiraMovedToEvidenceReview = await transitionJiraIssueToEvidenceReview(target.issueKey);
+        const issueResult: IssueAcValidationResult = {
+          issueKey: target.issueKey,
+          issueSummary: target.issueSummary,
+          modelName: generatedPlan.modelName,
+          modelTemperature: 0,
+          tokensIn: generatedPlan.tokensIn,
+          tokensOut: generatedPlan.tokensOut,
+          promptHash: sha256(generatedPlan.redactedInput),
+          planHash: validation.planHash,
+          resultHash,
+          approvalStatus: "pending_evidence_review",
+          statements: statementResults,
+          status: overallStatus,
+          confluenceSummary:
+            overallStatus === "passed"
+              ? `${statementResults.length} AC statement(s) validated successfully. Evidence is awaiting review.`
+              : "One or more AC statements failed validation. Evidence is awaiting review.",
+          screenshotPaths: [...artifactLinksByPath.values()].map((artifact) => artifact.consoleUrl),
+          evidencePackage,
+          writesPerformed: execution.writesPerformed,
+          elevatedSteps: validation.elevatedSteps,
+        };
+
+        await transitionAction({
+          actionId: parentActionId,
+          status: "pending_evidence_review",
+          metadata: {
+            issueKey: target.issueKey,
+            issueSummary: target.issueSummary,
+            environment: params.environment,
+            modelName: generatedPlan.modelName,
+            modelTemperature: 0,
+            tokensIn: generatedPlan.tokensIn,
+            tokensOut: generatedPlan.tokensOut,
+            promptHash: issueResult.promptHash,
+            planHash: issueResult.planHash,
+            resultHash: issueResult.resultHash,
+            perStatementResults: statementResults,
+            approvalStatus: issueResult.approvalStatus,
+            redactedAcText: generatedPlan.redactedInput,
+            evidencePackage,
+            writesPerformed: execution.writesPerformed,
+            elevatedSteps: validation.elevatedSteps,
+            jiraMovedToEvidenceReview,
+          },
+        });
+
+        results.push(issueResult);
+      } finally {
+        const teardown = await teardownQaAgentTenant({
+          baseUrl: params.baseUrl,
+          buildNumber: params.buildNumber,
+          issueKey: target.issueKey,
+        }).catch((error) => ({
+          qaAgentRunTag,
+          manifestPath: "",
+          deletedResourceIds: [],
+          errors: [error instanceof Error ? error.message : String(error)],
+        }));
+        teardownErrors = teardown.errors;
+        teardownDeletedIds = teardown.deletedResourceIds;
+      }
+
+      if (teardownErrors.length > 0 && mustTeardownCleanly) {
+        throw new Error(`QA fixture teardown failed: ${teardownErrors.join("; ")}`);
+      }
+
+      if (teardownDeletedIds.length > 0 || teardownErrors.length > 0) {
+        await transitionAction({
+          actionId: parentActionId,
+          status: "pending_evidence_review",
+          metadata: {
+            issueKey: target.issueKey,
+            qaAgentRunTag,
+            teardownDeletedIds,
+            teardownErrors,
+          },
+        });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await transitionAction({
@@ -396,7 +582,7 @@ export async function runAcValidator(params: RunAcValidatorParams): Promise<Issu
         issueSummary: target.issueSummary,
         status: /reject/i.test(message) ? "rejected" : "inconclusive",
         statements: [],
-        approvalStatus: "auto_read_only",
+        approvalStatus: /broad-scope|approval/i.test(message) ? "pending_pre_approval" : "execution_failed",
         confluenceSummary: message,
         screenshotPaths: [],
       });

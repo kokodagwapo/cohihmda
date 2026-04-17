@@ -19,6 +19,7 @@ export interface ConversationMessage {
   actions?: any[];
   teachingNotes?: string;
   timestamp: string;
+  qaAgentRunTag?: string;
 }
 
 export interface Conversation {

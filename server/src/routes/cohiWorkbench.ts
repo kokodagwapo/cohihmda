@@ -48,6 +48,18 @@ import { retrieveRAGContext } from "../services/ai/ragRetrieval.js";
 
 const router = Router();
 
+function resolveQaAgentRunTag(req: AuthRequest): string | null {
+  const headerTag = req.get("X-QA-Agent-Run");
+  if (headerTag?.trim()) {
+    return headerTag.trim();
+  }
+  const body = req.body as Record<string, unknown> | undefined;
+  if (typeof body?.qaAgentRunTag === "string" && body.qaAgentRunTag.trim()) {
+    return body.qaAgentRunTag.trim();
+  }
+  return null;
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -1699,6 +1711,7 @@ router.post(
       if (!tenantId) return res.status(400).json({ error: "No tenant context" });
 
       const message = req.body as ConversationMessage;
+      const qaAgentRunTag = resolveQaAgentRunTag(req);
       if (!message.id || !message.role || !message.content) {
         return res.status(400).json({ error: "Invalid message format" });
       }
@@ -1707,7 +1720,7 @@ router.post(
         tenantId,
         req.params.id as string,
         req.userId!,
-        message
+        qaAgentRunTag ? { ...message, qaAgentRunTag } : message
       );
 
       if (!success) {

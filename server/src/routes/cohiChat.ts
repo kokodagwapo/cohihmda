@@ -76,6 +76,28 @@ function buildQueryContext(req: AuthRequest): QueryContext {
   };
 }
 
+function resolveQaAgentRunTag(req: AuthRequest): string | null {
+  const headerTag = req.get('X-QA-Agent-Run');
+  if (headerTag?.trim()) {
+    return headerTag.trim();
+  }
+
+  const body = req.body as Record<string, unknown> | undefined;
+  if (typeof body?.qaAgentRunTag === 'string' && body.qaAgentRunTag.trim()) {
+    return body.qaAgentRunTag.trim();
+  }
+
+  return null;
+}
+
+function withQaAgentMetadata(
+  req: AuthRequest,
+  metadata: Record<string, unknown>,
+): Record<string, unknown> {
+  const qaAgentRunTag = resolveQaAgentRunTag(req);
+  return qaAgentRunTag ? { ...metadata, qaAgentRunTag } : metadata;
+}
+
 // ============================================================================
 // Routes
 // ============================================================================
@@ -124,7 +146,7 @@ router.post('/ask', authenticateToken, attachTenantContext, apiLimiter, async (r
           req.userId,
           sessionId,
           question,
-          JSON.stringify({ timestamp: new Date().toISOString() })
+          JSON.stringify(withQaAgentMetadata(req, { timestamp: new Date().toISOString() }))
         ]);
 
         // Save assistant response
@@ -135,14 +157,14 @@ router.post('/ask', authenticateToken, attachTenantContext, apiLimiter, async (r
           req.userId,
           sessionId,
           response.message,
-          JSON.stringify({
+          JSON.stringify(withQaAgentMetadata(req, {
             timestamp: new Date().toISOString(),
             hasVisualization: !!response.visualization,
             visualizationType: response.visualization?.type,
             rowCount: response.data?.length || 0,
             sources: response.sources,
             error: response.error
-          })
+          }))
         ]);
 
         // Auto-title the session with the first user question & bump updated_at
@@ -199,11 +221,11 @@ router.post('/refine', authenticateToken, attachTenantContext, apiLimiter, async
           req.userId,
           sessionId,
           refinement,
-          JSON.stringify({ 
+          JSON.stringify(withQaAgentMetadata(req, {
             timestamp: new Date().toISOString(),
             isRefinement: true,
             originalQuestion 
-          })
+          }))
         ]);
 
         await tenantPool.query(`
@@ -213,12 +235,12 @@ router.post('/refine', authenticateToken, attachTenantContext, apiLimiter, async
           req.userId,
           sessionId,
           response.message,
-          JSON.stringify({
+          JSON.stringify(withQaAgentMetadata(req, {
             timestamp: new Date().toISOString(),
             hasVisualization: !!response.visualization,
             visualizationType: response.visualization?.type,
             rowCount: response.data?.length || 0
-          })
+          }))
         ]);
 
         // Bump session updated_at
