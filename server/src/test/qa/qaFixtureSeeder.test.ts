@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "fs";
-import { teardownQaAgentTenant } from "../../../scripts/qa/lib/qaFixtureSeeder.js";
+import {
+  seedQaAgentTenant,
+  teardownQaAgentTenant,
+} from "../../../scripts/qa/lib/qaFixtureSeeder.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -44,7 +47,7 @@ describe("qaFixtureSeeder teardown", () => {
           {
             kind: "canvas",
             id: "canvas-1",
-            deletePath: "/api/workbench/canvas-1",
+            deletePath: "/api/workbench/canvases/canvas-1",
           },
         ],
       }),
@@ -91,5 +94,40 @@ describe("qaFixtureSeeder teardown", () => {
 
     expect(second.errors).toEqual([]);
     expect(second.deletedResourceIds).toEqual([]);
+  });
+
+  it("seeds canvases via the mounted workbench canvas CRUD route", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: "canvas-1" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ document: { id: "doc-1" } }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await seedQaAgentTenant({
+      baseUrl: "https://example.com",
+      buildNumber,
+      issueKey,
+      storageStatePath,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://example.com/api/workbench/canvases");
+    expect(result.resources).toEqual([
+      {
+        kind: "canvas",
+        id: "canvas-1",
+        deletePath: "/api/workbench/canvases/canvas-1",
+      },
+      {
+        kind: "knowledge_document",
+        id: "doc-1",
+        deletePath: "/api/knowledge-center/documents/doc-1",
+      },
+    ]);
   });
 });
