@@ -216,6 +216,13 @@ COMMIT="${BITBUCKET_COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo 'un
 export QA_ENABLE_AC_VALIDATOR="${QA_ENABLE_AC_VALIDATOR:-false}"
 export QA_AC_DRY_RUN="${QA_AC_DRY_RUN:-false}"
 
+# The AC validator runs the fail-closed audit-ledger registration
+# (aiAgentOrchestrator.startAction). That module expects a direct pg
+# connection which does not exist inside the Bitbucket runner, so we route
+# its writes through the deployed backend's HMAC-signed proxy endpoint
+# (/api/internal/ai-ledger) instead.
+export QA_LEDGER_BACKEND_URL="${QA_LEDGER_BACKEND_URL:-$E2E_BASE_URL}"
+
 log_info "Suite:       $SUITE"
 log_info "Build:       #$BUILD"
 log_info "Commit:      $COMMIT"
@@ -224,6 +231,7 @@ log_info "Backend CF:  $CF_STACK_BACKEND"
 log_info "QA bucket:   $AI_ARTIFACTS_BUCKET"
 log_info "AC Validator:$QA_ENABLE_AC_VALIDATOR"
 log_info "AC Dry Run:  $QA_AC_DRY_RUN"
+log_info "Ledger URL:  $QA_LEDGER_BACKEND_URL"
 
 # ---- Install server deps if needed ------------------------------------------
 if [ ! -d "server/node_modules" ]; then

@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
 import { resolve } from "path";
-import { startAction, transitionAction } from "../../../src/services/aiAgentOrchestrator.js";
+import { startAction, transitionAction } from "../lib/aiLedgerClient.js";
 import { redactToJson } from "../../../src/utils/aiRedactor.js";
 import { uploadFailureArtifacts, buildS3ConsoleUrl, buildS3DirectUrl } from "../lib/s3Upload.js";
 import type { QaTargetIssue, QaArtifactLink } from "../lib/atlassianReporter.js";

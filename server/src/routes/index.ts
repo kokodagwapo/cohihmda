@@ -50,6 +50,7 @@ import falloutResponseRoutes from "./falloutResponse.js";
 import podcastRoutes from "./podcast.js";
 import cohibuilderPortfolioRoutes from "./cohibuilderPortfolio.js";
 import qaResultsRoutes from "./internal/qaResults.js";
+import aiLedgerRoutes from "./internal/aiLedger.js";
 import jiraTransitionWebhookRoutes from "./webhooks/jiraTransition.js";
 import { pool, resetPool } from "../config/database.js";
 import { setupMockLosApi } from "../services/mockLosApi.js";
@@ -156,6 +157,7 @@ export function setupRoutes(app: Express) {
   app.use("/api/cohibuilder/portfolio", cohibuilderPortfolioRoutes); // Cohi Builder portfolio CRUD
   // Internal machine-to-machine endpoints (HMAC-signed, no JWT)
   app.use("/api/internal/qa-run", qaResultsRoutes);
+  app.use("/api/internal/ai-ledger", aiLedgerRoutes);
   app.use("/api/webhooks/jira-transition", jiraTransitionWebhookRoutes);
 
   // Health check handler (shared by both /health and /api/health)
