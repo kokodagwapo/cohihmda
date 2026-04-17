@@ -207,3 +207,13 @@ docs/due-diligence/
 sample-data/
 .obsidian/workspace.json
 INTERNAL_DISCOVERY.md
+
+# QA AI validator prompt + few-shot assets are source-controlled runtime
+# config: they ship with the backend bundle and are read at runtime by
+# server/scripts/qa/ai/planGenerator.ts. The catch-all *SYSTEM*.md /
+# *USER*.md / etc. rules above would otherwise silently drop them from git
+# (and therefore from the Bitbucket pipeline checkout, causing ENOENT on
+# planGenerator.system.md).
+!server/scripts/qa/ai/llm/prompts/
+!server/scripts/qa/ai/llm/prompts/**
+
