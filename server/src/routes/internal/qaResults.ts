@@ -46,6 +46,22 @@ const QaRunBodySchema = z.object({
   confluencePageUrls: z.array(z.string().url()).optional(),
   jiraIssueKeys: z.array(z.string()).optional(),
   s3ReportKey: z.string().optional(),
+  issueBreakdowns: z
+    .array(
+      z.object({
+        issueKey: z.string(),
+        tests: z.array(
+          z.object({
+            title: z.string(),
+            status: z.string(),
+            durationMs: z.number().int().nonnegative(),
+          })
+        ),
+        confluencePageUrl: z.string().url().optional(),
+        hasEvidenceGap: z.boolean(),
+      })
+    )
+    .optional(),
   failedTests: z
     .array(
       z.object({
@@ -177,6 +193,7 @@ router.post("/", async (req: Request, res: Response) => {
         ...(body.confluencePageUrl && { confluencePageUrl: body.confluencePageUrl }),
         ...(body.confluencePageUrls && { confluencePageUrls: body.confluencePageUrls }),
         ...(body.jiraIssueKeys && { jiraIssueKeys: body.jiraIssueKeys }),
+        ...(body.issueBreakdowns && { issueBreakdowns: body.issueBreakdowns }),
       },
     });
   } catch (err) {
@@ -204,6 +221,7 @@ router.post("/", async (req: Request, res: Response) => {
       metadata: {
         failedTests: body.failedTests ?? [],
         passRate: body.total > 0 ? Math.round((body.passed / body.total) * 100) : 0,
+        ...(body.issueBreakdowns && { issueBreakdowns: body.issueBreakdowns }),
       },
       ...(finalStatus === "failed" && {
         errorMessage: `${body.failed} test(s) failed in suite '${body.suite}' (build ${body.pipelineBuild})`,

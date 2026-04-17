@@ -18,6 +18,7 @@
     "audit:pricing-schema": "tsx scripts/audit-tenant-pricing-schema.ts",
     "seed:super-admin": "tsx scripts/seed-super-admin.ts",
     "seed:local": "tsx scripts/seed-local-dev.ts",
+    "lint:test-tags": "tsx scripts/qa/lib/lintTestTags.ts",
     "news:refresh": "tsx scripts/refresh-news.ts",
     "init:local": "tsx scripts/init-local-database.ts",
     "create-admin": "node ../scripts/create-admin-user.js",
