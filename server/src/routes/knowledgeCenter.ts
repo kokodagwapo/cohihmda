@@ -52,11 +52,26 @@ const uploadDocumentSchema = z.object({
   title: z.string().min(1).max(500).optional(),
   category: z.string().min(1).max(100).optional(),
   tags: z.string().optional(), // JSON stringified array
+  qaAgentRunTag: z.string().min(1).max(200).optional(),
 });
 
 // Helper to convert embedding array to pgvector format
 function embeddingToVector(embedding: number[]): string {
   return `[${embedding.join(",")}]`;
+}
+
+function resolveQaAgentRunTag(req: TenantRequest): string | null {
+  const headerTag = req.get("X-QA-Agent-Run");
+  if (headerTag?.trim()) {
+    return headerTag.trim();
+  }
+
+  const body = req.body as Record<string, unknown> | undefined;
+  if (typeof body?.qaAgentRunTag === "string" && body.qaAgentRunTag.trim()) {
+    return body.qaAgentRunTag.trim();
+  }
+
+  return null;
 }
 
 // =============================================================================
@@ -371,6 +386,8 @@ router.post(
 
       const { title, category, tags } = req.body;
       const parsedTags = tags ? JSON.parse(tags) : [];
+      const qaAgentRunTag = resolveQaAgentRunTag(req);
+      const metadata = qaAgentRunTag ? { qaAgentRunTag } : {};
 
       // Parse the document to extract text
       const parsed = await parseDocument(
@@ -399,8 +416,8 @@ router.post(
       // Create document record
       const docResult = await tenantPool.query(
         `INSERT INTO rag_documents 
-       (source_id, title, filename, file_type, file_size_bytes, content, category, tags, is_global, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, 'processing')
+       (source_id, title, filename, file_type, file_size_bytes, content, category, tags, metadata, is_global, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, false, 'processing')
        RETURNING *`,
         [
           sourceId,
@@ -411,6 +428,7 @@ router.post(
           parsed.text,
           category || "General",
           parsedTags,
+          metadata,
         ]
       );
 

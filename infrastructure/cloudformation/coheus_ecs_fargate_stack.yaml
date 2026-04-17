@@ -577,6 +577,34 @@ Resources:
       KmsKeyId: !Ref EncryptionKey
       SecretString: "__SET_OPENAI_API_KEY__"
 
+  QaAgentCredentialsSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ProjectName}/${Environment}/qa-runner/agent-credentials"
+      Description: QA agent browser credentials and tenant bootstrap data
+      KmsKeyId: !Ref EncryptionKey
+      SecretString: '{"username":"__SET_QA_AGENT_USERNAME__","password":"__SET_QA_AGENT_PASSWORD__"}'
+
+  QaEvidenceSigningSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ProjectName}/${Environment}/qa-runner/evidence-signing"
+      Description: HMAC signing secret for autonomous QA evidence manifests
+      KmsKeyId: !Ref EncryptionKey
+      GenerateSecretString:
+        ExcludePunctuation: true
+        PasswordLength: 64
+
+  JiraWebhookSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ProjectName}/${Environment}/qa-runner/jira-webhook"
+      Description: Shared secret used to verify Jira transition webhook payloads
+      KmsKeyId: !Ref EncryptionKey
+      GenerateSecretString:
+        ExcludePunctuation: true
+        PasswordLength: 64
+
   QaArtifactsBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
@@ -758,6 +786,9 @@ Resources:
                   - !Ref QaRunnerApiKeySecret
                   - !Ref QaRunnerHmacSecret
                   - !Ref QaAiOpenAiKeySecret
+                  - !Ref QaAgentCredentialsSecret
+                  - !Ref QaEvidenceSigningSecret
+                  - !Ref JiraWebhookSecret
                   - !If [HasOpenAISecret, !Ref OpenAIApiKeySecretArn, !Ref AWS::NoValue]
               - Effect: Allow
                 Action:
@@ -794,6 +825,9 @@ Resources:
                   - !Ref QaRunnerApiKeySecret
                   - !Ref QaRunnerHmacSecret
                   - !Ref QaAiOpenAiKeySecret
+                  - !Ref QaAgentCredentialsSecret
+                  - !Ref QaEvidenceSigningSecret
+                  - !Ref JiraWebhookSecret
                   - !If [HasOpenAISecret, !Ref OpenAIApiKeySecretArn, !Ref AWS::NoValue]
               - Effect: Allow
                 Action:
@@ -968,6 +1002,10 @@ Resources:
               ValueFrom: !Ref QaRunnerApiKeySecret
             - Name: QA_RUNNER_HMAC_SECRET
               ValueFrom: !Ref QaRunnerHmacSecret
+            - Name: QA_EVIDENCE_SIGNING_SECRET
+              ValueFrom: !Ref QaEvidenceSigningSecret
+            - Name: JIRA_WEBHOOK_SECRET
+              ValueFrom: !Ref JiraWebhookSecret
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -1077,6 +1115,10 @@ Resources:
               - Name: OPENAI_API_KEY
                 ValueFrom: !Ref OpenAIApiKeySecretArn
               - !Ref AWS::NoValue
+            - Name: QA_EVIDENCE_SIGNING_SECRET
+              ValueFrom: !Ref QaEvidenceSigningSecret
+            - Name: JIRA_WEBHOOK_SECRET
+              ValueFrom: !Ref JiraWebhookSecret
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -1358,6 +1400,18 @@ Outputs:
   QaAiOpenAiKeySecretArn:
     Description: Secrets Manager ARN for the OpenAI API key used by the QA AC validator
     Value: !Ref QaAiOpenAiKeySecret
+
+  QaAgentCredentialsSecretArn:
+    Description: Secrets Manager ARN for QA agent browser credentials/bootstrap data
+    Value: !Ref QaAgentCredentialsSecret
+
+  QaEvidenceSigningSecretArn:
+    Description: Secrets Manager ARN for evidence-manifest signing
+    Value: !Ref QaEvidenceSigningSecret
+
+  JiraWebhookSecretArn:
+    Description: Secrets Manager ARN for Jira transition webhook verification
+    Value: !Ref JiraWebhookSecret
 
   AlertsTopicArn:
     Description: SNS alerts topic ARN

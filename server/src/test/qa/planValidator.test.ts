@@ -41,4 +41,45 @@ describe("planValidator", () => {
     expect(result.ok).toBe(false);
     expect(result.errors.join(" ")).toMatch(/allowlist/i);
   });
+
+  it("classifies self-scoped mutations without elevation", () => {
+    const result = validatePlan({
+      ...BASE_PLAN,
+      steps: [
+        {
+          id: "ac1-create-canvas",
+          kind: "api",
+          method: "POST",
+          path: "/api/workbench/canvases",
+          expectStatus: 200,
+          body: { title: "QA Agent Canvas" },
+        },
+      ],
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.plan.steps[0]?.scope).toBe("self_scoped");
+    expect(result.plan.steps[0]?.requiresElevation).toBe(false);
+    expect(result.elevatedSteps).toEqual([]);
+  });
+
+  it("flags broad-scope mutations for elevation", () => {
+    const result = validatePlan({
+      ...BASE_PLAN,
+      steps: [
+        {
+          id: "ac1-delete-tenant",
+          kind: "api",
+          method: "DELETE",
+          path: "/api/tenants/123",
+          expectStatus: 204,
+        },
+      ],
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.plan.steps[0]?.scope).toBe("broad_scope");
+    expect(result.plan.steps[0]?.requiresElevation).toBe(true);
+    expect(result.elevatedSteps).toEqual(["ac1-delete-tenant"]);
+  });
 });

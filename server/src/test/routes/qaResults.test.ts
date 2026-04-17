@@ -82,6 +82,14 @@ describe("qaResults internal route", () => {
         ],
         confluencePageUrl: "https://cohi.atlassian.net/wiki/pages/12345",
         hasEvidenceGap: false,
+        evidencePackage: {
+          manifestS3Key: "ai-control-plane/dev/evidence/manifest.json",
+          manifestS3Url: "https://example-bucket.s3.amazonaws.com/manifest.json",
+          manifestHash: "abc123",
+          signature: "deadbeef",
+        },
+        writesPerformed: 2,
+        elevatedSteps: ["ac1-delete-tenant"],
       },
     ],
     failedTests: [

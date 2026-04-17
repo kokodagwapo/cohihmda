@@ -1,8 +1,9 @@
-import { mkdirSync, existsSync } from "fs";
+import { mkdirSync, existsSync, readFileSync, writeFileSync } from "fs";
 import { join, resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { chromium } from "@playwright/test";
-import type { TestPlan, StepExecutionResult } from "./types.js";
+import { redactToJson } from "../../../src/utils/aiRedactor.js";
+import type { PlanStep, StepExecutionResult, TestPlan } from "./types.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -18,10 +19,17 @@ export interface ExecutePlanParams {
 export interface ExecutePlanResult {
   stepResults: StepExecutionResult[];
   screenshotPaths: string[];
+  harPaths: string[];
+  domSnapshotPaths: string[];
+  writesPerformed: number;
 }
 
 function resolveStorageStatePath(): string {
   return process.env.QA_AC_STORAGE_STATE_PATH || join(REPO_ROOT, "e2e", ".auth", "admin.json");
+}
+
+function resolveRunTag(buildNumber: string): string {
+  return `qa-agent-run-${buildNumber}`;
 }
 
 function buildUrl(baseUrl: string, candidate: string): string {
@@ -31,38 +39,162 @@ function buildUrl(baseUrl: string, candidate: string): string {
   return `${baseUrl.replace(/\/+$/, "")}/${candidate.replace(/^\/+/, "")}`;
 }
 
+function isMutatingMethod(method: string): boolean {
+  return ["POST", "PUT", "PATCH", "DELETE"].includes(method.toUpperCase());
+}
+
+function extractAuthToken(storageStatePath: string, baseUrl: string): string | null {
+  if (!existsSync(storageStatePath)) {
+    return null;
+  }
+
+  try {
+    const targetOrigin = new URL(baseUrl).origin;
+    const raw = JSON.parse(readFileSync(storageStatePath, "utf8")) as {
+      origins?: Array<{ origin?: string; localStorage?: Array<{ name?: string; value?: string }> }>;
+    };
+    const matchingOrigins = (raw.origins ?? []).filter(
+      (origin) =>
+        origin.origin === targetOrigin ||
+        origin.localStorage?.some((entry) => entry.name === "auth_token"),
+    );
+    for (const origin of matchingOrigins) {
+      const token = origin.localStorage?.find((entry) => entry.name === "auth_token")?.value;
+      if (token) {
+        return token;
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
 async function assertVisible(page: any, locator: string): Promise<void> {
-  const isVisible = await page.locator(locator).first().isVisible({ timeout: 10_000 }).catch(() => false);
+  const isVisible = await page
+    .locator(locator)
+    .first()
+    .isVisible({ timeout: 10_000 })
+    .catch(() => false);
   if (!isVisible) {
     throw new Error(`Expected locator to be visible: ${locator}`);
   }
 }
 
 async function assertText(page: any, text: string): Promise<void> {
-  const visible = await page.getByText(text, { exact: false }).first().isVisible({ timeout: 10_000 }).catch(() => false);
+  const visible = await page
+    .getByText(text, { exact: false })
+    .first()
+    .isVisible({ timeout: 10_000 })
+    .catch(() => false);
   if (!visible) {
     throw new Error(`Expected text to be visible: ${text}`);
   }
 }
 
+async function assertUrl(page: any, expectedUrl: string): Promise<void> {
+  await page.waitForURL(new RegExp(expectedUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), {
+    timeout: 10_000,
+  });
+}
+
+async function assertLocatorText(page: any, locator: string, expectedText: string): Promise<void> {
+  const actualText = await page.locator(locator).first().textContent({ timeout: 10_000 });
+  if (!actualText?.includes(expectedText)) {
+    throw new Error(`Expected locator ${locator} to contain "${expectedText}" but saw "${actualText ?? ""}"`);
+  }
+}
+
+async function assertLocatorValue(page: any, locator: string, expectedValue: string): Promise<void> {
+  const actualValue = await page.locator(locator).first().inputValue({ timeout: 10_000 });
+  if (actualValue !== expectedValue) {
+    throw new Error(`Expected locator ${locator} to equal "${expectedValue}" but saw "${actualValue}"`);
+  }
+}
+
+function writeJson(path: string, value: unknown): void {
+  writeFileSync(path, JSON.stringify(value, null, 2), "utf8");
+}
+
 export async function executePlan(params: ExecutePlanParams): Promise<ExecutePlanResult> {
   const storageStatePath = resolveStorageStatePath();
+  const authToken = extractAuthToken(storageStatePath, params.baseUrl);
+  const runTag = resolveRunTag(params.buildNumber);
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
     baseURL: params.baseUrl,
+    acceptDownloads: true,
     ...(existsSync(storageStatePath) ? { storageState: storageStatePath } : {}),
   });
   const page = await context.newPage();
+
+  let activeStep: PlanStep | null = null;
+  let activeRequests: Array<Record<string, unknown>> = [];
+  let writesPerformed = 0;
+
+  await page.route("**/*", async (route) => {
+    const request = route.request();
+    const shouldTagWrite =
+      activeStep?.scope === "self_scoped" &&
+      isMutatingMethod(request.method()) &&
+      /^https?:\/\//i.test(request.url());
+
+    if (shouldTagWrite) {
+      await route.continue({
+        headers: {
+          ...request.headers(),
+          "X-QA-Agent-Run": runTag,
+        },
+      });
+      return;
+    }
+
+    await route.continue();
+  });
+
+  page.on("request", (request) => {
+    if (!activeStep) return;
+    activeRequests.push({
+      type: "request",
+      url: request.url(),
+      method: request.method(),
+      resourceType: request.resourceType(),
+      headers: request.headers(),
+    });
+  });
+
+  page.on("response", async (response) => {
+    if (!activeStep) return;
+    const request = response.request();
+    activeRequests.push({
+      type: "response",
+      url: response.url(),
+      method: request.method(),
+      status: response.status(),
+      headers: response.headers(),
+      contentType: response.headers()["content-type"] ?? null,
+    });
+  });
+
   await page.goto(params.baseUrl, { waitUntil: "domcontentloaded" }).catch(() => {});
 
-  const screenshotDir = join(REPO_ROOT, "test-results", "ac-validator", params.issueKey, params.buildNumber);
-  mkdirSync(screenshotDir, { recursive: true });
+  const artifactDir = join(REPO_ROOT, "test-results", "ac-validator", params.issueKey, params.buildNumber);
+  mkdirSync(artifactDir, { recursive: true });
 
   const stepResults: StepExecutionResult[] = [];
   const screenshotPaths: string[] = [];
+  const harPaths: string[] = [];
+  const domSnapshotPaths: string[] = [];
 
   for (const step of params.plan.steps) {
-    const screenshotPath = join(screenshotDir, `${step.id}.png`);
+    const screenshotPath = join(artifactDir, `${step.id}.png`);
+    const domSnapshotPath = join(artifactDir, `${step.id}.dom.html`);
+    const harPath = join(artifactDir, `${step.id}.har.json`);
+    const startedAt = Date.now();
+    activeStep = step;
+    activeRequests = [];
+
     try {
       if (step.kind === "goto") {
         await page.goto(buildUrl(params.baseUrl, step.url), { waitUntil: "domcontentloaded" });
@@ -72,37 +204,60 @@ export async function executePlan(params: ExecutePlanParams): Promise<ExecutePla
         if (step.expect.text) {
           await assertText(page, step.expect.text);
         }
-      } else if (step.kind === "api") {
-        const apiResult = await page.evaluate(
-          async ({ url, method }) => {
-            const token = window.localStorage.getItem("auth_token");
-            const response = await fetch(url, {
-              method,
-              headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-            });
-            return { status: response.status };
-          },
-          { url: buildUrl(params.baseUrl, step.path), method: step.method },
-        );
-        if (apiResult.status !== step.expectStatus) {
-          throw new Error(`Expected status ${step.expectStatus} but got ${apiResult.status}`);
+        if (step.expect.url) {
+          await assertUrl(page, step.expect.url);
         }
-        await page.screenshot({ path: screenshotPath, fullPage: true });
-        screenshotPaths.push(screenshotPath);
-        stepResults.push({
-          stepId: step.id,
-          status: "passed",
-          screenshotPath,
-          observedStatus: apiResult.status,
+      } else if (step.kind === "api") {
+        const url = buildUrl(params.baseUrl, step.path);
+        const headers: Record<string, string> = { Accept: "application/json" };
+        if (authToken) {
+          headers.Authorization = `Bearer ${authToken}`;
+        }
+        if (step.body) {
+          headers["Content-Type"] = "application/json";
+        }
+        if (step.scope === "self_scoped" && isMutatingMethod(step.method)) {
+          headers["X-QA-Agent-Run"] = runTag;
+        }
+
+        const response = await context.request.fetch(url, {
+          method: step.method,
+          headers,
+          data: step.body ? JSON.stringify(step.body) : undefined,
         });
-        continue;
+        const rawBody = await response.text().catch(() => "");
+        const headersObject = Object.fromEntries(
+          response.headersArray().map((header) => [header.name, header.value]),
+        );
+        activeRequests.push({
+          type: "api",
+          url,
+          method: step.method,
+          status: response.status(),
+          headers: headersObject,
+          body: redactToJson({ body: rawBody }),
+        });
+
+        if (step.scope === "self_scoped" && isMutatingMethod(step.method)) {
+          writesPerformed += 1;
+        }
+
+        if (response.status() !== step.expectStatus) {
+          throw new Error(`Expected status ${step.expectStatus} but got ${response.status()}`);
+        }
+        if (step.expectBodyContains && !rawBody.includes(step.expectBodyContains)) {
+          throw new Error(`Expected API body to contain "${step.expectBodyContains}"`);
+        }
       } else if (step.kind === "click") {
         await page.locator(step.locator).first().click({ timeout: 10_000 });
         if (step.expect.locator) {
           await assertVisible(page, step.expect.locator);
         }
+        if (step.expect.text) {
+          await assertText(page, step.expect.text);
+        }
         if (step.expect.url) {
-          await page.waitForURL(new RegExp(step.expect.url.replace(/\//g, "\\/")), { timeout: 10_000 });
+          await assertUrl(page, step.expect.url);
         }
       } else if (step.kind === "fill") {
         await page.locator(step.locator).first().fill(step.value, { timeout: 10_000 });
@@ -114,37 +269,114 @@ export async function executePlan(params: ExecutePlanParams): Promise<ExecutePla
           await assertVisible(page, step.locator);
         }
         if (step.toContainText) {
-          const actualText = await page.locator(step.locator).first().textContent({ timeout: 10_000 });
-          if (!actualText?.includes(step.toContainText)) {
-            throw new Error(
-              `Expected locator ${step.locator} to contain "${step.toContainText}" but saw "${actualText ?? ""}"`,
-            );
+          await assertLocatorText(page, step.locator, step.toContainText);
+        }
+        if (step.toHaveValue) {
+          await assertLocatorValue(page, step.locator, step.toHaveValue);
+        }
+      } else if (step.kind === "waitFor") {
+        await page.locator(step.locator).first().waitFor({
+          state: step.state,
+          timeout: step.timeout ?? 10_000,
+        });
+      } else if (step.kind === "upload") {
+        const fixturePath = join(REPO_ROOT, "e2e", "fixtures", "qa-agent", step.fixtureFile);
+        await page.locator(step.locator).setInputFiles(fixturePath);
+      } else if (step.kind === "select") {
+        await page.locator(step.locator).first().click({ timeout: 10_000 });
+        await page.locator("[role='listbox']").first().waitFor({ state: "visible", timeout: 10_000 });
+        await page
+          .locator("[role='option']")
+          .filter({ hasText: step.option })
+          .first()
+          .click({ timeout: 10_000 });
+        await assertLocatorText(page, step.locator, step.option);
+      } else if (step.kind === "press") {
+        await page.keyboard.press(step.keys);
+      } else if (step.kind === "expectDownload") {
+        const [download] = await Promise.all([
+          page.waitForEvent("download", { timeout: 10_000 }),
+          page.locator(step.triggerLocator).first().click({ timeout: 10_000 }),
+        ]);
+        const suggestedFilename = download.suggestedFilename();
+        const downloadPath = join(artifactDir, `${step.id}-${suggestedFilename}`);
+        await download.saveAs(downloadPath);
+        if (step.filenameMatches && !(new RegExp(step.filenameMatches, "i")).test(suggestedFilename)) {
+          throw new Error(`Expected download filename to match ${step.filenameMatches}, saw ${suggestedFilename}`);
+        }
+        if (step.contentType) {
+          const contentType = [...activeRequests]
+            .reverse()
+            .find((entry) => entry.type === "response" && typeof entry.contentType === "string")
+            ?.contentType;
+          if (typeof contentType !== "string" || !contentType.includes(step.contentType)) {
+            throw new Error(`Expected download content-type to contain "${step.contentType}"`);
           }
         }
+        activeRequests.push({
+          type: "download",
+          path: downloadPath,
+          suggestedFilename,
+        });
       }
 
+      const dom = await page.content();
       await page.screenshot({ path: screenshotPath, fullPage: true });
+      writeFileSync(domSnapshotPath, dom, "utf8");
+      writeJson(harPath, {
+        stepId: step.id,
+        stepKind: step.kind,
+        entries: activeRequests,
+      });
+
       screenshotPaths.push(screenshotPath);
+      harPaths.push(harPath);
+      domSnapshotPaths.push(domSnapshotPath);
+
+      const apiEntry = activeRequests.find((entry) => entry.type === "api");
       stepResults.push({
         stepId: step.id,
         status: "passed",
         screenshotPath,
+        domSnapshotPath,
+        harPath,
+        requestCount: activeRequests.length,
+        durationMs: Date.now() - startedAt,
+        ...(typeof apiEntry?.status === "number" ? { observedStatus: Number(apiEntry.status) } : {}),
+        ...(typeof apiEntry?.body === "string" ? { observedBodySnippet: String(apiEntry.body) } : {}),
       });
     } catch (error) {
+      const dom = await page.content().catch(() => "<html><body>DOM capture failed</body></html>");
       await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
+      writeFileSync(domSnapshotPath, dom, "utf8");
+      writeJson(harPath, {
+        stepId: step.id,
+        stepKind: step.kind,
+        entries: activeRequests,
+        error: error instanceof Error ? error.message : String(error),
+      });
+
       screenshotPaths.push(screenshotPath);
+      harPaths.push(harPath);
+      domSnapshotPaths.push(domSnapshotPath);
       stepResults.push({
         stepId: step.id,
         status: "failed",
         screenshotPath,
+        domSnapshotPath,
+        harPath,
+        requestCount: activeRequests.length,
+        durationMs: Date.now() - startedAt,
         error: error instanceof Error ? error.message : String(error),
       });
       break;
+    } finally {
+      activeStep = null;
     }
   }
 
   await context.close();
   await browser.close();
 
-  return { stepResults, screenshotPaths };
+  return { stepResults, screenshotPaths, harPaths, domSnapshotPaths, writesPerformed };
 }

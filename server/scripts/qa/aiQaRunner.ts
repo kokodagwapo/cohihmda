@@ -284,7 +284,8 @@ function printSummary(opts: {
   jiraIssueKeys: string[];
 }): void {
   const passRate = opts.total > 0 ? Math.round((opts.passed / opts.total) * 100) : 0;
-  const status = opts.failed > 0 ? "FAILED" : "PASSED";
+  const status =
+    opts.total === 0 ? "NO TESTS RAN" : opts.failed > 0 ? "FAILED" : "PASSED";
   const duration = (opts.durationMs / 1000).toFixed(1);
 
   console.log("\n" + "=".repeat(60));
@@ -324,9 +325,11 @@ async function main(): Promise<void> {
   const pwArgs = [
     "playwright",
     "test",
-    `--grep=@${suite}`,
     "--project=chromium",
   ];
+  if (suite !== "all") {
+    pwArgs.splice(2, 0, `--grep=@${suite}`);
+  }
 
   if (baseUrl) process.env.E2E_BASE_URL = baseUrl;
 
@@ -542,8 +545,11 @@ async function main(): Promise<void> {
     jiraIssueKeys: allIssueKeys,
   });
 
-  // Exit with Playwright's exit code so the pipeline step fails on test failures
-  process.exit(playwrightExitCode);
+  // Exit with Playwright's exit code so the pipeline step fails on test failures.
+  // Also fail loudly if Playwright "succeeded" but produced zero results — this almost
+  // always means the grep/tag filter matched nothing and is never a healthy outcome.
+  const finalExitCode = playwrightExitCode !== 0 ? playwrightExitCode : summary.total === 0 ? 2 : 0;
+  process.exit(finalExitCode);
 }
 
 main().catch((err) => {

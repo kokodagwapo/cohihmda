@@ -28,5 +28,67 @@
         }
       ]
     }
+  },
+  {
+    "issueKey": "COHI-96",
+    "acceptanceCriteria": [
+      "1. [MUTATION] Uploading a tenant document from Knowledge Center stores it successfully",
+      "2. [ASSERTION] The uploaded document appears in the tenant document list"
+    ],
+    "plan": {
+      "planVersion": 1,
+      "issueKey": "COHI-96",
+      "modelName": "gpt-5.4",
+      "modelTemperature": 0,
+      "generatedAt": "2026-04-17T00:00:00.000Z",
+      "steps": [
+        { "id": "ac1-goto-knowledge-center", "kind": "goto", "url": "/knowledge-center", "expect": { "text": "Knowledge Center" } },
+        { "id": "ac1-click-upload", "kind": "click", "locator": "button:has-text(\"Upload\")", "expect": { "locator": "input[type=\"file\"]" } },
+        { "id": "ac1-upload-fixture", "kind": "upload", "locator": "input[type=\"file\"]", "fixtureFile": "sample-knowledge-note.txt" },
+        { "id": "ac1-fill-title", "kind": "fill", "locator": "input[name=\"title\"]", "value": "QA Agent Upload", "expect": { "locator": "input[name=\"title\"]" } },
+        { "id": "ac1-submit-upload", "kind": "click", "locator": "button:has-text(\"Save\")", "expect": { "text": "processing" } },
+        { "id": "ac2-assert-uploaded-doc", "kind": "assert", "locator": "body", "toContainText": "QA Agent Upload" }
+      ]
+    }
+  },
+  {
+    "issueKey": "COHI-15",
+    "acceptanceCriteria": [
+      "1. [MUTATION] Saving a new workbench canvas persists it for the current user",
+      "2. [STATE] Reopening workbench shows the saved canvas title in the canvas list"
+    ],
+    "plan": {
+      "planVersion": 1,
+      "issueKey": "COHI-15",
+      "modelName": "gpt-5.4",
+      "modelTemperature": 0,
+      "generatedAt": "2026-04-17T00:00:00.000Z",
+      "steps": [
+        { "id": "ac1-goto-workbench", "kind": "goto", "url": "/workbench", "expect": { "text": "Workbench" } },
+        { "id": "ac1-click-new-canvas", "kind": "click", "locator": "button:has-text(\"New Canvas\")", "expect": { "text": "Untitled Canvas" } },
+        { "id": "ac1-fill-canvas-title", "kind": "fill", "locator": "input[placeholder*=\"Canvas\"]", "value": "QA Agent Canvas", "expect": { "locator": "input[placeholder*=\"Canvas\"]" } },
+        { "id": "ac1-save-canvas", "kind": "press", "keys": "Control+S" },
+        { "id": "ac2-goto-canvas-list", "kind": "goto", "url": "/workbench", "expect": { "text": "QA Agent Canvas" } },
+        { "id": "ac2-assert-canvas-listed", "kind": "assert", "locator": "body", "toContainText": "QA Agent Canvas" }
+      ]
+    }
+  },
+  {
+    "issueKey": "COHI-78",
+    "acceptanceCriteria": [
+      "1. [STATE] The tenants/workbench refresh indicators show latest refresh and next sync time for monitored tenants"
+    ],
+    "plan": {
+      "planVersion": 1,
+      "issueKey": "COHI-78",
+      "modelName": "gpt-5.4",
+      "modelTemperature": 0,
+      "generatedAt": "2026-04-17T00:00:00.000Z",
+      "steps": [
+        { "id": "ac1-goto-tenants", "kind": "goto", "url": "/admin", "expect": { "text": "Tenants" } },
+        { "id": "ac1-assert-last-refresh", "kind": "assert", "locator": "body", "toContainText": "Latest refresh" },
+        { "id": "ac1-assert-next-sync", "kind": "assert", "locator": "body", "toContainText": "Next sync" }
+      ]
+    }
   }
 ]

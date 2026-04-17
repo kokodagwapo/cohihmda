@@ -384,6 +384,7 @@ definitions:
           # Override QA_COMMIT_RANGE if you want a narrower/wider issue scan.
           - export QA_SUITE="${QA_SUITE:-critical}"
           - export QA_ENABLE_AC_VALIDATOR="${QA_ENABLE_AC_VALIDATOR:-false}"
+          - export QA_AC_DRY_RUN="${QA_AC_DRY_RUN:-false}"
           - chmod +x ./scripts/bitbucket/run-ai-qa.sh
           - ./scripts/bitbucket/run-ai-qa.sh
         artifacts:
@@ -565,11 +566,31 @@ pipelines:
             allowed-values:
               - "false"
               - "true"
+          - name: QA_AC_DRY_RUN
+            default: "false"
+            allowed-values:
+              - "false"
+              - "true"
+          - name: QA_AC_ALLOW_BROAD_SCOPE_TOKEN
+            default: ""
           - name: QA_COMMIT_RANGE
             default: ""
           - name: QA_COMMIT_LOOKBACK
             default: ""
       - step: *run-ai-qa-dev
+
+    poll-jira-approvals:
+      - step:
+          name: Poll Jira Evidence Approvals
+          oidc: true
+          deployment: dev
+          image: node:20
+          caches:
+            - server-npm
+          script:
+            - *setup-oidc
+            - cd server && npm ci
+            - npx tsx scripts/qa/poll-jira-approvals.ts
 
     # Database migrations
     run-migrations-dev:

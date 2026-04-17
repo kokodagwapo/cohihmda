@@ -24,6 +24,53 @@ const GLOBAL_VISIBILITY_ROLES = ['super_admin', 'platform_admin', 'tenant_admin'
 /** Roles that can fully access all canvases within selected tenant */
 const FULL_CANVAS_ACCESS_ROLES = ['super_admin', 'platform_admin'];
 
+function resolveQaAgentRunTag(req: AuthRequest): string | null {
+  const headerTag = req.get("X-QA-Agent-Run");
+  if (headerTag?.trim()) {
+    return headerTag.trim();
+  }
+
+  const body = req.body as Record<string, unknown> | undefined;
+  if (typeof body?.qaAgentRunTag === "string" && body.qaAgentRunTag.trim()) {
+    return body.qaAgentRunTag.trim();
+  }
+
+  const metadata =
+    body?.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata)
+      ? (body.metadata as Record<string, unknown>)
+      : null;
+  if (typeof metadata?.qaAgentRunTag === "string" && metadata.qaAgentRunTag.trim()) {
+    return metadata.qaAgentRunTag.trim();
+  }
+
+  return null;
+}
+
+function attachQaAgentRunTagToContent(content: unknown, qaAgentRunTag: string | null): unknown {
+  if (!qaAgentRunTag) {
+    return content;
+  }
+
+  const nextContent =
+    content && typeof content === "object" && !Array.isArray(content)
+      ? { ...(content as Record<string, unknown>) }
+      : {};
+  const metadata =
+    nextContent.metadata &&
+    typeof nextContent.metadata === "object" &&
+    !Array.isArray(nextContent.metadata)
+      ? { ...(nextContent.metadata as Record<string, unknown>) }
+      : {};
+
+  return {
+    ...nextContent,
+    metadata: {
+      ...metadata,
+      qaAgentRunTag,
+    },
+  };
+}
+
 /**
  * Resolve permission for a user on a canvas: 'owner' | 'editor' | 'viewer'.
  * Uses canvas_share_entries (direct user + group membership); falls back to
@@ -299,16 +346,17 @@ router.post(
 
       const sharedWith: string[] = Array.isArray(reqSharedWith) ? reqSharedWith : [];
       const createdByRole = req.userRole || 'user';
+      const qaAgentRunTag = resolveQaAgentRunTag(req);
 
       // Support both flat fields (from "Open in Workbench") and a pre-packed
       // content object (from future callers).
-      const content = rawContent ?? {
+      const content = attachQaAgentRunTagToContent(rawContent ?? {
         layoutVersion,
         layout: layout ?? [],
         annotations: annotations ?? [],
         background: background ?? { type: 'color', value: '#ffffff' },
         uploadsMeta: uploadsMeta ?? [],
-      };
+      }, qaAgentRunTag);
 
       const { tenantPool } = getTenantContext(req);
 
@@ -339,6 +387,7 @@ router.put(
     try {
       const { id } = req.params;
       const { title, content } = req.body;
+      const qaAgentRunTag = resolveQaAgentRunTag(req);
 
       const { tenantPool } = getTenantContext(req);
       const hasFullCanvasAccess = FULL_CANVAS_ACCESS_ROLES.includes(req.userRole || '');
@@ -368,7 +417,7 @@ router.put(
       }
       if (content !== undefined) {
         updates.push(`content = $${idx++}`);
-        params.push(JSON.stringify(content));
+        params.push(JSON.stringify(attachQaAgentRunTagToContent(content, qaAgentRunTag)));
       }
 
       params.push(id);
@@ -798,6 +847,7 @@ router.post(
         uploadsMeta: [],
         sourceInsight,
       };
+      const qaAgentRunTag = resolveQaAgentRunTag(req);
 
       // Create the canvas
       const canvasTitle = `Deep Dive: ${meta.headline.substring(0, 60)}${meta.headline.length > 60 ? '...' : ''}`;
@@ -806,7 +856,13 @@ router.post(
            (user_id, title, layout_version, content, created_by_role)
          VALUES ($1, $2, $3, $4, $5)
          RETURNING id, title, created_at, updated_at`,
-        [req.userId, canvasTitle, 'freeform-v1', JSON.stringify(content), req.userRole || 'user'],
+        [
+          req.userId,
+          canvasTitle,
+          'freeform-v1',
+          JSON.stringify(attachQaAgentRunTagToContent(content, qaAgentRunTag)),
+          req.userRole || 'user',
+        ],
       );
 
       console.log(`[Workbench] Created deep-dive canvas ${createRes.rows[0].id} for insight ${insightId}`);
@@ -862,6 +918,7 @@ router.post(
 
       let content: Record<string, unknown>;
       let canvasTitle: string;
+      const qaAgentRunTag = resolveQaAgentRunTag(req);
       try {
         const built = buildDashboardInsightDeepDiveCanvas(row);
         content = built.content;
@@ -876,7 +933,13 @@ router.post(
            (user_id, title, layout_version, content, created_by_role)
          VALUES ($1, $2, $3, $4, $5)
          RETURNING id, title, created_at, updated_at`,
-        [req.userId, canvasTitle, 'freeform-v1', JSON.stringify(content), req.userRole || 'user'],
+        [
+          req.userId,
+          canvasTitle,
+          'freeform-v1',
+          JSON.stringify(attachQaAgentRunTagToContent(content, qaAgentRunTag)),
+          req.userRole || 'user',
+        ],
       );
 
       console.log(`[Workbench] Created dashboard deep-dive canvas ${createRes.rows[0].id} for dashboard insight ${insightId}`);

@@ -44,7 +44,10 @@ export class SecurityBoundaryViolation extends Error {
 export type LedgerStatus =
   | 'started'
   | 'pending_approval'
+  | 'pending_evidence_review'
   | 'approved'
+  | 'evidence_approved'
+  | 'evidence_rejected'
   | 'executed'
   | 'failed';
 
@@ -268,6 +271,23 @@ export async function getAction(actionId: string): Promise<LedgerRow | null> {
   } catch (err) {
     logError('[AiOrchestrator] Failed to fetch action', err, { actionId });
     return null;
+  }
+}
+
+export async function listActionsByStatus(status: LedgerStatus): Promise<LedgerRow[]> {
+  if (process.env.SKIP_DB === 'true') return [];
+
+  const pool = getPool();
+
+  try {
+    const result = await pool.query<LedgerRow>(
+      `SELECT * FROM ai_control_plane.audit_ledger WHERE status = $1 ORDER BY created_at ASC`,
+      [status],
+    );
+    return result.rows;
+  } catch (err) {
+    logError('[AiOrchestrator] Failed to list actions by status', err, { status });
+    return [];
   }
 }
 

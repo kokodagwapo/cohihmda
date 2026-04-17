@@ -104,10 +104,12 @@ load_aws_managed_qa_config() {
   local hmac_secret_arn
   local atlassian_token_secret_arn
   local openai_secret_arn
+  local evidence_signing_secret_arn
   api_key_secret_arn="$(get_stack_output "QaRunnerApiKeySecretArn")"
   hmac_secret_arn="$(get_stack_output "QaRunnerHmacSecretArn")"
   atlassian_token_secret_arn="$(get_stack_output "QaAtlassianApiTokenSecretArn")"
   openai_secret_arn="$(get_stack_output "QaAiOpenAiKeySecretArn")"
+  evidence_signing_secret_arn="$(get_stack_output "QaEvidenceSigningSecretArn")"
 
   if [ -z "$AI_ARTIFACTS_BUCKET" ] || [ "$AI_ARTIFACTS_BUCKET" = "None" ]; then
     log_error "QaArtifactsBucketName output not found on stack $CF_STACK_BACKEND"
@@ -132,6 +134,11 @@ load_aws_managed_qa_config() {
   if [ -z "$QA_RUNNER_API_KEY" ] || [ "$QA_RUNNER_API_KEY" = "None" ]; then
     log_error "Failed to load QA_RUNNER_API_KEY from Secrets Manager"
     exit 1
+  fi
+
+  if [ -n "$evidence_signing_secret_arn" ] && [ "$evidence_signing_secret_arn" != "None" ]; then
+    export QA_EVIDENCE_SIGNING_SECRET
+    QA_EVIDENCE_SIGNING_SECRET="$(aws secretsmanager get-secret-value --secret-id "$evidence_signing_secret_arn" --region "$AWS_DEFAULT_REGION" --query SecretString --output text)"
   fi
 
   if [ -z "$QA_RUNNER_HMAC_SECRET" ] || [ "$QA_RUNNER_HMAC_SECRET" = "None" ]; then
@@ -184,6 +191,11 @@ done
 
 log_success "Environment validated"
 
+if printf '%s' "${E2E_BASE_URL:-}" | tr '[:upper:]' '[:lower:]' | grep -Eq 'prod|production'; then
+  log_error "run-ai-qa.sh refuses to target production URLs. Use the dedicated manual prod smoke pipeline instead."
+  exit 1
+fi
+
 # ---- AWS-managed QA config --------------------------------------------------
 require_aws_context
 install_aws_cli
@@ -202,6 +214,7 @@ SUITE="${QA_SUITE:-critical}"
 BUILD="${BITBUCKET_BUILD_NUMBER:-local}"
 COMMIT="${BITBUCKET_COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')}"
 export QA_ENABLE_AC_VALIDATOR="${QA_ENABLE_AC_VALIDATOR:-false}"
+export QA_AC_DRY_RUN="${QA_AC_DRY_RUN:-false}"
 
 log_info "Suite:       $SUITE"
 log_info "Build:       #$BUILD"
@@ -210,6 +223,7 @@ log_info "Base URL:    $E2E_BASE_URL"
 log_info "Backend CF:  $CF_STACK_BACKEND"
 log_info "QA bucket:   $AI_ARTIFACTS_BUCKET"
 log_info "AC Validator:$QA_ENABLE_AC_VALIDATOR"
+log_info "AC Dry Run:  $QA_AC_DRY_RUN"
 
 # ---- Install server deps if needed ------------------------------------------
 if [ ! -d "server/node_modules" ]; then

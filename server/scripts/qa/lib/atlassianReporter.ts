@@ -265,6 +265,9 @@ function buildConfluenceAdf(opts: {
   const failedTestsForIssue = getFailedTestsForIssue(summary, target.issueKey);
   const artifactsForIssue = getArtifactsForIssue(testsForIssue, artifacts);
   const hasEvidenceGap = testsForIssue.length === 0;
+  const requiresEvidenceApproval =
+    target.acValidation?.approvalStatus === "pending_evidence_review" ||
+    Boolean(target.acValidation?.evidencePackage);
   const evidenceForTest = (test: TestResult): Array<Record<string, unknown>> | string => {
     const paths = new Set([...test.screenshotPaths, ...test.tracePaths, ...test.videoPaths]);
     const matchingArtifacts = artifactsForIssue.filter(
@@ -289,6 +292,21 @@ function buildConfluenceAdf(opts: {
     version: 1,
     content: [
       adfHeading(1, buildConfluencePageTitle(target)),
+      ...(requiresEvidenceApproval
+        ? [
+            adfPanel("warning", [
+              adfParagraph("Approval Required: autonomous QA evidence has been generated and is awaiting human review."),
+              ...(target.acValidation?.evidencePackage?.manifestS3Url
+                ? [
+                    adfParagraph([
+                      adfText("Evidence manifest: "),
+                      adfText("Open manifest", target.acValidation.evidencePackage.manifestS3Url),
+                    ]),
+                  ]
+                : []),
+            ]),
+          ]
+        : []),
       adfParagraph([adfText("Jira issue: "), adfText(target.issueKey, target.issueUrl)]),
       adfParagraph(`Issue summary: ${target.issueSummary}`),
       adfParagraph(`Issue status: ${target.issueStatus}`),
@@ -843,5 +861,43 @@ export async function reportSuccessToJira(opts: {
     } catch (err) {
       console.warn(`[AtlassianReporter] Failed to post success comment on ${target.issueKey}:`, err);
     }
+  }
+}
+
+export async function transitionJiraIssueToEvidenceReview(
+  issueKey: string,
+  transitionNames = ["Evidence Review", "In Review"],
+): Promise<boolean> {
+  const cfg = loadConfig();
+  if (!cfg) {
+    return false;
+  }
+
+  try {
+    const transitions = await jiraRequest(
+      cfg,
+      "GET",
+      `/issue/${encodeURIComponent(issueKey)}/transitions`,
+    );
+    const transition = (transitions?.transitions ?? []).find((candidate: any) =>
+      transitionNames.some(
+        (name) => String(candidate?.name ?? "").trim().toLowerCase() === name.toLowerCase(),
+      ),
+    );
+
+    if (!transition?.id) {
+      console.warn(
+        `[AtlassianReporter] No evidence-review transition found for ${issueKey}; looked for ${transitionNames.join(", ")}`,
+      );
+      return false;
+    }
+
+    await jiraRequest(cfg, "POST", `/issue/${encodeURIComponent(issueKey)}/transitions`, {
+      transition: { id: transition.id },
+    });
+    return true;
+  } catch (error) {
+    console.warn(`[AtlassianReporter] Failed to transition ${issueKey} to evidence review:`, error);
+    return false;
   }
 }
