@@ -140,7 +140,9 @@ export async function seedQaAgentTenant(
   mkdirSync(dirname(manifestPath), { recursive: true });
 
   try {
-    const canvasResponse = await fetch(`${params.baseUrl.replace(/\/+$/, "")}/api/workbench`, {
+    const canvasResponse = await fetch(
+      `${params.baseUrl.replace(/\/+$/, "")}/api/workbench/canvases`,
+      {
       method: "POST",
       headers: {
         ...headers,
@@ -153,12 +155,13 @@ export async function seedQaAgentTenant(
         visibility: "private",
         qaAgentRunTag,
       }),
-    });
+      },
+    );
     const canvas = await expectJson<{ id: string }>(canvasResponse, "Seed canvas");
     resources.push({
       kind: "canvas",
       id: canvas.id,
-      deletePath: `/api/workbench/${canvas.id}`,
+      deletePath: `/api/workbench/canvases/${canvas.id}`,
     });
 
     const formData = new FormData();
