@@ -1,5 +1,4 @@
 import { postOpenAIChatCompletions } from "../../../../src/services/openai/chatCompletionsCompat.js";
-import { TEST_PLAN_JSON_SCHEMA } from "../types.js";
 
 export interface GeneratePlanInput {
   systemPrompt: string;
@@ -56,22 +55,36 @@ async function requestPlan(model: string, input: GeneratePlanInput): Promise<Res
           }),
         },
       ],
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "TestPlan",
-          schema: TEST_PLAN_JSON_SCHEMA,
-          strict: true,
-        },
-      },
+      // NOTE: We intentionally do not pass a strict `json_schema` response format.
+      // OpenAI's strict Structured Outputs disallows several JSON Schema
+      // features our TestPlan schema relies on (oneOf, minItems,
+      // additionalProperties:true, optional-not-in-required). We still enforce
+      // shape + safety downstream via planValidator.ts (Zod + policy checks),
+      // so `json_object` is sufficient to keep the model producing valid JSON.
+      response_format: { type: "json_object" },
     },
     4000,
   );
 }
 
 async function parseErrorMessage(response: Response): Promise<string> {
-  const payload = await response.json().catch(() => ({}));
-  return String(payload?.error?.message ?? response.statusText ?? "Unknown OpenAI error");
+  const rawText = await response.text().catch(() => "");
+  let parsedMessage: string | undefined;
+  if (rawText) {
+    try {
+      const payload = JSON.parse(rawText) as { error?: { message?: string; code?: string; type?: string } };
+      if (payload?.error?.message) {
+        const codeSuffix = payload.error.code ? ` [code=${payload.error.code}]` : "";
+        const typeSuffix = payload.error.type ? ` [type=${payload.error.type}]` : "";
+        parsedMessage = `${payload.error.message}${codeSuffix}${typeSuffix}`;
+      }
+    } catch {
+      // Ignore; fall back to raw text below.
+    }
+  }
+  const detail = parsedMessage ?? (rawText ? rawText.slice(0, 500) : "") ?? "";
+  const statusLabel = `HTTP ${response.status} ${response.statusText || ""}`.trim();
+  return detail ? `${statusLabel}: ${detail}` : statusLabel || "Unknown OpenAI error";
 }
 
 async function parseSuccessResponse(response: Response): Promise<{
