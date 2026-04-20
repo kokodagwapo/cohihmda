@@ -64,16 +64,19 @@ Fixture context (optional):
 
 Workbench Cohi chat guidance:
 - The Cohi side panel is **closed by default** under the validator. Whenever an AC requires interacting with the panel (its Chat/Dashboards/Schema tabs, its composer, or its chat transcript) the plan MUST first click the toolbar toggle `button:has-text("Cohi")` and only then assert/interact on the panel's internals. The tabs are not in the DOM while the panel is closed.
-- On seeded canvases with one or more widgets, the app can auto-send a proactive Cohi message shortly after load. This means empty-state copy such as "Intelligent Agent Mode" may disappear before your assertion executes.
-- Do NOT use empty-state chat text as a pass/fail landmark.
-- For chat-panel readiness, prefer stable controls: tab labels (`Chat`, `Dashboards`, `Schema`) and/or the composer placeholder text (`Ask Cohi`).
+- The app auto-sends a proactive Cohi briefing shortly after load on canvases with widgets. The `WorkbenchCanvas` component **suppresses that auto-briefing** when the loaded canvas carries a `qaAgentRunTag` metadata field, which the QA fixture seeder stamps on every canvas it creates. In practice this means: when the plan is running against `testContext.seededCanvasUrl`, empty-state chat copy such as **"Intelligent Agent Mode"** is stable and you MAY assert on it (AC #6 of COHI-77 requires exactly this assertion on seeded canvases).
+- Do NOT assert on empty-state chat copy when you are NOT on a QA-seeded canvas (e.g., production data, real user fixtures, shared canvases owned by another user) — in those cases the auto-briefing can still fire before your assertion executes and the empty state will disappear.
+- For chat-panel readiness assertions that have to work both on and off seeded canvases, prefer stable controls: tab labels (`Chat`, `Dashboards`, `Schema`) and/or the composer placeholder text (`Ask Cohi`).
 
 Workbench save-button guidance (critical — observed behavior differs from the naive "click save → save dialog opens" intuition):
 - `[data-testid="workbench-save-button"]` has **two different runtime behaviors** depending on whether a canvas id is already loaded:
   - **Existing/seeded canvas** (`testContext.seededCanvasUrl` → `/my-dashboard/<uuid>`): clicking the save button persists in-place and surfaces a `"Canvas saved"` toast. **No save dialog opens.** Asserting `[role="dialog"]` after clicking save will fail and timeout.
   - **New (unsaved) canvas** (route `/workbench` → "New canvas"): clicking the save button opens the name-the-canvas Save dialog, which must then be confirmed with the dialog's own "Save" button.
-- If the AC wording specifically says "opens a save dialog" / "opens a modal" / "asks for a name", start from a new canvas — not from `testContext.seededCanvasUrl`.
-- If the AC wording only says "saves" / "persists" / "stores" / "can be saved", prefer the seeded canvas and assert the `"Canvas saved"` toast (or a `GET /api/workbench/canvases` follow-up) — do NOT invent a dialog.
+- **Explicit decision rule — you MUST pick exactly one branch, not blend them.** Mixing them (e.g. navigating to the seeded canvas and then asserting `[role="dialog"]` after clicking save) is the single most common planner mistake and will always fail:
+  1. **If `testContext.seededCanvasUrl` is provided AND the plan navigates to it**, the save button click MUST be asserted via the `"Canvas saved"` toast (`"text=Canvas saved"` or `"[data-sonner-toast]"`) or via a follow-up `GET /api/workbench/canvases`. You MUST NOT emit a `[role="dialog"]` assertion on this step. The dialog simply does not render in this path — the app short-circuits to a direct save.
+  2. **If the AC wording specifically requires a save dialog** (phrases like "opens a save dialog", "prompts for a name", "opens a modal to name the canvas", "shows a save modal"), you MUST start the save sub-plan from `/workbench` (the new-canvas hub) instead of `testContext.seededCanvasUrl`. Click "New canvas" first, then click the save button to trigger the dialog, then close it.
+- If the AC wording only says "saves" / "persists" / "stores" / "can be saved" (no dialog/modal/prompt language), prefer the seeded canvas + toast path — it's faster and doesn't leave a stray canvas behind.
+- When in doubt between the two paths, prefer the seeded-canvas toast path. A "Canvas saved" toast is stronger evidence of persistence than a dialog opening (the dialog alone proves nothing was saved yet).
 - An analogous rule applies to other canvas-scoped affordances (share, export, delete): verify by reading the UI, not by assuming every button opens a modal.
 
 Modal/dialog hygiene (important — violations cause "backdrop intercepts pointer events" click failures):

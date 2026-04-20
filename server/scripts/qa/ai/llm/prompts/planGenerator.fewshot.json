@@ -1,35 +1,5 @@
 [
   {
-    "issueKey": "COHI-77",
-    "acceptanceCriteria": [
-      "1. [ROUTE] Navigating to /workbench/agents renders a heading \"Agents\"",
-      "2. [ASSERTION] The page shows a \"New Agent\" button"
-    ],
-    "plan": {
-      "planVersion": 1,
-      "issueKey": "COHI-77",
-      "modelName": "gpt-5.4",
-      "modelTemperature": 0,
-      "generatedAt": "2026-04-14T00:00:00.000Z",
-      "steps": [
-        {
-          "id": "ac1-goto-agents",
-          "kind": "goto",
-          "url": "/workbench/agents",
-          "expect": {
-            "text": "Agents"
-          }
-        },
-        {
-          "id": "ac2-assert-new-agent-button",
-          "kind": "assert",
-          "locator": "button:has-text(\"New Agent\")",
-          "toBeVisible": true
-        }
-      ]
-    }
-  },
-  {
     "issueKey": "COHI-96",
     "acceptanceCriteria": [
       "1. [MUTATION] Uploading a tenant document from Knowledge Center stores it successfully",
