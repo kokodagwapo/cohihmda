@@ -1,7 +1,7 @@
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from "fs";
 import { join, resolve, dirname } from "path";
 import { fileURLToPath } from "url";
-import { chromium } from "@playwright/test";
+import { chromium, expect } from "@playwright/test";
 import { redactToJson } from "../../../src/utils/aiRedactor.js";
 import type { PlanStep, StepExecutionResult, TestPlan } from "./types.js";
 import {
@@ -117,16 +117,29 @@ async function assertUrl(page: any, expectedUrl: string): Promise<void> {
   });
 }
 
+// NOTE: `locator.textContent()` and `locator.inputValue()` are one-shot reads —
+// they do NOT poll. If the target element is mid-rerender (loading skeleton →
+// data render, controlled input hydration, etc.), a one-shot read fires before
+// the real content lands and we falsely fail. `expect(...).toContainText(...)`
+// and `expect(...).toHaveValue(...)` auto-poll until the timeout, which matches
+// the `waitFor({ state: "visible" })` pattern we already use for assertVisible
+// and matches how Playwright's own `expect` web-first assertions are documented
+// to behave. This is the exact same race class as the `isVisible()` comment
+// above, just for text/value instead of visibility.
 async function assertLocatorText(page: any, locator: string, expectedText: string): Promise<void> {
-  const actualText = await page.locator(locator).first().textContent({ timeout: 10_000 });
-  if (!actualText?.includes(expectedText)) {
+  try {
+    await expect(page.locator(locator).first()).toContainText(expectedText, { timeout: 10_000 });
+  } catch {
+    const actualText = await page.locator(locator).first().textContent().catch(() => null);
     throw new Error(`Expected locator ${locator} to contain "${expectedText}" but saw "${actualText ?? ""}"`);
   }
 }
 
 async function assertLocatorValue(page: any, locator: string, expectedValue: string): Promise<void> {
-  const actualValue = await page.locator(locator).first().inputValue({ timeout: 10_000 });
-  if (actualValue !== expectedValue) {
+  try {
+    await expect(page.locator(locator).first()).toHaveValue(expectedValue, { timeout: 10_000 });
+  } catch {
+    const actualValue = await page.locator(locator).first().inputValue().catch(() => "");
     throw new Error(`Expected locator ${locator} to equal "${expectedValue}" but saw "${actualValue}"`);
   }
 }
@@ -154,6 +167,70 @@ export async function executePlan(params: ExecutePlanParams): Promise<ExecutePla
     acceptDownloads: true,
     ...(existsSync(storageStatePath) ? { storageState: storageStatePath } : {}),
   });
+
+  // ── QA overlay neutralizer ───────────────────────────────────────────────
+  // The Cohi UI has several auto-firing, backdrop-carrying overlays whose
+  // visibility is driven by server-side tutorial prefs or localStorage flags:
+  //
+  //   1. WelcomeTourTrigger (src/components/tutorial/WelcomeTourTrigger.tsx)
+  //      fires a Radix Dialog ~1s after the user lands on /insights when
+  //      `prefs.onboarding_complete === false`. Its backdrop intercepts all
+  //      pointer events.
+  //   2. WhatsNewButton (src/components/tutorial/WhatsNewButton.tsx) is
+  //      mounted inside the global Navigation and fires a modal ~1.5s after
+  //      mount when `getUnseenEntries(prefs.whats_new_last_seen, entries)` is
+  //      non-empty. It lives on *every* authenticated page — including the
+  //      canvas editor — so it will bleed into any plan that stays on a page
+  //      for more than ~1.5s.
+  //   3. WorkbenchCanvas Cohi panel (src/components/workbench/WorkbenchCanvas.tsx)
+  //      auto-opens on the first visit when `cohi-workbench-visited` is missing
+  //      from localStorage, producing order-dependent open/closed state across
+  //      AC runs that share a storage state.
+  //
+  // The AC validator is not a real human tester and cannot react to these
+  // UX flourishes — they only show up as "backdrop intercepts pointer events"
+  // click timeouts or as flaky "panel is closed so Chat tab doesn't exist"
+  // failures. We neutralize all three here so plans run against a deterministic
+  // surface. We do NOT ship this mode in production: it only applies to the
+  // isolated Playwright context the AC validator spawns.
+  await context.addInitScript(() => {
+    try {
+      localStorage.setItem("cohi-welcome-tour-last-shown", new Date().toISOString());
+      localStorage.setItem("cohi-workbench-visited", "1");
+    } catch {
+      // Storage blocked (e.g. file:// origin during initial about:blank). Ignore.
+    }
+  });
+
+  // Also stub /api/user/preferences GETs so the TutorialContext never reads a
+  // server payload with `onboarding_complete=false` or a stale
+  // `whats_new_last_seen` that would retrigger WelcomeTour/WhatsNew dialogs
+  // on subsequent visits within the same context. We only stub GETs — writes
+  // continue unchanged so AC plans that legitimately mutate other preferences
+  // still hit the real backend.
+  await context.route("**/api/user/preferences", async (route) => {
+    const request = route.request();
+    if (request.method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    const qaSafePrefs = {
+      tutorial: {
+        tours_completed: ["welcome"],
+        missions_completed: [],
+        whats_new_last_seen: new Date().toISOString(),
+        help_dismissed: true,
+        learning_path_week: 0,
+        onboarding_complete: true,
+      },
+    };
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ preferences: qaSafePrefs }),
+    });
+  });
+
   const page = await context.newPage();
 
   let activeStep: PlanStep | null = null;

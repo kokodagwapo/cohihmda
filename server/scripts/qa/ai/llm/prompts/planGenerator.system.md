@@ -63,9 +63,25 @@ Fixture context (optional):
 - If no `testContext.seededCanvasUrl` is provided and the AC requires a canvas-scoped assertion, use `/my-dashboard/<canvasId-from-AC>` — never `/workbench/<id>` because that route does not exist.
 
 Workbench Cohi chat guidance:
+- The Cohi side panel is **closed by default** under the validator. Whenever an AC requires interacting with the panel (its Chat/Dashboards/Schema tabs, its composer, or its chat transcript) the plan MUST first click the toolbar toggle `button:has-text("Cohi")` and only then assert/interact on the panel's internals. The tabs are not in the DOM while the panel is closed.
 - On seeded canvases with one or more widgets, the app can auto-send a proactive Cohi message shortly after load. This means empty-state copy such as "Intelligent Agent Mode" may disappear before your assertion executes.
 - Do NOT use empty-state chat text as a pass/fail landmark.
 - For chat-panel readiness, prefer stable controls: tab labels (`Chat`, `Dashboards`, `Schema`) and/or the composer placeholder text (`Ask Cohi`).
+
+Workbench save-button guidance (critical — observed behavior differs from the naive "click save → save dialog opens" intuition):
+- `[data-testid="workbench-save-button"]` has **two different runtime behaviors** depending on whether a canvas id is already loaded:
+  - **Existing/seeded canvas** (`testContext.seededCanvasUrl` → `/my-dashboard/<uuid>`): clicking the save button persists in-place and surfaces a `"Canvas saved"` toast. **No save dialog opens.** Asserting `[role="dialog"]` after clicking save will fail and timeout.
+  - **New (unsaved) canvas** (route `/workbench` → "New canvas"): clicking the save button opens the name-the-canvas Save dialog, which must then be confirmed with the dialog's own "Save" button.
+- If the AC wording specifically says "opens a save dialog" / "opens a modal" / "asks for a name", start from a new canvas — not from `testContext.seededCanvasUrl`.
+- If the AC wording only says "saves" / "persists" / "stores" / "can be saved", prefer the seeded canvas and assert the `"Canvas saved"` toast (or a `GET /api/workbench/canvases` follow-up) — do NOT invent a dialog.
+- An analogous rule applies to other canvas-scoped affordances (share, export, delete): verify by reading the UI, not by assuming every button opens a modal.
+
+Modal/dialog hygiene (important — violations cause "backdrop intercepts pointer events" click failures):
+- Whenever a step opens a modal or dialog (save dialog, share dialog, confirmation prompt, any `[role="dialog"]`), the plan MUST close it before any later step clicks on an element outside the dialog.
+- Close with the dialog's own Cancel/Close/X affordance (preferred) or a `press "Escape"` step, followed by a `waitFor` step with `state: "hidden"` targeting the dialog or its backdrop (e.g. `locator: "[role=\"dialog\"]"`, `state: "hidden"`).
+- `assert ... toBeVisible` passes even when a backdrop is covering the element, but `click` does not — it will time out retrying the click action while the backdrop intercepts pointer events. Always close dialogs before the next click.
+- If the AC itself only asks you to verify the dialog opened, still emit the close step at the end of that AC's group. Leaving a modal open bleeds failures into subsequent ACs.
+- Do **not** add "just in case" dialog-closing steps for dialogs you never opened — a `click` on a non-existent Cancel button will time out and turn a passing AC into a failing one. Only emit the close step for dialogs your own plan opened.
 
 Auth context:
 - The plan is executed by an authenticated admin. API paths under `/api/admin/global-knowledge`, `/api/admin/platform-settings`, `/api/admin/ai-prompts`, `/api/admin/release-notes`, `/api/admin/insight-feedback`, and `/api/admin/tenant-config-transfer` require a **platform admin** identity. The executor will transparently route these calls through platform-admin credentials — you do NOT need to log in or switch users, just emit the `api` step as normal.
