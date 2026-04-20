@@ -371,15 +371,37 @@ export async function executePlan(params: ExecutePlanParams): Promise<ExecutePla
         ...(typeof apiEntry?.body === "string" ? { observedBodySnippet: String(apiEntry.body) } : {}),
       });
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       const dom = await page.content().catch(() => "<html><body>DOM capture failed</body></html>");
+      const observedUrl = page.url();
       await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
       writeFileSync(domSnapshotPath, dom, "utf8");
       writeJson(harPath, {
         stepId: step.id,
         stepKind: step.kind,
         entries: activeRequests,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage,
+        observedUrl,
       });
+
+      // Emit a single-line, log-friendly summary so pipeline stdout surfaces
+      // the failing step without requiring the reviewer to pull the evidence
+      // manifest from S3. Include the observed URL because most AC failures
+      // we've seen are goto/assert steps that misread a redirect target.
+      const stepSummary: Record<string, unknown> = { kind: step.kind };
+      if (step.kind === "goto") {
+        stepSummary.url = step.url;
+        stepSummary.expect = step.expect;
+      } else if (step.kind === "api") {
+        stepSummary.method = step.method;
+        stepSummary.path = step.path;
+        stepSummary.expectStatus = step.expectStatus;
+      } else if (step.kind === "assert" || step.kind === "click" || step.kind === "fill" || step.kind === "waitFor") {
+        stepSummary.locator = (step as { locator?: string }).locator;
+      }
+      console.warn(
+        `[planExecutor] step ${step.id} failed: ${errorMessage} (observedUrl=${observedUrl}, step=${JSON.stringify(stepSummary)})`,
+      );
 
       screenshotPaths.push(screenshotPath);
       harPaths.push(harPath);
@@ -392,7 +414,7 @@ export async function executePlan(params: ExecutePlanParams): Promise<ExecutePla
         harPath,
         requestCount: activeRequests.length,
         durationMs: Date.now() - startedAt,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage,
       });
       break;
     } finally {
