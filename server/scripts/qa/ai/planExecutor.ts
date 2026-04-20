@@ -85,24 +85,28 @@ function extractAuthToken(storageStatePath: string, baseUrl: string): string | n
   return null;
 }
 
+// NOTE: `locator.isVisible()` is NOT an auto-waiting API in Playwright — it
+// returns the current state synchronously and its `timeout` option is ignored.
+// Using it after `page.goto({ waitUntil: "domcontentloaded" })` races against
+// React's post-hydration render cycle and produces false negatives (e.g. the
+// workbench canvas toolbar hasn't mounted yet when we look). The correct
+// auto-waiting pattern is `locator.waitFor({ state: "visible" })`, which polls
+// up to `timeout` ms before throwing.
 async function assertVisible(page: any, locator: string): Promise<void> {
-  const isVisible = await page
-    .locator(locator)
-    .first()
-    .isVisible({ timeout: 10_000 })
-    .catch(() => false);
-  if (!isVisible) {
+  try {
+    await page.locator(locator).first().waitFor({ state: "visible", timeout: 10_000 });
+  } catch {
     throw new Error(`Expected locator to be visible: ${locator}`);
   }
 }
 
 async function assertText(page: any, text: string): Promise<void> {
-  const visible = await page
-    .getByText(text, { exact: false })
-    .first()
-    .isVisible({ timeout: 10_000 })
-    .catch(() => false);
-  if (!visible) {
+  try {
+    await page
+      .getByText(text, { exact: false })
+      .first()
+      .waitFor({ state: "visible", timeout: 10_000 });
+  } catch {
     throw new Error(`Expected text to be visible: ${text}`);
   }
 }
