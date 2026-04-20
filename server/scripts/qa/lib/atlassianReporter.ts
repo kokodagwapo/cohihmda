@@ -9,7 +9,11 @@
  * All operations are best-effort: failures are logged as warnings and do
  * NOT cause the runner to exit with a non-zero code.
  *
- * Auth: Basic auth (email:apiToken) against ATLASSIAN_SITE_URL.
+ * Auth:
+ *   - Legacy personal API tokens: Basic auth (email:apiToken) against
+ *     ATLASSIAN_SITE_URL.
+ *   - Guard/service-account scoped tokens: Bearer auth against
+ *     api.atlassian.com using ATLASSIAN_CLOUD_ID.
  */
 
 import { QaRunSummary, type TestResult } from "./resultParser.js";
@@ -19,6 +23,7 @@ interface AtlassianConfig {
   siteUrl: string;
   email: string;
   apiToken: string;
+  cloudId?: string;
   confluenceParentPageId: string;
   jiraProjectKey: string;
   createBugsInProd: boolean;
@@ -54,10 +59,11 @@ function loadConfig(): AtlassianConfig | null {
   const rawSiteUrl = process.env.ATLASSIAN_SITE_URL;
   const email = process.env.ATLASSIAN_EMAIL;
   const apiToken = process.env.ATLASSIAN_API_TOKEN;
+  const cloudId = process.env.ATLASSIAN_CLOUD_ID?.trim() || undefined;
 
-  if (!rawSiteUrl || !email || !apiToken) {
+  if (!rawSiteUrl || !apiToken || (!cloudId && !email)) {
     console.warn(
-      "[AtlassianReporter] ATLASSIAN_SITE_URL, ATLASSIAN_EMAIL, or ATLASSIAN_API_TOKEN not set — skipping Atlassian reporting"
+      "[AtlassianReporter] ATLASSIAN_SITE_URL, ATLASSIAN_API_TOKEN, or auth identity not set — skipping Atlassian reporting"
     );
     return null;
   }
@@ -68,16 +74,32 @@ function loadConfig(): AtlassianConfig | null {
 
   return {
     siteUrl,
-    email,
+    email: email ?? "",
     apiToken,
+    cloudId,
     confluenceParentPageId: process.env.CONFLUENCE_QA_PARENT_PAGE_ID ?? "",
     jiraProjectKey: process.env.QA_JIRA_PROJECT_KEY ?? "COHI",
     createBugsInProd: process.env.QA_CREATE_BUGS_IN_PROD === "true",
   };
 }
 
-function authHeader(email: string, token: string): string {
-  return "Basic " + Buffer.from(`${email}:${token}`).toString("base64");
+function authHeader(cfg: AtlassianConfig): string {
+  if (cfg.cloudId) {
+    return `Bearer ${cfg.apiToken}`;
+  }
+  return "Basic " + Buffer.from(`${cfg.email}:${cfg.apiToken}`).toString("base64");
+}
+
+function buildJiraApiUrl(cfg: AtlassianConfig, path: string): string {
+  return cfg.cloudId
+    ? `https://api.atlassian.com/ex/jira/${cfg.cloudId}/rest/api/3${path}`
+    : `https://${cfg.siteUrl}/rest/api/3${path}`;
+}
+
+function buildConfluenceApiUrl(cfg: AtlassianConfig, path: string): string {
+  return cfg.cloudId
+    ? `https://api.atlassian.com/ex/confluence/${cfg.cloudId}/wiki${path}`
+    : `https://${cfg.siteUrl}/wiki${path}`;
 }
 
 async function confluenceRequest(
@@ -86,11 +108,11 @@ async function confluenceRequest(
   path: string,
   body?: unknown
 ): Promise<any> {
-  const url = `https://${cfg.siteUrl}/wiki${path}`;
+  const url = buildConfluenceApiUrl(cfg, path);
   const resp = await fetch(url, {
     method,
     headers: {
-      Authorization: authHeader(cfg.email, cfg.apiToken),
+      Authorization: authHeader(cfg),
       "Content-Type": "application/json",
       Accept: "application/json",
       // Pin error messages to English regardless of the authenticating
@@ -151,7 +173,10 @@ async function uploadConfluenceAttachment(
   filename: string,
   contentType: string,
 ): Promise<ConfluenceAttachmentMeta | null> {
-  const url = `https://${cfg.siteUrl}/wiki/rest/api/content/${encodeURIComponent(pageId)}/child/attachment?minorEdit=true`;
+  const url = buildConfluenceApiUrl(
+    cfg,
+    `/rest/api/content/${encodeURIComponent(pageId)}/child/attachment?minorEdit=true`,
+  );
 
   const form = new FormData();
   // Convert the Buffer to a Blob so undici's FormData accepts it; node's
@@ -162,7 +187,7 @@ async function uploadConfluenceAttachment(
   const resp = await fetch(url, {
     method: "POST",
     headers: {
-      Authorization: authHeader(cfg.email, cfg.apiToken),
+      Authorization: authHeader(cfg),
       Accept: "application/json",
       "X-Atlassian-Token": "no-check",
       "Accept-Language": "en-US",
@@ -204,11 +229,11 @@ async function jiraRequest(
   path: string,
   body?: unknown
 ): Promise<any> {
-  const url = `https://${cfg.siteUrl}/rest/api/3${path}`;
+  const url = buildJiraApiUrl(cfg, path);
   const resp = await fetch(url, {
     method,
     headers: {
-      Authorization: authHeader(cfg.email, cfg.apiToken),
+      Authorization: authHeader(cfg),
       "Content-Type": "application/json",
       Accept: "application/json",
       "Accept-Language": "en-US",
