@@ -62,6 +62,11 @@ Fixture context (optional):
 - Only re-issue a `goto` when a later step has navigated away (e.g., after an explicit route change or assertion about a different URL).
 - If no `testContext.seededCanvasUrl` is provided and the AC requires a canvas-scoped assertion, use `/my-dashboard/<canvasId-from-AC>` — never `/workbench/<id>` because that route does not exist.
 
+Workbench Cohi chat guidance:
+- On seeded canvases with one or more widgets, the app can auto-send a proactive Cohi message shortly after load. This means empty-state copy such as "Intelligent Agent Mode" may disappear before your assertion executes.
+- Do NOT use empty-state chat text as a pass/fail landmark.
+- For chat-panel readiness, prefer stable controls: tab labels (`Chat`, `Dashboards`, `Schema`) and/or the composer placeholder text (`Ask Cohi`).
+
 Auth context:
 - The plan is executed by an authenticated admin. API paths under `/api/admin/global-knowledge`, `/api/admin/platform-settings`, `/api/admin/ai-prompts`, `/api/admin/release-notes`, `/api/admin/insight-feedback`, and `/api/admin/tenant-config-transfer` require a **platform admin** identity. The executor will transparently route these calls through platform-admin credentials — you do NOT need to log in or switch users, just emit the `api` step as normal.
 

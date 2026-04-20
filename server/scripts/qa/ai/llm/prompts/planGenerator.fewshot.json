@@ -149,5 +149,30 @@
         { "id": "ac1-get-global-knowledge-categories", "kind": "api", "method": "GET", "path": "/api/admin/global-knowledge/categories", "expectStatus": 200, "expectBodyContains": "Analytics" }
       ]
     }
+  },
+  {
+    "issueKey": "COHI-177",
+    "acceptanceCriteria": [
+      "1. [UI] On a workbench canvas, the Cohi panel shows Chat, Dashboards, and Schema tabs",
+      "2. [ASSERTION] Selecting Chat keeps the message composer available"
+    ],
+    "testContext": {
+      "seededCanvasUrl": "/my-dashboard/00000000-0000-0000-0000-000000000000"
+    },
+    "plan": {
+      "planVersion": 1,
+      "issueKey": "COHI-177",
+      "modelName": "gpt-5.4",
+      "modelTemperature": 0,
+      "generatedAt": "2026-04-20T00:00:00.000Z",
+      "steps": [
+        { "id": "ac1-open-seeded-canvas", "kind": "goto", "url": "/my-dashboard/00000000-0000-0000-0000-000000000000", "expect": { "locator": "button:has-text(\"Chat\")" } },
+        { "id": "ac1-assert-chat-tab", "kind": "assert", "locator": "button:has-text(\"Chat\")", "toBeVisible": true },
+        { "id": "ac1-assert-dashboards-tab", "kind": "assert", "locator": "button:has-text(\"Dashboards\")", "toBeVisible": true },
+        { "id": "ac1-assert-schema-tab", "kind": "assert", "locator": "button:has-text(\"Schema\")", "toBeVisible": true },
+        { "id": "ac2-click-chat-tab", "kind": "click", "locator": "button:has-text(\"Chat\")", "expect": { "locator": "textarea[placeholder*=\"Ask Cohi\"]" } },
+        { "id": "ac2-assert-chat-composer", "kind": "assert", "locator": "textarea[placeholder*=\"Ask Cohi\"]", "toBeVisible": true }
+      ]
+    }
   }
 ]
