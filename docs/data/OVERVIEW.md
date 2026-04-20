@@ -158,9 +158,12 @@ Cohi uses a **unified schema** defined in the Cohi Data Dictionary. All data sou
 
 ### Source of Truth
 
-> **`server/src/config/tenantDatabaseSchema.ts`** is the canonical source for the Cohi schema.
+> The current schema is governed through the tenant migration set, with
+> **`server/migrations/tenant/002_loans_table.sql`** as the base `public.loans`
+> definition and later files in `server/migrations/tenant/` evolving it over time.
 >
-> The `public.loans` table definition in this file defines all 296 standard columns that every tenant database receives.
+> Runtime code such as `server/src/services/tenantSchemaResolver.ts` introspects
+> actual tenant schemas and adapts safely when column differences exist.
 
 ### Schema Origin
 
@@ -171,14 +174,15 @@ The current schema was migrated from the legacy Qlik Coheus system:
    - Used as reference to build the new PostgreSQL schema
    - **No longer used** - kept for historical reference only
 
-2. **New Schema**: `server/src/config/tenantDatabaseSchema.ts`
-   - Contains the `public.loans` CREATE TABLE statement
-   - All 296 columns copied from the legacy dictionary
-   - This is the source of truth for all tenant databases
+2. **Current schema implementation**: `server/migrations/tenant/002_loans_table.sql` + later tenant migrations
+   - `002_loans_table.sql` contains the base `public.loans` CREATE TABLE statement
+   - Later files in `server/migrations/tenant/` evolve the schema in a versioned, checksum-tracked way
+   - Runtime schema inspection is handled by `server/src/services/tenantSchemaResolver.ts`
 
 ### Schema Validation
 
 The Admin Panel provides a Dictionary Check feature (Admin → LOS Settings → Dictionary Check) that compares:
+
 - **DB Columns**: Actual columns in the tenant's `public.loans` table
 - **Valid Mappings**: Columns with working Encompass field mappings (client-specific)
 - **Orphaned Columns**: DB columns without dictionary mappings (cannot be populated via sync)
@@ -226,11 +230,11 @@ These columns exist in `public.loans` but are intentionally not part of the loan
 
 #### Default Fields (All Clients)
 
-TVMA maintains the default schema in `tenantDatabaseSchema.ts`. When new fields are added:
+TVMA maintains the default schema through tenant migrations. When new standard fields are added:
 
-1. Add the column to `public.loans` in `tenantDatabaseSchema.ts`
-2. Add the field mapping in `encompassFieldMapper.ts` (alias → column name)
-3. Schema migrations apply to all tenant databases on next startup
+1. Add the column in a new tenant migration under `server/migrations/tenant/`
+2. Add or update the field mapping in `encompassFieldMapper.ts` (alias → column name)
+3. Apply the migration through the migration runner so all tenant databases converge on the new shape
 
 #### Client Custom Fields
 
@@ -247,7 +251,9 @@ Clients can add custom fields to their tenant database:
 
 | File | Purpose |
 |------|---------|
-| `server/src/config/tenantDatabaseSchema.ts` | **Source of truth** - PostgreSQL schema definition |
+| `server/migrations/tenant/002_loans_table.sql` | Base `public.loans` schema definition |
+| `server/migrations/tenant/*.sql` | Ongoing schema evolution through ordered migrations |
+| `server/src/services/tenantSchemaResolver.ts` | Runtime schema introspection and alias resolution |
 | `server/src/services/encompassFieldMapper.ts` | Alias ↔ column name mappings, field swaps |
 | `QlikAppsAndLogicDictionaryDocs/.../CoheusDataDictionary.xml` | Legacy reference only (not used) |
 
