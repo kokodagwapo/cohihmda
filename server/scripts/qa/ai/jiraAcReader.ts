@@ -46,6 +46,10 @@ async function jiraRequest(cfg: AtlassianConfig, method: string, path: string, b
       Authorization: authHeader(cfg),
       Accept: "application/json",
       "Content-Type": "application/json",
+      // Force English error messages regardless of the service
+      // account's profile locale — see atlassianReporter.ts for the
+      // full rationale.
+      "Accept-Language": "en-US",
     },
     body: body ? JSON.stringify(body) : undefined,
   });
