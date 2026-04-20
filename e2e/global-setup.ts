@@ -1,4 +1,5 @@
 import { chromium, type FullConfig, type Page } from "@playwright/test";
+import { randomBytes } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -446,19 +447,36 @@ async function getAdminSession(baseURL: string, tenantSlugHint?: string) {
   };
 }
 
-async function deleteManagedUsersByPrefix(
+/**
+ * Delete any pre-existing tenant users whose email EXACTLY matches one of
+ * `emails`. This is intentionally scoped per-run (by exact email, not by
+ * shared prefix) because two QA pipelines can legitimately run at the same
+ * time against the same dev tenant — e.g. `ai-qa-dev` + a push-triggered
+ * branch pipeline, or a rerun that overlaps with a zombie executor — and a
+ * broad prefix-based cleanup will delete the OTHER run's freshly-provisioned
+ * users mid-test, which then 404s `/api/auth/me` and cascades into hundreds
+ * of Playwright failures that look like a `toHaveURL` / auth regression but
+ * are actually just shared-tenant test-user clobbering.
+ *
+ * Non-fatal if a target email does not exist (likely the common case thanks
+ * to the per-run random suffix below); we only care about reclaiming a slot
+ * if a previous run crashed before `global-teardown` ran.
+ */
+async function deleteTenantUsersByEmail(
   baseURL: string,
   adminToken: string,
   tenantId: string,
-  managedEmailPrefix: string,
+  emails: readonly string[],
 ): Promise<void> {
+  if (emails.length === 0) return;
+
   const list = await getJson(apiUrl(baseURL, `/api/admin/tenants/${tenantId}/users`), {
     Authorization: `Bearer ${adminToken}`,
   });
 
   if (!list.ok) {
     throw new Error(
-      `[E2E] Failed to list tenant users for cleanup (status ${list.status}).`,
+      `[E2E] Failed to list tenant users for targeted cleanup (status ${list.status}).`,
     );
   }
 
@@ -466,9 +484,10 @@ async function deleteManagedUsersByPrefix(
     ? (list.data.users as Array<Record<string, unknown>>)
     : [];
 
+  const targets = new Set(emails.map((email) => email.toLowerCase()));
   const matching = users.filter((u) => {
     const email = typeof u.email === "string" ? u.email.toLowerCase() : "";
-    return email.startsWith(`${managedEmailPrefix.toLowerCase()}.`);
+    return targets.has(email);
   });
 
   for (const user of matching) {
@@ -547,16 +566,27 @@ export default async function globalSetup(config: FullConfig) {
     process.env.E2E_MANAGED_EMAIL_PREFIX || "e2e.auto"
   ).toLowerCase();
   const runId = getRunId();
-  const tenantUserSeed = `tenant-user-${runId}`;
-  const canvasUserSeed = `canvas-only-${runId}`;
-  const tenantUserEmail = `${managedEmailPrefix}.tenant-user.${runId}@coheus.test`;
-  const canvasUserEmail = `${managedEmailPrefix}.canvas-only.${runId}@coheus.test`;
+  // Unique per-process suffix (8 hex chars). `BITBUCKET_BUILD_NUMBER` alone
+  // is NOT sufficient to dedupe provisioned users across concurrent pipelines
+  // (rerun zombies, parallel custom pipelines, branch pipelines firing at the
+  // same time, etc.). The suffix guarantees that even if two runs somehow
+  // share a `runId`, they allocate disjoint Cognito users and cannot clobber
+  // each other via the shared dev tenant.
+  const uniqueSuffix = randomBytes(4).toString("hex");
+  const tenantUserSeed = `tenant-user-${runId}-${uniqueSuffix}`;
+  const canvasUserSeed = `canvas-only-${runId}-${uniqueSuffix}`;
+  const tenantUserEmail = `${managedEmailPrefix}.tenant-user.${runId}.${uniqueSuffix}@coheus.test`;
+  const canvasUserEmail = `${managedEmailPrefix}.canvas-only.${runId}.${uniqueSuffix}@coheus.test`;
 
-  await deleteManagedUsersByPrefix(
+  // Targeted cleanup: only reclaim the exact two emails we are about to
+  // provision (in the very unlikely event a previous crashed run happened
+  // to pick the same random suffix and build number). Do NOT touch users
+  // owned by other concurrent runs.
+  await deleteTenantUsersByEmail(
     baseURL,
     admin.token,
     admin.tenantId,
-    managedEmailPrefix,
+    [tenantUserEmail, canvasUserEmail],
   );
 
   const tenantUser = await createProvisionedUser(
