@@ -5,6 +5,7 @@ interface AtlassianConfig {
   siteUrl: string;
   email: string;
   apiToken: string;
+  cloudId?: string;
 }
 
 export interface JiraAcReadResult {
@@ -21,26 +22,37 @@ function loadAtlassianConfig(): AtlassianConfig {
   const rawSiteUrl = process.env.ATLASSIAN_SITE_URL;
   const email = process.env.ATLASSIAN_EMAIL;
   const apiToken = process.env.ATLASSIAN_API_TOKEN;
+  const cloudId = process.env.ATLASSIAN_CLOUD_ID?.trim() || undefined;
 
-  if (!rawSiteUrl || !email || !apiToken) {
+  if (!rawSiteUrl || !apiToken || (!cloudId && !email)) {
     throw new Error(
-      "ATLASSIAN_SITE_URL, ATLASSIAN_EMAIL, and ATLASSIAN_API_TOKEN are required for AC validation",
+      "ATLASSIAN_SITE_URL, ATLASSIAN_API_TOKEN, and either ATLASSIAN_EMAIL or ATLASSIAN_CLOUD_ID are required for AC validation",
     );
   }
 
   return {
     siteUrl: rawSiteUrl.replace(/^https?:\/\//i, "").replace(/\/+$/, ""),
-    email,
+    email: email ?? "",
     apiToken,
+    cloudId,
   };
 }
 
 function authHeader(cfg: AtlassianConfig): string {
+  if (cfg.cloudId) {
+    return `Bearer ${cfg.apiToken}`;
+  }
   return "Basic " + Buffer.from(`${cfg.email}:${cfg.apiToken}`).toString("base64");
 }
 
+function buildJiraApiUrl(cfg: AtlassianConfig, path: string): string {
+  return cfg.cloudId
+    ? `https://api.atlassian.com/ex/jira/${cfg.cloudId}/rest/api/3${path}`
+    : `https://${cfg.siteUrl}/rest/api/3${path}`;
+}
+
 async function jiraRequest(cfg: AtlassianConfig, method: string, path: string, body?: unknown): Promise<any> {
-  const response = await fetch(`https://${cfg.siteUrl}/rest/api/3${path}`, {
+  const response = await fetch(buildJiraApiUrl(cfg, path), {
     method,
     headers: {
       Authorization: authHeader(cfg),

@@ -121,22 +121,27 @@ async function verifyJiraKeysExist(issueKeys: string[]): Promise<string[]> {
   const rawSiteUrl = process.env.ATLASSIAN_SITE_URL;
   const email = process.env.ATLASSIAN_EMAIL;
   const apiToken = process.env.ATLASSIAN_API_TOKEN;
+  const cloudId = process.env.ATLASSIAN_CLOUD_ID?.trim() || undefined;
 
-  if (!rawSiteUrl || !email || !apiToken) {
+  if (!rawSiteUrl || !apiToken || (!cloudId && !email)) {
     throw new Error(
-      "QA_LINT_VERIFY_JIRA=true requires ATLASSIAN_SITE_URL, ATLASSIAN_EMAIL, and ATLASSIAN_API_TOKEN",
+      "QA_LINT_VERIFY_JIRA=true requires ATLASSIAN_SITE_URL, ATLASSIAN_API_TOKEN, and either ATLASSIAN_EMAIL or ATLASSIAN_CLOUD_ID",
     );
   }
 
   const siteUrl = rawSiteUrl.replace(/^https?:\/\//i, "").replace(/\/+$/, "");
-  const authHeader = "Basic " + Buffer.from(`${email}:${apiToken}`).toString("base64");
+  const authHeader = cloudId
+    ? `Bearer ${apiToken}`
+    : "Basic " + Buffer.from(`${email}:${apiToken}`).toString("base64");
   const missingKeys = new Set(issueKeys);
 
   for (let index = 0; index < issueKeys.length; index += 50) {
     const chunk = issueKeys.slice(index, index + 50);
     const jql = `key in (${chunk.join(",")})`;
     const response = await fetch(
-      `https://${siteUrl}/rest/api/3/search/jql?jql=${encodeURIComponent(jql)}&fields=key&maxResults=${chunk.length}`,
+      cloudId
+        ? `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/search/jql?jql=${encodeURIComponent(jql)}&fields=key&maxResults=${chunk.length}`
+        : `https://${siteUrl}/rest/api/3/search/jql?jql=${encodeURIComponent(jql)}&fields=key&maxResults=${chunk.length}`,
       {
         headers: {
           Authorization: authHeader,
