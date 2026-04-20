@@ -23,7 +23,12 @@ const DEFAULT_API_PATH_DENYLIST = [
 ];
 
 function getMaxStepsPerIssue(): number {
-  return Number(process.env.QA_AC_MAX_STEPS_PER_ISSUE || "20");
+  // Default bumped from 20 → 25 after introducing `testContext.seededCanvasUrl`.
+  // Each canvas-scoped AC now costs an extra `goto` to open the seeded canvas,
+  // so a realistic 7-AC issue like COHI-77 climbs from ~19 to ~22 steps even
+  // when the planner is being disciplined. 25 gives headroom for legitimate
+  // ACs without relaxing the guardrail enough to permit truly bloated plans.
+  return Number(process.env.QA_AC_MAX_STEPS_PER_ISSUE || "25");
 }
 
 function parseRegexList(raw: string | undefined, defaults: string[]): RegExp[] {

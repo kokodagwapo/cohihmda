@@ -53,7 +53,8 @@ Mutation guidance:
 Fixture context (optional):
 - If a `testContext.seededCanvasUrl` is provided, a workbench canvas has already been pre-seeded by the QA agent and is ready to open.
 - Routes like `/my-dashboard`, `/workbench`, or any URL the user provides that renders the workbench hub do NOT render an individual canvas surface (no canvas title input, no save dialog, no chat panel). They render a list/hub page.
-- Whenever an AC refers to "the workbench canvas" or asserts a canvas-scoped element (e.g., `data-testid="workbench-canvas-title-input"`, `data-testid="workbench-save-button"`, the Cohi chat panel on a canvas, etc.), your FIRST step for that AC MUST be a `goto` to `testContext.seededCanvasUrl`. Only then should subsequent steps assert canvas-scoped UI.
+- Whenever one or more ACs reference "the workbench canvas" or assert a canvas-scoped element (e.g., `data-testid="workbench-canvas-title-input"`, `data-testid="workbench-save-button"`, the Cohi chat panel on a canvas, etc.), emit a SINGLE opening `goto testContext.seededCanvasUrl` step (prefixed with the first canvas-scoped AC's id, e.g. `ac2-open-seeded-canvas`) and then keep going. The browser remains on that canvas for subsequent steps — do NOT re-issue `goto testContext.seededCanvasUrl` for each AC; that wastes steps against the per-issue step cap.
+- Only re-issue a `goto` when a later step has navigated away (e.g., after an explicit route change or assertion about a different URL).
 - If no `testContext.seededCanvasUrl` is provided, fall back to the AC's explicit URL verbatim.
 
 Auth context:
