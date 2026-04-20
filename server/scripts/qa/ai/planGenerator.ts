@@ -12,11 +12,15 @@ const __dirname = dirname(__filename);
 export interface PlanTestContext {
   /**
    * App-relative URL of a canvas that has already been seeded by the QA agent
-   * and is safe to open during plan execution (e.g., `/workbench/<uuid>`).
+   * and is safe to open during plan execution. Always shaped as
+   * `/my-dashboard/<uuid>` — the individual canvas editor lives at
+   * `/my-dashboard/:canvasId` in the React Router table (see `src/App.tsx`).
+   * Using `/workbench/<uuid>` would fall through to a catch-all because no
+   * such route exists, and canvas-scoped testids would never render.
    *
    * When present, the planner is instructed to prepend a `goto` to this URL
    * for any AC that asserts a canvas-scoped element, since `/my-dashboard`
-   * and `/workbench` render the hub rather than a canvas.
+   * (no id) and `/workbench` both render the hub rather than a canvas.
    */
   seededCanvasUrl?: string;
 }
