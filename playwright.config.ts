@@ -26,7 +26,17 @@ export default defineConfig({
   use: {
     baseURL,
     trace: "on-first-retry",
-    screenshot: "only-on-failure",
+    // Always capture a final-state screenshot per test (not just on
+    // failure) so the AI QA agent pipeline can upload them to S3 and
+    // embed them in the Confluence evidence page. This lets reviewers
+    // verify that passing Jira-tagged tests (@COHI-77 etc.) landed on
+    // the correct final UI state instead of trusting a green dot.
+    //
+    // Cost impact locally: one extra PNG per test in `test-results/`,
+    // which dev workflows already ignore. CI impact: all artifacts are
+    // filtered down to Jira-tagged tests in `aiQaRunner.ts` before
+    // upload, so we are not paying S3 for untagged smoke tests.
+    screenshot: "on",
     video: "retain-on-failure",
   },
   projects: [

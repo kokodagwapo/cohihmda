@@ -5,7 +5,7 @@ import { basename, dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import type { EvidencePackage, StepExecutionResult } from "./types.js";
-import { buildS3DirectUrl } from "../lib/s3Upload.js";
+import { buildS3ConsoleUrl } from "../lib/s3Upload.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -188,7 +188,17 @@ export async function buildEvidencePackage(
 
     return {
       manifestS3Key: manifestKey,
-      manifestS3Url: buildS3DirectUrl(bucket, manifestKey, region),
+      // Use the S3 console URL (redirects into the AWS console and reuses
+      // the reviewer's signed-in SSO session) rather than the bare
+      // `https://<bucket>.s3.amazonaws.com/<key>` form. A direct S3 URL
+      // requires AWS SigV4 request signing; being logged into the console
+      // in another tab does NOT grant that auth, so direct URLs return
+      // AccessDenied for humans clicking through from Confluence/Jira.
+      //
+      // The console URL matches the pattern used by `QaArtifactLink.consoleUrl`
+      // for every other evidence artifact (screenshots, traces, videos), so
+      // the manifest link is consistent with the rest of the evidence table.
+      manifestS3Url: buildS3ConsoleUrl(bucket, manifestKey, region),
       manifestHash,
       signature,
     };

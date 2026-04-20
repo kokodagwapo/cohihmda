@@ -452,19 +452,44 @@ async function main(): Promise<void> {
         );
       }
 
+      // Failed tests: upload everything (screenshots, traces, videos)
+      // — debugging a failure needs the full trail.
       const failurePaths = summary.failedTests.flatMap((t) => [
         ...t.screenshotPaths,
         ...t.tracePaths,
         ...t.videoPaths,
       ]);
 
-      if (failurePaths.length > 0) {
+      // Passing Jira-tagged tests: upload screenshots ONLY. The goal is
+      // to let a human reviewer verify the AI QA agent actually exercised
+      // the right UI state for a given AC, not to replay the whole
+      // session. Videos are 2-10MB and traces can be 5-50MB each, so
+      // including them would 10-50x the per-build S3 footprint for no
+      // reviewer benefit on the happy path.
+      //
+      // We filter to tagged tests so untagged smoke/auth/platform tests
+      // do not bloat S3 with screenshots nobody will ever look at — the
+      // Confluence reporter only surfaces artifacts whose `localPath`
+      // matches a tagged test, so any upload outside that set is pure
+      // cost.
+      const passPathScreenshotPaths = summary.tests
+        .filter((t) => t.status === "passed" && t.jiraKeys.length > 0)
+        .flatMap((t) => t.screenshotPaths);
+
+      // De-dupe in case a test somehow ended up in both lists (shouldn't
+      // happen with current Playwright result shape, but cheap to be
+      // defensive — S3 PUTs are the expensive part, not Set lookups).
+      const allUploadPaths = Array.from(
+        new Set([...failurePaths, ...passPathScreenshotPaths]),
+      );
+
+      if (allUploadPaths.length > 0) {
         const uploaded = await uploadFailureArtifacts({
           repoRoot,
           environment,
           buildNumber,
           bucket,
-          failurePaths,
+          failurePaths: allUploadPaths,
         });
         uploadedArtifacts = uploaded.map((artifact) => ({
           label: artifact.localPath.split(/[/\\]/).pop() ?? artifact.s3Key,
