@@ -45,6 +45,7 @@ import {
 import { runAcValidator } from "./ai/acValidator.js";
 import { mergeAcIntoTargets } from "./ai/acReporter.js";
 import { OpenAiLlmClient } from "./ai/llm/openAiClient.js";
+import type { IssueAcValidationResult } from "./ai/types.js";
 
 // ---------------------------------------------------------------------------
 // CLI arg parsing
@@ -270,6 +271,40 @@ async function recordToLedger(opts: {
 // Summary printer
 // ---------------------------------------------------------------------------
 
+function summarizeAcResults(
+  acResults: IssueAcValidationResult[] | null,
+): {
+  total: number;
+  passed: number;
+  failed: number;
+  inconclusive: number;
+  pendingReview: number;
+  failedIssueKeys: string[];
+} | null {
+  if (!acResults || acResults.length === 0) return null;
+  let passed = 0;
+  let failed = 0;
+  let inconclusive = 0;
+  let pendingReview = 0;
+  const failedIssueKeys: string[] = [];
+  for (const r of acResults) {
+    if (r.status === "passed") passed += 1;
+    else if (r.status === "failed" || r.status === "rejected" || r.status === "parse_error") {
+      failed += 1;
+      failedIssueKeys.push(r.issueKey);
+    } else inconclusive += 1;
+    if (r.approvalStatus === "pending_evidence_review") pendingReview += 1;
+  }
+  return {
+    total: acResults.length,
+    passed,
+    failed,
+    inconclusive,
+    pendingReview,
+    failedIssueKeys,
+  };
+}
+
 function printSummary(opts: {
   suite: string;
   environment: string;
@@ -282,10 +317,25 @@ function printSummary(opts: {
   s3ReportKey: string | null;
   confluencePageUrls: string[];
   jiraIssueKeys: string[];
+  acResults: IssueAcValidationResult[] | null;
 }): void {
   const passRate = opts.total > 0 ? Math.round((opts.passed / opts.total) * 100) : 0;
-  const status =
-    opts.total === 0 ? "NO TESTS RAN" : opts.failed > 0 ? "FAILED" : "PASSED";
+  const ac = summarizeAcResults(opts.acResults);
+
+  // Top-line status reflects both Playwright outcomes AND AC validator outcomes.
+  // Playwright failures are hard; AC failures are surfaced but don't flip the
+  // banner to FAILED because AC results route through human evidence review
+  // (the pipeline's exit code is still driven by Playwright only — see caller).
+  let status: string;
+  if (opts.total === 0) {
+    status = "NO TESTS RAN";
+  } else if (opts.failed > 0) {
+    status = "FAILED";
+  } else if (ac && ac.failed > 0) {
+    status = "PASSED (AC review pending)";
+  } else {
+    status = "PASSED";
+  }
   const duration = (opts.durationMs / 1000).toFixed(1);
 
   console.log("\n" + "=".repeat(60));
@@ -300,6 +350,15 @@ function printSummary(opts: {
   console.log(`  Skipped:      ${opts.skipped}`);
   console.log(`  Pass rate:    ${passRate}%`);
   console.log(`  Duration:     ${duration}s`);
+  if (ac) {
+    const acLine =
+      `passed=${ac.passed}, failed=${ac.failed}, inconclusive=${ac.inconclusive}` +
+      (ac.pendingReview > 0 ? `, pendingReview=${ac.pendingReview}` : "");
+    console.log(`  AC validator: ${acLine} (of ${ac.total} issue(s))`);
+    if (ac.failedIssueKeys.length > 0) {
+      console.log(`  AC failures:  ${ac.failedIssueKeys.join(", ")} — see Jira (status: evidence review)`);
+    }
+  }
   if (opts.s3ReportKey) console.log(`  S3 report:    ${opts.s3ReportKey}`);
   if (opts.jiraIssueKeys.length > 0) console.log(`  Jira issues:  ${opts.jiraIssueKeys.join(", ")}`);
   if (opts.confluencePageUrls.length > 0) console.log(`  Confluence:   ${opts.confluencePageUrls.length} page(s) updated`);
@@ -434,6 +493,10 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------------
   // Step 4: AI AC validator (best-effort, gated)
   // ---------------------------------------------------------------------------
+  // Hoisted so the final summary can surface AC outcomes alongside Playwright
+  // results. `null` means the validator was gated off or never ran; `[]` means
+  // it ran but produced no results (e.g., no targets).
+  let acResults: IssueAcValidationResult[] | null = null;
   if (process.env.QA_ENABLE_AC_VALIDATOR === "true") {
     if (qaTargets.length === 0) {
       console.warn("[QaRunner] QA_ENABLE_AC_VALIDATOR=true but no Jira targets resolved — skipping AC validation");
@@ -442,7 +505,7 @@ async function main(): Promise<void> {
         console.log(
           `[QaRunner] Invoking AC validator — targets=${qaTargets.length}, dryRun=${process.env.QA_AC_DRY_RUN === "true"}`,
         );
-        const acResults = await runAcValidator({
+        acResults = await runAcValidator({
           targets: qaTargets,
           environment,
           buildNumber,
@@ -551,11 +614,19 @@ async function main(): Promise<void> {
     s3ReportKey,
     confluencePageUrls,
     jiraIssueKeys: allIssueKeys,
+    acResults,
   });
 
   // Exit with Playwright's exit code so the pipeline step fails on test failures.
   // Also fail loudly if Playwright "succeeded" but produced zero results — this almost
   // always means the grep/tag filter matched nothing and is never a healthy outcome.
+  //
+  // Intentional: AC validator failures do NOT flip the exit code. AC results
+  // route through the `pending_evidence_review` workflow in Jira where a
+  // human reviews the evidence before deciding. Coupling CI health to LLM
+  // plan correctness would turn every planner misfire into a red pipeline.
+  // The summary banner above surfaces AC failures so they're visible at a
+  // glance even though the pipeline itself passes.
   const finalExitCode = playwrightExitCode !== 0 ? playwrightExitCode : summary.total === 0 ? 2 : 0;
   process.exit(finalExitCode);
 }

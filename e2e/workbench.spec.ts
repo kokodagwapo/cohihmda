@@ -26,31 +26,45 @@ test.describe("Workbench", () => {
   });
 
   test("@critical @COHI-77 opens save dialog and supports basic canvas editing flow", async ({ userPage }) => {
-    await userPage.goto("/my-dashboard", { waitUntil: "domcontentloaded" });
+    // COHI-77 AC #4(b): on a *new, unsaved* canvas, clicking the save button
+    // opens a modal dialog with a Cancel button. The seeded/saved canvas path
+    // (4a) saves directly to a toast and is covered separately by the AC
+    // validator running against `testContext.seededCanvasUrl`. This test has
+    // to start from a route that actually renders a fresh in-memory canvas.
+    //
+    // Historically this test navigated to `/my-dashboard`, but that route now
+    // redirects to the `/workbench` hub (a list page with no canvas title
+    // input). As a result the pre-existing `test.skip(!hasTitleInput, …)`
+    // guard fired on every run and the test was silently skipped for weeks.
+    // Start from the hub and click "New canvas" to enter a real canvas.
+    await userPage.goto("/workbench", { waitUntil: "domcontentloaded" });
+    await expect(userPage).toHaveURL(/\/workbench/);
 
-    // Rename the current canvas
+    const newCanvasButton = userPage.getByTitle("New canvas").first();
+    const hasNewCanvasButton = await newCanvasButton.isVisible().catch(() => false);
+    test.skip(!hasNewCanvasButton, "Workbench hub did not render a 'New canvas' affordance in this variant.");
+    await newCanvasButton.click();
+
     const titleInput = userPage.getByTestId("workbench-canvas-title-input");
-    const hasTitleInput = await titleInput.isVisible().catch(() => false);
-    test.skip(!hasTitleInput, "Canvas title input is not available in this workbench variant.");
+    await expect(titleInput).toBeVisible();
     await titleInput.fill("E2E Canvas Draft");
     await expect(titleInput).toHaveValue("E2E Canvas Draft");
 
-    // Open save dialog from toolbar and close it
+    // Save button is intentionally disabled while the canvas is still loading
+    // (see `disabled={isSaving || canvasLoading}` in WorkbenchCanvas.tsx).
+    // Use Playwright's auto-polling expect so we don't race the initial load.
     const saveButton = userPage.getByTestId("workbench-save-button");
-    const hasSaveButton = await saveButton.isVisible().catch(() => false);
-    if (hasSaveButton) {
-      await saveButton.click();
-      await expect(userPage.getByRole("heading", { name: /save canvas|save/i }).first()).toBeVisible();
-      await userPage.getByRole("button", { name: "Cancel" }).click();
-      await expect(userPage.getByRole("heading", { name: /save canvas|save/i }).first()).not.toBeVisible();
-    }
+    await expect(saveButton).toBeVisible();
+    await expect(saveButton).toBeEnabled();
+    await saveButton.click();
 
-    // Add another tab and verify switching works
-    const newCanvasButton = userPage.getByTitle("New canvas");
-    if (await newCanvasButton.isVisible().catch(() => false)) {
-      await newCanvasButton.click();
-      await expect(userPage.getByText(/new canvas/i).first()).toBeVisible();
-    }
+    // On an unsaved canvas the save button opens the name-the-canvas dialog.
+    // Match the heading via role rather than `has-text("Save")` to avoid
+    // false-matching the save-button itself.
+    const saveDialogHeading = userPage.getByRole("heading", { name: /save canvas|save/i }).first();
+    await expect(saveDialogHeading).toBeVisible();
+    await userPage.getByRole("button", { name: "Cancel" }).click();
+    await expect(saveDialogHeading).toBeHidden();
   });
 
   test("enforces view-only mode for non-owner canvases when applicable", async ({ userPage }) => {

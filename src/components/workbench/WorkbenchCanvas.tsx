@@ -4470,6 +4470,9 @@ export function WorkbenchCanvas({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
+                      data-testid="workbench-cohi-toggle"
+                      aria-label="Toggle Cohi Assistant"
+                      aria-pressed={showCohiPanel}
                       variant="outline"
                       size="sm"
                       className={cn(
