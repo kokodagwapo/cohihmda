@@ -1049,6 +1049,9 @@ export function WorkbenchCanvas({
   const [aiBackgroundPrompt, setAiBackgroundPrompt] = useState("");
   const [sourceInsight, setSourceInsight] =
     useState<SourceInsightContext | null>(null);
+  const [loadedCanvasQaAgentRunTag, setLoadedCanvasQaAgentRunTag] = useState<
+    string | null
+  >(null);
   const [showCohiPanel, setShowCohiPanel] = useState(() => {
     // Auto-open Cohi panel on first visit
     const visited = localStorage.getItem("cohi-workbench-visited");
@@ -2399,6 +2402,7 @@ export function WorkbenchCanvas({
     setAnnotations([]);
     setUploads([]);
     setSourceInsight(null);
+    setLoadedCanvasQaAgentRunTag(null);
     setShowReportBuilder(false);
   }, [loadCanvasId, clearCanvasData]);
 
@@ -2417,6 +2421,16 @@ export function WorkbenchCanvas({
         const data = await api.request<any>(url);
         if (cancelled || !data) return;
         const content = data.content ?? {};
+        const contentMetadata =
+          content.metadata && typeof content.metadata === "object"
+            ? (content.metadata as Record<string, unknown>)
+            : null;
+        const qaAgentRunTag =
+          typeof contentMetadata?.qaAgentRunTag === "string" &&
+          contentMetadata.qaAgentRunTag.trim()
+            ? contentMetadata.qaAgentRunTag.trim()
+            : null;
+        setLoadedCanvasQaAgentRunTag(qaAgentRunTag);
         if (Array.isArray(content.layout)) {
           const containerWidth = Math.max(widthRef.current - 32, 480);
           const layoutVersion = content.layoutVersion as string | undefined;
@@ -2522,6 +2536,9 @@ export function WorkbenchCanvas({
     if (!canvasId || items.length === 0) return;
     // Only fire for loaded canvases (not brand-new ones)
     if (!loadCanvasId) return;
+    // QA-seeded canvases already drive AC validation and should not auto-send
+    // proactive briefing prompts that mutate the chat transcript.
+    if (loadedCanvasQaAgentRunTag) return;
 
     autoInsightsFiredRef.current = true;
     // Delay to let the canvas and widget data settle
@@ -2549,7 +2566,7 @@ export function WorkbenchCanvas({
 
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canvasId, items.length, loadCanvasId]);
+  }, [canvasId, items.length, loadCanvasId, loadedCanvasQaAgentRunTag]);
 
   // Observe the canvas root element (not outer wrapper) so width updates
   // when the Cohi panel opens/closes and the canvas area actually resizes.
