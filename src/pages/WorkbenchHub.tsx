@@ -203,6 +203,7 @@ export default function WorkbenchHub() {
               </p>
             </div>
             <button
+              data-testid="workbench-hub-new-canvas"
               onClick={() => navigate("/my-dashboard/new")}
               className="rounded-lg bg-emerald-600 text-white px-3 py-2 text-sm font-medium hover:bg-emerald-500"
             >

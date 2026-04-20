@@ -29,21 +29,22 @@ test.describe("Workbench", () => {
     // COHI-77 AC #4(b): on a *new, unsaved* canvas, clicking the save button
     // opens a modal dialog with a Cancel button. The seeded/saved canvas path
     // (4a) saves directly to a toast and is covered separately by the AC
-    // validator running against `testContext.seededCanvasUrl`. This test has
-    // to start from a route that actually renders a fresh in-memory canvas.
+    // validator running against `testContext.seededCanvasUrl`, so this test
+    // deliberately exercises only the dialog branch.
     //
-    // Historically this test navigated to `/my-dashboard`, but that route now
-    // redirects to the `/workbench` hub (a list page with no canvas title
-    // input). As a result the pre-existing `test.skip(!hasTitleInput, …)`
-    // guard fired on every run and the test was silently skipped for weeks.
-    // Start from the hub and click "New canvas" to enter a real canvas.
-    await userPage.goto("/workbench", { waitUntil: "domcontentloaded" });
-    await expect(userPage).toHaveURL(/\/workbench/);
-
-    const newCanvasButton = userPage.getByTitle("New canvas").first();
-    const hasNewCanvasButton = await newCanvasButton.isVisible().catch(() => false);
-    test.skip(!hasNewCanvasButton, "Workbench hub did not render a 'New canvas' affordance in this variant.");
-    await newCanvasButton.click();
+    // History: earlier revisions either navigated to `/my-dashboard` (which
+    // now redirects to the `/workbench` hub — a list page with no title
+    // input) or to `/workbench` and clicked a `getByTitle("New canvas")`
+    // button (which only matches the small `+` icon *inside* an already-
+    // loaded canvas, not the hub's "New Canvas" text-button). Both variants
+    // tripped a conditional `test.skip(...)` and the assertion never ran.
+    //
+    // The hub button simply `navigate("/my-dashboard/new")` and the router
+    // (`App.tsx`) treats the `new` canvasId as "create a fresh in-memory
+    // tab" (`MyDashboard.tsx:149`), so going straight there is equivalent to
+    // the UI click and is fully deterministic — no selector, no skip guard.
+    await userPage.goto("/my-dashboard/new", { waitUntil: "domcontentloaded" });
+    await expect(userPage).toHaveURL(/\/my-dashboard\/new/);
 
     const titleInput = userPage.getByTestId("workbench-canvas-title-input");
     await expect(titleInput).toBeVisible();
