@@ -54,6 +54,33 @@ Default is `false`.
   behavior an agent could exercise. Skipped issues produce an
   `inconclusive` result with `approvalStatus=skipped_opt_out` instead of a
   noisy `parse_error`.
+- `E2E_PLATFORM_ADMIN_EMAIL`, `E2E_PLATFORM_ADMIN_PASSWORD`,
+  `E2E_PLATFORM_ADMIN_TOTP_SECRET` — credentials for a dedicated
+  `platform_admin` (or `super_admin`) account in `coheus_users`. Required for
+  any AC that calls platform-scoped admin routes (see
+  `PLATFORM_ADMIN_API_PATH_PREFIXES` in `planExecutor.ts`, e.g.
+  `/api/admin/global-knowledge/*`, `/api/admin/platform-settings/*`,
+  `/api/admin/ai-prompts/*`, etc.). The Playwright global-setup signs this
+  account in with no tenant context and writes the storage state to
+  `e2e/.auth/platform-admin.json`; `planExecutor` then transparently switches
+  to this token for `api` steps whose `path` matches the platform prefix
+  list.
+  - **Use a different email than `E2E_ADMIN_EMAIL`.** Both tables enforce
+    email uniqueness independently, but re-using the same email across
+    `coheus_users` and the tenant `users` table produces ambiguous login
+    behavior (platform admin wins when no `tenantSlug` is sent, tenant admin
+    wins otherwise), which will silently break `role-access.spec.ts`
+    coverage.
+  - Suggested email: `qa-platform-admin@coheus.test` (or
+    `qa-platform-admin@teraverde.local`) with role `platform_admin` and MFA
+    enrolled.
+  - If these envs are not set, the Playwright setup skips the platform-admin
+    login and `planExecutor` falls back to the tenant-admin token. ACs that
+    require platform-admin will 403, which surfaces as an AC failure but
+    does not crash the pipeline.
+- `QA_AC_PLATFORM_ADMIN_STORAGE_PATH` — optional override for the
+  platform-admin storage state path. Defaults to
+  `e2e/.auth/platform-admin.json`.
 
 ## Execution safety model
 

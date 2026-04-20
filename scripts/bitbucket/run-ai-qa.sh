@@ -22,6 +22,12 @@
 #   CONFLUENCE_QA_PARENT_PAGE_ID - Parent page for per-issue Confluence QA pages
 #   QA_JIRA_PROJECT_KEY
 #   QA_CREATE_BUGS_IN_PROD    - Set to "true" to enable Jira bug creation in prod
+#   E2E_PLATFORM_ADMIN_EMAIL / E2E_PLATFORM_ADMIN_PASSWORD / E2E_PLATFORM_ADMIN_TOTP_SECRET
+#       - Platform-admin (super_admin / platform_admin) credentials used by the
+#         AI AC Validator for ACs that target /api/admin/global-knowledge,
+#         /api/admin/platform-settings, /api/admin/ai-prompts, /api/admin/release-notes,
+#         /api/admin/insight-feedback, or /api/admin/tenant-config-transfer.
+#         If unset, platform-scoped admin ACs will 403.
 # ============================================================================
 
 set -euo pipefail

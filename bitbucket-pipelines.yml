@@ -19,6 +19,13 @@
 #   - CF_STACK_BACKEND             - CloudFormation stack name (e.g., coheus-dev-backend)
 #   - COGNITO_PASSWORD_AUTH        - Set to "true" (Cognito-only password auth policy)
 #   - E2E_ADMIN_EMAIL / E2E_ADMIN_PASSWORD / E2E_ADMIN_TOTP_SECRET
+#   - E2E_PLATFORM_ADMIN_EMAIL / E2E_PLATFORM_ADMIN_PASSWORD / E2E_PLATFORM_ADMIN_TOTP_SECRET
+#       Optional. Platform-admin (coheus_users.role='platform_admin' or 'super_admin') account
+#       used by the AI AC Validator for ACs that target platform-scoped admin routes
+#       (/api/admin/global-knowledge/*, /api/admin/platform-settings/*, /api/admin/ai-prompts/*,
+#       /api/admin/release-notes/*, /api/admin/insight-feedback/*, /api/admin/tenant-config-transfer/*).
+#       MUST use a different email than E2E_ADMIN_EMAIL to avoid cross-table login ambiguity.
+#       If unset, platform-scoped admin ACs will 403 but the pipeline will continue.
 #   - CONFLUENCE_QA_PARENT_PAGE_ID - Parent Confluence page for per-issue QA pages
 #   - QA_JIRA_PROJECT_KEY          - Jira project used for issue resolution and bug creation
 #   - QA_COMMIT_RANGE              - Optional explicit git range for Jira-key discovery
