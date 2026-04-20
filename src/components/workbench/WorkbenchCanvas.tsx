@@ -4013,7 +4013,12 @@ export function WorkbenchCanvas({
                             size="icon"
                             className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400"
                             onClick={canvasId ? handleSaveConfirm : handleSaveClick}
-                            disabled={isSaving}
+                            // Also disable while the canvas is still loading: clicking
+                            // save before the load resolves would read `canvasId === null`
+                            // and take the "new canvas" branch, which (a) opens the Save
+                            // dialog unexpectedly and (b) risks overwriting the real
+                            // canvas content with a blank payload once load completes.
+                            disabled={isSaving || canvasLoading}
                           >
                             <Save className="h-4 w-4" />
                           </Button>

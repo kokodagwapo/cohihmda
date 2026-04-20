@@ -115,7 +115,7 @@
     "issueKey": "COHI-77",
     "acceptanceCriteria": [
       "1. [UI] On the workbench canvas, the element with data-testid=\"workbench-canvas-title-input\" is visible and accepts text input",
-      "2. [UI] Clicking the element with data-testid=\"workbench-save-button\" opens a modal dialog whose heading text contains \"Save\""
+      "2. [UI] Clicking the element with data-testid=\"workbench-save-button\" persists the canvas and surfaces a \"Canvas saved\" confirmation"
     ],
     "testContext": {
       "seededCanvasUrl": "/my-dashboard/00000000-0000-0000-0000-000000000000"
@@ -130,7 +130,8 @@
         { "id": "ac1-open-seeded-canvas", "kind": "goto", "url": "/my-dashboard/00000000-0000-0000-0000-000000000000", "expect": { "locator": "[data-testid=\"workbench-canvas-title-input\"]" } },
         { "id": "ac1-assert-canvas-title-input-visible", "kind": "assert", "locator": "[data-testid=\"workbench-canvas-title-input\"]", "toBeVisible": true },
         { "id": "ac1-fill-canvas-title", "kind": "fill", "locator": "[data-testid=\"workbench-canvas-title-input\"]", "value": "QA Agent Title", "expect": { "locator": "[data-testid=\"workbench-canvas-title-input\"]" } },
-        { "id": "ac2-click-save-button", "kind": "click", "locator": "[data-testid=\"workbench-save-button\"]", "expect": { "locator": "[role=\"dialog\"] :text-matches(\"Save\", \"i\")" } }
+        { "id": "ac2-click-save-button", "kind": "click", "locator": "[data-testid=\"workbench-save-button\"]", "expect": { "locator": "text=Canvas saved" } },
+        { "id": "ac2-assert-save-toast", "kind": "assert", "locator": "text=Canvas saved", "toBeVisible": true }
       ]
     }
   },
@@ -166,7 +167,8 @@
       "modelTemperature": 0,
       "generatedAt": "2026-04-20T00:00:00.000Z",
       "steps": [
-        { "id": "ac1-open-seeded-canvas", "kind": "goto", "url": "/my-dashboard/00000000-0000-0000-0000-000000000000", "expect": { "locator": "button:has-text(\"Chat\")" } },
+        { "id": "ac1-open-seeded-canvas", "kind": "goto", "url": "/my-dashboard/00000000-0000-0000-0000-000000000000", "expect": { "locator": "button:has-text(\"Cohi\")" } },
+        { "id": "ac1-open-cohi-panel", "kind": "click", "locator": "button:has-text(\"Cohi\")", "expect": { "locator": "button:has-text(\"Chat\")" } },
         { "id": "ac1-assert-chat-tab", "kind": "assert", "locator": "button:has-text(\"Chat\")", "toBeVisible": true },
         { "id": "ac1-assert-dashboards-tab", "kind": "assert", "locator": "button:has-text(\"Dashboards\")", "toBeVisible": true },
         { "id": "ac1-assert-schema-tab", "kind": "assert", "locator": "button:has-text(\"Schema\")", "toBeVisible": true },

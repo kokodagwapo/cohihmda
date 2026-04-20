@@ -12,11 +12,19 @@ async function waitForApi(
   return response;
 }
 
+// IMPORTANT: keep this timeout STRICTLY shorter than the Playwright test
+// timeout (60s at the time of writing). If this waits for the full 60s and
+// the caller `await`s it inside a `Promise.all([...])`, the outer test
+// timeout fires first — the `catch` never runs, `Promise.all` never resolves,
+// and the test fails with "Test timeout of 60000ms exceeded" even though the
+// required (non-optional) sibling request already responded. The original 60s
+// default exhibited exactly this failure mode on environments where the
+// leaderboard request is gated on tenant/channel selection and never fires.
 async function waitForApiOptional(
   page: Page,
   label: string,
   predicate: (response: Response) => boolean,
-  timeoutMs = 60_000,
+  timeoutMs = 20_000,
 ): Promise<Response | null> {
   try {
     return await waitForApi(page, label, predicate, timeoutMs);
