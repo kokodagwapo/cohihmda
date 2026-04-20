@@ -14,7 +14,10 @@ function validPlan(issueKey: string): TestPlan {
       {
         id: "ac1-open-seeded-canvas",
         kind: "goto",
-        url: "/workbench/abc-123",
+        // Individual canvas editor lives at `/my-dashboard/:canvasId`, not
+        // `/workbench/:canvasId`. Keep this URL shape in sync with
+        // `acValidator` so regressions show up in unit tests first.
+        url: "/my-dashboard/abc-123",
         expect: {},
       },
     ],
@@ -40,7 +43,7 @@ describe("planGenerator testContext plumbing", () => {
     const mockClient: LlmClient = {
       generatePlan: vi.fn(async ({ systemPrompt }) => {
         expect(systemPrompt).toContain("Runtime test context for this plan:");
-        expect(systemPrompt).toContain('"/workbench/abc-123"');
+        expect(systemPrompt).toContain('"/my-dashboard/abc-123"');
         expect(systemPrompt).toContain("seededCanvasUrl");
         return {
           plan: validPlan("COHI-77"),
@@ -59,7 +62,7 @@ describe("planGenerator testContext plumbing", () => {
       environment: "dev",
       statements: [canvasStatement],
       llmClient: mockClient,
-      testContext: { seededCanvasUrl: "/workbench/abc-123" },
+      testContext: { seededCanvasUrl: "/my-dashboard/abc-123" },
     });
 
     expect(result.plan.issueKey).toBe("COHI-77");

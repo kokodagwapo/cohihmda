@@ -10,6 +10,7 @@ import { readIssueAcceptanceCriteria, postJiraComment, type JiraAcReadResult } f
 import { generatePlan, type GeneratedPlanResult } from "./planGenerator.js";
 import { validatePlan } from "./planValidator.js";
 import { executePlan, type ExecutePlanResult } from "./planExecutor.js";
+import { buildSeededCanvasUrl } from "./planRoutes.js";
 import { approvePlan, type PlanApprovalDecision } from "./planApprover.js";
 import { buildEvidencePackage } from "./evidencePackager.js";
 import type { IssueAcValidationResult, StatementResult, TestPlan } from "./types.js";
@@ -362,7 +363,7 @@ export async function runAcValidator(params: RunAcValidatorParams): Promise<Issu
               issueKey: target.issueKey,
             });
             const canvasResource = seeded.resources.find((r) => r.kind === "canvas");
-            const canvasUrl = canvasResource ? `/workbench/${canvasResource.id}` : undefined;
+            const canvasUrl = canvasResource ? buildSeededCanvasUrl(canvasResource.id) : undefined;
             return {
               qaAgentRunTag: seeded.qaAgentRunTag,
               manifestPath: seeded.manifestPath,

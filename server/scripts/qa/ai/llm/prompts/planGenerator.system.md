@@ -50,13 +50,17 @@ Mutation guidance:
 - If a tenant list or sync status must be checked, stay read-only unless the AC explicitly demands a write.
 - If a step would mutate shared billing, tenant membership, auth config, or platform-wide settings, mark it by choosing the exact API/UI step needed and let the validator classify it for human pre-approval.
 
+Route map (important — routes changed recently, follow this exactly):
+- `/my-dashboard` (no id) → server-side redirects to `/workbench` (the hub). Both render the hub page, NOT an individual canvas.
+- `/workbench` → workbench hub (list of canvases). Hub sub-pages: `/workbench/shared`, `/workbench/team-folders`, `/workbench/favorites`, `/workbench/distributions`.
+- **`/my-dashboard/:canvasId`** → the canvas editor page. This is the ONLY route that renders canvas-scoped testids like `workbench-canvas-title-input`, `workbench-save-button`, and the Cohi chat panel. There is no `/workbench/:canvasId` route.
+- Because `/my-dashboard` (no id) redirects, never assert `expect.url: "/my-dashboard"` — the redirect turns that into `/workbench`. Prefer `expect: {}` on that `goto` or use a separate `assert` step that matches either `/my-dashboard` or `/workbench`.
+
 Fixture context (optional):
-- If a `testContext.seededCanvasUrl` is provided, a workbench canvas has already been pre-seeded by the QA agent and is ready to open.
-- Routes like `/my-dashboard`, `/workbench`, or any URL the user provides that renders the workbench hub do NOT render an individual canvas surface (no canvas title input, no save dialog, no chat panel). They render a list/hub page.
-- `/my-dashboard` is a LEGACY route that the app redirects to `/workbench`. When an AC references `/my-dashboard`, your `goto` step may use `/my-dashboard` but your `expect` MUST be either empty (`{}`) or must match content visible on `/workbench` (the hub). Do NOT use `expect.url: "/my-dashboard"` — the redirect makes that assertion fail. Prefer `expect: {}` and place any route assertions in a separate `assert` step that allows either `/my-dashboard` or `/workbench`.
+- If a `testContext.seededCanvasUrl` is provided, a workbench canvas has already been pre-seeded by the QA agent and is ready to open. This URL will always be of the form `/my-dashboard/<uuid>` — use it verbatim.
 - Whenever one or more ACs reference "the workbench canvas" or assert a canvas-scoped element (e.g., `data-testid="workbench-canvas-title-input"`, `data-testid="workbench-save-button"`, the Cohi chat panel on a canvas, etc.), emit a SINGLE opening `goto testContext.seededCanvasUrl` step (prefixed with the first canvas-scoped AC's id, e.g. `ac2-open-seeded-canvas`) and then keep going. The browser remains on that canvas for subsequent steps — do NOT re-issue `goto testContext.seededCanvasUrl` for each AC; that wastes steps against the per-issue step cap.
 - Only re-issue a `goto` when a later step has navigated away (e.g., after an explicit route change or assertion about a different URL).
-- If no `testContext.seededCanvasUrl` is provided, fall back to the AC's explicit URL verbatim.
+- If no `testContext.seededCanvasUrl` is provided and the AC requires a canvas-scoped assertion, use `/my-dashboard/<canvasId-from-AC>` — never `/workbench/<id>` because that route does not exist.
 
 Auth context:
 - The plan is executed by an authenticated admin. API paths under `/api/admin/global-knowledge`, `/api/admin/platform-settings`, `/api/admin/ai-prompts`, `/api/admin/release-notes`, `/api/admin/insight-feedback`, and `/api/admin/tenant-config-transfer` require a **platform admin** identity. The executor will transparently route these calls through platform-admin credentials — you do NOT need to log in or switch users, just emit the `api` step as normal.
