@@ -32,6 +32,7 @@ async function fetchIssueStatus(cfg: AtlassianConfig, issueKey: string): Promise
       headers: {
         Authorization: authHeader(cfg),
         Accept: "application/json",
+        "Accept-Language": "en-US",
       },
     },
   );

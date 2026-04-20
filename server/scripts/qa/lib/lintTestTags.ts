@@ -141,6 +141,7 @@ async function verifyJiraKeysExist(issueKeys: string[]): Promise<string[]> {
         headers: {
           Authorization: authHeader,
           Accept: "application/json",
+          "Accept-Language": "en-US",
         },
       },
     );

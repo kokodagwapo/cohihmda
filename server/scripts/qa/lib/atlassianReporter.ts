@@ -93,6 +93,12 @@ async function confluenceRequest(
       Authorization: authHeader(cfg.email, cfg.apiToken),
       "Content-Type": "application/json",
       Accept: "application/json",
+      // Pin error messages to English regardless of the authenticating
+      // account's profile locale. Guard-provisioned service accounts
+      // sometimes default to the org's regional language (e.g.
+      // Simplified Chinese) which makes CI error triage miserable
+      // because every response body comes back localized.
+      "Accept-Language": "en-US",
     },
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -159,6 +165,7 @@ async function uploadConfluenceAttachment(
       Authorization: authHeader(cfg.email, cfg.apiToken),
       Accept: "application/json",
       "X-Atlassian-Token": "no-check",
+      "Accept-Language": "en-US",
     },
     body: form,
   });
@@ -204,6 +211,7 @@ async function jiraRequest(
       Authorization: authHeader(cfg.email, cfg.apiToken),
       "Content-Type": "application/json",
       Accept: "application/json",
+      "Accept-Language": "en-US",
     },
     body: body ? JSON.stringify(body) : undefined,
   });
