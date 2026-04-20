@@ -256,6 +256,30 @@ export async function runAcValidator(params: RunAcValidatorParams): Promise<Issu
       },
     });
 
+    // Hoisted state for the teardown safety-net below. These must be declared
+    // outside the try{} so the catch handler can invoke teardown when a failure
+    // occurs between fixture seeding and the inner execution try/finally block.
+    let fixtureSeeded = false;
+    let qaAgentRunTag = `qa-agent-run-${params.buildNumber}`;
+    let teardownErrors: string[] = [];
+    let teardownDeletedIds: string[] = [];
+    const runFixtureTeardown = async () => {
+      if (!fixtureSeeded) return;
+      const teardown = await teardownQaAgentTenant({
+        baseUrl: params.baseUrl,
+        buildNumber: params.buildNumber,
+        issueKey: target.issueKey,
+      }).catch((error) => ({
+        qaAgentRunTag,
+        manifestPath: "",
+        deletedResourceIds: [],
+        errors: [error instanceof Error ? error.message : String(error)],
+      }));
+      teardownErrors = teardown.errors;
+      teardownDeletedIds = teardown.deletedResourceIds;
+      fixtureSeeded = false;
+    };
+
     try {
       const issue = await recordStageAction<JiraAcReadResult>(
         parentActionId,
@@ -311,11 +335,55 @@ export async function runAcValidator(params: RunAcValidatorParams): Promise<Issu
         `[AcValidator] ${target.issueKey} — parsed ${statements.length} AC statement(s); generating plan...`,
       );
 
+      // Pre-seed QA fixture BEFORE plan generation so the planner knows which
+      // specific canvas to open when an AC references the workbench canvas.
+      // `/my-dashboard` and `/workbench` render the hub (not a canvas surface),
+      // so without a concrete canvas URL the LLM cannot produce a plan that
+      // reaches `workbench-canvas-title-input` or the save dialog. Dry runs
+      // skip seeding (no execution follows) and rely on the LLM's default
+      // behavior.
+      let seededCanvasUrl: string | undefined;
+
+      if (!dryRun) {
+        const fixtureSeed = await recordStageAction<{
+          qaAgentRunTag: string;
+          manifestPath: string;
+          resourceCount: number;
+          seededCanvasUrl?: string;
+        }>(
+          parentActionId,
+          requestId,
+          "fixture_seed",
+          { issueKey: target.issueKey },
+          async () => {
+            const seeded = await seedQaAgentTenant({
+              baseUrl: params.baseUrl,
+              buildNumber: params.buildNumber,
+              issueKey: target.issueKey,
+            });
+            const canvasResource = seeded.resources.find((r) => r.kind === "canvas");
+            const canvasUrl = canvasResource ? `/workbench/${canvasResource.id}` : undefined;
+            return {
+              qaAgentRunTag: seeded.qaAgentRunTag,
+              manifestPath: seeded.manifestPath,
+              resourceCount: seeded.resources.length,
+              seededCanvasUrl: canvasUrl,
+            };
+          },
+        );
+        qaAgentRunTag = fixtureSeed.qaAgentRunTag;
+        seededCanvasUrl = fixtureSeed.seededCanvasUrl;
+        fixtureSeeded = true;
+        console.log(
+          `[AcValidator] ${target.issueKey} — fixture seeded: resources=${fixtureSeed.resourceCount}, seededCanvasUrl=${seededCanvasUrl ?? "(none)"}`,
+        );
+      }
+
       const generatedPlan = await recordStageAction<GeneratedPlanResult>(
         parentActionId,
         requestId,
         "plan_generation",
-        { issueKey: target.issueKey },
+        { issueKey: target.issueKey, seededCanvasUrl: seededCanvasUrl ?? null },
         async () => {
           const result = await generatePlan({
             issueKey: target.issueKey,
@@ -323,6 +391,7 @@ export async function runAcValidator(params: RunAcValidatorParams): Promise<Issu
             environment: params.environment,
             statements,
             llmClient: params.llmClient,
+            testContext: seededCanvasUrl ? { seededCanvasUrl } : undefined,
           });
           return result;
         },
@@ -427,36 +496,8 @@ export async function runAcValidator(params: RunAcValidatorParams): Promise<Issu
 
       let execution: ExecutePlanResult | null = null;
       let evidencePackage: IssueAcValidationResult["evidencePackage"];
-      let teardownErrors: string[] = [];
-      let teardownDeletedIds: string[] = [];
-      let qaAgentRunTag = `qa-agent-run-${params.buildNumber}`;
 
       try {
-        const fixtureSeed = await recordStageAction<{
-          qaAgentRunTag: string;
-          manifestPath: string;
-          resourceCount: number;
-        }>(
-          parentActionId,
-          requestId,
-          "fixture_seed",
-          { issueKey: target.issueKey },
-          async () => {
-            const seeded = await seedQaAgentTenant({
-              baseUrl: params.baseUrl,
-              buildNumber: params.buildNumber,
-              issueKey: target.issueKey,
-            });
-            qaAgentRunTag = seeded.qaAgentRunTag;
-            return {
-              qaAgentRunTag: seeded.qaAgentRunTag,
-              manifestPath: seeded.manifestPath,
-              resourceCount: seeded.resources.length,
-            };
-          },
-        );
-        qaAgentRunTag = fixtureSeed.qaAgentRunTag;
-
         const executionStartedAt = Date.now();
         execution = await recordStageAction<ExecutePlanResult>(
           parentActionId,
@@ -597,18 +638,7 @@ export async function runAcValidator(params: RunAcValidatorParams): Promise<Issu
         );
         results.push(issueResult);
       } finally {
-        const teardown = await teardownQaAgentTenant({
-          baseUrl: params.baseUrl,
-          buildNumber: params.buildNumber,
-          issueKey: target.issueKey,
-        }).catch((error) => ({
-          qaAgentRunTag,
-          manifestPath: "",
-          deletedResourceIds: [],
-          errors: [error instanceof Error ? error.message : String(error)],
-        }));
-        teardownErrors = teardown.errors;
-        teardownDeletedIds = teardown.deletedResourceIds;
+        await runFixtureTeardown();
       }
 
       if (teardownErrors.length > 0 && mustTeardownCleanly) {
@@ -630,6 +660,10 @@ export async function runAcValidator(params: RunAcValidatorParams): Promise<Issu
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn(`[AcValidator] ${target.issueKey} — failed: ${message}`);
+      // Safety-net teardown: if seeding completed but a later stage (plan
+      // generation, validation, etc.) threw before reaching the inner
+      // try/finally, the fixture would otherwise leak.
+      await runFixtureTeardown().catch(() => {});
       await transitionAction({
         actionId: parentActionId,
         status: "failed",

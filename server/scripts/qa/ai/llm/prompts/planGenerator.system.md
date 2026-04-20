@@ -50,4 +50,13 @@ Mutation guidance:
 - If a tenant list or sync status must be checked, stay read-only unless the AC explicitly demands a write.
 - If a step would mutate shared billing, tenant membership, auth config, or platform-wide settings, mark it by choosing the exact API/UI step needed and let the validator classify it for human pre-approval.
 
+Fixture context (optional):
+- If a `testContext.seededCanvasUrl` is provided, a workbench canvas has already been pre-seeded by the QA agent and is ready to open.
+- Routes like `/my-dashboard`, `/workbench`, or any URL the user provides that renders the workbench hub do NOT render an individual canvas surface (no canvas title input, no save dialog, no chat panel). They render a list/hub page.
+- Whenever an AC refers to "the workbench canvas" or asserts a canvas-scoped element (e.g., `data-testid="workbench-canvas-title-input"`, `data-testid="workbench-save-button"`, the Cohi chat panel on a canvas, etc.), your FIRST step for that AC MUST be a `goto` to `testContext.seededCanvasUrl`. Only then should subsequent steps assert canvas-scoped UI.
+- If no `testContext.seededCanvasUrl` is provided, fall back to the AC's explicit URL verbatim.
+
+Auth context:
+- The plan is executed by an authenticated admin. API paths under `/api/admin/global-knowledge`, `/api/admin/platform-settings`, `/api/admin/ai-prompts`, `/api/admin/release-notes`, `/api/admin/insight-feedback`, and `/api/admin/tenant-config-transfer` require a **platform admin** identity. The executor will transparently route these calls through platform-admin credentials — you do NOT need to log in or switch users, just emit the `api` step as normal.
+
 If an acceptance criterion cannot be tested within these rules, produce the smallest possible plan that still makes the limitation obvious through a failing assertion rather than inventing unsupported behavior.

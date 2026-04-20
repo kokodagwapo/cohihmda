@@ -11,6 +11,7 @@ import { generateTotpCode } from "./totp";
 
 const USER_STATE = path.join(AUTH_DIR, "user.json");
 const ADMIN_STATE = path.join(AUTH_DIR, "admin.json");
+const PLATFORM_ADMIN_STATE = path.join(AUTH_DIR, "platform-admin.json");
 const CANVAS_ONLY_STATE = path.join(AUTH_DIR, "canvas-only.json");
 const TOTP_RETRY_OFFSETS_MS = [0, -30_000, 30_000, -60_000, 60_000, -90_000, 90_000];
 
@@ -335,6 +336,44 @@ async function signInAndResolveToken(
   );
 }
 
+/**
+ * Sign in as a platform admin (no tenant context) and persist the storage
+ * state to `outputPath`. Unlike `loginAndPersistState`, this does not navigate
+ * to `/insights` because platform admins do not have a tenant and the insights
+ * page is tenant-scoped. The persisted storage state contains only what the
+ * AI AC Validator needs: an `auth_token` in localStorage that carries platform
+ * admin privileges for calling `/api/admin/*` platform routes.
+ */
+async function loginPlatformAdminAndPersistState(
+  baseURL: string,
+  email: string,
+  password: string,
+  totpSecret: string,
+  outputPath: string,
+) {
+  const signedIn = await signInAndResolveToken(baseURL, email, password, undefined, {
+    allowMfaSetup: false,
+    existingTotpSecret: totpSecret,
+  });
+
+  const browser = await chromium.launch();
+  const page = await browser.newPage();
+
+  await page.goto(apiUrl(baseURL, "/login"), { waitUntil: "domcontentloaded" });
+  await page.evaluate(
+    ({ token, cognitoAccessToken }) => {
+      localStorage.setItem("auth_token", token);
+      if (cognitoAccessToken) {
+        localStorage.setItem("cognito_access_token", cognitoAccessToken);
+      }
+    },
+    { token: signedIn.token, cognitoAccessToken: signedIn.cognitoAccessToken },
+  );
+
+  await page.context().storageState({ path: outputPath });
+  await browser.close();
+}
+
 async function loginAndPersistState(
   baseURL: string,
   email: string,
@@ -580,4 +619,40 @@ export default async function globalSetup(config: FullConfig) {
     CANVAS_ONLY_STATE,
     admin.tenantSlug,
   );
+
+  // Optional platform-admin session for the AI AC Validator. Platform-admin
+  // credentials are only required when an AC targets platform-scoped admin
+  // routes (e.g., `/api/admin/global-knowledge/categories`). If the envs are
+  // not set, we skip this step so the broader E2E suite can still run for
+  // engineers who do not have platform-admin credentials provisioned locally.
+  const platformAdminEmail = process.env.E2E_PLATFORM_ADMIN_EMAIL?.trim();
+  const platformAdminPassword = process.env.E2E_PLATFORM_ADMIN_PASSWORD?.trim();
+  const platformAdminTotpSecret = process.env.E2E_PLATFORM_ADMIN_TOTP_SECRET?.trim();
+  if (platformAdminEmail && platformAdminPassword && platformAdminTotpSecret) {
+    try {
+      await loginPlatformAdminAndPersistState(
+        baseURL,
+        platformAdminEmail,
+        platformAdminPassword,
+        platformAdminTotpSecret,
+        PLATFORM_ADMIN_STATE,
+      );
+      console.log(
+        `[E2E] Persisted platform-admin session for AI AC Validator (${platformAdminEmail}).`,
+      );
+    } catch (error) {
+      // Do NOT fail the whole setup if platform admin login fails — only the
+      // AI AC Validator's admin-API ACs depend on it. Surface a loud warning
+      // so the AC failure logs correlate to this missing session.
+      console.warn(
+        `[E2E] Platform-admin session setup failed: ${
+          error instanceof Error ? error.message : String(error)
+        }. AI AC Validator steps against /api/admin/* platform routes will fall back to the tenant-admin token and likely 403.`,
+      );
+    }
+  } else {
+    console.log(
+      "[E2E] E2E_PLATFORM_ADMIN_* envs not set — skipping platform-admin session. AI AC Validator admin-API steps will use tenant-admin credentials only.",
+    );
+  }
 }

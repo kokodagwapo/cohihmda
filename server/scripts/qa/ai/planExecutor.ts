@@ -28,6 +28,39 @@ function resolveStorageStatePath(): string {
   return process.env.QA_AC_STORAGE_STATE_PATH || join(REPO_ROOT, "e2e", ".auth", "admin.json");
 }
 
+function resolvePlatformAdminStoragePath(): string {
+  return (
+    process.env.QA_AC_PLATFORM_ADMIN_STORAGE_PATH ||
+    join(REPO_ROOT, "e2e", ".auth", "platform-admin.json")
+  );
+}
+
+/**
+ * API paths that require a `platform_admin` or `super_admin` identity (these
+ * routes are mounted behind `requirePlatformAdmin` / `requireSuperAdmin`
+ * middleware on the backend). Calling them with a tenant-admin token produces
+ * a 403 Forbidden, so the executor must transparently switch to the platform
+ * admin storage state when these paths appear in the plan.
+ *
+ * Tenant-scoped admin routes like `/api/admin/tenants/:id/...` are NOT on this
+ * list: they run under tenant admins today and their ACs should continue to
+ * exercise tenant-admin credentials.
+ */
+const PLATFORM_ADMIN_API_PATH_PREFIXES = [
+  "/api/admin/global-knowledge",
+  "/api/admin/platform-settings",
+  "/api/admin/ai-prompts",
+  "/api/admin/release-notes",
+  "/api/admin/insight-feedback",
+  "/api/admin/tenant-config-transfer",
+];
+
+export function requiresPlatformAdmin(apiPath: string): boolean {
+  return PLATFORM_ADMIN_API_PATH_PREFIXES.some((prefix) => apiPath.startsWith(prefix));
+}
+
+export const __TESTING__ = { PLATFORM_ADMIN_API_PATH_PREFIXES };
+
 function resolveRunTag(buildNumber: string): string {
   return `qa-agent-run-${buildNumber}`;
 }
@@ -120,6 +153,15 @@ function writeJson(path: string, value: unknown): void {
 export async function executePlan(params: ExecutePlanParams): Promise<ExecutePlanResult> {
   const storageStatePath = resolveStorageStatePath();
   const authToken = extractAuthToken(storageStatePath, params.baseUrl);
+  const platformAdminStoragePath = resolvePlatformAdminStoragePath();
+  const platformAdminToken = existsSync(platformAdminStoragePath)
+    ? extractAuthToken(platformAdminStoragePath, params.baseUrl)
+    : null;
+  if (!platformAdminToken) {
+    console.warn(
+      `[planExecutor] Platform-admin storage state missing at ${platformAdminStoragePath}. API steps targeting platform-only admin routes will be executed with the tenant-admin token and likely 403.`,
+    );
+  }
   const runTag = resolveRunTag(params.buildNumber);
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
@@ -210,8 +252,10 @@ export async function executePlan(params: ExecutePlanParams): Promise<ExecutePla
       } else if (step.kind === "api") {
         const url = buildUrl(params.baseUrl, step.path);
         const headers: Record<string, string> = { Accept: "application/json" };
-        if (authToken) {
-          headers.Authorization = `Bearer ${authToken}`;
+        const stepAuthToken =
+          requiresPlatformAdmin(step.path) && platformAdminToken ? platformAdminToken : authToken;
+        if (stepAuthToken) {
+          headers.Authorization = `Bearer ${stepAuthToken}`;
         }
         if (step.body) {
           headers["Content-Type"] = "application/json";

@@ -110,5 +110,44 @@
         { "id": "ac3-assert-canvases-field", "kind": "api", "method": "GET", "path": "/api/workbench/canvases", "expectStatus": 200, "expectBodyContains": "canvases" }
       ]
     }
+  },
+  {
+    "issueKey": "COHI-77",
+    "acceptanceCriteria": [
+      "1. [UI] On the workbench canvas, the element with data-testid=\"workbench-canvas-title-input\" is visible and accepts text input",
+      "2. [UI] Clicking the element with data-testid=\"workbench-save-button\" opens a modal dialog whose heading text contains \"Save\""
+    ],
+    "testContext": {
+      "seededCanvasUrl": "/workbench/00000000-0000-0000-0000-000000000000"
+    },
+    "plan": {
+      "planVersion": 1,
+      "issueKey": "COHI-77",
+      "modelName": "gpt-5.4",
+      "modelTemperature": 0,
+      "generatedAt": "2026-04-17T00:00:00.000Z",
+      "steps": [
+        { "id": "ac1-open-seeded-canvas", "kind": "goto", "url": "/workbench/00000000-0000-0000-0000-000000000000", "expect": { "locator": "[data-testid=\"workbench-canvas-title-input\"]" } },
+        { "id": "ac1-assert-canvas-title-input-visible", "kind": "assert", "locator": "[data-testid=\"workbench-canvas-title-input\"]", "toBeVisible": true },
+        { "id": "ac1-fill-canvas-title", "kind": "fill", "locator": "[data-testid=\"workbench-canvas-title-input\"]", "value": "QA Agent Title", "expect": { "locator": "[data-testid=\"workbench-canvas-title-input\"]" } },
+        { "id": "ac2-click-save-button", "kind": "click", "locator": "[data-testid=\"workbench-save-button\"]", "expect": { "locator": "[role=\"dialog\"] :text-matches(\"Save\", \"i\")" } }
+      ]
+    }
+  },
+  {
+    "issueKey": "COHI-96",
+    "acceptanceCriteria": [
+      "1. [API] GET /api/admin/global-knowledge/categories returns 200 and the response body contains the text \"Analytics\""
+    ],
+    "plan": {
+      "planVersion": 1,
+      "issueKey": "COHI-96",
+      "modelName": "gpt-5.4",
+      "modelTemperature": 0,
+      "generatedAt": "2026-04-17T00:00:00.000Z",
+      "steps": [
+        { "id": "ac1-get-global-knowledge-categories", "kind": "api", "method": "GET", "path": "/api/admin/global-knowledge/categories", "expectStatus": 200, "expectBodyContains": "Analytics" }
+      ]
+    }
   }
 ]
