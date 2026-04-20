@@ -92,11 +92,33 @@ function extractAuthToken(storageStatePath: string, baseUrl: string): string | n
 // workbench canvas toolbar hasn't mounted yet when we look). The correct
 // auto-waiting pattern is `locator.waitFor({ state: "visible" })`, which polls
 // up to `timeout` ms before throwing.
+// Best-effort URL reader for error-message context. Playwright's `page.url()`
+// is synchronous and safe to call even when the page is mid-transition; we
+// defensively guard against exotic edge cases (closed browser, race) so a
+// context-gathering helper never itself becomes the error thrown to the user.
+function currentUrlForError(page: any): string {
+  try {
+    return typeof page?.url === "function" ? page.url() : "<unknown>";
+  } catch {
+    return "<unknown>";
+  }
+}
+
 async function assertVisible(page: any, locator: string): Promise<void> {
   try {
     await page.locator(locator).first().waitFor({ state: "visible", timeout: 10_000 });
   } catch {
-    throw new Error(`Expected locator to be visible: ${locator}`);
+    // Include the observed URL in the thrown Error itself (not just in the
+    // step's console warning). The most common root cause of this timeout is
+    // that an earlier `click` navigated the browser somewhere unexpected
+    // (e.g. a `button:has-text("Cohi")` matched a sidebar nav link instead
+    // of the workbench toolbar toggle), so the URL context is what tells
+    // you where the plan actually landed. Without this, Confluence + Jira
+    // evidence surfaces show only "Expected locator to be visible: …" and
+    // the URL gets lost once the error is serialized out of process.
+    throw new Error(
+      `Expected locator to be visible: ${locator} (observedUrl=${currentUrlForError(page)})`,
+    );
   }
 }
 
@@ -107,14 +129,22 @@ async function assertText(page: any, text: string): Promise<void> {
       .first()
       .waitFor({ state: "visible", timeout: 10_000 });
   } catch {
-    throw new Error(`Expected text to be visible: ${text}`);
+    throw new Error(
+      `Expected text to be visible: ${text} (observedUrl=${currentUrlForError(page)})`,
+    );
   }
 }
 
 async function assertUrl(page: any, expectedUrl: string): Promise<void> {
-  await page.waitForURL(new RegExp(expectedUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), {
-    timeout: 10_000,
-  });
+  try {
+    await page.waitForURL(new RegExp(expectedUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), {
+      timeout: 10_000,
+    });
+  } catch {
+    throw new Error(
+      `Expected URL to match "${expectedUrl}" but observedUrl=${currentUrlForError(page)}`,
+    );
+  }
 }
 
 // NOTE: `locator.textContent()` and `locator.inputValue()` are one-shot reads —

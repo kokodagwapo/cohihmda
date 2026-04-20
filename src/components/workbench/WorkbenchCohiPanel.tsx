@@ -431,7 +431,7 @@ export function WorkbenchCohiPanel({
         )}
 
         {/* Tabs */}
-        <div className="flex px-2 gap-1 bg-slate-50/50 dark:bg-slate-800/30">
+        <div role="tablist" aria-label="Cohi panel sections" className="flex px-2 gap-1 bg-slate-50/50 dark:bg-slate-800/30">
           {([
             { key: 'chat' as const, icon: <MessageSquare className="h-3 w-3" />, label: 'Chat' },
             { key: 'dashboards' as const, icon: <LayoutDashboard className="h-3 w-3" />, label: 'Dashboards' },
@@ -439,6 +439,9 @@ export function WorkbenchCohiPanel({
           ]).map((tab) => (
             <button
               key={tab.key}
+              role="tab"
+              data-testid={`workbench-cohi-tab-${tab.key}`}
+              aria-selected={activeTab === tab.key}
               onClick={() => setActiveTab(tab.key)}
               className={cn(
                 'flex items-center gap-1 px-3 py-1.5 text-xs font-medium border-b-2 transition-colors',
