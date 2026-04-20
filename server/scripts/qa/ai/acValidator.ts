@@ -636,6 +636,18 @@ export async function runAcValidator(params: RunAcValidatorParams): Promise<Issu
         console.log(
           `[AcValidator] ${target.issueKey} — execution complete: status=${issueResult.status}, writes=${execution.writesPerformed}, evidenceManifest=${evidencePackage?.manifestS3Url ?? "local"}, jiraMovedToEvidenceReview=${jiraMovedToEvidenceReview}`,
         );
+        if (issueResult.status === "failed") {
+          const firstFailed = execution.stepResults.find((step) => step.status === "failed");
+          if (firstFailed) {
+            console.warn(
+              `[AcValidator] ${target.issueKey} — first failing step: stepId=${firstFailed.stepId}, error=${firstFailed.error ?? "(no message)"}`,
+            );
+          } else {
+            console.warn(
+              `[AcValidator] ${target.issueKey} — marked failed but no individual step was tagged failed (check evidence manifest at ${evidencePackage?.manifestS3Url ?? "local"})`,
+            );
+          }
+        }
         results.push(issueResult);
       } finally {
         await runFixtureTeardown();
