@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { requiresPlatformAdmin } from "../../../scripts/qa/ai/planExecutor.js";
+// Intentionally import from planExecutorAuth (not planExecutor) so the backend's
+// predeploy Vitest suite does not need `@playwright/test` — which is an E2E-only
+// devDependency at the repo root and is not installed in the `server/` workspace.
+import { requiresPlatformAdmin } from "../../../scripts/qa/ai/planExecutorAuth.js";
 
 describe("planExecutor platform-admin path routing", () => {
   it.each([

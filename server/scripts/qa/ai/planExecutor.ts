@@ -4,6 +4,12 @@ import { fileURLToPath } from "url";
 import { chromium } from "@playwright/test";
 import { redactToJson } from "../../../src/utils/aiRedactor.js";
 import type { PlanStep, StepExecutionResult, TestPlan } from "./types.js";
+import {
+  PLATFORM_ADMIN_API_PATH_PREFIXES,
+  requiresPlatformAdmin,
+} from "./planExecutorAuth.js";
+
+export { requiresPlatformAdmin, PLATFORM_ADMIN_API_PATH_PREFIXES };
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -35,31 +41,6 @@ function resolvePlatformAdminStoragePath(): string {
   );
 }
 
-/**
- * API paths that require a `platform_admin` or `super_admin` identity (these
- * routes are mounted behind `requirePlatformAdmin` / `requireSuperAdmin`
- * middleware on the backend). Calling them with a tenant-admin token produces
- * a 403 Forbidden, so the executor must transparently switch to the platform
- * admin storage state when these paths appear in the plan.
- *
- * Tenant-scoped admin routes like `/api/admin/tenants/:id/...` are NOT on this
- * list: they run under tenant admins today and their ACs should continue to
- * exercise tenant-admin credentials.
- */
-const PLATFORM_ADMIN_API_PATH_PREFIXES = [
-  "/api/admin/global-knowledge",
-  "/api/admin/platform-settings",
-  "/api/admin/ai-prompts",
-  "/api/admin/release-notes",
-  "/api/admin/insight-feedback",
-  "/api/admin/tenant-config-transfer",
-];
-
-export function requiresPlatformAdmin(apiPath: string): boolean {
-  return PLATFORM_ADMIN_API_PATH_PREFIXES.some((prefix) => apiPath.startsWith(prefix));
-}
-
-export const __TESTING__ = { PLATFORM_ADMIN_API_PATH_PREFIXES };
 
 function resolveRunTag(buildNumber: string): string {
   return `qa-agent-run-${buildNumber}`;
