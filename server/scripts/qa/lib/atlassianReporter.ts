@@ -745,16 +745,23 @@ async function uploadScreenshotAttachmentsForIssue(
   if (screenshotArtifacts.length === 0) return result;
 
   const { readFile } = await import("node:fs/promises");
-  const { basename } = await import("node:path");
+  const { basename, dirname } = await import("node:path");
 
   for (const artifact of screenshotArtifacts) {
     if (!artifact.localPath) continue;
     try {
       const bytes = await readFile(artifact.localPath);
       const baseName = basename(artifact.localPath);
-      // Prefix with build number so repeated runs don't hit Confluence's
-      // "attachment with that title already exists" 400.
-      const title = `b${buildNumber}-${baseName}`;
+      // Playwright writes every test's screenshots into a unique directory
+      // named after the test title, but the file inside is always
+      // `test-finished-1.png` or `test-failed-1.png`. When multiple tests
+      // for the same issue produce screenshots, the bare basename collides
+      // on upload. Include a short hash of the parent directory name so
+      // each attachment title is unique within the page while still being
+      // human-readable.
+      const parentDir = basename(dirname(artifact.localPath));
+      const dirHash = parentDir.slice(-10).replace(/[^a-zA-Z0-9-]/g, "");
+      const title = `b${buildNumber}-${dirHash}-${baseName}`;
       const contentType =
         artifact.contentType && artifact.contentType.startsWith("image/")
           ? artifact.contentType
