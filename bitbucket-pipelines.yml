@@ -31,6 +31,7 @@
 #   - QA_COMMIT_RANGE              - Optional explicit git range for Jira-key discovery
 #   - QA_COMMIT_LOOKBACK           - Fallback commit lookback window when no range is provided
 #   - QA_ENABLE_AC_VALIDATOR       - Optional; defaults to "false" and enables Jira AC validation when true
+#   - QA_AC_MAX_STEPS_PER_ISSUE    - Optional override for the AI plan-validator per-issue step cap (default 25)
 #   - ATLASSIAN_EMAIL / ATLASSIAN_SITE_URL
 #   - Atlassian API token is fetched from Secrets Manager via backend stack output
 #   - (Optional) E2E_MANAGED_EMAIL_PREFIX      - defaults to "e2e.auto"
@@ -397,6 +398,11 @@ definitions:
           # the agent does not waste a plan-generation call trying to parse
           # them. COHI-106 is the AI control plane itself.
           - export QA_AC_SKIP_ISSUES="${QA_AC_SKIP_ISSUES:-COHI-106,COHI-14,COHI-13}"
+          # Forward the max-steps-per-issue override if the Run pipeline
+          # dialog set it. When empty the planValidator applies its default
+          # (25). Only export when the dialog value is non-empty so we don't
+          # clobber a deployment-level env var with an empty string.
+          - '[ -n "${QA_AC_MAX_STEPS_PER_ISSUE:-}" ] && export QA_AC_MAX_STEPS_PER_ISSUE || true'
           - chmod +x ./scripts/bitbucket/run-ai-qa.sh
           - ./scripts/bitbucket/run-ai-qa.sh
         artifacts:
@@ -590,6 +596,12 @@ pipelines:
           - name: QA_COMMIT_RANGE
             default: ""
           - name: QA_COMMIT_LOOKBACK
+            default: ""
+          # Upper bound on steps the AI plan generator is allowed to emit per
+          # Jira issue. Defaults to 25 in planValidator.ts. Large ACs (20+
+          # numbered items) can legitimately blow past 25; bump this for the
+          # run without editing code.
+          - name: QA_AC_MAX_STEPS_PER_ISSUE
             default: ""
       - step: *run-ai-qa-dev
 
