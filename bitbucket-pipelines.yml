@@ -32,6 +32,8 @@
 #   - QA_COMMIT_LOOKBACK           - Fallback commit lookback window when no range is provided
 #   - QA_ENABLE_AC_VALIDATOR       - Optional; defaults to "false" and enables Jira AC validation when true
 #   - QA_AC_MAX_STEPS_PER_ISSUE    - Optional override for the AI plan-validator per-issue step cap (default 25)
+#   - QA_AC_MAX_WRITES_PER_ISSUE   - Optional override for the AC validator per-issue write-action cap (default 10)
+#   - QA_AC_MAX_WRITES_PER_RUN     - Optional override for the AC validator aggregate write-action cap per pipeline run (default 25)
 #   - ATLASSIAN_EMAIL / ATLASSIAN_SITE_URL
 #   - Atlassian API token is fetched from Secrets Manager via backend stack output
 #   - (Optional) E2E_MANAGED_EMAIL_PREFIX      - defaults to "e2e.auto"
@@ -398,11 +400,14 @@ definitions:
           # the agent does not waste a plan-generation call trying to parse
           # them. COHI-106 is the AI control plane itself.
           - export QA_AC_SKIP_ISSUES="${QA_AC_SKIP_ISSUES:-COHI-106,COHI-14,COHI-13}"
-          # Forward the max-steps-per-issue override if the Run pipeline
-          # dialog set it. When empty the planValidator applies its default
-          # (25). Only export when the dialog value is non-empty so we don't
-          # clobber a deployment-level env var with an empty string.
+          # Forward the AC validator per-issue/per-run caps if the Run
+          # pipeline dialog set them. When empty, acValidator.ts / planValidator.ts
+          # fall back to their own defaults (25/10/25). Only re-export when
+          # the dialog value is non-empty so we don't clobber any
+          # deployment-level defaults with an empty string.
           - '[ -n "${QA_AC_MAX_STEPS_PER_ISSUE:-}" ] && export QA_AC_MAX_STEPS_PER_ISSUE || true'
+          - '[ -n "${QA_AC_MAX_WRITES_PER_ISSUE:-}" ] && export QA_AC_MAX_WRITES_PER_ISSUE || true'
+          - '[ -n "${QA_AC_MAX_WRITES_PER_RUN:-}" ] && export QA_AC_MAX_WRITES_PER_RUN || true'
           - chmod +x ./scripts/bitbucket/run-ai-qa.sh
           - ./scripts/bitbucket/run-ai-qa.sh
         artifacts:
@@ -602,6 +607,17 @@ pipelines:
           # numbered items) can legitimately blow past 25; bump this for the
           # run without editing code.
           - name: QA_AC_MAX_STEPS_PER_ISSUE
+            default: ""
+          # Upper bound on self-scoped write actions (clicks, fills, drags,
+          # POSTs) the AC plan executor is allowed to perform per Jira issue.
+          # Default 10 in acValidator.ts. Interaction-heavy UI stories with
+          # many buttons/drags can legitimately exceed 10.
+          - name: QA_AC_MAX_WRITES_PER_ISSUE
+            default: ""
+          # Aggregate write-action cap across every issue validated in the
+          # same pipeline run. Default 25 in acValidator.ts. Raise when
+          # running several interaction-heavy issues in one pipeline.
+          - name: QA_AC_MAX_WRITES_PER_RUN
             default: ""
       - step: *run-ai-qa-dev
 
