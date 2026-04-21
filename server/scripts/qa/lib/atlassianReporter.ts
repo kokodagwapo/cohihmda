@@ -634,11 +634,25 @@ function toAdfParagraph(text: string) {
   };
 }
 
-async function getConfluenceParent(cfg: AtlassianConfig): Promise<{ id: string; spaceId: string }> {
-  const parent = await confluenceRequest(cfg, "GET", `/api/v2/pages/${cfg.confluenceParentPageId}`);
+async function getConfluenceParent(cfg: AtlassianConfig): Promise<{ id: string; spaceKey: string }> {
+  // v1 REST API: /wiki/rest/api/content/{id}?expand=space
+  //
+  // We use v1 throughout the Confluence surface because the service-account
+  // token this pipeline authenticates with only carries the classic
+  // Confluence OAuth scopes (read:confluence-content.all etc.) and not the
+  // granular v2 scopes (read:page:confluence, write:page:confluence,
+  // read:space:confluence, ...). Every v2 call responds with
+  // `401 "scope does not match"` under those classic scopes, so we stay on
+  // v1. v1 is deprecated-but-supported; if Atlassian ever fully sunsets it
+  // we'll need to either add the granular scopes or rewrite again.
+  const parent = await confluenceRequest(
+    cfg,
+    "GET",
+    `/rest/api/content/${encodeURIComponent(cfg.confluenceParentPageId)}?expand=space`,
+  );
   return {
     id: String(parent?.id ?? cfg.confluenceParentPageId),
-    spaceId: String(parent?.spaceId ?? ""),
+    spaceKey: String(parent?.space?.key ?? ""),
   };
 }
 
@@ -674,12 +688,16 @@ function buildConfluencePageUrl(
 async function findConfluencePageByTitle(
   cfg: AtlassianConfig,
   title: string,
-  spaceId: string
+  spaceKey: string
 ): Promise<string | null> {
+  // v1 REST API: /wiki/rest/api/content?title=...&spaceKey=...&type=page
+  //
+  // The `type=page` filter is important — without it, attachments and
+  // blogposts with the same title could show up in `results`.
   const result = await confluenceRequest(
     cfg,
     "GET",
-    `/api/v2/pages?title=${encodeURIComponent(title)}&space-id=${encodeURIComponent(spaceId)}`
+    `/rest/api/content?title=${encodeURIComponent(title)}&spaceKey=${encodeURIComponent(spaceKey)}&type=page&limit=25`,
   );
   const pages = result?.results ?? [];
   const page = pages.find((entry: any) => entry?.title === title);
@@ -775,7 +793,7 @@ async function upsertConfluencePageForTarget(
     reportConsoleUrl: string | null;
     artifacts: QaArtifactLink[];
     relatedCommitsByIssueKey: Record<string, QaRelatedCommit[]>;
-    parent: { id: string; spaceId: string };
+    parent: { id: string; spaceKey: string };
   }
 ): Promise<QaTargetIssue> {
   const title = buildConfluencePageTitle(target);
@@ -807,7 +825,7 @@ async function upsertConfluencePageForTarget(
       mediaByLocalPath,
     });
 
-  const existingPageId = await findConfluencePageByTitle(cfg, title, opts.parent.spaceId);
+  const existingPageId = await findConfluencePageByTitle(cfg, title, opts.parent.spaceKey);
 
   // Pass 1: ensure a Confluence page exists for this issue so we have a
   // pageId to upload attachments against. For existing pages we skip the
@@ -820,22 +838,38 @@ async function upsertConfluencePageForTarget(
   let pageBeforeFinalPut: Record<string, unknown> | null = null;
   if (existingPageId) {
     pageId = existingPageId;
-    pageBeforeFinalPut = await confluenceRequest(cfg, "GET", `/api/v2/pages/${pageId}`);
+    // Expand `version` so the Pass 3 PUT has a fresh version number and
+    // `_links.webui` so we can surface a browsable URL even if Pass 3
+    // fails.
+    pageBeforeFinalPut = await confluenceRequest(
+      cfg,
+      "GET",
+      `/rest/api/content/${encodeURIComponent(pageId)}?expand=version`,
+    );
   } else {
     // POST with a minimal-but-valid ADF body so the page exists; Pass 2
     // will replace it with the full report.
-    const created = await confluenceRequest(cfg, "POST", "/api/v2/pages", {
-      spaceId: opts.parent.spaceId,
-      status: "current",
+    //
+    // v1 create payload differs from v2:
+    //   - `type: "page"` is required (v2 inferred it).
+    //   - Parent is set via `ancestors: [{ id }]`, not `parentId`.
+    //   - Space is identified by `space.key`, not `spaceId`.
+    //   - ADF goes under `body.atlas_doc_format.value` with the
+    //     representation declared inline.
+    const created = await confluenceRequest(cfg, "POST", "/rest/api/content", {
+      type: "page",
       title,
-      parentId: opts.parent.id,
+      space: { key: opts.parent.spaceKey },
+      ancestors: [{ id: opts.parent.id }],
       body: {
-        representation: "atlas_doc_format",
-        value: JSON.stringify({
-          type: "doc",
-          version: 1,
-          content: [toAdfParagraph(`QA page created for build #${opts.buildNumber}; evidence upload in progress…`)],
-        }),
+        atlas_doc_format: {
+          value: JSON.stringify({
+            type: "doc",
+            version: 1,
+            content: [toAdfParagraph(`QA page created for build #${opts.buildNumber}; evidence upload in progress…`)],
+          }),
+          representation: "atlas_doc_format",
+        },
       },
     });
     pageId = String(created?.id ?? "");
@@ -865,22 +899,38 @@ async function upsertConfluencePageForTarget(
   // because the attachment uploads themselves bump the page's internal
   // version counter on some Confluence tenants; using the stale number
   // would hit `409: version conflict`.
-  const beforePut = await confluenceRequest(cfg, "GET", `/api/v2/pages/${pageId}`);
+  const beforePut = await confluenceRequest(
+    cfg,
+    "GET",
+    `/rest/api/content/${encodeURIComponent(pageId)}?expand=version`,
+  );
   const currentVersion: number = beforePut?.version?.number ?? pageBeforeFinalPut?.version?.number ?? 0;
 
-  const updated = await confluenceRequest(cfg, "PUT", `/api/v2/pages/${pageId}`, {
-    id: pageId,
-    status: "current",
-    title,
-    body: {
-      representation: "atlas_doc_format",
-      value: JSON.stringify(adfBody),
+  // v1 update payload differs from v2:
+  //   - `type: "page"` is required.
+  //   - Body path is `body.atlas_doc_format.value` with the representation
+  //     declared inline.
+  //   - `version.number` must be `currentVersion + 1` or Confluence 409s.
+  const updated = await confluenceRequest(
+    cfg,
+    "PUT",
+    `/rest/api/content/${encodeURIComponent(pageId)}`,
+    {
+      id: pageId,
+      type: "page",
+      title,
+      body: {
+        atlas_doc_format: {
+          value: JSON.stringify(adfBody),
+          representation: "atlas_doc_format",
+        },
+      },
+      version: {
+        number: currentVersion + 1,
+        message: `Build #${opts.buildNumber}${mediaByLocalPath.size > 0 ? ` (+${mediaByLocalPath.size} inline screenshot${mediaByLocalPath.size === 1 ? "" : "s"})` : ""}`,
+      },
     },
-    version: {
-      number: currentVersion + 1,
-      message: `Build #${opts.buildNumber}${mediaByLocalPath.size > 0 ? ` (+${mediaByLocalPath.size} inline screenshot${mediaByLocalPath.size === 1 ? "" : "s"})` : ""}`,
-    },
-  });
+  );
 
   const enrichedTarget: QaTargetIssue = {
     ...target,
