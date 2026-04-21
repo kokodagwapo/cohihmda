@@ -163,7 +163,10 @@ function makeFetchMock(responses: Record<string, any> = {}) {
 
 function extractAdfBodyFromPutCall(call: [string, any]) {
   const payload = JSON.parse(call[1].body);
-  return JSON.parse(payload.body.value);
+  // v1 Confluence REST wraps the ADF payload under
+  // `body.atlas_doc_format.value`; the representation is declared inline
+  // as a sibling of the value.
+  return JSON.parse(payload.body.atlas_doc_format.value);
 }
 
 function collectAdfText(node: any): string {
@@ -239,31 +242,33 @@ describe("atlassianReporter.updateConfluencePages", () => {
 
   it("renders only issue-scoped tests and related commits on each page", async () => {
     const fetchMock = makeFetchMock({
-      "GET https://cohi.atlassian.net/wiki/api/v2/pages/99999": {
+      // v1 REST API surface. `getConfluenceParent` expands `space` so the
+      // reporter can read `space.key` for the subsequent `spaceKey=` lookup.
+      "GET https://cohi.atlassian.net/wiki/rest/api/content/99999?expand=space": {
         ok: true,
-        body: { id: "99999", spaceId: "space-1", version: { number: 2 } },
+        body: { id: "99999", space: { key: "space-1" } },
       },
-      "GET https://cohi.atlassian.net/wiki/api/v2/pages?title=QA%20-%20COHI-77&space-id=space-1": {
+      "GET https://cohi.atlassian.net/wiki/rest/api/content?title=QA%20-%20COHI-77&spaceKey=space-1&type=page&limit=25": {
         ok: true,
         body: { results: [{ id: "12345", title: "QA - COHI-77" }] },
       },
-      "GET https://cohi.atlassian.net/wiki/api/v2/pages?title=QA%20-%20COHI-96&space-id=space-1": {
+      "GET https://cohi.atlassian.net/wiki/rest/api/content?title=QA%20-%20COHI-96&spaceKey=space-1&type=page&limit=25": {
         ok: true,
         body: { results: [{ id: "67890", title: "QA - COHI-96" }] },
       },
-      "GET https://cohi.atlassian.net/wiki/api/v2/pages/12345": {
+      "GET https://cohi.atlassian.net/wiki/rest/api/content/12345?expand=version": {
         ok: true,
         body: { version: { number: 5 } },
       },
-      "GET https://cohi.atlassian.net/wiki/api/v2/pages/67890": {
+      "GET https://cohi.atlassian.net/wiki/rest/api/content/67890?expand=version": {
         ok: true,
         body: { version: { number: 8 } },
       },
-      "PUT https://cohi.atlassian.net/wiki/api/v2/pages/12345": {
+      "PUT https://cohi.atlassian.net/wiki/rest/api/content/12345": {
         ok: true,
         body: {},
       },
-      "PUT https://cohi.atlassian.net/wiki/api/v2/pages/67890": {
+      "PUT https://cohi.atlassian.net/wiki/rest/api/content/67890": {
         ok: true,
         body: {},
       },
@@ -313,7 +318,10 @@ describe("atlassianReporter.updateConfluencePages", () => {
     expect(enriched.map((target) => target.confluencePageId)).toEqual(["12345", "67890"]);
     const putCalls = fetchMock.mock.calls.filter(([, opts]: [string, any]) => opts?.method === "PUT");
     expect(putCalls).toHaveLength(2);
-    expect(JSON.parse(putCalls[0][1].body).body.representation).toBe("atlas_doc_format");
+    // v1 declares representation inside the body.atlas_doc_format envelope.
+    expect(JSON.parse(putCalls[0][1].body).body.atlas_doc_format.representation).toBe(
+      "atlas_doc_format",
+    );
 
     const firstPageText = collectAdfText(extractAdfBodyFromPutCall(putCalls[0]));
     const secondPageText = collectAdfText(extractAdfBodyFromPutCall(putCalls[1]));
@@ -330,19 +338,19 @@ describe("atlassianReporter.updateConfluencePages", () => {
 
   it("emits an evidence-gap page and Jira comment when a target has no tagged tests", async () => {
     const fetchMock = makeFetchMock({
-      "GET https://cohi.atlassian.net/wiki/api/v2/pages/99999": {
+      "GET https://cohi.atlassian.net/wiki/rest/api/content/99999?expand=space": {
         ok: true,
-        body: { id: "99999", spaceId: "space-1", version: { number: 2 } },
+        body: { id: "99999", space: { key: "space-1" } },
       },
-      "GET https://cohi.atlassian.net/wiki/api/v2/pages?title=QA%20-%20COHI-14&space-id=space-1": {
+      "GET https://cohi.atlassian.net/wiki/rest/api/content?title=QA%20-%20COHI-14&spaceKey=space-1&type=page&limit=25": {
         ok: true,
         body: { results: [{ id: "67890", title: "QA - COHI-14" }] },
       },
-      "GET https://cohi.atlassian.net/wiki/api/v2/pages/67890": {
+      "GET https://cohi.atlassian.net/wiki/rest/api/content/67890?expand=version": {
         ok: true,
         body: { version: { number: 8 } },
       },
-      "PUT https://cohi.atlassian.net/wiki/api/v2/pages/67890": {
+      "PUT https://cohi.atlassian.net/wiki/rest/api/content/67890": {
         ok: true,
         body: {},
       },
