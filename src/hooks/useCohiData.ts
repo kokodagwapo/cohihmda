@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
 import { CheckCircle2, Info, AlertTriangle, AlertCircle } from "lucide-react";
 
@@ -15,6 +15,7 @@ export interface CohiInsight {
   bucket?: "working" | "attention" | "critical" | "context";
   headline?: string;
   understory?: string;
+  understory_bullets?: string[];
   severity_score?: number;
   bucketPriority?: "BLUE" | "YELLOW" | "RED" | "GRAY";
   impact?: {
@@ -103,6 +104,7 @@ export const useCohiData = (
       bucket: insight.bucket,
       headline: insight.headline,
       understory: insight.understory,
+      understory_bullets: Array.isArray(insight.understory_bullets) ? insight.understory_bullets : undefined,
       severity_score: insight.severity_score,
       bucketPriority: insight.bucketPriority,
       impact: insight.impact,

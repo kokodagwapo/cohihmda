@@ -29,6 +29,8 @@ import {
   buildFundedFilter,
 } from "../../utils/scorecard-utils.js";
 import { getStaffingUnitTargets, type StaffingUnitTargets } from "../../utils/staffingUnitTargets.js";
+import { buildUnderstoryBullets } from "../insights/understoryBullets.js";
+import { selectBulletSource } from "../insights/bulletSource.js";
 
 /**
  * Analytics Service
@@ -123,6 +125,7 @@ export interface Insight {
   bucket?: string;
   headline?: string;
   understory?: string;
+  understory_bullets?: string[];
   severity_score?: number;
   bucketPriority?: string;
   impact?: { type?: string; estimated_dollars?: number | null; units_affected?: number | null };
@@ -1351,7 +1354,7 @@ async function loadEscalatedDashboardInsightsAsInsights(
 ): Promise<Insight[]> {
   try {
     const escalated = await loadEscalatedDashboardInsights(tenantPool);
-    return escalated.map((d) => ({
+    return Promise.all(escalated.map(async (d) => ({
       id: d.id,
       type: "critical",
       message: d.headline,
@@ -1362,6 +1365,9 @@ async function loadEscalatedDashboardInsightsAsInsights(
       bucket: "critical",
       headline: d.headline,
       understory: d.understory,
+      understory_bullets: Array.isArray(d.understory_bullets)
+        ? d.understory_bullets
+        : await buildUnderstoryBullets(d.understory, { headline: d.headline, sourceLabel: "understory" }),
       severity_score: d.severity_score,
       bucketPriority: "RED",
       what_changed: d.what_changed,
@@ -1377,7 +1383,7 @@ async function loadEscalatedDashboardInsightsAsInsights(
       cited_numbers: d.cited_numbers ?? [],
       supporting_data: d.supporting_data ?? undefined,
       functional_category: d.functional_category,
-    }));
+    })));
   } catch (err) {
     console.warn("[Insights] Failed to load escalated dashboard insights:", err);
     return [];
@@ -1454,8 +1460,8 @@ export async function getInsights(
         );
 
         // Map categorized insights to the API response format
-        const insights: Insight[] = stored.insights.map(
-          (ins: CategorizedInsight) => ({
+        const insights: Insight[] = await Promise.all(stored.insights.map(
+          async (ins: CategorizedInsight) => ({
             id: (ins as any).id,
             type: ins.insight_type,
             message: ins.headline,
@@ -1474,6 +1480,24 @@ export async function getInsights(
             bucket: ins.bucket,
             headline: ins.headline,
             understory: ins.understory,
+            understory_bullets: Array.isArray((ins as any).understory_bullets)
+              ? (ins as any).understory_bullets
+              : await buildUnderstoryBullets(
+                  selectBulletSource({
+                    generation_method: (ins as any).generation_method || "pipeline",
+                    detail_data: (ins as any).detail_data,
+                    understory: ins.understory,
+                  }).text,
+                  {
+                    headline: ins.headline,
+                    tenantId,
+                    sourceLabel: selectBulletSource({
+                      generation_method: (ins as any).generation_method || "pipeline",
+                      detail_data: (ins as any).detail_data,
+                      understory: ins.understory,
+                    }).sourceLabel,
+                  }
+                ),
             severity_score: ins.severity_score,
             bucketPriority: ins.priority,
             impact: ins.impact,
@@ -1489,7 +1513,7 @@ export async function getInsights(
             detail_data: (ins as any).detail_data || null,
             functional_category: (ins as any).functional_category || null,
           })
-        );
+        ));
 
         // Append escalated dashboard insights (Critical bucket, "Go to page" link)
         const escalatedDashboard = await loadEscalatedDashboardInsightsAsInsights(tenantPool);
@@ -2494,8 +2518,8 @@ export async function refreshInsights(
   const insightsSource = stored?.insights ?? result.insights;
 
   // Map to API response format
-  const insights: Insight[] = insightsSource.map(
-    (ins: CategorizedInsight) => ({
+  const insights: Insight[] = await Promise.all(insightsSource.map(
+    async (ins: CategorizedInsight) => ({
       id: (ins as any).id,
       type: ins.insight_type,
       message: ins.headline,
@@ -2514,14 +2538,33 @@ export async function refreshInsights(
       bucket: ins.bucket,
       headline: ins.headline,
       understory: ins.understory,
+      understory_bullets: Array.isArray((ins as any).understory_bullets)
+        ? (ins as any).understory_bullets
+        : await buildUnderstoryBullets(
+            selectBulletSource({
+              generation_method: (ins as any).generation_method || "pipeline",
+              detail_data: (ins as any).detail_data,
+              understory: ins.understory,
+            }).text,
+            {
+              headline: ins.headline,
+              tenantId,
+              sourceLabel: selectBulletSource({
+                generation_method: (ins as any).generation_method || "pipeline",
+                detail_data: (ins as any).detail_data,
+                understory: ins.understory,
+              }).sourceLabel,
+            }
+          ),
       severity_score: ins.severity_score,
       bucketPriority: ins.priority,
       impact: ins.impact,
       evidence: ins.evidence,
       generation_method: ins.generation_method || "pipeline",
+      detail_data: (ins as any).detail_data || null,
       functional_category: (ins as any).functional_category || null,
     })
-  );
+  ));
 
   return {
     insights,

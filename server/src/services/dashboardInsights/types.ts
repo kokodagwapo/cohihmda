@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Dashboard Insights — TypeScript types
  *
  * Page context (input to the pipeline) and pipeline output (per insight)
@@ -199,6 +199,7 @@ export interface DashboardInsight {
   id?: number;
   headline: string;
   understory: string;
+  understory_bullets?: string[];
   sentiment: "positive" | "warning" | "critical" | "neutral";
   severity_score: number;
   cited_numbers: string[];

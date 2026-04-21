@@ -65,6 +65,7 @@ export interface Finding {
   questionId: number;
   title: string;
   summary: string;
+  summary_bullets?: string[];
   confidence: "high" | "medium" | "low";
   evidence: EvidenceItem[];
   keyMetrics: Record<string, string | number>;

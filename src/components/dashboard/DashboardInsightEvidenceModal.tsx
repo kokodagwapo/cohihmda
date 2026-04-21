@@ -1,4 +1,4 @@
-﻿import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { X, AlertCircle, AlertTriangle, CheckCircle2, Info, ChevronRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -49,6 +49,7 @@ export type DashboardInsightEvidenceModalInsight = Pick<
   DashboardInsightItem,
   | "headline"
   | "understory"
+  | "understory_bullets"
   | "sentiment"
   | "severity_score"
   | "what_changed"
@@ -129,6 +130,10 @@ export function DashboardInsightEvidenceModal({
     insight &&
     (insight.what_changed || insight.why || insight.business_impact || insight.risk_if_ignored || insight.recommended_action || insight.owner);
   const refs = insight?.evidence_refs ?? [];
+  const summaryBullets =
+    Array.isArray(insight?.understory_bullets) && insight.understory_bullets.length > 0
+      ? insight.understory_bullets
+      : (insight?.understory ? [insight.understory] : []);
   const citedRaw = insight?.cited_numbers ?? [];
 
   /** Normalize cited items to display strings (API may return strings or objects). */
@@ -210,10 +215,16 @@ export function DashboardInsightEvidenceModal({
 
           {/* Scrollable body */}
           <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 min-h-0">
-            {insight?.understory && (
+            {summaryBullets.length > 0 && (
               <section>
                 <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Summary</h3>
-                <p className="text-sm text-slate-600 dark:text-slate-400">{insight.understory}</p>
+                <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/40 p-3">
+                  <ul className="list-disc pl-5 space-y-1.5 text-sm text-slate-600 dark:text-slate-300">
+                    {summaryBullets.map((bullet, idx) => (
+                      <li key={`${idx}-${bullet.slice(0, 24)}`}>{bullet}</li>
+                    ))}
+                  </ul>
+                </div>
               </section>
             )}
 

@@ -39,6 +39,7 @@ import {
   insightLogStart, insightLogEnd, getInsightLogPath,
 } from "./insightLogger.js";
 import { VIZ_STANDARDS_MEDIUM } from "../../config/visualizationStandards.js";
+import { buildUnderstoryBullets } from "./understoryBullets.js";
 
 // ============================================================================
 // Types
@@ -209,6 +210,7 @@ export interface CategorizedInsight {
   generation_method?: "pipeline" | "agent";
   /** Functional category this insight belongs to */
   functional_category?: string | null;
+  understory_bullets?: string[];
 }
 
 /** Full response from a generation run. */
@@ -2878,14 +2880,16 @@ async function persistInsights(
   // Check which optional columns exist (graceful for pre-migration tenants)
   let hasExperimentCol = false;
   let hasDetailDataCol = false;
+  let hasUnderstoryBulletsCol = false;
   try {
     const colCheck = await tenantPool.query(`
       SELECT column_name FROM information_schema.columns
-      WHERE table_name = 'generated_insights' AND column_name IN ('experiment_id', 'detail_data')
+      WHERE table_name = 'generated_insights' AND column_name IN ('experiment_id', 'detail_data', 'understory_bullets')
     `);
     for (const row of colCheck.rows) {
       if (row.column_name === "experiment_id") hasExperimentCol = true;
       if (row.column_name === "detail_data") hasDetailDataCol = true;
+      if (row.column_name === "understory_bullets") hasUnderstoryBulletsCol = true;
     }
   } catch { /* ignore */ }
 
@@ -2899,7 +2903,10 @@ async function persistInsights(
 
     // Base 15 columns always present
     const baseCount = 15;
-    const extraCount = (hasExperimentCol ? 1 : 0) + (hasDetailDataCol ? 1 : 0);
+    const extraCount =
+      (hasExperimentCol ? 1 : 0) +
+      (hasDetailDataCol ? 1 : 0) +
+      (hasUnderstoryBulletsCol ? 1 : 0);
     const totalParams = baseCount + extraCount;
     const ph = Array.from({ length: totalParams }, () => `$${paramIdx++}`);
     placeholders.push(`(${ph.join(", ")})`);
@@ -2935,6 +2942,13 @@ async function persistInsights(
     if (hasDetailDataCol) {
       values.push(ins.detail_data ? JSON.stringify(ins.detail_data) : null);
     }
+    if (hasUnderstoryBulletsCol) {
+      const bullets =
+        Array.isArray(ins.understory_bullets) && ins.understory_bullets.length > 0
+          ? ins.understory_bullets
+          : await buildUnderstoryBullets(ins.understory, { headline: ins.headline });
+      values.push(JSON.stringify(bullets));
+    }
     if (hasExperimentCol) {
       values.push(expId);
     }
@@ -2945,6 +2959,7 @@ async function persistInsights(
        severity_score, impact, evidence, for_podcast,
        date_filter, channel_group, generation_batch, generated_at, detail_query`;
   if (hasDetailDataCol) columnList += `, detail_data`;
+  if (hasUnderstoryBulletsCol) columnList += `, understory_bullets`;
   if (hasExperimentCol) columnList += `, experiment_id`;
   const columns = `(${columnList})`;
 
@@ -3038,6 +3053,9 @@ export async function loadStoredInsights(
         generation_method: row.generation_method || "pipeline",
         detail_data: row.detail_data || null,
         functional_category: row.functional_category || null,
+        understory_bullets: Array.isArray(row.understory_bullets)
+          ? row.understory_bullets
+          : undefined,
       };
     });
 
@@ -3973,14 +3991,16 @@ async function appendInsights(
   // Check which optional columns exist
   let hasExperimentCol = false;
   let hasDetailDataCol = false;
+  let hasUnderstoryBulletsCol = false;
   try {
     const colCheck = await tenantPool.query(`
       SELECT column_name FROM information_schema.columns
-      WHERE table_name = 'generated_insights' AND column_name IN ('experiment_id', 'detail_data')
+      WHERE table_name = 'generated_insights' AND column_name IN ('experiment_id', 'detail_data', 'understory_bullets')
     `);
     for (const row of colCheck.rows) {
       if (row.column_name === "experiment_id") hasExperimentCol = true;
       if (row.column_name === "detail_data") hasDetailDataCol = true;
+      if (row.column_name === "understory_bullets") hasUnderstoryBulletsCol = true;
     }
   } catch { /* ignore */ }
 
@@ -3990,7 +4010,10 @@ async function appendInsights(
 
   for (const ins of insights) {
     const baseCount = 15;
-    const extraCount = (hasExperimentCol ? 1 : 0) + (hasDetailDataCol ? 1 : 0);
+    const extraCount =
+      (hasExperimentCol ? 1 : 0) +
+      (hasDetailDataCol ? 1 : 0) +
+      (hasUnderstoryBulletsCol ? 1 : 0);
     const totalParams = baseCount + extraCount;
     const ph = Array.from({ length: totalParams }, () => `$${paramIdx++}`);
     placeholders.push(`(${ph.join(", ")})`);
@@ -4025,6 +4048,13 @@ async function appendInsights(
     if (hasDetailDataCol) {
       values.push(ins.detail_data ? JSON.stringify(ins.detail_data) : null);
     }
+    if (hasUnderstoryBulletsCol) {
+      const bullets =
+        Array.isArray(ins.understory_bullets) && ins.understory_bullets.length > 0
+          ? ins.understory_bullets
+          : await buildUnderstoryBullets(ins.understory, { headline: ins.headline });
+      values.push(JSON.stringify(bullets));
+    }
     if (hasExperimentCol) {
       values.push(null); // no experiment for generate-more
     }
@@ -4034,6 +4064,7 @@ async function appendInsights(
        severity_score, impact, evidence, for_podcast,
        date_filter, channel_group, generation_batch, generated_at, detail_query`;
   if (hasDetailDataCol) columnList += `, detail_data`;
+  if (hasUnderstoryBulletsCol) columnList += `, understory_bullets`;
   if (hasExperimentCol) columnList += `, experiment_id`;
   const columns = `(${columnList})`;
 

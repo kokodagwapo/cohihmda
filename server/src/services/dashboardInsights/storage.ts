@@ -9,6 +9,7 @@
 import pg from "pg";
 import type { DashboardInsight } from "./types.js";
 import { DASHBOARD_PAGE_CATEGORY_MAP } from "./types.js";
+import { buildUnderstoryBullets } from "../insights/understoryBullets.js";
 
 const MAX_INSIGHTS_PER_PAGE_FILTER = 10;
 
@@ -30,7 +31,11 @@ export async function saveDashboardInsights(
   let paramIdx = 1;
 
   for (const ins of insights) {
-    const ph = Array.from({ length: 22 }, () => `$${paramIdx++}`);
+    const ph = Array.from({ length: 23 }, () => `$${paramIdx++}`);
+    const persistedBullets =
+      Array.isArray(ins.understory_bullets) && ins.understory_bullets.length > 0
+        ? ins.understory_bullets
+        : await buildUnderstoryBullets(ins.understory ?? "", { headline: ins.headline });
     placeholders.push(`(${ph.join(", ")})`);
     values.push(
       pageId,
@@ -53,6 +58,7 @@ export async function saveDashboardInsights(
       ins.supporting_data != null ? JSON.stringify(ins.supporting_data) : null,
       ins.detail_data != null ? JSON.stringify(ins.detail_data) : null,
       ins.functional_category ?? DASHBOARD_PAGE_CATEGORY_MAP[pageId] ?? null,
+      JSON.stringify(persistedBullets),
       generationBatch,
       new Date().toISOString(),
     );
@@ -60,7 +66,7 @@ export async function saveDashboardInsights(
 
   const columns = `(page_id, page_name, headline, understory, sentiment, severity_score, scope, escalate,
     what_changed, why, business_impact, risk_if_ignored, recommended_action, owner,
-    filter_context, evidence_refs, cited_numbers, supporting_data, detail_data, functional_category, generation_batch, generated_at)`;
+    filter_context, evidence_refs, cited_numbers, supporting_data, detail_data, functional_category, understory_bullets, generation_batch, generated_at)`;
   await tenantPool.query(
     `INSERT INTO dashboard_generated_insights ${columns} VALUES ${placeholders.join(", ")}`,
     values,
@@ -110,7 +116,7 @@ export async function loadDashboardInsights(
 
   const result = isPageLevel
     ? await tenantPool.query(
-        `SELECT id, page_id, page_name, headline, understory, sentiment, severity_score, scope, escalate,
+        `SELECT id, page_id, page_name, headline, understory, understory_bullets, sentiment, severity_score, scope, escalate,
                 what_changed, why, business_impact, risk_if_ignored, recommended_action, owner,
                 filter_context, evidence_refs, cited_numbers, supporting_data, detail_data, functional_category, generation_batch, generated_at
          FROM dashboard_generated_insights
@@ -121,7 +127,7 @@ export async function loadDashboardInsights(
         [pageId, latestBatch, MAX_INSIGHTS_PER_PAGE_FILTER],
       )
     : await tenantPool.query(
-        `SELECT id, page_id, page_name, headline, understory, sentiment, severity_score, scope, escalate,
+        `SELECT id, page_id, page_name, headline, understory, understory_bullets, sentiment, severity_score, scope, escalate,
                 what_changed, why, business_impact, risk_if_ignored, recommended_action, owner,
                 filter_context, evidence_refs, cited_numbers, supporting_data, detail_data, functional_category, generation_batch, generated_at
          FROM dashboard_generated_insights
@@ -144,6 +150,7 @@ export async function loadDashboardInsights(
     page_name: string;
     headline: string;
     understory: string | null;
+    understory_bullets: unknown;
     sentiment: string;
     severity_score: number | null;
     scope: string;
@@ -178,10 +185,14 @@ export async function loadDashboardInsights(
     });
   }
 
-  const insights: DashboardInsight[] = rows.map((r) => ({
+  const insights: DashboardInsight[] = await Promise.all(rows.map(async (r) => ({
     id: r.id,
     headline: r.headline,
     understory: r.understory ?? "",
+    understory_bullets:
+      Array.isArray(r.understory_bullets) && r.understory_bullets.length > 0
+        ? (r.understory_bullets as string[])
+        : await buildUnderstoryBullets(r.understory ?? "", { headline: r.headline }),
     sentiment: r.sentiment as DashboardInsight["sentiment"],
     severity_score: r.severity_score ?? 0,
     cited_numbers: normalizeCitedNumbers(r.cited_numbers),
@@ -203,7 +214,7 @@ export async function loadDashboardInsights(
       r.functional_category ?? DASHBOARD_PAGE_CATEGORY_MAP[r.page_id],
     supporting_data: r.supporting_data as DashboardInsight["supporting_data"],
     detail_data: r.detail_data as DashboardInsight["detail_data"],
-  }));
+  })));
 
   const generatedAt =
     rows.length > 0 && rows[0].generated_at
@@ -225,7 +236,7 @@ export async function loadTrackedDashboardInsightsForPage(
   pageId: string,
 ): Promise<DashboardInsight[]> {
   const result = await tenantPool.query(
-    `SELECT dgi.id AS id, dgi.page_id, dgi.page_name, dgi.headline, dgi.understory, dgi.sentiment, dgi.severity_score, dgi.scope, dgi.escalate,
+    `SELECT dgi.id AS id, dgi.page_id, dgi.page_name, dgi.headline, dgi.understory, dgi.understory_bullets, dgi.sentiment, dgi.severity_score, dgi.scope, dgi.escalate,
             what_changed, why, business_impact, risk_if_ignored, recommended_action, owner,
             dgi.filter_context, dgi.evidence_refs, dgi.cited_numbers, dgi.supporting_data, dgi.detail_data, dgi.generated_at
      FROM tracked_insights ti
@@ -244,6 +255,7 @@ export async function loadTrackedDashboardInsightsForPage(
     page_name: string;
     headline: string;
     understory: string | null;
+    understory_bullets: unknown;
     sentiment: string;
     severity_score: number | null;
     scope: string;
@@ -276,10 +288,14 @@ export async function loadTrackedDashboardInsightsForPage(
     });
   }
 
-  return rows.map((r) => ({
+  return Promise.all(rows.map(async (r) => ({
     id: r.id,
     headline: r.headline,
     understory: r.understory ?? "",
+    understory_bullets:
+      Array.isArray(r.understory_bullets) && r.understory_bullets.length > 0
+        ? (r.understory_bullets as string[])
+        : await buildUnderstoryBullets(r.understory ?? "", { headline: r.headline }),
     sentiment: r.sentiment as DashboardInsight["sentiment"],
     severity_score: r.severity_score ?? 0,
     cited_numbers: normalizeCitedNumbers(r.cited_numbers),
@@ -299,7 +315,7 @@ export async function loadTrackedDashboardInsightsForPage(
     sourcePageName: r.page_name,
     supporting_data: r.supporting_data as DashboardInsight["supporting_data"],
     detail_data: r.detail_data as DashboardInsight["detail_data"],
-  }));
+  })));
 }
 
 /**
@@ -357,7 +373,7 @@ export async function loadDashboardInsightForTracking(
   filter_context: Record<string, unknown>;
 } | null> {
   const result = await tenantPool.query(
-    `SELECT id, page_id, page_name, headline, understory, sentiment, severity_score, detail_data, filter_context
+    `SELECT id, page_id, page_name, headline, understory, understory_bullets, sentiment, severity_score, detail_data, filter_context
      FROM dashboard_generated_insights
      WHERE id = $1`,
     [insightId],
@@ -404,6 +420,7 @@ export async function loadEscalatedDashboardInsights(
     page_name: string;
     headline: string;
     understory: string | null;
+    understory_bullets: unknown;
     sentiment: string;
     severity_score: number | null;
     scope: string;
@@ -436,10 +453,14 @@ export async function loadEscalatedDashboardInsights(
     });
   }
 
-  return rows.map((r) => ({
+  return Promise.all(rows.map(async (r) => ({
     id: r.id,
     headline: r.headline,
     understory: r.understory ?? "",
+    understory_bullets:
+      Array.isArray(r.understory_bullets) && r.understory_bullets.length > 0
+        ? (r.understory_bullets as string[])
+        : await buildUnderstoryBullets(r.understory ?? "", { headline: r.headline }),
     sentiment: r.sentiment as DashboardInsight["sentiment"],
     severity_score: r.severity_score ?? 0,
     cited_numbers: normalizeCitedNumbers(r.cited_numbers),
@@ -461,5 +482,5 @@ export async function loadEscalatedDashboardInsights(
       r.functional_category ?? DASHBOARD_PAGE_CATEGORY_MAP[r.page_id],
     supporting_data: r.supporting_data as DashboardInsight["supporting_data"],
     detail_data: r.detail_data as DashboardInsight["detail_data"],
-  }));
+  })));
 }

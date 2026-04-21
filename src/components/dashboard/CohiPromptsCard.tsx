@@ -82,6 +82,7 @@ function CohiInsightToEvidenceModalInsight(
   return {
     headline: i.headline ?? i.message ?? "",
     understory: i.understory ?? "",
+    understory_bullets: i.understory_bullets,
     sentiment: typeToSentiment(i.type ?? "info"),
     severity_score: i.severity_score ?? 0,
     what_changed: i.what_changed ?? "",
@@ -97,6 +98,14 @@ function CohiInsightToEvidenceModalInsight(
     cited_numbers: i.cited_numbers,
     supporting_data: i.supporting_data,
   };
+}
+
+function getInsightBullets(i: CohiInsight): string[] {
+  if (Array.isArray(i.understory_bullets) && i.understory_bullets.length > 0) {
+    return i.understory_bullets;
+  }
+  const fallback = i.understory || i.reasoning;
+  return fallback ? [fallback] : [];
 }
 
 function GoToDashboardPageButton({
@@ -711,16 +720,22 @@ function BucketLane({
         </div>
 
         <AnimatePresence>
-          {isSelected && (insight.understory || insight.reasoning) && (
+          {isSelected && (insight.understory || insight.reasoning || (insight.understory_bullets?.length ?? 0) > 0) && (
             <motion.div
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: "auto" }}
               exit={{ opacity: 0, height: 0 }}
               transition={{ duration: 0.2 }}
             >
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
-                {insight.understory || insight.reasoning}
-              </p>
+              <div className="mt-1.5 rounded-md border border-slate-200/80 dark:border-slate-700/70 bg-white/80 dark:bg-slate-900/40 px-2.5 py-2">
+                <ul className="list-disc pl-4 space-y-1 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                  {getInsightBullets(insight).map((bullet, idx) => (
+                    <li key={`${insight.insightId || insight.headline || insight.message}-${idx}`}>
+                      {bullet}
+                    </li>
+                  ))}
+                </ul>
+              </div>
               {canDrill && (
                 <span className="inline-flex items-center gap-0.5 mt-1.5 text-[11px] text-blue-500 dark:text-blue-400 font-medium">
                   View details
@@ -1102,6 +1117,12 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
           questionId: 0,
           title: dd.title || insight.headline || "",
           summary: dd.summary || insight.understory || "",
+          summary_bullets:
+            Array.isArray(insight.understory_bullets) && insight.understory_bullets.length > 0
+              ? insight.understory_bullets
+              : dd.summary
+                ? [dd.summary]
+                : (insight.understory ? [insight.understory] : []),
           confidence: dd.confidence || "medium",
           keyMetrics: dd.keyMetrics || {},
           keyMetricDescriptions: dd.keyMetricDescriptions || {},
@@ -1525,7 +1546,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
                     rows: allInsights.map((insight) => [
                       insight.bucket || "--",
                       insight.headline || insight.message || "--",
-                      insight.understory || insight.reasoning || "--",
+                      getInsightBullets(insight).join(" | ") || "--",
                       insight.source || "--",
                       insight.severity_score?.toFixed(2) || "--",
                     ]),
