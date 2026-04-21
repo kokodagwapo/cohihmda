@@ -1,11 +1,26 @@
 import { test, expect } from "./fixtures";
 
+async function dismissBlockingOverlays(page: import("@playwright/test").Page) {
+  for (let i = 0; i < 3; i++) {
+    const overlay = page
+      .locator("div[data-state='open'][aria-hidden='true']")
+      .first();
+    if (await overlay.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(500);
+    } else {
+      break;
+    }
+  }
+}
+
 test.describe("TopTiering Comparison — Actor Focus (COHI-327)", () => {
   test.beforeEach(async ({ userPage }) => {
     await userPage.goto("/performance/toptiering-comparison", {
       waitUntil: "domcontentloaded",
     });
     await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
+    await dismissBlockingOverlays(userPage);
   });
 
   test("@critical @COHI-327 page renders with title, charts, and focus panel", async ({
