@@ -1,9 +1,29 @@
 import { test, expect } from "./fixtures";
 
+async function dismissBlockingOverlays(page: import("@playwright/test").Page) {
+  // The welcome tour and "What's New" modals fire on first visit for
+  // accounts that haven't completed onboarding. They render a fixed
+  // backdrop that intercepts all pointer events, which causes every
+  // subsequent click in the test to time out. Dismiss them by pressing
+  // Escape until no blocking overlay remains, up to 3 attempts.
+  for (let i = 0; i < 3; i++) {
+    const overlay = page
+      .locator("div[data-state='open'][aria-hidden='true']")
+      .first();
+    if (await overlay.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(500);
+    } else {
+      break;
+    }
+  }
+}
+
 test.describe("Insights Understory Readability (COHI-328)", () => {
   test.beforeEach(async ({ userPage }) => {
     await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
     await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
+    await dismissBlockingOverlays(userPage);
   });
 
   test("@critical @COHI-328 insights section renders with content", async ({
