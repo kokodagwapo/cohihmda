@@ -179,7 +179,99 @@ Each issue gets a QA page under the SRS space with:
 
 ---
 
-## 6. Troubleshooting
+## 6. Decision Framework — Deterministic vs AI-Assisted Testing
+
+Not every feature can be tested the same way. Use this framework to decide what kind of test to write.
+
+### Decision table
+
+| Feature type | Deterministic test? | AI AC validator? | Why |
+|-------------|-------------------|-----------------|-----|
+| **Static UI** (page renders, layout, buttons, panels) | Yes — primary evidence | Optional supplement | DOM structure is stable and predictable |
+| **User interaction flow** (click, select, focus, modal open/close) | Yes — primary evidence | Optional supplement | Interaction outcomes are deterministic given the same state |
+| **Data-driven dashboard** (KPIs, charts, tables from API) | Yes — assert structure, not exact values | Optional supplement | Assert that cards/charts render and contain non-zero numeric values; don't hardcode specific dollar amounts since data changes between syncs |
+| **LLM-powered chat** (Cohi Chat, Workbench Cohi panel) | Partial — test the shell, not the response content | Yes — useful here | You CAN deterministically test: panel opens, input field accepts text, send button works, a response container appears, no console errors. You CANNOT deterministically test: the exact response text, insight quality, or reasoning output. The AI validator can exploratorily verify that the chat produces a non-empty response. |
+| **AI-generated insights** (CohiPromptsCard, dashboard insights) | Partial — test rendering, not content | Yes — useful here | Deterministically assert: insight section renders, cards have headline + understory structure, drill-down modal opens. Don't assert on specific insight text — it changes every generation cycle. The AI validator can verify that insight text "makes sense" (though this is subjective). |
+| **Research Lab / Investigation sessions** | Partial — test the shell and lifecycle | Yes — useful here | Deterministically test: page loads, input accepts text, investigation starts, follow-up behavior works (COHI-106 already does this). Don't test specific research output content. |
+| **PDF/PowerPoint/CSV export** | Yes — primary evidence | No | Assert that clicking export produces a downloaded file with the expected extension and non-zero size. Content validation is deterministic if you control the input data. |
+| **Role/permission boundaries** | Yes — primary evidence | No | Assert that tenant_admin can access X, tenant_user is blocked from Y. These are fully deterministic. |
+| **Webhook/sync/background job** | API contract tests (Vitest) | No | Test the API shape, status codes, and database state changes. Not a Playwright E2E concern. |
+
+### Testing LLM-backed features in practice
+
+The key insight: **separate the container from the content.**
+
+**Container (deterministic — Tier 1):**
+- The chat panel opens when the user clicks the Cohi button
+- The input field accepts text and the send button becomes enabled
+- After sending, a response container appears in the chat thread
+- The response container is not empty (`.textContent().length > 0`)
+- No console errors during the interaction
+- The panel can be closed and reopened without state corruption
+
+**Content (non-deterministic — Tier 2 or manual):**
+- The response is relevant to the prompt
+- The insight headline accurately summarizes the data
+- The research investigation produces useful findings
+
+Example spec for an LLM-backed feature:
+
+```typescript
+test("@critical @COHI-{N} Cohi Chat panel sends a message and receives a response", async ({
+  userPage,
+}) => {
+  await userPage.goto("/workbench", { waitUntil: "domcontentloaded" });
+
+  // Open the Cohi panel — container test
+  const cohiButton = userPage.getByRole("button", { name: /cohi/i });
+  await expect(cohiButton).toBeVisible({ timeout: 10_000 });
+  await cohiButton.click();
+
+  // Chat input renders — container test
+  const chatInput = userPage.locator("textarea, input[type='text']")
+    .filter({ hasText: /ask|type|message/i })
+    .first();
+  // Fall back to any visible textarea inside the panel
+  const input = (await chatInput.count()) > 0
+    ? chatInput
+    : userPage.locator("[role='dialog'] textarea, [data-panel] textarea").first();
+  await expect(input).toBeVisible({ timeout: 5_000 });
+
+  // Type and send — interaction test
+  await input.fill("What is the total funded volume?");
+  const sendButton = userPage.getByRole("button", { name: /send|submit/i }).first();
+  await expect(sendButton).toBeEnabled();
+  await sendButton.click();
+
+  // A response appears — container test (NOT content test)
+  // We assert the response container exists and has text, but we do NOT
+  // assert what the text says because the LLM response is non-deterministic.
+  const responseContainer = userPage.locator("[data-chat-response], [class*='message'], [class*='response']").last();
+  await expect(responseContainer).toBeVisible({ timeout: 30_000 });
+  const responseText = await responseContainer.textContent();
+  expect(responseText?.length).toBeGreaterThan(10);
+});
+```
+
+### When the AI AC validator adds real value
+
+The validator shines on LLM-backed features specifically because it can:
+1. Generate a plan that sends a chat message and subjectively evaluates whether the response "contains relevant financial data" (something a deterministic test cannot do).
+2. Exercise insight cards and check whether the headline/understory "relate to the chart data" (a judgment call).
+3. Run exploratory paths through the Research Lab that would take too long to script manually.
+
+For these features, the recommended approach is:
+- **Tier 1:** Write deterministic tests for the container/shell/lifecycle (must pass every run).
+- **Tier 2:** Run the AC validator for the content/quality signal (advisory, may vary between runs).
+- **Manual QA:** For critical releases, a human reviews the actual LLM output quality.
+
+### Summary rule of thumb
+
+> If the output changes every time you refresh the page with the same inputs, test the **container** deterministically and use the AI validator (or manual QA) for the **content**.
+
+---
+
+## 7. Troubleshooting
 
 ### My test passes locally but fails in CI
 
@@ -207,7 +299,7 @@ The QA Agent service account needs "Add Attachments" permission on the SRS Confl
 
 ---
 
-## 7. Quick Reference Card
+## 8. Quick Reference Card
 
 ```
 Feature workflow:
