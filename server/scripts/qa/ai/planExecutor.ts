@@ -195,6 +195,7 @@ export async function executePlan(params: ExecutePlanParams): Promise<ExecutePla
   const context = await browser.newContext({
     baseURL: params.baseUrl,
     acceptDownloads: true,
+    viewport: { width: 1440, height: 900 },
     ...(existsSync(storageStatePath) ? { storageState: storageStatePath } : {}),
   });
 
