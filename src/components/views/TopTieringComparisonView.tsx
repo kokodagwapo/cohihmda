@@ -337,6 +337,100 @@ export function TopTieringComparisonView({
     [toggleSelection]
   );
 
+  // ---------------------------------------------------------------------------
+  // Visual drag-select overlay
+  //
+  // We layer a second set of handlers on the chart wrapper <div> (in addition
+  // to the recharts chart handlers above) so we can:
+  //   1. Call preventDefault on mousedown to stop the browser from selecting
+  //      surrounding text when the user drags across bars.
+  //   2. Render a violet selection rectangle that tracks the mouse while the
+  //      drag is in progress, so users get visual confirmation of the range.
+  //
+  // The chart-index-based selection logic still comes from recharts'
+  // activeTooltipIndex callbacks — this overlay is purely cosmetic.
+  // ---------------------------------------------------------------------------
+  type DragOverlay = {
+    chartKey: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  const [dragOverlay, setDragOverlay] = useState<DragOverlay | null>(null);
+  const dragOverlayStartRef = useRef<{
+    x: number;
+    y: number;
+    chartKey: string;
+  } | null>(null);
+
+  const makeChartOverlayHandlers = useCallback((chartKey: string) => {
+    const end = () => {
+      if (dragOverlayStartRef.current?.chartKey !== chartKey) return;
+      dragOverlayStartRef.current = null;
+      setDragOverlay(null);
+    };
+
+    return {
+      onMouseDown: (e: React.MouseEvent<HTMLDivElement>) => {
+        // Prevent the browser from starting a text selection while the user
+        // drags across bars. user-select:none on the wrapper handles the
+        // visual side of this for content inside the wrapper; preventDefault
+        // covers the case where the drag escapes the wrapper bounds.
+        e.preventDefault();
+        const rect = e.currentTarget.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        dragOverlayStartRef.current = { x, y, chartKey };
+        setDragOverlay({ chartKey, x, y, width: 0, height: 0 });
+      },
+      onMouseMove: (e: React.MouseEvent<HTMLDivElement>) => {
+        if (dragOverlayStartRef.current?.chartKey !== chartKey) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        const curX = e.clientX - rect.left;
+        const curY = e.clientY - rect.top;
+        const { x: startX, y: startY } = dragOverlayStartRef.current;
+        setDragOverlay({
+          chartKey,
+          x: Math.min(startX, curX),
+          y: Math.min(startY, curY),
+          width: Math.abs(curX - startX),
+          height: Math.abs(curY - startY),
+        });
+      },
+      onMouseUp: end,
+      onMouseLeave: end,
+    };
+  }, []);
+
+  const renderDragOverlay = useCallback(
+    (chartKey: string) => {
+      if (
+        !dragOverlay ||
+        dragOverlay.chartKey !== chartKey ||
+        (dragOverlay.width < 3 && dragOverlay.height < 3)
+      ) {
+        return null;
+      }
+      return (
+        <div
+          className={`pointer-events-none absolute rounded-sm border-2 ${
+            isDarkMode
+              ? "border-violet-400/80 bg-violet-400/10"
+              : "border-violet-500/80 bg-violet-500/15"
+          }`}
+          style={{
+            left: dragOverlay.x,
+            top: dragOverlay.y,
+            width: dragOverlay.width,
+            height: dragOverlay.height,
+          }}
+        />
+      );
+    },
+    [dragOverlay, isDarkMode]
+  );
+
   // Fetch real data from API
   const {
     data: apiData,
@@ -2009,9 +2103,11 @@ export function TopTieringComparisonView({
                 <CardContent className="pt-1 pb-1 px-2">
                   <div className="w-full overflow-x-auto -webkit-overflow-scrolling-touch">
                     <div
+                      className="relative select-none cursor-crosshair"
                       style={{
                         minWidth: getChartMinWidth(revenueChartData.length),
                       }}
+                      {...makeChartOverlayHandlers("revenue-inline")}
                     >
                       <ResponsiveContainer width="100%" height={chartHeight}>
                         <ComposedChart
@@ -2173,6 +2269,7 @@ export function TopTieringComparisonView({
                           />
                         </ComposedChart>
                       </ResponsiveContainer>
+                      {renderDragOverlay("revenue-inline")}
                     </div>
                   </div>
                 </CardContent>
@@ -2448,9 +2545,11 @@ export function TopTieringComparisonView({
                     /* Units or Volume Chart View */
                     <div className="w-full overflow-x-auto -webkit-overflow-scrolling-touch">
                       <div
+                        className="relative select-none cursor-crosshair"
                         style={{
                           minWidth: getChartMinWidth(unitsChartData.length),
                         }}
+                        {...makeChartOverlayHandlers("units-inline")}
                       >
                         <ResponsiveContainer width="100%" height={chartHeight}>
                           <ComposedChart
@@ -2636,6 +2735,7 @@ export function TopTieringComparisonView({
                             />
                           </ComposedChart>
                         </ResponsiveContainer>
+                        {renderDragOverlay("units-inline")}
                       </div>
                     </div>
                   )}
@@ -2734,9 +2834,11 @@ export function TopTieringComparisonView({
                 <CardContent className="pt-1 pb-1 px-2">
                   <div className="w-full overflow-x-auto -webkit-overflow-scrolling-touch">
                     <div
+                      className="relative select-none cursor-crosshair"
                       style={{
                         minWidth: getChartMinWidth(bpsChartData.length),
                       }}
+                      {...makeChartOverlayHandlers("bps-inline")}
                     >
                       <ResponsiveContainer width="100%" height={chartHeight}>
                         <BarChart
@@ -2864,6 +2966,7 @@ export function TopTieringComparisonView({
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>
+                      {renderDragOverlay("bps-inline")}
                     </div>
                   </div>
                 </CardContent>
@@ -3022,7 +3125,10 @@ export function TopTieringComparisonView({
                 controls stay reachable while interacting with the zoomed-in
                 chart. */}
             {focusPanelContent}
-            <div className="w-full">
+            <div
+              className="relative w-full select-none cursor-crosshair"
+              {...makeChartOverlayHandlers("modal")}
+            >
               <ResponsiveContainer width="100%" height={550}>
                 {expandedChart === "revenue" ? (
                   <ComposedChart
@@ -3446,6 +3552,7 @@ export function TopTieringComparisonView({
                   </BarChart>
                 )}
               </ResponsiveContainer>
+              {renderDragOverlay("modal")}
             </div>
           </div>
         </DialogContent>
