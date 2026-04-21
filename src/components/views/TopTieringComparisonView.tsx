@@ -225,6 +225,7 @@ export function TopTieringComparisonView({
 
   // Selection state for Current Selection feature
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [focusedActorIds, setFocusedActorIds] = useState<Set<string>>(new Set());
   const { setSelection } = useTopTieringSelectionStore();
 
   // Toggle selection of an item
@@ -243,6 +244,10 @@ export function TopTieringComparisonView({
   // Clear all selections
   const clearAllSelections = useCallback(() => {
     setSelectedIds(new Set());
+  }, []);
+
+  const clearActorFocus = useCallback(() => {
+    setFocusedActorIds(new Set());
   }, []);
 
   // Fetch real data from API
@@ -340,6 +345,18 @@ export function TopTieringComparisonView({
   }, [timeFilter]);
 
   useEffect(() => {
+    setFocusedActorIds(new Set());
+    setSelectedIds(new Set());
+  }, [
+    selectedActor,
+    timeFilter,
+    selectedTenantId,
+    selectedChannel,
+    customDateRange?.start,
+    customDateRange?.end,
+  ]);
+
+  useEffect(() => {
     if (!pendingInsightWidgetId || loading) return;
     const el = document.getElementById(pendingInsightWidgetId);
     if (!el) return;
@@ -390,11 +407,9 @@ export function TopTieringComparisonView({
     return [];
   }, [apiData]);
 
-  // Sync selections to the global store whenever they change
-  // NOTE: This must come AFTER currentData is defined
-  useEffect(() => {
-    if (selectedIds.size > 0) {
-      const selectedItems: TopTieringSelectionItem[] = currentData
+  const selectedItems = useMemo<TopTieringSelectionItem[]>(
+    () =>
+      currentData
         .filter((item) => selectedIds.has(item.id))
         .map((item) => ({
           id: item.id,
@@ -405,16 +420,55 @@ export function TopTieringComparisonView({
           volume: item.volume,
           revenueBPS: item.revenueBPS,
           revenuePerLoan: item.revenuePerLoan,
-        }));
+        })),
+    [currentData, selectedIds]
+  );
+
+  const focusedActors = useMemo(() => {
+    if (focusedActorIds.size === 0) {
+      return [];
+    }
+    return currentData.filter((item) => focusedActorIds.has(item.id));
+  }, [currentData, focusedActorIds]);
+
+  const isActorFocusApplied = focusedActorIds.size > 0;
+
+  const applyActorFocus = useCallback(() => {
+    if (selectedItems.length === 0) return;
+    setFocusedActorIds(new Set(selectedItems.map((item) => item.id)));
+    setSelectedIds(new Set());
+  }, [selectedItems]);
+
+  const focusScopedData = useMemo(() => {
+    if (!isActorFocusApplied) {
+      return currentData;
+    }
+    return currentData.filter((item) => focusedActorIds.has(item.id));
+  }, [currentData, focusedActorIds, isActorFocusApplied]);
+
+  const visibleData = useMemo(() => {
+    if (!searchQuery.trim()) return focusScopedData;
+    const query = searchQuery.toLowerCase();
+    return focusScopedData.filter(
+      (item) =>
+        item.name.toLowerCase().includes(query) ||
+        item.id.toLowerCase().includes(query)
+    );
+  }, [focusScopedData, searchQuery]);
+
+  // Sync selections to the global store whenever they change
+  // NOTE: This must come AFTER currentData is defined
+  useEffect(() => {
+    if (selectedItems.length > 0) {
       setSelection(selectedActor, selectedItems);
     } else {
       setSelection(selectedActor, []);
     }
-  }, [selectedIds, currentData, selectedActor, setSelection]);
+  }, [selectedItems, selectedActor, setSelection]);
 
   // Calculate statistical insights
   const statisticalInsights = useMemo(() => {
-    if (currentData.length === 0) {
+    if (focusScopedData.length === 0) {
       const emptyBlock = {
         mean: 0,
         median: 0,
@@ -431,9 +485,9 @@ export function TopTieringComparisonView({
       };
     }
 
-    const revenues = currentData.map((d) => d.revenue).sort((a, b) => a - b);
-    const units = currentData.map((d) => d.units).sort((a, b) => a - b);
-    const revenueBPS = currentData
+    const revenues = focusScopedData.map((d) => d.revenue).sort((a, b) => a - b);
+    const units = focusScopedData.map((d) => d.units).sort((a, b) => a - b);
+    const revenueBPS = focusScopedData
       .map((d) => d.revenueBPS)
       .sort((a, b) => a - b);
 
@@ -481,18 +535,7 @@ export function TopTieringComparisonView({
         max: revenueBPS[revenueBPS.length - 1],
       },
     };
-  }, [currentData]);
-
-  // Filter data based on search query
-  const filteredData = useMemo(() => {
-    if (!searchQuery.trim()) return currentData;
-    const query = searchQuery.toLowerCase();
-    return currentData.filter(
-      (item) =>
-        item.name.toLowerCase().includes(query) ||
-        item.id.toLowerCase().includes(query)
-    );
-  }, [currentData, searchQuery]);
+  }, [focusScopedData]);
 
   // Calculate YoY growth - use API data when available
   const yoyGrowth = useMemo(() => {
@@ -518,7 +561,7 @@ export function TopTieringComparisonView({
           "Revenue BPS",
           "Revenue per Loan",
         ].join(","),
-        ...filteredData.map((item) =>
+        ...visibleData.map((item) =>
           [
             item.name,
             item.id,
@@ -553,19 +596,18 @@ export function TopTieringComparisonView({
     }
   };
 
-  const totalRevenue = currentData.reduce((sum, item) => sum + item.revenue, 0);
-  const totalUnits = currentData.reduce((sum, item) => sum + item.units, 0);
-  const totalVolume = currentData.reduce((sum, item) => sum + item.volume, 0);
+  const totalRevenue = focusScopedData.reduce((sum, item) => sum + item.revenue, 0);
+  const totalUnits = focusScopedData.reduce((sum, item) => sum + item.units, 0);
+  const totalVolume = focusScopedData.reduce((sum, item) => sum + item.volume, 0);
   const totalRevenueBPS =
-    currentData.length > 0
-      ? currentData.reduce((sum, item) => sum + item.revenueBPS, 0) /
-        currentData.length
+    totalVolume > 0
+      ? (totalRevenue / totalVolume) * 10000
       : 0;
 
   // Calculate tier summaries dynamically
-  const topTierItems = currentData.filter((item) => item.tier === "top");
-  const secondTierItems = currentData.filter((item) => item.tier === "second");
-  const bottomTierItems = currentData.filter((item) => item.tier === "bottom");
+  const topTierItems = focusScopedData.filter((item) => item.tier === "top");
+  const secondTierItems = focusScopedData.filter((item) => item.tier === "second");
+  const bottomTierItems = focusScopedData.filter((item) => item.tier === "bottom");
 
   const topTierRevenue = topTierItems.reduce(
     (sum, item) => sum + item.revenue,
@@ -593,6 +635,25 @@ export function TopTieringComparisonView({
     selectedActor === "branch" ? "Branches" : "Loan Officers";
   const actorLabelSingular =
     selectedActor === "branch" ? "Branch" : "Loan Officer";
+  const formatTierLabel = useCallback((tier: ActorData["tier"]) => {
+    if (tier === "top") return "Top Tier";
+    if (tier === "second") return "Second Tier";
+    return "Bottom Tier";
+  }, []);
+  const focusedTierSummary = useMemo(() => {
+    if (!isActorFocusApplied || focusedActors.length === 0) return "";
+    const counts = focusedActors.reduce(
+      (acc, item) => {
+        acc[item.tier] += 1;
+        return acc;
+      },
+      { top: 0, second: 0, bottom: 0 } as Record<ActorData["tier"], number>
+    );
+    return (["top", "second", "bottom"] as const)
+      .filter((tier) => counts[tier] > 0)
+      .map((tier) => `${counts[tier]} ${formatTierLabel(tier)}`)
+      .join(" | ");
+  }, [focusedActors, formatTierLabel, isActorFocusApplied]);
 
   // Helper function to sort and add cumulative percentages
   const sortAndAddCumulative = (
@@ -653,27 +714,33 @@ export function TopTieringComparisonView({
 
   // Prepare chart data with cumulative percentage - separate for each chart
   const revenueChartData = useMemo(() => {
-    return sortAndAddCumulative(filteredData, revenueChartSorting, "revenue");
-  }, [filteredData, revenueChartSorting]);
+    return sortAndAddCumulative(visibleData, revenueChartSorting, "revenue");
+  }, [visibleData, revenueChartSorting]);
 
   // Units/Volume chart uses the correct metric based on selected tab
   const unitsChartData = useMemo(() => {
     const metric = selectedChartTab === "volume" ? "volume" : "units";
-    return sortAndAddCumulative(filteredData, unitsChartSorting, metric);
-  }, [filteredData, unitsChartSorting, selectedChartTab]);
+    return sortAndAddCumulative(visibleData, unitsChartSorting, metric);
+  }, [visibleData, unitsChartSorting, selectedChartTab]);
 
   // BPS chart sorts by the currently selected metric (BPS or Revenue per Loan)
   const bpsChartData = useMemo(() => {
     const metric =
       selectedRevenueTab === "revenue-bps" ? "revenueBPS" : "revenuePerLoan";
-    return sortAndAddCumulative(filteredData, bpsChartSorting, metric);
-  }, [filteredData, bpsChartSorting, selectedRevenueTab]);
+    return sortAndAddCumulative(visibleData, bpsChartSorting, metric);
+  }, [visibleData, bpsChartSorting, selectedRevenueTab]);
 
   // Calculate minimum chart width based on data count for horizontal scrolling
   const getChartMinWidth = (dataCount: number) => {
     const minWidthPerBar = 70; // pixels per bar for readable labels
     return Math.max(600, dataCount * minWidthPerBar);
   };
+  const shouldRotateXAxisLabels = visibleData.length > 6;
+  const xAxisAngle = shouldRotateXAxisLabels ? -45 : 0;
+  const xAxisTextAnchor = shouldRotateXAxisLabels ? "end" : "middle";
+  const standardXAxisHeight = shouldRotateXAxisLabels ? 60 : 36;
+  const denseXAxisHeight = shouldRotateXAxisLabels ? 80 : 44;
+  const modalXAxisHeight = shouldRotateXAxisLabels ? 100 : 52;
 
   // Get tier color - Updated to match new tier colors
   const getTierColor = (tier: "top" | "second" | "bottom") => {
@@ -888,45 +955,149 @@ export function TopTieringComparisonView({
                 </div>
               </CardHeader>
               <CardContent className="pt-4 sm:pt-5 space-y-4 sm:space-y-5">
-                {/* Selection Summary */}
-                {selectedIds.size > 0 && (
+                {isActorFocusApplied && (
                   <div
-                    className={`p-3 rounded-lg flex items-center justify-between gap-2 ${
+                    className={`p-3 rounded-lg space-y-3 ${
+                      isDarkMode
+                        ? "bg-blue-900/30 border border-blue-700/50"
+                        : "bg-blue-50 border border-blue-200"
+                    }`}
+                  >
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <ListChecks
+                          className={`w-4 h-4 ${
+                            isDarkMode ? "text-blue-300" : "text-blue-600"
+                          }`}
+                        />
+                        <span
+                          className={`text-sm font-medium ${
+                            isDarkMode ? "text-blue-100" : "text-blue-800"
+                          }`}
+                        >
+                          Focused on {focusedActors.length}{" "}
+                          {focusedActors.length === 1
+                            ? actorLabelSingular.toLowerCase()
+                            : actorLabelPlural.toLowerCase()}
+                        </span>
+                      </div>
+                      <p
+                        className={`text-xs ${
+                          isDarkMode ? "text-blue-200/90" : "text-blue-700"
+                        }`}
+                      >
+                        Original tiers are preserved from the full comparison set. KPIs and charts now reflect only the focused {actorLabelPlural.toLowerCase()}.
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {focusedActors.slice(0, 4).map((actorEntry) => (
+                          <span
+                            key={actorEntry.id}
+                            className={`rounded-full px-2 py-1 text-[10px] font-medium ${
+                              isDarkMode
+                                ? "bg-slate-800/70 text-blue-100 border border-blue-800/60"
+                                : "bg-white text-blue-800 border border-blue-200"
+                            }`}
+                          >
+                            {actorEntry.name} · {formatTierLabel(actorEntry.tier)}
+                          </span>
+                        ))}
+                        {focusedActors.length > 4 && (
+                          <span
+                            className={`rounded-full px-2 py-1 text-[10px] font-medium ${
+                              isDarkMode
+                                ? "bg-slate-800/70 text-blue-100 border border-blue-800/60"
+                                : "bg-white text-blue-800 border border-blue-200"
+                            }`}
+                          >
+                            +{focusedActors.length - 4} more
+                          </span>
+                        )}
+                      </div>
+                      {focusedTierSummary && (
+                        <p
+                          className={`text-[10px] ${
+                            isDarkMode ? "text-blue-200/80" : "text-blue-700/90"
+                          }`}
+                        >
+                          {focusedTierSummary}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={clearActorFocus}
+                        className={`h-8 px-3 text-xs ${
+                          isDarkMode
+                            ? "border-blue-700/60 bg-transparent text-blue-100 hover:bg-blue-900/40"
+                            : "border-blue-300 bg-white text-blue-800 hover:bg-blue-100"
+                        }`}
+                      >
+                        Clear Focus
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Selection Summary */}
+                {selectedIds.size > 0 && !isActorFocusApplied && (
+                  <div
+                    className={`p-3 rounded-lg space-y-3 ${
                       isDarkMode
                         ? "bg-violet-900/30 border border-violet-700/50"
                         : "bg-violet-50 border border-violet-200"
                     }`}
                   >
-                    <div className="flex items-center gap-2">
-                      <ListChecks
-                        className={`w-4 h-4 ${
-                          isDarkMode ? "text-violet-400" : "text-violet-600"
-                        }`}
-                      />
-                      <span
-                        className={`text-sm font-medium ${
-                          isDarkMode ? "text-violet-300" : "text-violet-700"
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <ListChecks
+                          className={`w-4 h-4 ${
+                            isDarkMode ? "text-violet-400" : "text-violet-600"
+                          }`}
+                        />
+                        <span
+                          className={`text-sm font-medium ${
+                            isDarkMode ? "text-violet-300" : "text-violet-700"
+                          }`}
+                        >
+                          {selectedIds.size}{" "}
+                          {selectedIds.size === 1
+                            ? actorLabelSingular.toLowerCase()
+                            : actorLabelPlural.toLowerCase()}{" "}
+                          selected
+                        </span>
+                      </div>
+                      <p
+                        className={`text-xs ${
+                          isDarkMode ? "text-violet-200/80" : "text-violet-700/90"
                         }`}
                       >
-                        {selectedIds.size}{" "}
-                        {selectedIds.size === 1
-                          ? actorLabelSingular.toLowerCase()
-                          : actorLabelPlural.toLowerCase()}{" "}
-                        selected
-                      </span>
+                        Focus the dashboard to compare only the selected {actorLabelPlural.toLowerCase()} while keeping their original tiers.
+                      </p>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={clearAllSelections}
-                      className={`h-7 px-2 text-xs ${
-                        isDarkMode
-                          ? "text-violet-400 hover:text-violet-300"
-                          : "text-violet-600 hover:text-violet-700"
-                      }`}
-                    >
-                      Clear
-                    </Button>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        onClick={applyActorFocus}
+                        disabled={selectedIds.size === 0}
+                        className="h-8 px-3 text-xs"
+                      >
+                        Focus Dashboard
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={clearAllSelections}
+                        className={`h-8 px-3 text-xs ${
+                          isDarkMode
+                            ? "text-violet-400 hover:text-violet-300"
+                            : "text-violet-600 hover:text-violet-700"
+                        }`}
+                      >
+                        Clear Selection
+                      </Button>
+                    </div>
                   </div>
                 )}
 
@@ -963,7 +1134,7 @@ export function TopTieringComparisonView({
                         isDarkMode ? "text-slate-400" : "text-slate-600"
                       }`}
                     >
-                      Showing {filteredData.length} of {currentData.length}{" "}
+                      Showing {visibleData.length} of {focusScopedData.length}{" "}
                       {actorLabelPlural.toLowerCase()}
                     </p>
                   )}
@@ -1065,7 +1236,7 @@ export function TopTieringComparisonView({
                       isDarkMode ? "text-white" : "text-slate-900"
                     }`}
                   >
-                    Total Revenue contributed by {currentData.length}{" "}
+                    Total Revenue contributed by {focusScopedData.length}{" "}
                     {actorLabelPlural}{" "}
                     {apiData?.dateRange?.label || "Last Year"}.{" "}
                     <strong className="font-bold">
@@ -1199,8 +1370,10 @@ export function TopTieringComparisonView({
                               isDarkMode ? "text-slate-500" : "text-slate-600"
                             }`}
                           >
-                            {tierData.items.length} {actorLabelSingular}
-                            {tierData.items.length > 1 ? "s" : ""}
+                            {tierData.items.length}{" "}
+                            {tierData.items.length === 1
+                              ? actorLabelSingular
+                              : actorLabelPlural}
                           </p>
                         </div>
 
@@ -1417,21 +1590,33 @@ export function TopTieringComparisonView({
                     >
                       {formatCurrency(totalRevenue)}
                     </p>
-                    <div className="flex items-center gap-1">
-                      <TrendingUp
-                        className={`w-3 h-3 flex-shrink-0 ${
-                          isDarkMode ? "text-emerald-400" : "text-emerald-600"
-                        }`}
-                      />
-                      <span
-                        className={`text-[10px] font-medium ${
-                          isDarkMode ? "text-emerald-400" : "text-emerald-600"
-                        }`}
-                      >
-                        {Number(yoyGrowth) > 0 ? "+" : ""}
-                        {Number(yoyGrowth ?? 0).toFixed(1)}% YoY
-                      </span>
-                    </div>
+                    {isActorFocusApplied ? (
+                      <div className="flex items-center gap-1">
+                        <span
+                          className={`text-[10px] font-medium ${
+                            isDarkMode ? "text-blue-300" : "text-blue-700"
+                          }`}
+                        >
+                          {focusedTierSummary || "Original tiers preserved"}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1">
+                        <TrendingUp
+                          className={`w-3 h-3 flex-shrink-0 ${
+                            isDarkMode ? "text-emerald-400" : "text-emerald-600"
+                          }`}
+                        />
+                        <span
+                          className={`text-[10px] font-medium ${
+                            isDarkMode ? "text-emerald-400" : "text-emerald-600"
+                          }`}
+                        >
+                          {Number(yoyGrowth) > 0 ? "+" : ""}
+                          {Number(yoyGrowth ?? 0).toFixed(1)}% YoY
+                        </span>
+                      </div>
+                    )}
                   </div>
                   <div
                     className={`p-1.5 rounded-lg flex-shrink-0 ${
@@ -1481,8 +1666,8 @@ export function TopTieringComparisonView({
                       Avg:{" "}
                       {formatNumber(
                         Math.round(
-                          currentData.length > 0
-                            ? totalUnits / currentData.length
+                          focusScopedData.length > 0
+                            ? totalUnits / focusScopedData.length
                             : 0
                         )
                       )}{" "}
@@ -1576,7 +1761,7 @@ export function TopTieringComparisonView({
                         isDarkMode ? "text-white" : "text-slate-900"
                       }`}
                     >
-                      {currentData.length}
+                      {focusScopedData.length}
                     </p>
                     <p
                       className={`text-[10px] ${
@@ -1603,7 +1788,7 @@ export function TopTieringComparisonView({
             </Card>
           </div>
 
-          {filteredData.length === 0 ? (
+          {visibleData.length === 0 ? (
             <Card
               className={`rounded-xl backdrop-blur-sm ${
                 isDarkMode
@@ -1720,9 +1905,9 @@ export function TopTieringComparisonView({
                             dataKey={selectedActor === "branch" ? "id" : "name"}
                             stroke={isDarkMode ? "#94a3b8" : "#64748b"}
                             tick={{ fontSize: 9 }}
-                            angle={-45}
-                            textAnchor="end"
-                            height={60}
+                            angle={xAxisAngle}
+                            textAnchor={xAxisTextAnchor}
+                            height={standardXAxisHeight}
                             interval={0}
                           />
                           <YAxis
@@ -2162,9 +2347,9 @@ export function TopTieringComparisonView({
                               }
                               stroke={isDarkMode ? "#94a3b8" : "#64748b"}
                               tick={{ fontSize: 11 }}
-                              angle={-45}
-                              textAnchor="end"
-                              height={80}
+                              angle={xAxisAngle}
+                              textAnchor={xAxisTextAnchor}
+                              height={denseXAxisHeight}
                               interval={0}
                             />
                             <YAxis
@@ -2447,9 +2632,9 @@ export function TopTieringComparisonView({
                             dataKey={selectedActor === "branch" ? "id" : "name"}
                             stroke={isDarkMode ? "#94a3b8" : "#64748b"}
                             tick={{ fontSize: 9 }}
-                            angle={-45}
-                            textAnchor="end"
-                            height={60}
+                            angle={xAxisAngle}
+                            textAnchor={xAxisTextAnchor}
+                            height={standardXAxisHeight}
                             interval={0}
                           />
                           <YAxis
@@ -2614,7 +2799,12 @@ export function TopTieringComparisonView({
                     ? `Total Units: ${formatNumber(totalUnits)}`
                     : `Total Volume: ${formatCurrency(totalVolume)}`)}
                 {expandedChart === "bps" &&
-                  `Total Revenue: ${totalRevenueBPS.toFixed(0)} BPS`}
+                  (isActorFocusApplied
+                    ? `Focused on ${focusedActors.length} ${focusedActors.length === 1
+                        ? actorLabelSingular.toLowerCase()
+                        : actorLabelPlural.toLowerCase()
+                      } · Original tiers preserved`
+                    : `Total Revenue: ${totalRevenueBPS.toFixed(0)} BPS`)}
               </DialogDescription>
             </div>
             <div className="flex items-center gap-3 mr-8">
@@ -2725,9 +2915,9 @@ export function TopTieringComparisonView({
                       dataKey={selectedActor === "branch" ? "id" : "name"}
                       stroke={isDarkMode ? "#94a3b8" : "#64748b"}
                       tick={{ fontSize: 12 }}
-                      angle={-45}
-                      textAnchor="end"
-                      height={100}
+                      angle={xAxisAngle}
+                      textAnchor={xAxisTextAnchor}
+                      height={modalXAxisHeight}
                       interval={0}
                     />
                     <YAxis
@@ -2868,9 +3058,9 @@ export function TopTieringComparisonView({
                       dataKey={selectedActor === "branch" ? "id" : "name"}
                       stroke={isDarkMode ? "#94a3b8" : "#64748b"}
                       tick={{ fontSize: 12 }}
-                      angle={-45}
-                      textAnchor="end"
-                      height={100}
+                      angle={xAxisAngle}
+                      textAnchor={xAxisTextAnchor}
+                      height={modalXAxisHeight}
                       interval={0}
                     />
                     <YAxis
@@ -3027,9 +3217,9 @@ export function TopTieringComparisonView({
                       dataKey={selectedActor === "branch" ? "id" : "name"}
                       stroke={isDarkMode ? "#94a3b8" : "#64748b"}
                       tick={{ fontSize: 12 }}
-                      angle={-45}
-                      textAnchor="end"
-                      height={100}
+                      angle={xAxisAngle}
+                      textAnchor={xAxisTextAnchor}
+                      height={modalXAxisHeight}
                       interval={0}
                     />
                     <YAxis
