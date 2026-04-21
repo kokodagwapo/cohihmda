@@ -778,9 +778,19 @@ function InsightCard({
                   )}
                 </>
               ) : (
-                <p className="text-slate-500 dark:text-slate-400">
-                  {insight.understory || "No additional detail available for this insight."}
-                </p>
+                <>
+                  {Array.isArray(insight.understory_bullets) && insight.understory_bullets.length > 0 ? (
+                    <ul className="list-disc pl-4 space-y-1 text-slate-500 dark:text-slate-400">
+                      {insight.understory_bullets.map((bullet, idx) => (
+                        <li key={`${insight.id || insight.headline}-${idx}`}>{bullet}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-slate-500 dark:text-slate-400">
+                      {insight.understory || "No additional detail available for this insight."}
+                    </p>
+                  )}
+                </>
               )}
             </div>
           )}

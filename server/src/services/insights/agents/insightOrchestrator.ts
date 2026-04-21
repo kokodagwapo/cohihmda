@@ -57,6 +57,7 @@ import {
 } from "../../dashboard/marketRateService.js";
 import { getIndustryNews } from "../../newsService.js";
 import { getTenantRevenueExpression } from "../../../utils/scorecard-utils.js";
+import { buildUnderstoryBullets } from "../understoryBullets.js";
 
 // ============================================================================
 // Types
@@ -855,17 +856,19 @@ async function persistAgentInsights(
   let hasGenerationMethodCol = false;
   let hasValueScoreCol = false;
   let hasFunctionalCategoryCol = false;
+  let hasUnderstoryBulletsCol = false;
   try {
     const colCheck = await tenantPool.query(`
       SELECT column_name FROM information_schema.columns
       WHERE table_name = 'generated_insights'
-        AND column_name IN ('detail_data', 'generation_method', 'value_score', 'functional_category')
+        AND column_name IN ('detail_data', 'generation_method', 'value_score', 'functional_category', 'understory_bullets')
     `);
     for (const row of colCheck.rows) {
       if (row.column_name === "detail_data") hasDetailDataCol = true;
       if (row.column_name === "generation_method") hasGenerationMethodCol = true;
       if (row.column_name === "value_score") hasValueScoreCol = true;
       if (row.column_name === "functional_category") hasFunctionalCategoryCol = true;
+      if (row.column_name === "understory_bullets") hasUnderstoryBulletsCol = true;
     }
     // Auto-migrate: create functional_category column if migration hasn't been applied yet
     if (!hasFunctionalCategoryCol) {
@@ -908,7 +911,8 @@ async function persistAgentInsights(
     const extraCount =
       (hasDetailDataCol ? 1 : 0) +
       (hasValueScoreCol ? 1 : 0) +
-      (hasFunctionalCategoryCol ? 1 : 0);
+      (hasFunctionalCategoryCol ? 1 : 0) +
+      (hasUnderstoryBulletsCol ? 1 : 0);
     const totalParams = baseCount + extraCount;
     const ph = Array.from({ length: totalParams }, () => `$${paramIdx++}`);
     placeholders.push(`(${ph.join(", ")})`);
@@ -952,6 +956,21 @@ async function persistAgentInsights(
     if (hasFunctionalCategoryCol) {
       values.push(ins.functional_category ?? null);
     }
+    if (hasUnderstoryBulletsCol) {
+      const sourceText =
+        detailData?.type === "agent_finding" && typeof detailData?.summary === "string" && detailData.summary.trim()
+          ? detailData.summary
+          : ins.understory;
+      const sourceLabel =
+        detailData?.type === "agent_finding" && typeof detailData?.summary === "string" && detailData.summary.trim()
+          ? "summary"
+          : "understory";
+      const bullets = await buildUnderstoryBullets(sourceText, {
+        headline: ins.headline,
+        sourceLabel,
+      });
+      values.push(JSON.stringify(bullets));
+    }
   }
 
   let columnList = `bucket, priority, headline, understory, insight_type, source,
@@ -961,6 +980,7 @@ async function persistAgentInsights(
   if (hasDetailDataCol) columnList += `, detail_data`;
   if (hasValueScoreCol) columnList += `, value_score`;
   if (hasFunctionalCategoryCol) columnList += `, functional_category`;
+  if (hasUnderstoryBulletsCol) columnList += `, understory_bullets`;
   const columns = `(${columnList})`;
 
   // Diagnostic: log a sample of what's being persisted to confirm functional_category
@@ -993,17 +1013,19 @@ async function appendAgentInsights(
   let hasGenerationMethodCol = false;
   let hasValueScoreCol = false;
   let hasFunctionalCategoryCol = false;
+  let hasUnderstoryBulletsCol = false;
   try {
     const colCheck = await tenantPool.query(`
       SELECT column_name FROM information_schema.columns
       WHERE table_name = 'generated_insights'
-        AND column_name IN ('detail_data', 'generation_method', 'value_score', 'functional_category')
+        AND column_name IN ('detail_data', 'generation_method', 'value_score', 'functional_category', 'understory_bullets')
     `);
     for (const row of colCheck.rows) {
       if (row.column_name === "detail_data") hasDetailDataCol = true;
       if (row.column_name === "generation_method") hasGenerationMethodCol = true;
       if (row.column_name === "value_score") hasValueScoreCol = true;
       if (row.column_name === "functional_category") hasFunctionalCategoryCol = true;
+      if (row.column_name === "understory_bullets") hasUnderstoryBulletsCol = true;
     }
     // Auto-migrate: create functional_category column if migration hasn't been applied yet
     if (!hasFunctionalCategoryCol) {
@@ -1038,7 +1060,8 @@ async function appendAgentInsights(
     const extraCount =
       (hasDetailDataCol ? 1 : 0) +
       (hasValueScoreCol ? 1 : 0) +
-      (hasFunctionalCategoryCol ? 1 : 0);
+      (hasFunctionalCategoryCol ? 1 : 0) +
+      (hasUnderstoryBulletsCol ? 1 : 0);
     const totalParams = baseCount + extraCount;
     const ph = Array.from({ length: totalParams }, () => `$${paramIdx++}`);
     placeholders.push(`(${ph.join(", ")})`);
@@ -1081,6 +1104,21 @@ async function appendAgentInsights(
     if (hasFunctionalCategoryCol) {
       values.push(ins.functional_category ?? null);
     }
+    if (hasUnderstoryBulletsCol) {
+      const sourceText =
+        detailData?.type === "agent_finding" && typeof detailData?.summary === "string" && detailData.summary.trim()
+          ? detailData.summary
+          : ins.understory;
+      const sourceLabel =
+        detailData?.type === "agent_finding" && typeof detailData?.summary === "string" && detailData.summary.trim()
+          ? "summary"
+          : "understory";
+      const bullets = await buildUnderstoryBullets(sourceText, {
+        headline: ins.headline,
+        sourceLabel,
+      });
+      values.push(JSON.stringify(bullets));
+    }
   }
 
   let columnList = `bucket, priority, headline, understory, insight_type, source,
@@ -1090,6 +1128,7 @@ async function appendAgentInsights(
   if (hasDetailDataCol) columnList += `, detail_data`;
   if (hasValueScoreCol) columnList += `, value_score`;
   if (hasFunctionalCategoryCol) columnList += `, functional_category`;
+  if (hasUnderstoryBulletsCol) columnList += `, understory_bullets`;
   const columns = `(${columnList})`;
 
   await tenantPool.query(
