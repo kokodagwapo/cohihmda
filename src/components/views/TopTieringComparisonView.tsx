@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import {
   Card,
@@ -249,6 +249,93 @@ export function TopTieringComparisonView({
   const clearActorFocus = useCallback(() => {
     setFocusedActorIds(new Set());
   }, []);
+
+  // ---------------------------------------------------------------------------
+  // Click-and-drag multi-select across chart bars
+  //
+  // Strategy: on mouse down we record the starting bar index; while the mouse
+  // moves over different bars we maintain a "drag range" id set; on mouse up
+  // we commit that set into the persistent selection and suppress the next
+  // bar click so the starting bar doesn't get toggled back off.
+  // ---------------------------------------------------------------------------
+  const [dragRangeIds, setDragRangeIds] = useState<Set<string>>(new Set());
+  const dragStartIndexRef = useRef<number | null>(null);
+  const dragMovedRef = useRef(false);
+  const suppressBarClickRef = useRef(false);
+
+  const isIdHighlightedForSelection = useCallback(
+    (id: string) => selectedIds.has(id) || dragRangeIds.has(id),
+    [selectedIds, dragRangeIds]
+  );
+
+  const createChartDragHandlers = useCallback(
+    (chartData: Array<{ id: string }>) => {
+      const onMouseDown = (state: any) => {
+        const idx = state?.activeTooltipIndex;
+        if (!Number.isInteger(idx)) return;
+        dragStartIndexRef.current = idx as number;
+        dragMovedRef.current = false;
+        const item = chartData[idx as number];
+        if (item) setDragRangeIds(new Set([item.id]));
+      };
+
+      const onMouseMove = (state: any) => {
+        if (dragStartIndexRef.current === null) return;
+        const idx = state?.activeTooltipIndex;
+        if (!Number.isInteger(idx)) return;
+        const start = dragStartIndexRef.current;
+        const current = idx as number;
+        if (current !== start) dragMovedRef.current = true;
+        const min = Math.min(start, current);
+        const max = Math.max(start, current);
+        const ids = new Set<string>();
+        for (let i = min; i <= max; i++) {
+          const item = chartData[i];
+          if (item) ids.add(item.id);
+        }
+        setDragRangeIds(ids);
+      };
+
+      const commitDrag = () => {
+        if (dragStartIndexRef.current !== null && dragMovedRef.current) {
+          setDragRangeIds((current) => {
+            if (current.size > 1) {
+              setSelectedIds((prev) => {
+                const next = new Set(prev);
+                current.forEach((id) => next.add(id));
+                return next;
+              });
+              suppressBarClickRef.current = true;
+            }
+            return new Set();
+          });
+        } else {
+          setDragRangeIds(new Set());
+        }
+        dragStartIndexRef.current = null;
+        dragMovedRef.current = false;
+      };
+
+      return {
+        onMouseDown,
+        onMouseMove,
+        onMouseUp: commitDrag,
+        onMouseLeave: commitDrag,
+      };
+    },
+    []
+  );
+
+  const handleBarClick = useCallback(
+    (data: any) => {
+      if (suppressBarClickRef.current) {
+        suppressBarClickRef.current = false;
+        return;
+      }
+      if (data) toggleSelection(data);
+    },
+    [toggleSelection]
+  );
 
   // Fetch real data from API
   const {
@@ -655,6 +742,184 @@ export function TopTieringComparisonView({
       .join(" | ");
   }, [focusedActors, formatTierLabel, isActorFocusApplied]);
 
+  // `focusPanelContent` is rendered both in the left rail and inside the
+  // expanded-chart modal. It has three visual states:
+  //   1. Focus applied (blue banner with focused actor chips + Clear Focus)
+  //   2. Selection pending (violet panel with count + Focus Dashboard + Clear Selection)
+  //   3. No selection and no focus (violet panel with usage instructions)
+  //
+  // State (3) is always visible so users can discover the focus action;
+  // earlier iterations hid it entirely until the first click.
+  // Declared as a memoised JSX node so the rail and modal share identical
+  // markup without duplicating it.
+  const focusPanelContent = useMemo(() => {
+    if (isActorFocusApplied) {
+      return (
+        <div
+          className={`p-3 rounded-lg space-y-3 ${
+            isDarkMode
+              ? "bg-blue-900/30 border border-blue-700/50"
+              : "bg-blue-50 border border-blue-200"
+          }`}
+        >
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <ListChecks
+                className={`w-4 h-4 ${
+                  isDarkMode ? "text-blue-300" : "text-blue-600"
+                }`}
+              />
+              <span
+                className={`text-sm font-medium ${
+                  isDarkMode ? "text-blue-100" : "text-blue-800"
+                }`}
+              >
+                Focused on {focusedActors.length}{" "}
+                {focusedActors.length === 1
+                  ? actorLabelSingular.toLowerCase()
+                  : actorLabelPlural.toLowerCase()}
+              </span>
+            </div>
+            <p
+              className={`text-xs ${
+                isDarkMode ? "text-blue-200/90" : "text-blue-700"
+              }`}
+            >
+              Original tiers are preserved from the full comparison set. KPIs
+              and charts now reflect only the focused {actorLabelPlural.toLowerCase()}.
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {focusedActors.slice(0, 4).map((actorEntry) => (
+                <span
+                  key={actorEntry.id}
+                  className={`rounded-full px-2 py-1 text-[10px] font-medium ${
+                    isDarkMode
+                      ? "bg-slate-800/70 text-blue-100 border border-blue-800/60"
+                      : "bg-white text-blue-800 border border-blue-200"
+                  }`}
+                >
+                  {actorEntry.name} · {formatTierLabel(actorEntry.tier)}
+                </span>
+              ))}
+              {focusedActors.length > 4 && (
+                <span
+                  className={`rounded-full px-2 py-1 text-[10px] font-medium ${
+                    isDarkMode
+                      ? "bg-slate-800/70 text-blue-100 border border-blue-800/60"
+                      : "bg-white text-blue-800 border border-blue-200"
+                  }`}
+                >
+                  +{focusedActors.length - 4} more
+                </span>
+              )}
+            </div>
+            {focusedTierSummary && (
+              <p
+                className={`text-[10px] ${
+                  isDarkMode ? "text-blue-200/80" : "text-blue-700/90"
+                }`}
+              >
+                {focusedTierSummary}
+              </p>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={clearActorFocus}
+              className={`h-8 px-3 text-xs ${
+                isDarkMode
+                  ? "border-blue-700/60 bg-transparent text-blue-100 hover:bg-blue-900/40"
+                  : "border-blue-300 bg-white text-blue-800 hover:bg-blue-100"
+              }`}
+            >
+              Clear Focus
+            </Button>
+          </div>
+        </div>
+      );
+    }
+
+    const hasPendingSelection = selectedIds.size > 0;
+    return (
+      <div
+        className={`p-3 rounded-lg space-y-3 ${
+          isDarkMode
+            ? "bg-violet-900/30 border border-violet-700/50"
+            : "bg-violet-50 border border-violet-200"
+        }`}
+      >
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <ListChecks
+              className={`w-4 h-4 ${
+                isDarkMode ? "text-violet-400" : "text-violet-600"
+              }`}
+            />
+            <span
+              className={`text-sm font-medium ${
+                isDarkMode ? "text-violet-300" : "text-violet-700"
+              }`}
+            >
+              {hasPendingSelection
+                ? `${selectedIds.size} ${
+                    selectedIds.size === 1
+                      ? actorLabelSingular.toLowerCase()
+                      : actorLabelPlural.toLowerCase()
+                  } selected`
+                : `Focus this dashboard on specific ${actorLabelPlural.toLowerCase()}`}
+            </span>
+          </div>
+          <p
+            className={`text-xs ${
+              isDarkMode ? "text-violet-200/80" : "text-violet-700/90"
+            }`}
+          >
+            {hasPendingSelection
+              ? `Click Focus Dashboard to scope KPIs, charts, and the detail table to the selected ${actorLabelPlural.toLowerCase()} while keeping their original tiers.`
+              : `Click a bar in any chart to select a ${actorLabelSingular.toLowerCase()}, or click and drag across bars to select several. Then use Focus Dashboard to scope everything to that cohort while keeping their original tiers.`}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            onClick={applyActorFocus}
+            disabled={!hasPendingSelection}
+            className="h-8 px-3 text-xs"
+          >
+            Focus Dashboard
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={clearAllSelections}
+            disabled={!hasPendingSelection}
+            className={`h-8 px-3 text-xs ${
+              isDarkMode
+                ? "text-violet-400 hover:text-violet-300"
+                : "text-violet-600 hover:text-violet-700"
+            }`}
+          >
+            Clear Selection
+          </Button>
+        </div>
+      </div>
+    );
+  }, [
+    isActorFocusApplied,
+    isDarkMode,
+    focusedActors,
+    actorLabelPlural,
+    actorLabelSingular,
+    focusedTierSummary,
+    clearActorFocus,
+    selectedIds.size,
+    applyActorFocus,
+    clearAllSelections,
+    formatTierLabel,
+  ]);
+
   // Helper function to sort and add cumulative percentages
   const sortAndAddCumulative = (
     data: ActorData[],
@@ -955,151 +1220,7 @@ export function TopTieringComparisonView({
                 </div>
               </CardHeader>
               <CardContent className="pt-4 sm:pt-5 space-y-4 sm:space-y-5">
-                {isActorFocusApplied && (
-                  <div
-                    className={`p-3 rounded-lg space-y-3 ${
-                      isDarkMode
-                        ? "bg-blue-900/30 border border-blue-700/50"
-                        : "bg-blue-50 border border-blue-200"
-                    }`}
-                  >
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <ListChecks
-                          className={`w-4 h-4 ${
-                            isDarkMode ? "text-blue-300" : "text-blue-600"
-                          }`}
-                        />
-                        <span
-                          className={`text-sm font-medium ${
-                            isDarkMode ? "text-blue-100" : "text-blue-800"
-                          }`}
-                        >
-                          Focused on {focusedActors.length}{" "}
-                          {focusedActors.length === 1
-                            ? actorLabelSingular.toLowerCase()
-                            : actorLabelPlural.toLowerCase()}
-                        </span>
-                      </div>
-                      <p
-                        className={`text-xs ${
-                          isDarkMode ? "text-blue-200/90" : "text-blue-700"
-                        }`}
-                      >
-                        Original tiers are preserved from the full comparison set. KPIs and charts now reflect only the focused {actorLabelPlural.toLowerCase()}.
-                      </p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {focusedActors.slice(0, 4).map((actorEntry) => (
-                          <span
-                            key={actorEntry.id}
-                            className={`rounded-full px-2 py-1 text-[10px] font-medium ${
-                              isDarkMode
-                                ? "bg-slate-800/70 text-blue-100 border border-blue-800/60"
-                                : "bg-white text-blue-800 border border-blue-200"
-                            }`}
-                          >
-                            {actorEntry.name} · {formatTierLabel(actorEntry.tier)}
-                          </span>
-                        ))}
-                        {focusedActors.length > 4 && (
-                          <span
-                            className={`rounded-full px-2 py-1 text-[10px] font-medium ${
-                              isDarkMode
-                                ? "bg-slate-800/70 text-blue-100 border border-blue-800/60"
-                                : "bg-white text-blue-800 border border-blue-200"
-                            }`}
-                          >
-                            +{focusedActors.length - 4} more
-                          </span>
-                        )}
-                      </div>
-                      {focusedTierSummary && (
-                        <p
-                          className={`text-[10px] ${
-                            isDarkMode ? "text-blue-200/80" : "text-blue-700/90"
-                          }`}
-                        >
-                          {focusedTierSummary}
-                        </p>
-                      )}
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={clearActorFocus}
-                        className={`h-8 px-3 text-xs ${
-                          isDarkMode
-                            ? "border-blue-700/60 bg-transparent text-blue-100 hover:bg-blue-900/40"
-                            : "border-blue-300 bg-white text-blue-800 hover:bg-blue-100"
-                        }`}
-                      >
-                        Clear Focus
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Selection Summary */}
-                {selectedIds.size > 0 && !isActorFocusApplied && (
-                  <div
-                    className={`p-3 rounded-lg space-y-3 ${
-                      isDarkMode
-                        ? "bg-violet-900/30 border border-violet-700/50"
-                        : "bg-violet-50 border border-violet-200"
-                    }`}
-                  >
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <ListChecks
-                          className={`w-4 h-4 ${
-                            isDarkMode ? "text-violet-400" : "text-violet-600"
-                          }`}
-                        />
-                        <span
-                          className={`text-sm font-medium ${
-                            isDarkMode ? "text-violet-300" : "text-violet-700"
-                          }`}
-                        >
-                          {selectedIds.size}{" "}
-                          {selectedIds.size === 1
-                            ? actorLabelSingular.toLowerCase()
-                            : actorLabelPlural.toLowerCase()}{" "}
-                          selected
-                        </span>
-                      </div>
-                      <p
-                        className={`text-xs ${
-                          isDarkMode ? "text-violet-200/80" : "text-violet-700/90"
-                        }`}
-                      >
-                        Focus the dashboard to compare only the selected {actorLabelPlural.toLowerCase()} while keeping their original tiers.
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        size="sm"
-                        onClick={applyActorFocus}
-                        disabled={selectedIds.size === 0}
-                        className="h-8 px-3 text-xs"
-                      >
-                        Focus Dashboard
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={clearAllSelections}
-                        className={`h-8 px-3 text-xs ${
-                          isDarkMode
-                            ? "text-violet-400 hover:text-violet-300"
-                            : "text-violet-600 hover:text-violet-700"
-                        }`}
-                      >
-                        Clear Selection
-                      </Button>
-                    </div>
-                  </div>
-                )}
+                {focusPanelContent}
 
                 {/* Search Filter */}
                 <div>
@@ -1896,6 +2017,7 @@ export function TopTieringComparisonView({
                         <ComposedChart
                           data={revenueChartData}
                           margin={{ top: 5, right: 20, left: 10, bottom: 60 }}
+                          {...createChartDragHandlers(revenueChartData)}
                         >
                           <CartesianGrid
                             strokeDasharray="3 3"
@@ -2004,28 +2126,26 @@ export function TopTieringComparisonView({
                             name="Revenue"
                             radius={[4, 4, 0, 0]}
                             cursor="pointer"
-                            onClick={(data: any) =>
-                              data && toggleSelection(data)
-                            }
+                            onClick={handleBarClick}
                           >
                             {revenueChartData.map((entry, index) => (
                               <Cell
                                 key={`cell-${index}`}
                                 fill={
-                                  selectedIds.has(entry.id)
+                                  isIdHighlightedForSelection(entry.id)
                                     ? isDarkMode
                                       ? "#8b5cf6"
                                       : "#7c3aed"
                                     : getTierColor(entry.tier)
                                 }
                                 stroke={
-                                  selectedIds.has(entry.id)
+                                  isIdHighlightedForSelection(entry.id)
                                     ? isDarkMode
                                       ? "#a78bfa"
                                       : "#8b5cf6"
                                     : "none"
                                 }
-                                strokeWidth={selectedIds.has(entry.id) ? 2 : 0}
+                                strokeWidth={isIdHighlightedForSelection(entry.id) ? 2 : 0}
                               />
                             ))}
                           </Bar>
@@ -2336,6 +2456,7 @@ export function TopTieringComparisonView({
                           <ComposedChart
                             data={unitsChartData}
                             margin={{ top: 5, right: 20, left: 10, bottom: 60 }}
+                            {...createChartDragHandlers(unitsChartData)}
                           >
                             <CartesianGrid
                               strokeDasharray="3 3"
@@ -2475,29 +2596,27 @@ export function TopTieringComparisonView({
                               }
                               radius={[4, 4, 0, 0]}
                               cursor="pointer"
-                              onClick={(data: any) =>
-                                data && toggleSelection(data)
-                              }
+                              onClick={handleBarClick}
                             >
                               {unitsChartData.map((entry, index) => (
                                 <Cell
                                   key={`cell-${index}`}
                                   fill={
-                                    selectedIds.has(entry.id)
+                                    isIdHighlightedForSelection(entry.id)
                                       ? isDarkMode
                                         ? "#8b5cf6"
                                         : "#7c3aed"
                                       : getTierColor(entry.tier)
                                   }
                                   stroke={
-                                    selectedIds.has(entry.id)
+                                    isIdHighlightedForSelection(entry.id)
                                       ? isDarkMode
                                         ? "#a78bfa"
                                         : "#8b5cf6"
                                       : "none"
                                   }
                                   strokeWidth={
-                                    selectedIds.has(entry.id) ? 2 : 0
+                                    isIdHighlightedForSelection(entry.id) ? 2 : 0
                                   }
                                 />
                               ))}
@@ -2623,6 +2742,7 @@ export function TopTieringComparisonView({
                         <BarChart
                           data={bpsChartData}
                           margin={{ top: 5, right: 20, left: 10, bottom: 60 }}
+                          {...createChartDragHandlers(bpsChartData)}
                         >
                           <CartesianGrid
                             strokeDasharray="3 3"
@@ -2719,28 +2839,26 @@ export function TopTieringComparisonView({
                             }
                             radius={[4, 4, 0, 0]}
                             cursor="pointer"
-                            onClick={(data: any) =>
-                              data && toggleSelection(data)
-                            }
+                            onClick={handleBarClick}
                           >
                             {bpsChartData.map((entry, index) => (
                               <Cell
                                 key={`cell-${index}`}
                                 fill={
-                                  selectedIds.has(entry.id)
+                                  isIdHighlightedForSelection(entry.id)
                                     ? isDarkMode
                                       ? "#8b5cf6"
                                       : "#7c3aed"
                                     : getTierColor(entry.tier)
                                 }
                                 stroke={
-                                  selectedIds.has(entry.id)
+                                  isIdHighlightedForSelection(entry.id)
                                     ? isDarkMode
                                       ? "#a78bfa"
                                       : "#8b5cf6"
                                     : "none"
                                 }
-                                strokeWidth={selectedIds.has(entry.id) ? 2 : 0}
+                                strokeWidth={isIdHighlightedForSelection(entry.id) ? 2 : 0}
                               />
                             ))}
                           </Bar>
@@ -2897,15 +3015,20 @@ export function TopTieringComparisonView({
 
           {/* Modal Chart Content */}
           <div
-            className="p-6 overflow-auto"
+            className="p-6 overflow-auto space-y-4"
             style={{ maxHeight: "calc(90vh - 120px)" }}
           >
+            {/* Focus panel mirrored from the left rail so the selection/focus
+                controls stay reachable while interacting with the zoomed-in
+                chart. */}
+            {focusPanelContent}
             <div className="w-full">
               <ResponsiveContainer width="100%" height={550}>
                 {expandedChart === "revenue" ? (
                   <ComposedChart
                     data={revenueChartData}
                     margin={{ top: 20, right: 40, left: 30, bottom: 100 }}
+                    {...createChartDragHandlers(revenueChartData)}
                   >
                     <CartesianGrid
                       strokeDasharray="3 3"
@@ -3005,26 +3128,26 @@ export function TopTieringComparisonView({
                       radius={[4, 4, 0, 0]}
                       name="Revenue"
                       cursor="pointer"
-                      onClick={(data: any) => data && toggleSelection(data)}
+                      onClick={handleBarClick}
                     >
                       {revenueChartData.map((entry, index) => (
                         <Cell
                           key={`cell-${index}`}
                           fill={
-                            selectedIds.has(entry.id)
+                            isIdHighlightedForSelection(entry.id)
                               ? isDarkMode
                                 ? "#8b5cf6"
                                 : "#7c3aed"
                               : getTierColor(entry.tier)
                           }
                           stroke={
-                            selectedIds.has(entry.id)
+                            isIdHighlightedForSelection(entry.id)
                               ? isDarkMode
                                 ? "#a78bfa"
                                 : "#8b5cf6"
                               : "none"
                           }
-                          strokeWidth={selectedIds.has(entry.id) ? 2 : 0}
+                          strokeWidth={isIdHighlightedForSelection(entry.id) ? 2 : 0}
                         />
                       ))}
                     </Bar>
@@ -3049,6 +3172,7 @@ export function TopTieringComparisonView({
                   <ComposedChart
                     data={unitsChartData}
                     margin={{ top: 20, right: 40, left: 30, bottom: 100 }}
+                    {...createChartDragHandlers(unitsChartData)}
                   >
                     <CartesianGrid
                       strokeDasharray="3 3"
@@ -3167,26 +3291,26 @@ export function TopTieringComparisonView({
                       name={selectedChartTab === "units" ? "Units" : "Volume"}
                       radius={[4, 4, 0, 0]}
                       cursor="pointer"
-                      onClick={(data: any) => data && toggleSelection(data)}
+                      onClick={handleBarClick}
                     >
                       {unitsChartData.map((entry, index) => (
                         <Cell
                           key={`cell-${index}`}
                           fill={
-                            selectedIds.has(entry.id)
+                            isIdHighlightedForSelection(entry.id)
                               ? isDarkMode
                                 ? "#8b5cf6"
                                 : "#7c3aed"
                               : getTierColor(entry.tier)
                           }
                           stroke={
-                            selectedIds.has(entry.id)
+                            isIdHighlightedForSelection(entry.id)
                               ? isDarkMode
                                 ? "#a78bfa"
                                 : "#8b5cf6"
                               : "none"
                           }
-                          strokeWidth={selectedIds.has(entry.id) ? 2 : 0}
+                          strokeWidth={isIdHighlightedForSelection(entry.id) ? 2 : 0}
                         />
                       ))}
                     </Bar>
@@ -3208,6 +3332,7 @@ export function TopTieringComparisonView({
                   <BarChart
                     data={bpsChartData}
                     margin={{ top: 20, right: 40, left: 30, bottom: 100 }}
+                    {...createChartDragHandlers(bpsChartData)}
                   >
                     <CartesianGrid
                       strokeDasharray="3 3"
@@ -3295,26 +3420,26 @@ export function TopTieringComparisonView({
                       }
                       radius={[4, 4, 0, 0]}
                       cursor="pointer"
-                      onClick={(data: any) => data && toggleSelection(data)}
+                      onClick={handleBarClick}
                     >
                       {bpsChartData.map((entry, index) => (
                         <Cell
                           key={`cell-${index}`}
                           fill={
-                            selectedIds.has(entry.id)
+                            isIdHighlightedForSelection(entry.id)
                               ? isDarkMode
                                 ? "#8b5cf6"
                                 : "#7c3aed"
                               : getTierColor(entry.tier)
                           }
                           stroke={
-                            selectedIds.has(entry.id)
+                            isIdHighlightedForSelection(entry.id)
                               ? isDarkMode
                                 ? "#a78bfa"
                                 : "#8b5cf6"
                               : "none"
                           }
-                          strokeWidth={selectedIds.has(entry.id) ? 2 : 0}
+                          strokeWidth={isIdHighlightedForSelection(entry.id) ? 2 : 0}
                         />
                       ))}
                     </Bar>
