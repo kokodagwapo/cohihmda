@@ -181,6 +181,8 @@ function SessionItem({
 
   return (
     <div
+      data-testid="cohi-chat-history-item"
+      data-session-id={session.id}
       className={cn(
         "group relative flex items-start gap-2.5 px-3 py-2.5 rounded-lg cursor-pointer transition-colors",
         isActive
