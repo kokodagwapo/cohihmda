@@ -57,6 +57,8 @@ export default function MyDashboard() {
   const effectiveTenantId = selectedTenantId || user?.tenant_id;
   const { canvasId: urlCanvasId } = useParams<{ canvasId?: string }>();
   const [searchParams] = useSearchParams();
+  const autoOpenReportBuilder =
+    searchParams.get("reportBuilder") === "1";
   const navigate = useNavigate();
   const initialUrlCanvasIdRef = useRef<string | undefined>(urlCanvasId);
 
@@ -478,6 +480,7 @@ export default function MyDashboard() {
                   onDirtyChange={handleDirtyChange}
                   tenantId={effectiveTenantId}
                   isOwner={activeCanvasIsOwner}
+                  autoOpenReportBuilder={autoOpenReportBuilder}
                 />
               )}
             </div>
