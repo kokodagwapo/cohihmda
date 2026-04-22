@@ -58,6 +58,7 @@ import { renderMarkdownText } from "@/utils/renderMarkdown";
 import { InsightChat } from "@/components/dashboard/InsightChat";
 import { AutoChart, EvidencePreviewTable } from "@/components/research/FindingDrillDown";
 import { SaveToWorkbenchModal, type SaveToWorkbenchPayload } from "@/components/research/SaveToWorkbenchModal";
+import { FindingSummaryContent } from "@/components/research/FindingSummaryContent";
 import type {
   ResearchReport as ResearchReportType,
   ResearchTheme,
@@ -221,7 +222,12 @@ export function QuickAnswerView({
             </Badge>
           </div>
           <div className="text-sm text-muted-foreground leading-relaxed mt-1 prose prose-sm dark:prose-invert max-w-none">
-            {renderMarkdownText(finding.summary)}
+            <FindingSummaryContent
+              summary={finding.summary}
+              preferredBullets={finding.summary_bullets}
+              paragraphClassName="min-w-0 break-words [overflow-wrap:anywhere]"
+              listClassName="list-disc pl-5 space-y-1 min-w-0 break-words [overflow-wrap:anywhere]"
+            />
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
