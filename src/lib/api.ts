@@ -1616,6 +1616,82 @@ export class ApiClient {
       body: JSON.stringify({ loan_id: loanId, additional_emails: additionalEmails, custom_message: customMessage }),
     });
   }
+
+  // Feedback
+  private _feedbackTq(tenantId?: string | null): string {
+    return tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+  }
+
+  async createFeedback(
+    payload: {
+      area:
+        | "insights"
+        | "dashboards"
+        | "workbench"
+        | "research_lab"
+        | "communication_center"
+        | "general_feedback";
+      description: string;
+    },
+    tenantId?: string | null,
+  ) {
+    const res = await this.request<{
+      feedback: any;
+      notificationSent: boolean;
+      notificationFailures: Array<{ email: string; error: string }>;
+    }>(`/api/feedback${this._feedbackTq(tenantId)}`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    this.invalidateCacheFor("/api/feedback");
+    return res;
+  }
+
+  async getFeedbackList(
+    params?: {
+      sortBy?: "created_at" | "status" | "area";
+      sortDir?: "asc" | "desc";
+      status?: "open" | "in_progress" | "resolved";
+      area?:
+        | "insights"
+        | "dashboards"
+        | "workbench"
+        | "research_lab"
+        | "communication_center"
+        | "general_feedback";
+      page?: number;
+      limit?: number;
+      tenantId?: string | null;
+    },
+  ) {
+    const sp = new URLSearchParams();
+    if (params?.sortBy) sp.set("sortBy", params.sortBy);
+    if (params?.sortDir) sp.set("sortDir", params.sortDir);
+    if (params?.status) sp.set("status", params.status);
+    if (params?.area) sp.set("area", params.area);
+    if (params?.page) sp.set("page", String(params.page));
+    if (params?.limit) sp.set("limit", String(params.limit));
+    if (params?.tenantId) sp.set("tenant_id", params.tenantId);
+    const qs = sp.toString() ? `?${sp.toString()}` : "";
+    return this.request<{ feedback: any[]; page: number; limit: number; total: number }>(`/api/feedback${qs}`);
+  }
+
+  async getFeedbackById(id: string, tenantId?: string | null) {
+    return this.request<{ feedback: any }>(`/api/feedback/${encodeURIComponent(id)}${this._feedbackTq(tenantId)}`);
+  }
+
+  async updateFeedback(
+    id: string,
+    payload: { status?: "open" | "in_progress" | "resolved"; admin_notes?: string },
+    tenantId?: string | null,
+  ) {
+    const res = await this.request<{ feedback: any }>(`/api/feedback/${encodeURIComponent(id)}${this._feedbackTq(tenantId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+    this.invalidateCacheFor("/api/feedback");
+    return res;
+  }
 }
 
 export const api = new ApiClient();

@@ -1,4 +1,4 @@
-﻿import { Button } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { CoheusLogo } from "@/components/ui/CoheusLogo";
 import { UserMenu } from "@/components/layout/UserMenu";
 import { useAuth } from "@/contexts/AuthContext";
@@ -38,6 +38,12 @@ import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Sheet,
   SheetContent,
@@ -927,6 +933,32 @@ export function Navigation(
             Data Explorer
           </button>
         </div>
+
+        {/* Help */}
+        <div className="space-y-1">
+          <button
+            onClick={() => {
+              navigate("/help");
+              setMobileMenuOpen(false);
+            }}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+            data-track="nav_help_center"
+          >
+            <HelpCircle className="w-4 h-4 flex-shrink-0" />
+            <span>Help Center</span>
+          </button>
+          <button
+            onClick={() => {
+              navigate("/feedback");
+              setMobileMenuOpen(false);
+            }}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+            data-track="nav_feedback"
+          >
+            <HelpCircle className="w-4 h-4 flex-shrink-0" />
+            <span>Feedback</span>
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1640,15 +1672,32 @@ export function Navigation(
             {/* Help & What's New */}
             {isAuthenticated && (
               <div className="hidden lg:flex items-center gap-1">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-9 w-9 rounded-lg"
-                  onClick={() => navigate("/help")}
-                  aria-label="Help center"
-                >
-                  <HelpCircle className="h-4 w-4" />
-                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-9 w-9 rounded-lg"
+                      aria-label="Help options"
+                    >
+                      <HelpCircle className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-44">
+                    <DropdownMenuItem
+                      onClick={() => navigate("/help")}
+                      data-track="nav_help_center"
+                    >
+                      Help Center
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => navigate("/feedback")}
+                      data-track="nav_feedback"
+                    >
+                      Feedback
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 <WhatsNewButton />
               </div>
             )}
