@@ -161,9 +161,11 @@ export default function FeedbackDetailPage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div>
+              <div className="min-w-0">
                 <Label className="font-semibold">Description</Label>
-                <p className="mt-2 whitespace-pre-wrap text-sm">{feedback.description}</p>
+                <p className="mt-2 min-w-0 max-w-full whitespace-pre-wrap text-sm [overflow-wrap:anywhere]">
+                  {feedback.description}
+                </p>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
                 <div>
