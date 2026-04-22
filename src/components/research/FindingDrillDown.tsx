@@ -78,6 +78,7 @@ import { cn } from "@/lib/utils";
 import { useDebugMode } from "@/contexts/DebugModeContext";
 import { exportDataAsExcel } from "@/utils/exportUtils";
 import { SaveToWorkbenchModal, type SaveToWorkbenchPayload } from "@/components/research/SaveToWorkbenchModal";
+import { FindingSummaryContent } from "@/components/research/FindingSummaryContent";
 import {
   FIELD_REGISTRY,
   SUMMARY_REGISTRY,
@@ -1735,11 +1736,6 @@ export function FindingDrillDown({ finding, onClose, sessionId }: FindingDrillDo
   const allMetrics = Object.entries(finding.keyMetrics);
   const visibleMetrics = kpiExpanded ? allMetrics : allMetrics.slice(0, KPI_INITIAL_VISIBLE);
   const hiddenCount = allMetrics.length - KPI_INITIAL_VISIBLE;
-  const summaryBullets =
-    Array.isArray(finding.summary_bullets) && finding.summary_bullets.length > 0
-      ? finding.summary_bullets
-      : (finding.summary ? [finding.summary] : []);
-
   // Primary evidence for the header Save to Workbench action
   const primaryEvidence = finding.evidence[finding.evidence.length - 1] ?? null;
 
@@ -1762,13 +1758,10 @@ export function FindingDrillDown({ finding, onClose, sessionId }: FindingDrillDo
               {finding.confidence}
             </Badge>
           </div>
-          {summaryBullets.length > 0 && (
-            <ul className="list-disc pl-5 space-y-1 text-sm text-muted-foreground leading-relaxed">
-              {summaryBullets.map((bullet, idx) => (
-                <li key={`${idx}-${bullet.slice(0, 24)}`}>{bullet}</li>
-              ))}
-            </ul>
-          )}
+          <FindingSummaryContent
+            summary={finding.summary}
+            preferredBullets={finding.summary_bullets}
+          />
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
           {primaryEvidence && (
