@@ -9,6 +9,9 @@ import {
   writeProvisionedState,
 } from "./provision-state";
 import { generateTotpCode } from "./totp";
+import { loadE2EEnv } from "./load-e2e-env.mjs";
+
+loadE2EEnv();
 
 const USER_STATE = path.join(AUTH_DIR, "user.json");
 const ADMIN_STATE = path.join(AUTH_DIR, "admin.json");

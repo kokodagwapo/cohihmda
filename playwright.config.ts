@@ -1,4 +1,7 @@
 import { defineConfig } from "@playwright/test";
+import { loadE2EEnv } from "./e2e/load-e2e-env.mjs";
+
+loadE2EEnv();
 
 const baseURL = process.env.E2E_BASE_URL || "http://localhost:5000";
 const isCI = !!process.env.CI;
