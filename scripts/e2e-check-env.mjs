@@ -8,6 +8,7 @@ import {
 
 const { loadedFiles, repoRoot } = loadE2EEnv();
 const missingRequired = getMissingRequiredE2EEnv();
+const configuredTenantSlug = process.env.E2E_ADMIN_TENANT_SLUG?.trim();
 
 function statusLabel(isSet) {
   return isSet ? "OK" : "MISSING";
@@ -45,5 +46,14 @@ if (missingRequired.length > 0) {
   process.exitCode = 1;
 } else {
   console.log("\nAll required E2E variables are present.");
+}
+
+if (
+  configuredTenantSlug &&
+  configuredTenantSlug !== configuredTenantSlug.toLowerCase()
+) {
+  console.warn(
+    `\nWarning: E2E_ADMIN_TENANT_SLUG is "${configuredTenantSlug}". Local auth lookups are safest when this is lowercase (for example "${configuredTenantSlug.toLowerCase()}").`,
+  );
 }
 

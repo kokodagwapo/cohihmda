@@ -33,6 +33,11 @@ type SignInResponse = {
   };
 };
 
+function normalizeTenantSlug(tenantSlug?: string): string | undefined {
+  const trimmed = tenantSlug?.trim();
+  return trimmed ? trimmed.toLowerCase() : undefined;
+}
+
 function sanitizeAuthPayload(data: SignInResponse): Record<string, unknown> {
   const clone: Record<string, unknown> = { ...data };
   if (typeof clone.cognitoAccessToken === "string") {
@@ -240,9 +245,10 @@ async function signInAndResolveToken(
   tenantSlug: string | undefined,
   opts: { allowMfaSetup: boolean; existingTotpSecret?: string },
 ): Promise<{ token: string; cognitoAccessToken?: string; totpSecret?: string }> {
+  const normalizedTenantSlug = normalizeTenantSlug(tenantSlug);
   const signInPayload: Record<string, unknown> = { email, password };
-  if (tenantSlug && tenantSlug.trim()) {
-    signInPayload.tenantSlug = tenantSlug.trim();
+  if (normalizedTenantSlug) {
+    signInPayload.tenantSlug = normalizedTenantSlug;
   }
 
   const first = await postJson(apiUrl(baseURL, "/api/auth/signin"), {
@@ -274,7 +280,7 @@ async function signInAndResolveToken(
       baseURL,
       email,
       data.session,
-      tenantSlug,
+      normalizedTenantSlug,
       data.challengeName,
       opts.existingTotpSecret,
     );
@@ -321,7 +327,7 @@ async function signInAndResolveToken(
       );
     }
 
-    return signInAndResolveToken(baseURL, email, password, tenantSlug, {
+    return signInAndResolveToken(baseURL, email, password, normalizedTenantSlug, {
       allowMfaSetup: false,
       existingTotpSecret: totpSecret,
     });
@@ -338,6 +344,41 @@ async function signInAndResolveToken(
       sanitizeAuthPayload(data),
     )}`,
   );
+}
+
+function isProvisioningConsistencyError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes("User not found in application") ||
+    message.includes("Invalid email or password") ||
+    message.includes("Unable to persist authenticated state")
+  );
+}
+
+async function retryProvisionedUserAuth<T>(
+  label: string,
+  task: () => Promise<T>,
+  attempts = 5,
+): Promise<T> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await task();
+    } catch (error) {
+      lastError = error;
+      if (!isProvisioningConsistencyError(error) || attempt === attempts) {
+        throw error;
+      }
+
+      console.warn(
+        `[E2E] ${label} not ready yet (attempt ${attempt}/${attempts}). Retrying after Cognito/app-user consistency delay...`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 2_000 * attempt));
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
 /**
@@ -515,6 +556,7 @@ async function createProvisionedUser(
     persona: "tenant_user" | "tenant_canvas_only_user";
   },
 ): Promise<ProvisionedUser> {
+  const normalizedTenantSlug = normalizeTenantSlug(tenantSlug);
   const create = await postJson(
     apiUrl(baseURL, `/api/admin/tenants/${tenantId}/users`),
     {
@@ -537,12 +579,16 @@ async function createProvisionedUser(
   const userObj = create.data.user as Record<string, unknown> | undefined;
   const userId = userObj ? assertStringField(userObj, "id") : "";
 
-  const signin = await signInAndResolveToken(
-    baseURL,
-    params.email,
-    params.password,
-    tenantSlug,
-    { allowMfaSetup: true },
+  const signin = await retryProvisionedUserAuth(
+    `Initial sign-in for provisioned user ${params.email}`,
+    () =>
+      signInAndResolveToken(
+        baseURL,
+        params.email,
+        params.password,
+        normalizedTenantSlug,
+        { allowMfaSetup: true },
+      ),
   );
 
   if (!signin.totpSecret) {
@@ -636,21 +682,29 @@ export default async function globalSetup(config: FullConfig) {
     ADMIN_STATE,
     admin.tenantSlug,
   );
-  await loginAndPersistState(
-    baseURL,
-    tenantUser.email,
-    tenantUser.password,
-    tenantUser.totpSecret,
-    USER_STATE,
-    admin.tenantSlug,
+  await retryProvisionedUserAuth(
+    `Persist storage state for ${tenantUser.email}`,
+    () =>
+      loginAndPersistState(
+        baseURL,
+        tenantUser.email,
+        tenantUser.password,
+        tenantUser.totpSecret,
+        USER_STATE,
+        admin.tenantSlug,
+      ),
   );
-  await loginAndPersistState(
-    baseURL,
-    canvasOnlyUser.email,
-    canvasOnlyUser.password,
-    canvasOnlyUser.totpSecret,
-    CANVAS_ONLY_STATE,
-    admin.tenantSlug,
+  await retryProvisionedUserAuth(
+    `Persist storage state for ${canvasOnlyUser.email}`,
+    () =>
+      loginAndPersistState(
+        baseURL,
+        canvasOnlyUser.email,
+        canvasOnlyUser.password,
+        canvasOnlyUser.totpSecret,
+        CANVAS_ONLY_STATE,
+        admin.tenantSlug,
+      ),
   );
 
   // Optional platform-admin session for the AI AC Validator. Platform-admin
