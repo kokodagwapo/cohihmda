@@ -66,6 +66,22 @@ async function dismissBlockingOverlays(page: import("@playwright/test").Page) {
   }
 }
 
+async function suppressWelcomeTour(page: Page) {
+  // The welcome tour dialog intercepts pointer events on /insights for newly
+  // provisioned users. Pre-seed the localStorage flag it uses so the dialog
+  // never renders, instead of relying on post-render Escape dismissal.
+  await page.addInitScript(() => {
+    try {
+      window.localStorage.setItem(
+        "cohi-welcome-tour-last-shown",
+        new Date().toISOString(),
+      );
+    } catch {
+      /* storage access denied; tour dismissal in beforeEach will still try */
+    }
+  });
+}
+
 async function mockInsightsApis(page: Page) {
   await page.route("**/api/dashboard/insights?**", async (route) => {
     await route.fulfill({
@@ -99,7 +115,11 @@ function insightCard(page: Page, headline: string) {
 }
 
 test.describe("Insights Understory Readability (COHI-328)", () => {
+  test.describe.configure({ mode: "serial" });
+  test.setTimeout(90_000);
+
   test.beforeEach(async ({ userPage }) => {
+    await suppressWelcomeTour(userPage);
     await mockInsightsApis(userPage);
     await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
     await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
@@ -123,6 +143,7 @@ test.describe("Insights Understory Readability (COHI-328)", () => {
     const card = insightCard(userPage, BULLET_HEADLINE);
     await expect(card).toBeVisible();
 
+    await dismissBlockingOverlays(userPage);
     await card.click();
     await expect(card).toHaveAttribute("aria-expanded", "true");
 
