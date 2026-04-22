@@ -80,6 +80,11 @@ interface JwtPayload {
 let managementPool: pg.Pool | null = null;
 const tenantPools: Map<string, pg.Pool> = new Map();
 
+function normalizeTenantSlugInput(tenantSlug?: string): string | undefined {
+  const trimmed = tenantSlug?.trim();
+  return trimmed ? trimmed.toLowerCase() : undefined;
+}
+
 function getManagementPool(): pg.Pool {
   if (!managementPool) {
     const dbHost = (process.env.DB_HOST || "localhost").trim();
@@ -109,9 +114,14 @@ function getManagementPool(): pg.Pool {
 }
 
 async function getTenantPool(tenantSlug: string): Promise<pg.Pool | null> {
+  const normalizedTenantSlug = normalizeTenantSlugInput(tenantSlug);
+  if (!normalizedTenantSlug) {
+    return null;
+  }
+
   // Check cache first
-  if (tenantPools.has(tenantSlug)) {
-    return tenantPools.get(tenantSlug)!;
+  if (tenantPools.has(normalizedTenantSlug)) {
+    return tenantPools.get(normalizedTenantSlug)!;
   }
 
   try {
@@ -121,7 +131,7 @@ async function getTenantPool(tenantSlug: string): Promise<pg.Pool | null> {
       `SELECT database_name, database_host, database_port, database_user, database_password_encrypted, status
        FROM coheus_tenants 
        WHERE slug = $1 AND status = 'active'`,
-      [tenantSlug],
+      [normalizedTenantSlug],
     );
 
     if (result.rows.length === 0) {
@@ -146,10 +156,12 @@ async function getTenantPool(tenantSlug: string): Promise<pg.Pool | null> {
       connectionTimeoutMillis: 10000,
     });
 
-    tenantPools.set(tenantSlug, pool);
+    tenantPools.set(normalizedTenantSlug, pool);
     return pool;
   } catch (error: any) {
-    logError("[Auth] Failed to get tenant pool", error, { tenantSlug });
+    logError("[Auth] Failed to get tenant pool", error, {
+      tenantSlug: normalizedTenantSlug,
+    });
     return null;
   }
 }
@@ -224,6 +236,7 @@ async function findTenantUser(
 > {
   try {
     const mgmtPool = getManagementPool();
+    const normalizedTenantSlug = normalizeTenantSlugInput(tenantSlug);
 
     // If no tenant slug provided, search all active tenants
     let tenants: Array<{
@@ -233,10 +246,10 @@ async function findTenantUser(
       database_name: string;
     }>;
 
-    if (tenantSlug) {
+    if (normalizedTenantSlug) {
       const result = await mgmtPool.query(
         `SELECT id, slug, name, database_name FROM coheus_tenants WHERE slug = $1 AND status = 'active'`,
-        [tenantSlug],
+        [normalizedTenantSlug],
       );
       tenants = result.rows;
     } else {
@@ -283,7 +296,10 @@ async function findTenantUser(
 
     return null;
   } catch (error: any) {
-    logError("[Auth] Failed to find tenant user", error, { email, tenantSlug });
+    logError("[Auth] Failed to find tenant user", error, {
+      email,
+      tenantSlug: normalizeTenantSlugInput(tenantSlug),
+    });
     return null;
   }
 }

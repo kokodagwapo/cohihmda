@@ -26,6 +26,47 @@ bugfix/COHI-{N}-{short-description}
 
 Branch from `dev`, not `main`. See `docs/TESTING_STRATEGY.md` for the gitflow model.
 
+### Local E2E environment setup
+
+Playwright local auth setup reads E2E credentials from process environment, and the repo now auto-loads:
+
+- `.env.e2e`
+- `.env.e2e.local`
+
+for local runs only. CI can still inject environment variables directly, which take precedence over the local files.
+
+Recommended setup:
+
+1. Copy `.env.e2e.example` to `.env.e2e.local`
+2. Fill in your tenant-admin credentials and TOTP secret
+3. Run the env checker before your first local E2E run
+
+```bash
+cp .env.e2e.example .env.e2e.local
+npm run e2e:check-env
+```
+
+Required variables for local Playwright auth refresh:
+
+- `E2E_ADMIN_EMAIL`
+- `E2E_ADMIN_PASSWORD`
+- `E2E_ADMIN_TOTP_SECRET`
+
+Common optional variables:
+
+- `E2E_BASE_URL` defaults to `http://localhost:5000`
+- `E2E_ADMIN_TENANT_SLUG`
+- `E2E_MANAGED_EMAIL_PREFIX`
+- `E2E_PLATFORM_ADMIN_EMAIL`
+- `E2E_PLATFORM_ADMIN_PASSWORD`
+- `E2E_PLATFORM_ADMIN_TOTP_SECRET`
+
+Notes:
+
+- `.env.e2e.local` is for local developer machines only and must never be committed.
+- The Playwright global setup provisions fresh tenant users and rewrites `e2e/.auth/*.json` for each run, so you should treat those auth files as disposable artifacts, not hand-maintained session files.
+- If E2E auth seems stale, re-run `npm run e2e:check-env` and then any Playwright command to regenerate the auth state.
+
 ### Write your E2E test alongside the feature
 
 Create a spec file in `e2e/` following the project conventions:
@@ -76,6 +117,9 @@ Example: `"@critical @COHI-327 focus dashboard scopes to selected loan officers"
 ### Run tests locally before pushing
 
 ```bash
+# Check that local E2E secrets are present
+npm run e2e:check-env
+
 # Run just your new spec
 npx playwright test e2e/your-spec.spec.ts --project=chromium
 

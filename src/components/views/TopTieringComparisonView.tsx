@@ -850,6 +850,7 @@ export function TopTieringComparisonView({
     if (isActorFocusApplied) {
       return (
         <div
+          data-testid="ttc-focus-panel"
           className={`p-3 rounded-lg space-y-3 ${
             isDarkMode
               ? "bg-blue-900/30 border border-blue-700/50"
@@ -938,6 +939,7 @@ export function TopTieringComparisonView({
     const hasPendingSelection = selectedIds.size > 0;
     return (
       <div
+        data-testid="ttc-focus-panel"
         className={`p-3 rounded-lg space-y-3 ${
           isDarkMode
             ? "bg-violet-900/30 border border-violet-700/50"
@@ -1295,6 +1297,7 @@ export function TopTieringComparisonView({
                       onClick={handleExport}
                       disabled={isExporting}
                       aria-label="Export data"
+                      data-testid="ttc-export-button"
                     >
                       {isExporting ? (
                         <Loader2 className="h-4 w-4 animate-spin" />

@@ -14,6 +14,12 @@
 import { callLLM, type LLMMessage } from "../../research/tools.js";
 import type { InsightFinding } from "./insightInvestigatorAgent.js";
 import { SOURCE_TO_CATEGORY } from "./categoryDefinitions.js";
+import {
+  buildDataQualityReviewCatalogForPrompt,
+  groupsForReviewTestIds,
+  normalizeReviewTestIds,
+  type DataQualityWarningGroup,
+} from "../../dataQuality/dataQualityTests.js";
 
 // ============================================================================
 // Types
@@ -57,6 +63,35 @@ export interface EvaluatedInsight {
   risk_if_ignored?: string;
   recommended_action?: string;
   owner?: string;
+  /** Cross-cutting data quality caveat for this insight (persisted under detail_data.data_quality). */
+  data_quality?: InsightDataQualityMeta;
+}
+
+/** Persisted to detail_data.data_quality; surfaced in UI when flagged. */
+export interface InsightDataQualityMeta {
+  flagged: boolean;
+  issue_summary?: string;
+  trust_impact?: "low" | "medium" | "high";
+  affected_loan_count?: number | null;
+  reference_loan_count?: number | null;
+  counts_confidence?: "exact" | "estimated" | "unknown";
+  /** Same `id` values as /api/data-quality automated tests (see `DATA_QUALITY_TESTS`). */
+  review_test_ids?: string[];
+  /** Distinct warning groups for `review_test_ids` (Status, Date, Application, etc.). */
+  review_groups?: DataQualityWarningGroup[];
+  /** Evaluator-owned high-recall prefilter candidates (1-10). */
+  prefilter_candidate_test_ids?: string[];
+  prefilter_basis?: "required_columns" | "name_desc" | "mixed";
+  prefilter_notes?: string;
+  /** Cohort-scoped sample rows keyed by review_test_id (max 20 rows/test). */
+  dq_samples_by_test_id?: Record<
+    string,
+    Array<{ loan_id: string; loan_number: string | null; [key: string]: unknown }>
+  >;
+  dq_sample_columns_by_test_id?: Record<string, string[]>;
+  /** Diagnostics for verifier pathing/debug. */
+  dq_cohort_source?: "headlineMetricSignature" | "metricSignature" | "fallback" | "none";
+  dq_drop_reasons?: Record<string, unknown>;
 }
 
 export interface EvaluationResult {
@@ -99,7 +134,19 @@ Output JSON:
       "business_impact": "Quantified impact in dollars, units, or operational terms",
       "risk_if_ignored": "What happens if no action is taken — be specific to this finding",
       "recommended_action": "Prescriptive next step: who should do what, by when (e.g. 'Branch Manager — review 15 stale loans over 90 days and escalate to processing by Friday')",
-      "owner": "Role or person responsible (e.g. 'VP Operations', 'Branch Manager — Main St', 'Compliance Officer')"
+      "owner": "Role or person responsible (e.g. 'VP Operations', 'Branch Manager — Main St', 'Compliance Officer')",
+      "data_quality": {
+        "flagged": false,
+        "issue_summary": "Only when flagged=true: plain-language description aligned with Data Quality dashboard wording (status vs milestones, HMDA/TRID gaps, date logic, credit ranges, assignments, etc.)",
+        "trust_impact": "low|medium|high — how much this issue undermines acting on the insight",
+        "affected_loan_count": null,
+        "reference_loan_count": null,
+        "counts_confidence": "exact|estimated|unknown",
+        "review_test_ids": [],
+        "prefilter_candidate_test_ids": [],
+        "prefilter_basis": "required_columns|name_desc|mixed",
+        "prefilter_notes": "optional short reason for broad prefilter choices"
+      }
     }
   ],
   "dropped": [
@@ -123,12 +170,77 @@ __TARGET_RULE__
 - Preserve the findingIndex so we can link back to evidence.
 - De-duplicate only when two findings are nearly identical. Similar topics from different angles should BOTH be kept.
 - HEADLINE ACCURACY: Before writing the headline, read the finding's summary carefully. If the investigator's title contradicts the actual findings (e.g. title says "missing milestones" but summary says "0 loans have blank milestones"), you MUST rewrite the headline to reflect the TRUE finding. Never propagate a disproven hypothesis into the headline.
-- CONFIDENCE GROUNDING: When setting confidence, consider the evidence depth. "high" confidence requires 2+ SQL queries returning meaningful data. "medium" requires at least 1 query with clear results. "low" means speculative or based on thin data — these should generally not be in "critical" bucket.`;
+- CONFIDENCE GROUNDING: When setting confidence, consider the evidence depth. "high" confidence requires 2+ SQL queries returning meaningful data. "medium" requires at least 1 query with clear results. "low" means speculative or based on thin data — these should generally not be in "critical" bucket.
+- DATA_QUALITY (OPTIONAL): For each insight, include a "data_quality" object. Set "flagged": true ONLY when a specific, defensible data-quality issue affects interpretation of THIS finding. Classification MUST align with the same dimensions the Data Quality product uses: the appended catalog lists every automated test id. When flagged=true: (1) issue_summary MUST be concrete and should read like those dashboard warnings; (2) include prefilter_candidate_test_ids: broad high-recall candidate ids (1-10), prioritizing required-column overlap with the finding context; (3) include review_test_ids: your best 1–3 ids; (4) cohort language MUST match the chosen test definition (example: if issue_summary says "active loans", do NOT map to HMDA originated/funded/purchased tests). (5) If no catalog id truly matches, DO NOT set flagged=true. (6) Set trust_impact; set reference_loan_count from evidence (e.g. rowCount / distinct loans in keyMetrics) and affected_loan_count for loans showing the defect (affected <= reference). Use null counts with counts_confidence "unknown" if evidence cannot support numbers—never invent counts. Keep prefilter_notes brief if provided.`;
 
 const FULL_PIPELINE_TARGET = `- TARGET 12-18 insights across all buckets. A comprehensive dashboard should have broad coverage. Aim for at least 1 insight per bucket when findings support it, but do NOT force low-quality findings into a bucket just to fill a quota.`;
 
 function buildPerCategoryTarget(findingCount: number): string {
-  return `- CATEGORY MODE — you are evaluating a focused batch of ${findingCount} findings for ONE functional category. Target: keep 5-8 insights from this batch (or more if all findings have real signal). Every finding that contains concrete numbers and a genuine signal should survive as at minimum a "context" insight. Only drop findings that are true duplicates of another finding in this batch, or that contain zero concrete data (no numbers, no specific result). Do NOT apply the full-pipeline "12-18" guidance here — that refers to the total across all five categories combined; the per-category target is higher.`;
+  return `- CATEGORY MODE — you are evaluating a focused batch of ${findingCount} findings for ONE functional category. Target: keep 5-8 insights from this batch (or more if all findings have real signal). Every finding that contains concrete numbers and a genuine signal should survive as at minimum a "context" insight. Only drop findings that are true duplicates of another finding in this batch, or that contain zero concrete data (no numbers, no specific result). Do NOT apply the full-pipeline "12-18" guidance here — that refers to the total across all functional categories combined; the per-category target is higher.`;
+}
+
+/** Normalize LLM output for persistence and UI. */
+export function normalizeInsightDataQuality(
+  raw: unknown,
+  _finding?: InsightFinding
+): InsightDataQualityMeta | undefined {
+  if (raw == null || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, unknown>;
+  if (r.flagged !== true) return undefined;
+
+  const trustRaw = r.trust_impact;
+  const trust_impact: "low" | "medium" | "high" =
+    trustRaw === "low" || trustRaw === "high" ? trustRaw : "medium";
+
+  const ccRaw = r.counts_confidence;
+  const counts_confidence: "exact" | "estimated" | "unknown" =
+    ccRaw === "exact" || ccRaw === "estimated" || ccRaw === "unknown" ? ccRaw : "unknown";
+
+  const toInt = (n: unknown): number | null => {
+    if (n === null || n === undefined) return null;
+    if (typeof n === "number" && Number.isFinite(n)) return Math.max(0, Math.round(n));
+    if (typeof n === "string" && n.trim() !== "" && !Number.isNaN(Number(n)))
+      return Math.max(0, Math.round(Number(n)));
+    return null;
+  };
+
+  let affected = toInt(r.affected_loan_count);
+  let reference = toInt(r.reference_loan_count);
+  if (affected != null && reference != null && affected > reference) affected = reference;
+
+  const issue_summary =
+    typeof r.issue_summary === "string" && r.issue_summary.trim()
+      ? r.issue_summary.trim().slice(0, 4000)
+      : "A data quality concern affects how this insight should be interpreted.";
+
+  const effectiveConfidence: "exact" | "estimated" | "unknown" =
+    affected == null || reference == null ? "unknown" : counts_confidence;
+
+  const review_test_ids = normalizeReviewTestIds(r.review_test_ids);
+  const prefilter_candidate_test_ids = normalizeReviewTestIds(r.prefilter_candidate_test_ids).slice(0, 10);
+  const prefilter_basis =
+    r.prefilter_basis === "required_columns" || r.prefilter_basis === "name_desc" || r.prefilter_basis === "mixed"
+      ? r.prefilter_basis
+      : undefined;
+  const prefilter_notes =
+    typeof r.prefilter_notes === "string" && r.prefilter_notes.trim().length > 0
+      ? r.prefilter_notes.trim().slice(0, 300)
+      : undefined;
+  const review_groups = groupsForReviewTestIds(review_test_ids);
+
+  return {
+    flagged: true,
+    issue_summary,
+    trust_impact,
+    affected_loan_count: affected,
+    reference_loan_count: reference,
+    counts_confidence: effectiveConfidence,
+    ...(prefilter_candidate_test_ids.length > 0 ? { prefilter_candidate_test_ids } : {}),
+    ...(prefilter_basis ? { prefilter_basis } : {}),
+    ...(prefilter_notes ? { prefilter_notes } : {}),
+    ...(review_test_ids.length > 0 ? { review_test_ids } : {}),
+    ...(review_groups.length > 0 ? { review_groups } : {}),
+  };
 }
 
 function buildEvaluatorSystemPrompt(options?: { functionalCategory?: string; categorySupplement?: string }, findingCount = 0): string {
@@ -136,7 +248,8 @@ function buildEvaluatorSystemPrompt(options?: { functionalCategory?: string; cat
     ? buildPerCategoryTarget(findingCount)
     : FULL_PIPELINE_TARGET;
   const base = EVALUATOR_PROMPT_BASE.replace("__TARGET_RULE__", targetRule);
-  return options?.categorySupplement ? `${base}\n\n${options.categorySupplement}` : base;
+  const withCatalog = `${base}\n\n${buildDataQualityReviewCatalogForPrompt()}`;
+  return options?.categorySupplement ? `${withCatalog}\n\n${options.categorySupplement}` : withCatalog;
 }
 
 // ============================================================================
@@ -227,13 +340,19 @@ export async function runInsightEvaluator(
       SOURCE_TO_CATEGORY[ins.source] ||
       undefined;
 
+    const base: Record<string, unknown> = { ...(ins as unknown as Record<string, unknown>) };
+    const rawDq = base.data_quality;
+    delete base.data_quality;
+    const data_quality = normalizeInsightDataQuality(rawDq, originalFinding);
+
     return {
-      ...ins,
+      ...(base as unknown as EvaluatedInsight),
       bucket,
       priority: (BUCKET_TO_PRIORITY[bucket] || "GRAY") as any,
       insight_type: (BUCKET_TO_TYPE[bucket] || "info") as any,
       severity_score: Math.min(1, Math.max(0, ins.severity_score || 0.5)),
       functional_category: functionalCategory,
+      ...(data_quality ? { data_quality } : {}),
       metricSignature: originalFinding?.metricSignature || ins.metricSignature,
       headlineMetricSignature: originalFinding?.headlineMetricSignature,
       evidence: originalFinding

@@ -1,6 +1,9 @@
 import type { FullConfig } from "@playwright/test";
 import { readProvisionedState, removeProvisionedState } from "./provision-state";
 import { generateTotpCode } from "./totp";
+import { loadE2EEnv } from "./load-e2e-env.mjs";
+
+loadE2EEnv();
 
 const TOTP_RETRY_OFFSETS_MS = [0, -30_000, 30_000, -60_000, 60_000, -90_000, 90_000];
 
