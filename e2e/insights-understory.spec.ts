@@ -1,16 +1,63 @@
 import { test, expect } from "./fixtures";
+import type { Page } from "@playwright/test";
+
+const BULLET_HEADLINE = "Pipeline bottlenecks are concentrated in underwriting";
+const PARAGRAPH_HEADLINE = "Conversion trends improved after targeted coaching";
+
+const MOCK_INSIGHTS_RESPONSE = {
+  usedLLM: true,
+  generatedAt: "2026-04-22T12:00:00.000Z",
+  summaryForPodcast: "",
+  insights: [
+    {
+      id: 32801,
+      type: "critical",
+      priority: "high",
+      source: "pipeline_velocity",
+      bucket: "critical",
+      headline: BULLET_HEADLINE,
+      understory:
+        "Three underwriting blockers are driving cycle-time risk this week.",
+      understory_bullets: [
+        "Average underwriting turn time is 2.4 days above target.",
+        "82 files are waiting on the same condition package.",
+        "The backlog is concentrated in two branches and one product mix.",
+      ],
+      functional_category: "operations",
+      generation_method: "agent",
+    },
+    {
+      id: 32802,
+      type: "info",
+      priority: "medium",
+      source: "performance",
+      bucket: "working",
+      headline: PARAGRAPH_HEADLINE,
+      understory:
+        "Pull-through improved after last month's coaching changes, especially in the top-performing branch.",
+      functional_category: "operations",
+      generation_method: "agent",
+    },
+  ],
+};
 
 async function dismissBlockingOverlays(page: import("@playwright/test").Page) {
-  // The welcome tour and "What's New" modals fire on first visit for
-  // accounts that haven't completed onboarding. They render a fixed
-  // backdrop that intercepts all pointer events, which causes every
-  // subsequent click in the test to time out. Dismiss them by pressing
-  // Escape until no blocking overlay remains, up to 3 attempts.
-  for (let i = 0; i < 3; i++) {
-    const overlay = page
-      .locator("div[data-state='open'][aria-hidden='true']")
+  // The welcome tour / onboarding dialog can appear on first visit and
+  // intercept every click on the page. Treat either an open dialog or
+  // backdrop as blocking and dismiss it with Escape before assertions.
+  for (let i = 0; i < 5; i++) {
+    const blockingDialog = page
+      .locator("[role='dialog']")
+      .filter({ hasText: /quick tour|welcome|what's new|let us give you a quick tour/i })
       .first();
-    if (await overlay.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    const overlay = page.locator("div[data-state='open'][aria-hidden='true']").first();
+
+    const dialogVisible = await blockingDialog
+      .isVisible({ timeout: 1_500 })
+      .catch(() => false);
+    const overlayVisible = await overlay.isVisible({ timeout: 1_500 }).catch(() => false);
+
+    if (dialogVisible || overlayVisible) {
       await page.keyboard.press("Escape");
       await page.waitForTimeout(500);
     } else {
@@ -19,10 +66,45 @@ async function dismissBlockingOverlays(page: import("@playwright/test").Page) {
   }
 }
 
+async function mockInsightsApis(page: Page) {
+  await page.route("**/api/dashboard/insights?**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(MOCK_INSIGHTS_RESPONSE),
+    });
+  });
+
+  await page.route("**/api/dashboard/insights/details/**", async (route) => {
+    const url = new URL(route.request().url());
+    const headline = url.searchParams.get("headline") || BULLET_HEADLINE;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        source: "pipeline_velocity",
+        title: headline,
+        summary: {},
+        rows: [],
+      }),
+    });
+  });
+}
+
+function insightCard(page: Page, headline: string) {
+  return page
+    .locator('[data-testid="insight-card"]')
+    .filter({ hasText: headline })
+    .first();
+}
+
 test.describe("Insights Understory Readability (COHI-328)", () => {
   test.beforeEach(async ({ userPage }) => {
+    await mockInsightsApis(userPage);
     await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
     await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
+    await dismissBlockingOverlays(userPage);
+    await userPage.waitForTimeout(750);
     await dismissBlockingOverlays(userPage);
   });
 
@@ -31,96 +113,72 @@ test.describe("Insights Understory Readability (COHI-328)", () => {
   }) => {
     const insightsSection = userPage.locator("#CohiInsights");
     await expect(insightsSection).toBeVisible({ timeout: 15_000 });
-
-    // Should have rendered meaningful content (cards or empty state)
-    const sectionText = await insightsSection.textContent();
-    expect(sectionText?.length).toBeGreaterThan(20);
+    await expect(insightsSection.getByText(BULLET_HEADLINE, { exact: true })).toBeVisible();
+    await expect(insightsSection.getByText(PARAGRAPH_HEADLINE, { exact: true })).toBeVisible();
   });
 
-  test("@critical @COHI-328 insight cards have distinct headline and understory", async ({
+  test("@critical @COHI-328 multi-line understory renders as bullet items", async ({
+    userPage,
+  }) => {
+    const card = insightCard(userPage, BULLET_HEADLINE);
+    await expect(card).toBeVisible();
+
+    await card.click();
+    await expect(card).toHaveAttribute("aria-expanded", "true");
+
+    const bulletList = card.locator('[data-testid="insight-understory-list"]');
+    await expect(bulletList).toBeVisible();
+    await expect(bulletList.locator("li")).toHaveCount(3);
+    await expect(bulletList).toContainText(
+      "Average underwriting turn time is 2.4 days above target.",
+    );
+  });
+
+  test("@critical @COHI-328 single-sentence understory renders as paragraph", async ({
+    userPage,
+  }) => {
+    const card = insightCard(userPage, PARAGRAPH_HEADLINE);
+    await expect(card).toBeVisible();
+
+    await dismissBlockingOverlays(userPage);
+    await card.click();
+    await expect(card).toHaveAttribute("aria-expanded", "true");
+
+    const paragraph = card.locator('[data-testid="insight-understory-paragraph"]');
+    await expect(paragraph).toBeVisible();
+    await expect(paragraph).toContainText(
+      "Pull-through improved after last month's coaching changes",
+    );
+    await expect(card.locator('[data-testid="insight-understory-list"]')).toHaveCount(0);
+  });
+
+  test("@critical @COHI-328 expand all shows grouped understory containers consistently", async ({
     userPage,
   }) => {
     const insightsSection = userPage.locator("#CohiInsights");
     await expect(insightsSection).toBeVisible({ timeout: 15_000 });
 
-    // Wait for at least one insight card to render. Cards are rendered
-    // inside CohiPromptsCard; each bucket section contains cards with
-    // headline text. If no insights exist on this tenant, skip gracefully.
-    const headlineLocator = insightsSection.locator(
-      "[class*='font-semibold'], [class*='font-bold'], [class*='font-medium']",
-    );
+    await userPage.getByRole("button", { name: /expand all/i }).click();
 
-    const headlineCount = await headlineLocator.count();
-    if (headlineCount === 0) {
-      // Empty-state tenant — cannot verify card structure
-      test.skip(true, "No insight cards rendered on this tenant");
-      return;
-    }
+    const bulletCard = insightCard(userPage, BULLET_HEADLINE);
+    const paragraphCard = insightCard(userPage, PARAGRAPH_HEADLINE);
 
-    // At least one headline element is visible
-    await expect(headlineLocator.first()).toBeVisible();
+    await expect(bulletCard.locator('[data-testid="insight-understory"]')).toBeVisible();
+    await expect(paragraphCard.locator('[data-testid="insight-understory"]')).toBeVisible();
+    await expect(bulletCard.locator('[data-testid="insight-understory-list"]')).toBeVisible();
+    await expect(paragraphCard.locator('[data-testid="insight-understory-paragraph"]')).toBeVisible();
   });
 
-  test("@critical @COHI-328 insight cards are visually grouped with borders or backgrounds", async ({
+  test("@critical @COHI-328 selected drillable insight exposes a View details affordance", async ({
     userPage,
   }) => {
-    const insightsSection = userPage.locator("#CohiInsights");
-    await expect(insightsSection).toBeVisible({ timeout: 15_000 });
+    const card = insightCard(userPage, BULLET_HEADLINE);
+    await expect(card).toBeVisible();
 
-    // Each insight card should have a visual boundary. The CohiPromptsCard
-    // renders insight items inside styled containers. Check that at least
-    // one element inside the section has a border or rounded styling.
-    const styledCards = insightsSection.locator(
-      "[class*='rounded'], [class*='border'], [class*='shadow']",
-    );
-    const count = await styledCards.count();
-    expect(count).toBeGreaterThan(0);
-  });
-
-  test("@critical @COHI-328 clicking an insight opens a detail or evidence modal", async ({
-    userPage,
-  }) => {
-    const insightsSection = userPage.locator("#CohiInsights");
-    await expect(insightsSection).toBeVisible({ timeout: 15_000 });
-
-    // Find any clickable action on an insight card (the "Show on dashboard"
-    // or evidence button). We look for buttons/links inside the section
-    // that suggest drill-down.
-    const actionButton = insightsSection
-      .locator("button, [role='button']")
-      .filter({ hasText: /show|evidence|detail|view|expand/i })
-      .first();
-
-    if ((await actionButton.count()) === 0) {
-      // If there's no drill-down action visible, look for clickable insight
-      // cards themselves (the whole card may be the click target)
-      const clickableCard = insightsSection
-        .locator("[class*='cursor-pointer']")
-        .first();
-
-      if ((await clickableCard.count()) === 0) {
-        test.skip(true, "No drill-down action found on insight cards");
-        return;
-      }
-
-      await clickableCard.click();
-    } else {
-      await actionButton.click();
-    }
-
-    // Either a modal dialog opens or a navigation/panel expansion occurs.
-    // Check both patterns.
-    const dialogOrPanel = userPage.locator(
-      "[role='dialog'], [data-state='open']",
-    );
-    const appeared = await dialogOrPanel
-      .first()
-      .isVisible({ timeout: 5_000 })
-      .catch(() => false);
-
-    // If no dialog, the action may have scrolled to a section or toggled
-    // inline content. Either way the page should not have errored.
-    expect(appeared || true).toBeTruthy();
+    await dismissBlockingOverlays(userPage);
+    await card.click();
+    await expect(card.locator('[data-testid="insight-understory-list"]')).toBeVisible();
+    await expect(card.getByText("View details")).toBeVisible();
   });
 
   test("@critical @COHI-328 no console errors from insight components", async ({
@@ -133,10 +191,9 @@ test.describe("Insights Understory Readability (COHI-328)", () => {
       }
     });
 
-    // Re-navigate to capture fresh console output
-    await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
-    await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
+    await dismissBlockingOverlays(userPage);
     await expect(userPage.locator("#CohiInsights")).toBeVisible({ timeout: 15_000 });
+    await userPage.waitForTimeout(1_000);
 
     // Filter for errors originating from insight components
     const insightErrors = consoleErrors.filter(

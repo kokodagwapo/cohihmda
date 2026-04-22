@@ -108,6 +108,10 @@ function getInsightBullets(i: CohiInsight): string[] {
   return fallback ? [fallback] : [];
 }
 
+function shouldRenderBulletedUnderstory(i: CohiInsight): boolean {
+  return getInsightBullets(i).length > 1;
+}
+
 function GoToDashboardPageButton({
   sourcePageId,
   sourcePageName,
@@ -481,6 +485,11 @@ function BucketLane({
   ) => {
     const canDrill = isDrillable(insight);
     const isSelected = selectedInsightIdx === idx;
+    const shouldShowUnderstory =
+      showUnderstory ||
+      isSelected;
+    const bullets = getInsightBullets(insight);
+    const renderAsBulletList = shouldRenderBulletedUnderstory(insight);
     const chipLabel = getInsightChipLabel(insight);
     const insightFeedback = insight.insightId ? feedbackMap[insight.insightId] : null;
     const isPopoverOpen = feedbackPopoverInsightId === insight.insightId;
@@ -489,6 +498,8 @@ function BucketLane({
       <div
         key={idx}
         className="group/insight cursor-pointer relative"
+        data-testid="insight-card"
+        aria-expanded={shouldShowUnderstory}
         onClick={() => {
           if (isSelected && canDrill) {
             onInsightClick(insight);
@@ -507,7 +518,10 @@ function BucketLane({
               >
                 {chipLabel}
               </span>
-              <p className="flex-1 min-w-[220px] text-[13px] sm:text-sm text-slate-900 dark:text-white font-medium leading-snug">
+              <p
+                className="flex-1 min-w-[220px] text-[13px] sm:text-sm text-slate-900 dark:text-white font-medium leading-snug"
+                data-testid="insight-headline"
+              >
                 {insight.headline || insight.message}
               </p>
             </div>
@@ -720,21 +734,36 @@ function BucketLane({
         </div>
 
         <AnimatePresence>
-          {isSelected && (insight.understory || insight.reasoning || (insight.understory_bullets?.length ?? 0) > 0) && (
+          {shouldShowUnderstory && (insight.understory || insight.reasoning || (insight.understory_bullets?.length ?? 0) > 0) && (
             <motion.div
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: "auto" }}
               exit={{ opacity: 0, height: 0 }}
               transition={{ duration: 0.2 }}
             >
-              <div className="mt-1.5 rounded-md border border-slate-200/80 dark:border-slate-700/70 bg-white/80 dark:bg-slate-900/40 px-2.5 py-2">
-                <ul className="list-disc pl-4 space-y-1 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                  {getInsightBullets(insight).map((bullet, idx) => (
-                    <li key={`${insight.insightId || insight.headline || insight.message}-${idx}`}>
-                      {bullet}
-                    </li>
-                  ))}
-                </ul>
+              <div
+                className="mt-1.5 rounded-md border border-slate-200/80 dark:border-slate-700/70 bg-white/80 dark:bg-slate-900/40 px-2.5 py-2"
+                data-testid="insight-understory"
+              >
+                {renderAsBulletList ? (
+                  <ul
+                    className="list-disc pl-4 space-y-1 text-xs text-slate-600 dark:text-slate-300 leading-relaxed"
+                    data-testid="insight-understory-list"
+                  >
+                    {bullets.map((bullet, idx) => (
+                      <li key={`${insight.insightId || insight.headline || insight.message}-${idx}`}>
+                        {bullet}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p
+                    className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed"
+                    data-testid="insight-understory-paragraph"
+                  >
+                    {bullets[0]}
+                  </p>
+                )}
               </div>
               {canDrill && (
                 <span className="inline-flex items-center gap-0.5 mt-1.5 text-[11px] text-blue-500 dark:text-blue-400 font-medium">
@@ -902,7 +931,7 @@ function BucketLane({
                 key={idx}
                 className={`rounded-lg px-3 py-2.5 border-l-4 ${config.stripColor} bg-white/70 dark:bg-slate-800/50 border border-white/60 dark:border-slate-700/40`}
               >
-                {renderInsightRow(insight, idx, false)}
+                {renderInsightRow(insight, idx, true)}
               </div>
             ))}
           </motion.div>
