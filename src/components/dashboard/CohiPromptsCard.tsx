@@ -6,7 +6,7 @@ import React, {
   useRef,
 } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import {
   getDashboardInsightPath,
   getDashboardInsightNavigateState,
@@ -39,6 +39,7 @@ import {
   Loader2,
   FlaskConical,
   Telescope,
+  ExternalLink,
 } from "lucide-react";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { useCohiData, CohiInsight } from "@/hooks/useCohiData";
@@ -59,6 +60,8 @@ import { DashboardInsightEvidenceModal, type DashboardInsightEvidenceModalInsigh
 import { TrackedInsightsWatchlist } from "./TrackedInsightsWatchlist";
 import { FindingDrillDown } from "@/components/research/FindingDrillDown";
 import { InsightChat } from "./InsightChat";
+import { DataQualityImpactBlock } from "./DataQualityImpactBlock";
+import { getInsightDataQuality } from "@/lib/insightDataQuality";
 import { ExportMenu } from "@/components/common/ExportMenu";
 import type { ExportData } from "@/utils/exportUtils";
 import type { Finding } from "@/hooks/useResearchSession";
@@ -272,6 +275,13 @@ const CATEGORY_TABS: CategoryTab[] = [
     emptyTitle: "No Compliance insights",
     emptyBody: "TRID timing, fair lending signals, and regulatory risk insights will appear here when generated.",
   },
+  {
+    id: "data_quality",
+    label: "Data Quality",
+    emptyTitle: "No data-quality flags on insights",
+    emptyBody:
+      "When the AI detects a concrete data reliability issue tied to an insight, it appears here. Regenerate insights to re-evaluate, or open Data Quality for portfolio-level checks.",
+  },
 ];
 
 // ============================================================================
@@ -359,6 +369,23 @@ const SOURCE_CHIP_LABELS: Record<string, string> = {
 function getInsightChipLabel(insight: CohiInsight): string {
   const source = (insight.source || "").trim().toLowerCase();
   return SOURCE_CHIP_LABELS[source] ?? "Insight";
+}
+
+const FUNCTIONAL_CATEGORY_LABELS: Record<string, string> = {
+  operations: "Operations",
+  sales: "Sales",
+  finance: "Finance",
+  secondary_marketing: "Secondary Marketing",
+  compliance: "Compliance",
+};
+
+/** Primary domain chip: functional_category when set, else source-based chip. */
+function getPrimaryCategoryChipLabel(insight: CohiInsight): string {
+  const fc = (insight.functional_category || "").trim().toLowerCase();
+  if (fc && FUNCTIONAL_CATEGORY_LABELS[fc]) {
+    return FUNCTIONAL_CATEGORY_LABELS[fc];
+  }
+  return getInsightChipLabel(insight);
 }
 
 interface BucketLaneProps {
@@ -485,12 +512,11 @@ function BucketLane({
   ) => {
     const canDrill = isDrillable(insight);
     const isSelected = selectedInsightIdx === idx;
-    const shouldShowUnderstory =
-      showUnderstory ||
-      isSelected;
+    const shouldShowUnderstory = showUnderstory || isSelected;
     const bullets = getInsightBullets(insight);
     const renderAsBulletList = shouldRenderBulletedUnderstory(insight);
-    const chipLabel = getInsightChipLabel(insight);
+    const primaryLabel = getPrimaryCategoryChipLabel(insight);
+    const dqMeta = getInsightDataQuality(insight.detail_data);
     const insightFeedback = insight.insightId ? feedbackMap[insight.insightId] : null;
     const isPopoverOpen = feedbackPopoverInsightId === insight.insightId;
 
@@ -516,8 +542,13 @@ function BucketLane({
               <span
                 className={`inline-flex items-center rounded-lg px-2.5 py-1 text-[11px] font-semibold leading-none transition-all duration-200 ease-out origin-left transform-gpu group-hover/insight:scale-[1.04] group-hover/insight:px-3 group-hover/insight:shadow-sm ${config.badgeBg} ${config.badgeText}`}
               >
-                {chipLabel}
+                {primaryLabel}
               </span>
+              {dqMeta?.flagged && (
+                <span className="inline-flex items-center rounded-lg px-2.5 py-1 text-[11px] font-semibold leading-none bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-200 ring-1 ring-amber-200/80 dark:ring-amber-800/60">
+                  Data quality
+                </span>
+              )}
               <p
                 className="flex-1 min-w-[220px] text-[13px] sm:text-sm text-slate-900 dark:text-white font-medium leading-snug"
                 data-testid="insight-headline"
@@ -991,6 +1022,9 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
     submitFeedback,
     loadInsightsByMethod,
     refreshByCategory,
+    dataQualityMetrics,
+    dataQualityLoading,
+    refreshDataQualitySummary,
   } = useCohiData(
     dateFilter,
     onDataAvailabilityChange,
@@ -1012,6 +1046,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
   const [categoryJobId, setCategoryJobId] = useState<string | null>(null);
   const categoryJob = useJobStatus(categoryJobId);
   const isCategoryRefreshing = categoryJob.status === "processing";
+  const [dqTabRefreshing, setDqTabRefreshing] = useState(false);
 
   // ---- Tracked insights (watchlist) for pipeline insights ----
   // Map<source_insight_id, tracked_uuid> drives both UI and delete logic.
@@ -1095,15 +1130,31 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
     [loadInsightsByMethod]
   );
 
-  const handleCategoryRefresh = useCallback(async (categoryId: string) => {
-    if (isCategoryRefreshing || categoryId === "all") return;
-    try {
-      const jobId = await refreshByCategory(categoryId);
-      if (jobId) setCategoryJobId(jobId);
-    } catch (err: any) {
-      console.error("Category refresh failed:", err);
-    }
-  }, [isCategoryRefreshing, refreshByCategory]);
+  const handleCategoryRefresh = useCallback(
+    async (categoryId: string) => {
+      if (categoryId === "all") return;
+      if (categoryId === "data_quality") {
+        if (dqTabRefreshing) return;
+        setDqTabRefreshing(true);
+        try {
+          await refreshDataQualitySummary();
+        } catch (err: unknown) {
+          console.error("Data quality metrics refresh failed:", err);
+        } finally {
+          setDqTabRefreshing(false);
+        }
+        return;
+      }
+      if (isCategoryRefreshing) return;
+      try {
+        const jobId = await refreshByCategory(categoryId);
+        if (jobId) setCategoryJobId(jobId);
+      } catch (err: unknown) {
+        console.error("Category refresh failed:", err);
+      }
+    },
+    [isCategoryRefreshing, refreshByCategory, refreshDataQualitySummary, dqTabRefreshing]
+  );
 
   const handleAgentGenerate = useCallback(async (forceFresh = false) => {
     if (isAgentGenerating) return;
@@ -1347,13 +1398,25 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
     onDataReady({ content: lines.join('\n'), title: 'Cohi Insights', insightCount: allInsights.length });
   }, [onDataReady, insightsLoading, allInsights]);
 
+  // Parse and cache DQ metadata once per insights payload.
+  const insightDqMeta = useMemo(() => {
+    const map = new WeakMap<CohiInsight, ReturnType<typeof getInsightDataQuality>>();
+    for (const insight of allInsights) {
+      map.set(insight, getInsightDataQuality(insight.detail_data));
+    }
+    return map;
+  }, [allInsights]);
+
   // Filter insights by the active functional category, then group by bucket
   const filteredInsights = useMemo(() => {
     if (activeCategoryId === "all") return allInsights;
+    if (activeCategoryId === "data_quality") {
+      return allInsights.filter((i) => insightDqMeta.get(i)?.flagged === true);
+    }
     return allInsights.filter(
       (i) => (i.functional_category || null) === activeCategoryId
     );
-  }, [allInsights, activeCategoryId]);
+  }, [allInsights, activeCategoryId, insightDqMeta]);
 
   // Group filtered insights by bucket
   const bucketedInsights = useMemo(() => {
@@ -1378,11 +1441,25 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
   // Per-category counts and critical flags for badge display
   const categoryStats = useMemo(() => {
     const stats: Record<string, { total: number; hasCritical: boolean }> = {};
+    const flaggedInsights = allInsights.filter(
+      (i) => insightDqMeta.get(i)?.flagged === true
+    );
     for (const cat of CATEGORY_TABS) {
       if (cat.id === "all") {
         stats["all"] = {
           total: allInsights.length,
           hasCritical: allInsights.some((i) => i.bucket === "critical"),
+        };
+        continue;
+      }
+      if (cat.id === "data_quality") {
+        stats["data_quality"] = {
+          total: flaggedInsights.length,
+          hasCritical:
+            (dataQualityMetrics?.critical_issues ?? 0) > 0 ||
+            flaggedInsights.some(
+              (i) => insightDqMeta.get(i)?.trust_impact === "high"
+            ),
         };
         continue;
       }
@@ -1395,7 +1472,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
       };
     }
     return stats;
-  }, [allInsights]);
+  }, [allInsights, dataQualityMetrics, insightDqMeta]);
 
   // Count non-empty buckets for the currently visible category
   const nonEmptyBuckets = useMemo(
@@ -1675,14 +1752,32 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
             })}
 
             {/* Per-category refresh button (admin only, non-All tabs) */}
-            {isAdmin && activeCategoryId !== "all" && (
+            {isAdmin && activeCategoryId !== "all" && activeCategoryId !== "data_quality" && (
               <button
                 onClick={() => handleCategoryRefresh(activeCategoryId)}
-                disabled={isCategoryRefreshing || insightsLoading}
+                disabled={
+                  insightsLoading ||
+                  (activeCategoryId === "data_quality"
+                    ? dqTabRefreshing || dataQualityLoading
+                    : isCategoryRefreshing)
+                }
                 className="ml-auto flex-shrink-0 flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
-                title={`Regenerate ${activeCategoryDef?.label} insights`}
+                title={
+                  activeCategoryId === "data_quality"
+                    ? "Refresh data quality metrics"
+                    : `Regenerate ${activeCategoryDef?.label} insights`
+                }
               >
-                <RotateCw className={`w-3 h-3 ${isCategoryRefreshing ? "animate-spin" : ""}`} strokeWidth={1.5} />
+                <RotateCw
+                  className={`w-3 h-3 ${
+                    activeCategoryId === "data_quality"
+                      ? dqTabRefreshing || dataQualityLoading
+                      : isCategoryRefreshing
+                        ? "animate-spin"
+                        : ""
+                  }`}
+                  strokeWidth={1.5}
+                />
                 Refresh
               </button>
             )}
@@ -1699,6 +1794,25 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
             onRetry={() => handleCategoryRefresh(activeCategoryId)}
             className="px-1 mb-3"
           />
+        )}
+
+        {dqTabRefreshing && (
+          <div className="px-1 mb-3 flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+            <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" aria-hidden />
+            Refreshing data quality metrics…
+          </div>
+        )}
+
+        {activeTab === "agent" && hasInsights && activeCategoryId === "data_quality" && (
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <Link
+              to="/data-quality"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-teal-600 hover:bg-teal-500 text-white text-sm font-medium transition-colors shadow-sm shadow-teal-600/20"
+            >
+              Open Data Quality
+              <ExternalLink className="w-4 h-4" strokeWidth={2} aria-hidden />
+            </Link>
+          </div>
         )}
 
         {/* ===== Watchlist Tab ===== */}
@@ -1839,7 +1953,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
                   {activeCategoryDef?.emptyBody}
                 </p>
               </div>
-              {isAdmin && (
+              {isAdmin && activeCategoryId !== "data_quality" && (
                 <button
                   onClick={() => handleCategoryRefresh(activeCategoryId)}
                   disabled={isCategoryRefreshing}
@@ -1847,6 +1961,19 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
                 >
                   <Sparkles className="w-3.5 h-3.5" strokeWidth={1.5} />
                   Generate {activeCategoryDef?.label} Insights
+                </button>
+              )}
+              {isAdmin && activeCategoryId === "data_quality" && (
+                <button
+                  onClick={() => handleCategoryRefresh("data_quality")}
+                  disabled={dqTabRefreshing || dataQualityLoading}
+                  className="mt-1 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-teal-50 dark:bg-teal-900/30 text-teal-800 dark:text-teal-200 text-xs font-medium hover:bg-teal-100 dark:hover:bg-teal-900/50 transition-colors disabled:opacity-50"
+                >
+                  <RotateCw
+                    className={`w-3.5 h-3.5 ${dqTabRefreshing || dataQualityLoading ? "animate-spin" : ""}`}
+                    strokeWidth={1.5}
+                  />
+                  Refresh metrics
                 </button>
               )}
             </div>
@@ -1870,12 +1997,16 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
                   expandToggleKey={expandToggleKey}
                   onRefreshBucket={
                     isAdmin
-                      ? () => refreshBucket(bucket.id)
+                      ? async () => {
+                          await refreshBucket(bucket.id);
+                        }
                       : undefined
                   }
                   onGenerateMore={
                     isAdmin
-                      ? () => generateMoreInsights(bucket.id)
+                      ? async () => {
+                          await generateMoreInsights(bucket.id);
+                        }
                       : undefined
                   }
                   onDeleteInsight={
@@ -1952,6 +2083,11 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
             >
               {/* Scrollable content */}
               <div className="flex-1 overflow-y-auto p-6 min-h-0">
+                {agentFindingInsight &&
+                  (() => {
+                    const dq = insightDqMeta.get(agentFindingInsight);
+                    return dq?.flagged ? <DataQualityImpactBlock dq={dq} className="mb-4" /> : null;
+                  })()}
                 {/* Action buttons */}
                 <div className="flex justify-end gap-2 mb-2">
                   <button

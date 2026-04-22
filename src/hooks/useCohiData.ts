@@ -52,6 +52,20 @@ export interface InsightsMetadata {
   needsGeneration?: boolean;
 }
 
+/** Snapshot from GET /api/data-quality/metrics */
+export interface DataQualityMetricsSnapshot {
+  total_loans: number;
+  loans_with_issues: number;
+  total_issues: number;
+  quality_score: number;
+  critical_issues: number;
+  warning_issues: number;
+  info_issues: number;
+  status_inconsistencies?: number;
+  date_sequence_issues?: number;
+  issues_by_group?: Record<string, number>;
+}
+
 // Map API insight type to icon
 const getIconForType = (type: string) => {
   switch (type) {
@@ -82,6 +96,10 @@ export const useCohiData = (
   const [funnelData, setFunnelData] = useState<any>(null);
   const [metadata, setMetadata] = useState<InsightsMetadata | null>(null);
   const [needsGeneration, setNeedsGeneration] = useState(false);
+  const [dataQualityMetrics, setDataQualityMetrics] =
+    useState<DataQualityMetricsSnapshot | null>(null);
+  const [dataQualityLoading, setDataQualityLoading] = useState(false);
+  const [dataQualityError, setDataQualityError] = useState<string | null>(null);
 
   // Map API response insights to component format
   const mapInsights = (data: any): CohiInsight[] => {
@@ -501,6 +519,40 @@ export const useCohiData = (
     fetchInsights();
   }, [dateFilter, selectedTenantId, selectedChannel]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const loadDataQualityMetrics = useCallback(async () => {
+    if (!api.hasToken()) return;
+    setDataQualityLoading(true);
+    setDataQualityError(null);
+    try {
+      const tenantParam = selectedTenantId
+        ? `?tenant_id=${encodeURIComponent(selectedTenantId)}`
+        : "";
+      const resp = await api.request<{
+        success: boolean;
+        metrics?: DataQualityMetricsSnapshot;
+      }>(`/api/data-quality/metrics${tenantParam}`);
+      if (resp.success && resp.metrics) {
+        setDataQualityMetrics(resp.metrics);
+      } else {
+        setDataQualityMetrics(null);
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Failed to load data quality metrics";
+      setDataQualityError(msg);
+      setDataQualityMetrics(null);
+    } finally {
+      setDataQualityLoading(false);
+    }
+  }, [selectedTenantId]);
+
+  const refreshDataQualitySummary = useCallback(async () => {
+    await loadDataQualityMetrics();
+  }, [loadDataQualityMetrics]);
+
+  useEffect(() => {
+    void loadDataQualityMetrics();
+  }, [loadDataQualityMetrics]);
+
   // Fetch funnel data for briefing context
   useEffect(() => {
     const fetchFunnelData = async () => {
@@ -563,5 +615,9 @@ export const useCohiData = (
     getFeedback,
     loadInsightsByMethod,
     refreshByCategory,
+    dataQualityMetrics,
+    dataQualityLoading,
+    dataQualityError,
+    refreshDataQualitySummary,
   };
 };

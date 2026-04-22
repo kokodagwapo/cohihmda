@@ -25,6 +25,8 @@ import {
 } from '@/config/insightFieldRegistry';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { InsightChat } from './InsightChat';
+import { DataQualityImpactBlock } from './DataQualityImpactBlock';
+import type { InsightDataQualityMeta } from '@/lib/insightDataQuality';
 
 // ============================================================================
 // Types
@@ -190,6 +192,7 @@ interface DetailData {
   etm?: ETMSection;
   comparison?: ComparisonData | null;
   audit?: EvidenceAuditData | null;
+  data_quality?: InsightDataQualityMeta;
   // Legacy fields
   loans?: Record<string, any>[];
   officers?: Record<string, any>[];
@@ -1015,6 +1018,10 @@ export const InsightDetailModal = ({
               </div>
             ) : data ? (
               <div className="space-y-6">
+                {data.data_quality?.flagged && (
+                  <DataQualityImpactBlock dq={data.data_quality} />
+                )}
+
                 {/* ========== Recommended Action Hero Callout ========== */}
                 {etm?.recommended_action && (
                   <div className="flex gap-3 rounded-xl border-l-4 border-indigo-500 bg-indigo-50/70 dark:bg-indigo-950/30 p-4">
