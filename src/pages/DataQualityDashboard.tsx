@@ -21,6 +21,7 @@ import { useTenantStore } from "@/stores/tenantStore";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import { useSearchParams } from "react-router-dom";
 
 export default function DataQualityDashboard() {
   const { user } = useAuth();
@@ -31,6 +32,7 @@ export default function DataQualityDashboard() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState("warnings");
+  const [searchParams] = useSearchParams();
 
   const [metrics, setMetrics] = useState<DataQualityMetrics | null>(null);
   const [warnings, setWarnings] = useState<DataQualityWarning[]>([]);
@@ -163,6 +165,18 @@ export default function DataQualityDashboard() {
   };
 
   const totalWarningCount = warnings.reduce((s, w) => s + w.count, 0);
+  const deepLinkTab = searchParams.get("tab");
+  const highlightedWarningId = searchParams.get("warning") || undefined;
+
+  useEffect(() => {
+    if (deepLinkTab === "warnings" || deepLinkTab === "field-health" || deepLinkTab === "ranges") {
+      setActiveTab(deepLinkTab);
+      return;
+    }
+    if (highlightedWarningId) {
+      setActiveTab("warnings");
+    }
+  }, [deepLinkTab, highlightedWarningId]);
 
   return (
     <TopTieringLayout>
@@ -218,6 +232,7 @@ export default function DataQualityDashboard() {
                       groupedSummary={groupedSummary}
                       statusInconsistencies={statusInconsistencies}
                       tenantId={tenantId}
+                      highlightedWarningId={highlightedWarningId}
                     />
                   </TabsContent>
 
