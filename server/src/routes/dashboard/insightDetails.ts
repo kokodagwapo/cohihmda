@@ -235,6 +235,13 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
     if (detailData && detailData.title) {
       console.log(`[InsightDetails] source=${source}, insightId=${insightId} — returning pre-hydrated detail_data (${(detailData.rows as any[] || []).length} rows)`);
 
+      const dq =
+        detailData.data_quality &&
+        typeof detailData.data_quality === "object" &&
+        (detailData.data_quality as { flagged?: boolean }).flagged === true
+          ? detailData.data_quality
+          : undefined;
+
       return res.json({
         source,
         dateFilter,
@@ -251,6 +258,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
         ...(generatedAt ? { dataAsOf: generatedAt } : {}),
         comparison: detailData.comparison || null,
         audit: detailData.audit || null,
+        ...(dq ? { data_quality: dq } : {}),
       });
     }
 

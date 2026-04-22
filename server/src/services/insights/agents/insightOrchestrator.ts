@@ -58,6 +58,11 @@ import {
 import { getIndustryNews } from "../../newsService.js";
 import { getTenantRevenueExpression } from "../../../utils/scorecard-utils.js";
 import { buildUnderstoryBullets } from "../understoryBullets.js";
+import { extractInsightCohortSql } from "../insightCohortExtractor.js";
+import {
+  rankRelevantVerifiedTests,
+} from "../dataQualityInsightMatcher.js";
+import { getDataQualityTestById } from "../../dataQuality/dataQualityTests.js";
 
 // ============================================================================
 // Types
@@ -390,7 +395,12 @@ export async function runInsightGeneration(
 
     // ----- Phase 4: Persist -----
     emit("persisting", `Persisting ${allEvaluatedInsights.length} insights across ${FUNCTIONAL_CATEGORIES.length} categories...`);
-    await persistAgentInsights(tenantPool, allEvaluatedInsights, allFindingsGlobal, generationBatch);
+    const verifiedInsights = await verifyDataQualityForInsights(
+      tenantPool,
+      allEvaluatedInsights,
+      allFindingsGlobal
+    );
+    await persistAgentInsights(tenantPool, verifiedInsights, allFindingsGlobal, generationBatch);
     emit("persisting", "Done.");
 
     // ----- Phase 5: Re-evaluate tracked insights -----
@@ -590,10 +600,11 @@ export async function generateMoreForBucketAgent(
         (r: { headline: string }) => r.headline.toLowerCase()
       )
     );
-    const newInsights = forBucket.filter((ins) => !existingHeadlines.has(ins.headline.toLowerCase()));
+    let newInsights = forBucket.filter((ins) => !existingHeadlines.has(ins.headline.toLowerCase()));
 
     if (newInsights.length > 0) {
       emit("persisting", `Appending ${newInsights.length} new insights for "${targetBucket}"...`);
+      newInsights = await verifyDataQualityForInsights(tenantPool, newInsights, allFindings);
       await appendAgentInsights(tenantPool, newInsights, allFindings, generationBatch);
 
       // Stage 2 parity: re-evaluate tracked insights after generate-more persistence
@@ -806,7 +817,12 @@ export async function generateInsightsForCategory(
       [category.id]
     );
     if (evaluation.insights.length > 0) {
-      await appendAgentInsights(tenantPool, evaluation.insights, allFindings, generationBatch);
+      const verifiedCategoryInsights = await verifyDataQualityForInsights(
+        tenantPool,
+        evaluation.insights,
+        allFindings
+      );
+      await appendAgentInsights(tenantPool, verifiedCategoryInsights, allFindings, generationBatch);
     }
 
     // Stage 2 parity: re-evaluate tracked insights after category replace/append persistence
@@ -839,6 +855,181 @@ export async function generateInsightsForCategory(
       error: err.message,
     };
   }
+}
+
+// ============================================================================
+// Data quality cohort-scoped verification (prefilter -> verify -> final relevance)
+// ============================================================================
+
+type DqMatchMode = "shadow" | "enforce";
+
+function getDqMatchMode(): DqMatchMode {
+  const raw = (process.env.INSIGHTS_DQ_MATCH_MODE || "").toLowerCase().trim();
+  return raw === "shadow" ? "shadow" : "enforce";
+}
+
+function sanitizeSqlIdentifier(identifier: string): string | null {
+  return /^[a-z_][a-z0-9_]*$/i.test(identifier) ? identifier : null;
+}
+
+async function verifyDataQualityForInsights(
+  tenantPool: pg.Pool,
+  insights: EvaluatedInsight[],
+  findings: InsightFinding[]
+): Promise<EvaluatedInsight[]> {
+  const mode = getDqMatchMode();
+  const output: EvaluatedInsight[] = [];
+  let dqFlaggedCount = 0;
+  let candidateTotal = 0;
+
+  for (const ins of insights) {
+    const rawDq = ins.data_quality;
+    const finding = findings[ins.findingIndex];
+    if (!rawDq?.flagged || !finding) {
+      output.push(ins);
+      continue;
+    }
+    dqFlaggedCount += 1;
+    logInfo("[InsightOrchestrator] DQ analyze insight", {
+      headline: ins.headline,
+      finding_title: finding.title,
+    });
+
+    const prefilterIds = Array.isArray((rawDq as any).prefilter_candidate_test_ids)
+      ? (rawDq as any).prefilter_candidate_test_ids.filter((x: unknown): x is string => typeof x === "string")
+      : [];
+    const candidateIds = (prefilterIds.length > 0 ? prefilterIds : (rawDq.review_test_ids || [])).slice(0, 10);
+    candidateTotal += candidateIds.length;
+    logInfo("[InsightOrchestrator] DQ candidate tests", {
+      headline: ins.headline,
+      prefilter_basis: (rawDq as any).prefilter_basis || null,
+      candidate_test_ids: candidateIds,
+    });
+
+    const cohort = extractInsightCohortSql(finding);
+    if (!cohort.cohortSql) {
+      if (mode === "shadow") {
+        output.push(ins);
+      } else {
+        const { data_quality: _, ...rest } = ins;
+        output.push(rest as EvaluatedInsight);
+      }
+      continue;
+    }
+
+    const verifiedIds: string[] = [];
+    const samplesByTestId: Record<string, Array<Record<string, unknown>>> = {};
+    const sampleColumnsByTestId: Record<string, string[]> = {};
+
+    for (const testId of candidateIds) {
+      const test = getDataQualityTestById(testId);
+      if (!test) continue;
+      logInfo("[InsightOrchestrator] DQ verify test", {
+        headline: ins.headline,
+        test_id: testId,
+      });
+      const verifySql = `
+        WITH insight_cohort AS (${cohort.cohortSql})
+        SELECT COUNT(*)::int AS issue_count
+        FROM public.loans l
+        WHERE l.loan_id IN (SELECT loan_id FROM insight_cohort)
+          AND (${test.sqlCondition})
+      `;
+      try {
+        const countRes = await tenantPool.query(verifySql);
+        const count = Number(countRes.rows[0]?.issue_count || 0);
+        if (count <= 0) continue;
+        verifiedIds.push(testId);
+
+        const requiredCols = test.requiredColumns
+          .map((c) => sanitizeSqlIdentifier(c))
+          .filter((c): c is string => Boolean(c));
+        const selectRequired = requiredCols.map((c) => `l.${c} AS ${c}`).join(", ");
+        const selectClause = selectRequired
+          ? `l.loan_id, l.loan_number, ${selectRequired}`
+          : "l.loan_id, l.loan_number";
+        const sampleSql = `
+          WITH insight_cohort AS (${cohort.cohortSql})
+          SELECT ${selectClause}
+          FROM public.loans l
+          WHERE l.loan_id IN (SELECT loan_id FROM insight_cohort)
+            AND (${test.sqlCondition})
+          LIMIT 20
+        `;
+        const sampleRes = await tenantPool.query(sampleSql);
+        samplesByTestId[testId] = sampleRes.rows.map((r: any) => ({
+          loan_id: r.loan_id,
+          loan_number: r.loan_number,
+          ...Object.fromEntries(requiredCols.map((col) => [col, r[col] ?? null])),
+        }));
+        sampleColumnsByTestId[testId] = ["loan_number", "loan_id", ...requiredCols];
+      } catch (err: any) {
+        logWarn(`[InsightOrchestrator] DQ verify failed for ${testId}: ${err.message}`);
+      }
+    }
+
+    const ranked = rankRelevantVerifiedTests(
+      { finding, issueSummary: rawDq.issue_summary },
+      verifiedIds
+    );
+    const finalIds = ranked.matchedTestIds;
+    logInfo("[InsightOrchestrator] DQ final tests", {
+      headline: ins.headline,
+      final_test_ids: finalIds,
+    });
+
+    if (mode === "shadow") {
+      if (JSON.stringify(candidateIds) !== JSON.stringify(finalIds)) {
+        logInfo("[InsightOrchestrator] DQ shadow mismatch", {
+          insight: finding.title,
+          candidate_ids: candidateIds,
+          verified_ids: verifiedIds,
+          final_ids: finalIds,
+          cohort_source: cohort.cohortSource,
+        });
+      }
+      output.push(ins);
+      continue;
+    }
+
+    if (finalIds.length === 0) {
+      const { data_quality: _, ...rest } = ins;
+      output.push(rest as EvaluatedInsight);
+      continue;
+    }
+
+    output.push({
+      ...ins,
+      data_quality: {
+        ...rawDq,
+        flagged: true,
+        review_test_ids: finalIds,
+        review_groups: ranked.matchedTestIds.length
+          ? (ranked.matchedTestIds.map((id) => getDataQualityTestById(id)?.group).filter(Boolean) as any)
+          : rawDq.review_groups,
+        dq_samples_by_test_id: Object.fromEntries(
+          finalIds.map((id) => [id, samplesByTestId[id] || []])
+        ),
+        dq_sample_columns_by_test_id: Object.fromEntries(
+          finalIds.map((id) => [id, sampleColumnsByTestId[id] || ["loan_number", "loan_id"]])
+        ),
+        dq_cohort_source: cohort.cohortSource,
+        dq_drop_reasons: {
+          cohort_count_zero: candidateIds.filter((id) => !verifiedIds.includes(id)),
+          not_relevant: verifiedIds.filter((id) => !finalIds.includes(id)),
+        },
+      } as any,
+    });
+  }
+
+  if (dqFlaggedCount > 0) {
+    logInfo("[InsightOrchestrator] DQ candidate breadth", {
+      dq_flagged_insights: dqFlaggedCount,
+      average_candidates_per_insight: Number((candidateTotal / dqFlaggedCount).toFixed(2)),
+    });
+  }
+
+  return output;
 }
 
 // ============================================================================
@@ -1204,6 +1395,9 @@ async function finalizeAgentDetailData(
     logWarn(
       `[InsightOrchestrator] headlineMetricSignature rejected for "${finding.title?.slice(0, 60)}": ${error}`
     );
+  }
+  if (insight.data_quality?.flagged) {
+    dd.data_quality = insight.data_quality;
   }
   return dd;
 }

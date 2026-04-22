@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, AlertCircle, Eye, XCircle, AlertTriangle, Info } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -46,6 +46,7 @@ interface WarningsViewProps {
   groupedSummary: Record<string, GroupedWarningSummary>;
   statusInconsistencies: StatusInconsistency[];
   tenantId: string | null;
+  highlightedWarningId?: string;
 }
 
 function CategoryHeader({
@@ -117,9 +118,14 @@ function CategoryHeader({
 interface WarningTableProps {
   warnings: DataQualityWarning[];
   onViewLoans: (warning: DataQualityWarning) => void;
+  highlightedWarningId?: string;
 }
 
-function WarningTable({ warnings, onViewLoans }: WarningTableProps) {
+function WarningTable({
+  warnings,
+  onViewLoans,
+  highlightedWarningId,
+}: WarningTableProps) {
   if (warnings.length === 0) {
     return (
       <div className="py-8 text-center text-sm text-slate-500">
@@ -151,7 +157,11 @@ function WarningTable({ warnings, onViewLoans }: WarningTableProps) {
             const SeverityIcon = SEVERITY_ICONS[w.severity];
             const groupConfig = WARNING_GROUP_CONFIG[w.group];
             return (
-              <TableRow key={w.id}>
+              <TableRow
+                key={w.id}
+                id={`dq-warning-${w.id}`}
+                className={highlightedWarningId === w.id ? "bg-amber-100/70 dark:bg-amber-900/30 transition-colors duration-300" : undefined}
+              >
                 <TableCell>
                   <Badge className={SEVERITY_COLORS[w.severity]}>
                     <SeverityIcon className="h-3 w-3 mr-1" />
@@ -208,6 +218,7 @@ export function WarningsView({
   groupedSummary,
   statusInconsistencies,
   tenantId,
+  highlightedWarningId,
 }: WarningsViewProps) {
   const [openCategories, setOpenCategories] = useState<Set<WarningCategory>>(
     new Set(["Loan Lifecycle", "Compliance", "Data Integrity"])
@@ -216,6 +227,7 @@ export function WarningsView({
   const [severityFilter, setSeverityFilter] = useState<Severity | "all">("all");
   const [selectedWarning, setSelectedWarning] = useState<DataQualityWarning | null>(null);
   const [loansDialogOpen, setLoansDialogOpen] = useState(false);
+  const [activeHighlightId, setActiveHighlightId] = useState<string | undefined>(undefined);
 
   const toggleCategory = (cat: WarningCategory) => {
     setOpenCategories((prev) => {
@@ -243,6 +255,49 @@ export function WarningsView({
     }
     return true;
   });
+  const visibleWarningIds = useMemo(
+    () => new Set(filteredWarnings.map((w) => w.id)),
+    [filteredWarnings]
+  );
+  const warningById = useMemo(
+    () => new Map(warnings.map((w) => [w.id, w])),
+    [warnings]
+  );
+
+  useEffect(() => {
+    if (!highlightedWarningId) return;
+    const target = warningById.get(highlightedWarningId);
+    if (!target) return;
+    const targetCategory = CATEGORIES.find((category) =>
+      CATEGORY_GROUPS[category].includes(target.group)
+    );
+    if (!targetCategory) return;
+    setOpenCategories((prev) => {
+      if (prev.has(targetCategory)) return prev;
+      const next = new Set(prev);
+      next.add(targetCategory);
+      return next;
+    });
+  }, [highlightedWarningId, warningById]);
+
+  useEffect(() => {
+    if (!highlightedWarningId) return;
+    if (!visibleWarningIds.has(highlightedWarningId)) return;
+
+    const rowId = `dq-warning-${highlightedWarningId}`;
+    const target = document.getElementById(rowId);
+    if (!target) return;
+
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    setActiveHighlightId(highlightedWarningId);
+
+    const t = window.setTimeout(() => {
+      setActiveHighlightId((current) =>
+        current === highlightedWarningId ? undefined : current
+      );
+    }, 3500);
+    return () => window.clearTimeout(t);
+  }, [highlightedWarningId, visibleWarningIds]);
 
   const totalIssues = warnings.reduce((s, w) => s + w.count, 0);
 
@@ -320,7 +375,11 @@ export function WarningsView({
               {isOpen && (
                 <Card className="mt-1 rounded-tl-none rounded-tr-none border-t-0">
                   <CardContent className="p-0">
-                    <WarningTable warnings={categoryWarnings} onViewLoans={handleViewLoans} />
+                    <WarningTable
+                      warnings={categoryWarnings}
+                      onViewLoans={handleViewLoans}
+                      highlightedWarningId={activeHighlightId}
+                    />
                   </CardContent>
                 </Card>
               )}
