@@ -1371,16 +1371,25 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
     onDataReady({ content: lines.join('\n'), title: 'Cohi Insights', insightCount: allInsights.length });
   }, [onDataReady, insightsLoading, allInsights]);
 
+  // Parse and cache DQ metadata once per insights payload.
+  const insightDqMeta = useMemo(() => {
+    const map = new WeakMap<CohiInsight, ReturnType<typeof getInsightDataQuality>>();
+    for (const insight of allInsights) {
+      map.set(insight, getInsightDataQuality(insight.detail_data));
+    }
+    return map;
+  }, [allInsights]);
+
   // Filter insights by the active functional category, then group by bucket
   const filteredInsights = useMemo(() => {
     if (activeCategoryId === "all") return allInsights;
     if (activeCategoryId === "data_quality") {
-      return allInsights.filter((i) => getInsightDataQuality(i.detail_data)?.flagged === true);
+      return allInsights.filter((i) => insightDqMeta.get(i)?.flagged === true);
     }
     return allInsights.filter(
       (i) => (i.functional_category || null) === activeCategoryId
     );
-  }, [allInsights, activeCategoryId]);
+  }, [allInsights, activeCategoryId, insightDqMeta]);
 
   // Group filtered insights by bucket
   const bucketedInsights = useMemo(() => {
@@ -1406,7 +1415,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
   const categoryStats = useMemo(() => {
     const stats: Record<string, { total: number; hasCritical: boolean }> = {};
     const flaggedInsights = allInsights.filter(
-      (i) => getInsightDataQuality(i.detail_data)?.flagged === true
+      (i) => insightDqMeta.get(i)?.flagged === true
     );
     for (const cat of CATEGORY_TABS) {
       if (cat.id === "all") {
@@ -1422,7 +1431,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
           hasCritical:
             (dataQualityMetrics?.critical_issues ?? 0) > 0 ||
             flaggedInsights.some(
-              (i) => getInsightDataQuality(i.detail_data)?.trust_impact === "high"
+              (i) => insightDqMeta.get(i)?.trust_impact === "high"
             ),
         };
         continue;
@@ -1436,7 +1445,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
       };
     }
     return stats;
-  }, [allInsights, dataQualityMetrics]);
+  }, [allInsights, dataQualityMetrics, insightDqMeta]);
 
   // Count non-empty buckets for the currently visible category
   const nonEmptyBuckets = useMemo(
@@ -2049,7 +2058,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
               <div className="flex-1 overflow-y-auto p-6 min-h-0">
                 {agentFindingInsight &&
                   (() => {
-                    const dq = getInsightDataQuality(agentFindingInsight.detail_data);
+                    const dq = insightDqMeta.get(agentFindingInsight);
                     return dq?.flagged ? <DataQualityImpactBlock dq={dq} className="mb-4" /> : null;
                   })()}
                 {/* Action buttons */}
