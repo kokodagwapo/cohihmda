@@ -108,10 +108,27 @@ async function mockInsightsApis(page: Page) {
 }
 
 function insightCard(page: Page, headline: string) {
+  // Match either the new `data-testid="insight-card"` hook or the stable
+  // `group/insight` Tailwind class that predates it, so this spec works
+  // against both freshly-deployed builds and dev deployments that are
+  // still running the pre-COHI-328 component.
   return page
-    .locator('[data-testid="insight-card"]')
+    .locator(
+      '#CohiInsights [data-testid="insight-card"], #CohiInsights div[class*="group/insight"]',
+    )
     .filter({ hasText: headline })
     .first();
+}
+
+async function expandAllInsights(page: Page) {
+  // Expand mode stops the 5s insight carousel auto-rotation and stacks
+  // every insight in the DOM simultaneously. That prevents races where a
+  // card selector resolves during rotation and Playwright loses the
+  // reference before it can interact with it.
+  const expandAll = page.getByRole("button", { name: /expand all/i });
+  if (await expandAll.isVisible().catch(() => false)) {
+    await expandAll.click();
+  }
 }
 
 test.describe("Insights Understory Readability (COHI-328)", () => {
@@ -126,6 +143,19 @@ test.describe("Insights Understory Readability (COHI-328)", () => {
     await dismissBlockingOverlays(userPage);
     await userPage.waitForTimeout(750);
     await dismissBlockingOverlays(userPage);
+
+    // Wait for the mocked insights to actually render before any test
+    // starts querying cards. This avoids races with component loading
+    // states and the collapsed-carousel auto-rotation that can briefly
+    // hide a headline while the other is on screen.
+    const insightsSection = userPage.locator("#CohiInsights");
+    await expect(insightsSection).toBeVisible({ timeout: 15_000 });
+    await expect(
+      insightsSection.getByText(BULLET_HEADLINE, { exact: true }),
+    ).toBeVisible({ timeout: 15_000 });
+    await expect(
+      insightsSection.getByText(PARAGRAPH_HEADLINE, { exact: true }),
+    ).toBeVisible({ timeout: 15_000 });
   });
 
   test("@critical @COHI-328 insights section renders with content", async ({
@@ -140,6 +170,7 @@ test.describe("Insights Understory Readability (COHI-328)", () => {
   test("@critical @COHI-328 multi-line understory renders as bullet items", async ({
     userPage,
   }) => {
+    await expandAllInsights(userPage);
     const card = insightCard(userPage, BULLET_HEADLINE);
     await expect(card).toBeVisible();
 
@@ -158,6 +189,7 @@ test.describe("Insights Understory Readability (COHI-328)", () => {
   test("@critical @COHI-328 single-sentence understory renders as paragraph", async ({
     userPage,
   }) => {
+    await expandAllInsights(userPage);
     const card = insightCard(userPage, PARAGRAPH_HEADLINE);
     await expect(card).toBeVisible();
 
@@ -193,6 +225,7 @@ test.describe("Insights Understory Readability (COHI-328)", () => {
   test("@critical @COHI-328 selected drillable insight exposes a View details affordance", async ({
     userPage,
   }) => {
+    await expandAllInsights(userPage);
     const card = insightCard(userPage, BULLET_HEADLINE);
     await expect(card).toBeVisible();
 
