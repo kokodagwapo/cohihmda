@@ -83,13 +83,15 @@ export default function MyDashboard() {
   // Track which tabs have unsaved changes (dirty state from canvas autosave)
   const [dirtyTabs, setDirtyTabs] = useState<Set<string>>(new Set());
 
+  const reportBuilderSearch = autoOpenReportBuilder ? "?reportBuilder=1" : "";
+
   /* ─── Backward compat: redirect ?canvas=xxx to slug-based URL ─── */
   useEffect(() => {
     const legacyCanvas = searchParams.get('canvas');
     if (legacyCanvas) {
-      navigate(`/my-dashboard/${legacyCanvas}`, { replace: true });
+      navigate(`/my-dashboard/${legacyCanvas}${reportBuilderSearch}`, { replace: true });
     }
-  }, [searchParams, navigate]);
+  }, [searchParams, navigate, reportBuilderSearch]);
 
   /* ─── Persist tabs to localStorage when they change ─── */
   useEffect(() => {
@@ -111,11 +113,11 @@ export default function MyDashboard() {
   /* ─── Sync URL when active tab changes ─── */
   const updateUrl = useCallback((tabId: string | null) => {
     if (!tabId || tabId.startsWith('new-')) {
-      navigate('/my-dashboard/new', { replace: true });
+      navigate(`/my-dashboard/new${reportBuilderSearch}`, { replace: true });
     } else {
-      navigate(`/my-dashboard/${tabId}`, { replace: true });
+      navigate(`/my-dashboard/${tabId}${reportBuilderSearch}`, { replace: true });
     }
-  }, [navigate]);
+  }, [navigate, reportBuilderSearch]);
 
   const fetchCanvases = useCallback(async (): Promise<CanvasListItem[]> => {
     try {
@@ -183,14 +185,14 @@ export default function MyDashboard() {
         setOpenTabs(nextTabs);
         setActiveTabId(nextActive);
         setLoadCanvasId(nextActive);
-        navigate(`/my-dashboard/${nextActive}`, { replace: true });
+        navigate(`/my-dashboard/${nextActive}${reportBuilderSearch}`, { replace: true });
       } else {
         const newTabId = `new-${Date.now()}`;
         setOpenTabs([newTabId]);
         setActiveTabId(newTabId);
         setLoadCanvasId(null);
         setCanvasKey((k) => k + 1);
-        navigate('/my-dashboard/new', { replace: true });
+        navigate(`/my-dashboard/new${reportBuilderSearch}`, { replace: true });
       }
 
       setDirtyTabs(new Set());
@@ -201,7 +203,7 @@ export default function MyDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [effectiveTenantId, fetchCanvases, navigate]);
+  }, [effectiveTenantId, fetchCanvases, navigate, reportBuilderSearch]);
 
   /* ─── Respond to URL changes post-hydration only when canvas is accessible ─── */
   useEffect(() => {

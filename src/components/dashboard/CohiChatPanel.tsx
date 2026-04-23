@@ -509,7 +509,13 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
       });
 
       toast({ title: "Workbench created", description: `${canvasItems.length} visualization(s) exported.` });
-      onClose();
+      // Navigating away unmounts the chat panel in both host modes:
+      // 1) floating overlay on dashboard pages
+      // 2) dedicated /data-chat route
+      //
+      // Calling `onClose()` here is unsafe because on /data-chat it is
+      // implemented as `navigate(-1)`, which can win the race and send the
+      // browser to `about:blank` before the Workbench navigation lands.
       navigate(`/my-dashboard?canvas=${data.id}`);
     } catch (err) {
       toast({ title: "Export failed", description: err instanceof Error ? err.message : "Try again", variant: "destructive" });
@@ -932,7 +938,6 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
 
       toast({ title: "Saved to Workbench", description: "Visualization saved as a new canvas." });
       navigate(`/my-dashboard?canvas=${canvasId}`);
-      onClose();
     } catch (error: any) {
       toast({
         title: "Error",
@@ -956,7 +961,6 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
           title: "Opening PowerPoint Editor",
           description: "Chart sent to Workbench and seeded as slide 1.",
         });
-        onClose();
         navigate(`/my-dashboard/${canvasId}?reportBuilder=1`);
       } catch (error: any) {
         toast({
