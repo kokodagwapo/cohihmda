@@ -128,6 +128,7 @@ export const ROLE_MATRIX: RouteExpectation[] = [
   { routeGroup: "/api/pipeline-analysis", method: "GET", path: "/api/pipeline-analysis/__rbac_probe", policy: "auth", expect: AUTH_EXPECTED },
   { routeGroup: "/api/predictions", method: "GET", path: "/api/predictions/__rbac_probe", policy: "auth", expect: AUTH_EXPECTED },
   { routeGroup: "/api/fallout", method: "GET", path: "/api/fallout/__rbac_probe", policy: "auth", expect: AUTH_EXPECTED },
+  { routeGroup: "/api/feedback", method: "GET", path: "/api/feedback/__rbac_probe", policy: "auth", expect: AUTH_BLOCKS_CANVAS_ONLY },
   { routeGroup: "/api/user", method: "GET", path: "/api/user/__rbac_probe", policy: "auth", expect: AUTH_BLOCKS_CANVAS_ONLY },
   { routeGroup: "/api/encompass", method: "GET", path: "/api/encompass/__rbac_probe", policy: "auth", expect: AUTH_BLOCKS_CANVAS_ONLY },
   { routeGroup: "/api/tenants", method: "GET", path: "/api/tenants/__rbac_probe", policy: "platform_staff", expect: PLATFORM_STAFF_EXPECTED },
