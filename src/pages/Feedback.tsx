@@ -449,7 +449,9 @@ export default function FeedbackPage() {
   }
 
   function onFilesSelected(nextFilesList: FileList | null): void {
-    if (!nextFilesList) return;
+    // Clearing the input in onChange can fire a second change with an empty FileList.
+    // Never treat that as "remove all attachments" — we only manage files via state + Remove.
+    if (!nextFilesList || nextFilesList.length === 0) return;
     const nextFiles = Array.from(nextFilesList);
     const nextErrors: string[] = [];
 
@@ -503,7 +505,9 @@ export default function FeedbackPage() {
             <form className="space-y-5" onSubmit={onSubmit}>
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <Label htmlFor="feedback-area">Area</Label>
+                  <Label htmlFor="feedback-area" className="font-semibold">
+                    Area
+                  </Label>
                   {areaError ? (
                     <span className="text-xs px-2 py-1 rounded border border-red-300 bg-red-50 text-red-700">
                       Area is required to submit
@@ -532,7 +536,9 @@ export default function FeedbackPage() {
 
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <Label htmlFor="feedback-type">Type</Label>
+                  <Label htmlFor="feedback-type" className="font-semibold">
+                    Type
+                  </Label>
                   {typeError ? (
                     <span className="text-xs px-2 py-1 rounded border border-red-300 bg-red-50 text-red-700">
                       Type is required to submit
@@ -561,7 +567,9 @@ export default function FeedbackPage() {
 
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <Label htmlFor="feedback-description">Description</Label>
+                  <Label htmlFor="feedback-description" className="font-semibold">
+                    Description
+                  </Label>
                   {descriptionError ? (
                     <span className="text-xs px-2 py-1 rounded border border-red-300 bg-red-50 text-red-700">
                       Description is required to submit
@@ -582,7 +590,9 @@ export default function FeedbackPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="feedback-files">Attachments (optional)</Label>
+                <Label htmlFor="feedback-files" className="font-semibold block w-full">
+                  Attachments (optional)
+                </Label>
                 <input
                   ref={fileInputRef}
                   id="feedback-files"
@@ -590,10 +600,22 @@ export default function FeedbackPage() {
                   multiple
                   accept=".png,.jpg,.jpeg,.webp,.csv,.xlsx,.xls,.pdf"
                   onChange={(e) => {
-                    onFilesSelected(e.target.files);
+                    const list = e.target.files;
+                    if (!list || list.length === 0) return;
+                    onFilesSelected(list);
+                    e.currentTarget.value = "";
                   }}
-                  className="block w-full rounded-md border border-input bg-background px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-slate-100 file:px-2 file:py-1 file:text-xs dark:file:bg-slate-800"
+                  className="sr-only"
                 />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-fit"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  Choose Files
+                </Button>
                 <p className="text-xs text-muted-foreground">
                   Up to 5 files. Images up to 10MB each; CSV/XLS/XLSX/PDF up to 50MB each.
                 </p>

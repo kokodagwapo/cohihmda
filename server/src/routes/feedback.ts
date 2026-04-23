@@ -408,6 +408,9 @@ router.get("/", authenticateToken, attachTenantContext, async (req: AuthRequest,
     }
     const whereClause = whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "";
     const offset = (page - 1) * limit;
+    const statusSortExpression =
+      "CASE uf.status WHEN 'open' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'resolved' THEN 3 ELSE 4 END";
+    const sortColumn = sortBy === "status" ? statusSortExpression : `uf.${sortBy}`;
 
     const countResult = await tenantContext.tenantPool.query(
       `SELECT COUNT(*)::int AS total FROM user_feedback ${whereClause}`,
@@ -432,7 +435,7 @@ router.get("/", authenticateToken, attachTenantContext, async (req: AuthRequest,
        FROM user_feedback uf
        LEFT JOIN users u ON u.id = uf.user_id
        ${whereClause}
-       ORDER BY ${sortBy} ${sortDir.toUpperCase()}, created_at DESC
+       ORDER BY ${sortColumn} ${sortDir.toUpperCase()}, uf.created_at DESC
        LIMIT $${i++} OFFSET $${i++}`,
       [...params, limit, offset]
     );
@@ -659,7 +662,14 @@ router.patch("/:id", authenticateToken, attachTenantContext, async (req: AuthReq
     }
 
     if (!hasChanges) {
-      return res.json({ feedback: existingResult.rows[0] });
+      const unchanged = existingResult.rows[0];
+      const attachments = await getFeedbackAttachments(tenantContext.tenantPool as any, unchanged.id);
+      return res.json({
+        feedback: {
+          ...unchanged,
+          attachments: toAttachmentMetaRows(attachments, unchanged.id, getTenantQueryValue(req)),
+        },
+      });
     }
 
     values.push(paramsParsed.data.id);
@@ -695,7 +705,14 @@ router.patch("/:id", authenticateToken, attachTenantContext, async (req: AuthReq
       [paramsParsed.data.id]
     );
 
-    return res.json({ feedback: refreshedResult.rows[0] });
+    const refreshed = refreshedResult.rows[0];
+    const attachments = await getFeedbackAttachments(tenantContext.tenantPool as any, refreshed.id);
+    return res.json({
+      feedback: {
+        ...refreshed,
+        attachments: toAttachmentMetaRows(attachments, refreshed.id, getTenantQueryValue(req)),
+      },
+    });
   } catch (err: unknown) {
     console.error("[Feedback] PATCH /:id error:", err);
     return res.status(500).json({ error: "Failed to update feedback" });
