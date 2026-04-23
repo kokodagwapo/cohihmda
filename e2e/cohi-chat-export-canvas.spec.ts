@@ -298,12 +298,19 @@ async function askMockQuestion(page: Page, question: string = MOCK_ASK_QUESTION)
   const chartWrapper = chatPanel.getByTestId("cohi-chat-viz").last();
   await expect(chartWrapper).toBeVisible({ timeout: 20_000 });
 
-  // Wait for Recharts to actually render bar elements – without this, the
-  // html2canvas capture can race the first animation frame and export an
-  // empty image.
+  // Wait for Recharts to actually paint bars, not just mount the wrapper
+  // group. Target the drawn `<path d="…">` children of `.recharts-bar-rectangle`
+  // which only materialize once Recharts has calculated geometry. Checking the
+  // outer `<g>` is unreliable because it can be present but zero-size /
+  // `visibility:hidden` during the enter animation (this is what caused the
+  // original CI flake where the locator resolved 19× but was always "hidden").
   await expect(
-    chartWrapper.locator(".recharts-bar-rectangle").first(),
-  ).toBeVisible({ timeout: 15_000 });
+    chartWrapper.locator(".recharts-bar-rectangle path[d]"),
+  ).not.toHaveCount(0, { timeout: 15_000 });
+
+  // Let the enter animation settle so html2canvas captures finished bars
+  // instead of tween frames.
+  await page.waitForTimeout(600);
 }
 
 /**
@@ -499,10 +506,12 @@ test.describe("Chat visualizations: prominent export + Edit in PPT Editor (COHI-
     );
     await expect(vizWrapper.getByTestId("cohi-chat-viz-footer")).toHaveCount(0);
 
-    // Sanity: the chart itself IS inside the capture target.
+    // Sanity: the chart itself IS inside the capture target. We check for any
+    // rendered bar path rather than `.toBeVisible()` on the wrapper group,
+    // which can be zero-size during Recharts' enter animation.
     await expect(
-      vizWrapper.locator(".recharts-bar-rectangle").first(),
-    ).toBeVisible();
+      vizWrapper.locator(".recharts-bar-rectangle path[d]"),
+    ).not.toHaveCount(0);
   });
 
   // --------------------------------------------------------------------------
@@ -628,9 +637,9 @@ test.describe("Chat visualizations: prominent export + Edit in PPT Editor (COHI-
     // The chart must rehydrate from metadata.visualization, not vanish.
     const chart = chatPanel.getByTestId("cohi-chat-viz").first();
     await expect(chart).toBeVisible({ timeout: 15_000 });
-    await expect(chart.locator(".recharts-bar-rectangle").first()).toBeVisible({
-      timeout: 15_000,
-    });
+    await expect(
+      chart.locator(".recharts-bar-rectangle path[d]"),
+    ).not.toHaveCount(0, { timeout: 15_000 });
 
     // The export controls must be wired up for the hydrated message too.
     await expect(

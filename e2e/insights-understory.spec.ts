@@ -105,6 +105,47 @@ async function mockInsightsApis(page: Page) {
       }),
     });
   });
+
+  // The Dashboard renders <div id="CohiInsights"> only if
+  // `dashboardVisibility.CohiInsights` is truthy. That state is loaded from
+  // /api/user/preferences/dashboardVisibility — if the CI test user has
+  // previously saved the section as hidden (or the endpoint stalls in CI),
+  // the #CohiInsights anchor never appears in the DOM and every assertion
+  // in this file times out on "element not found". Force a known-good
+  // default here so this test doesn't depend on dev tenant preference state.
+  const defaultVisibilityPreference = {
+    preference_value: {
+      executiveDashboard: true,
+      industryNews: true,
+      CohiInsights: true,
+      leaderboard: true,
+      topTiering: true,
+      closingFalloutForecast: true,
+      trends: true,
+      forecasting: true,
+      kpiReports: true,
+    },
+  };
+  await page.route(
+    /\/api\/user\/preferences\/dashboardVisibility(\?|$)/,
+    async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(defaultVisibilityPreference),
+        });
+        return;
+      }
+      // PUT writes from the real code path are harmless to swallow in a mocked
+      // environment — ack with the same body so nothing upstream throws.
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(defaultVisibilityPreference),
+      });
+    },
+  );
 }
 
 function insightCard(page: Page, headline: string) {
