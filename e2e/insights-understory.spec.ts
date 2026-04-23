@@ -82,6 +82,41 @@ async function suppressWelcomeTour(page: Page) {
   });
 }
 
+async function seedInsightsVisibility(page: Page) {
+  // Defense-in-depth for the dashboard-visibility race:
+  // - useDashboardVisibility() first tries GET /api/user/preferences/dashboardVisibility
+  // - on any failure / timeout it falls back to localStorage('dashboardVisibility')
+  //
+  // In the critical suite, the shared test user can carry a persisted server
+  // preference or localStorage snapshot where CohiInsights is hidden. We
+  // already mock the server response below, but if that request errors or is
+  // delayed the hook can still briefly hydrate from localStorage and keep the
+  // section out of the DOM long enough for the spec to fail at `#CohiInsights`.
+  //
+  // Seed the same known-good value in localStorage before page scripts run so
+  // both the primary path and the fallback path agree that CohiInsights is on.
+  await page.addInitScript(() => {
+    try {
+      window.localStorage.setItem(
+        "dashboardVisibility",
+        JSON.stringify({
+          executiveDashboard: true,
+          industryNews: true,
+          CohiInsights: true,
+          leaderboard: true,
+          topTiering: true,
+          closingFalloutForecast: true,
+          trends: true,
+          forecasting: true,
+          kpiReports: true,
+        }),
+      );
+    } catch {
+      /* storage access denied */
+    }
+  });
+}
+
 async function mockInsightsApis(page: Page) {
   await page.route("**/api/dashboard/insights?**", async (route) => {
     await route.fulfill({
@@ -178,8 +213,10 @@ test.describe("Insights Understory Readability (COHI-328)", () => {
 
   test.beforeEach(async ({ userPage }) => {
     await suppressWelcomeTour(userPage);
+    await seedInsightsVisibility(userPage);
     await mockInsightsApis(userPage);
     await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
+    await expect(userPage).toHaveURL(/\/insights/);
     await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
     await dismissBlockingOverlays(userPage);
     await userPage.waitForTimeout(750);
