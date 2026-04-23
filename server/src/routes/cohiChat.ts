@@ -150,6 +150,10 @@ router.post('/ask', authenticateToken, attachTenantContext, apiLimiter, async (r
         ]);
 
         // Save assistant response
+        // IMPORTANT: Persist the full `visualization` object (chart config + data)
+        // and `sqlQuery` in metadata so that loading a session from history
+        // re-renders the chart. Without this, the client only has a boolean
+        // `hasVisualization` and shows bare text when the user reopens the chat.
         await tenantPool.query(`
           INSERT INTO public.chat_history (user_id, session_id, role, content, metadata)
           VALUES ($1, $2, 'assistant', $3, $4)
@@ -161,6 +165,8 @@ router.post('/ask', authenticateToken, attachTenantContext, apiLimiter, async (r
             timestamp: new Date().toISOString(),
             hasVisualization: !!response.visualization,
             visualizationType: response.visualization?.type,
+            visualization: response.visualization,
+            sqlQuery: response.sqlQuery,
             rowCount: response.data?.length || 0,
             sources: response.sources,
             error: response.error
@@ -239,6 +245,8 @@ router.post('/refine', authenticateToken, attachTenantContext, apiLimiter, async
             timestamp: new Date().toISOString(),
             hasVisualization: !!response.visualization,
             visualizationType: response.visualization?.type,
+            visualization: response.visualization,
+            sqlQuery: response.sqlQuery,
             rowCount: response.data?.length || 0
           }))
         ]);

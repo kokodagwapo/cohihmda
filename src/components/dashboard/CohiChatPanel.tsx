@@ -108,6 +108,8 @@ import {
   DropdownMenuCheckboxItem,
 } from "@/components/ui/dropdown-menu";
 
+const CHAT_EXPORT_FORMAT_KEY = "cohi-chat-preferred-export-format";
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -130,7 +132,11 @@ type ExportOverride = {
   visualization: VisualizationConfig;
   title?: string;
   description?: string;
+  /** Chat message id so we can capture the rendered chart image for the export. */
+  messageId?: string;
 };
+
+type QuickExportFormat = "pdf" | "ppt";
 
 type MessageType =
   | "success"
@@ -461,6 +467,12 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
   } = useCohiChat({ tenantId, enabled: isOpen });
 
   const [showHistory, setShowHistory] = useState(false);
+  const [preferredExportFormat, setPreferredExportFormat] =
+    useState<QuickExportFormat>(() => {
+      if (typeof window === "undefined") return "ppt";
+      const stored = window.localStorage.getItem(CHAT_EXPORT_FORMAT_KEY);
+      return stored === "pdf" ? "pdf" : "ppt";
+    });
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -497,7 +509,13 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
       });
 
       toast({ title: "Workbench created", description: `${canvasItems.length} visualization(s) exported.` });
-      onClose();
+      // Navigating away unmounts the chat panel in both host modes:
+      // 1) floating overlay on dashboard pages
+      // 2) dedicated /data-chat route
+      //
+      // Calling `onClose()` here is unsafe because on /data-chat it is
+      // implemented as `navigate(-1)`, which can win the race and send the
+      // browser to `about:blank` before the Workbench navigation lands.
       navigate(`/my-dashboard?canvas=${data.id}`);
     } catch (err) {
       toast({ title: "Export failed", description: err instanceof Error ? err.message : "Try again", variant: "destructive" });
@@ -505,6 +523,70 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
       setIsCreatingCanvas(false);
     }
   }, [messages, vizTypeOverrides, toast, onClose, navigate, tenantId]);
+
+  const createSingleVisualizationCanvas = useCallback(
+    async (
+      visualization: VisualizationConfig,
+      question: string,
+      options?: { sqlQuery?: string },
+    ): Promise<string> => {
+      const qs = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+      const itemId = `chat-build-${Date.now()}`;
+      let layout: CanvasLayoutItem[];
+
+      if (options?.sqlQuery) {
+        const groupId = `chat-build-group-${Date.now()}`;
+        layout = [
+          createLayoutItem(
+            groupId,
+            "widget_group",
+            {
+              type: "widget_group",
+              groupId,
+              title: visualization.title || "Chat Visualization",
+              sectionType: "company-scorecard",
+              widgetIds: [],
+              items: [
+                {
+                  kind: "cohi" as const,
+                  id: itemId,
+                  sql: options.sqlQuery,
+                  title: visualization.title || "Chat Visualization",
+                  vizConfig: visualization,
+                  explanation: question.slice(0, 200),
+                },
+              ],
+            },
+            { x: 20, y: 20, w: 700, h: 500 },
+          ),
+        ];
+      } else {
+        layout = [
+          createLayoutItem(
+            itemId,
+            "chart",
+            { type: "chart", config: visualization },
+            { x: 20, y: 20, w: 420, h: 280 },
+          ),
+        ];
+      }
+
+      const data = await api.request<{ id: string }>(`/api/workbench/canvases${qs}`, {
+        method: "POST",
+        body: JSON.stringify({
+          title: visualization.title || "Chat Visualization",
+          layoutVersion: "freeform-v1",
+          layout,
+          annotations: [],
+          background: { type: "color", value: "#ffffff" },
+          uploadsMeta: [],
+        }),
+      });
+
+      return data.id;
+    },
+    [tenantId],
+  );
 
   // Focus input when panel opens
   useEffect(() => {
@@ -850,51 +932,12 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     sqlQuery?: string,
   ) => {
     try {
-      const qs = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : '';
-      // Build a single canvas item from the visualization
-      const itemId = `chat-save-${Date.now()}`;
-      let layout: CanvasLayoutItem[];
-
-      if (sqlQuery) {
-        // Wrap SQL-backed viz in a WidgetGroup so it gets timeframe controls
-        const groupId = `chat-save-group-${Date.now()}`;
-        layout = [createLayoutItem(groupId, 'widget_group', {
-          type: 'widget_group',
-          groupId,
-          title: visualization.title || 'Chat Visualization',
-          sectionType: 'company-scorecard',
-          widgetIds: [],
-          items: [{
-            kind: 'cohi' as const,
-            id: itemId,
-            sql: sqlQuery,
-            title: visualization.title || 'Chat Visualization',
-            vizConfig: visualization,
-            explanation: question.slice(0, 200),
-          }],
-        }, { x: 20, y: 20, w: 700, h: 500 })];
-      } else {
-        layout = [createLayoutItem(itemId, 'chart', {
-          type: 'chart',
-          config: visualization,
-        }, { x: 20, y: 20, w: 420, h: 280 })];
-      }
-
-      const data = await api.request<{ id: string }>(`/api/workbench/canvases${qs}`, {
-        method: "POST",
-        body: JSON.stringify({
-          title: visualization.title || 'Chat Visualization',
-          layoutVersion: "freeform-v1",
-          layout,
-          annotations: [],
-          background: { type: "color", value: "#ffffff" },
-          uploadsMeta: [],
-        }),
+      const canvasId = await createSingleVisualizationCanvas(visualization, question, {
+        sqlQuery,
       });
 
       toast({ title: "Saved to Workbench", description: "Visualization saved as a new canvas." });
-      navigate(`/my-dashboard?canvas=${data.id}`);
-      onClose();
+      navigate(`/my-dashboard?canvas=${canvasId}`);
     } catch (error: any) {
       toast({
         title: "Error",
@@ -902,106 +945,205 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
         variant: "destructive",
       });
     }
-  }, [tenantId, toast, navigate, onClose]);
+  }, [createSingleVisualizationCanvas, toast, navigate, onClose]);
+
+  const handleBuildInCanvas = useCallback(
+    async (
+      visualization: VisualizationConfig,
+      question: string,
+      sqlQuery?: string,
+    ) => {
+      try {
+        const canvasId = await createSingleVisualizationCanvas(visualization, question, {
+          sqlQuery,
+        });
+        toast({
+          title: "Opening PowerPoint Editor",
+          description: "Chart sent to Workbench and seeded as slide 1.",
+        });
+        navigate(`/my-dashboard/${canvasId}?reportBuilder=1`);
+      } catch (error: any) {
+        toast({
+          title: "Couldn't open PowerPoint Editor",
+          description: error.message || "Please try again.",
+          variant: "destructive",
+        });
+      }
+    },
+    [createSingleVisualizationCanvas, toast, onClose, navigate],
+  );
 
   /**
-   * Export visualization as PDF (optional override for quick export from bubble)
+   * Export visualization as PDF (chart image on page 1, data table on page 2).
+   * If the chart DOM hasn't been rendered (no messageId), falls back to a
+   * data-only PDF so the user still gets something.
    */
   const handleDownloadPDF = async (override?: ExportOverride) => {
     const viz = override?.visualization;
     const title = override?.title;
     const desc = override?.description;
+    const messageId = override?.messageId;
     if (!viz) return;
 
     try {
       const { jsPDF } = await import("jspdf");
-      const doc = new jsPDF();
-      const pageWidth = doc.internal.pageSize.width;
+      const doc = new jsPDF({
+        orientation: "landscape",
+        unit: "pt",
+        format: "letter",
+      });
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 40;
+      const contentWidth = pageWidth - margin * 2;
 
-      doc.setFontSize(20);
-      doc.setTextColor(30, 41, 59);
-      doc.text(title || viz.title || "Visualization", 20, 25);
+      const drawHeader = (pageTitle: string) => {
+        doc.setFontSize(18);
+        doc.setTextColor(30, 41, 59);
+        doc.setFont(undefined as any, "bold");
+        doc.text(pageTitle, margin, margin + 10);
+        doc.setFont(undefined as any, "normal");
 
-      const chartType = viz.type || "chart";
-      doc.setFontSize(10);
-      doc.setTextColor(100, 116, 139);
-      doc.text(
-        `Chart Type: ${chartType.charAt(0).toUpperCase() + chartType.slice(1)}`,
-        20,
-        35
-      );
+        const chartType = viz.type || "chart";
+        doc.setFontSize(10);
+        doc.setTextColor(100, 116, 139);
+        doc.text(
+          `Chart Type: ${chartType.charAt(0).toUpperCase() + chartType.slice(1)}`,
+          margin,
+          margin + 28
+        );
+      };
 
-      let currentY = 45;
+      const drawFooter = () => {
+        doc.setFontSize(8);
+        doc.setTextColor(148, 163, 184);
+        doc.text(
+          `Generated by Coheus on ${new Date().toLocaleDateString()}`,
+          margin,
+          pageHeight - 20
+        );
+        doc.text("coheus.ai", pageWidth - margin - 50, pageHeight - 20);
+      };
+
+      // --- Page 1: Chart image + optional description ---
+      drawHeader(title || viz.title || "Visualization");
+
+      let currentY = margin + 48;
       if (desc) {
         doc.setFontSize(11);
         doc.setTextColor(71, 85, 105);
-        const splitDescription = doc.splitTextToSize(desc, pageWidth - 40);
-        doc.text(splitDescription, 20, currentY);
-        currentY += splitDescription.length * 6 + 10;
+        const splitDescription = doc.splitTextToSize(desc, contentWidth);
+        doc.text(splitDescription, margin, currentY);
+        currentY += splitDescription.length * 14 + 10;
       }
 
-      const data = viz.data || [];
-      if (data.length > 0 && Object.keys(data[0]).length > 0) {
-        const columns = Object.keys(data[0]);
-        const colCount = Math.min(columns.length, 5);
-
-        // Guard against divide by zero
-        if (colCount === 0) {
-          doc.setFontSize(10);
-          doc.text("No data columns available", 20, currentY);
-        } else {
-          const colWidth = (pageWidth - 40) / colCount;
-
-          // Table header background
-          doc.setFillColor(241, 245, 249); // slate-100
-          doc.rect(20, currentY - 5, pageWidth - 40, 10, "F");
-
-          // Headers
-          doc.setFontSize(9);
-          doc.setTextColor(30, 41, 59);
-          doc.setFont(undefined as any, "bold");
-          columns.slice(0, colCount).forEach((col, i) => {
-            doc.text(col.substring(0, 18), 22 + i * colWidth, currentY);
-          });
-          currentY += 10;
-
-          // Data rows
-          doc.setFont(undefined as any, "normal");
-          doc.setTextColor(51, 65, 85); // slate-700
-          data.slice(0, 25).forEach((row) => {
-            if (currentY > 270) {
-              doc.addPage();
-              currentY = 25;
-            }
-            columns.slice(0, colCount).forEach((col, i) => {
-              const value = String(row[col] ?? "").substring(0, 18);
-              doc.text(value, 22 + i * colWidth, currentY);
+      // Try to capture the rendered chart as an image
+      let chartEmbedded = false;
+      if (messageId) {
+        try {
+          const blob = await captureChartAsBlob(messageId);
+          if (blob) {
+            const dataUrl: string = await new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onloadend = () => resolve(reader.result as string);
+              reader.onerror = reject;
+              reader.readAsDataURL(blob);
             });
-            currentY += 7;
-          });
 
-          if (data.length > 25) {
-            currentY += 5;
-            doc.setFontSize(8);
-            doc.setTextColor(148, 163, 184); // slate-400
-            doc.text(`... and ${data.length - 25} more rows`, 20, currentY);
+            // Determine intrinsic aspect ratio from the captured image so we
+            // don't stretch the chart.
+            const { width: imgW, height: imgH } = await new Promise<{
+              width: number;
+              height: number;
+            }>((resolve) => {
+              const im = new window.Image();
+              im.onload = () => resolve({ width: im.width, height: im.height });
+              im.onerror = () => resolve({ width: 1024, height: 576 });
+              im.src = dataUrl;
+            });
+
+            const maxImgHeight = pageHeight - currentY - margin - 24;
+            const ratio = imgW / imgH || 16 / 9;
+            let drawW = contentWidth;
+            let drawH = drawW / ratio;
+            if (drawH > maxImgHeight) {
+              drawH = maxImgHeight;
+              drawW = drawH * ratio;
+            }
+            const drawX = margin + (contentWidth - drawW) / 2;
+            doc.addImage(
+              dataUrl,
+              "PNG",
+              drawX,
+              currentY,
+              drawW,
+              drawH,
+              undefined,
+              "FAST"
+            );
+            chartEmbedded = true;
           }
+        } catch (captureErr) {
+          console.warn("Chart capture for PDF failed:", captureErr);
         }
-      } else {
+      }
+
+      if (!chartEmbedded) {
         doc.setFontSize(10);
         doc.setTextColor(148, 163, 184);
-        doc.text("No data available for this visualization", 20, currentY);
+        doc.text(
+          "Chart preview unavailable — see data table on the next page.",
+          margin,
+          currentY + 20
+        );
       }
 
-      // Footer
-      doc.setFontSize(8);
-      doc.setTextColor(148, 163, 184);
-      doc.text(
-        `Generated by Coheus on ${new Date().toLocaleDateString()}`,
-        20,
-        285
-      );
-      doc.text("coheus.ai", pageWidth - 35, 285);
+      drawFooter();
+
+      // --- Page 2: Data table ---
+      const data = viz.data || [];
+      const hasTabularData =
+        data.length > 0 && Object.keys(data[0] || {}).length > 0;
+
+      if (hasTabularData) {
+        doc.addPage();
+        drawHeader(`${title || viz.title || "Visualization"} — Data`);
+
+        let tableY = margin + 56;
+        const columns = Object.keys(data[0]);
+        const colCount = Math.min(columns.length, 6);
+        const colWidth = contentWidth / colCount;
+
+        doc.setFillColor(241, 245, 249);
+        doc.rect(margin, tableY - 14, contentWidth, 22, "F");
+
+        doc.setFontSize(10);
+        doc.setTextColor(30, 41, 59);
+        doc.setFont(undefined as any, "bold");
+        columns.slice(0, colCount).forEach((col, i) => {
+          doc.text(col.substring(0, 22), margin + 6 + i * colWidth, tableY);
+        });
+        tableY += 14;
+
+        doc.setFont(undefined as any, "normal");
+        doc.setTextColor(51, 65, 85);
+        doc.setFontSize(9);
+        data.forEach((row) => {
+          if (tableY > pageHeight - margin - 20) {
+            drawFooter();
+            doc.addPage();
+            drawHeader(`${title || viz.title || "Visualization"} — Data`);
+            tableY = margin + 56;
+          }
+          columns.slice(0, colCount).forEach((col, i) => {
+            const value = String(row[col] ?? "").substring(0, 28);
+            doc.text(value, margin + 6 + i * colWidth, tableY);
+          });
+          tableY += 14;
+        });
+
+        drawFooter();
+      }
 
       doc.save(
         `${(title || viz.title || "visualization").replace(
@@ -1009,10 +1151,16 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
           "_"
         )}.pdf`
       );
+      setPreferredExportFormat("pdf");
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(CHAT_EXPORT_FORMAT_KEY, "pdf");
+      }
 
       toast({
         title: "Downloaded!",
-        description: "PDF report saved successfully.",
+        description: chartEmbedded
+          ? "PDF report saved with chart and data."
+          : "PDF report saved.",
       });
     } catch (error: any) {
       toast({
@@ -1024,11 +1172,15 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
   };
 
   /**
-   * Export visualization to PowerPoint (optional override for quick export)
+   * Export visualization to PowerPoint (16:9 widescreen, chart image on slide 1,
+   * data table on slide 2). Falls back to a data-only deck if the chart DOM
+   * hasn't rendered (e.g. quick-export before the bubble mounts).
    */
   const handleAddToPowerPoint = async (override?: ExportOverride) => {
     const viz = override?.visualization;
     const title = override?.title;
+    const desc = override?.description;
+    const messageId = override?.messageId;
     if (!viz) return;
 
     try {
@@ -1036,116 +1188,212 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
       const pres = new pptxgen();
       pres.author = "Coheus";
       pres.title = title || "Visualization";
+      // Use 16:9 widescreen (13.333" x 7.5") to match modern PPT templates and
+      // match the chart's natural aspect ratio.
+      pres.layout = "LAYOUT_WIDE";
 
-      const slide = pres.addSlide();
-      slide.addText(title || viz.title || "Visualization", {
-        x: 0.5,
-        y: 0.3,
-        w: 9,
-        fontSize: 28,
-        bold: true,
-        color: "1e293b",
-      });
-
+      const slideW = 13.333;
+      const slideH = 7.5;
+      const margin = 0.5;
+      const contentW = slideW - margin * 2;
+      const displayTitle = title || viz.title || "Visualization";
       const chartType = viz.type || "chart";
-      slide.addText(
-        `Chart Type: ${chartType.charAt(0).toUpperCase() + chartType.slice(1)}`,
-        {
-          x: 0.5,
-          y: 0.7,
-          w: 9,
-          fontSize: 12,
+      const chartTypeLabel = `Chart Type: ${
+        chartType.charAt(0).toUpperCase() + chartType.slice(1)
+      }`;
+
+      const addHeader = (s: any, headerTitle: string) => {
+        s.addText(headerTitle, {
+          x: margin,
+          y: 0.3,
+          w: contentW,
+          h: 0.6,
+          fontSize: 24,
+          bold: true,
+          color: "1e293b",
+          fontFace: "Arial",
+        });
+        s.addText(chartTypeLabel, {
+          x: margin,
+          y: 0.92,
+          w: contentW,
+          h: 0.3,
+          fontSize: 11,
           color: "64748b",
-        }
-      );
-
-      const desc = override?.description;
-      let tableY = 1.3;
-      if (desc) {
-        slide.addText(desc, {
-          x: 0.5,
-          y: 1.0,
-          w: 9,
-          fontSize: 14,
-          color: "475569",
+          fontFace: "Arial",
         });
-        tableY = 1.7;
-      }
+      };
 
-      const data = viz.data || [];
-      if (data.length > 0 && Object.keys(data[0]).length > 0) {
-        const columns = Object.keys(data[0]).slice(0, 5);
-
-        // Guard against empty columns
-        if (columns.length > 0) {
-          const colWidth = 9 / columns.length;
-          const rows = [
-            columns.map((col) => ({
-              text: col.substring(0, 20),
-              options: {
-                bold: true,
-                fill: { color: "f1f5f9" },
-                color: "1e293b",
-              },
-            })),
-            ...data.slice(0, 12).map((row) =>
-              columns.map((col) => ({
-                text: String(row[col] ?? "").substring(0, 25),
-                options: { color: "334155" },
-              }))
-            ),
-          ];
-
-          slide.addTable(rows as any, {
-            x: 0.5,
-            y: tableY,
-            w: 9,
-            colW: columns.map(() => colWidth),
-            border: { pt: 0.5, color: "e2e8f0" },
+      const addFooter = (s: any) => {
+        s.addText(
+          `Generated by Coheus | ${new Date().toLocaleDateString()}`,
+          {
+            x: margin,
+            y: slideH - 0.4,
+            w: contentW,
+            h: 0.3,
+            fontSize: 9,
+            color: "94a3b8",
             fontFace: "Arial",
-            fontSize: 10,
-          });
-
-          if (data.length > 12) {
-            slide.addText(`... and ${data.length - 12} more rows`, {
-              x: 0.5,
-              y: tableY + 2.8,
-              fontSize: 9,
-              color: "94a3b8",
-              italic: true,
-            });
           }
-        }
-      } else {
-        slide.addText("No data available for this visualization", {
-          x: 0.5,
-          y: tableY,
+        );
+      };
+
+      // --- Slide 1: Chart image ---
+      const chartSlide = pres.addSlide();
+      addHeader(chartSlide, displayTitle);
+
+      let chartTopY = 1.4;
+      if (desc) {
+        chartSlide.addText(desc, {
+          x: margin,
+          y: 1.3,
+          w: contentW,
+          h: 0.5,
           fontSize: 12,
-          color: "94a3b8",
+          color: "475569",
+          fontFace: "Arial",
         });
+        chartTopY = 1.9;
       }
 
-      // Footer
-      slide.addText(
-        `Generated by Coheus | ${new Date().toLocaleDateString()}`,
-        {
-          x: 0.5,
-          y: 5.2,
-          fontSize: 8,
-          color: "94a3b8",
+      let chartEmbedded = false;
+      if (messageId) {
+        try {
+          const blob = await captureChartAsBlob(messageId);
+          if (blob) {
+            const dataUrl: string = await new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onloadend = () => resolve(reader.result as string);
+              reader.onerror = reject;
+              reader.readAsDataURL(blob);
+            });
+
+            const { width: imgW, height: imgH } = await new Promise<{
+              width: number;
+              height: number;
+            }>((resolve) => {
+              const im = new window.Image();
+              im.onload = () => resolve({ width: im.width, height: im.height });
+              im.onerror = () => resolve({ width: 1600, height: 900 });
+              im.src = dataUrl;
+            });
+
+            const ratio = imgW / imgH || 16 / 9;
+            const maxW = contentW;
+            const maxH = slideH - chartTopY - 0.6; // leave room for footer
+            let drawW = maxW;
+            let drawH = drawW / ratio;
+            if (drawH > maxH) {
+              drawH = maxH;
+              drawW = drawH * ratio;
+            }
+            const drawX = margin + (contentW - drawW) / 2;
+            const drawY = chartTopY + (maxH - drawH) / 2;
+
+            chartSlide.addImage({
+              data: dataUrl,
+              x: drawX,
+              y: drawY,
+              w: drawW,
+              h: drawH,
+            });
+            chartEmbedded = true;
+          }
+        } catch (captureErr) {
+          console.warn("Chart capture for PPT failed:", captureErr);
         }
-      );
+      }
+
+      if (!chartEmbedded) {
+        chartSlide.addText(
+          "Chart preview unavailable — see data table on the next slide.",
+          {
+            x: margin,
+            y: chartTopY + 1,
+            w: contentW,
+            h: 0.5,
+            fontSize: 14,
+            color: "94a3b8",
+            italic: true,
+            align: "center",
+            fontFace: "Arial",
+          }
+        );
+      }
+
+      addFooter(chartSlide);
+
+      // --- Slide 2: Data table ---
+      const data = viz.data || [];
+      const hasTabularData =
+        data.length > 0 && Object.keys(data[0] || {}).length > 0;
+
+      if (hasTabularData) {
+        const tableSlide = pres.addSlide();
+        addHeader(tableSlide, `${displayTitle} — Data`);
+
+        const columns = Object.keys(data[0]).slice(0, 6);
+        const colWidth = contentW / columns.length;
+        const rows = [
+          columns.map((col) => ({
+            text: col.substring(0, 22),
+            options: {
+              bold: true,
+              fill: { color: "f1f5f9" },
+              color: "1e293b",
+              fontFace: "Arial",
+            },
+          })),
+          ...data.slice(0, 18).map((row) =>
+            columns.map((col) => ({
+              text: String(row[col] ?? "").substring(0, 32),
+              options: { color: "334155", fontFace: "Arial" },
+            }))
+          ),
+        ];
+
+        tableSlide.addTable(rows as any, {
+          x: margin,
+          y: 1.4,
+          w: contentW,
+          h: slideH - 1.4 - 0.6,
+          colW: columns.map(() => colWidth),
+          border: { pt: 0.5, color: "e2e8f0" },
+          fontFace: "Arial",
+          fontSize: 11,
+          valign: "middle",
+        });
+
+        if (data.length > 18) {
+          tableSlide.addText(`... and ${data.length - 18} more rows`, {
+            x: margin,
+            y: slideH - 0.7,
+            w: contentW,
+            h: 0.25,
+            fontSize: 9,
+            color: "94a3b8",
+            italic: true,
+            fontFace: "Arial",
+          });
+        }
+
+        addFooter(tableSlide);
+      }
 
       await pres.writeFile({
-        fileName: `${(title || viz.title || "visualization").replace(
-          /[^a-z0-9]/gi,
-          "_"
-        )}.pptx`,
+        fileName: `${displayTitle.replace(/[^a-z0-9]/gi, "_")}.pptx`,
       });
+      setPreferredExportFormat("ppt");
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(CHAT_EXPORT_FORMAT_KEY, "ppt");
+      }
 
       toast({
         title: "Downloaded!",
-        description: "PowerPoint presentation saved.",
+        description: chartEmbedded
+          ? "PowerPoint saved with chart and data slides."
+          : "PowerPoint saved.",
       });
     } catch (error: any) {
       toast({
@@ -1575,6 +1823,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
         aria-hidden="true"
       />
       <motion.div
+        data-testid="cohi-chat-panel"
         initial={{ x: 500, opacity: 0 }}
         animate={{ x: 0, opacity: 1 }}
         exit={{ x: 500, opacity: 0 }}
@@ -1646,7 +1895,9 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                 className="h-8 w-8 rounded-xl text-slate-500 hover:text-violet-700 dark:hover:text-violet-300 hover:bg-violet-100/80 dark:hover:bg-violet-500/20 transition-colors"
                 onClick={handleOpenInWorkbench}
                 disabled={isCreatingCanvas}
-                title="Open in Workbench"
+                title="Save all charts from this chat to a new Workbench canvas"
+                aria-label="Save all charts to Workbench"
+                data-testid="cohi-chat-save-all-to-workbench"
               >
                 {isCreatingCanvas ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -1726,9 +1977,11 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
           onNewSession={newSession}
         />
 
-        {/* Messages */}
-        <ScrollArea className="flex-1 p-4 sm:p-5">
-          <div className="space-y-5 min-w-0 pr-1">
+        {/* Messages – native scrollable div (not Radix ScrollArea) because Radix
+            wraps children in <div style="display:table;min-width:100%"> which lets
+            intrinsic-width children like Recharts bleed past the panel's right edge. */}
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-5 min-w-0">
+          <div className="space-y-5 min-w-0 w-full">
             <AnimatePresence>
               {messages.length === 0 && (
                 <motion.div
@@ -1770,6 +2023,9 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                 <EnhancedChatMessageBubble
                   message={message}
                   onSave={(viz, q, sql) => handleSaveToWorkbench(viz, q, sql)}
+                  onBuildInCanvas={(viz, q, sql) =>
+                    handleBuildInCanvas(viz, q, sql)
+                  }
                   onSpeak={speakResponse}
                   onDrilldown={handleDrilldown}
                   isFullscreen={isFullscreen}
@@ -1778,16 +2034,21 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                   onDesignOptionClick={(id, type) =>
                     setVizTypeOverrides((prev) => ({ ...prev, [id]: type }))
                   }
-                  onExportPDF={(viz) =>
-                    handleDownloadPDF({ visualization: viz, title: viz.title })
+                  onExportPDF={(viz, msgId) =>
+                    handleDownloadPDF({
+                      visualization: viz,
+                      title: viz.title,
+                      messageId: msgId,
+                    })
                   }
                   onExportExcel={(viz) =>
                     handleExportExcel({ visualization: viz, title: viz.title })
                   }
-                  onExportPPT={(viz) =>
+                  onExportPPT={(viz, msgId) =>
                     handleAddToPowerPoint({
                       visualization: viz,
                       title: viz.title,
+                      messageId: msgId,
                     })
                   }
                   onExportImage={(viz, msgId) =>
@@ -1811,13 +2072,14 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
                       title: viz.title,
                     })
                   }
+                  preferredExportFormat={preferredExportFormat}
                 />
               </motion.div>
             ))}
 
             <div ref={messagesEndRef} />
           </div>
-        </ScrollArea>
+        </div>
 
         {/* Suggestions */}
         {messages.length > 0 && suggestedQuestions.length > 0 && !isLoading && (
@@ -2195,6 +2457,11 @@ const VIZ_DESIGN_OPTIONS: {
 interface EnhancedChatMessageBubbleProps {
   message: ChatMessage;
   onSave: (visualization: VisualizationConfig, question: string, sqlQuery?: string) => void;
+  onBuildInCanvas: (
+    visualization: VisualizationConfig,
+    question: string,
+    sqlQuery?: string,
+  ) => void;
   onSpeak: (text: string) => void;
   onDrilldown: (item: any, level: string) => void;
   isFullscreen: boolean;
@@ -2204,18 +2471,20 @@ interface EnhancedChatMessageBubbleProps {
     messageId: string,
     type: VisualizationConfig["type"]
   ) => void;
-  onExportPDF?: (viz: VisualizationConfig) => void;
+  onExportPDF?: (viz: VisualizationConfig, messageId?: string) => void;
   onExportExcel?: (viz: VisualizationConfig) => void;
-  onExportPPT?: (viz: VisualizationConfig) => void;
+  onExportPPT?: (viz: VisualizationConfig, messageId?: string) => void;
   onExportImage?: (viz: VisualizationConfig, messageId?: string) => void;
   onCopyLink?: (viz: VisualizationConfig) => void;
   onEmailWithScreenshot?: (viz: VisualizationConfig, messageId: string) => void;
   onEmailWithLink?: (viz: VisualizationConfig) => void;
+  preferredExportFormat?: QuickExportFormat;
 }
 
 const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
   message,
   onSave,
+  onBuildInCanvas,
   onSpeak,
   onDrilldown,
   isFullscreen,
@@ -2229,6 +2498,7 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
   onCopyLink,
   onEmailWithScreenshot,
   onEmailWithLink,
+  preferredExportFormat = "ppt",
 }) => {
   const isUser = message.role === "user";
   const styling = !isUser ? getMessageStyling(message.content) : null;
@@ -2250,7 +2520,7 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
           isUser ? "max-w-[88%] w-auto" : "w-full max-w-[calc(100%-8px)]",
           isUser
             ? "bg-gradient-to-br from-blue-500 to-indigo-600 text-white px-4 py-2.5 shadow-sm"
-            : "border border-slate-200/80 dark:border-slate-700/80 bg-slate-50/80 dark:bg-slate-800/60 shadow-sm min-w-0 overflow-x-auto overflow-y-visible"
+            : "border border-slate-200/80 dark:border-slate-700/80 bg-slate-50/80 dark:bg-slate-800/60 shadow-sm min-w-0 overflow-x-hidden overflow-y-visible"
         )}
       >
         {message.isLoading ? (
@@ -2341,34 +2611,41 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
                 };
                 return (
                   <motion.div
-                    id={`cohi-viz-${message.id}`}
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.3 }}
                     className="mt-0 mx-0 mb-0 max-w-full min-w-0 border-t border-slate-200/60 dark:border-slate-700/60"
                   >
-                    <EnhancedVisualization
-                      config={{
-                        type: effectiveType,
-                        title: vizConfig.title || "Data Analysis",
-                        subtitle: "Click on data points to drill down",
-                        data: vizConfig.data || [],
-                        xKey: vizConfig.xKey || vizConfig.nameKey,
-                        yKey: vizConfig.yKey || vizConfig.valueKey,
-                        yKeys: vizConfig.yKeys,
-                        colors: vizConfig.colors,
-                        showLegend: vizConfig.showLegend,
-                        showGrid: vizConfig.showGrid,
-                        stacked: vizConfig.stacked,
-                        animated: true,
-                        drilldownEnabled: true,
-                        insights: [],
-                      }}
-                      height={isFullscreen ? 320 : 236}
-                      showInsights={false}
-                      onDrilldown={onDrilldown}
-                      compact={!isFullscreen}
-                    />
+                    {/* Capture target: wraps ONLY the chart card so PDF/PPT
+                        exports don't pick up the Design row, SQL toggle, or
+                        the Save & export footer buttons. */}
+                    <div
+                      id={`cohi-viz-${message.id}`}
+                      data-testid="cohi-chat-viz"
+                    >
+                      <EnhancedVisualization
+                        config={{
+                          type: effectiveType,
+                          title: vizConfig.title || "Data Analysis",
+                          subtitle: "Click on data points to drill down",
+                          data: vizConfig.data || [],
+                          xKey: vizConfig.xKey || vizConfig.nameKey,
+                          yKey: vizConfig.yKey || vizConfig.valueKey,
+                          yKeys: vizConfig.yKeys,
+                          colors: vizConfig.colors,
+                          showLegend: vizConfig.showLegend,
+                          showGrid: vizConfig.showGrid,
+                          stacked: vizConfig.stacked,
+                          animated: true,
+                          drilldownEnabled: true,
+                          insights: [],
+                        }}
+                        height={isFullscreen ? 320 : 236}
+                        showInsights={false}
+                        onDrilldown={onDrilldown}
+                        compact={!isFullscreen}
+                      />
+                    </div>
 
                     {/* Design options – click to change chart type */}
                     <div className="border-t border-slate-200/50 dark:border-slate-700/50 bg-slate-50/80 dark:bg-slate-800/40 px-3 py-2 overflow-x-auto">
@@ -2416,7 +2693,10 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
                       </div>
                     )}
 
-                    <div className="flex items-center justify-between gap-2 px-3 py-2.5 bg-slate-100/60 dark:bg-slate-800/30">
+                    <div
+                      className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 bg-slate-100/60 dark:bg-slate-800/30"
+                      data-testid="cohi-chat-viz-footer"
+                    >
                       <div className="flex items-center gap-2 min-w-0">
                         <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                           {effectiveType}
@@ -2425,23 +2705,106 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
                           AI
                         </span>
                       </div>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
+                      <div className="flex flex-wrap items-center gap-1.5 justify-end ml-auto max-w-full">
+                        <div className="flex items-center overflow-hidden rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm">
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="text-[11px] h-7 px-2.5 rounded-md text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white shrink-0"
+                            className="h-8 rounded-none px-2.5 text-[11px] text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
+                            onClick={() =>
+                              preferredExportFormat === "pdf"
+                                ? onExportPDF?.(vizConfig, message.id)
+                                : onExportPPT?.(vizConfig, message.id)
+                            }
+                            title={
+                              preferredExportFormat === "pdf"
+                                ? "Download PDF"
+                                : "Download PowerPoint"
+                            }
+                            data-testid="cohi-chat-export-primary"
+                            data-export-format={preferredExportFormat}
                           >
-                            <Save className="w-3 h-3 mr-1.5" />
-                            Save & export
-                            <ChevronDown className="w-3 h-3 ml-1" />
+                            {preferredExportFormat === "pdf" ? (
+                              <FileText className="w-3.5 h-3.5 mr-1.5 text-red-500 shrink-0" />
+                            ) : (
+                              <Presentation className="w-3.5 h-3.5 mr-1.5 text-orange-500 shrink-0" />
+                            )}
+                            {preferredExportFormat === "pdf" ? "PDF" : "PPT"}
                           </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent
-                          align="end"
-                          className="w-64 z-[10001]"
-                          sideOffset={4}
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-7 rounded-none border-l border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-900 dark:hover:text-white"
+                                title="Choose export format"
+                                data-testid="cohi-chat-export-menu-trigger"
+                              >
+                                <ChevronDown className="w-3.5 h-3.5" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent
+                              align="end"
+                              className="w-48 z-[10001]"
+                              sideOffset={4}
+                            >
+                              <DropdownMenuItem
+                                onClick={() =>
+                                  onExportPDF?.(vizConfig, message.id)
+                                }
+                                className="gap-2 py-2"
+                                data-testid="cohi-chat-export-pdf"
+                              >
+                                <FileText className="w-4 h-4 text-red-500 shrink-0" />
+                                <span>Download PDF</span>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() =>
+                                  onExportPPT?.(vizConfig, message.id)
+                                }
+                                className="gap-2 py-2"
+                                data-testid="cohi-chat-export-ppt"
+                              >
+                                <Presentation className="w-4 h-4 text-orange-500 shrink-0" />
+                                <span>Download PowerPoint</span>
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 rounded-md px-2.5 text-[11px] gap-1.5 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700"
+                          onClick={() =>
+                            onBuildInCanvas(
+                              vizConfig,
+                              message.content,
+                              message.sqlQuery,
+                            )
+                          }
+                          title="Edit this chart in the PowerPoint Editor (opens Workbench with slide 1 seeded)"
+                          aria-label="Edit in PowerPoint Editor"
+                          data-testid="cohi-chat-edit-in-ppt"
                         >
+                          <Presentation className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400 shrink-0" />
+                          Edit in PPT Editor
+                        </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-[11px] h-8 px-2.5 rounded-md text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white shrink-0"
+                              title="More save and export options"
+                            >
+                              <MoreHorizontal className="w-3.5 h-3.5" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent
+                            align="end"
+                            className="w-64 z-[10001]"
+                            sideOffset={4}
+                          >
                           <DropdownMenuLabel className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 px-2 py-1.5">
                             Save
                           </DropdownMenuLabel>
@@ -2457,25 +2820,11 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
                             Export
                           </DropdownMenuLabel>
                           <DropdownMenuItem
-                            onClick={() => onExportPDF?.(vizConfig)}
-                            className="gap-2 py-2"
-                          >
-                            <FileText className="w-4 h-4 text-red-500 shrink-0" />
-                            <span>Download PDF</span>
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
                             onClick={() => onExportExcel?.(vizConfig)}
                             className="gap-2 py-2"
                           >
                             <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
                             <span>Export Excel (CSV)</span>
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => onExportPPT?.(vizConfig)}
-                            className="gap-2 py-2"
-                          >
-                            <Presentation className="w-4 h-4 text-orange-500 shrink-0" />
-                            <span>Add to PowerPoint</span>
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() =>
@@ -2535,8 +2884,9 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
                               </DropdownMenuItem>
                             </DropdownMenuSubContent>
                           </DropdownMenuSub>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
                     </div>
                   </motion.div>
                 );

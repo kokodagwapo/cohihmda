@@ -233,6 +233,11 @@ export function SSOConfigSection() {
   // Dialog states
   const [metadataDialogOpen, setMetadataDialogOpen] = useState(false);
   const [testDialogOpen, setTestDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  // Controlled tab state so the active tab survives loading/re-renders
+  const [activeTab, setActiveTab] = useState('setup');
 
   // Load SSO config when tenant changes
   useEffect(() => {
@@ -435,6 +440,41 @@ export function SSOConfigSection() {
     }
   };
 
+  const handleDeleteConfig = async () => {
+    if (!config?.id) return;
+    setDeleting(true);
+    try {
+      await api.request(`/api/admin/sso/config/${config.id}${selectedTenantId ? `?tenant_id=${selectedTenantId}` : ''}`, {
+        method: 'DELETE',
+      });
+      toast({
+        title: 'SSO Configuration Deleted',
+        description: 'The SSO configuration and Cognito IdP have been removed. You can set up a new configuration.'
+      });
+      setDeleteDialogOpen(false);
+      setConfig(null);
+      setIdpEntityId('');
+      setIdpSsoUrl('');
+      setIdpSloUrl('');
+      setIdpCertificate('');
+      setOidcClientId('');
+      setOidcClientSecret('');
+      setOidcIssuerUrl('');
+      setEmailDomains([]);
+      setIsEnabled(false);
+      setActiveTab('setup');
+      loadSSOConfig();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to delete SSO configuration',
+        variant: 'destructive'
+      });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const handleToggleSSO = async (enabled: boolean) => {
     setSaving(true);
     try {
@@ -592,6 +632,17 @@ export function SSOConfigSection() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          {config?.id && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/20 border-rose-200 dark:border-rose-800"
+              onClick={() => setDeleteDialogOpen(true)}
+            >
+              <AlertTriangle className="h-4 w-4 mr-1.5" />
+              Delete Config
+            </Button>
+          )}
           <div className="flex items-center gap-2">
             <span className="text-sm text-slate-600 dark:text-slate-400">SSO Enabled</span>
             <Switch
@@ -643,13 +694,419 @@ export function SSOConfigSection() {
         </CardContent>
       </Card>
 
-      <Tabs defaultValue="provider" className="w-full">
-        <TabsList className="grid w-full grid-cols-4">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="grid w-full grid-cols-5">
+          <TabsTrigger value="setup">Setup Guide</TabsTrigger>
+          <TabsTrigger value="sp-info">SP Details</TabsTrigger>
           <TabsTrigger value="provider">Provider</TabsTrigger>
-          <TabsTrigger value="mapping">Attribute Mapping</TabsTrigger>
-          <TabsTrigger value="sp-info">SP Information</TabsTrigger>
-          <TabsTrigger value="history">Login History</TabsTrigger>
+          <TabsTrigger value="mapping">Mapping</TabsTrigger>
+          <TabsTrigger value="history">History</TabsTrigger>
         </TabsList>
+
+        {/* Setup Guide Tab */}
+        <TabsContent value="setup" className="space-y-6 mt-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <FileText className="h-5 w-5 text-blue-500" />
+                SSO Setup Guide
+              </CardTitle>
+              <CardDescription>
+                Follow these steps to configure Single Sign-On between your Identity Provider and Cohi.
+                This process typically takes 10–15 minutes.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-8">
+              <div className="space-y-2 p-4 border rounded-lg bg-slate-50 dark:bg-slate-800/50">
+                <Label className="text-base font-medium">Which Identity Provider does your organization use?</Label>
+                <Select value={provider} onValueChange={(v: SSOProvider) => setProvider(v)}>
+                  <SelectTrigger className="max-w-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(PROVIDERS).map(([key, info]) => (
+                      <SelectItem key={key} value={key}>
+                        <div className="flex items-center gap-2">
+                          <info.icon className={`h-4 w-4 ${info.color}`} />
+                          <span>{info.name}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Microsoft Entra ID Guide */}
+              {provider === 'azure_ad' && (
+                <div className="space-y-6">
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-sky-100 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400 flex items-center justify-center font-semibold text-sm">1</div>
+                    <div className="flex-1 pt-0.5">
+                      <h4 className="font-medium text-slate-900 dark:text-white mb-2">Create an Enterprise Application in Entra</h4>
+                      <ol className="list-decimal list-inside space-y-1 text-sm text-slate-600 dark:text-slate-400">
+                        <li>Sign in to the <strong>Microsoft Entra Admin Center</strong> (entra.microsoft.com)</li>
+                        <li>Navigate to <strong>Enterprise applications</strong> → <strong>New application</strong></li>
+                        <li>Click <strong>Create your own application</strong></li>
+                        <li>Name it <strong>"Cohi"</strong> and select <strong>"Integrate any other application you don't find in the gallery"</strong></li>
+                        <li>Click <strong>Create</strong></li>
+                      </ol>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-sky-100 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400 flex items-center justify-center font-semibold text-sm">2</div>
+                    <div className="flex-1 pt-0.5">
+                      <h4 className="font-medium text-slate-900 dark:text-white mb-2">Enable SAML Single Sign-On</h4>
+                      <ol className="list-decimal list-inside space-y-1 text-sm text-slate-600 dark:text-slate-400">
+                        <li>In the Cohi app overview, click <strong>Single sign-on</strong> in the left menu</li>
+                        <li>Select <strong>SAML</strong> as the sign-on method</li>
+                      </ol>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-sky-100 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400 flex items-center justify-center font-semibold text-sm">3</div>
+                    <div className="flex-1 pt-0.5">
+                      <h4 className="font-medium text-slate-900 dark:text-white mb-2">Configure Basic SAML Settings</h4>
+                      <p className="text-sm text-slate-600 dark:text-slate-400 mb-2">
+                        In the <strong>Basic SAML Configuration</strong> section, click <strong>Edit</strong> and enter the values below. You can copy them from the <strong>SP Details</strong> tab.
+                      </p>
+                      <div className="bg-white dark:bg-slate-900 border rounded-lg p-3 space-y-3 text-sm">
+                        <div>
+                          <span className="text-slate-500 text-xs">Identifier (Entity ID)</span>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <code className="text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded flex-1 truncate">{config?.sp_entity_id || 'Loading...'}</code>
+                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => copyToClipboard(config?.sp_entity_id || '', 'Entity ID')}>
+                              <Copy className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 text-xs">Reply URL (Assertion Consumer Service URL)</span>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <code className="text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded flex-1 truncate">{config?.sp_acs_url || 'Loading...'}</code>
+                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => copyToClipboard(config?.sp_acs_url || '', 'ACS URL')}>
+                              <Copy className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-sky-100 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400 flex items-center justify-center font-semibold text-sm">4</div>
+                    <div className="flex-1 pt-0.5">
+                      <h4 className="font-medium text-slate-900 dark:text-white mb-2">Set the Name ID Format</h4>
+                      <ol className="list-decimal list-inside space-y-1 text-sm text-slate-600 dark:text-slate-400">
+                        <li>Still in the SAML setup, click <strong>Edit</strong> next to <strong>Attributes & Claims</strong></li>
+                        <li>Click the <strong>Unique User Identifier (Name ID)</strong> claim at the top</li>
+                        <li>Set <strong>Name identifier format</strong> to <strong>Email address</strong></li>
+                        <li>Set <strong>Source attribute</strong> to <strong>user.userprincipalname</strong> (or <strong>user.mail</strong> if your UPNs differ from email addresses)</li>
+                        <li>Click <strong>Save</strong></li>
+                      </ol>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-sky-100 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400 flex items-center justify-center font-semibold text-sm">5</div>
+                    <div className="flex-1 pt-0.5">
+                      <h4 className="font-medium text-slate-900 dark:text-white mb-2">Download Federation Metadata from Entra</h4>
+                      <ol className="list-decimal list-inside space-y-1 text-sm text-slate-600 dark:text-slate-400">
+                        <li>Scroll to the <strong>SAML Certificates</strong> section</li>
+                        <li>Copy the <strong>App Federation Metadata URL</strong>, or click <strong>Download</strong> next to <strong>Federation Metadata XML</strong></li>
+                      </ol>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-sky-100 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400 flex items-center justify-center font-semibold text-sm">6</div>
+                    <div className="flex-1 pt-0.5">
+                      <h4 className="font-medium text-slate-900 dark:text-white mb-2">Upload Metadata to Cohi</h4>
+                      <ol className="list-decimal list-inside space-y-1 text-sm text-slate-600 dark:text-slate-400">
+                        <li>Switch to the <strong>Provider</strong> tab above</li>
+                        <li>Add your email domain(s) (e.g., <strong>yourcompany.com</strong>)</li>
+                        <li>Click <strong>Upload Metadata</strong> and paste the Federation Metadata URL or the XML content</li>
+                        <li>Click <strong>Save Configuration</strong></li>
+                      </ol>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-sky-100 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400 flex items-center justify-center font-semibold text-sm">7</div>
+                    <div className="flex-1 pt-0.5">
+                      <h4 className="font-medium text-slate-900 dark:text-white mb-2">Assign Users in Entra</h4>
+                      <ol className="list-decimal list-inside space-y-1 text-sm text-slate-600 dark:text-slate-400">
+                        <li>Back in Entra, go to the Cohi app's <strong>Users and groups</strong></li>
+                        <li>Click <strong>Add user/group</strong> and assign the users or groups who need SSO access</li>
+                      </ol>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-semibold text-sm">&#10003;</div>
+                    <div className="flex-1 pt-0.5">
+                      <h4 className="font-medium text-slate-900 dark:text-white mb-2">Test the Connection</h4>
+                      <p className="text-sm text-slate-600 dark:text-slate-400">
+                        Switch to the <strong>Provider</strong> tab and click <strong>Test Connection</strong>. Sign in with an assigned Entra user to verify everything works.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* CyberArk Identity Guide */}
+              {provider === 'cyberark' && (
+                <div className="space-y-6">
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-teal-100 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400 flex items-center justify-center font-semibold text-sm">1</div>
+                    <div className="flex-1 pt-0.5">
+                      <h4 className="font-medium text-slate-900 dark:text-white mb-2">Add a SAML Web Application</h4>
+                      <ol className="list-decimal list-inside space-y-1 text-sm text-slate-600 dark:text-slate-400">
+                        <li>Sign in to the <strong>CyberArk Identity Admin Portal</strong></li>
+                        <li>Go to <strong>Apps</strong> → <strong>Web Apps</strong></li>
+                        <li>Click <strong>Add Web Apps</strong> and search for <strong>SAML</strong></li>
+                        <li>Select <strong>Generic SAML</strong> and click <strong>Add</strong></li>
+                        <li>Name the application <strong>"Cohi"</strong></li>
+                      </ol>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-teal-100 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400 flex items-center justify-center font-semibold text-sm">2</div>
+                    <div className="flex-1 pt-0.5">
+                      <h4 className="font-medium text-slate-900 dark:text-white mb-2">Configure SAML Trust Settings</h4>
+                      <p className="text-sm text-slate-600 dark:text-slate-400 mb-2">
+                        In the app's <strong>Trust</strong> tab, enter:
+                      </p>
+                      <div className="bg-white dark:bg-slate-900 border rounded-lg p-3 space-y-3 text-sm">
+                        <div>
+                          <span className="text-slate-500 text-xs">SP Entity ID / Audience</span>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <code className="text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded flex-1 truncate">{config?.sp_entity_id || 'Loading...'}</code>
+                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => copyToClipboard(config?.sp_entity_id || '', 'Entity ID')}>
+                              <Copy className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 text-xs">Assertion Consumer Service (ACS) URL</span>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <code className="text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded flex-1 truncate">{config?.sp_acs_url || 'Loading...'}</code>
+                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => copyToClipboard(config?.sp_acs_url || '', 'ACS URL')}>
+                              <Copy className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 text-xs">Name ID Format</span>
+                          <code className="text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded block mt-0.5">emailAddress</code>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-teal-100 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400 flex items-center justify-center font-semibold text-sm">3</div>
+                    <div className="flex-1 pt-0.5">
+                      <h4 className="font-medium text-slate-900 dark:text-white mb-2">Download IdP Metadata</h4>
+                      <ol className="list-decimal list-inside space-y-1 text-sm text-slate-600 dark:text-slate-400">
+                        <li>In the <strong>Trust</strong> tab, click <strong>Download Metadata</strong></li>
+                        <li>Save the metadata XML file</li>
+                      </ol>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-teal-100 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400 flex items-center justify-center font-semibold text-sm">4</div>
+                    <div className="flex-1 pt-0.5">
+                      <h4 className="font-medium text-slate-900 dark:text-white mb-2">Upload Metadata to Cohi</h4>
+                      <ol className="list-decimal list-inside space-y-1 text-sm text-slate-600 dark:text-slate-400">
+                        <li>Switch to the <strong>Provider</strong> tab above</li>
+                        <li>Add your email domain(s)</li>
+                        <li>Click <strong>Upload Metadata</strong> and paste or upload the XML</li>
+                        <li>Click <strong>Save Configuration</strong></li>
+                      </ol>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-teal-100 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400 flex items-center justify-center font-semibold text-sm">5</div>
+                    <div className="flex-1 pt-0.5">
+                      <h4 className="font-medium text-slate-900 dark:text-white mb-2">Assign Users / Roles</h4>
+                      <ol className="list-decimal list-inside space-y-1 text-sm text-slate-600 dark:text-slate-400">
+                        <li>In CyberArk, go to the Cohi app's <strong>Permissions</strong></li>
+                        <li>Add the roles or users who need SSO access</li>
+                      </ol>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-semibold text-sm">&#10003;</div>
+                    <div className="flex-1 pt-0.5">
+                      <h4 className="font-medium text-slate-900 dark:text-white mb-2">Test the Connection</h4>
+                      <p className="text-sm text-slate-600 dark:text-slate-400">
+                        Switch to the <strong>Provider</strong> tab and click <strong>Test Connection</strong>.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Generic SAML / Okta Guide */}
+              {(provider === 'saml' || provider === 'okta') && (
+                <div className="space-y-6">
+                  <Alert>
+                    <Shield className="h-4 w-4" />
+                    <AlertDescription>
+                      {provider === 'okta'
+                        ? 'These steps cover setting up Cohi as a SAML app in Okta. Refer to Okta documentation for specific menu locations.'
+                        : 'These are general steps for any SAML 2.0 Identity Provider. Refer to your IdP\'s documentation for specific details.'
+                      }
+                    </AlertDescription>
+                  </Alert>
+
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center font-semibold text-sm">1</div>
+                    <div className="flex-1 pt-0.5">
+                      <h4 className="font-medium text-slate-900 dark:text-white mb-2">Create a SAML Application in your IdP</h4>
+                      <p className="text-sm text-slate-600 dark:text-slate-400">
+                        In your Identity Provider's admin console, create a new SAML 2.0 application for Cohi.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center font-semibold text-sm">2</div>
+                    <div className="flex-1 pt-0.5">
+                      <h4 className="font-medium text-slate-900 dark:text-white mb-2">Enter the SP Configuration</h4>
+                      <p className="text-sm text-slate-600 dark:text-slate-400 mb-2">
+                        Configure the application with these Service Provider details:
+                      </p>
+                      <div className="bg-white dark:bg-slate-900 border rounded-lg p-3 space-y-3 text-sm">
+                        <div>
+                          <span className="text-slate-500 text-xs">Entity ID / Audience</span>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <code className="text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded flex-1 truncate">{config?.sp_entity_id || 'Loading...'}</code>
+                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => copyToClipboard(config?.sp_entity_id || '', 'Entity ID')}>
+                              <Copy className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 text-xs">ACS / Reply URL</span>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <code className="text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded flex-1 truncate">{config?.sp_acs_url || 'Loading...'}</code>
+                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => copyToClipboard(config?.sp_acs_url || '', 'ACS URL')}>
+                              <Copy className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 text-xs">Name ID Format</span>
+                          <code className="text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded block mt-0.5">Email Address (emailAddress)</code>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center font-semibold text-sm">3</div>
+                    <div className="flex-1 pt-0.5">
+                      <h4 className="font-medium text-slate-900 dark:text-white mb-2">Download IdP Metadata</h4>
+                      <p className="text-sm text-slate-600 dark:text-slate-400">
+                        Download the Identity Provider's metadata XML or copy the metadata URL from your IdP's SAML configuration page.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center font-semibold text-sm">4</div>
+                    <div className="flex-1 pt-0.5">
+                      <h4 className="font-medium text-slate-900 dark:text-white mb-2">Upload Metadata to Cohi</h4>
+                      <ol className="list-decimal list-inside space-y-1 text-sm text-slate-600 dark:text-slate-400">
+                        <li>Switch to the <strong>Provider</strong> tab above</li>
+                        <li>Add your email domain(s)</li>
+                        <li>Click <strong>Upload Metadata</strong> and provide the URL or XML</li>
+                        <li>Click <strong>Save Configuration</strong></li>
+                      </ol>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center font-semibold text-sm">5</div>
+                    <div className="flex-1 pt-0.5">
+                      <h4 className="font-medium text-slate-900 dark:text-white mb-2">Assign Users</h4>
+                      <p className="text-sm text-slate-600 dark:text-slate-400">
+                        In your IdP, assign users or groups to the Cohi application.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-semibold text-sm">&#10003;</div>
+                    <div className="flex-1 pt-0.5">
+                      <h4 className="font-medium text-slate-900 dark:text-white mb-2">Test the Connection</h4>
+                      <p className="text-sm text-slate-600 dark:text-slate-400">
+                        Switch to the <strong>Provider</strong> tab and click <strong>Test Connection</strong>.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* OIDC / Google Guide */}
+              {(provider === 'oidc' || provider === 'google') && (
+                <div className="space-y-6">
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 flex items-center justify-center font-semibold text-sm">1</div>
+                    <div className="flex-1 pt-0.5">
+                      <h4 className="font-medium text-slate-900 dark:text-white mb-2">Register an OAuth Application</h4>
+                      <p className="text-sm text-slate-600 dark:text-slate-400">
+                        {provider === 'google'
+                          ? 'In the Google Cloud Console, create an OAuth 2.0 Client ID under APIs & Services → Credentials.'
+                          : 'In your Identity Provider, register a new OpenID Connect (OIDC) application.'
+                        }
+                      </p>
+                      <div className="bg-white dark:bg-slate-900 border rounded-lg p-3 text-sm mt-2">
+                        <span className="text-slate-500 text-xs">Redirect URI</span>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <code className="text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded flex-1 truncate">{config?.sp_acs_url || 'Loading...'}</code>
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => copyToClipboard(config?.sp_acs_url || '', 'Redirect URI')}>
+                            <Copy className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 flex items-center justify-center font-semibold text-sm">2</div>
+                    <div className="flex-1 pt-0.5">
+                      <h4 className="font-medium text-slate-900 dark:text-white mb-2">Configure in Cohi</h4>
+                      <ol className="list-decimal list-inside space-y-1 text-sm text-slate-600 dark:text-slate-400">
+                        <li>Switch to the <strong>Provider</strong> tab above</li>
+                        <li>Enter the <strong>Issuer URL</strong>, <strong>Client ID</strong>, and <strong>Client Secret</strong> from your provider</li>
+                        <li>Add your email domain(s)</li>
+                        <li>Click <strong>Save Configuration</strong></li>
+                      </ol>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-semibold text-sm">&#10003;</div>
+                    <div className="flex-1 pt-0.5">
+                      <h4 className="font-medium text-slate-900 dark:text-white mb-2">Test the Connection</h4>
+                      <p className="text-sm text-slate-600 dark:text-slate-400">
+                        Switch to the <strong>Provider</strong> tab and click <strong>Test Connection</strong>.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* Provider Tab */}
         <TabsContent value="provider" className="space-y-6 mt-6">
@@ -960,16 +1417,17 @@ export function SSOConfigSection() {
         <TabsContent value="sp-info" className="space-y-6 mt-6">
           <Card>
             <CardHeader>
-              <CardTitle className="text-lg">Service Provider Information</CardTitle>
+              <CardTitle className="text-lg">Service Provider (SP) Details</CardTitle>
               <CardDescription>
-                Provide these values to the client's IT team when they configure Cohi in their Identity Provider (Entra, CyberArk, etc.)
+                Copy these values into your Identity Provider when creating the SAML application for Cohi.
+                These are the first things you need before configuring anything else.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <Alert>
                 <Shield className="h-4 w-4" />
                 <AlertDescription>
-                  These values point to your Cognito User Pool. They are the same for all tenants — each tenant is differentiated by their own IdP configuration within the pool.
+                  Enter these values into your Identity Provider (Entra, CyberArk, Okta, etc.) when setting up the SAML enterprise application. They tell your IdP where to send authentication responses.
                 </AlertDescription>
               </Alert>
 
@@ -1006,16 +1464,25 @@ export function SSOConfigSection() {
               <div className="space-y-2">
                 <Label>Name ID Format</Label>
                 <div className="flex items-center gap-2">
-                  <Input value="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress" readOnly className="font-mono text-sm" />
+                  <Input value="Email Address" readOnly className="text-sm font-medium" />
                   <Button
                     variant="outline"
                     size="icon"
-                    onClick={() => copyToClipboard('urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress', 'Name ID Format')}
+                    onClick={() => copyToClipboard('urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress', 'Name ID Format URN')}
+                    title="Copy technical SAML URN"
                   >
                     <Copy className="h-4 w-4" />
                   </Button>
                 </div>
-                <p className="text-xs text-slate-500">The IdP should send the user's email address as the Name ID.</p>
+                <div className="text-xs text-slate-500 dark:text-slate-400 space-y-1.5 mt-1">
+                  <p>The IdP must send the user's email address as the Name ID. How to configure this varies by provider:</p>
+                  <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3 space-y-1.5">
+                    <p><strong>Microsoft Entra ID:</strong> Under <em>Attributes & Claims</em>, click the <em>Unique User Identifier (Name ID)</em> claim. Set the format to <strong>"Email address"</strong> and the source to <strong>user.userprincipalname</strong>.</p>
+                    <p><strong>CyberArk Identity:</strong> In the Trust settings, set the Name ID format to <strong>"emailAddress"</strong>.</p>
+                    <p><strong>Okta:</strong> Set the Name ID format to <strong>"EmailAddress"</strong> and the application username to <strong>"Email"</strong>.</p>
+                    <p><strong>Other IdPs:</strong> Select "Email" or "emailAddress" as the Name ID format. The technical SAML URN is <code className="bg-slate-100 dark:bg-slate-700 px-1 rounded">urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress</code>.</p>
+                  </div>
+                </div>
               </div>
 
               <div className="pt-4 border-t flex items-center gap-3">
@@ -1188,6 +1655,44 @@ export function SSOConfigSection() {
                   <ExternalLink className="h-4 w-4 mr-2" />
                   Start Test
                 </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Configuration Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete SSO Configuration</DialogTitle>
+            <DialogDescription>
+              This will permanently remove the SSO configuration and the associated Identity Provider from Cognito.
+            </DialogDescription>
+          </DialogHeader>
+
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription>
+              <strong>This action cannot be undone.</strong> Users who sign in via SSO will no longer be able to authenticate until a new configuration is created.
+              {emailDomains.length > 0 && (
+                <span className="block mt-1">Affected domains: <strong>{emailDomains.join(', ')}</strong></span>
+              )}
+            </AlertDescription>
+          </Alert>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDeleteConfig} disabled={deleting}>
+              {deleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                'Delete Configuration'
               )}
             </Button>
           </DialogFooter>

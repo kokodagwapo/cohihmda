@@ -959,6 +959,8 @@ export interface WorkbenchCanvasProps {
   onDirtyChange?: (dirty: boolean) => void;
   /** Whether the current user is the owner of this canvas (undefined = assume owner for new canvases) */
   isOwner?: boolean;
+  /** When true, auto-open the Report Builder after the canvas has loaded items. */
+  autoOpenReportBuilder?: boolean;
 }
 
 export function WorkbenchCanvas({
@@ -968,6 +970,7 @@ export function WorkbenchCanvas({
   tenantId,
   onDirtyChange,
   isOwner: isOwnerProp,
+  autoOpenReportBuilder = false,
 }: WorkbenchCanvasProps) {
   const {
     items,
@@ -3480,6 +3483,26 @@ export function WorkbenchCanvas({
 
   // ---- Report Builder mode toggle ----
   const [showReportBuilder, setShowReportBuilder] = useState(false);
+  const autoOpenedReportBuilderRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!autoOpenReportBuilder) return;
+    if (canvasLoading) return;
+    if (items.length === 0) return;
+
+    const currentKey = loadCanvasId ?? canvasId ?? draftScopeId;
+    if (autoOpenedReportBuilderRef.current === currentKey) return;
+
+    autoOpenedReportBuilderRef.current = currentKey;
+    setShowReportBuilder(true);
+  }, [
+    autoOpenReportBuilder,
+    canvasLoading,
+    items.length,
+    loadCanvasId,
+    canvasId,
+    draftScopeId,
+  ]);
 
   const getShareUrl = useCallback(() => {
     if (!canvasId) return "";

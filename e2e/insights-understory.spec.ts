@@ -82,6 +82,142 @@ async function suppressWelcomeTour(page: Page) {
   });
 }
 
+async function seedInsightsVisibility(page: Page) {
+  // Defense-in-depth for the dashboard-visibility race:
+  // - useDashboardVisibility() first tries GET /api/user/preferences/dashboardVisibility
+  // - on any failure / timeout it falls back to localStorage('dashboardVisibility')
+  //
+  // In the critical suite, the shared test user can carry a persisted server
+  // preference or localStorage snapshot where CohiInsights is hidden. We
+  // already mock the server response below, but if that request errors or is
+  // delayed the hook can still briefly hydrate from localStorage and keep the
+  // section out of the DOM long enough for the spec to fail at `#CohiInsights`.
+  //
+  // Seed the same known-good value in localStorage before page scripts run so
+  // both the primary path and the fallback path agree that CohiInsights is on.
+  await page.addInitScript(() => {
+    try {
+      window.localStorage.setItem(
+        "dashboardVisibility",
+        JSON.stringify({
+          executiveDashboard: true,
+          industryNews: true,
+          CohiInsights: true,
+          leaderboard: true,
+          topTiering: true,
+          closingFalloutForecast: true,
+          trends: true,
+          forecasting: true,
+          kpiReports: true,
+        }),
+      );
+    } catch {
+      /* storage access denied */
+    }
+  });
+}
+
+async function confirmInsightsVisibilityInputs(page: Page) {
+  // Explicitly prove the two inputs that control whether Dashboard mounts
+  // `#CohiInsights` are set the way this test expects:
+  // 1. localStorage fallback
+  // 2. GET /api/user/preferences/dashboardVisibility
+  //
+  // If both are true and the anchor still doesn't mount, the failure is no
+  // longer attributable to the test user's saved preference state.
+  await expect
+    .poll(
+      async () =>
+        await page.evaluate(() => {
+          try {
+            const raw = window.localStorage.getItem("dashboardVisibility");
+            const parsed = raw ? JSON.parse(raw) : null;
+            return parsed?.CohiInsights ?? null;
+          } catch {
+            return null;
+          }
+        }),
+      { message: "expected localStorage dashboardVisibility.CohiInsights === true" },
+    )
+    .toBe(true);
+
+  await expect
+    .poll(
+      async () =>
+        await page.evaluate(async () => {
+          try {
+            const res = await fetch("/api/user/preferences/dashboardVisibility", {
+              credentials: "include",
+            });
+            const json = await res.json();
+            return json?.preference_value?.CohiInsights ?? null;
+          } catch {
+            return null;
+          }
+        }),
+      { message: "expected dashboardVisibility API to return CohiInsights === true" },
+    )
+    .toBe(true);
+}
+
+async function ensureInsightsSectionVisible(page: Page) {
+  // In the full critical suite on dev, `/insights` can intermittently land in
+  // a first-load state where the route is correct but the `#CohiInsights`
+  // anchor never mounts. The same spec often passes on Playwright retry with
+  // no code changes, which strongly suggests a page-hydration race rather than
+  // a real product regression.
+  //
+  // Make that recovery deterministic here: try the load flow, and if the
+  // anchor is still absent, reseed the visibility preference and reload once.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (attempt === 0) {
+      await page.goto("/insights", { waitUntil: "domcontentloaded" });
+    } else {
+      await page.evaluate(() => {
+        try {
+          window.localStorage.setItem(
+            "dashboardVisibility",
+            JSON.stringify({
+              executiveDashboard: true,
+              industryNews: true,
+              CohiInsights: true,
+              leaderboard: true,
+              topTiering: true,
+              closingFalloutForecast: true,
+              trends: true,
+              forecasting: true,
+              kpiReports: true,
+            }),
+          );
+        } catch {
+          /* storage access denied */
+        }
+      });
+      await page.reload({ waitUntil: "domcontentloaded" });
+    }
+
+    await expect(page).toHaveURL(/\/insights/);
+    await confirmInsightsVisibilityInputs(page);
+    await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
+    await dismissBlockingOverlays(page);
+    await page.waitForTimeout(750);
+    await dismissBlockingOverlays(page);
+
+    const insightsSection = page.locator("#CohiInsights");
+    const visible = await insightsSection
+      .isVisible({ timeout: 4_000 })
+      .catch(() => false);
+    if (visible) {
+      return insightsSection;
+    }
+  }
+
+  // Final strict assertion so failure output still points to the missing anchor.
+  const insightsSection = page.locator("#CohiInsights");
+  await expect(insightsSection).toBeVisible({ timeout: 15_000 });
+  return insightsSection;
+}
+
 async function mockInsightsApis(page: Page) {
   await page.route("**/api/dashboard/insights?**", async (route) => {
     await route.fulfill({
@@ -105,6 +241,47 @@ async function mockInsightsApis(page: Page) {
       }),
     });
   });
+
+  // The Dashboard renders <div id="CohiInsights"> only if
+  // `dashboardVisibility.CohiInsights` is truthy. That state is loaded from
+  // /api/user/preferences/dashboardVisibility — if the CI test user has
+  // previously saved the section as hidden (or the endpoint stalls in CI),
+  // the #CohiInsights anchor never appears in the DOM and every assertion
+  // in this file times out on "element not found". Force a known-good
+  // default here so this test doesn't depend on dev tenant preference state.
+  const defaultVisibilityPreference = {
+    preference_value: {
+      executiveDashboard: true,
+      industryNews: true,
+      CohiInsights: true,
+      leaderboard: true,
+      topTiering: true,
+      closingFalloutForecast: true,
+      trends: true,
+      forecasting: true,
+      kpiReports: true,
+    },
+  };
+  await page.route(
+    /\/api\/user\/preferences\/dashboardVisibility(\?|$)/,
+    async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(defaultVisibilityPreference),
+        });
+        return;
+      }
+      // PUT writes from the real code path are harmless to swallow in a mocked
+      // environment — ack with the same body so nothing upstream throws.
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(defaultVisibilityPreference),
+      });
+    },
+  );
 }
 
 function insightCard(page: Page, headline: string) {
@@ -137,19 +314,12 @@ test.describe("Insights Understory Readability (COHI-328)", () => {
 
   test.beforeEach(async ({ userPage }) => {
     await suppressWelcomeTour(userPage);
+    await seedInsightsVisibility(userPage);
     await mockInsightsApis(userPage);
-    await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
-    await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
-    await dismissBlockingOverlays(userPage);
-    await userPage.waitForTimeout(750);
-    await dismissBlockingOverlays(userPage);
-
-    // Wait for the mocked insights to actually render before any test
-    // starts querying cards. This avoids races with component loading
-    // states and the collapsed-carousel auto-rotation that can briefly
-    // hide a headline while the other is on screen.
-    const insightsSection = userPage.locator("#CohiInsights");
-    await expect(insightsSection).toBeVisible({ timeout: 15_000 });
+    // Wait for the mocked insights to actually render before any test starts
+    // querying cards. This helper also recovers once from the intermittent
+    // first-load /insights hydration race seen only in the full critical suite.
+    const insightsSection = await ensureInsightsSectionVisible(userPage);
     await expect(
       insightsSection.getByText(BULLET_HEADLINE, { exact: true }),
     ).toBeVisible({ timeout: 15_000 });

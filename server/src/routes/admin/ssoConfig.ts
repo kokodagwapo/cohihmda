@@ -143,6 +143,7 @@ function parseSAMLMetadata(xml: string): ParsedSAMLMetadata {
   const parser = new XMLParser({
     ignoreAttributes: false,
     attributeNamePrefix: "@_",
+    removeNSPrefix: true,
   });
   
   const parsed = parser.parse(xml);
@@ -229,10 +230,12 @@ function parseSAMLMetadata(xml: string): ParsedSAMLMetadata {
 function generateCognitoIdpName(tenantSlug: string, providerType: string): string {
   const sanitized = tenantSlug.replace(/[^a-zA-Z0-9]/g, "");
   const suffix = providerType === "oidc" ? "OIDC" : "SAML";
-  // Add a short hash of the full slug to prevent collisions (e.g., "acme" vs "acmecorp")
   const hash = crypto.createHash("md5").update(tenantSlug).digest("hex").substring(0, 4);
-  const name = `${sanitized}-${suffix}-${hash}`.substring(0, 32);
-  return name;
+  // Reserve space for the suffix and hash so the name doesn't end with a dangling hyphen
+  // Format: {slug}-{SAML|OIDC}-{hash}  e.g. "acmecorp-SAML-a1b2" (max 32 chars)
+  const reservedLen = suffix.length + hash.length + 2; // 2 hyphens
+  const slug = sanitized.substring(0, 32 - reservedLen);
+  return `${slug}-${suffix}-${hash}`;
 }
 
 /**
@@ -243,6 +246,8 @@ async function createOrUpdateCognitoIdp(
   providerType: ProviderType,
   config: {
     metadata?: ParsedSAMLMetadata;
+    metadataUrl?: string;
+    metadataXml?: string;
     oidcConfig?: {
       clientId: string;
       clientSecret: string;
@@ -290,13 +295,24 @@ async function createOrUpdateCognitoIdp(
     if (!config.metadata) {
       throw new Error("SAML metadata required");
     }
-    providerDetails = {
-      MetadataURL: "", // We'll use MetadataFile instead
-      IDPSignout: config.metadata.sloUrl ? "true" : "false",
-    };
-    // Cognito requires either MetadataURL or MetadataFile
-    // For parsed metadata, we reconstruct minimal XML
-    const metadataXml = `<?xml version="1.0"?>
+    // Pass the ORIGINAL metadata to Cognito so it gets authentic certificates.
+    // Prefer MetadataURL (Cognito auto-refreshes on cert rotation), fall back to
+    // the original XML, and only reconstruct as a last resort.
+    if (config.metadataUrl) {
+      providerDetails = {
+        MetadataURL: config.metadataUrl,
+        IDPSignout: config.metadata.sloUrl ? "true" : "false",
+      };
+      logInfo("[SSOConfig] Using MetadataURL for Cognito IdP", { url: config.metadataUrl });
+    } else if (config.metadataXml) {
+      providerDetails = {
+        MetadataFile: config.metadataXml,
+        IDPSignout: config.metadata.sloUrl ? "true" : "false",
+      };
+      logInfo("[SSOConfig] Using original MetadataFile for Cognito IdP", { length: config.metadataXml.length });
+    } else {
+      logWarn("[SSOConfig] No original metadata available, reconstructing XML");
+      const metadataXml = `<?xml version="1.0"?>
 <EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" entityID="${config.metadata.entityId}">
   <IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
     <KeyDescriptor use="signing">
@@ -310,11 +326,11 @@ async function createOrUpdateCognitoIdp(
     ${config.metadata.sloUrl ? `<SingleLogoutService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="${config.metadata.sloUrl}"/>` : ""}
   </IDPSSODescriptor>
 </EntityDescriptor>`;
-    
-    providerDetails = {
-      MetadataFile: metadataXml,
-      IDPSignout: config.metadata.sloUrl ? "true" : "false",
-    };
+      providerDetails = {
+        MetadataFile: metadataXml,
+        IDPSignout: config.metadata.sloUrl ? "true" : "false",
+      };
+    }
   }
   
   // Default attribute mapping
@@ -596,15 +612,19 @@ router.post("/config", authenticateToken, async (req: AuthRequest, res: Response
     
     // Parse SAML metadata if provided
     let parsedMetadata: ParsedSAMLMetadata | undefined;
+    let originalMetadataUrl: string | undefined;
+    let originalMetadataXml: string | undefined;
     const isSamlType = input.provider_type !== "oidc" && input.provider_type !== "google";
     
     if (isSamlType) {
       if (input.metadata_url) {
         logInfo("[SSOConfig] Fetching metadata from URL", { url: input.metadata_url, tenantSlug: tenant.slug });
         try {
-          const metadataXml = await fetchMetadataFromUrl(input.metadata_url);
-          logInfo("[SSOConfig] Metadata fetched successfully", { length: metadataXml.length });
-          parsedMetadata = parseSAMLMetadata(metadataXml);
+          originalMetadataUrl = input.metadata_url;
+          const fetchedXml = await fetchMetadataFromUrl(input.metadata_url);
+          originalMetadataXml = fetchedXml;
+          logInfo("[SSOConfig] Metadata fetched successfully", { length: fetchedXml.length });
+          parsedMetadata = parseSAMLMetadata(fetchedXml);
           logInfo("[SSOConfig] Metadata parsed", { entityId: parsedMetadata.entityId, ssoUrl: parsedMetadata.ssoUrl });
         } catch (fetchError: any) {
           logError("[SSOConfig] Metadata fetch/parse failed", fetchError, { url: input.metadata_url });
@@ -615,6 +635,7 @@ router.post("/config", authenticateToken, async (req: AuthRequest, res: Response
         }
       } else if (input.metadata_xml) {
         try {
+          originalMetadataXml = input.metadata_xml;
           parsedMetadata = parseSAMLMetadata(input.metadata_xml);
           logInfo("[SSOConfig] Metadata XML parsed", { entityId: parsedMetadata.entityId, ssoUrl: parsedMetadata.ssoUrl });
         } catch (parseError: any) {
@@ -640,6 +661,8 @@ router.post("/config", authenticateToken, async (req: AuthRequest, res: Response
       try {
         cognitoIdpName = await createOrUpdateCognitoIdp(tenant.slug, input.provider_type, {
           metadata: parsedMetadata,
+          metadataUrl: originalMetadataUrl,
+          metadataXml: originalMetadataXml,
           oidcConfig: input.oidc_client_id ? {
             clientId: input.oidc_client_id,
             clientSecret: input.oidc_client_secret || "",
@@ -727,11 +750,11 @@ router.post("/config", authenticateToken, async (req: AuthRequest, res: Response
       configId = updateResult.rows[0].id;
       logInfo("[SSOConfig] Updated SSO configuration", { tenantSlug: tenant.slug, configId });
     } else {
-      // Insert new
+      // Insert new — always enabled on creation so SSO works immediately after setup
       const insertResult = await mgmtPool.query(
         `INSERT INTO tenant_identity_providers 
          (tenant_id, provider_type, provider_name, idp_type, cognito_idp_name, email_domains, config, is_enabled, is_primary, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, $9)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, true, true, $8)
          RETURNING id`,
         [
           tenantId,
@@ -741,7 +764,6 @@ router.post("/config", authenticateToken, async (req: AuthRequest, res: Response
           cognitoIdpName,
           input.email_domains,
           JSON.stringify(configData),
-          input.is_enabled ?? true,
           req.userId
         ]
       );
@@ -962,7 +984,15 @@ router.put("/auth-mode", authenticateToken, async (req: AuthRequest, res: Respon
       [mode, allow_email_password ?? (mode !== "sso_only"), tenantId]
     );
     
-    logInfo("[SSOConfig] Updated auth mode", { tenantId, mode });
+    // Keep the provider's is_enabled in sync with the toggle:
+    // enabling SSO (hybrid/sso_only) enables the provider; disabling (password_only) disables it
+    const providerEnabled = mode !== "password_only";
+    await mgmtPool.query(
+      `UPDATE tenant_identity_providers SET is_enabled = $1, updated_at = NOW() WHERE tenant_id = $2`,
+      [providerEnabled, tenantId]
+    );
+    
+    logInfo("[SSOConfig] Updated auth mode", { tenantId, mode, providerEnabled });
     
     res.json({ success: true, message: `Authentication mode set to ${mode}` });
     
