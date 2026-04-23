@@ -1617,6 +1617,46 @@ export class ApiClient {
     });
   }
 
+  async getFeedbackNotificationUsers() {
+    return this.request<{
+      users: Array<{ id: string; user_name: string; email: string }>;
+    }>("/api/admin/platform-settings/feedback-notification-users");
+  }
+
+  async getFeedbackNotificationRecipients() {
+    return this.request<{
+      recipients: Array<{ id: string; user_name: string; email: string; created_by: string }>;
+    }>("/api/admin/platform-settings/feedback-notification-recipients", {
+      headers: {
+        "Cache-Control": "no-cache",
+      },
+    });
+  }
+
+  async createFeedbackNotificationRecipient(payload: {
+    source: "existing_user" | "new_user";
+    user_id?: string;
+    user_name?: string;
+    email?: string;
+  }) {
+    const res = await this.request<{
+      recipient: { id: string; user_name: string; email: string; created_by: string };
+    }>("/api/admin/platform-settings/feedback-notification-recipients", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    this.invalidateCacheFor("/api/admin/platform-settings/feedback-notification-recipients");
+    return res;
+  }
+
+  async deleteFeedbackNotificationRecipient(id: string) {
+    const res = await this.request<{ ok: boolean }>(`/api/admin/platform-settings/feedback-notification-recipients/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+    this.invalidateCacheFor("/api/admin/platform-settings/feedback-notification-recipients");
+    return res;
+  }
+
   // Feedback
   private _feedbackTq(tenantId?: string | null): string {
     return tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
@@ -1631,17 +1671,32 @@ export class ApiClient {
         | "research_lab"
         | "communication_center"
         | "general_feedback";
+      type: "feature_request" | "bug_issue" | "question";
       description: string;
+      files?: File[];
     },
     tenantId?: string | null,
   ) {
+    const hasFiles = Array.isArray(payload.files) && payload.files.length > 0;
+    const body = hasFiles
+      ? (() => {
+          const formData = new FormData();
+          formData.append("area", payload.area);
+          formData.append("type", payload.type);
+          formData.append("description", payload.description);
+          for (const file of payload.files || []) {
+            formData.append("files", file);
+          }
+          return formData;
+        })()
+      : JSON.stringify({ area: payload.area, type: payload.type, description: payload.description });
     const res = await this.request<{
       feedback: any;
       notificationSent: boolean;
       notificationFailures: Array<{ email: string; error: string }>;
     }>(`/api/feedback${this._feedbackTq(tenantId)}`, {
       method: "POST",
-      body: JSON.stringify(payload),
+      body,
     });
     this.invalidateCacheFor("/api/feedback");
     return res;
@@ -1691,6 +1746,34 @@ export class ApiClient {
     });
     this.invalidateCacheFor("/api/feedback");
     return res;
+  }
+
+  getFeedbackAttachmentDownloadUrl(feedbackId: string, attachmentId: string, tenantId?: string | null): string {
+    return `/api/feedback/${encodeURIComponent(feedbackId)}/attachments/${encodeURIComponent(attachmentId)}/download${this._feedbackTq(tenantId)}`;
+  }
+
+  async downloadFeedbackAttachment(feedbackId: string, attachmentId: string, tenantId?: string | null): Promise<Blob> {
+    const endpoint = this.getFeedbackAttachmentDownloadUrl(feedbackId, attachmentId, tenantId);
+    const response = await this.fetchWithAuth(endpoint, {
+      method: "GET",
+      headers: {
+        Accept: "application/octet-stream",
+      },
+    });
+    if (!response.ok) {
+      let message = "Failed to download attachment";
+      try {
+        const raw = await response.text();
+        if (raw?.trim()) {
+          const parsed = JSON.parse(raw) as { error?: string };
+          message = parsed.error || message;
+        }
+      } catch {
+        // Keep fallback message
+      }
+      throw new Error(message);
+    }
+    return response.blob();
   }
 }
 

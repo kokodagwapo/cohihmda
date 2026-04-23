@@ -6,10 +6,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 type ExtendedRenderOptions = Omit<RenderOptions, "wrapper"> & {
   route?: string;
   withRouter?: boolean;
+  initialEntries?: Array<string | { pathname: string; search?: string; state?: unknown }>;
 };
 
 export function renderWithProviders(ui: ReactElement, options: ExtendedRenderOptions = {}) {
-  const { route = "/", withRouter = false, ...renderOptions } = options;
+  const { route = "/", withRouter = false, initialEntries, ...renderOptions } = options;
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -23,7 +24,7 @@ export function renderWithProviders(ui: ReactElement, options: ExtendedRenderOpt
     }
 
     return (
-      <MemoryRouter initialEntries={[route]}>
+      <MemoryRouter initialEntries={initialEntries || [route]}>
         <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
       </MemoryRouter>
     );

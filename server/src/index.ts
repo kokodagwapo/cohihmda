@@ -442,6 +442,15 @@ async function startWorker() {
   } catch (error) {
     console.warn("⚠️ Failed to start upload cleanup scheduler:", error);
   }
+
+  try {
+    const { startFeedbackAttachmentCleanupScheduler } = await import(
+      "./services/feedbackAttachmentCleanupScheduler.js"
+    );
+    startFeedbackAttachmentCleanupScheduler();
+  } catch (error) {
+    console.warn("⚠️ Failed to start feedback attachment cleanup scheduler:", error);
+  }
 }
 
 if (SKIP_DB) {
@@ -540,6 +549,15 @@ if (SKIP_DB) {
           startUploadCleanupScheduler();
         } catch (error) {
           console.warn("⚠️ Failed to start upload cleanup scheduler:", error);
+        }
+
+        try {
+          const { startFeedbackAttachmentCleanupScheduler } = await import(
+            "./services/feedbackAttachmentCleanupScheduler.js"
+          );
+          startFeedbackAttachmentCleanupScheduler();
+        } catch (error) {
+          console.warn("⚠️ Failed to start feedback attachment cleanup scheduler:", error);
         }
       }
     })

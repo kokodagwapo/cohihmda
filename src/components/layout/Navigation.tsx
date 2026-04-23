@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button";
+﻿import { Button } from "@/components/ui/button";
 import { CoheusLogo } from "@/components/ui/CoheusLogo";
 import { UserMenu } from "@/components/layout/UserMenu";
 import { useAuth } from "@/contexts/AuthContext";
@@ -38,12 +38,6 @@ import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
   Sheet,
   SheetContent,
@@ -397,17 +391,20 @@ export function Navigation(
   const [topTieringOpen, setTopTieringOpen] = useState(false);
   const [workbenchOpen, setWorkbenchOpen] = useState(false);
   const [researchOpen, setResearchOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [allPagesOpen, setAllPagesOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const insightsRef = useRef<HTMLDivElement>(null);
   const topTieringRef = useRef<HTMLDivElement>(null);
   const workbenchRef = useRef<HTMLDivElement>(null);
   const researchRef = useRef<HTMLDivElement>(null);
+  const helpRef = useRef<HTMLDivElement>(null);
   const allPagesRef = useRef<HTMLDivElement>(null);
   const insightsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const topTieringTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const workbenchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const researchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const helpTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const allPagesTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Keyboard navigation state
@@ -465,6 +462,9 @@ export function Navigation(
         !researchRef.current.contains(event.target as Node)
       ) {
         setResearchOpen(false);
+      }
+      if (helpRef.current && !helpRef.current.contains(event.target as Node)) {
+        setHelpOpen(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -596,6 +596,24 @@ export function Navigation(
       navigate(route);
     }
   };
+
+  const openHelpMenu = useCallback(() => {
+    if (helpTimeoutRef.current) {
+      clearTimeout(helpTimeoutRef.current);
+      helpTimeoutRef.current = null;
+    }
+    setHelpOpen(true);
+  }, []);
+
+  const closeHelpMenuWithDelay = useCallback(() => {
+    if (helpTimeoutRef.current) {
+      clearTimeout(helpTimeoutRef.current);
+    }
+    helpTimeoutRef.current = setTimeout(() => {
+      setHelpOpen(false);
+      helpTimeoutRef.current = null;
+    }, 150);
+  }, []);
 
   const isInsightsPage = location.pathname === "/insights";
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
@@ -949,7 +967,12 @@ export function Navigation(
           </button>
           <button
             onClick={() => {
-              navigate("/feedback");
+              navigate("/feedback", {
+                state: {
+                  sourcePath: location.pathname,
+                  sourceSearch: location.search,
+                },
+              });
               setMobileMenuOpen(false);
             }}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -1672,32 +1695,65 @@ export function Navigation(
             {/* Help & What's New */}
             {isAuthenticated && (
               <div className="hidden lg:flex items-center gap-1">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-9 w-9 rounded-lg"
-                      aria-label="Help options"
-                    >
-                      <HelpCircle className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-44">
-                    <DropdownMenuItem
-                      onClick={() => navigate("/help")}
-                      data-track="nav_help_center"
-                    >
-                      Help Center
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => navigate("/feedback")}
-                      data-track="nav_feedback"
-                    >
-                      Feedback
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <div
+                  ref={helpRef}
+                  className="relative"
+                  onMouseEnter={openHelpMenu}
+                  onMouseLeave={closeHelpMenuWithDelay}
+                >
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9 rounded-lg text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                    aria-label="Help options"
+                    aria-haspopup="true"
+                    aria-expanded={helpOpen}
+                    onClick={() => setHelpOpen((prev) => !prev)}
+                  >
+                    <HelpCircle className="h-4 w-4" />
+                  </Button>
+                  <AnimatePresence>
+                    {helpOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                        transition={{ duration: 0.15 }}
+                        className="absolute top-full right-0 mt-2 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200/80 dark:border-slate-700/80 overflow-hidden z-50 w-44"
+                        role="menu"
+                        aria-label="Help options"
+                      >
+                        <button
+                          onClick={() => {
+                            navigate("/help");
+                            setHelpOpen(false);
+                          }}
+                          data-track="nav_help_center"
+                          className="w-full text-left px-2 py-1.5 text-sm rounded-sm transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
+                          role="menuitem"
+                        >
+                          Help Center
+                        </button>
+                        <button
+                          onClick={() => {
+                            navigate("/feedback", {
+                              state: {
+                                sourcePath: location.pathname,
+                                sourceSearch: location.search,
+                              },
+                            });
+                            setHelpOpen(false);
+                          }}
+                          data-track="nav_feedback"
+                          className="w-full text-left px-2 py-1.5 text-sm rounded-sm transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
+                          role="menuitem"
+                        >
+                          Feedback
+                        </button>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
                 <WhatsNewButton />
               </div>
             )}

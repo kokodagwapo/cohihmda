@@ -29,23 +29,29 @@ function getFeedbackDetailUrl(feedbackId: string): string {
   return base ? `${base}/feedback/${feedbackId}` : `/feedback/${feedbackId}`;
 }
 
-export async function resolveActiveSuperAdminEmails(): Promise<string[]> {
-  const result = await managementPool.query(
-    `SELECT email
-     FROM coheus_users
-     WHERE is_active = true
-       AND role = 'super_admin'
-       AND email IS NOT NULL
-       AND email <> ''`
-  );
+export async function resolveFeedbackNotificationRecipientEmails(): Promise<string[]> {
+  try {
+    const result = await managementPool.query(
+      `SELECT email
+       FROM feedback_notification_recipients
+       WHERE email IS NOT NULL
+         AND TRIM(email) <> ''`
+    );
 
-  return Array.from(
-    new Set(
-      result.rows
-        .map((row: { email?: string }) => String(row.email || "").trim().toLowerCase())
-        .filter(Boolean)
-    )
-  );
+    return Array.from(
+      new Set(
+        result.rows
+          .map((row: { email?: string }) => String(row.email || "").trim().toLowerCase())
+          .filter(Boolean)
+      )
+    );
+  } catch (error: any) {
+    // If migrations have not been run yet, avoid breaking feedback submission.
+    if (error?.code === "42P01") {
+      return [];
+    }
+    throw error;
+  }
 }
 
 async function sendToRecipient(email: string, input: NotifyInput): Promise<void> {
@@ -85,7 +91,7 @@ async function sendToRecipient(email: string, input: NotifyInput): Promise<void>
 }
 
 export async function notifySuperAdminsOfFeedback(input: NotifyInput): Promise<NotifyResult> {
-  const recipients = await resolveActiveSuperAdminEmails();
+  const recipients = await resolveFeedbackNotificationRecipientEmails();
   if (recipients.length === 0) {
     return { recipients: [], sent: [], failed: [] };
   }

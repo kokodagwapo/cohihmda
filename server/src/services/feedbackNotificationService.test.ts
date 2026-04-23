@@ -17,7 +17,7 @@ vi.mock("./emailService.js", () => ({
 
 import {
   notifySuperAdminsOfFeedback,
-  resolveActiveSuperAdminEmails,
+  resolveFeedbackNotificationRecipientEmails,
 } from "./feedbackNotificationService.js";
 
 describe("feedbackNotificationService", () => {
@@ -26,7 +26,7 @@ describe("feedbackNotificationService", () => {
     sendEmailMock.mockReset();
   });
 
-  it("resolves active super admin emails from management DB", async () => {
+  it("resolves configured feedback notification recipient emails", async () => {
     queryMock.mockResolvedValueOnce({
       rows: [
         { email: "admin1@coheus.test" },
@@ -35,7 +35,7 @@ describe("feedbackNotificationService", () => {
       ],
     });
 
-    const emails = await resolveActiveSuperAdminEmails();
+    const emails = await resolveFeedbackNotificationRecipientEmails();
 
     expect(queryMock).toHaveBeenCalledOnce();
     expect(emails).toEqual(["admin1@coheus.test", "admin2@coheus.test"]);

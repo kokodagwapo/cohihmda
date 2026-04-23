@@ -28,6 +28,7 @@ import { AIPromptManager } from "@/components/admin/AIPromptManager";
 import { InsightFeedbackSection } from "@/components/admin/InsightFeedbackSection";
 import { ReleaseNotesSection } from "@/components/admin/ReleaseNotesSection";
 import { PlatformSettingsSection } from "@/components/admin/PlatformSettingsSection";
+import { FeedbackNotificationRecipientsSection } from "@/components/admin/FeedbackNotificationRecipientsSection";
 import { SyncManagementSection } from "@/components/admin/SyncManagementSection";
 import { AnalyticsSection } from "@/components/admin/AnalyticsSection";
 import { ApiUsageSection } from "@/components/admin/ApiUsageSection";
@@ -257,6 +258,7 @@ export const Admin = () => {
       { id: "insight-feedback", label: "Insight Feedback" },
       { id: "release-notes", label: "Release Notes" },
       { id: "platform-settings", label: "Platform Settings" },
+      { id: "feedback-notification-recipients", label: "Feedback Recipients" },
       { id: "api-usage", label: "API Usage" },
       { id: "usage-report", label: "Usage Report" },
       { id: "analytics", label: "User Analytics" },
@@ -581,6 +583,16 @@ export const Admin = () => {
                   transition={{ duration: 0.3 }}
                 >
                   <PlatformSettingsSection />
+                </motion.div>
+              )}
+
+              {activeSection === "feedback-notification-recipients" && isPlatform && userRole === "super_admin" && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <FeedbackNotificationRecipientsSection />
                 </motion.div>
               )}
 
