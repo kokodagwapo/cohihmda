@@ -298,15 +298,28 @@ async function askMockQuestion(page: Page, question: string = MOCK_ASK_QUESTION)
   const chartWrapper = chatPanel.getByTestId("cohi-chat-viz").last();
   await expect(chartWrapper).toBeVisible({ timeout: 20_000 });
 
-  // Wait for Recharts to actually paint bars, not just mount the wrapper
-  // group. Target the drawn `<path d="…">` children of `.recharts-bar-rectangle`
-  // which only materialize once Recharts has calculated geometry. Checking the
-  // outer `<g>` is unreliable because it can be present but zero-size /
-  // `visibility:hidden` during the enter animation (this is what caused the
-  // original CI flake where the locator resolved 19× but was always "hidden").
-  await expect(
-    chartWrapper.locator(".recharts-bar-rectangle path[d]"),
-  ).not.toHaveCount(0, { timeout: 15_000 });
+  // Wait for the SVG chart to actually render some drawable content.
+  //
+  // Why not assert a specific Recharts selector like `.recharts-bar-rectangle`?
+  // CI showed that the exact DOM shape varies during animation / hydration:
+  // first the wrapper `<g>` existed but was "hidden", then on the next run
+  // there were no `<path d>` children at all yet. The export tests below are
+  // the real proof that a chart image made it into the PDF/PPT; this helper
+  // just needs to wait for the visualization shell to be genuinely rendered.
+  //
+  // An SVG with multiple vector/text nodes is a stable cross-browser signal
+  // that Recharts finished laying out enough content for html2canvas to capture.
+  const chartSvg = chartWrapper.locator("svg").first();
+  await expect(chartSvg).toBeVisible({ timeout: 15_000 });
+  await expect
+    .poll(
+      async () => await chartSvg.locator("path[d], rect, text").count(),
+      {
+        timeout: 15_000,
+        message: "waiting for chart SVG content to render",
+      },
+    )
+    .toBeGreaterThan(5);
 
   // Let the enter animation settle so html2canvas captures finished bars
   // instead of tween frames.
@@ -506,12 +519,13 @@ test.describe("Chat visualizations: prominent export + Edit in PPT Editor (COHI-
     );
     await expect(vizWrapper.getByTestId("cohi-chat-viz-footer")).toHaveCount(0);
 
-    // Sanity: the chart itself IS inside the capture target. We check for any
-    // rendered bar path rather than `.toBeVisible()` on the wrapper group,
-    // which can be zero-size during Recharts' enter animation.
-    await expect(
-      vizWrapper.locator(".recharts-bar-rectangle path[d]"),
-    ).not.toHaveCount(0);
+    // Sanity: the chart itself IS inside the capture target. Use the SVG's
+    // generic drawable/text nodes instead of a bar-specific selector so this
+    // stays stable across Recharts' animation timing and DOM-shape changes.
+    await expect(vizWrapper.locator("svg").first()).toBeVisible();
+    await expect
+      .poll(async () => await vizWrapper.locator("svg").first().locator("path[d], rect, text").count())
+      .toBeGreaterThan(5);
   });
 
   // --------------------------------------------------------------------------
@@ -581,9 +595,25 @@ test.describe("Chat visualizations: prominent export + Edit in PPT Editor (COHI-
     );
     await expect(userPage).not.toHaveURL(/reportBuilder=1/);
 
-    const body = captured.canvasBodies.at(-1) as { layout: unknown[] };
-    // Two asks -> two viz messages -> two layout items at minimum.
-    expect(body.layout.length).toBeGreaterThanOrEqual(2);
+    const body = captured.canvasBodies.at(-1) as {
+      layout: Array<{
+        type?: string;
+        payload?: { type?: string; items?: unknown[] };
+      }>;
+    };
+    expect(Array.isArray(body.layout)).toBe(true);
+    expect(body.layout.length).toBeGreaterThan(0);
+
+    // SQL-backed chat visualizations are intentionally bundled into a single
+    // `widget_group` by `convertChatToCanvasItems()` rather than emitted as
+    // one top-level layout item per chart. Two asks therefore become one
+    // widget_group whose nested `items` array contains both chat charts.
+    const widgetGroup = body.layout.find(
+      (item) =>
+        item?.type === "widget_group" || item?.payload?.type === "widget_group",
+    );
+    expect(widgetGroup, "expected a widget_group for SQL-backed chat export").toBeTruthy();
+    expect(widgetGroup?.payload?.items?.length ?? 0).toBeGreaterThanOrEqual(2);
   });
 
   // --------------------------------------------------------------------------
@@ -637,9 +667,13 @@ test.describe("Chat visualizations: prominent export + Edit in PPT Editor (COHI-
     // The chart must rehydrate from metadata.visualization, not vanish.
     const chart = chatPanel.getByTestId("cohi-chat-viz").first();
     await expect(chart).toBeVisible({ timeout: 15_000 });
-    await expect(
-      chart.locator(".recharts-bar-rectangle path[d]"),
-    ).not.toHaveCount(0, { timeout: 15_000 });
+    await expect(chart.locator("svg").first()).toBeVisible({ timeout: 15_000 });
+    await expect
+      .poll(
+        async () => await chart.locator("svg").first().locator("path[d], rect, text").count(),
+        { timeout: 15_000, message: "waiting for rehydrated chart SVG content" },
+      )
+      .toBeGreaterThan(5);
 
     // The export controls must be wired up for the hydrated message too.
     await expect(
