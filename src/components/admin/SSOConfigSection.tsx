@@ -233,6 +233,11 @@ export function SSOConfigSection() {
   // Dialog states
   const [metadataDialogOpen, setMetadataDialogOpen] = useState(false);
   const [testDialogOpen, setTestDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  // Controlled tab state so the active tab survives loading/re-renders
+  const [activeTab, setActiveTab] = useState('setup');
 
   // Load SSO config when tenant changes
   useEffect(() => {
@@ -435,6 +440,41 @@ export function SSOConfigSection() {
     }
   };
 
+  const handleDeleteConfig = async () => {
+    if (!config?.id) return;
+    setDeleting(true);
+    try {
+      await api.request(`/api/admin/sso/config/${config.id}${selectedTenantId ? `?tenant_id=${selectedTenantId}` : ''}`, {
+        method: 'DELETE',
+      });
+      toast({
+        title: 'SSO Configuration Deleted',
+        description: 'The SSO configuration and Cognito IdP have been removed. You can set up a new configuration.'
+      });
+      setDeleteDialogOpen(false);
+      setConfig(null);
+      setIdpEntityId('');
+      setIdpSsoUrl('');
+      setIdpSloUrl('');
+      setIdpCertificate('');
+      setOidcClientId('');
+      setOidcClientSecret('');
+      setOidcIssuerUrl('');
+      setEmailDomains([]);
+      setIsEnabled(false);
+      setActiveTab('setup');
+      loadSSOConfig();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to delete SSO configuration',
+        variant: 'destructive'
+      });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const handleToggleSSO = async (enabled: boolean) => {
     setSaving(true);
     try {
@@ -592,6 +632,17 @@ export function SSOConfigSection() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          {config?.id && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/20 border-rose-200 dark:border-rose-800"
+              onClick={() => setDeleteDialogOpen(true)}
+            >
+              <AlertTriangle className="h-4 w-4 mr-1.5" />
+              Delete Config
+            </Button>
+          )}
           <div className="flex items-center gap-2">
             <span className="text-sm text-slate-600 dark:text-slate-400">SSO Enabled</span>
             <Switch
@@ -643,7 +694,7 @@ export function SSOConfigSection() {
         </CardContent>
       </Card>
 
-      <Tabs defaultValue="setup" className="w-full">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="setup">Setup Guide</TabsTrigger>
           <TabsTrigger value="sp-info">SP Details</TabsTrigger>
@@ -1604,6 +1655,44 @@ export function SSOConfigSection() {
                   <ExternalLink className="h-4 w-4 mr-2" />
                   Start Test
                 </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Configuration Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete SSO Configuration</DialogTitle>
+            <DialogDescription>
+              This will permanently remove the SSO configuration and the associated Identity Provider from Cognito.
+            </DialogDescription>
+          </DialogHeader>
+
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription>
+              <strong>This action cannot be undone.</strong> Users who sign in via SSO will no longer be able to authenticate until a new configuration is created.
+              {emailDomains.length > 0 && (
+                <span className="block mt-1">Affected domains: <strong>{emailDomains.join(', ')}</strong></span>
+              )}
+            </AlertDescription>
+          </Alert>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDeleteConfig} disabled={deleting}>
+              {deleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                'Delete Configuration'
               )}
             </Button>
           </DialogFooter>
