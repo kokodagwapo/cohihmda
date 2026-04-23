@@ -143,6 +143,7 @@ function parseSAMLMetadata(xml: string): ParsedSAMLMetadata {
   const parser = new XMLParser({
     ignoreAttributes: false,
     attributeNamePrefix: "@_",
+    removeNSPrefix: true,
   });
   
   const parsed = parser.parse(xml);

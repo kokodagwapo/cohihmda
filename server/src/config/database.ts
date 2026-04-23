@@ -286,6 +286,19 @@ export async function initDatabase(): Promise<void> {
           migrationError,
         );
       }
+    } else {
+      // In multi-tenant mode, ensure SOC 2 compliance tables exist in the app DB.
+      // The legacy runMigrations() is skipped, but auditLogger.ts still writes to
+      // these tables via the default pool. Create them without FK constraints since
+      // users/tenants live in separate databases in multi-tenant mode.
+      try {
+        await ensureComplianceTables();
+      } catch (complianceError: any) {
+        console.warn(
+          "⚠️ Compliance table init warning:",
+          complianceError.message,
+        );
+      }
     }
 
     // Force-sync default AI prompt configs on every startup.
@@ -311,6 +324,68 @@ export async function initDatabase(): Promise<void> {
 // Note: Derived field functions (calculate_revenue, calculate_turn_time, etc.)
 // were removed — they were never called by application code.
 // Revenue/margin calculations use inline SQL in scorecard-utils.ts.
+
+async function ensureComplianceTables(): Promise<void> {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.audit_logs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID,
+      user_email TEXT,
+      user_role TEXT,
+      tenant_id UUID,
+      action TEXT NOT NULL,
+      resource TEXT NOT NULL,
+      resource_id TEXT,
+      description TEXT,
+      changes JSONB,
+      metadata JSONB,
+      status TEXT DEFAULT 'success',
+      error_message TEXT,
+      ip_address TEXT,
+      user_agent TEXT,
+      request_id TEXT,
+      timestamp TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON public.audit_logs(user_id)`).catch(() => {});
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_id ON public.audit_logs(tenant_id)`).catch(() => {});
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON public.audit_logs(timestamp)`).catch(() => {});
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.user_sessions (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL,
+      tenant_id UUID,
+      token_hash TEXT NOT NULL UNIQUE,
+      ip_address TEXT,
+      user_agent TEXT,
+      expires_at TIMESTAMPTZ NOT NULL,
+      last_activity_at TIMESTAMPTZ DEFAULT now(),
+      is_active BOOLEAN DEFAULT true,
+      logout_at TIMESTAMPTZ,
+      logout_reason TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON public.user_sessions(user_id)`).catch(() => {});
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_user_sessions_token_hash ON public.user_sessions(token_hash)`).catch(() => {});
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.failed_login_attempts (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      email TEXT NOT NULL,
+      ip_address TEXT,
+      user_agent TEXT,
+      failure_reason TEXT,
+      metadata JSONB,
+      attempted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
+  console.log("✅ SOC 2 compliance tables ensured (audit_logs, user_sessions, failed_login_attempts)");
+}
 
 async function runMigrations() {
   try {
