@@ -34,6 +34,7 @@ import {
   Folder,
   Megaphone,
   Coins,
+  Mail,
 } from "lucide-react";
 import type { AdminSection, AdminMode } from "@/hooks/admin/useAdminState";
 
@@ -188,6 +189,16 @@ const allAdminSections: AdminSectionDef[] = [
     description: "API keys and platform-wide configuration",
     color: "text-slate-300 dark:text-slate-400/70",
     allowedRoles: ["super_admin", "platform_admin"],
+    category: "Infrastructure",
+    mode: "platform",
+  },
+  {
+    id: "feedback-notification-recipients" as AdminSection,
+    label: "Feedback Recipients",
+    icon: Mail,
+    description: "Manage feedback notification recipient list",
+    color: "text-blue-300 dark:text-blue-400/70",
+    allowedRoles: ["super_admin"],
     category: "Infrastructure",
     mode: "platform",
   },

@@ -74,6 +74,8 @@ import WorkbenchHub from "./pages/WorkbenchHub";
 import ResearchHub from "./pages/ResearchHub";
 // Help Center
 import HelpCenter from "./pages/HelpCenter";
+import FeedbackPage from "./pages/Feedback";
+import FeedbackDetailPage from "./pages/FeedbackDetail";
 import DataChat from "./pages/DataChat";
 
 const AgenticSecurity = lazy(() => import("./pages/AgenticSecurity"));
@@ -248,6 +250,8 @@ const App = () => (
               
               {/* Help Center */}
               <Route path="/help/*" element={<HelpCenter />} />
+              <Route path="/feedback" element={<FeedbackPage />} />
+              <Route path="/feedback/:id" element={<FeedbackDetailPage />} />
 
               <Route
                 path="/agentic-security"

@@ -27,6 +27,7 @@ export type AdminSection =
   | "release-notes" // Release notes editor and distribution (platform admin)
   | "sync-management" // Cross-tenant sync schedule management (platform admin)
   | "platform-settings" // Platform API keys and settings (platform admin)
+  | "feedback-notification-recipients" // Manage feedback notification recipients (super admin)
   | "api-usage" // Per-tenant OpenAI token and cost tracking (platform admin)
   | "usage-report" // Cross-tenant platform usage report (platform admin)
   | "analytics"; // User behavior analytics (page views, sessions, funnels, replays)

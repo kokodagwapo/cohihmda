@@ -49,6 +49,7 @@ import falloutAlertsRoutes from "./falloutAlerts.js";
 import falloutResponseRoutes from "./falloutResponse.js";
 import podcastRoutes from "./podcast.js";
 import cohibuilderPortfolioRoutes from "./cohibuilderPortfolio.js";
+import feedbackRoutes from "./feedback.js";
 import qaResultsRoutes from "./internal/qaResults.js";
 import aiLedgerRoutes from "./internal/aiLedger.js";
 import jiraTransitionWebhookRoutes from "./webhooks/jiraTransition.js";
@@ -155,6 +156,7 @@ export function setupRoutes(app: Express) {
   app.use("/api/fallout-response", falloutResponseRoutes); // Public one-time fallout response links
   app.use("/api/podcast/cohi", podcastRoutes); // Cohi Daily Briefing podcast (TTS streaming)
   app.use("/api/cohibuilder/portfolio", cohibuilderPortfolioRoutes); // Cohi Builder portfolio CRUD
+  app.use("/api/feedback", feedbackRoutes); // User feedback submission and triage
   // Internal machine-to-machine endpoints (HMAC-signed, no JWT)
   app.use("/api/internal/qa-run", qaResultsRoutes);
   app.use("/api/internal/ai-ledger", aiLedgerRoutes);

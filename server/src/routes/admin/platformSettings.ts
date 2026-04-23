@@ -6,8 +6,9 @@
  */
 
 import express from "express";
-import { authenticateToken } from "../../middleware/auth.js";
+import { authenticateToken, AuthRequest } from "../../middleware/auth.js";
 import { requireRole } from "../../middleware/rbac.js";
+import { pool as managementPool } from "../../config/managementDatabase.js";
 import {
   getAllPlatformSettings,
   setPlatformSetting,
@@ -20,11 +21,202 @@ const router = express.Router();
 
 // Require platform admin access for all routes
 const requirePlatformAdmin = requireRole("super_admin", "platform_admin");
+const requireSuperAdmin = requireRole("super_admin");
 
 // Validation schemas
 const updateSettingSchema = z.object({
   value: z.string().nullable(),
 });
+const recipientIdParamSchema = z.object({
+  id: z.string().uuid(),
+});
+const createFeedbackRecipientSchema = z
+  .object({
+    source: z.enum(["existing_user", "new_user"]),
+    user_id: z.string().uuid().optional(),
+    user_name: z.string().trim().min(1).max(200).optional(),
+    email: z.string().trim().email().max(320).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.source === "existing_user" && !value.user_id) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["user_id"],
+        message: "user_id is required for existing_user source",
+      });
+    }
+    if (value.source === "new_user") {
+      if (!value.user_name) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["user_name"],
+          message: "user_name is required for new_user source",
+        });
+      }
+      if (!value.email) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["email"],
+          message: "email is required for new_user source",
+        });
+      }
+    }
+  });
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+router.get(
+  "/feedback-notification-users",
+  authenticateToken,
+  requireSuperAdmin,
+  async (_req, res) => {
+    try {
+      const result = await managementPool.query(
+        `SELECT id, COALESCE(NULLIF(full_name, ''), email) AS user_name, email
+         FROM coheus_users
+         WHERE is_active = true
+           AND email IS NOT NULL
+           AND TRIM(email) <> ''
+         ORDER BY COALESCE(NULLIF(full_name, ''), email) ASC`
+      );
+      res.json({ users: result.rows });
+    } catch (error: any) {
+      console.error("[PlatformSettings] Error fetching feedback notification users:", error);
+      res.status(500).json({ error: "Failed to fetch users" });
+    }
+  },
+);
+
+router.get(
+  "/feedback-notification-recipients",
+  authenticateToken,
+  requireSuperAdmin,
+  async (_req, res) => {
+    try {
+      const result = await managementPool.query(
+        `SELECT id, user_name, email, created_by
+         FROM feedback_notification_recipients
+         ORDER BY user_name ASC, email ASC`
+      );
+      res.json({ recipients: result.rows });
+    } catch (error: any) {
+      if (error?.code === "42P01") {
+        return res.status(503).json({
+          error: "Feedback notification recipients table not configured",
+          message: "Please run management database migrations.",
+        });
+      }
+      console.error("[PlatformSettings] Error fetching feedback notification recipients:", error);
+      res.status(500).json({ error: "Failed to fetch recipients" });
+    }
+  },
+);
+
+router.post(
+  "/feedback-notification-recipients",
+  authenticateToken,
+  requireSuperAdmin,
+  async (req: AuthRequest, res) => {
+    try {
+      if (!req.userId) return res.status(401).json({ error: "Unauthorized" });
+      const parsed = createFeedbackRecipientSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid request", details: parsed.error.flatten() });
+      }
+
+      const payload = parsed.data;
+      let userName = "";
+      let email = "";
+
+      if (payload.source === "existing_user") {
+        const userResult = await managementPool.query(
+          `SELECT COALESCE(NULLIF(full_name, ''), email) AS user_name, email
+           FROM coheus_users
+           WHERE id = $1
+             AND is_active = true
+           LIMIT 1`,
+          [payload.user_id]
+        );
+        if (userResult.rows.length === 0) {
+          return res.status(404).json({ error: "Existing user not found or inactive" });
+        }
+        userName = String(userResult.rows[0].user_name || "").trim();
+        email = normalizeEmail(String(userResult.rows[0].email || ""));
+      } else {
+        userName = String(payload.user_name || "").trim();
+        email = normalizeEmail(String(payload.email || ""));
+      }
+
+      if (!userName || !email) {
+        return res.status(400).json({ error: "user_name and email are required" });
+      }
+
+      const duplicateCheck = await managementPool.query(
+        `SELECT 1
+         FROM feedback_notification_recipients
+         WHERE LOWER(TRIM(email)) = LOWER(TRIM($1))
+         LIMIT 1`,
+        [email]
+      );
+      if (duplicateCheck.rows.length > 0) {
+        return res.status(409).json({ error: "Recipient with this email already exists" });
+      }
+
+      const insertResult = await managementPool.query(
+        `INSERT INTO feedback_notification_recipients (user_name, email, created_by)
+         VALUES ($1, $2, $3)
+         RETURNING id, user_name, email, created_by`,
+        [userName, email, req.userId]
+      );
+      res.status(201).json({ recipient: insertResult.rows[0] });
+    } catch (error: any) {
+      if (error?.code === "42P01") {
+        return res.status(503).json({
+          error: "Feedback notification recipients table not configured",
+          message: "Please run management database migrations.",
+        });
+      }
+      console.error("[PlatformSettings] Error creating feedback notification recipient:", error);
+      res.status(500).json({ error: "Failed to create recipient" });
+    }
+  },
+);
+
+router.delete(
+  "/feedback-notification-recipients/:id",
+  authenticateToken,
+  requireSuperAdmin,
+  async (req, res) => {
+    try {
+      const parsed = recipientIdParamSchema.safeParse(req.params);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid request", details: parsed.error.flatten() });
+      }
+
+      const result = await managementPool.query(
+        `DELETE FROM feedback_notification_recipients
+         WHERE id = $1
+         RETURNING id`,
+        [parsed.data.id]
+      );
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Recipient not found" });
+      }
+      res.json({ ok: true });
+    } catch (error: any) {
+      if (error?.code === "42P01") {
+        return res.status(503).json({
+          error: "Feedback notification recipients table not configured",
+          message: "Please run management database migrations.",
+        });
+      }
+      console.error("[PlatformSettings] Error deleting feedback notification recipient:", error);
+      res.status(500).json({ error: "Failed to remove recipient" });
+    }
+  },
+);
 
 /**
  * GET /api/admin/platform-settings
