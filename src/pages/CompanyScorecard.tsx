@@ -25,7 +25,7 @@ import { DashboardInsightsStrip } from '@/components/dashboard/DashboardInsights
 import { useDashboardInsights, type DashboardInsightItem } from '@/hooks/useDashboardInsights';
 
 const CompanyScorecard = () => {
-  const pageRef = useRef<HTMLDivElement>(null);
+  const detailTableRef = useRef<HTMLDivElement>(null);
   const { theme } = useTheme();
   const isDarkMode = theme === 'dark';
 
@@ -39,7 +39,7 @@ const CompanyScorecard = () => {
   const [detailActor, setDetailActor] = useState<'branch' | 'loan_officer'>('branch');
   const [detailFullscreenOpen, setDetailFullscreenOpen] = useState(false);
   const [detailPage, setDetailPage] = useState(1);
-  const [detailPageSize, setDetailPageSize] = useState(10);
+  const [detailPageSize, setDetailPageSize] = useState<number | 'all'>('all');
   const [drilldownTitle, setDrilldownTitle] = useState<string | null>(null);
   const [drilldownSortKey, setDrilldownSortKey] = useState<SortKey | undefined>(undefined);
   // Each metric uses its own defaultDateField (matching Qlik per-expression DateType behavior)
@@ -314,11 +314,12 @@ const CompanyScorecard = () => {
     return detailActor === 'branch' ? (data.byBranch ?? []) : (data.byLoanOfficer ?? []);
   }, [data, detailActor]);
 
-  const detailPageCount = Math.max(1, Math.ceil(detailRows.length / detailPageSize));
+  const detailShowingAll = detailPageSize === 'all';
+  const detailPageCount = detailShowingAll ? 1 : Math.max(1, Math.ceil(detailRows.length / detailPageSize));
   const detailPageSafe = Math.min(detailPage, detailPageCount);
-  const detailStartIndex = (detailPageSafe - 1) * detailPageSize;
-  const detailEndIndex = Math.min(detailStartIndex + detailPageSize, detailRows.length);
-  const detailPagedRows = detailRows.slice(detailStartIndex, detailEndIndex);
+  const detailStartIndex = detailRows.length === 0 ? 0 : detailShowingAll ? 0 : (detailPageSafe - 1) * detailPageSize;
+  const detailEndIndex = detailRows.length === 0 ? 0 : detailShowingAll ? detailRows.length : Math.min(detailStartIndex + detailPageSize, detailRows.length);
+  const detailVisibleRows = detailShowingAll ? detailRows : detailRows.slice(detailStartIndex, detailEndIndex);
 
   const openDrilldown = (title: string, sortKey: SortKey, actorOverride?: 'branch' | 'loan_officer') => {
     if (actorOverride) {
@@ -608,37 +609,75 @@ const CompanyScorecard = () => {
     ? kpiData.totalVolume / kpiData.totalLoansWithRespa
     : 0;
 
-  const getExportData = (): ExportData => ({
-    title: "Company Scorecard",
-    tables: [
-      {
-        name: "KPIs",
-        headers: ["Metric", "Value"],
-        rows: [
-          ["Total Loans", kpiData.totalLoansWithRespa],
-          ["Total Volume", formatCurrency(kpiData.totalVolume)],
-          ["Total Revenue", formatCurrency(kpiData.totalRevenue)],
-          ["Pull-Through Rate", `${kpiData.pullThroughRate.toFixed(1)}%`],
-          ["Avg Cycle Time", `${Math.round(kpiData.avgCycleTime)}d`],
-          ["Credit Pulls", kpiData.creditPulls],
-        ],
-      },
-      ...(summaryData
-        ? [
-            {
-              name: "Branch Counts",
-              headers: ["Tier", "Count"],
-              rows: [
-                ["Total", summaryData.branchCount.totals],
-                ["Top Tier", summaryData.branchCount.topTier],
-                ["Second Tier", summaryData.branchCount.secondTier],
-                ["Bottom Tier", summaryData.branchCount.bottomTier],
-              ],
-            },
-          ]
-        : []),
-    ],
-  });
+  const getDetailExportData = useCallback((): ExportData => {
+    const headers = [
+      detailActor === 'branch' ? 'Branch' : 'Loan Officer',
+      'Apps $',
+      'Apps',
+      'Orig %',
+      'W/D',
+      'W/D %',
+      'Denied',
+      'Denied %',
+      'Orig Rev $',
+      'W/D Rev',
+      'Final Vol',
+      'Final Units',
+      'Orig Vol $',
+      'W/D $',
+      'Denied $',
+      "Gov't %",
+      'Purch %',
+      'WAC',
+      'WA FICO',
+      'WA LTV',
+      'WA DTI',
+    ];
+
+    const mapRow = (row: typeof detailRows[number] | typeof data.totals) => {
+      const totalLoans = row.totalLoansWithRespa;
+      const originatedPct = totalLoans > 0 ? (row.originatedLoans / totalLoans) * 100 : 0;
+      const withdrawnPct = totalLoans > 0 ? (row.falloutWithdrawn / totalLoans) * 100 : 0;
+      const deniedPct = totalLoans > 0 ? (row.falloutDenied / totalLoans) * 100 : 0;
+      const govtPct = row.originatedLoans > 0 ? (row.govtUnits / row.originatedLoans) * 100 : 0;
+      const purchasePct = row.originatedLoans > 0 ? (row.purchaseUnits / row.originatedLoans) * 100 : 0;
+
+      return [
+        'name' in row ? row.name : 'Totals',
+        formatLargeNumber('tieringVolume' in row ? row.tieringVolume : row.totalVolume),
+        formatNumber(row.totalLoansWithRespa),
+        `${originatedPct.toFixed(1)}%`,
+        formatNumber(row.falloutWithdrawn),
+        `${withdrawnPct.toFixed(1)}%`,
+        formatNumber(row.falloutDenied),
+        `${deniedPct.toFixed(1)}%`,
+        formatLargeNumber('revenue' in row ? row.revenue : row.originatedRevenue),
+        formatLargeNumber(row.withdrawnProformaRevenue),
+        formatLargeNumber(row.hmdaVolume),
+        formatNumber(row.hmdaUnits),
+        formatLargeNumber('volume' in row ? row.volume : row.originatedVolume),
+        formatLargeNumber(row.withdrawnVolume),
+        formatLargeNumber(row.deniedVolume),
+        `${govtPct.toFixed(1)}%`,
+        `${purchasePct.toFixed(1)}%`,
+        (row.wac || 0).toFixed(3),
+        Math.round(row.waFico || 0),
+        (row.waLtv || 0).toFixed(1),
+        (row.waDti || 0).toFixed(1),
+      ];
+    };
+
+    return {
+      title: `Company Scorecard Detail by ${detailActor === 'branch' ? 'Branch' : 'Loan Officer'}`,
+      tables: [
+        {
+          name: detailActor === 'branch' ? 'Detail by Branch' : 'Detail by Loan Officer',
+          headers,
+          rows: data?.totals ? [mapRow(data.totals), ...detailRows.map(mapRow)] : detailRows.map(mapRow),
+        },
+      ],
+    };
+  }, [data?.totals, detailActor, detailRows, formatLargeNumber, formatNumber]);
 
   const SummaryTable = () => (
     <Card className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden dark:bg-slate-800 dark:border-slate-700">
@@ -864,7 +903,7 @@ const CompanyScorecard = () => {
     <TopTieringLayout>
       <div className="flex flex-col min-h-[calc(100vh-4rem)]">
         <TopTieringTopBar title="Company Scorecard" />
-        <main ref={pageRef} className="relative flex-1 overflow-y-auto px-4 sm:px-6 py-2 sm:py-3">
+        <main className="relative flex-1 overflow-y-auto px-4 sm:px-6 py-2 sm:py-3">
           <div className="max-w-[1800px] mx-auto">
         {/* Header Section */}
         <div className="mb-4">
@@ -909,11 +948,6 @@ const CompanyScorecard = () => {
                   ))}
                 </SelectContent>
               </Select>
-              <ExportMenu
-                title="Company Scorecard"
-                targetRef={pageRef}
-                getExportData={getExportData}
-              />
             </div>
           </div>
 
@@ -1045,6 +1079,12 @@ const CompanyScorecard = () => {
                         <Maximize2 className="h-4 w-4 mr-2" />
                         Fullscreen
                       </Button>
+                      <ExportMenu
+                        title={`Company Scorecard Detail by ${detailActor === 'branch' ? 'Branch' : 'Loan Officer'}`}
+                        targetRef={detailTableRef}
+                        getExportData={getDetailExportData}
+                        disabled={!data?.totals || detailRows.length === 0}
+                      />
                       <span className="text-xs text-slate-500 dark:text-slate-400">
                         Company Scorecard by {detailActor === 'branch' ? 'Branch' : 'Loan Officer'}
                       </span>
@@ -1055,7 +1095,7 @@ const CompanyScorecard = () => {
                         <Select
                           value={String(detailPageSize)}
                           onValueChange={(value) => {
-                            setDetailPageSize(Number(value));
+                            setDetailPageSize(value === 'all' ? 'all' : Number(value));
                             setDetailPage(1);
                           }}
                         >
@@ -1063,9 +1103,10 @@ const CompanyScorecard = () => {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="5">5</SelectItem>
                             <SelectItem value="10">10</SelectItem>
-                            <SelectItem value="15">15</SelectItem>
+                            <SelectItem value="25">25</SelectItem>
+                            <SelectItem value="50">50</SelectItem>
+                            <SelectItem value="all">All</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -1073,32 +1114,39 @@ const CompanyScorecard = () => {
                         <span>
                           {detailRows.length === 0
                             ? '0'
-                            : `${detailStartIndex + 1}-${detailEndIndex}`} of {detailRows.length}
+                            : detailShowingAll
+                              ? `All ${detailRows.length}`
+                              : `${detailStartIndex + 1}-${detailEndIndex} of ${detailRows.length}`}
                         </span>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 px-2"
-                          disabled={detailPageSafe <= 1}
-                          onClick={() => setDetailPage(detailPageSafe - 1)}
-                        >
-                          Prev
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 px-2"
-                          disabled={detailPageSafe >= detailPageCount}
-                          onClick={() => setDetailPage(detailPageSafe + 1)}
-                        >
-                          Next
-                        </Button>
+                        {!detailShowingAll && (
+                          <>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 px-2"
+                              disabled={detailPageSafe <= 1}
+                              onClick={() => setDetailPage(detailPageSafe - 1)}
+                            >
+                              Prev
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 px-2"
+                              disabled={detailPageSafe >= detailPageCount}
+                              onClick={() => setDetailPage(detailPageSafe + 1)}
+                            >
+                              Next
+                            </Button>
+                          </>
+                        )}
                       </div>
                     </div>
                     {data?.totals && (
                       <div
+                        ref={detailTableRef}
                         id={
                           detailActor === "branch"
                             ? "company-scorecard-detail-branch-table"
@@ -1106,12 +1154,13 @@ const CompanyScorecard = () => {
                         }
                       >
                         <CompanyScorecardDetailTable
-                          rows={detailPagedRows}
+                          rows={detailVisibleRows}
                           totals={data.totals}
                           actor={detailActor}
                           isDarkMode={isDarkMode}
                           formatNumber={formatNumber}
                           formatLargeNumber={formatLargeNumber}
+                          tableWrapperClassName="max-h-[65vh]"
                         />
                       </div>
                     )}
@@ -1230,13 +1279,14 @@ const CompanyScorecard = () => {
             <div className="flex-1 overflow-auto">
               {data?.totals && (
                 <CompanyScorecardDetailTable
-                  rows={detailPagedRows}
+                  rows={detailRows}
                   totals={data.totals}
                   actor={detailActor}
                   isDarkMode={isDarkMode}
                   formatNumber={formatNumber}
                   formatLargeNumber={formatLargeNumber}
                   containerClassName="h-full"
+                  tableWrapperClassName="h-full"
                   initialSortKey={drilldownSortKey}
                 />
               )}
