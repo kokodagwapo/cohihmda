@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ChangeEvent } from 'react';
 import { motion } from 'framer-motion';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -204,6 +204,7 @@ export function SSOConfigSection() {
   const [isEnabled, setIsEnabled] = useState(false);
   const [idpMetadataXml, setIdpMetadataXml] = useState('');
   const [idpMetadataUrl, setIdpMetadataUrl] = useState('');
+  const [metadataFileName, setMetadataFileName] = useState('');
   const [showSecret, setShowSecret] = useState(false);
   const [emailDomains, setEmailDomains] = useState<string[]>([]);
   const [newDomain, setNewDomain] = useState('');
@@ -502,6 +503,40 @@ export function SSOConfigSection() {
     }
   };
 
+  const handleMetadataFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith('.xml')) {
+      toast({
+        title: 'Invalid File',
+        description: 'Please select an XML metadata file.',
+        variant: 'destructive'
+      });
+      event.target.value = '';
+      return;
+    }
+
+    try {
+      const xml = await file.text();
+      setIdpMetadataXml(xml);
+      setMetadataFileName(file.name);
+      setIdpMetadataUrl('');
+      toast({
+        title: 'Metadata File Loaded',
+        description: `${file.name} is ready to upload.`
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to read the metadata file.',
+        variant: 'destructive'
+      });
+    } finally {
+      event.target.value = '';
+    }
+  };
+
   const handleUploadMetadata = async () => {
     if (!idpMetadataXml && !idpMetadataUrl) {
       toast({
@@ -552,6 +587,7 @@ export function SSOConfigSection() {
       // Clear metadata inputs after successful upload
       setIdpMetadataUrl('');
       setIdpMetadataXml('');
+      setMetadataFileName('');
       loadSSOConfig();
     } catch (error: any) {
       toast({
@@ -815,6 +851,7 @@ export function SSOConfigSection() {
                       <ol className="list-decimal list-inside space-y-1 text-sm text-slate-600 dark:text-slate-400">
                         <li>Scroll to the <strong>SAML Certificates</strong> section</li>
                         <li>Copy the <strong>App Federation Metadata URL</strong>, or click <strong>Download</strong> next to <strong>Federation Metadata XML</strong></li>
+                        <li>Use the <strong>app-specific</strong> metadata from this enterprise application page, not the generic tenant-wide `FederationMetadata.xml` URL.</li>
                       </ol>
                     </div>
                   </div>
@@ -1578,13 +1615,15 @@ export function SSOConfigSection() {
           <DialogHeader>
             <DialogTitle>Upload IdP Metadata</DialogTitle>
             <DialogDescription>
-              Provide your Identity Provider's metadata to auto-configure SSO settings
+              Provide your Identity Provider's metadata to auto-configure SSO settings.
+              For Microsoft Entra ID, prefer the <strong>App Federation Metadata URL</strong> or the XML downloaded from that same enterprise application.
             </DialogDescription>
           </DialogHeader>
 
           <Tabs defaultValue="url" className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
+            <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="url">From URL</TabsTrigger>
+              <TabsTrigger value="file">Upload File</TabsTrigger>
               <TabsTrigger value="xml">Paste XML</TabsTrigger>
             </TabsList>
             <TabsContent value="url" className="space-y-4 mt-4">
@@ -1592,9 +1631,37 @@ export function SSOConfigSection() {
                 <Label>Metadata URL</Label>
                 <Input
                   value={idpMetadataUrl}
-                  onChange={(e) => setIdpMetadataUrl(e.target.value)}
+                  onChange={(e) => {
+                    setIdpMetadataUrl(e.target.value);
+                    if (e.target.value) {
+                      setIdpMetadataXml('');
+                      setMetadataFileName('');
+                    }
+                  }}
                   placeholder="https://idp.example.com/metadata"
                 />
+                <p className="text-xs text-slate-500">
+                  In Entra, use the <strong>App Federation Metadata URL</strong> from the SAML Certificates section.
+                </p>
+              </div>
+            </TabsContent>
+            <TabsContent value="file" className="space-y-4 mt-4">
+              <div className="space-y-2">
+                <Label htmlFor="metadata-file">Metadata XML file</Label>
+                <Input
+                  id="metadata-file"
+                  type="file"
+                  accept=".xml,text/xml,application/xml"
+                  onChange={handleMetadataFileChange}
+                />
+                <p className="text-xs text-slate-500">
+                  Select the XML file downloaded from your Identity Provider. We read it locally and send the XML contents to the server.
+                </p>
+                {metadataFileName && (
+                  <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-300">
+                    Loaded file: <strong>{metadataFileName}</strong>
+                  </div>
+                )}
               </div>
             </TabsContent>
             <TabsContent value="xml" className="space-y-4 mt-4">
@@ -1602,7 +1669,13 @@ export function SSOConfigSection() {
                 <Label>Metadata XML</Label>
                 <Textarea
                   value={idpMetadataXml}
-                  onChange={(e) => setIdpMetadataXml(e.target.value)}
+                  onChange={(e) => {
+                    setIdpMetadataXml(e.target.value);
+                    if (e.target.value) {
+                      setIdpMetadataUrl('');
+                      setMetadataFileName('');
+                    }
+                  }}
                   placeholder="Paste the full XML metadata here"
                   rows={10}
                   className="font-mono text-xs"
