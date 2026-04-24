@@ -1909,6 +1909,231 @@ router.get(
 );
 
 /**
+ * GET /api/loans/sales-company-overview
+ * Dedicated Sales Company Overview metrics with sales-specific definitions:
+ * - Active Loans: exact COHI active-loan definition
+ * - Submitted Loans MTD: submitted_to_processing_date in current month window
+ * - Funded Loans MTD: funding_date in current month window
+ * - Volume: sum(loan_amount) per cohort
+ * - WAC: weighted avg interest_rate per cohort (exclude <=0 or >15)
+ */
+router.get(
+  "/sales-company-overview",
+  authenticateToken,
+  attachTenantContext,
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const { tenantPool, tenantId } = getTenantContext(req);
+      const channelGroup = req.query.channel_group as string | undefined;
+
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      const startDateStr = formatDateForSQL(startOfMonth);
+      const endDateExclusiveStr = formatDateForSQL(startOfNextMonth);
+
+      const accessCtx = await getLoanAccessContext(req, tenantPool);
+      if (accessCtx.hasNoAccess) {
+        return res.json({
+          activeLoans: { count: 0, volume: 0, avgInterestRate: 0 },
+          submittedMTD: { count: 0, volume: 0, avgInterestRate: 0 },
+          fundedMTD: { count: 0, volume: 0, avgInterestRate: 0 },
+          aging: { "0-15": 0, "16-30": 0, "31-45": 0, "46-60": 0, "61-90": 0, ">90": 0 },
+          submittedByType: {},
+          fundedByType: {},
+          window: { startDate: startDateStr, endDateExclusive: endDateExclusiveStr },
+        });
+      }
+
+      const {
+        accessClause: rawAccessClause,
+        accessParams: rawAccessParams,
+        nextParamIndex,
+      } = accessCtx.buildWhereClause("", 1);
+
+      const baseConditions: string[] = ["(is_archived IS DISTINCT FROM TRUE)"];
+      const params: any[] = [];
+      let paramIndex = 1;
+
+      if (rawAccessClause) {
+        const accessCondition = rawAccessClause.replace(/^AND\s+/, "").trim();
+        if (accessCondition && accessCondition !== "FALSE") {
+          baseConditions.push(accessCondition);
+          params.push(...rawAccessParams);
+          paramIndex = nextParamIndex;
+        }
+      }
+
+      if (channelGroup && channelGroup !== "All") {
+        const clause = buildChannelWhereClause(channelGroup);
+        if (clause) {
+          baseConditions.push(clause.replace(/^AND\s+/i, ""));
+        }
+      }
+
+      const whereClause = baseConditions.join(" AND ");
+      const startMonthParam = `$${paramIndex}`;
+      params.push(startDateStr);
+      paramIndex++;
+      const endExclusiveParam = `$${paramIndex}`;
+      params.push(endDateExclusiveStr);
+      paramIndex++;
+
+      const overviewQuery = `
+        WITH base AS (
+          SELECT
+            loan_amount::numeric AS amount,
+            interest_rate::numeric AS rate,
+            loan_type,
+            application_date,
+            submitted_to_processing_date,
+            funding_date,
+            current_loan_status
+          FROM loans
+          WHERE ${whereClause}
+        ),
+        flagged AS (
+          SELECT
+            amount,
+            rate,
+            loan_type,
+            application_date,
+            submitted_to_processing_date,
+            funding_date,
+            (
+              current_loan_status = 'Active Loan'
+              AND application_date IS NOT NULL
+              AND TRIM(COALESCE(application_date::text, '')) <> ''
+            ) AS is_active
+          FROM base
+        )
+        SELECT
+          COUNT(*) FILTER (WHERE is_active) AS active_count,
+          COALESCE(SUM(amount) FILTER (WHERE is_active), 0) AS active_volume,
+          CASE
+            WHEN COALESCE(SUM(CASE WHEN is_active AND rate > 0 AND rate <= 15 THEN amount ELSE 0 END), 0) > 0
+              THEN COALESCE(SUM(CASE WHEN is_active AND rate > 0 AND rate <= 15 THEN amount * rate ELSE 0 END), 0)
+                   / NULLIF(SUM(CASE WHEN is_active AND rate > 0 AND rate <= 15 THEN amount ELSE 0 END), 0)
+            ELSE 0
+          END AS active_wac,
+
+          COUNT(*) FILTER (WHERE submitted_to_processing_date > ${startMonthParam}::date AND submitted_to_processing_date < ${endExclusiveParam}::date) AS submitted_count,
+          COALESCE(SUM(amount) FILTER (WHERE submitted_to_processing_date > ${startMonthParam}::date AND submitted_to_processing_date < ${endExclusiveParam}::date), 0) AS submitted_volume,
+          CASE
+            WHEN COALESCE(SUM(CASE WHEN submitted_to_processing_date > ${startMonthParam}::date AND submitted_to_processing_date < ${endExclusiveParam}::date AND rate > 0 AND rate <= 15 THEN amount ELSE 0 END), 0) > 0
+              THEN COALESCE(SUM(CASE WHEN submitted_to_processing_date > ${startMonthParam}::date AND submitted_to_processing_date < ${endExclusiveParam}::date AND rate > 0 AND rate <= 15 THEN amount * rate ELSE 0 END), 0)
+                   / NULLIF(SUM(CASE WHEN submitted_to_processing_date > ${startMonthParam}::date AND submitted_to_processing_date < ${endExclusiveParam}::date AND rate > 0 AND rate <= 15 THEN amount ELSE 0 END), 0)
+            ELSE 0
+          END AS submitted_wac,
+
+          COUNT(*) FILTER (WHERE funding_date > ${startMonthParam}::date AND funding_date < ${endExclusiveParam}::date) AS funded_count,
+          COALESCE(SUM(amount) FILTER (WHERE funding_date > ${startMonthParam}::date AND funding_date < ${endExclusiveParam}::date), 0) AS funded_volume,
+          CASE
+            WHEN COALESCE(SUM(CASE WHEN funding_date > ${startMonthParam}::date AND funding_date < ${endExclusiveParam}::date AND rate > 0 AND rate <= 15 THEN amount ELSE 0 END), 0) > 0
+              THEN COALESCE(SUM(CASE WHEN funding_date > ${startMonthParam}::date AND funding_date < ${endExclusiveParam}::date AND rate > 0 AND rate <= 15 THEN amount * rate ELSE 0 END), 0)
+                   / NULLIF(SUM(CASE WHEN funding_date > ${startMonthParam}::date AND funding_date < ${endExclusiveParam}::date AND rate > 0 AND rate <= 15 THEN amount ELSE 0 END), 0)
+            ELSE 0
+          END AS funded_wac,
+
+          COUNT(*) FILTER (WHERE is_active AND application_date IS NOT NULL AND (CURRENT_DATE - application_date::date) BETWEEN 0 AND 15) AS aging_0_15,
+          COUNT(*) FILTER (WHERE is_active AND application_date IS NOT NULL AND (CURRENT_DATE - application_date::date) BETWEEN 16 AND 30) AS aging_16_30,
+          COUNT(*) FILTER (WHERE is_active AND application_date IS NOT NULL AND (CURRENT_DATE - application_date::date) BETWEEN 31 AND 45) AS aging_31_45,
+          COUNT(*) FILTER (WHERE is_active AND application_date IS NOT NULL AND (CURRENT_DATE - application_date::date) BETWEEN 46 AND 60) AS aging_46_60,
+          COUNT(*) FILTER (WHERE is_active AND application_date IS NOT NULL AND (CURRENT_DATE - application_date::date) BETWEEN 61 AND 90) AS aging_61_90,
+          COUNT(*) FILTER (WHERE is_active AND application_date IS NOT NULL AND (CURRENT_DATE - application_date::date) > 90) AS aging_over_90
+        FROM flagged
+      `;
+
+      const submittedTypeQuery = `
+        SELECT COALESCE(loan_type, 'Other') AS loan_type, COUNT(*) AS count
+        FROM loans
+        WHERE ${whereClause}
+          AND submitted_to_processing_date > ${startMonthParam}::date
+          AND submitted_to_processing_date < ${endExclusiveParam}::date
+        GROUP BY COALESCE(loan_type, 'Other')
+      `;
+
+      const fundedTypeQuery = `
+        SELECT COALESCE(loan_type, 'Other') AS loan_type, COUNT(*) AS count
+        FROM loans
+        WHERE ${whereClause}
+          AND funding_date > ${startMonthParam}::date
+          AND funding_date < ${endExclusiveParam}::date
+        GROUP BY COALESCE(loan_type, 'Other')
+      `;
+
+      const [overviewResult, submittedTypeResult, fundedTypeResult] = await Promise.all([
+        retryQuery(() => tenantPool.query(overviewQuery, params), 2, 500),
+        retryQuery(() => tenantPool.query(submittedTypeQuery, params), 2, 500),
+        retryQuery(() => tenantPool.query(fundedTypeQuery, params), 2, 500),
+      ]);
+
+      const toNum = (v: any) => Number(v) || 0;
+      const m = overviewResult.rows[0] || {};
+
+      const submittedByType: Record<string, number> = {};
+      for (const row of submittedTypeResult.rows) {
+        submittedByType[row.loan_type] = Number(row.count || 0);
+      }
+
+      const fundedByType: Record<string, number> = {};
+      for (const row of fundedTypeResult.rows) {
+        fundedByType[row.loan_type] = Number(row.count || 0);
+      }
+
+      logInfo("[SalesCompanyOverview] Results", {
+        tenantId,
+        activeCount: toNum(m.active_count),
+        submittedCount: toNum(m.submitted_count),
+        fundedCount: toNum(m.funded_count),
+        startDate: startDateStr,
+        endDateExclusive: endDateExclusiveStr,
+      });
+
+      res.json({
+        activeLoans: {
+          count: toNum(m.active_count),
+          volume: toNum(m.active_volume),
+          avgInterestRate: toNum(m.active_wac),
+        },
+        submittedMTD: {
+          count: toNum(m.submitted_count),
+          volume: toNum(m.submitted_volume),
+          avgInterestRate: toNum(m.submitted_wac),
+        },
+        fundedMTD: {
+          count: toNum(m.funded_count),
+          volume: toNum(m.funded_volume),
+          avgInterestRate: toNum(m.funded_wac),
+        },
+        aging: {
+          "0-15": toNum(m.aging_0_15),
+          "16-30": toNum(m.aging_16_30),
+          "31-45": toNum(m.aging_31_45),
+          "46-60": toNum(m.aging_46_60),
+          "61-90": toNum(m.aging_61_90),
+          ">90": toNum(m.aging_over_90),
+        },
+        submittedByType,
+        fundedByType,
+        window: {
+          startDate: startDateStr,
+          endDateExclusive: endDateExclusiveStr,
+        },
+      });
+    } catch (error: any) {
+      logError("Error fetching sales company overview", error, {
+        userId: req.userId,
+      });
+      res
+        .status(500)
+        .json({ error: error.message || "Failed to fetch sales company overview" });
+    }
+  },
+);
+
+/**
  * GET /api/loans/operations-overview
  * Get operations overview metrics (Cycle Time, Active Pipeline, Processing Efficiency, Turn Time by Stage)
  * Supports date range and channel filtering
