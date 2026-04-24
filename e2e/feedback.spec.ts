@@ -45,6 +45,38 @@ async function waitForBackdropToClear(page: import("@playwright/test").Page) {
   await expect(backdrop).not.toBeVisible({ timeout: 10_000 });
 }
 
+async function openHelpMenuAndGoToFeedback(page: import("@playwright/test").Page) {
+  const helpOptionsButton = page.getByRole("button", { name: "Help options" });
+  const helpMenu = page.getByRole("menu", { name: "Help options" });
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    await dismissBlockingOverlays(page);
+    await waitForBackdropToClear(page);
+
+    const isMenuVisible = await helpMenu.isVisible().catch(() => false);
+    if (!isMenuVisible) {
+      // Primary path: hover opens the menu on desktop.
+      await helpOptionsButton.hover();
+    }
+
+    const ready = await helpMenu.isVisible({ timeout: 2_500 }).catch(() => false);
+    if (ready) {
+      await helpMenu.getByRole("menuitem", { name: "Feedback" }).click();
+      return;
+    }
+
+    // Fallback: click toggle if hover path didn't open in this attempt.
+    await helpOptionsButton.click();
+    const readyAfterClick = await helpMenu.isVisible({ timeout: 2_500 }).catch(() => false);
+    if (readyAfterClick) {
+      await helpMenu.getByRole("menuitem", { name: "Feedback" }).click();
+      return;
+    }
+  }
+
+  throw new Error("[E2E] Unable to open Help menu and click Feedback after retries.");
+}
+
 function sampleListItem() {
   return {
     id: FEEDBACK_ID,
@@ -177,15 +209,7 @@ test.describe("Feedback flow (COHI-322)", () => {
     await waitForBackdropToClear(userPage);
 
     // Use stable selectors
-    const helpOptionsButton = userPage.getByRole("button", { name: "Help options" });
-    if (await helpOptionsButton.isVisible().catch(() => false)) {
-      await helpOptionsButton.hover();
-      const helpMenu = userPage.getByRole("menu", { name: "Help options" });
-      await expect(helpMenu).toBeVisible();
-      await helpMenu.getByRole("menuitem", { name: "Feedback" }).click();
-    } else {
-      await userPage.locator('[data-track="nav_feedback"]:visible').first().click();
-    }
+    await openHelpMenuAndGoToFeedback(userPage);
     await expect(userPage).toHaveURL(/\/feedback/);
     await expect(userPage.locator("#feedback-area")).toBeVisible();
     await expect(userPage.locator("#feedback-type")).toBeVisible();
@@ -246,7 +270,7 @@ test.describe("Feedback flow (COHI-322)", () => {
     await userPage.locator("#feedback-description").fill("Latency spikes on the insights grid.");
     await userPage.getByRole("button", { name: "Submit Feedback" }).click();
 
-    const notifications = userPage.getByLabel("Notifications (F8)");
+    const notifications = userPage.getByLabel(/Notifications/i);
     await expect(notifications.getByText("Feedback saved")).toBeVisible();
     await expect(
       notifications.getByText("Feedback submitted successfully. Email Notification Failed. Will try again shortly."),
@@ -287,7 +311,7 @@ test.describe("Feedback flow (COHI-322)", () => {
 
     // Use stable selectors
     await expect(userPage).toHaveURL(/\/feedback$/);
-    const notifications = userPage.getByLabel("Notifications (F8)");
+    const notifications = userPage.getByLabel(/Notifications/i);
     await expect(notifications.getByText("Failed to load feedback", { exact: true })).toBeVisible();
   });
 
@@ -329,7 +353,7 @@ test.describe("Feedback flow (COHI-322)", () => {
     );
     await adminPage.locator("textarea").fill("Reviewed by platform admin.");
     await adminPage.getByRole("button", { name: "Save Updates" }).click();
-    const notifications = adminPage.getByLabel("Notifications (F8)");
+    const notifications = adminPage.getByLabel(/Notifications/i);
     await expect(notifications.getByText("Feedback updated", { exact: true })).toBeVisible();
     await expect(
       adminPage.locator("div").filter({ hasText: "In Progress At:" }).first(),
