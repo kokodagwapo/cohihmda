@@ -609,7 +609,7 @@ const CompanyScorecard = () => {
     ? kpiData.totalVolume / kpiData.totalLoansWithRespa
     : 0;
 
-  const getDetailExportData = useCallback((): ExportData => {
+  const getDetailExportData = (): ExportData => {
     const headers = [
       detailActor === 'branch' ? 'Branch' : 'Loan Officer',
       'Apps $',
@@ -677,7 +677,7 @@ const CompanyScorecard = () => {
         },
       ],
     };
-  }, [data?.totals, detailActor, detailRows, formatLargeNumber, formatNumber]);
+  };
 
   const SummaryTable = () => (
     <Card className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden dark:bg-slate-800 dark:border-slate-700">
