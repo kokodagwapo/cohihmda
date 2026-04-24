@@ -130,8 +130,9 @@ export const Login = () => {
       const response = await fetch(`${apiUrl}/api/auth/cognito/lookup-tenant?email=${encodeURIComponent(emailValue)}`);
       if (response.ok) {
         const data = await response.json();
+        const hasIdpHint = !!data.idp_name;
         return {
-          available: data.sso_available === true,
+          available: data.sso_available === true && hasIdpHint,
           tenantSlug: data.tenant_slug,
           tenantName: data.tenant_name,
           idpName: data.idp_name,
@@ -188,16 +189,27 @@ export const Login = () => {
         // SSO-only: redirect immediately (no password fallback)
         setStep('sso-redirect');
         handleSsoRedirect(result);
+      } else if (result.available && result.allowPassword) {
+        // Hybrid mode: show password field + SSO button
+        setStep('password');
+        setTimeout(() => passwordRef.current?.focus(), 100);
       } else {
-        // No SSO, or hybrid mode (SSO + password allowed): show password field
-        // User can still click "Sign in with SSO" button if SSO is available
+        // No SSO configured for this domain: password only
         setStep('password');
         setTimeout(() => passwordRef.current?.focus(), 100);
       }
     } catch (err) {
-      // If lookup fails, fall back to password
-      setStep('password');
-      setTimeout(() => passwordRef.current?.focus(), 100);
+      // Lookup failed — show password unless we already know this is SSO-only
+      if (ssoInfo.available && !ssoInfo.allowPassword) {
+        toast({
+          title: 'SSO Error',
+          description: 'Unable to connect to SSO. Please contact your administrator.',
+          variant: 'destructive',
+        });
+      } else {
+        setStep('password');
+        setTimeout(() => passwordRef.current?.focus(), 100);
+      }
     } finally {
       setLoading(false);
     }
