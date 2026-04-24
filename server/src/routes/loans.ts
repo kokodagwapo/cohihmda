@@ -1908,14 +1908,99 @@ router.get(
   },
 );
 
+const SALES_COMPANY_OVERVIEW_AGING_BUCKETS = new Set([
+  "0-15",
+  "16-30",
+  "31-45",
+  "46-60",
+  "61-90",
+  ">90",
+]);
+
+/** Active pipeline row predicate (matches flagged.is_active inputs, without the boolean wrap). */
+const SALES_CO_ACTIVE_PIPELINE_ROW = `
+  current_loan_status = 'Active Loan'
+  AND application_date IS NOT NULL
+  AND TRIM(COALESCE(application_date::text, '')) <> ''
+  AND (is_archived IS DISTINCT FROM TRUE)
+`;
+
+function readSalesCompanyOverviewQueryStringList(value: unknown): string[] {
+  if (value == null) return [];
+  if (Array.isArray(value)) {
+    return value
+      .flatMap((v) => (typeof v === "string" ? v.split(",") : []))
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+  }
+  if (typeof value === "string") {
+    if (value.includes(",")) {
+      return value
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+    }
+    const t = value.trim();
+    return t ? [t] : [];
+  }
+  return [];
+}
+
+/** One AND-group: non–active-pipeline loans pass; active pipeline loans must land in one of the buckets. */
+function buildSalesCompanyOverviewMultiAgingFilterSql(buckets: string[]): string | null {
+  const valid = [...new Set(buckets)].filter((b) => SALES_COMPANY_OVERVIEW_AGING_BUCKETS.has(b));
+  if (valid.length === 0) return null;
+  const ageExpr = "(CURRENT_DATE - application_date::date)";
+  const parts: string[] = [];
+  for (const b of valid) {
+    switch (b) {
+      case "0-15":
+        parts.push(`${ageExpr} BETWEEN 0 AND 15`);
+        break;
+      case "16-30":
+        parts.push(`${ageExpr} BETWEEN 16 AND 30`);
+        break;
+      case "31-45":
+        parts.push(`${ageExpr} BETWEEN 31 AND 45`);
+        break;
+      case "46-60":
+        parts.push(`${ageExpr} BETWEEN 46 AND 60`);
+        break;
+      case "61-90":
+        parts.push(`${ageExpr} BETWEEN 61 AND 90`);
+        break;
+      case ">90":
+        parts.push(`${ageExpr} > 90`);
+        break;
+      default:
+        break;
+    }
+  }
+  if (!parts.length) return null;
+  const innerOr = parts.join(" OR ");
+  return `(
+    NOT (${SALES_CO_ACTIVE_PIPELINE_ROW})
+    OR (${SALES_CO_ACTIVE_PIPELINE_ROW} AND (${innerOr}))
+  )`;
+}
+
 /**
  * GET /api/loans/sales-company-overview
  * Dedicated Sales Company Overview metrics with sales-specific definitions:
  * - Active Loans: exact COHI active-loan definition
- * - Submitted Loans MTD: submitted_to_processing_date in current month window
- * - Funded Loans MTD: funding_date in current month window
+ * - Submitted Loans MTD: submitted_to_processing_date in current month window,
+ *   falling back to processing_date only when submitted_to_processing_date is empty for the scoped loan set
+ * - Funded Loans MTD: funding_date from month start through current day (matches Business Overview Closed Loans MTD)
  * - Volume: sum(loan_amount) per cohort
  * - WAC: weighted avg interest_rate per cohort (exclude <=0 or >15)
+ *
+ * Optional cross-filters (query params, AND together; repeat params for multi-select):
+ * - loan_type: COALESCE(loan_type,'Other') IN (…) when multiple
+ * - aging_bucket: active pipeline loans must fall in one of the selected age buckets (OR); non–active-pipeline loans remain eligible
+ *
+ * Chart breakdowns: aging bars always use tenant+channel only (full-size bars; UI greys non-selected buckets).
+ * KPIs use filtered loans. Submitted/Funded MTD donuts use filtered loans when at least one aging bucket is selected
+ * (shares readjust to that cohort); with loan-type-only filters, donut counts stay on the full population (grey-out only).
  */
 router.get(
   "/sales-company-overview",
@@ -1926,12 +2011,24 @@ router.get(
     try {
       const { tenantPool, tenantId } = getTenantContext(req);
       const channelGroup = req.query.channel_group as string | undefined;
+      const loanTypesUnique = [
+        ...new Set(
+          readSalesCompanyOverviewQueryStringList(req.query.loan_type).map((s) => s.trim()).filter(Boolean),
+        ),
+      ];
+      const agingBucketsUnique = [
+        ...new Set(
+          readSalesCompanyOverviewQueryStringList(req.query.aging_bucket).filter((b) =>
+            SALES_COMPANY_OVERVIEW_AGING_BUCKETS.has(b),
+          ),
+        ),
+      ];
+      const hasSliceFilters = loanTypesUnique.length > 0 || agingBucketsUnique.length > 0;
 
       const now = new Date();
       const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-      const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
       const startDateStr = formatDateForSQL(startOfMonth);
-      const endDateExclusiveStr = formatDateForSQL(startOfNextMonth);
+      const endDateStr = formatDateForSQL(now);
 
       const accessCtx = await getLoanAccessContext(req, tenantPool);
       if (accessCtx.hasNoAccess) {
@@ -1942,7 +2039,8 @@ router.get(
           aging: { "0-15": 0, "16-30": 0, "31-45": 0, "46-60": 0, "61-90": 0, ">90": 0 },
           submittedByType: {},
           fundedByType: {},
-          window: { startDate: startDateStr, endDateExclusive: endDateExclusiveStr },
+          window: { startDate: startDateStr, endDate: endDateStr },
+          definitions: { submittedDateField: "submitted_to_processing_date" },
         });
       }
 
@@ -1952,7 +2050,7 @@ router.get(
         nextParamIndex,
       } = accessCtx.buildWhereClause("", 1);
 
-      const baseConditions: string[] = ["(is_archived IS DISTINCT FROM TRUE)"];
+      const baseConditions: string[] = ["1=1"];
       const params: any[] = [];
       let paramIndex = 1;
 
@@ -1972,15 +2070,59 @@ router.get(
         }
       }
 
-      const whereClause = baseConditions.join(" AND ");
-      const startMonthParam = `$${paramIndex}`;
-      params.push(startDateStr);
-      paramIndex++;
-      const endExclusiveParam = `$${paramIndex}`;
-      params.push(endDateExclusiveStr);
-      paramIndex++;
+      const baselineConditions: string[] = [...baseConditions];
+      const baselineParams: any[] = [...params];
 
-      const overviewQuery = `
+      const filteredConditions: string[] = [...baseConditions];
+      const filteredParams: any[] = [...params];
+      let filteredParamIndex = paramIndex;
+
+      if (loanTypesUnique.length === 1) {
+        filteredConditions.push(`COALESCE(loan_type, 'Other') = $${filteredParamIndex}`);
+        filteredParams.push(loanTypesUnique[0]);
+        filteredParamIndex++;
+      } else if (loanTypesUnique.length > 1) {
+        const placeholders = loanTypesUnique.map((_, i) => `$${filteredParamIndex + i}`).join(", ");
+        filteredConditions.push(`COALESCE(loan_type, 'Other') IN (${placeholders})`);
+        filteredParams.push(...loanTypesUnique);
+        filteredParamIndex += loanTypesUnique.length;
+      }
+
+      const agingFilterSql = buildSalesCompanyOverviewMultiAgingFilterSql(agingBucketsUnique);
+      if (agingFilterSql) {
+        filteredConditions.push(agingFilterSql);
+      }
+
+      const whereBaseline = baselineConditions.join(" AND ");
+      const whereFiltered = filteredConditions.join(" AND ");
+
+      const startMonthBaseline = `$${baselineParams.length + 1}`;
+      const endDateBaseline = `$${baselineParams.length + 2}`;
+      const paramsWithDatesBaseline = [...baselineParams, startDateStr, endDateStr];
+
+      const startMonthFiltered = `$${filteredParams.length + 1}`;
+      const endDateFiltered = `$${filteredParams.length + 2}`;
+      const paramsWithDatesFiltered = [...filteredParams, startDateStr, endDateStr];
+
+      const submittedDateSourceResult = await retryQuery(
+        () =>
+          tenantPool.query(
+            `
+            SELECT COUNT(submitted_to_processing_date) AS submitted_to_processing_date_count
+            FROM loans
+            WHERE ${whereBaseline}
+            `,
+            baselineParams,
+          ),
+        2,
+        500,
+      );
+      const submittedDateField =
+        Number(submittedDateSourceResult.rows[0]?.submitted_to_processing_date_count || 0) === 0
+          ? "processing_date"
+          : "submitted_to_processing_date";
+
+      const baseCte = (whereSql: string) => `
         WITH base AS (
           SELECT
             loan_amount::numeric AS amount,
@@ -1988,10 +2130,13 @@ router.get(
             loan_type,
             application_date,
             submitted_to_processing_date,
+            processing_date,
             funding_date,
-            current_loan_status
+            current_loan_status,
+            is_archived,
+            COUNT(submitted_to_processing_date) OVER () AS submitted_to_processing_date_count
           FROM loans
-          WHERE ${whereClause}
+          WHERE ${whereSql}
         ),
         flagged AS (
           SELECT
@@ -1999,15 +2144,21 @@ router.get(
             rate,
             loan_type,
             application_date,
-            submitted_to_processing_date,
+            CASE
+              WHEN submitted_to_processing_date_count = 0 THEN processing_date
+              ELSE submitted_to_processing_date
+            END AS submitted_mtd_date,
             funding_date,
             (
               current_loan_status = 'Active Loan'
               AND application_date IS NOT NULL
               AND TRIM(COALESCE(application_date::text, '')) <> ''
+              AND (is_archived IS DISTINCT FROM TRUE)
             ) AS is_active
           FROM base
-        )
+        )`;
+
+      const kpiSelectBody = (startP: string, endP: string) => `
         SELECT
           COUNT(*) FILTER (WHERE is_active) AS active_count,
           COALESCE(SUM(amount) FILTER (WHERE is_active), 0) AS active_volume,
@@ -2018,21 +2169,95 @@ router.get(
             ELSE 0
           END AS active_wac,
 
-          COUNT(*) FILTER (WHERE submitted_to_processing_date > ${startMonthParam}::date AND submitted_to_processing_date < ${endExclusiveParam}::date) AS submitted_count,
-          COALESCE(SUM(amount) FILTER (WHERE submitted_to_processing_date > ${startMonthParam}::date AND submitted_to_processing_date < ${endExclusiveParam}::date), 0) AS submitted_volume,
+          COUNT(*) FILTER (WHERE DATE(submitted_mtd_date) >= ${startP}::date AND DATE(submitted_mtd_date) <= ${endP}::date) AS submitted_count,
+          COALESCE(SUM(amount) FILTER (WHERE DATE(submitted_mtd_date) >= ${startP}::date AND DATE(submitted_mtd_date) <= ${endP}::date), 0) AS submitted_volume,
           CASE
-            WHEN COALESCE(SUM(CASE WHEN submitted_to_processing_date > ${startMonthParam}::date AND submitted_to_processing_date < ${endExclusiveParam}::date AND rate > 0 AND rate <= 15 THEN amount ELSE 0 END), 0) > 0
-              THEN COALESCE(SUM(CASE WHEN submitted_to_processing_date > ${startMonthParam}::date AND submitted_to_processing_date < ${endExclusiveParam}::date AND rate > 0 AND rate <= 15 THEN amount * rate ELSE 0 END), 0)
-                   / NULLIF(SUM(CASE WHEN submitted_to_processing_date > ${startMonthParam}::date AND submitted_to_processing_date < ${endExclusiveParam}::date AND rate > 0 AND rate <= 15 THEN amount ELSE 0 END), 0)
+            WHEN COALESCE(SUM(CASE WHEN DATE(submitted_mtd_date) >= ${startP}::date AND DATE(submitted_mtd_date) <= ${endP}::date AND rate > 0 AND rate <= 15 THEN amount ELSE 0 END), 0) > 0
+              THEN COALESCE(SUM(CASE WHEN DATE(submitted_mtd_date) >= ${startP}::date AND DATE(submitted_mtd_date) <= ${endP}::date AND rate > 0 AND rate <= 15 THEN amount * rate ELSE 0 END), 0)
+                   / NULLIF(SUM(CASE WHEN DATE(submitted_mtd_date) >= ${startP}::date AND DATE(submitted_mtd_date) <= ${endP}::date AND rate > 0 AND rate <= 15 THEN amount ELSE 0 END), 0)
             ELSE 0
           END AS submitted_wac,
 
-          COUNT(*) FILTER (WHERE funding_date > ${startMonthParam}::date AND funding_date < ${endExclusiveParam}::date) AS funded_count,
-          COALESCE(SUM(amount) FILTER (WHERE funding_date > ${startMonthParam}::date AND funding_date < ${endExclusiveParam}::date), 0) AS funded_volume,
+          COUNT(*) FILTER (WHERE DATE(funding_date) >= ${startP}::date AND DATE(funding_date) <= ${endP}::date) AS funded_count,
+          COALESCE(SUM(amount) FILTER (WHERE DATE(funding_date) >= ${startP}::date AND DATE(funding_date) <= ${endP}::date), 0) AS funded_volume,
           CASE
-            WHEN COALESCE(SUM(CASE WHEN funding_date > ${startMonthParam}::date AND funding_date < ${endExclusiveParam}::date AND rate > 0 AND rate <= 15 THEN amount ELSE 0 END), 0) > 0
-              THEN COALESCE(SUM(CASE WHEN funding_date > ${startMonthParam}::date AND funding_date < ${endExclusiveParam}::date AND rate > 0 AND rate <= 15 THEN amount * rate ELSE 0 END), 0)
-                   / NULLIF(SUM(CASE WHEN funding_date > ${startMonthParam}::date AND funding_date < ${endExclusiveParam}::date AND rate > 0 AND rate <= 15 THEN amount ELSE 0 END), 0)
+            WHEN COALESCE(SUM(CASE WHEN DATE(funding_date) >= ${startP}::date AND DATE(funding_date) <= ${endP}::date AND rate > 0 AND rate <= 15 THEN amount ELSE 0 END), 0) > 0
+              THEN COALESCE(SUM(CASE WHEN DATE(funding_date) >= ${startP}::date AND DATE(funding_date) <= ${endP}::date AND rate > 0 AND rate <= 15 THEN amount * rate ELSE 0 END), 0)
+                   / NULLIF(SUM(CASE WHEN DATE(funding_date) >= ${startP}::date AND DATE(funding_date) <= ${endP}::date AND rate > 0 AND rate <= 15 THEN amount ELSE 0 END), 0)
+            ELSE 0
+          END AS funded_wac
+        FROM flagged`;
+
+      const agingSelectBody = () => `
+        SELECT
+          COUNT(*) FILTER (WHERE is_active AND application_date IS NOT NULL AND (CURRENT_DATE - application_date::date) BETWEEN 0 AND 15) AS aging_0_15,
+          COUNT(*) FILTER (WHERE is_active AND application_date IS NOT NULL AND (CURRENT_DATE - application_date::date) BETWEEN 16 AND 30) AS aging_16_30,
+          COUNT(*) FILTER (WHERE is_active AND application_date IS NOT NULL AND (CURRENT_DATE - application_date::date) BETWEEN 31 AND 45) AS aging_31_45,
+          COUNT(*) FILTER (WHERE is_active AND application_date IS NOT NULL AND (CURRENT_DATE - application_date::date) BETWEEN 46 AND 60) AS aging_46_60,
+          COUNT(*) FILTER (WHERE is_active AND application_date IS NOT NULL AND (CURRENT_DATE - application_date::date) BETWEEN 61 AND 90) AS aging_61_90,
+          COUNT(*) FILTER (WHERE is_active AND application_date IS NOT NULL AND (CURRENT_DATE - application_date::date) > 90) AS aging_over_90
+        FROM flagged`;
+
+      const submittedTypeQuery = (whereSql: string, startP: string, endP: string) => `
+        WITH scoped AS (
+          SELECT
+            loan_type,
+            CASE
+              WHEN COUNT(submitted_to_processing_date) OVER () = 0 THEN processing_date
+              ELSE submitted_to_processing_date
+            END AS submitted_mtd_date
+          FROM loans
+          WHERE ${whereSql}
+        )
+        SELECT COALESCE(loan_type, 'Other') AS loan_type, COUNT(*) AS count
+        FROM scoped
+        WHERE DATE(submitted_mtd_date) >= ${startP}::date
+          AND DATE(submitted_mtd_date) <= ${endP}::date
+        GROUP BY COALESCE(loan_type, 'Other')
+      `;
+
+      const fundedTypeQuery = (whereSql: string, startP: string, endP: string) => `
+        SELECT COALESCE(loan_type, 'Other') AS loan_type, COUNT(*) AS count
+        FROM loans
+        WHERE ${whereSql}
+          AND DATE(funding_date) >= ${startP}::date
+          AND DATE(funding_date) <= ${endP}::date
+        GROUP BY COALESCE(loan_type, 'Other')
+      `;
+
+      const toNum = (v: any) => Number(v) || 0;
+      let m: Record<string, unknown>;
+      let agingRow: Record<string, unknown>;
+      const submittedByType: Record<string, number> = {};
+      const fundedByType: Record<string, number> = {};
+
+      if (!hasSliceFilters) {
+        const overviewQueryFixed = `${baseCte(whereBaseline)}
+        SELECT
+          COUNT(*) FILTER (WHERE is_active) AS active_count,
+          COALESCE(SUM(amount) FILTER (WHERE is_active), 0) AS active_volume,
+          CASE
+            WHEN COALESCE(SUM(CASE WHEN is_active AND rate > 0 AND rate <= 15 THEN amount ELSE 0 END), 0) > 0
+              THEN COALESCE(SUM(CASE WHEN is_active AND rate > 0 AND rate <= 15 THEN amount * rate ELSE 0 END), 0)
+                   / NULLIF(SUM(CASE WHEN is_active AND rate > 0 AND rate <= 15 THEN amount ELSE 0 END), 0)
+            ELSE 0
+          END AS active_wac,
+
+          COUNT(*) FILTER (WHERE DATE(submitted_mtd_date) >= ${startMonthBaseline}::date AND DATE(submitted_mtd_date) <= ${endDateBaseline}::date) AS submitted_count,
+          COALESCE(SUM(amount) FILTER (WHERE DATE(submitted_mtd_date) >= ${startMonthBaseline}::date AND DATE(submitted_mtd_date) <= ${endDateBaseline}::date), 0) AS submitted_volume,
+          CASE
+            WHEN COALESCE(SUM(CASE WHEN DATE(submitted_mtd_date) >= ${startMonthBaseline}::date AND DATE(submitted_mtd_date) <= ${endDateBaseline}::date AND rate > 0 AND rate <= 15 THEN amount ELSE 0 END), 0) > 0
+              THEN COALESCE(SUM(CASE WHEN DATE(submitted_mtd_date) >= ${startMonthBaseline}::date AND DATE(submitted_mtd_date) <= ${endDateBaseline}::date AND rate > 0 AND rate <= 15 THEN amount * rate ELSE 0 END), 0)
+                   / NULLIF(SUM(CASE WHEN DATE(submitted_mtd_date) >= ${startMonthBaseline}::date AND DATE(submitted_mtd_date) <= ${endDateBaseline}::date AND rate > 0 AND rate <= 15 THEN amount ELSE 0 END), 0)
+            ELSE 0
+          END AS submitted_wac,
+
+          COUNT(*) FILTER (WHERE DATE(funding_date) >= ${startMonthBaseline}::date AND DATE(funding_date) <= ${endDateBaseline}::date) AS funded_count,
+          COALESCE(SUM(amount) FILTER (WHERE DATE(funding_date) >= ${startMonthBaseline}::date AND DATE(funding_date) <= ${endDateBaseline}::date), 0) AS funded_volume,
+          CASE
+            WHEN COALESCE(SUM(CASE WHEN DATE(funding_date) >= ${startMonthBaseline}::date AND DATE(funding_date) <= ${endDateBaseline}::date AND rate > 0 AND rate <= 15 THEN amount ELSE 0 END), 0) > 0
+              THEN COALESCE(SUM(CASE WHEN DATE(funding_date) >= ${startMonthBaseline}::date AND DATE(funding_date) <= ${endDateBaseline}::date AND rate > 0 AND rate <= 15 THEN amount * rate ELSE 0 END), 0)
+                   / NULLIF(SUM(CASE WHEN DATE(funding_date) >= ${startMonthBaseline}::date AND DATE(funding_date) <= ${endDateBaseline}::date AND rate > 0 AND rate <= 15 THEN amount ELSE 0 END), 0)
             ELSE 0
           END AS funded_wac,
 
@@ -2043,43 +2268,57 @@ router.get(
           COUNT(*) FILTER (WHERE is_active AND application_date IS NOT NULL AND (CURRENT_DATE - application_date::date) BETWEEN 61 AND 90) AS aging_61_90,
           COUNT(*) FILTER (WHERE is_active AND application_date IS NOT NULL AND (CURRENT_DATE - application_date::date) > 90) AS aging_over_90
         FROM flagged
-      `;
+        `;
 
-      const submittedTypeQuery = `
-        SELECT COALESCE(loan_type, 'Other') AS loan_type, COUNT(*) AS count
-        FROM loans
-        WHERE ${whereClause}
-          AND submitted_to_processing_date > ${startMonthParam}::date
-          AND submitted_to_processing_date < ${endExclusiveParam}::date
-        GROUP BY COALESCE(loan_type, 'Other')
-      `;
+        const [overviewResult, submittedTypeResult, fundedTypeResult] = await Promise.all([
+          retryQuery(() => tenantPool.query(overviewQueryFixed, paramsWithDatesBaseline), 2, 500),
+          retryQuery(
+            () => tenantPool.query(submittedTypeQuery(whereBaseline, startMonthBaseline, endDateBaseline), paramsWithDatesBaseline),
+            2,
+            500,
+          ),
+          retryQuery(
+            () => tenantPool.query(fundedTypeQuery(whereBaseline, startMonthBaseline, endDateBaseline), paramsWithDatesBaseline),
+            2,
+            500,
+          ),
+        ]);
+        m = overviewResult.rows[0] || {};
+        agingRow = m;
+        for (const row of submittedTypeResult.rows) {
+          submittedByType[row.loan_type] = Number(row.count || 0);
+        }
+        for (const row of fundedTypeResult.rows) {
+          fundedByType[row.loan_type] = Number(row.count || 0);
+        }
+      } else {
+        const kpiOnlySql = `${baseCte(whereFiltered)}
+${kpiSelectBody(startMonthFiltered, endDateFiltered)}`;
+        const agingOnlySql = `${baseCte(whereBaseline)}
+${agingSelectBody()}`;
 
-      const fundedTypeQuery = `
-        SELECT COALESCE(loan_type, 'Other') AS loan_type, COUNT(*) AS count
-        FROM loans
-        WHERE ${whereClause}
-          AND funding_date > ${startMonthParam}::date
-          AND funding_date < ${endExclusiveParam}::date
-        GROUP BY COALESCE(loan_type, 'Other')
-      `;
+        // When aging buckets are selected, MTD donut distributions follow the filtered cohort (shares readjust).
+        // Loan-type-only filters keep full-population donut slices with UI grey-out on non-selected types.
+        const useFilteredForDonuts = agingBucketsUnique.length > 0;
+        const donutWhere = useFilteredForDonuts ? whereFiltered : whereBaseline;
+        const donutStart = useFilteredForDonuts ? startMonthFiltered : startMonthBaseline;
+        const donutEnd = useFilteredForDonuts ? endDateFiltered : endDateBaseline;
+        const donutParams = useFilteredForDonuts ? paramsWithDatesFiltered : paramsWithDatesBaseline;
 
-      const [overviewResult, submittedTypeResult, fundedTypeResult] = await Promise.all([
-        retryQuery(() => tenantPool.query(overviewQuery, params), 2, 500),
-        retryQuery(() => tenantPool.query(submittedTypeQuery, params), 2, 500),
-        retryQuery(() => tenantPool.query(fundedTypeQuery, params), 2, 500),
-      ]);
-
-      const toNum = (v: any) => Number(v) || 0;
-      const m = overviewResult.rows[0] || {};
-
-      const submittedByType: Record<string, number> = {};
-      for (const row of submittedTypeResult.rows) {
-        submittedByType[row.loan_type] = Number(row.count || 0);
-      }
-
-      const fundedByType: Record<string, number> = {};
-      for (const row of fundedTypeResult.rows) {
-        fundedByType[row.loan_type] = Number(row.count || 0);
+        const [kpiResult, agingResult, submittedTypeResult, fundedTypeResult] = await Promise.all([
+          retryQuery(() => tenantPool.query(kpiOnlySql, paramsWithDatesFiltered), 2, 500),
+          retryQuery(() => tenantPool.query(agingOnlySql, baselineParams), 2, 500),
+          retryQuery(() => tenantPool.query(submittedTypeQuery(donutWhere, donutStart, donutEnd), donutParams), 2, 500),
+          retryQuery(() => tenantPool.query(fundedTypeQuery(donutWhere, donutStart, donutEnd), donutParams), 2, 500),
+        ]);
+        m = kpiResult.rows[0] || {};
+        agingRow = agingResult.rows[0] || {};
+        for (const row of submittedTypeResult.rows) {
+          submittedByType[row.loan_type] = Number(row.count || 0);
+        }
+        for (const row of fundedTypeResult.rows) {
+          fundedByType[row.loan_type] = Number(row.count || 0);
+        }
       }
 
       logInfo("[SalesCompanyOverview] Results", {
@@ -2088,7 +2327,8 @@ router.get(
         submittedCount: toNum(m.submitted_count),
         fundedCount: toNum(m.funded_count),
         startDate: startDateStr,
-        endDateExclusive: endDateExclusiveStr,
+        endDate: endDateStr,
+        hasSliceFilters,
       });
 
       res.json({
@@ -2108,18 +2348,21 @@ router.get(
           avgInterestRate: toNum(m.funded_wac),
         },
         aging: {
-          "0-15": toNum(m.aging_0_15),
-          "16-30": toNum(m.aging_16_30),
-          "31-45": toNum(m.aging_31_45),
-          "46-60": toNum(m.aging_46_60),
-          "61-90": toNum(m.aging_61_90),
-          ">90": toNum(m.aging_over_90),
+          "0-15": toNum(agingRow.aging_0_15),
+          "16-30": toNum(agingRow.aging_16_30),
+          "31-45": toNum(agingRow.aging_31_45),
+          "46-60": toNum(agingRow.aging_46_60),
+          "61-90": toNum(agingRow.aging_61_90),
+          ">90": toNum(agingRow.aging_over_90),
         },
         submittedByType,
         fundedByType,
         window: {
           startDate: startDateStr,
-          endDateExclusive: endDateExclusiveStr,
+          endDate: endDateStr,
+        },
+        definitions: {
+          submittedDateField,
         },
       });
     } catch (error: any) {
