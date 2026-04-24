@@ -213,6 +213,17 @@ router.post("/callback", authLimiter, async (req, res) => {
       idpName: userInfo.idpName,
     });
 
+    if (!userInfo.email) {
+      logError("[CognitoAuth] SSO token missing email claim", new Error("missing email"), {
+        idpName: userInfo.idpName,
+        sub: userInfo.sub,
+        username: userInfo.username,
+      });
+      return res.status(400).json({
+        error: "SSO provider did not return an email address. Check the IdP attribute mapping in the SSO configuration.",
+      });
+    }
+
     // Find or create user
     const { user, tenantSlug, isSuperAdmin } = await findOrCreateSsoUser(
       userInfo,
@@ -316,7 +327,13 @@ router.post("/callback", authLimiter, async (req, res) => {
       } catch (e) {}
     }
 
-    return res.status(401).json({ error: "SSO authentication failed" });
+    const errorDetail = error.message || "Unknown error";
+    const isMissingClaim = errorDetail.includes("toLowerCase") || errorDetail.includes("undefined");
+    return res.status(isMissingClaim ? 400 : 401).json({
+      error: isMissingClaim
+        ? "SSO provider returned incomplete user data. Check the IdP attribute mapping (email is required)."
+        : "SSO authentication failed",
+    });
   }
 });
 
@@ -402,10 +419,10 @@ router.get("/lookup-tenant", authLimiter, async (req, res) => {
 
     // No tenant-level SSO (or DB unavailable) — check platform JIT domains
     if (PLATFORM_JIT_DOMAINS.includes(domain) && isCognitoConfigured()) {
-      const platformIdpName = process.env.PLATFORM_SSO_IDP_NAME || "";
-      logInfo("[CognitoAuth] Platform SSO domain detected", { domain, platformIdpName });
+      const platformIdpName = (process.env.PLATFORM_SSO_IDP_NAME || "").trim();
+      logInfo("[CognitoAuth] Platform domain detected", { domain, platformIdpName: platformIdpName || "(not configured)" });
       return res.json({
-        sso_available: true,
+        sso_available: !!platformIdpName,
         tenant_slug: null,
         tenant_name: "Cohi Platform",
         idp_name: platformIdpName || undefined,

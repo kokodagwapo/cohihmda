@@ -37,6 +37,7 @@ interface CompanyScorecardDetailTableProps {
   formatNumber: (num: number) => string;
   formatLargeNumber: (num: number) => string;
   containerClassName?: string;
+  tableWrapperClassName?: string;
   initialSortKey?: SortKey;
   initialSortDir?: 'asc' | 'desc';
 }
@@ -65,6 +66,7 @@ export function CompanyScorecardDetailTable({
   formatNumber,
   formatLargeNumber,
   containerClassName,
+  tableWrapperClassName,
   initialSortKey,
   initialSortDir,
 }: CompanyScorecardDetailTableProps) {
@@ -223,7 +225,7 @@ export function CompanyScorecardDetailTable({
 
   return (
     <Card className={`rounded-xl shadow-sm border overflow-hidden ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'} ${containerClassName ?? ''}`}>
-      <div className="overflow-x-auto">
+      <div className={`overflow-auto ${tableWrapperClassName ?? ''}`}>
         <table className="w-full border-collapse min-w-[1400px]">
           <thead>
             <tr className={`border-b-2 ${borderTh}`}>
@@ -239,8 +241,8 @@ export function CompanyScorecardDetailTable({
               <th className={`text-right py-2 px-2 text-[10px] sm:text-xs sm:py-3 sm:px-3 font-medium ${bgTh}`}>{renderHeaderButton('Denied %', 'Denied Units %', 'deniedUnitsPct')}</th>
               <th className={`text-right py-2 px-2 text-[10px] sm:text-xs sm:py-3 sm:px-3 font-medium ${bgTh}`}>{renderHeaderButton('Orig Rev $', 'Originated Revenue $', 'originatedRevenue')}</th>
               <th className={`text-right py-2 px-2 text-[10px] sm:text-xs sm:py-3 sm:px-3 font-medium ${bgTh}`}>{renderHeaderButton('W/D Rev', 'W/D ProForma Revenue', 'withdrawnProformaRevenue')}</th>
-              <th className={`text-right py-2 px-2 text-[10px] sm:text-xs sm:py-3 sm:px-3 font-medium ${bgTh}`}>{renderHeaderButton('Vol HMDA', 'Volume All Final HMDA Status', 'volumeAllFinal')}</th>
-              <th className={`text-right py-2 px-2 text-[10px] sm:text-xs sm:py-3 sm:px-3 font-medium ${bgTh}`}>{renderHeaderButton('Units HMDA', 'Units All Final HMDA Status', 'unitsAllFinal')}</th>
+              <th className={`text-right py-2 px-2 text-[10px] sm:text-xs sm:py-3 sm:px-3 font-medium ${bgTh}`}>{renderHeaderButton('Final Vol', 'Volume All Final Status', 'volumeAllFinal')}</th>
+              <th className={`text-right py-2 px-2 text-[10px] sm:text-xs sm:py-3 sm:px-3 font-medium ${bgTh}`}>{renderHeaderButton('Final Units', 'Units All Final Status', 'unitsAllFinal')}</th>
               <th className={`text-right py-2 px-2 text-[10px] sm:text-xs sm:py-3 sm:px-3 font-medium ${bgTh}`}>{renderHeaderButton('Orig Vol $', 'Originated Volume $', 'originatedVolume')}</th>
               <th className={`text-right py-2 px-2 text-[10px] sm:text-xs sm:py-3 sm:px-3 font-medium ${bgTh}`}>{renderHeaderButton('W/D $', 'Withdrawn $', 'withdrawnDollar')}</th>
               <th className={`text-right py-2 px-2 text-[10px] sm:text-xs sm:py-3 sm:px-3 font-medium ${bgTh}`}>{renderHeaderButton('Denied $', 'Denied $', 'deniedDollar')}</th>
