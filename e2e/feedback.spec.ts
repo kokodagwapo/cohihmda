@@ -27,6 +27,24 @@ async function dismissBlockingOverlays(page: import("@playwright/test").Page) {
   }
 }
 
+async function suppressWelcomeTour(page: import("@playwright/test").Page) {
+  // Pre-seed the same localStorage key used by the welcome tour so CI runs
+  // don't render an overlay that intercepts Help-menu pointer actions.
+  await page.addInitScript(() => {
+    try {
+      window.localStorage.setItem("cohi-welcome-tour-last-shown", new Date().toISOString());
+    } catch {
+      /* storage access denied */
+    }
+  });
+}
+
+async function waitForBackdropToClear(page: import("@playwright/test").Page) {
+  // Guard against transient modal backdrops still animating after dismissal.
+  const backdrop = page.locator("div[data-state='open'][aria-hidden='true']").first();
+  await expect(backdrop).not.toBeVisible({ timeout: 10_000 });
+}
+
 function sampleListItem() {
   return {
     id: FEEDBACK_ID,
@@ -151,10 +169,12 @@ test.describe("Feedback flow (COHI-322)", () => {
     userPage,
   }) => {
     await mockFeedbackApis(userPage);
+    await suppressWelcomeTour(userPage);
 
     await userPage.goto("/insights", { waitUntil: "domcontentloaded" });
     await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
     await dismissBlockingOverlays(userPage);
+    await waitForBackdropToClear(userPage);
 
     // Use stable selectors
     const helpOptionsButton = userPage.getByRole("button", { name: "Help options" });
