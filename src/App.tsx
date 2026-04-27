@@ -40,6 +40,7 @@ import CaptureAnalysis from "./pages/CaptureAnalysis";
 import SalesScorecard from "./pages/SalesScorecard";
 import SalesTrends from "./pages/SalesTrends";
 import SalesScorecardOverview from "./pages/SalesScorecardOverview";
+import SalesCompanyOverview from "./pages/SalesCompanyOverview";
 import CompanyScorecard from "./pages/CompanyScorecard";
 import HighPerformers from "./pages/HighPerformers";
 import CreditRiskManagement from "./pages/CreditRiskManagement";
@@ -226,6 +227,7 @@ const App = () => (
               <Route path="/performance/financial-modeling-sandbox" element={<FinancialModelingSandbox />} />
               <Route path="/capture-analysis" element={<CaptureAnalysis />} />
               <Route path="/sales-scorecard" element={<SalesScorecard />} />
+              <Route path="/sales-company-overview" element={<SalesCompanyOverview />} />
               <Route path="/sales-trends" element={<SalesTrends />} />
               <Route path="/sales-scorecard-overview" element={<SalesScorecardOverview />} />
               <Route path="/performance/operation-scorecard" element={<OperationScorecard />} />
