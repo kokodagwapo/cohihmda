@@ -93,6 +93,7 @@ router.get(
         startDate: z.string().optional(), // For custom date range (YYYY-MM-DD)
         endDate: z.string().optional(), // For custom date range (YYYY-MM-DD)
         channel_group: z.string().optional(), // Channel filter (e.g., 'Retail', 'TPO', or specific channel)
+        actor_status: z.string().optional(),
       });
 
       const {
@@ -102,6 +103,7 @@ router.get(
         startDate,
         endDate,
         channel_group,
+        actor_status,
       } = querySchema.parse(req.query);
 
       const tenantContext = getTenantContext(req);
@@ -130,6 +132,7 @@ router.get(
         startDate: startDate || undefined,
         endDate: endDate || undefined,
         channelGroup: channel_group || undefined,
+        actorStatusFilter: actor_status || undefined,
         userAccessFilter: accessCtx.getFilter("l"),
         dimensionFilterClause: dimensionFilterClause || undefined,
       };

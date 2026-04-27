@@ -21,6 +21,12 @@ import { apiLimiter } from "../../middleware/rateLimiter.js";
 import { logError, logWarn, logInfo, logDebug } from "../../services/logger.js";
 import { getLoanAccessContext } from "../../services/userLoanAccessService.js";
 import {
+  buildActorStatusSummary,
+  enrichActorsWithStatus,
+  filterActorsByStatus,
+  normalizeActorStatusFilter,
+} from "../../services/actorStatusService.js";
+import {
   resolveLoanComplexityScoreForRead,
   loanRowToComplexityData,
 } from "../../services/scoring/persistedLoanComplexity.js";
@@ -264,6 +270,7 @@ router.get(
       const startDate = req.query.startDate as string | undefined;
       const endDate = req.query.endDate as string | undefined;
       const channelGroup = req.query.channel_group as string | undefined;
+      const actorStatusFilter = normalizeActorStatusFilter(req.query.actor_status);
 
       // Validate actor type
       if (!["branch", "loan_officer"].includes(actor)) {
@@ -439,6 +446,7 @@ router.get(
       // Aggregate metrics by actor
       interface ActorMetrics {
         name: string;
+        actorId: string | null;
         units: number;
         volume: number;
         revenue: number;
@@ -466,6 +474,7 @@ router.get(
 
         const existing = actorMap.get(actorName) || {
           name: actorName,
+          actorId: actorColumn === "loan_officer" ? (l.loan_officer_id ?? null) : null,
           units: 0,
           volume: 0,
           revenue: 0,
@@ -757,7 +766,9 @@ router.get(
               : 0;
 
           return {
+            id: actor.actorId || actor.name,
             name: actor.name,
+            actorId: actor.actorId,
             units: safeNum(actor.units),
             volume: safeNum(actor.volume),
             revenue: safeRevenue,
@@ -1070,17 +1081,28 @@ router.get(
         loanComplexityScore: companyAvgComplexity,
       };
 
+      const enrichedActors = await enrichActorsWithStatus(tenantPool, actorsWithTiers, {
+        actorKind: actor === "branch" ? "branch" : actorColumn,
+        getActorId: (row: any) => row.id,
+        getActorName: (row: any) => row.name,
+      });
+      const visibleActors = filterActorsByStatus(enrichedActors, actorStatusFilter);
+      const actorStatusSummary = buildActorStatusSummary(enrichedActors);
+
       logInfo("[Scorecard/Sales] Complete", {
-        actors: actorsWithTiers.length,
+        actors: visibleActors.length,
+        allActors: actorsWithTiers.length,
         totalUnits,
       });
 
       res.json({
-        actors: actorsWithTiers,
+        actors: visibleActors,
         companyAverages,
         weightConfig,
         tierSummary,
         totals,
+        actorStatusFilter,
+        actorStatusSummary,
         dateRange: {
           startDate: effectiveStartDate.toISOString(),
           endDate: effectiveEndDate.toISOString(),

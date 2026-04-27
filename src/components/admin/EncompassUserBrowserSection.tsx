@@ -58,6 +58,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useAdminTenant } from "@/contexts/AdminTenantContext";
 import { api } from "@/lib/api";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 interface EncompassUser {
   id: string;
@@ -96,6 +97,18 @@ interface SyncHistory {
 interface GroupOption {
   id: string;
   name: string;
+}
+
+/** Response from GET /api/admin/encompass-users/actor-reconciliation-summary */
+interface LoanActorReportingCoverage {
+  actorColumn: string;
+  distinctLoanActors: number;
+  totalActors: number;
+  matchedActors: number;
+  unmatchedActors: number;
+  activeActors: number;
+  inactiveActors: number;
+  unknownActors: number;
 }
 
 interface EncompassUserBrowserSectionProps {
@@ -144,6 +157,9 @@ export function EncompassUserBrowserSection({
 
   // Loan access sync state
   const [syncingLoanAccessUserId, setSyncingLoanAccessUserId] = useState<string | null>(null);
+
+  const [actorReconciliation, setActorReconciliation] =
+    useState<LoanActorReportingCoverage | null>(null);
 
   // Fetch users
   const fetchUsers = useCallback(async () => {
@@ -232,6 +248,34 @@ export function EncompassUserBrowserSection({
   useEffect(() => {
     fetchGroups();
   }, [fetchGroups]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadReconciliation = async () => {
+      if (isPlatformAdmin && !selectedTenantId) {
+        setActorReconciliation(null);
+        return;
+      }
+      try {
+        const params = new URLSearchParams();
+        if (isPlatformAdmin && selectedTenantId) {
+          params.set("tenant_id", selectedTenantId);
+        }
+        const qs = params.toString();
+        const url = qs
+          ? `/api/admin/encompass-users/actor-reconciliation-summary?${qs}`
+          : `/api/admin/encompass-users/actor-reconciliation-summary`;
+        const data = await api.request<LoanActorReportingCoverage>(url);
+        if (!cancelled) setActorReconciliation(data);
+      } catch {
+        if (!cancelled) setActorReconciliation(null);
+      }
+    };
+    void loadReconciliation();
+    return () => {
+      cancelled = true;
+    };
+  }, [isPlatformAdmin, selectedTenantId]);
 
   // Sync users from Encompass
   const handleSync = async () => {
@@ -473,6 +517,28 @@ export function EncompassUserBrowserSection({
                 <span className="text-red-600"> Failed</span>
               )}
             </div>
+          )}
+
+          {actorReconciliation && actorReconciliation.distinctLoanActors > 0 && (
+            <Alert
+              className="mb-4"
+              data-testid="actor-reconciliation-summary"
+            >
+              <Link2 className="h-4 w-4" />
+              <AlertTitle>Reporting actor coverage</AlertTitle>
+              <AlertDescription className="text-sm">
+                {actorReconciliation.matchedActors} of{" "}
+                {actorReconciliation.distinctLoanActors} distinct{" "}
+                {actorReconciliation.actorColumn === "account_executive"
+                  ? "account executives"
+                  : "loan officers"}{" "}
+                on loans matched an Encompass user;{" "}
+                {actorReconciliation.unmatchedActors} unmatched. Status mix on
+                loan actors: {actorReconciliation.activeActors} active,{" "}
+                {actorReconciliation.inactiveActors} inactive,{" "}
+                {actorReconciliation.unknownActors} unknown.
+              </AlertDescription>
+            </Alert>
           )}
 
           {/* Filters */}

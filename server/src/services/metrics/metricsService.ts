@@ -20,6 +20,13 @@
 import pg from "pg";
 import type { LoanAccessFilter } from "../userLoanAccessService.js";
 import { getActorColumnForChannel } from "../../utils/scorecard-utils.js";
+import {
+  buildActorStatusSummary,
+  enrichActorsWithStatus,
+  filterActorsByStatus,
+  normalizeActorStatusFilter,
+  type ActorStatusFilter,
+} from "../actorStatusService.js";
 
 // Date range interface
 export interface DateRange {
@@ -69,6 +76,7 @@ export interface MetricQueryOptions {
    * - { sql: 'l.guid IN (...)', ... } = filtered access
    */
   userAccessFilter?: LoanAccessFilter | null;
+  actorStatusFilter?: ActorStatusFilter | string | null;
 }
 
 // Metrics catalog - all available metrics with SQL implementations
@@ -1873,19 +1881,22 @@ export interface GroupedMetricResult {
   metadata?: Record<string, any>;
 }
 
+type GroupByField =
+  | "loan_officer"
+  | "branch"
+  | "processor"
+  | "underwriter"
+  | "channel"
+  | "investor"
+  | "loan_type"
+  | "loan_purpose"
+  | "occupancy_type"
+  | "account_executive";
+
 export async function queryMetricGroupedBy(
   tenantPool: pg.Pool,
   metricId: string,
-  groupBy:
-    | "loan_officer"
-    | "branch"
-    | "processor"
-    | "underwriter"
-    | "channel"
-    | "investor"
-    | "loan_type"
-    | "loan_purpose"
-    | "occupancy_type",
+  groupBy: GroupByField,
   options: MetricQueryOptions = {}
 ): Promise<GroupedMetricResult[]> {
   const metric = METRICS_CATALOG[metricId];
@@ -1966,9 +1977,14 @@ export async function queryMetricGroupedBy(
   }
 
   // Build query with GROUP BY
+  const actorIdSelect =
+    effectiveGroupBy === "loan_officer"
+      ? "MIN(l.loan_officer_id) AS actor_id,"
+      : "NULL::text AS actor_id,";
   const query = `
     SELECT 
       l.${effectiveGroupBy} as group_key,
+      ${actorIdSelect}
       ${metric.sqlQuery} as metric_value,
       COUNT(*) as count
     FROM public.loans l
@@ -1997,11 +2013,38 @@ export async function queryMetricGroupedBy(
 
   const result = await tenantPool.query(query, params);
 
-  return result.rows.map((row) => ({
+  const groupedRows = result.rows.map((row) => ({
     groupKey: row.group_key,
     value: parseFloat(row.metric_value) || 0,
     metadata: {
       count: parseInt(row.count) || 0,
+      actorId: row.actor_id ?? null,
+    },
+  }));
+
+  const actorGroupFields = new Set(["loan_officer", "account_executive", "branch"]);
+  if (!actorGroupFields.has(effectiveGroupBy)) return groupedRows;
+
+  const enriched = await enrichActorsWithStatus(tenantPool, groupedRows, {
+    actorKind: effectiveGroupBy === "branch" ? "branch" : effectiveGroupBy,
+    getActorId: (row) => row.metadata?.actorId,
+    getActorName: (row) => row.groupKey,
+  });
+  const filtered = filterActorsByStatus(
+    enriched,
+    normalizeActorStatusFilter(options.actorStatusFilter),
+  );
+
+  return filtered.map((row) => ({
+    groupKey: row.groupKey,
+    value: row.value,
+    metadata: {
+      ...row.metadata,
+      actorStatus: row.actorStatus,
+      lastLogin: row.lastLogin,
+      actorStatusMatchType: row.actorStatusMatchType,
+      encompassUserId: row.encompassUserId,
+      actorStatusSummary: buildActorStatusSummary(enriched),
     },
   }));
 }
@@ -2013,16 +2056,7 @@ export async function queryMetricGroupedBy(
 export async function queryMetricsGroupedBy(
   tenantPool: pg.Pool,
   metricIds: string[],
-  groupBy:
-    | "loan_officer"
-    | "branch"
-    | "processor"
-    | "underwriter"
-    | "channel"
-    | "investor"
-    | "loan_type"
-    | "loan_purpose"
-    | "occupancy_type",
+  groupBy: GroupByField,
   options: MetricQueryOptions = {}
 ): Promise<Record<string, GroupedMetricResult[]>> {
   const results: Record<string, GroupedMetricResult[]> = {};
