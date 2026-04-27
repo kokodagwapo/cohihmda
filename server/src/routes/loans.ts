@@ -2001,6 +2001,9 @@ function buildSalesCompanyOverviewMultiAgingFilterSql(buckets: string[]): string
  * Chart breakdowns: aging bars always use tenant+channel only (full-size bars; UI greys non-selected buckets).
  * KPIs use filtered loans. Submitted/Funded MTD donuts use filtered loans when at least one aging bucket is selected
  * (shares readjust to that cohort); with loan-type-only filters, donut counts stay on the full population (grey-out only).
+ *
+ * Response includes `sliceFilterOptionLists.loanTypes`: DISTINCT COALESCE(loan_type,'Other') under baseline access+channel
+ * (ignores slice filters) so filter pills can show the full pick list while charts are sliced.
  */
 router.get(
   "/sales-company-overview",
@@ -2041,6 +2044,7 @@ router.get(
           fundedByType: {},
           window: { startDate: startDateStr, endDate: endDateStr },
           definitions: { submittedDateField: "submitted_to_processing_date" },
+          sliceFilterOptionLists: { loanTypes: [] },
         });
       }
 
@@ -2095,6 +2099,13 @@ router.get(
 
       const whereBaseline = baselineConditions.join(" AND ");
       const whereFiltered = filteredConditions.join(" AND ");
+
+      const sliceLoanTypeListSql = `
+        SELECT DISTINCT COALESCE(loan_type, 'Other') AS v
+        FROM loans
+        WHERE ${whereBaseline}
+        ORDER BY 1
+      `;
 
       const startMonthBaseline = `$${baselineParams.length + 1}`;
       const endDateBaseline = `$${baselineParams.length + 2}`;
@@ -2230,6 +2241,7 @@ router.get(
       let agingRow: Record<string, unknown>;
       const submittedByType: Record<string, number> = {};
       const fundedByType: Record<string, number> = {};
+      let sliceLoanTypeList: string[] = [];
 
       if (!hasSliceFilters) {
         const overviewQueryFixed = `${baseCte(whereBaseline)}
@@ -2270,7 +2282,7 @@ router.get(
         FROM flagged
         `;
 
-        const [overviewResult, submittedTypeResult, fundedTypeResult] = await Promise.all([
+        const [overviewResult, submittedTypeResult, fundedTypeResult, loanTypesListResult] = await Promise.all([
           retryQuery(() => tenantPool.query(overviewQueryFixed, paramsWithDatesBaseline), 2, 500),
           retryQuery(
             () => tenantPool.query(submittedTypeQuery(whereBaseline, startMonthBaseline, endDateBaseline), paramsWithDatesBaseline),
@@ -2282,9 +2294,13 @@ router.get(
             2,
             500,
           ),
+          retryQuery(() => tenantPool.query(sliceLoanTypeListSql, baselineParams), 2, 500),
         ]);
         m = overviewResult.rows[0] || {};
         agingRow = m;
+        sliceLoanTypeList = loanTypesListResult.rows
+          .map((r: any) => String(r.v ?? "").trim())
+          .filter(Boolean);
         for (const row of submittedTypeResult.rows) {
           submittedByType[row.loan_type] = Number(row.count || 0);
         }
@@ -2305,14 +2321,18 @@ ${agingSelectBody()}`;
         const donutEnd = useFilteredForDonuts ? endDateFiltered : endDateBaseline;
         const donutParams = useFilteredForDonuts ? paramsWithDatesFiltered : paramsWithDatesBaseline;
 
-        const [kpiResult, agingResult, submittedTypeResult, fundedTypeResult] = await Promise.all([
+        const [kpiResult, agingResult, submittedTypeResult, fundedTypeResult, loanTypesListResult] = await Promise.all([
           retryQuery(() => tenantPool.query(kpiOnlySql, paramsWithDatesFiltered), 2, 500),
           retryQuery(() => tenantPool.query(agingOnlySql, baselineParams), 2, 500),
           retryQuery(() => tenantPool.query(submittedTypeQuery(donutWhere, donutStart, donutEnd), donutParams), 2, 500),
           retryQuery(() => tenantPool.query(fundedTypeQuery(donutWhere, donutStart, donutEnd), donutParams), 2, 500),
+          retryQuery(() => tenantPool.query(sliceLoanTypeListSql, baselineParams), 2, 500),
         ]);
         m = kpiResult.rows[0] || {};
         agingRow = agingResult.rows[0] || {};
+        sliceLoanTypeList = loanTypesListResult.rows
+          .map((r: any) => String(r.v ?? "").trim())
+          .filter(Boolean);
         for (const row of submittedTypeResult.rows) {
           submittedByType[row.loan_type] = Number(row.count || 0);
         }
@@ -2363,6 +2383,9 @@ ${agingSelectBody()}`;
         },
         definitions: {
           submittedDateField,
+        },
+        sliceFilterOptionLists: {
+          loanTypes: sliceLoanTypeList,
         },
       });
     } catch (error: any) {
@@ -6111,6 +6134,690 @@ router.get(
         error:
           error.message || "Failed to fetch operations scorecard trends data",
       });
+    }
+  },
+);
+
+/**
+ * GET /api/loans/production-trends
+ * Production Trends dashboard data source.
+ */
+router.get(
+  "/production-trends",
+  authenticateToken,
+  attachTenantContext,
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const { tenantPool } = getTenantContext(req);
+      const dateType = String(req.query.date_type || "funded");
+      const measure = String(req.query.measure || "volume");
+      const dimension = String(req.query.dimension || "branch");
+      const channelGroup = req.query.channel_group as string | undefined;
+      const yearMonthsRaw = req.query.year_month;
+      const yearMonths = (Array.isArray(yearMonthsRaw) ? yearMonthsRaw : [yearMonthsRaw])
+        .filter((v): v is string => typeof v === "string" && /^\d{4}-\d{2}$/.test(v));
+
+      const dateExprMap: Record<string, string> = {
+        applications: "application_date::date",
+        closed: "closing_date::date",
+        funded: "funding_date::date",
+      };
+      const dateTypeLabelMap: Record<string, string> = {
+        applications: "Applications Taken",
+        closed: "Closed Loans",
+        funded: "Funded Loans",
+      };
+      const measureLabelMap: Record<string, string> = {
+        volume: "Volume",
+        units: "Units",
+      };
+      const dimensionMap: Record<string, { column: string; label: string }> = {
+        loan_purpose: { column: "COALESCE(loan_purpose, 'Unknown')", label: "Loan Purpose" },
+        loan_type: { column: "COALESCE(loan_type, 'Unknown')", label: "Loan Type" },
+        channel: { column: "COALESCE(channel, 'Unknown')", label: "Channel" },
+        branch: { column: "COALESCE(branch, 'Unknown')", label: "Branch" },
+        broker_lender_name: { column: "COALESCE(broker_lender_name, 'Unknown')", label: "Broker Lender Name" },
+        investor: { column: "COALESCE(investor, 'Unknown')", label: "Investor" },
+        warehouse_co_name: { column: "COALESCE(warehouse_co_name, 'Unknown')", label: "Warehouse Co Name" },
+      };
+
+      if (!dateExprMap[dateType]) {
+        return res.status(400).json({ error: "Invalid date_type" });
+      }
+      if (!measureLabelMap[measure]) {
+        return res.status(400).json({ error: "Invalid measure" });
+      }
+      if (!dimensionMap[dimension]) {
+        return res.status(400).json({ error: "Invalid dimension" });
+      }
+
+      const accessCtx = await getLoanAccessContext(req, tenantPool);
+      if (accessCtx.hasNoAccess) {
+        return res.json({
+          currentYear: new Date().getFullYear(),
+          previousYear: new Date().getFullYear() - 1,
+          currentMaxYear: new Date().getFullYear(),
+          currentMaxMonth: new Date().getMonth() + 1,
+          dateTypeLabel: dateTypeLabelMap[dateType],
+          measureLabel: measureLabelMap[measure],
+          dimensionLabel: dimensionMap[dimension].label,
+          yearMonthOptions: [],
+          yoyComparison: [],
+          largestCategory: { titleCategory: "-", titleSharePercent: 0, rows: [] },
+          yoySeries: [],
+          drilldown: { turnTimeLabel: "Average Turn Time", rows: [] },
+          sliceFilterOptionLists: {
+            dimensionValues: [],
+            drilldownBranches: [],
+            drilldownLiens: [],
+            drilldownProducts: [],
+            drilldownPrograms: [],
+          },
+        });
+      }
+
+      const { accessClause, accessParams, nextParamIndex } = accessCtx.buildWhereClause("", 1);
+      const whereParts: string[] = ["1=1"];
+      const params: any[] = [];
+      let pIdx = 1;
+      if (accessClause) {
+        const accessCondition = accessClause.replace(/^AND\s+/, "").trim();
+        if (accessCondition && accessCondition !== "FALSE") {
+          whereParts.push(accessCondition);
+          params.push(...accessParams);
+          pIdx = nextParamIndex;
+        }
+      }
+
+      const channelClause = buildChannelWhereClause(channelGroup);
+      if (channelClause) whereParts.push(channelClause.replace(/^AND\s+/i, ""));
+
+      const dateExpr = dateExprMap[dateType];
+      whereParts.push(`${dateExpr} IS NOT NULL`);
+
+      const readProductionTrendsStringList = (value: unknown): string[] => {
+        const arr = Array.isArray(value) ? value : value != null && String(value) !== "" ? [value] : [];
+        return [
+          ...new Set(
+            arr
+              .filter((v): v is string => typeof v === "string")
+              .map((s) => s.trim())
+              .filter(Boolean),
+          ),
+        ];
+      };
+      const sliceCategories = readProductionTrendsStringList(req.query.slice_category);
+      const sliceMonthsFromChart = readProductionTrendsStringList(req.query.slice_month)
+        .map((v) => Number.parseInt(v, 10))
+        .filter((m) => Number.isInteger(m) && m >= 1 && m <= 12);
+      const sliceBranches = readProductionTrendsStringList(req.query.slice_branch);
+      const sliceLiens = readProductionTrendsStringList(req.query.slice_lien_position);
+      const sliceProducts = readProductionTrendsStringList(req.query.slice_product_type);
+      const slicePrograms = readProductionTrendsStringList(req.query.slice_loan_program);
+
+      const snapCoreForSliceOptionSql = { wp: [...whereParts], pr: [...params] };
+
+      const appendInClause = (sqlExpr: string, values: string[]) => {
+        if (values.length === 0) return;
+        const start = params.length + 1;
+        const ph = values.map((_, i) => `$${start + i}`).join(", ");
+        whereParts.push(`${sqlExpr} IN (${ph})`);
+        params.push(...values);
+      };
+
+      const appendInClauseW = (wp: string[], pr: any[], sqlExpr: string, values: string[]) => {
+        if (values.length === 0) return;
+        const start = pr.length + 1;
+        const ph = values.map((_, i) => `$${start + i}`).join(", ");
+        wp.push(`${sqlExpr} IN (${ph})`);
+        pr.push(...values);
+      };
+      const appendYearMonthPickerToWhere = (wp: string[], pr: any[]) => {
+        if (yearMonths.length === 0) return;
+        const start = pr.length + 1;
+        const ph = yearMonths.map((_, i) => `$${start + i}`).join(", ");
+        wp.push(`TO_CHAR(${dateExpr}, 'YYYY-MM') IN (${ph})`);
+        pr.push(...yearMonths);
+      };
+      const sliceMonthCharValuesForSliceOpts = sliceMonthsFromChart.map((m) => String(m).padStart(2, "0"));
+      const buildLoansWhereForSliceOptionLists = (omit: {
+        branch?: boolean;
+        lien?: boolean;
+        product?: boolean;
+        program?: boolean;
+        category?: boolean;
+        month?: boolean;
+      }) => {
+        const wp = [...snapCoreForSliceOptionSql.wp];
+        const pr = [...snapCoreForSliceOptionSql.pr];
+        if (!omit.branch && sliceBranches.length) {
+          appendInClauseW(wp, pr, `COALESCE(branch, 'Unknown')`, sliceBranches);
+        }
+        if (!omit.lien && sliceLiens.length) {
+          appendInClauseW(wp, pr, `COALESCE(lien_position, 'Unknown')`, sliceLiens);
+        }
+        if (!omit.product && sliceProducts.length) {
+          appendInClauseW(wp, pr, `COALESCE(product_type, 'Unknown')`, sliceProducts);
+        }
+        if (!omit.program && slicePrograms.length) {
+          appendInClauseW(wp, pr, `COALESCE(loan_program, 'Unknown')`, slicePrograms);
+        }
+        if (!omit.category && sliceCategories.length) {
+          appendInClauseW(wp, pr, dimensionMap[dimension].column, sliceCategories);
+        }
+        if (!omit.month && sliceMonthsFromChart.length) {
+          appendInClauseW(wp, pr, `TO_CHAR(${dateExpr}, 'MM')`, sliceMonthCharValuesForSliceOpts);
+        }
+        appendYearMonthPickerToWhere(wp, pr);
+        return { sql: wp.join(" AND "), pr };
+      };
+
+      if (sliceBranches.length > 0) {
+        appendInClause(`COALESCE(branch, 'Unknown')`, sliceBranches);
+      }
+      if (sliceLiens.length > 0) {
+        appendInClause(`COALESCE(lien_position, 'Unknown')`, sliceLiens);
+      }
+      if (sliceProducts.length > 0) {
+        appendInClause(`COALESCE(product_type, 'Unknown')`, sliceProducts);
+      }
+      if (slicePrograms.length > 0) {
+        appendInClause(`COALESCE(loan_program, 'Unknown')`, slicePrograms);
+      }
+      if (sliceCategories.length > 0) {
+        appendInClause(dimensionMap[dimension].column, sliceCategories);
+      }
+      if (sliceMonthsFromChart.length > 0) {
+        appendInClause(
+          `TO_CHAR(${dateExpr}, 'MM')`,
+          sliceMonthsFromChart.map((m) => String(m).padStart(2, "0")),
+        );
+      }
+
+      // Options list must ignore selected year_months so the UI can show all months while multi-selecting.
+      const whereSqlForOptions = whereParts.join(" AND ");
+      const paramsForOptions = [...params];
+
+      if (yearMonths.length > 0) {
+        const placeholders = yearMonths.map((_, i) => `$${pIdx + i}`).join(", ");
+        whereParts.push(`TO_CHAR(${dateExpr}, 'YYYY-MM') IN (${placeholders})`);
+        params.push(...yearMonths);
+      }
+      const whereSql = whereParts.join(" AND ");
+
+      const optDimWhere = buildLoansWhereForSliceOptionLists({ category: true });
+      const optBranchWhere = buildLoansWhereForSliceOptionLists({ branch: true });
+      const optLienWhere = buildLoansWhereForSliceOptionLists({ lien: true });
+      const optProductWhere = buildLoansWhereForSliceOptionLists({ product: true });
+      const optProgramWhere = buildLoansWhereForSliceOptionLists({ program: true });
+      const mapDistinctV = (rows: any[]) =>
+        rows.map((row: any) => String(row.v ?? "").trim()).filter((s: string) => s.length > 0);
+
+      const [dimOptRes, brOptRes, liOptRes, prOptRes, progOptRes] = await Promise.all([
+        tenantPool.query(
+          `SELECT DISTINCT ${dimensionMap[dimension].column} AS v FROM loans WHERE ${optDimWhere.sql} ORDER BY 1`,
+          optDimWhere.pr,
+        ),
+        tenantPool.query(
+          `SELECT DISTINCT COALESCE(branch, 'Unknown') AS v FROM loans WHERE ${optBranchWhere.sql} ORDER BY 1`,
+          optBranchWhere.pr,
+        ),
+        tenantPool.query(
+          `SELECT DISTINCT COALESCE(lien_position, 'Unknown') AS v FROM loans WHERE ${optLienWhere.sql} ORDER BY 1`,
+          optLienWhere.pr,
+        ),
+        tenantPool.query(
+          `SELECT DISTINCT COALESCE(product_type, 'Unknown') AS v FROM loans WHERE ${optProductWhere.sql} ORDER BY 1`,
+          optProductWhere.pr,
+        ),
+        tenantPool.query(
+          `SELECT DISTINCT COALESCE(loan_program, 'Unknown') AS v FROM loans WHERE ${optProgramWhere.sql} ORDER BY 1`,
+          optProgramWhere.pr,
+        ),
+      ]);
+      const sliceFilterOptionLists = {
+        dimensionValues: mapDistinctV(dimOptRes.rows),
+        drilldownBranches: mapDistinctV(brOptRes.rows),
+        drilldownLiens: mapDistinctV(liOptRes.rows),
+        drilldownProducts: mapDistinctV(prOptRes.rows),
+        drilldownPrograms: mapDistinctV(progOptRes.rows),
+      };
+
+      const baseCteForWhere = (whereSqlInner: string) => `
+        WITH scoped AS (
+          SELECT
+            loan_amount::numeric AS loan_amount,
+            ltv_ratio::numeric AS ltv_ratio,
+            interest_rate::numeric AS interest_rate,
+            COALESCE(branch, 'Unknown') AS branch,
+            COALESCE(lien_position, 'Unknown') AS lien_position,
+            COALESCE(product_type, 'Unknown') AS product_type,
+            COALESCE(loan_program, 'Unknown') AS loan_program,
+            COALESCE(loan_purpose, 'Unknown') AS loan_purpose,
+            COALESCE(loan_type, 'Unknown') AS loan_type,
+            COALESCE(channel, 'Unknown') AS channel,
+            COALESCE(broker_lender_name, 'Unknown') AS broker_lender_name,
+            COALESCE(investor, 'Unknown') AS investor,
+            COALESCE(warehouse_co_name, 'Unknown') AS warehouse_co_name,
+            ${dateExpr} AS selected_date,
+            application_date::date AS application_date,
+            closing_date::date AS closing_date,
+            funding_date::date AS funding_date,
+            submitted_to_underwriting_date::date AS submitted_to_underwriting_date,
+            submitted_to_processing_date::date AS submitted_to_processing_date
+          FROM loans
+          WHERE ${whereSqlInner}
+        )
+      `;
+
+      const baseCte = baseCteForWhere(whereSql);
+      const baseCteOptions = baseCteForWhere(whereSqlForOptions);
+
+      const [yearMonthResult, yearsResult] = await Promise.all([
+        tenantPool.query(
+          `${baseCteOptions}
+          SELECT DISTINCT TO_CHAR(selected_date, 'YYYY-MM') AS value
+          FROM scoped
+          ORDER BY value DESC`,
+          paramsForOptions,
+        ),
+        tenantPool.query(
+          `${baseCte}
+          SELECT
+            COALESCE(MAX(EXTRACT(YEAR FROM selected_date))::int, EXTRACT(YEAR FROM CURRENT_DATE)::int) AS current_year,
+            COALESCE(MIN(EXTRACT(YEAR FROM selected_date))::int, EXTRACT(YEAR FROM CURRENT_DATE)::int) AS min_year,
+            COALESCE(MAX(selected_date), CURRENT_DATE) AS current_max_date
+          FROM scoped`,
+          params,
+        ),
+      ]);
+
+      const currentYear = Number(yearsResult.rows[0]?.current_year || new Date().getFullYear());
+      const minYear = Number(yearsResult.rows[0]?.min_year || currentYear);
+      const currentMaxDate = new Date(yearsResult.rows[0]?.current_max_date || new Date().toISOString());
+      const previousYear = currentYear - 1;
+      const cutoffMonth = currentMaxDate.getUTCMonth() + 1;
+      const cutoffDay = currentMaxDate.getUTCDate();
+      const currentQuarter = Math.floor((cutoffMonth - 1) / 3) + 1;
+
+      const yoyResult = await tenantPool.query(
+        `${baseCte}
+        SELECT
+          COALESCE(COUNT(*) FILTER (
+            WHERE EXTRACT(YEAR FROM selected_date) = $${params.length + 1}
+              AND EXTRACT(MONTH FROM selected_date) = $${params.length + 2}
+              AND EXTRACT(DAY FROM selected_date) <= $${params.length + 3}
+          ), 0) AS mtd_current_units,
+          COALESCE(SUM(loan_amount) FILTER (
+            WHERE EXTRACT(YEAR FROM selected_date) = $${params.length + 1}
+              AND EXTRACT(MONTH FROM selected_date) = $${params.length + 2}
+              AND EXTRACT(DAY FROM selected_date) <= $${params.length + 3}
+          ), 0) AS mtd_current_volume,
+          COALESCE(COUNT(*) FILTER (
+            WHERE EXTRACT(YEAR FROM selected_date) = $${params.length + 4}
+              AND EXTRACT(MONTH FROM selected_date) = $${params.length + 2}
+              AND EXTRACT(DAY FROM selected_date) <= $${params.length + 3}
+          ), 0) AS mtd_prev_units,
+          COALESCE(SUM(loan_amount) FILTER (
+            WHERE EXTRACT(YEAR FROM selected_date) = $${params.length + 4}
+              AND EXTRACT(MONTH FROM selected_date) = $${params.length + 2}
+              AND EXTRACT(DAY FROM selected_date) <= $${params.length + 3}
+          ), 0) AS mtd_prev_volume,
+
+          COALESCE(COUNT(*) FILTER (
+            WHERE EXTRACT(YEAR FROM selected_date) = $${params.length + 1}
+              AND EXTRACT(QUARTER FROM selected_date) = $${params.length + 5}
+              AND (
+                EXTRACT(MONTH FROM selected_date) < $${params.length + 2}
+                OR (EXTRACT(MONTH FROM selected_date) = $${params.length + 2} AND EXTRACT(DAY FROM selected_date) <= $${params.length + 3})
+              )
+          ), 0) AS qtd_current_units,
+          COALESCE(SUM(loan_amount) FILTER (
+            WHERE EXTRACT(YEAR FROM selected_date) = $${params.length + 1}
+              AND EXTRACT(QUARTER FROM selected_date) = $${params.length + 5}
+              AND (
+                EXTRACT(MONTH FROM selected_date) < $${params.length + 2}
+                OR (EXTRACT(MONTH FROM selected_date) = $${params.length + 2} AND EXTRACT(DAY FROM selected_date) <= $${params.length + 3})
+              )
+          ), 0) AS qtd_current_volume,
+          COALESCE(COUNT(*) FILTER (
+            WHERE EXTRACT(YEAR FROM selected_date) = $${params.length + 4}
+              AND EXTRACT(QUARTER FROM selected_date) = $${params.length + 5}
+              AND (
+                EXTRACT(MONTH FROM selected_date) < $${params.length + 2}
+                OR (EXTRACT(MONTH FROM selected_date) = $${params.length + 2} AND EXTRACT(DAY FROM selected_date) <= $${params.length + 3})
+              )
+          ), 0) AS qtd_prev_units,
+          COALESCE(SUM(loan_amount) FILTER (
+            WHERE EXTRACT(YEAR FROM selected_date) = $${params.length + 4}
+              AND EXTRACT(QUARTER FROM selected_date) = $${params.length + 5}
+              AND (
+                EXTRACT(MONTH FROM selected_date) < $${params.length + 2}
+                OR (EXTRACT(MONTH FROM selected_date) = $${params.length + 2} AND EXTRACT(DAY FROM selected_date) <= $${params.length + 3})
+              )
+          ), 0) AS qtd_prev_volume,
+
+          COALESCE(COUNT(*) FILTER (
+            WHERE EXTRACT(YEAR FROM selected_date) = $${params.length + 1}
+              AND (
+                EXTRACT(MONTH FROM selected_date) < $${params.length + 2}
+                OR (EXTRACT(MONTH FROM selected_date) = $${params.length + 2} AND EXTRACT(DAY FROM selected_date) <= $${params.length + 3})
+              )
+          ), 0) AS ytd_current_units,
+          COALESCE(SUM(loan_amount) FILTER (
+            WHERE EXTRACT(YEAR FROM selected_date) = $${params.length + 1}
+              AND (
+                EXTRACT(MONTH FROM selected_date) < $${params.length + 2}
+                OR (EXTRACT(MONTH FROM selected_date) = $${params.length + 2} AND EXTRACT(DAY FROM selected_date) <= $${params.length + 3})
+              )
+          ), 0) AS ytd_current_volume,
+          COALESCE(COUNT(*) FILTER (
+            WHERE EXTRACT(YEAR FROM selected_date) = $${params.length + 4}
+              AND (
+                EXTRACT(MONTH FROM selected_date) < $${params.length + 2}
+                OR (EXTRACT(MONTH FROM selected_date) = $${params.length + 2} AND EXTRACT(DAY FROM selected_date) <= $${params.length + 3})
+              )
+          ), 0) AS ytd_prev_units,
+          COALESCE(SUM(loan_amount) FILTER (
+            WHERE EXTRACT(YEAR FROM selected_date) = $${params.length + 4}
+              AND (
+                EXTRACT(MONTH FROM selected_date) < $${params.length + 2}
+                OR (EXTRACT(MONTH FROM selected_date) = $${params.length + 2} AND EXTRACT(DAY FROM selected_date) <= $${params.length + 3})
+              )
+          ), 0) AS ytd_prev_volume
+        FROM scoped`,
+        [...params, currentYear, cutoffMonth, cutoffDay, previousYear, currentQuarter],
+      );
+      const yoy = yoyResult.rows[0] || {};
+
+      const largestResult = await tenantPool.query(
+        `${baseCte}
+        SELECT
+          ${dimensionMap[dimension].column} AS category,
+          COUNT(*) AS units,
+          COALESCE(SUM(loan_amount), 0) AS volume
+        FROM scoped
+        WHERE EXTRACT(YEAR FROM selected_date) = $${params.length + 1}
+          AND (
+            EXTRACT(MONTH FROM selected_date) < $${params.length + 2}
+            OR (
+              EXTRACT(MONTH FROM selected_date) = $${params.length + 2}
+              AND EXTRACT(DAY FROM selected_date) <= $${params.length + 3}
+            )
+          )
+        GROUP BY ${dimensionMap[dimension].column}
+        ORDER BY ${measure === "volume" ? "volume" : "units"} DESC
+        LIMIT 15`,
+        [...params, currentYear, cutoffMonth, cutoffDay],
+      );
+      const largestRowsRaw = largestResult.rows.map((r: any) => ({
+        category: String(r.category || "Unknown"),
+        units: Number(r.units || 0),
+        volume: Number(r.volume || 0),
+      }));
+      const totalLargestMetric = largestRowsRaw.reduce(
+        (sum: number, r: any) => sum + (measure === "volume" ? r.volume : r.units),
+        0,
+      );
+      const largestRows = largestRowsRaw.map((r: any) => ({
+        ...r,
+        sharePercent:
+          totalLargestMetric > 0
+            ? ((measure === "volume" ? r.volume : r.units) / totalLargestMetric) * 100
+            : 0,
+      }));
+
+      const monthlyResult = await tenantPool.query(
+        `${baseCte}
+        SELECT
+          EXTRACT(YEAR FROM selected_date)::int AS year,
+          EXTRACT(MONTH FROM selected_date)::int AS month,
+          COUNT(*) AS units,
+          COALESCE(SUM(loan_amount), 0) AS volume
+        FROM scoped
+        GROUP BY EXTRACT(YEAR FROM selected_date), EXTRACT(MONTH FROM selected_date)
+        ORDER BY year DESC, month ASC`,
+        params,
+      );
+      const byYearMonth = new Map<string, { units: number; volume: number }>();
+      for (const row of monthlyResult.rows) {
+        byYearMonth.set(`${row.year}-${row.month}`, {
+          units: Number(row.units || 0),
+          volume: Number(row.volume || 0),
+        });
+      }
+      const yoySeries: Array<{
+        key: string;
+        currentYear: number;
+        previousYear: number;
+        points: Array<{ month: number; monthLabel: string; currentValue: number; previousValue: number }>;
+      }> = [];
+      const monthLabel = (m: number) =>
+        new Date(Date.UTC(2020, m - 1, 1)).toLocaleString("en-US", {
+          month: "short",
+          timeZone: "UTC",
+        });
+      for (let y = currentYear; y > minYear; y -= 1) {
+        const prev = y - 1;
+        let prevTotal = 0;
+        for (let m = 1; m <= 12; m += 1) {
+          prevTotal += (byYearMonth.get(`${prev}-${m}`)?.[measure] || 0) as number;
+        }
+        if (prevTotal <= 0) continue;
+        const points = Array.from({ length: 12 }, (_, idx) => {
+          const month = idx + 1;
+          const curr = byYearMonth.get(`${y}-${month}`) || { units: 0, volume: 0 };
+          const prevV = byYearMonth.get(`${prev}-${month}`) || { units: 0, volume: 0 };
+          return {
+            month,
+            monthLabel: monthLabel(month),
+            currentValue: Number(curr[measure] || 0),
+            previousValue: Number(prevV[measure] || 0),
+          };
+        });
+        yoySeries.push({ key: `${y}-${prev}`, currentYear: y, previousYear: prev, points });
+      }
+
+      const submittalExpr = "COALESCE(submitted_to_underwriting_date, submitted_to_processing_date)";
+      const turnTimeExpr =
+        dateType === "applications"
+          ? `CASE
+               WHEN application_date IS NOT NULL AND ${submittalExpr} IS NOT NULL
+                    AND ${submittalExpr} >= application_date
+               THEN (${submittalExpr} - application_date)::numeric
+               ELSE NULL
+             END`
+          : `CASE
+               WHEN ${submittalExpr} IS NOT NULL AND ${dateExpr} IS NOT NULL
+                    AND ${dateExpr} >= ${submittalExpr}
+               THEN (${dateExpr} - ${submittalExpr})::numeric
+               ELSE NULL
+             END`;
+
+      const drilldownSql = `${baseCte}
+        SELECT
+          branch,
+          lien_position,
+          product_type,
+          loan_program,
+          COUNT(*) AS units,
+          COALESCE(SUM(loan_amount), 0) AS volume,
+          COALESCE(AVG(CASE WHEN ltv_ratio > 0 THEN ltv_ratio END), NULL) AS avg_ltv,
+          COALESCE(
+            SUM(CASE WHEN interest_rate > 0 AND interest_rate <= 15 AND loan_amount > 0 THEN loan_amount * interest_rate ELSE 0 END)
+            / NULLIF(SUM(CASE WHEN interest_rate > 0 AND interest_rate <= 15 AND loan_amount > 0 THEN loan_amount ELSE 0 END), 0),
+            NULL
+          ) AS wac,
+          AVG(${turnTimeExpr}) AS avg_turn_time
+        FROM scoped
+        GROUP BY branch, lien_position, product_type, loan_program
+        ORDER BY branch, lien_position, product_type, loan_program`;
+      const drilldownResult = await tenantPool.query(drilldownSql, params);
+
+      type Agg = { units: number; volume: number; ltvSum: number; ltvCount: number; wacNum: number; wacDen: number; turnSum: number; turnCount: number };
+      const byPath = new Map<string, Agg>();
+      const addAgg = (key: string, row: any) => {
+        const existing = byPath.get(key) || {
+          units: 0,
+          volume: 0,
+          ltvSum: 0,
+          ltvCount: 0,
+          wacNum: 0,
+          wacDen: 0,
+          turnSum: 0,
+          turnCount: 0,
+        };
+        const units = Number(row.units || 0);
+        const volume = Number(row.volume || 0);
+        existing.units += units;
+        existing.volume += volume;
+        if (row.avg_ltv != null) {
+          existing.ltvSum += Number(row.avg_ltv) * units;
+          existing.ltvCount += units;
+        }
+        if (row.wac != null && volume > 0) {
+          existing.wacNum += Number(row.wac) * volume;
+          existing.wacDen += volume;
+        }
+        if (row.avg_turn_time != null) {
+          existing.turnSum += Number(row.avg_turn_time) * units;
+          existing.turnCount += units;
+        }
+        byPath.set(key, existing);
+      };
+
+      for (const row of drilldownResult.rows) {
+        const branch = row.branch || "Unknown";
+        const lien = row.lien_position || "Unknown";
+        const product = row.product_type || "Unknown";
+        const program = row.loan_program || "Unknown";
+        addAgg(`branch|${branch}`, row);
+        addAgg(`branch|${branch}>lien|${lien}`, row);
+        addAgg(`branch|${branch}>lien|${lien}>product|${product}`, row);
+        addAgg(`branch|${branch}>lien|${lien}>product|${product}>program|${program}`, row);
+      }
+
+      const rows: any[] = [];
+      const asRow = (id: string, parentId: string | null, depth: number, label: string) => {
+        const agg = byPath.get(id);
+        if (!agg) return;
+        rows.push({
+          id,
+          parentId,
+          depth,
+          label,
+          units: agg.units,
+          volume: agg.volume,
+          avgLoanAmount: agg.units > 0 ? agg.volume / agg.units : 0,
+          avgLtv: agg.ltvCount > 0 ? agg.ltvSum / agg.ltvCount : null,
+          wac: agg.wacDen > 0 ? agg.wacNum / agg.wacDen : null,
+          avgTurnTime: agg.turnCount > 0 ? agg.turnSum / agg.turnCount : null,
+        });
+      };
+
+      const branches = [...new Set(drilldownResult.rows.map((r: any) => r.branch || "Unknown"))].sort();
+      for (const b of branches) {
+        const branchId = `branch|${b}`;
+        asRow(branchId, null, 0, b);
+        const liens = [
+          ...new Set(drilldownResult.rows.filter((r: any) => (r.branch || "Unknown") === b).map((r: any) => r.lien_position || "Unknown")),
+        ].sort();
+        for (const l of liens) {
+          const lienId = `${branchId}>lien|${l}`;
+          asRow(lienId, branchId, 1, l);
+          const products = [
+            ...new Set(
+              drilldownResult.rows
+                .filter((r: any) => (r.branch || "Unknown") === b && (r.lien_position || "Unknown") === l)
+                .map((r: any) => r.product_type || "Unknown"),
+            ),
+          ].sort();
+          for (const p of products) {
+            const productId = `${lienId}>product|${p}`;
+            asRow(productId, lienId, 2, p);
+            const programs = [
+              ...new Set(
+                drilldownResult.rows
+                  .filter(
+                    (r: any) =>
+                      (r.branch || "Unknown") === b &&
+                      (r.lien_position || "Unknown") === l &&
+                      (r.product_type || "Unknown") === p,
+                  )
+                  .map((r: any) => r.loan_program || "Unknown"),
+              ),
+            ].sort();
+            for (const pr of programs) {
+              const programId = `${productId}>program|${pr}`;
+              asRow(programId, productId, 3, pr);
+            }
+          }
+        }
+      }
+
+      const getYoYPct = (currentValue: number, prevValue: number): number | null =>
+        prevValue > 0 ? ((currentValue - prevValue) / prevValue) * 100 : null;
+      const mkYoYRow = (
+        timeRange: "Month to Date" | "Quarter to Date" | "Year to Date",
+        currentUnits: number,
+        currentVolume: number,
+        prevUnits: number,
+        prevVolume: number,
+      ) => {
+        const currentValue = measure === "volume" ? currentVolume : currentUnits;
+        const prevValue = measure === "volume" ? prevVolume : prevUnits;
+        return {
+          timeRange,
+          currentYear: Number(currentValue),
+          previousYear: Number(prevValue),
+          yoyPercent: getYoYPct(Number(currentValue), Number(prevValue)),
+        };
+      };
+
+      const yearMonthOptions = yearMonthResult.rows.map((r: any) => {
+        const [y, m] = String(r.value).split("-");
+        const label = new Date(Date.UTC(Number(y), Number(m) - 1, 1)).toLocaleString("en-US", {
+          year: "numeric",
+          month: "short",
+        });
+        return { value: String(r.value), label };
+      });
+
+      res.json({
+        currentYear,
+        previousYear,
+        currentMaxYear: currentMaxDate.getUTCFullYear(),
+        currentMaxMonth: currentMaxDate.getUTCMonth() + 1,
+        dateTypeLabel: dateTypeLabelMap[dateType],
+        measureLabel: measureLabelMap[measure],
+        dimensionLabel: dimensionMap[dimension].label,
+        yearMonthOptions,
+        yoyComparison: [
+          mkYoYRow("Month to Date", Number(yoy.mtd_current_units || 0), Number(yoy.mtd_current_volume || 0), Number(yoy.mtd_prev_units || 0), Number(yoy.mtd_prev_volume || 0)),
+          mkYoYRow("Quarter to Date", Number(yoy.qtd_current_units || 0), Number(yoy.qtd_current_volume || 0), Number(yoy.qtd_prev_units || 0), Number(yoy.qtd_prev_volume || 0)),
+          mkYoYRow("Year to Date", Number(yoy.ytd_current_units || 0), Number(yoy.ytd_current_volume || 0), Number(yoy.ytd_prev_units || 0), Number(yoy.ytd_prev_volume || 0)),
+        ],
+        largestCategory: {
+          titleCategory: largestRows[0]?.category || "-",
+          titleSharePercent: Number(largestRows[0]?.sharePercent || 0),
+          rows: largestRows,
+        },
+        yoySeries,
+        drilldown: {
+          turnTimeLabel:
+            dateType === "applications"
+              ? "Average Applied to Submittal"
+              : dateType === "funded"
+                ? "Average Submittal to Funding"
+                : "Average Submittal to Closed",
+          rows,
+        },
+        sliceFilterOptionLists,
+      });
+    } catch (error: any) {
+      logError("Error fetching production trends data", error, { userId: req.userId });
+      res.status(500).json({ error: error.message || "Failed to fetch production trends data" });
     }
   },
 );
