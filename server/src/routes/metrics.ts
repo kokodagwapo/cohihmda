@@ -190,8 +190,14 @@ router.post(
   apiLimiter,
   async (req: AuthRequest, res) => {
     try {
-      const { metricIds, dateRange, dateField, groupBy, additionalFilters } =
-        req.body;
+      const {
+        metricIds,
+        dateRange,
+        dateField,
+        groupBy,
+        additionalFilters,
+        actorStatusFilter,
+      } = req.body;
       const tenantPool = getTenantContext(req).tenantPool;
 
       // Get user's loan access context
@@ -241,6 +247,7 @@ router.post(
         dateRange: parsedDateRange,
         dateField,
         additionalFilters,
+        actorStatusFilter,
         userAccessFilter: accessCtx.getFilter("l"),
       };
 
@@ -256,6 +263,7 @@ router.post(
           "processor",
           "underwriter",
           "investor",
+          "account_executive",
         ];
         if (!allowedGroupBy.includes(groupBy)) {
           return res.status(400).json({

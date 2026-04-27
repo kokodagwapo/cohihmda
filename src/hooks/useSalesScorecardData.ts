@@ -1,5 +1,10 @@
 import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
+import type {
+  ActorStatus,
+  ActorStatusFilterValue,
+  ActorStatusSummary,
+} from "@/components/common/ActorStatusFilter";
 
 export interface DateRange {
   start: string;
@@ -14,7 +19,10 @@ export type TTSTier = "top" | "second" | "bottom";
  * Includes metrics and composite TTS score
  */
 export interface TTSActor {
+  id?: string;
   name: string;
+  actorStatus?: ActorStatus;
+  lastLogin?: string | null;
   // Core metrics
   units: number;
   volume: number;
@@ -141,6 +149,8 @@ export interface SalesScorecardData {
     bottom: TTSTierSummary;
   };
   totals: TotalsData;
+  actorStatusFilter?: ActorStatusFilterValue;
+  actorStatusSummary?: ActorStatusSummary;
   dateRange: {
     startDate: string;
     endDate: string;
@@ -173,6 +183,7 @@ export const useSalesScorecardData = (
   selectedTenantId?: string | null,
   selectedChannel?: string | null,
   dimensionFilters?: Array<{ column: string; value: string }>,
+  actorStatusFilter: ActorStatusFilterValue = "all",
 ) => {
   const [data, setData] = useState<SalesScorecardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -199,6 +210,7 @@ export const useSalesScorecardData = (
         if (selectedTenantId) params.append("tenant_id", selectedTenantId);
         if (selectedChannel && selectedChannel !== "All")
           params.append("channel_group", selectedChannel);
+        if (actorStatusFilter !== "all") params.append("actor_status", actorStatusFilter);
         if (dimensionFilters) {
           for (const df of dimensionFilters) {
             if (df.value && df.value !== 'all') params.append(df.column, df.value);
@@ -265,6 +277,7 @@ export const useSalesScorecardData = (
     dateRange?.end,
     selectedTenantId,
     selectedChannel,
+    actorStatusFilter,
     JSON.stringify(dimensionFilters),
   ]);
 

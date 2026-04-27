@@ -39,6 +39,12 @@ import { useChannelStore } from "@/stores/channelStore";
 import { useTenantStore } from "@/stores/tenantStore";
 import { TopTieringLayout } from "@/components/layout/TopTieringLayout";
 import { TopTieringTopBar } from "@/components/layout/TopTieringTopBar";
+import {
+  ActorStatusBadge,
+  ActorStatusFilter,
+  formatActorLastLogin,
+  type ActorStatusFilterValue,
+} from "@/components/common/ActorStatusFilter";
 
 type ScorecardActor = "branch" | "loan-officer";
 type ActiveTab = "summary" | "detail";
@@ -114,6 +120,8 @@ const SalesScorecard = () => {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [actorStatusFilter, setActorStatusFilter] =
+    useState<ActorStatusFilterValue>("all");
 
   // Channel filter from global store (synced with header)
   const { selectedChannel } = useChannelStore();
@@ -130,7 +138,14 @@ const SalesScorecard = () => {
     data: scorecardData,
     loading,
     error,
-  } = useSalesScorecardData(actorType, dateRange, tenantId, selectedChannel);
+  } = useSalesScorecardData(
+    actorType,
+    dateRange,
+    tenantId,
+    selectedChannel,
+    undefined,
+    actorStatusFilter,
+  );
 
   useEffect(() => {
     localStorage.setItem("sales-scorecard-actor", selectedActor);
@@ -621,6 +636,8 @@ const SalesScorecard = () => {
       ];
       const rows = (data as TTSActor[]).map((actor) => [
         actor.name,
+        actor.actorStatus || "Unknown",
+        formatActorLastLogin(actor.lastLogin),
         actor.ttsScore.toFixed(1),
         getTierDisplayName(actor.tier),
         actor.units.toString(),
@@ -633,6 +650,7 @@ const SalesScorecard = () => {
         actor.waLtv.toFixed(1),
         actor.waDti.toFixed(1),
       ]);
+      headers.splice(1, 0, "Status", "Last Login");
       return [headers, ...rows].map((row) => row.join(",")).join("\n");
     }
   };
@@ -1423,6 +1441,10 @@ const SalesScorecard = () => {
                   <CardContent>
                     {/* Controls Row */}
                     <div className="flex items-center gap-4 mb-4 flex-wrap">
+                      <ActorStatusFilter
+                        value={actorStatusFilter}
+                        onChange={setActorStatusFilter}
+                      />
                       <div className="relative flex-1 max-w-xs">
                         <Search
                           className={`absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 ${
@@ -1674,6 +1696,12 @@ const SalesScorecard = () => {
                                     <th className="py-2.5 px-4 text-right text-xs font-semibold text-slate-600 dark:text-slate-300">
                                       TTS Score
                                     </th>
+                                    <th className="py-2.5 px-4 text-left text-xs font-semibold text-slate-600 dark:text-slate-300">
+                                      Status
+                                    </th>
+                                    <th className="py-2.5 px-4 text-left text-xs font-semibold text-slate-600 dark:text-slate-300">
+                                      Last Login
+                                    </th>
                                     <th className="py-2.5 px-4 text-center text-xs font-semibold text-slate-600 dark:text-slate-300">
                                       Tier
                                     </th>
@@ -1705,6 +1733,12 @@ const SalesScorecard = () => {
                                     >
                                       <td className="py-3 px-4 text-sm font-medium text-slate-800 dark:text-slate-200">
                                         {actor.name || "-"}
+                                      </td>
+                                      <td className="py-3 px-4 text-sm">
+                                        <ActorStatusBadge status={actor.actorStatus} />
+                                      </td>
+                                      <td className="py-3 px-4 text-sm text-slate-700 dark:text-slate-300">
+                                        {formatActorLastLogin(actor.lastLogin)}
                                       </td>
                                       <td
                                         className={`py-3 px-4 text-sm text-right font-bold ${getTierScoreColorClass(

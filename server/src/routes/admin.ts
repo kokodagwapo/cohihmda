@@ -18,6 +18,7 @@ import { tenantDbManager } from "../config/tenantDatabaseManager.js";
 import { listTenants } from "../services/tenantProvisioningService.js";
 import { AdditionalFieldService } from "../services/additionalFieldService.js";
 import { createEncompassUserSyncService } from "../services/encompassUserSyncService.js";
+import { summarizeLoanActorReportingCoverage } from "../services/actorStatusService.js";
 import ssoConfigRoutes from "./admin/ssoConfig.js";
 import * as cognitoAuth from "../services/cognito/cognitoAuthService.js";
 import {
@@ -1782,6 +1783,47 @@ router.get(
       logError("Error fetching Encompass users", error, { userId: req.userId });
       return res.status(500).json({
         error: "Failed to fetch Encompass users",
+        details: error.message,
+      });
+    }
+  },
+);
+
+/**
+ * Distinct loan-book actors vs Encompass sync coverage (matched / unmatched / status mix).
+ * GET /api/admin/encompass-users/actor-reconciliation-summary?tenant_id=&channel_group=
+ */
+router.get(
+  "/encompass-users/actor-reconciliation-summary",
+  authenticateToken,
+  requireRole("super_admin", "platform_admin", "tenant_admin"),
+  async (req: AuthRequest, res) => {
+    try {
+      const tenant_id = req.query.tenant_id as string | undefined;
+      const channel_group = req.query.channel_group as string | undefined;
+
+      const tenantContext = await resolveTenantContext(req, tenant_id);
+      if (!tenantContext) {
+        return res.status(400).json({ error: "Tenant context required" });
+      }
+
+      const tenantPool = await tenantDbManager.getTenantPool(
+        tenantContext.tenantSlug,
+      );
+      if (!tenantPool) {
+        return res.status(404).json({ error: "Tenant not found" });
+      }
+
+      const summary = await summarizeLoanActorReportingCoverage(tenantPool, {
+        channelGroup: channel_group,
+      });
+      return res.json(summary);
+    } catch (error: any) {
+      logError("Error building actor reconciliation summary", error, {
+        userId: req.userId,
+      });
+      return res.status(500).json({
+        error: "Failed to build actor reconciliation summary",
         details: error.message,
       });
     }

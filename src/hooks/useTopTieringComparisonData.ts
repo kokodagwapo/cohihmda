@@ -1,5 +1,10 @@
 import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
+import type {
+  ActorStatus,
+  ActorStatusFilterValue,
+  ActorStatusSummary,
+} from "@/components/common/ActorStatusFilter";
 
 export type TopTieringActorType = "branch" | "loan-officer";
 export type TimeFilterType =
@@ -27,6 +32,8 @@ export interface TopTieringActor {
   revenuePerLoan: number;
   cumulativeRevenuePercent?: number;
   cumulativeUnitsPercent?: number;
+  actorStatus?: ActorStatus;
+  lastLogin?: string | null;
 }
 
 /**
@@ -78,6 +85,8 @@ export interface TopTieringComparisonData {
   };
   dateRange: TopTieringDateRange;
   yoyGrowth?: number;
+  actorStatusFilter?: ActorStatusFilterValue;
+  actorStatusSummary?: ActorStatusSummary;
 }
 
 /**
@@ -110,6 +119,7 @@ export const useTopTieringComparisonData = (
   selectedChannel?: string | null,
   customDateRange?: CustomDateRange,
   dimensionFilters?: Array<{ column: string; value: string }>,
+  actorStatusFilter: ActorStatusFilterValue = "all",
 ) => {
   const [data, setData] = useState<TopTieringComparisonData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -145,6 +155,9 @@ export const useTopTieringComparisonData = (
           for (const df of dimensionFilters) {
             if (df.value && df.value !== 'all') params.append(df.column, df.value);
           }
+        }
+        if (actorStatusFilter !== "all") {
+          params.append("actor_status", actorStatusFilter);
         }
 
         const queryString = params.toString();
@@ -206,6 +219,7 @@ export const useTopTieringComparisonData = (
     timeFilter,
     selectedTenantId,
     selectedChannel,
+    actorStatusFilter,
     customDateRange?.start,
     customDateRange?.end,
     // eslint-disable-next-line react-hooks/exhaustive-deps

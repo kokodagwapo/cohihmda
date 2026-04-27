@@ -17,6 +17,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { TopTieringLayout } from '@/components/layout/TopTieringLayout';
 import { TopTieringTopBar } from '@/components/layout/TopTieringTopBar';
 import { ExportMenu } from '@/components/common/ExportMenu';
+import { ActorStatusFilter, formatActorLastLogin, type ActorStatusFilterValue } from '@/components/common/ActorStatusFilter';
 import { CompanyScorecardDetailTable, SortKey } from '@/components/scorecard/CompanyScorecardDetailTable';
 import type { ExportData } from '@/utils/exportUtils';
 import { KPICard, formatKPIValue } from '@/components/widgets/components/KPICard';
@@ -37,6 +38,7 @@ const CompanyScorecard = () => {
   const [selectedLoanOfficer, setSelectedLoanOfficer] = useState<string>('all');
   const [activeTab, setActiveTab] = useState<'summary' | 'detail'>('summary');
   const [detailActor, setDetailActor] = useState<'branch' | 'loan_officer'>('branch');
+  const [actorStatusFilter, setActorStatusFilter] = useState<ActorStatusFilterValue>('all');
   const [detailFullscreenOpen, setDetailFullscreenOpen] = useState(false);
   const [detailPage, setDetailPage] = useState(1);
   const [detailPageSize, setDetailPageSize] = useState<number | 'all'>('all');
@@ -80,7 +82,8 @@ const CompanyScorecard = () => {
     application: selectedApplication,
     channel: selectedChannel, // Channel filter - matches Qlik [Consolidated Channels]
     dateRange: dateRange, // Pass the calculated date range from the hook
-    tenantId: tenantId // Tenant context (admins viewing other tenants, or user's own tenant)
+    tenantId: tenantId, // Tenant context (admins viewing other tenants, or user's own tenant)
+    actorStatusFilter,
   };
   const { data, loading, error } = useCompanyScorecardData(filters);
   const prevCompanyScorecardLoadingRef = useRef<boolean>(loading);
@@ -612,6 +615,8 @@ const CompanyScorecard = () => {
   const getDetailExportData = (): ExportData => {
     const headers = [
       detailActor === 'branch' ? 'Branch' : 'Loan Officer',
+      'Status',
+      'Last Login',
       'Apps $',
       'Apps',
       'Orig %',
@@ -644,6 +649,8 @@ const CompanyScorecard = () => {
 
       return [
         'name' in row ? row.name : 'Totals',
+        'actorStatus' in row ? (row.actorStatus || 'Unknown') : '',
+        'lastLogin' in row ? formatActorLastLogin(row.lastLogin) : '',
         formatLargeNumber('tieringVolume' in row ? row.tieringVolume : row.totalVolume),
         formatNumber(row.totalLoansWithRespa),
         `${originatedPct.toFixed(1)}%`,
@@ -1089,6 +1096,11 @@ const CompanyScorecard = () => {
                         Company Scorecard by {detailActor === 'branch' ? 'Branch' : 'Loan Officer'}
                       </span>
                     </div>
+                    <ActorStatusFilter
+                      value={actorStatusFilter}
+                      onChange={setActorStatusFilter}
+                      className="py-1"
+                    />
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-slate-500 dark:text-slate-400">Rows per page</span>
