@@ -192,7 +192,7 @@ function parseDetailRowCount(summaryText: string): number {
 }
 
 test.describe("Company Scorecard detail table", () => {
-  test("@regression @COHI-348 uses final-status labels and table-scoped actions", async ({
+  test("@critical @regression @COHI-348 uses final-status labels and table-scoped actions", async ({
     userPage,
   }) => {
     await mockCompanyScorecardApis(userPage);
@@ -213,7 +213,7 @@ test.describe("Company Scorecard detail table", () => {
     await expect(detailTable.getByText("Units HMDA")).toHaveCount(0);
   });
 
-  test("@regression @COHI-348 supports show-all rows and fullscreen full dataset", async ({
+  test("@critical @regression @COHI-348 supports show-all rows and fullscreen full dataset", async ({
     userPage,
   }) => {
     await mockCompanyScorecardApis(userPage);
