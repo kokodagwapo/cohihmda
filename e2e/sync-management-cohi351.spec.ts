@@ -56,7 +56,7 @@ test.describe("@COHI-351 @soc2 Sync Management scheduling controls", () => {
     "Requires E2E_PLATFORM_ADMIN_* credentials because Sync Management is platform-admin only",
   );
 
-  test("platform admin can view and update scheduler-only business-day controls", async ({ platformAdminPage }) => {
+  test("@COHI-351 platform admin can view and update scheduler-only business-day controls", async ({ platformAdminPage }) => {
     const adminPage = platformAdminPage;
     let updateBody: Record<string, unknown> | undefined;
 
