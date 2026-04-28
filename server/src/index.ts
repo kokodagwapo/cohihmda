@@ -384,6 +384,14 @@ async function startWorker() {
   }
 
   try {
+    const { registerEncompassUserSyncHook } =
+      await import("./services/hooks/registerEncompassUserSyncHook.js");
+    registerEncompassUserSyncHook();
+  } catch (error) {
+    console.warn("⚠️ Failed to register Encompass user sync hook:", error);
+  }
+
+  try {
     const { registerInsightHooks } =
       await import("./services/hooks/registerInsightHooks.js");
     registerInsightHooks();
@@ -489,6 +497,14 @@ if (SKIP_DB) {
               error,
             );
           }
+        }
+
+        try {
+          const { registerEncompassUserSyncHook } =
+            await import("./services/hooks/registerEncompassUserSyncHook.js");
+          registerEncompassUserSyncHook();
+        } catch (error) {
+          console.warn("⚠️ Failed to register Encompass user sync hook:", error);
         }
 
         try {

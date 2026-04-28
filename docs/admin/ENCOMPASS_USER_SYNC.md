@@ -24,6 +24,26 @@ Cohi integrates with Encompass to:
 3. **Invite Users** - Allow admins to create Cohi accounts linked to Encompass
 4. **Scope Access** - Filter loans based on Encompass user ID
 
+## Scheduled user cache sync
+
+After a successful **Encompass loan sync**, Cohi can automatically refresh the local `encompass_users` cache (enabled by default per LOS connection via `encompass_users_sync_enabled`). This keeps **actor status** fields such as `is_enabled` and Encompass login metadata aligned with loan sync cadence, which downstream features (for example active-actor reporting) rely on.
+
+- User sync runs in a **post-sync hook**; it does **not** block or roll back the loan sync if it fails.
+- The hook updates `los_connections.last_encompass_users_sync_at` on success.
+- Scheduled runs may be **throttled** with `ENCOMPASS_USER_SYNC_MIN_INTERVAL_HOURS` (hours between scheduled-trigger user syncs; `0` disables throttling). Manual operations are not throttled by this env.
+
+See also: **Sync Management** in the platform admin UI (`/api/admin/sync-management`) for toggles and timezone.
+
+## Business-day scheduling
+
+Per LOS connection (not tenant-wide):
+
+- **`sync_business_days_only`** — When true, the **automatic LOS scheduler** (15-minute cadence) does not **start** loan sync on Saturday/Sunday in `scheduler_timezone`. **Manual sync** from the admin UI or tenant API is **never** blocked by this flag.
+- **`insights_business_days_only`** — When true, **post-sync** prediction / agent / tracked insight hooks skip weekends **only** when the loan sync trigger was **`scheduled`**. Manual and webhook-triggered syncs still run those hooks according to `insights_auto_enabled`.
+- **`scheduler_timezone`** — IANA zone (default `America/New_York`) used to decide local weekend for the above.
+
+Holiday calendars are **not** included in this story.
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                       ENCOMPASS USER INTEGRATION FLOW                            │
