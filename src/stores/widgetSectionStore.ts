@@ -10,6 +10,7 @@
 import { create } from 'zustand';
 import type { PeriodSelection } from '@/components/ui/DatePeriodPicker';
 import type { ColumnFilterState } from '@/utils/loanDetailFilters';
+import type { SalesCompanyOverviewAgingBucket } from '@/hooks/useSalesCompanyOverviewData';
 
 export type SectionType =
   | 'company-scorecard'
@@ -32,7 +33,8 @@ export type SectionType =
   | 'sales-scorecard-overview'
   | 'lock-stratification'
   | 'loan-complexity'
-  | 'estimated-closings-risk';
+  | 'estimated-closings-risk'
+  | 'sales-company-overview';
 
 /**
  * A dynamic (user-added) filter dimension.
@@ -190,6 +192,10 @@ export interface SectionFilters {
   estimatedClosingsRemainingComplexityGroup?: string | null;
   estimatedClosingsRemainingProcessingStage?: string | null;
   estimatedClosingsDetailColumnFilters?: ColumnFilterState;
+  /** Sales Company Overview: selected loan type slices (multi-select) */
+  salesCompanyOverviewLoanTypes?: string[];
+  /** Sales Company Overview: selected aging buckets (multi-select) */
+  salesCompanyOverviewAgingBuckets?: SalesCompanyOverviewAgingBucket[];
   /** User-added dynamic filters (column = value conditions) */
   dynamicFilters?: DynamicFilterEntry[];
 }
@@ -383,6 +389,12 @@ export const useWidgetSectionStore = create<WidgetSectionState>((set, get) => ({
           estimatedClosingsRemainingComplexityGroup: null,
           estimatedClosingsRemainingProcessingStage: null,
           estimatedClosingsDetailColumnFilters: {},
+        };
+      } else if (sectionType === 'sales-company-overview') {
+        filters = {
+          ...base,
+          salesCompanyOverviewLoanTypes: [],
+          salesCompanyOverviewAgingBuckets: [],
         };
       }
       return {
