@@ -59,6 +59,8 @@ export const useLeaderboardData = (
     []
   );
   const [loading, setLoading] = useState(true);
+  const [actorStatusSummary, setActorStatusSummary] =
+    useState<ActorStatusSummary | null>(null);
 
   useEffect(() => {
     const fetchLeaderboard = async () => {
