@@ -1,0 +1,88 @@
+import React from "react";
+import type { WidgetDefinition } from "./types";
+import { SalesCompanyOverviewEmbed } from "../components/SalesCompanyOverviewEmbed";
+import type { SalesCompanyOverviewData } from "@/hooks/useSalesCompanyOverviewData";
+
+const SalesCompanyOverviewEmbedComponent =
+  SalesCompanyOverviewEmbed as React.ComponentType<unknown>;
+
+export const salesCompanyOverviewWidgets: WidgetDefinition[] = [
+  {
+    id: "sales-company-overview-active-loans-kpi",
+    name: "Active Loans KPI",
+    description: "Active loans count, volume, and WAC",
+    category: "kpi",
+    group: "Sales Company Overview",
+    dataSource: "sales-company-overview",
+    dataSelector: (raw) => raw as SalesCompanyOverviewData,
+    defaultSize: { w: 12, h: 10 },
+    minSize: { w: 8, h: 7 },
+    config: { variant: "kpi-active" },
+    component: SalesCompanyOverviewEmbedComponent,
+  },
+  {
+    id: "sales-company-overview-submitted-kpi",
+    name: "Submitted MTD KPI",
+    description: "Submitted month-to-date count, volume, and WAC",
+    category: "kpi",
+    group: "Sales Company Overview",
+    dataSource: "sales-company-overview",
+    dataSelector: (raw) => raw as SalesCompanyOverviewData,
+    defaultSize: { w: 12, h: 10 },
+    minSize: { w: 8, h: 7 },
+    config: { variant: "kpi-submitted" },
+    component: SalesCompanyOverviewEmbedComponent,
+  },
+  {
+    id: "sales-company-overview-funded-kpi",
+    name: "Funded MTD KPI",
+    description: "Funded month-to-date count, volume, and WAC",
+    category: "kpi",
+    group: "Sales Company Overview",
+    dataSource: "sales-company-overview",
+    dataSelector: (raw) => raw as SalesCompanyOverviewData,
+    defaultSize: { w: 12, h: 10 },
+    minSize: { w: 8, h: 7 },
+    config: { variant: "kpi-funded" },
+    component: SalesCompanyOverviewEmbedComponent,
+  },
+  {
+    id: "sales-company-overview-aging-chart",
+    name: "Aging of Active Loans",
+    description: "Aging bar chart with click-to-filter",
+    category: "chart",
+    group: "Sales Company Overview",
+    dataSource: "sales-company-overview",
+    dataSelector: (raw) => raw as SalesCompanyOverviewData,
+    defaultSize: { w: 24, h: 20 },
+    minSize: { w: 16, h: 14 },
+    config: { variant: "aging-chart" },
+    component: SalesCompanyOverviewEmbedComponent,
+  },
+  {
+    id: "sales-company-overview-submitted-type-chart",
+    name: "Loan Type MTD Submitted",
+    description: "Submitted loan type donut with click-to-filter",
+    category: "chart",
+    group: "Sales Company Overview",
+    dataSource: "sales-company-overview",
+    dataSelector: (raw) => raw as SalesCompanyOverviewData,
+    defaultSize: { w: 18, h: 20 },
+    minSize: { w: 12, h: 14 },
+    config: { variant: "submitted-type-chart" },
+    component: SalesCompanyOverviewEmbedComponent,
+  },
+  {
+    id: "sales-company-overview-funded-type-chart",
+    name: "Loan Type MTD Funded",
+    description: "Funded loan type donut with click-to-filter",
+    category: "chart",
+    group: "Sales Company Overview",
+    dataSource: "sales-company-overview",
+    dataSelector: (raw) => raw as SalesCompanyOverviewData,
+    defaultSize: { w: 18, h: 20 },
+    minSize: { w: 12, h: 14 },
+    config: { variant: "funded-type-chart" },
+    component: SalesCompanyOverviewEmbedComponent,
+  },
+];

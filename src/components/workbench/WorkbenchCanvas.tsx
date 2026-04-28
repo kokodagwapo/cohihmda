@@ -828,6 +828,17 @@ const SECTION_TO_WIDGETS: Record<
       "sales-scorecard-overview-table",
     ],
   },
+  salesCompanyOverview: {
+    sectionType: "sales-company-overview",
+    widgetIds: [
+      "sales-company-overview-active-loans-kpi",
+      "sales-company-overview-submitted-kpi",
+      "sales-company-overview-funded-kpi",
+      "sales-company-overview-aging-chart",
+      "sales-company-overview-submitted-type-chart",
+      "sales-company-overview-funded-type-chart",
+    ],
+  },
   lockStratification: {
     sectionType: "lock-stratification",
     widgetIds: [

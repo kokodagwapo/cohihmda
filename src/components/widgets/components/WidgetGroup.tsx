@@ -351,6 +351,7 @@ const SECTION_FILTER_CONFIG: Partial<
       dependsOn: "branch",
     },
   ],
+  "sales-company-overview": [],
   "high-performers": [],
   actors: [],
   "pricing-dashboard": [],
@@ -385,6 +386,7 @@ const SECTION_BUILTIN_FILTER_COLUMNS: Partial<Record<SectionType, string[]>> = {
   "pipeline-analysis": ["loan_type", "loan_purpose", "branch"],
   "pricing-dashboard": ["current_loan_status"],
   "sales-scorecard-overview": ["branch", "loan_officer"],
+  "sales-company-overview": [],
   "loan-complexity": ["current_loan_status"],
 };
 
@@ -1325,6 +1327,12 @@ const SECTION_COLORS: Record<
     accent: "text-emerald-600 dark:text-emerald-400",
     dot: "bg-emerald-500",
   },
+  "sales-company-overview": {
+    border: "border-blue-400/50",
+    bg: "bg-blue-50/50 dark:bg-blue-950/20",
+    accent: "text-blue-600 dark:text-blue-400",
+    dot: "bg-blue-500",
+  },
 };
 
 /**
@@ -1454,6 +1462,15 @@ function getGridSizeForItem(item: GroupWidgetItem): GridSize {
     )
       return { w: 18, h: 20, minW: 12, minH: 14 };
     // table: use standard table grid size
+  }
+  if (
+    item.kind === "registry" &&
+    item.defId.startsWith("sales-company-overview-")
+  ) {
+    if (item.defId.includes("-kpi")) return { w: 12, h: 10, minW: 8, minH: 7 };
+    if (item.defId === "sales-company-overview-aging-chart")
+      return { w: 24, h: 20, minW: 16, minH: 14 };
+    return { w: 18, h: 20, minW: 12, minH: 14 };
   }
   const def = getWidgetDefinition(item.defId);
   return (def && GRID_SIZES[def.category]) || DEFAULT_GRID;
@@ -2090,6 +2107,10 @@ function GridCellRegistryWidget({
   const salesScorecardOverviewConfig = isSalesScorecardOverview
     ? { groupId }
     : {};
+  const isSalesCompanyOverview = defId?.startsWith("sales-company-overview-");
+  const salesCompanyOverviewConfig = isSalesCompanyOverview
+    ? { groupId, variant: definition.config?.variant }
+    : {};
   const isLockStratification = defId?.startsWith("lock-stratification-");
   const lockStratificationConfig = isLockStratification
     ? { groupId, variant: definition.config?.variant }
@@ -2250,6 +2271,7 @@ function GridCellRegistryWidget({
     ...pricingConfig,
     ...workflowConfig,
     ...salesScorecardOverviewConfig,
+    ...salesCompanyOverviewConfig,
     ...lockStratificationConfig,
     ...loanComplexityConfig,
     ...estimatedClosingsRiskConfig,
@@ -2750,6 +2772,20 @@ export function WidgetGroup({
       )
         toSave.salesScorecardOverviewMilestoneColumns =
           filters.salesScorecardOverviewMilestoneColumns;
+    }
+    if (sectionType === "sales-company-overview") {
+      if (
+        filters.salesCompanyOverviewLoanTypes &&
+        filters.salesCompanyOverviewLoanTypes.length > 0
+      )
+        toSave.salesCompanyOverviewLoanTypes =
+          filters.salesCompanyOverviewLoanTypes;
+      if (
+        filters.salesCompanyOverviewAgingBuckets &&
+        filters.salesCompanyOverviewAgingBuckets.length > 0
+      )
+        toSave.salesCompanyOverviewAgingBuckets =
+          filters.salesCompanyOverviewAgingBuckets;
     }
     if (sectionType === "pricing-dashboard") {
       if (
@@ -4338,7 +4374,8 @@ export function WidgetGroup({
                 </>
               ) : (
                 <>
-                  {sectionType !== "estimated-closings-risk" ? (
+                  {sectionType !== "estimated-closings-risk" &&
+                  sectionType !== "sales-company-overview" ? (
                     <DatePeriodPicker
                       year={filters.year}
                       onYearChange={handleYearChange}
@@ -4367,6 +4404,72 @@ export function WidgetGroup({
                       }
                     />
                   ) : null}
+
+                  {sectionType === "sales-company-overview" && (
+                    <>
+                      {(filters.salesCompanyOverviewLoanTypes ?? []).map((loanType) => (
+                        <span
+                          key={`lt-${loanType}`}
+                          className="inline-flex items-center gap-1 rounded-md bg-blue-100 dark:bg-blue-900/40 px-2 py-0.5 text-xs"
+                        >
+                          Loan type: {loanType}
+                          <button
+                            type="button"
+                            className="rounded p-0.5 hover:bg-blue-200 dark:hover:bg-blue-800"
+                            onClick={() =>
+                              updateFilters(groupId, {
+                                salesCompanyOverviewLoanTypes: (
+                                  filters.salesCompanyOverviewLoanTypes ?? []
+                                ).filter((x) => x !== loanType),
+                              })
+                            }
+                            aria-label={`Remove loan type ${loanType}`}
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      ))}
+                      {(filters.salesCompanyOverviewAgingBuckets ?? []).map((bucket) => (
+                        <span
+                          key={`ab-${bucket}`}
+                          className="inline-flex items-center gap-1 rounded-md bg-blue-100 dark:bg-blue-900/40 px-2 py-0.5 text-xs"
+                        >
+                          Aging: {bucket}
+                          <button
+                            type="button"
+                            className="rounded p-0.5 hover:bg-blue-200 dark:hover:bg-blue-800"
+                            onClick={() =>
+                              updateFilters(groupId, {
+                                salesCompanyOverviewAgingBuckets: (
+                                  filters.salesCompanyOverviewAgingBuckets ?? []
+                                ).filter((x) => x !== bucket),
+                              })
+                            }
+                            aria-label={`Remove aging bucket ${bucket}`}
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      ))}
+                      {((filters.salesCompanyOverviewLoanTypes?.length ?? 0) > 0 ||
+                        (filters.salesCompanyOverviewAgingBuckets?.length ?? 0) >
+                          0) && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-xs"
+                          onClick={() =>
+                            updateFilters(groupId, {
+                              salesCompanyOverviewLoanTypes: [],
+                              salesCompanyOverviewAgingBuckets: [],
+                            })
+                          }
+                        >
+                          Clear chart filters
+                        </Button>
+                      )}
+                    </>
+                  )}
 
                   {/* Data-driven filters from SECTION_FILTER_CONFIG */}
                   {(SECTION_FILTER_CONFIG[sectionType] ?? []).map((field) => {

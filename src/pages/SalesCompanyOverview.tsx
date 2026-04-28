@@ -469,7 +469,7 @@ const SalesCompanyOverview = () => {
                       Active pipeline, submitted-to-processing MTD, and funded MTD using dedicated Sales Company Overview definitions.
                     </p>
                     <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
-                      Click bars or donut slices to multi-select filters (KPIs update). Aging bars stay full-size with grey-out for non-selected buckets. When at least one age bucket is selected, MTD donut slices readjust to that cohort’s loan-type mix; loan-type-only filters keep full donut sizes with grey-out. Click a selected slice again to remove it.
+                      Click bars or donut slices to multi-select filters (KPIs update). Loan-type selections recalculate aging buckets to that loan-type cohort; age-bucket selections keep bars full-size with grey-out for non-selected buckets. When at least one age bucket is selected, MTD donut slices readjust to that cohort’s loan-type mix; loan-type-only filters keep full donut sizes with grey-out. Click a selected slice again to remove it.
                     </p>
                   </div>
                   {loading && (

@@ -67,6 +67,7 @@ const SECTION_TO_SOURCE: Record<SectionType, string> = {
   'lock-stratification': 'lock-stratification',
   'loan-complexity': 'loan-complexity',
   'estimated-closings-risk': 'estimated-closings-risk',
+  'sales-company-overview': 'sales-company-overview',
 };
 
 // Contextual suggested prompts per section type

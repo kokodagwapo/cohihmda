@@ -28,6 +28,7 @@ import { actorsWidgets } from './actorsWidgets';
 import { pricingDashboardWidgets } from './pricingDashboardWidgets';
 import { pipelineAnalysisWidgets } from './pipelineAnalysisWidgets';
 import { salesScorecardOverviewWidgets } from './salesScorecardOverviewWidgets';
+import { salesCompanyOverviewWidgets } from './salesCompanyOverviewWidgets';
 
 // Lock Stratification – import embed component once to avoid circular or chunk issues
 import { LockStratificationEmbed } from '../components/LockStratificationEmbed';
@@ -69,6 +70,7 @@ const allWidgets: WidgetDefinition[] = [
   ...pricingDashboardWidgets,
   ...pipelineAnalysisWidgets,
   ...salesScorecardOverviewWidgets,
+  ...salesCompanyOverviewWidgets,
   ...lockStratificationWidgets,
   ...loanComplexityWidgets,
   ...estimatedClosingsRiskWidgets,
