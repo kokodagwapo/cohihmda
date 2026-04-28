@@ -198,6 +198,12 @@ const topTieringMenuGroups = {
         icon: TrendingUp,
         iconColor: "emerald" as const,
       },
+      {
+        id: "productionTrends",
+        label: "Production Trends",
+        icon: LineChart,
+        iconColor: "emerald" as const,
+      },
     ],
   },
   secondaryMarket: {
@@ -331,6 +337,7 @@ const routeMap: Record<string, string> = {
   salesScorecardOverview: "/sales-scorecard-overview",
   salesCompanyOverview: "/sales-company-overview",
   salesTrends: "/sales-trends",
+  productionTrends: "/production-trends",
   operationsScorecard: "/performance/operation-scorecard",
   operationsTrends: "/performance/operation-scorecard-trends",
   estimatedClosingsRisk: "/performance/estimated-closings-risk",
@@ -647,6 +654,7 @@ export function Navigation(
       "/sales-scorecard-overview",
       "/sales-company-overview",
       "/sales-trends",
+      "/production-trends",
       "/performance/operation-scorecard",
       "/performance/operation-scorecard-trends",
       "/performance/estimated-closings-risk",

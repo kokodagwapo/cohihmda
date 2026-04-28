@@ -27,6 +27,7 @@ export function getSidebarSearchTargets(): SidebarRouteSearchTarget[] {
     { id: 'route:falloutForecastPage', label: 'Fallout Report', group: 'TopTiering', kind: 'route', path: '/fallout-forecast', keywords: ['fallout', 'closing', 'risk', 'report'] },
     { id: 'route:salesScorecard', label: 'Sales Scorecard', group: 'TopTiering', kind: 'route', path: '/sales-scorecard', keywords: ['toptiering', 'top tiering', 'performance'] },
     { id: 'route:salesTrends', label: 'Sales Trends', group: 'TopTiering', kind: 'route', path: '/sales-trends', keywords: ['toptiering', 'top tiering', 'performance'] },
+    { id: 'route:productionTrends', label: 'Production Trends', group: 'TopTiering', kind: 'route', path: '/production-trends', keywords: ['toptiering', 'top tiering', 'production', 'sales'] },
     { id: 'route:operationsScorecard', label: 'Operations Scorecard', group: 'TopTiering', kind: 'route', path: '/performance/operation-scorecard', keywords: ['toptiering', 'top tiering', 'performance'] },
     { id: 'route:operationsTrends', label: 'Operations Trends', group: 'TopTiering', kind: 'route', path: '/performance/operation-scorecard-trends', keywords: ['toptiering', 'top tiering', 'performance'] },
     { id: 'route:estimatedClosingsRisk', label: 'Estimated Closings and Risk Analysis', group: 'TopTiering', kind: 'route', path: '/performance/estimated-closings-risk', keywords: ['operations', 'estimated closings', 'risk analysis', 'ecd', 'dashboard'] },

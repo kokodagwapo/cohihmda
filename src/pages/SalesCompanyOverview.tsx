@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { TopTieringLayout } from "@/components/layout/TopTieringLayout";
 import { TopTieringTopBar } from "@/components/layout/TopTieringTopBar";
 import {
@@ -101,6 +103,236 @@ const EmptyChartState = ({ label }: { label: string }) => (
     {label}
   </div>
 );
+
+const AGING_FILTER_ROWS: { key: SalesCompanyOverviewAgingBucket; label: string }[] = [
+  { key: "0-15", label: "0–15 days" },
+  { key: "16-30", label: "16–30 days" },
+  { key: "31-45", label: "31–45 days" },
+  { key: "46-60", label: "46–60 days" },
+  { key: "61-90", label: "61–90 days" },
+  { key: ">90", label: "90+ days" },
+];
+
+const pillBadgeTriggerClass =
+  "inline-flex max-w-[min(280px,calc(100vw-6rem))] cursor-pointer items-center gap-1 rounded-full border border-blue-200/80 bg-white px-2.5 py-0.5 text-left text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700/80";
+
+function SalesCompanyOverviewStringFilterPopover({
+  title,
+  open,
+  onOpenChange,
+  trigger,
+  options,
+  draftSelected,
+  onToggleDraftValue,
+  onApply,
+  onClearSelection,
+}: {
+  title: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  trigger: ReactNode;
+  options: string[];
+  draftSelected: string[];
+  onToggleDraftValue: (value: string) => void;
+  onApply: () => void;
+  onClearSelection: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  useEffect(() => {
+    if (!open) setSearch("");
+  }, [open]);
+
+  const q = search.trim().toLowerCase();
+  const filtered = q ? options.filter((o) => o.toLowerCase().includes(q)) : options;
+  const ordered = [...filtered].sort((a, b) => {
+    const asel = draftSelected.includes(a) ? 1 : 0;
+    const bsel = draftSelected.includes(b) ? 1 : 0;
+    if (asel !== bsel) return bsel - asel;
+    return a.localeCompare(b, undefined, { numeric: true });
+  });
+
+  return (
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+      <PopoverContent
+        align="start"
+        className="w-80 p-3"
+        onInteractOutside={(e) => e.preventDefault()}
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onEscapeKeyDown={(e) => e.preventDefault()}
+      >
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="min-w-0 flex-1 pr-2">
+            <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">{title}</div>
+            <div className="text-[11px] text-slate-400 dark:text-slate-500">
+              Select one or more values from the list below.
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-col items-stretch gap-1 sm:flex-row sm:items-center">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={() => onOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={() => {
+                onApply();
+                onOpenChange(false);
+              }}
+            >
+              Apply Filters
+            </Button>
+          </div>
+        </div>
+        <Command shouldFilter={false}>
+          <CommandInput placeholder={`Search ${title}`} value={search} onValueChange={setSearch} />
+          <CommandList>
+            <CommandEmpty>No values found.</CommandEmpty>
+            {ordered.map((value) => {
+              const sel = draftSelected.includes(value);
+              return (
+                <CommandItem
+                  key={value}
+                  value={value}
+                  onSelect={() => onToggleDraftValue(value)}
+                  className={cn(
+                    "cursor-pointer hover:!bg-transparent hover:!text-foreground data-[selected=true]:!bg-transparent data-[selected=true]:!text-foreground",
+                    sel
+                      ? "!bg-accent !text-accent-foreground hover:!bg-accent data-[selected=true]:!bg-accent data-[selected=true]:!text-accent-foreground"
+                      : "",
+                  )}
+                >
+                  <span className="mr-2">{sel ? "✓" : ""}</span>
+                  {value}
+                </CommandItem>
+              );
+            })}
+          </CommandList>
+        </Command>
+        <Button type="button" size="sm" variant="ghost" className="mt-2 w-full" onClick={onClearSelection}>
+          Clear Selection
+        </Button>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function SalesCompanyOverviewAgingFilterPopover({
+  title,
+  open,
+  onOpenChange,
+  trigger,
+  draftSelected,
+  onToggleDraftKey,
+  onApply,
+  onClearSelection,
+}: {
+  title: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  trigger: ReactNode;
+  draftSelected: SalesCompanyOverviewAgingBucket[];
+  onToggleDraftKey: (key: SalesCompanyOverviewAgingBucket) => void;
+  onApply: () => void;
+  onClearSelection: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  useEffect(() => {
+    if (!open) setSearch("");
+  }, [open]);
+
+  const q = search.trim().toLowerCase();
+  const filtered = q
+    ? AGING_FILTER_ROWS.filter(
+        (r) => r.label.toLowerCase().includes(q) || r.key.toLowerCase().includes(q),
+      )
+    : AGING_FILTER_ROWS;
+  const ordered = [...filtered].sort((a, b) => {
+    const asel = draftSelected.includes(a.key) ? 1 : 0;
+    const bsel = draftSelected.includes(b.key) ? 1 : 0;
+    if (asel !== bsel) return bsel - asel;
+    return a.key.localeCompare(b.key);
+  });
+
+  return (
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+      <PopoverContent
+        align="start"
+        className="w-80 p-3"
+        onInteractOutside={(e) => e.preventDefault()}
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onEscapeKeyDown={(e) => e.preventDefault()}
+      >
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="min-w-0 flex-1 pr-2">
+            <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">{title}</div>
+            <div className="text-[11px] text-slate-400 dark:text-slate-500">
+              Select one or more values from the list below.
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-col items-stretch gap-1 sm:flex-row sm:items-center">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={() => onOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={() => {
+                onApply();
+                onOpenChange(false);
+              }}
+            >
+              Apply Filters
+            </Button>
+          </div>
+        </div>
+        <Command shouldFilter={false}>
+          <CommandInput placeholder={`Search ${title}`} value={search} onValueChange={setSearch} />
+          <CommandList>
+            <CommandEmpty>No values found.</CommandEmpty>
+            {ordered.map((row) => {
+              const sel = draftSelected.includes(row.key);
+              return (
+                <CommandItem
+                  key={row.key}
+                  value={row.key}
+                  onSelect={() => onToggleDraftKey(row.key)}
+                  className={cn(
+                    "cursor-pointer hover:!bg-transparent hover:!text-foreground data-[selected=true]:!bg-transparent data-[selected=true]:!text-foreground",
+                    sel
+                      ? "!bg-accent !text-accent-foreground hover:!bg-accent data-[selected=true]:!bg-accent data-[selected=true]:!text-accent-foreground"
+                      : "",
+                  )}
+                >
+                  <span className="mr-2">{sel ? "✓" : ""}</span>
+                  {row.label}
+                </CommandItem>
+              );
+            })}
+          </CommandList>
+        </Command>
+        <Button type="button" size="sm" variant="ghost" className="mt-2 w-full" onClick={onClearSelection}>
+          Clear Selection
+        </Button>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 /** Donut without outside labels (avoids Recharts label/labelLine misalignment). Legend lists name, count, share. */
 const LoanTypeDonutChart = ({
@@ -209,6 +441,8 @@ const LoanTypeDonutChart = ({
   );
 };
 
+type SalesCoPillEditor = null | "loanType" | "aging";
+
 const toLoanTypeData = (values?: Record<string, number>): LoanTypeDatum[] => {
   if (!values) return [];
   const total = Object.values(values).reduce((sum, count) => sum + Number(count || 0), 0);
@@ -239,6 +473,10 @@ const SalesCompanyOverview = () => {
 
   const [loanTypeFilters, setLoanTypeFilters] = useState<string[]>([]);
   const [agingBucketFilters, setAgingBucketFilters] = useState<SalesCompanyOverviewAgingBucket[]>([]);
+
+  const [pillEditor, setPillEditor] = useState<SalesCoPillEditor>(null);
+  const [draftLoanTypes, setDraftLoanTypes] = useState<string[]>([]);
+  const [draftAgingBuckets, setDraftAgingBuckets] = useState<SalesCompanyOverviewAgingBucket[]>([]);
 
   useEffect(() => {
     if (!isPersistenceEnabled || !persistedViewState.preferenceKey) {
@@ -342,6 +580,7 @@ const SalesCompanyOverview = () => {
   const clearAllChartFilters = useCallback(() => {
     setLoanTypeFilters([]);
     setAgingBucketFilters([]);
+    setPillEditor(null);
   }, []);
 
   const handleAgingBarChartClick = useCallback(
@@ -357,24 +596,21 @@ const SalesCompanyOverview = () => {
 
   const chartSelectionActiveAging = agingBucketFilters.length > 0;
 
-  const activeFilterChips = useMemo(() => {
-    const chips: Array<{ key: string; label: string; onRemove: () => void }> = [];
-    for (const lt of loanTypeFilters) {
-      chips.push({
-        key: `loanType:${lt}`,
-        label: `Loan type: ${lt}`,
-        onRemove: () => setLoanTypeFilters((p) => p.filter((x) => x !== lt)),
-      });
-    }
-    for (const ab of agingBucketFilters) {
-      chips.push({
-        key: `aging:${ab}`,
-        label: `Aging (active days): ${ab}`,
-        onRemove: () => setAgingBucketFilters((p) => p.filter((x) => x !== ab)),
-      });
-    }
-    return chips;
-  }, [loanTypeFilters, agingBucketFilters]);
+  const loanTypeFilterOptions = useMemo(() => {
+    const fromApi = companyOverviewData?.sliceFilterOptionLists?.loanTypes ?? [];
+    const fromCharts = new Set([
+      ...Object.keys(companyOverviewData?.submittedByType ?? {}),
+      ...Object.keys(companyOverviewData?.fundedByType ?? {}),
+    ]);
+    const selected = new Set(loanTypeFilters);
+    const merged = new Set<string>([...fromApi, ...fromCharts, ...selected]);
+    return [...merged].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [
+    companyOverviewData?.sliceFilterOptionLists?.loanTypes,
+    companyOverviewData?.submittedByType,
+    companyOverviewData?.fundedByType,
+    loanTypeFilters,
+  ]);
 
   const agingData = useMemo(
     () => [
@@ -444,6 +680,20 @@ const SalesCompanyOverview = () => {
     },
   ];
 
+  const loanTypePillLabel =
+    loanTypeFilters.length === 0
+      ? ""
+      : loanTypeFilters.length === 1
+        ? `Loan type: ${loanTypeFilters[0]}`
+        : `Loan types: ${loanTypeFilters.length} selected`;
+
+  const agingPillLabel =
+    agingBucketFilters.length === 0
+      ? ""
+      : agingBucketFilters.length === 1
+        ? `Aging (active days): ${agingBucketFilters[0]}`
+        : `Aging (active days): ${agingBucketFilters.length} selected`;
+
   return (
     <TopTieringLayout>
       <div className="flex flex-col min-h-[calc(100vh-4rem)]">
@@ -485,23 +735,91 @@ const SalesCompanyOverview = () => {
             {hasChartFilters && (
               <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-100/80 bg-blue-50/50 px-3 py-2 dark:border-slate-700/80 dark:bg-slate-900/40">
                 <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Active filters</span>
-                {activeFilterChips.map((chip) => (
-                  <Badge
-                    key={chip.key}
-                    variant="secondary"
-                    className="flex items-center gap-1 border border-blue-200/80 bg-white pr-1 text-xs font-medium text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
-                  >
-                    <span className="max-w-[240px] truncate">{chip.label}</span>
+                {loanTypeFilters.length > 0 && (
+                  <div className="flex items-center gap-0.5">
+                    <SalesCompanyOverviewStringFilterPopover
+                      title="Loan type"
+                      open={pillEditor === "loanType"}
+                      onOpenChange={(o) => {
+                        if (o) {
+                          setDraftLoanTypes([...loanTypeFilters]);
+                          setPillEditor("loanType");
+                        } else setPillEditor(null);
+                      }}
+                      options={loanTypeFilterOptions}
+                      draftSelected={draftLoanTypes}
+                      onToggleDraftValue={(v) =>
+                        setDraftLoanTypes((prev) => {
+                          const s = new Set(prev);
+                          if (s.has(v)) s.delete(v);
+                          else s.add(v);
+                          return [...s].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+                        })
+                      }
+                      onApply={() => setLoanTypeFilters(draftLoanTypes)}
+                      onClearSelection={() => setDraftLoanTypes([])}
+                      trigger={
+                        <button type="button" className={pillBadgeTriggerClass}>
+                          <span className="truncate">{loanTypePillLabel}</span>
+                        </button>
+                      }
+                    />
                     <button
                       type="button"
-                      onClick={chip.onRemove}
-                      className="rounded-sm p-0.5 hover:bg-blue-100/80 dark:hover:bg-slate-700/80"
-                      aria-label={`Remove ${chip.label}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setLoanTypeFilters([]);
+                        setPillEditor(null);
+                      }}
+                      className="rounded-sm p-0.5 text-slate-500 hover:bg-blue-100/80 hover:text-slate-800 dark:hover:bg-slate-700/80 dark:hover:text-slate-200"
+                      aria-label="Remove loan type filter"
                     >
                       <X className="h-3 w-3" />
                     </button>
-                  </Badge>
-                ))}
+                  </div>
+                )}
+                {agingBucketFilters.length > 0 && (
+                  <div className="flex items-center gap-0.5">
+                    <SalesCompanyOverviewAgingFilterPopover
+                      title="Aging (active days)"
+                      open={pillEditor === "aging"}
+                      onOpenChange={(o) => {
+                        if (o) {
+                          setDraftAgingBuckets([...agingBucketFilters]);
+                          setPillEditor("aging");
+                        } else setPillEditor(null);
+                      }}
+                      draftSelected={draftAgingBuckets}
+                      onToggleDraftKey={(key) =>
+                        setDraftAgingBuckets((prev) => {
+                          const s = new Set(prev);
+                          if (s.has(key)) s.delete(key);
+                          else s.add(key);
+                          return [...s].sort((a, b) => a.localeCompare(b)) as SalesCompanyOverviewAgingBucket[];
+                        })
+                      }
+                      onApply={() => setAgingBucketFilters(draftAgingBuckets)}
+                      onClearSelection={() => setDraftAgingBuckets([])}
+                      trigger={
+                        <button type="button" className={pillBadgeTriggerClass}>
+                          <span className="truncate">{agingPillLabel}</span>
+                        </button>
+                      }
+                    />
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setAgingBucketFilters([]);
+                        setPillEditor(null);
+                      }}
+                      className="rounded-sm p-0.5 text-slate-500 hover:bg-blue-100/80 hover:text-slate-800 dark:hover:bg-slate-700/80 dark:hover:text-slate-200"
+                      aria-label="Remove aging filter"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                )}
                 <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={clearAllChartFilters}>
                   Clear all filters
                 </Button>
