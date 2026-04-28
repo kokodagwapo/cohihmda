@@ -18,7 +18,11 @@ import { tenantDbManager } from "../config/tenantDatabaseManager.js";
 import { listTenants } from "../services/tenantProvisioningService.js";
 import { AdditionalFieldService } from "../services/additionalFieldService.js";
 import { createEncompassUserSyncService } from "../services/encompassUserSyncService.js";
-import { summarizeLoanActorReportingCoverage } from "../services/actorStatusService.js";
+import {
+  explainActorMatch,
+  listUnknownLoanActorsDebug,
+  summarizeLoanActorReportingCoverage,
+} from "../services/actorStatusService.js";
 import ssoConfigRoutes from "./admin/ssoConfig.js";
 import * as cognitoAuth from "../services/cognito/cognitoAuthService.js";
 import {
@@ -1824,6 +1828,99 @@ router.get(
       });
       return res.status(500).json({
         error: "Failed to build actor reconciliation summary",
+        details: error.message,
+      });
+    }
+  },
+);
+
+/**
+ * GET /api/admin/encompass-users/actor-match-debug?tenant_id=&actor_name=&actor_id=&actor_kind=
+ * Explains Encompass user matching for one loan-book actor (admin / support tooling).
+ */
+router.get(
+  "/encompass-users/actor-match-debug",
+  authenticateToken,
+  requireRole("super_admin", "platform_admin", "tenant_admin"),
+  async (req: AuthRequest, res) => {
+    try {
+      const tenant_id = req.query.tenant_id as string | undefined;
+      const actor_name = (req.query.actor_name as string | undefined)?.trim();
+      const actor_id = (req.query.actor_id as string | undefined)?.trim();
+      const actor_kind = (req.query.actor_kind as string | undefined)?.trim();
+
+      if (!actor_name && !actor_id) {
+        return res.status(400).json({
+          error: "Provide actor_name and/or actor_id",
+        });
+      }
+
+      const tenantContext = await resolveTenantContext(req, tenant_id);
+      if (!tenantContext) {
+        return res.status(400).json({ error: "Tenant context required" });
+      }
+
+      const tenantPool = await tenantDbManager.getTenantPool(
+        tenantContext.tenantSlug,
+      );
+      if (!tenantPool) {
+        return res.status(404).json({ error: "Tenant not found" });
+      }
+
+      const payload = await explainActorMatch(tenantPool, {
+        actorName: actor_name || undefined,
+        actorId: actor_id || undefined,
+        actorKind: actor_kind || undefined,
+      });
+      return res.json(payload);
+    } catch (error: any) {
+      logError("Error in actor-match-debug", error, { userId: req.userId });
+      return res.status(500).json({
+        error: "Failed to explain actor match",
+        details: error.message,
+      });
+    }
+  },
+);
+
+/**
+ * GET /api/admin/encompass-users/actor-match-debug/unknowns?tenant_id=&channel_group=&limit=
+ * Lists top unmatched loan-book actors with fuzzy name hints from encompass_users.
+ */
+router.get(
+  "/encompass-users/actor-match-debug/unknowns",
+  authenticateToken,
+  requireRole("super_admin", "platform_admin", "tenant_admin"),
+  async (req: AuthRequest, res) => {
+    try {
+      const tenant_id = req.query.tenant_id as string | undefined;
+      const channel_group = req.query.channel_group as string | undefined;
+      const limitRaw = req.query.limit as string | undefined;
+      const limit = limitRaw ? Number.parseInt(limitRaw, 10) : 30;
+
+      const tenantContext = await resolveTenantContext(req, tenant_id);
+      if (!tenantContext) {
+        return res.status(400).json({ error: "Tenant context required" });
+      }
+
+      const tenantPool = await tenantDbManager.getTenantPool(
+        tenantContext.tenantSlug,
+      );
+      if (!tenantPool) {
+        return res.status(404).json({ error: "Tenant not found" });
+      }
+
+      const payload = await listUnknownLoanActorsDebug(tenantPool, {
+        channelGroup: channel_group,
+        limit: Number.isFinite(limit) ? limit : 30,
+      });
+      return res.json(payload);
+    } catch (error: any) {
+      logError("Error in actor-match-debug/unknowns", error, {
+        userId: req.userId,
+      });
+      return res.status(500).json({
+        error: "Failed to list unknown loan actors",
         details: error.message,
       });
     }

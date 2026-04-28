@@ -72,6 +72,7 @@ interface EncompassUser {
   user_indicators: string[];
   is_enabled: boolean;
   cohi_user_id?: string;
+  encompass_last_login?: string | null;
   last_synced_at: string;
 }
 
@@ -108,6 +109,7 @@ interface LoanActorReportingCoverage {
   unmatchedActors: number;
   activeActors: number;
   inactiveActors: number;
+  removedActors?: number;
   unknownActors: number;
 }
 
@@ -115,6 +117,19 @@ interface EncompassUserBrowserSectionProps {
   losConnections: LOSConnection[];
   selectedConnectionId?: string;
   onConnectionChange?: (connectionId: string) => void;
+}
+
+function formatEncompassLastLogin(value?: string | null): string {
+  if (!value) return "Never";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "Never";
+  return date.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 export function EncompassUserBrowserSection({
@@ -536,6 +551,7 @@ export function EncompassUserBrowserSection({
                 {actorReconciliation.unmatchedActors} unmatched. Status mix on
                 loan actors: {actorReconciliation.activeActors} active,{" "}
                 {actorReconciliation.inactiveActors} inactive,{" "}
+                {actorReconciliation.removedActors ?? 0} removed,{" "}
                 {actorReconciliation.unknownActors} unknown.
               </AlertDescription>
             </Alert>
@@ -678,6 +694,7 @@ export function EncompassUserBrowserSection({
                     <TableHead>Email</TableHead>
                     <TableHead>Username</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Last Login</TableHead>
                     <TableHead>Linked</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -723,6 +740,9 @@ export function EncompassUserBrowserSection({
                             Disabled
                           </Badge>
                         )}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {formatEncompassLastLogin(user.encompass_last_login)}
                       </TableCell>
                       <TableCell>
                         {user.cohi_user_id ? (

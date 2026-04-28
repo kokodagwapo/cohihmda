@@ -86,6 +86,8 @@ export interface EncompassUserFromApi {
   userId?: string;
   userName?: string;
   enabled?: boolean;
+  loginEnabled?: boolean;
+  accountEnabled?: boolean;
   firstName?: string;
   lastName?: string;
   middleName?: string;
@@ -106,6 +108,7 @@ export interface EncompassUserFromApi {
     entityUri?: string;
   };
   nmlsOriginatorID?: string;
+  nmlsOriginatorId?: string;
   lastLogin?: string;
   encompassVersion?: string;
   subordinateLoanAccess?: string;
@@ -125,6 +128,7 @@ export interface EncompassUser {
   id: string;
   username: string;
   firstName?: string;
+  middleName?: string;
   lastName?: string;
   fullName?: string;
   email?: string;
@@ -152,17 +156,25 @@ function mapEncompassUser(user: EncompassUserFromApi): EncompassUser {
   const resolvedEnabled =
     typeof user.enabled === "boolean"
       ? user.enabled
-      : enabledFromIndicators ?? true;
+      : typeof user.accountEnabled === "boolean"
+        ? user.accountEnabled
+        : typeof user.loginEnabled === "boolean"
+          ? user.loginEnabled
+          : enabledFromIndicators ?? true;
 
   return {
     id: resolvedId,
     username: user.userName || resolvedId,
     firstName: user.firstName,
+    middleName: user.middleName,
     lastName: user.lastName,
     fullName:
       user.fullName ||
       (user.firstName && user.lastName
-        ? `${user.firstName} ${user.lastName}`.trim()
+        ? [user.firstName, user.middleName, user.lastName, user.suffix]
+            .filter(Boolean)
+            .join(" ")
+            .trim()
         : user.firstName || user.lastName || resolvedId),
     email: user.email,
     phone: user.phone,
@@ -171,7 +183,7 @@ function mapEncompassUser(user: EncompassUserFromApi): EncompassUser {
     isEnabled: resolvedEnabled,
     userIndicators: user.userIndicators || [],
     personas: personaNames,
-    nmlsId: user.nmlsOriginatorID,
+    nmlsId: user.nmlsOriginatorID || user.nmlsOriginatorId,
     orgId: user.organization?.entityId,
     orgName: user.organization?.entityName,
     lastLogin: user.lastLogin,

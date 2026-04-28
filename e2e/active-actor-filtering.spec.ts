@@ -7,11 +7,12 @@ async function mockLeaderboardActorApis(page: Page) {
     const base = {
       timeframe: "lq",
       actorStatusSummary: {
-        totalActors: 3,
+        totalActors: 4,
         matchedActors: 2,
-        unmatchedActors: 1,
+        unmatchedActors: 2,
         activeActors: 1,
         inactiveActors: 1,
+        removedActors: 1,
         unknownActors: 1,
       },
     };
@@ -49,11 +50,27 @@ async function mockLeaderboardActorApis(page: Page) {
         delta: 0,
       },
       {
+        employeeId: "id-removed",
+        name: "Removed LO",
+        role: "Loan Officer",
+        branch: "West",
+        rank: 3,
+        actorStatus: "Removed",
+        lastLogin: null,
+        loansClosed: 8,
+        loansStarted: 9,
+        totalVolume: 2_000_000,
+        totalRevenue: 50_000,
+        pullThroughRate: 65,
+        avgCycleTime: 38,
+        delta: -1,
+      },
+      {
         employeeId: "id-unknown",
         name: "Unknown LO",
         role: "Loan Officer",
         branch: "East",
-        rank: 3,
+        rank: 4,
         actorStatus: "Unknown",
         lastLogin: null,
         loansClosed: 5,
@@ -82,7 +99,7 @@ async function mockLeaderboardActorApis(page: Page) {
         contentType: "application/json",
         body: JSON.stringify({
           ...base,
-          leaderboard: fullLeaderboard.filter((r) => r.actorStatus === "Inactive"),
+          leaderboard: fullLeaderboard.filter((r) => r.actorStatus === "Inactive" || r.actorStatus === "Removed"),
         }),
       });
       return;
@@ -188,6 +205,7 @@ async function mockTopTieringComparison(page: Page) {
           unmatchedActors: 0,
           activeActors: 1,
           inactiveActors: 1,
+        removedActors: 0,
           unknownActors: 0,
         },
         dateRange: {
@@ -211,15 +229,17 @@ test.describe("Active actor filtering (COHI-350)", () => {
     await userPage.goto("/leaderboard", { waitUntil: "domcontentloaded" });
 
     await expect(userPage.getByTestId("actor-status-filter")).toBeVisible();
-    await expect(userPage.getByText(/1 active · 1 inactive · 1 unknown/)).toBeVisible();
+    await expect(userPage.getByText(/1 active · 1 inactive · 1 removed · 1 unknown/)).toBeVisible();
 
     const lbTable = userPage.locator("#leaderboard-main-table");
     await expect(lbTable.getByText("Active LO", { exact: true })).toBeVisible();
     await expect(lbTable.getByText("Inactive LO", { exact: true })).toBeVisible();
+    await expect(lbTable.getByText("Removed LO", { exact: true })).toBeVisible();
 
     await userPage.getByTestId("actor-status-filter-active").click();
     await expect(lbTable.getByText("Active LO", { exact: true })).toBeVisible();
     await expect(lbTable.getByText("Inactive LO", { exact: true })).toHaveCount(0);
+    await expect(lbTable.getByText("Removed LO", { exact: true })).toHaveCount(0);
   });
 
   test("@critical @COHI-350 TopTiering comparison keeps tier totals while filtering visible actors", async ({
@@ -310,6 +330,7 @@ test.describe("Active actor filtering (COHI-350)", () => {
           unmatchedActors: 3,
           activeActors: 6,
           inactiveActors: 1,
+          removedActors: 2,
           unknownActors: 3,
         }),
       });
