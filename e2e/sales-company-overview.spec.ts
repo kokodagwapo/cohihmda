@@ -9,7 +9,7 @@ type OverviewPayload = {
   submittedByType: Record<string, number>;
   fundedByType: Record<string, number>;
   window: { startDate: string; endDate: string };
-  definitions: { submittedDateField: "submitted_to_processing_date" | "processing_date" };
+  definitions: { submittedDateField: "submitted_to_processing_date" | "submitted_to_underwriting_date" };
 };
 
 type MockOptions = {
@@ -26,7 +26,7 @@ const BASE_OVERVIEW_PAYLOAD: OverviewPayload = {
   submittedByType: { Conventional: 25, FHA: 20, VA: 17 },
   fundedByType: { Conventional: 18, FHA: 15, VA: 11 },
   window: { startDate: "2026-04-01", endDate: "2026-04-30" },
-  definitions: { submittedDateField: "processing_date" },
+  definitions: { submittedDateField: "submitted_to_underwriting_date" },
 };
 
 const VIEW_STATE_KEY = "salesCompanyOverviewViewState:v2:tenant:tenant-e2e-344:standalone";

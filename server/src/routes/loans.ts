@@ -1989,7 +1989,7 @@ function buildSalesCompanyOverviewMultiAgingFilterSql(buckets: string[]): string
  * Dedicated Sales Company Overview metrics with sales-specific definitions:
  * - Active Loans: exact COHI active-loan definition
  * - Submitted Loans MTD: submitted_to_processing_date in current month window,
- *   falling back to processing_date only when submitted_to_processing_date is empty for the scoped loan set
+ *   falling back to submitted_to_underwriting_date when submitted_to_processing_date is null
  * - Funded Loans MTD: funding_date from month start through current day (matches Business Overview Closed Loans MTD)
  * - Volume: sum(loan_amount) per cohort
  * - WAC: weighted avg interest_rate per cohort (exclude <=0 or >15)
@@ -2131,7 +2131,9 @@ router.get(
         () =>
           tenantPool.query(
             `
-            SELECT COUNT(submitted_to_processing_date) AS submitted_to_processing_date_count
+            SELECT
+              COUNT(submitted_to_processing_date) AS submitted_to_processing_date_count,
+              COUNT(submitted_to_underwriting_date) AS submitted_to_underwriting_date_count
             FROM loans
             WHERE ${whereBaseline}
             `,
@@ -2140,10 +2142,18 @@ router.get(
         2,
         500,
       );
+      const submittedToProcessingDateCount = Number(
+        submittedDateSourceResult.rows[0]?.submitted_to_processing_date_count || 0,
+      );
+      const submittedToUnderwritingDateCount = Number(
+        submittedDateSourceResult.rows[0]?.submitted_to_underwriting_date_count || 0,
+      );
       const submittedDateField =
-        Number(submittedDateSourceResult.rows[0]?.submitted_to_processing_date_count || 0) === 0
-          ? "processing_date"
-          : "submitted_to_processing_date";
+        submittedToProcessingDateCount > 0
+          ? "submitted_to_processing_date"
+          : submittedToUnderwritingDateCount > 0
+            ? "submitted_to_underwriting_date"
+            : "submitted_to_processing_date";
 
       const baseCte = (whereSql: string) => `
         WITH base AS (
@@ -2153,11 +2163,10 @@ router.get(
             loan_type,
             application_date,
             submitted_to_processing_date,
-            processing_date,
+            submitted_to_underwriting_date,
             funding_date,
             current_loan_status,
-            is_archived,
-            COUNT(submitted_to_processing_date) OVER () AS submitted_to_processing_date_count
+            is_archived
           FROM loans
           WHERE ${whereSql}
         ),
@@ -2167,10 +2176,7 @@ router.get(
             rate,
             loan_type,
             application_date,
-            CASE
-              WHEN submitted_to_processing_date_count = 0 THEN processing_date
-              ELSE submitted_to_processing_date
-            END AS submitted_mtd_date,
+            COALESCE(submitted_to_processing_date, submitted_to_underwriting_date) AS submitted_mtd_date,
             funding_date,
             (
               current_loan_status = 'Active Loan'
@@ -2225,10 +2231,7 @@ router.get(
         WITH scoped AS (
           SELECT
             loan_type,
-            CASE
-              WHEN COUNT(submitted_to_processing_date) OVER () = 0 THEN processing_date
-              ELSE submitted_to_processing_date
-            END AS submitted_mtd_date
+            COALESCE(submitted_to_processing_date, submitted_to_underwriting_date) AS submitted_mtd_date
           FROM loans
           WHERE ${whereSql}
         )
