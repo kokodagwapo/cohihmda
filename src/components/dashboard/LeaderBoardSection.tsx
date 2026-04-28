@@ -47,6 +47,12 @@ import { Calendar } from "@/components/ui/calendar";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ExportMenu } from "@/components/common/ExportMenu";
+import {
+  ActorStatusBadge,
+  ActorStatusFilter,
+  formatActorLastLogin,
+  type ActorStatusFilterValue,
+} from "@/components/common/ActorStatusFilter";
 import type { ExportData } from "@/utils/exportUtils";
 import { api } from "@/lib/api";
 import { Loader2 } from "lucide-react";
@@ -191,6 +197,8 @@ export const LeaderBoardSection = ({
   const [rankingMetric, setRankingMetric] = useState<
     "units" | "volume" | "turnTime" | "pullThrough" | "revenue"
   >("units");
+  const [actorStatusFilter, setActorStatusFilter] =
+    useState<ActorStatusFilterValue>("all");
   const [customDateRange, setCustomDateRange] = useState<{
     start: Date | null;
     end: Date | null;
@@ -341,7 +349,7 @@ export const LeaderBoardSection = ({
     return scope === "All" ? "all" : scope === "Branch" ? "branch" : "team";
   }, [scope]);
 
-  const { leaderboardData } = useLeaderboardData(
+  const { leaderboardData, actorStatusSummary } = useLeaderboardData(
     apiTimeframe,
     selectedTenantId,
     {
@@ -349,6 +357,7 @@ export const LeaderBoardSection = ({
       startDate: dateRangeFilter?.startDate,
       endDate: dateRangeFilter?.endDate,
       channelGroup: selectedChannel || undefined,
+      actorStatusFilter,
     }
   );
 
@@ -533,6 +542,8 @@ export const LeaderBoardSection = ({
     const columns = [
       { key: 'rank', label: 'Rank', align: 'right' as const },
       { key: 'name', label: 'Name', align: 'left' as const },
+      { key: 'status', label: 'Status', align: 'left' as const },
+      { key: 'lastLogin', label: 'Last Login', align: 'left' as const },
       { key: 'units', label: 'Units', align: 'right' as const },
       { key: 'volume', label: 'Volume', align: 'right' as const },
       { key: 'cycleTime', label: 'Cycle Time', align: 'right' as const },
@@ -541,6 +552,8 @@ export const LeaderBoardSection = ({
     const rows = leadersData.slice(0, 10).map((l) => ({
       rank: String(l.rank),
       name: l.name,
+      status: l.actorStatus || 'Unknown',
+      lastLogin: formatActorLastLogin(l.lastLogin),
       units: String(l.loans),
       volume: formatLeaderboardMoney(l.volume),
       cycleTime: l.cycleTime != null ? `${l.cycleTime} days` : '—',
@@ -577,6 +590,8 @@ export const LeaderBoardSection = ({
   const getExportData = (): ExportData => {
     const headers = [
       "LO Name",
+      "Status",
+      "Last Login",
       "Units",
       "Ranking",
       "Volume $",
@@ -590,16 +605,18 @@ export const LeaderBoardSection = ({
     ];
     const rows = leadersData.map((leader) => [
       leader.name,
+      leader.actorStatus || "Unknown",
+      formatActorLastLogin(leader.lastLogin),
       leader.loans,
-      rankMap.units.get(leader.id) || "--",
+      rankMaps.units.get(leader.id) || "--",
       leader.volume,
-      rankMap.volume.get(leader.id) || "--",
+      rankMaps.volume.get(leader.id) || "--",
       `${leader.pullThru}%`,
-      rankMap.pullThrough.get(leader.id) || "--",
+      rankMaps.pullThrough.get(leader.id) || "--",
       `${leader.cycleTime} days`,
-      rankMap.turnTime.get(leader.id) || "--",
+      rankMaps.turnTime.get(leader.id) || "--",
       leader.revenue,
-      rankMap.revenue.get(leader.id) || "--",
+      rankMaps.revenue.get(leader.id) || "--",
     ]);
     return {
       title: "Leaderboard",
@@ -901,6 +918,12 @@ export const LeaderBoardSection = ({
         </div>
       </div>
 
+      <ActorStatusFilter
+        value={actorStatusFilter}
+        onChange={setActorStatusFilter}
+        summary={actorStatusSummary ?? undefined}
+      />
+
       {/* Dashboard Insights strip */}
       <DashboardInsightsStrip
         insights={dashboardInsights}
@@ -957,6 +980,9 @@ export const LeaderBoardSection = ({
                     <p className="text-sm sm:text-base font-medium text-slate-900 dark:text-white truncate">
                       {leader.name}
                     </p>
+                    <div className="mt-1">
+                      <ActorStatusBadge status={leader.actorStatus} />
+                    </div>
                     <p className="text-[11px] sm:text-xs text-slate-400 dark:text-slate-500 truncate">
                       {leader.role}
                     </p>
@@ -1062,7 +1088,7 @@ export const LeaderBoardSection = ({
                 className="overflow-hidden"
               >
                 <div className="overflow-x-auto -mx-1">
-                  <table className="w-full min-w-[640px] border-collapse text-left">
+                  <table className="w-full min-w-[760px] border-collapse text-left">
                     <thead>
                       <tr className="text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider border-b border-slate-200 dark:border-slate-700">
                         <th className="py-2.5 px-2 sm:px-3">
@@ -1072,6 +1098,12 @@ export const LeaderBoardSection = ({
                             </span>
                             LO Name
                           </span>
+                        </th>
+                        <th className="py-2.5 px-2 sm:px-3">
+                          Status
+                        </th>
+                        <th className="py-2.5 px-2 sm:px-3 text-right whitespace-nowrap">
+                          Last Login
                         </th>
                         <th className="py-2.5 px-2 sm:px-3 text-right">
                           <span className="inline-flex items-center justify-end gap-1.5">
@@ -1169,6 +1201,12 @@ export const LeaderBoardSection = ({
                             <p className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 truncate max-w-[140px]">
                               {leader.branch}
                             </p>
+                          </td>
+                          <td className="py-2.5 px-2 sm:px-3">
+                            <ActorStatusBadge status={leader.actorStatus} />
+                          </td>
+                          <td className="py-2.5 px-2 sm:px-3 text-right text-[10px] sm:text-xs text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                            {formatActorLastLogin(leader.lastLogin)}
                           </td>
                           <td className="py-2.5 px-2 sm:px-3 text-right text-xs sm:text-sm font-medium text-slate-700 dark:text-slate-300">
                             {leader.loans.toLocaleString()}

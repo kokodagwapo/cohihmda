@@ -462,6 +462,7 @@ export const AdminLayout = ({
       <motion.button
         key={section.id}
         data-tour={`admin-${section.id}`}
+        data-testid={`admin-${section.id}`}
         onClick={handleClick}
         className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-all duration-200 rounded-lg group ${
           isActive

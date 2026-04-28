@@ -48,6 +48,10 @@ export interface SalesCompanyOverviewData {
   definitions?: {
     submittedDateField: "submitted_to_processing_date" | "processing_date";
   };
+  /** Distinct loan types for filter pills (baseline tenant+channel+access; ignores slice filters). */
+  sliceFilterOptionLists?: {
+    loanTypes: string[];
+  };
 }
 
 function buildSalesCompanyOverviewQueryString(

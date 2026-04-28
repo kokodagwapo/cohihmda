@@ -781,6 +781,11 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
       loading: false,
       error: null,
     },
+    'production-trends': {
+      data: { ready: true },
+      loading: false,
+      error: null,
+    },
     'high-performers': {
       data: highPerformersData,
       loading: highPerformersLoading,

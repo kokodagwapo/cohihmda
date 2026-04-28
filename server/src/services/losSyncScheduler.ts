@@ -16,6 +16,7 @@
 import { pool as managementPool } from '../config/managementDatabase.js';
 import { tenantDbManager } from '../config/tenantDatabaseManager.js';
 import pg from 'pg';
+import { shouldRunScheduledSync } from '../utils/schedulerPolicy.js';
 
 interface SyncJob {
   tenantId: string;
@@ -26,13 +27,18 @@ interface SyncJob {
   lastSyncedAt?: Date;
   lastLoanModifiedAt?: Date;
   encompassSelectedFolders?: string[];
+  syncBusinessDaysOnly?: boolean;
+  insightsBusinessDaysOnly?: boolean;
+  schedulerTimezone?: string;
+  encompassUsersSyncEnabled?: boolean;
+  lastEncompassUsersSyncAt?: Date;
 }
 
 /**
  * Determine if a connection is overdue for sync based on frequency and last sync time.
  * Returns true if enough time has elapsed since the last sync.
  */
-function isSyncOverdue(frequency: string, lastSyncedAt?: Date): boolean {
+export function isSyncOverdue(frequency: string, lastSyncedAt?: Date): boolean {
   // Never synced before — always overdue
   if (!lastSyncedAt) {
     return true;
@@ -72,11 +78,14 @@ async function getActiveTenants(): Promise<Array<{ id: string; name: string }>> 
 /**
  * Get all connections that need syncing for a specific tenant
  */
-async function getConnectionsToSync(tenantId: string, tenantPool: pg.Pool): Promise<SyncJob[]> {
+export async function getConnectionsToSync(tenantId: string, tenantPool: pg.Pool): Promise<SyncJob[]> {
   try {
     const result = await tenantPool.query(
-      `SELECT id, connection_method, los_type, sync_frequency, 
-              last_synced_at, last_loan_modified_at, encompass_selected_folders
+      `SELECT id, connection_method, los_type, sync_frequency,
+              last_synced_at, last_loan_modified_at, encompass_selected_folders,
+              encompass_users_sync_enabled, sync_business_days_only,
+              insights_business_days_only, scheduler_timezone,
+              last_encompass_users_sync_at
        FROM public.los_connections
        WHERE sync_enabled = true
          AND connection_method IN ('api', 'csv_upload')
@@ -86,30 +95,49 @@ async function getConnectionsToSync(tenantId: string, tenantPool: pg.Pool): Prom
     const jobs: SyncJob[] = [];
 
     for (const row of result.rows) {
-      if (isSyncOverdue(row.sync_frequency, row.last_synced_at)) {
-        // Parse encompass_selected_folders safely
-        let folders: string[] = [];
-        if (row.encompass_selected_folders) {
-          try {
-            folders = typeof row.encompass_selected_folders === 'string'
-              ? JSON.parse(row.encompass_selected_folders)
-              : row.encompass_selected_folders;
-          } catch {
-            folders = [];
-          }
-        }
-
-        jobs.push({
-          tenantId,
-          connectionId: row.id,
-          connectionMethod: row.connection_method,
-          losType: row.los_type,
-          syncFrequency: row.sync_frequency,
-          lastSyncedAt: row.last_synced_at ? new Date(row.last_synced_at) : undefined,
-          lastLoanModifiedAt: row.last_loan_modified_at ? new Date(row.last_loan_modified_at) : undefined,
-          encompassSelectedFolders: folders,
-        });
+      if (!isSyncOverdue(row.sync_frequency, row.last_synced_at)) {
+        continue;
       }
+
+      if (
+        !shouldRunScheduledSync({
+          businessDaysOnly: row.sync_business_days_only,
+          timeZone: row.scheduler_timezone,
+        })
+      ) {
+        // Intentionally quiet: avoid spamming logs every 15m per connection on weekends
+        continue;
+      }
+
+      // Parse encompass_selected_folders safely
+      let folders: string[] = [];
+      if (row.encompass_selected_folders) {
+        try {
+          folders = typeof row.encompass_selected_folders === 'string'
+            ? JSON.parse(row.encompass_selected_folders)
+            : row.encompass_selected_folders;
+        } catch {
+          folders = [];
+        }
+      }
+
+      jobs.push({
+        tenantId,
+        connectionId: row.id,
+        connectionMethod: row.connection_method,
+        losType: row.los_type,
+        syncFrequency: row.sync_frequency,
+        lastSyncedAt: row.last_synced_at ? new Date(row.last_synced_at) : undefined,
+        lastLoanModifiedAt: row.last_loan_modified_at ? new Date(row.last_loan_modified_at) : undefined,
+        encompassSelectedFolders: folders,
+        syncBusinessDaysOnly: row.sync_business_days_only,
+        insightsBusinessDaysOnly: row.insights_business_days_only,
+        schedulerTimezone: row.scheduler_timezone,
+        encompassUsersSyncEnabled: row.encompass_users_sync_enabled,
+        lastEncompassUsersSyncAt: row.last_encompass_users_sync_at
+          ? new Date(row.last_encompass_users_sync_at)
+          : undefined,
+      });
     }
 
     return jobs;
@@ -187,6 +215,7 @@ async function runEncompassSync(job: SyncJob, tenantPool: pg.Pool): Promise<void
     loanStartDate: threeYearsAgo,
     loanStartDateField: 'Fields.Log.MS.Date.Started',
     folderNames: job.encompassSelectedFolders?.length ? job.encompassSelectedFolders : undefined,
+    syncTrigger: 'scheduled',
   });
 
   console.log(`[SyncScheduler] Encompass sync complete for connection=${job.connectionId}: ` +
@@ -200,7 +229,7 @@ async function runGenericApiSync(job: SyncJob): Promise<void> {
   const { syncLoansFromAPI } = await import('./losApiService.js');
 
   console.log(`[SyncScheduler] Running generic API sync for connection=${job.connectionId}`);
-  const result = await syncLoansFromAPI(job.connectionId);
+  const result = await syncLoansFromAPI(job.connectionId, { syncTrigger: 'scheduled' });
   console.log(`[SyncScheduler] Generic API sync complete for connection=${job.connectionId}: ` +
     `${result.records_synced} synced, ${result.records_failed} failed`);
 }
@@ -212,7 +241,7 @@ async function runCsvSync(job: SyncJob): Promise<void> {
   const { processCSVFilesFromPath } = await import('./csvProcessor.js');
 
   console.log(`[SyncScheduler] Running CSV sync for connection=${job.connectionId}`);
-  await processCSVFilesFromPath(job.connectionId);
+  await processCSVFilesFromPath(job.connectionId, { syncTrigger: 'scheduled' });
   console.log(`[SyncScheduler] CSV sync complete for connection=${job.connectionId}`);
 }
 

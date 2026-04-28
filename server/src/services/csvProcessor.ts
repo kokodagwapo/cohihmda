@@ -9,6 +9,7 @@ import { readFile, readdir, stat } from 'fs/promises';
 import { join } from 'path';
 import { parse } from 'csv-parse/sync';
 import { runPostSyncHooks } from './hooks/postSyncHookService.js';
+import type { SyncTrigger } from '../utils/schedulerPolicy.js';
 import {
   attachPersistedComplexityScores,
   warnIfCsvComplexityDiverges,
@@ -35,14 +36,24 @@ export interface CSVProcessingResult {
   duration: number;
 }
 
+export interface ProcessCsvFromPathOptions {
+  syncTrigger?: SyncTrigger;
+}
+
+export interface ProcessCSVFileOptions {
+  fieldMapping?: Record<string, string>;
+  syncTrigger?: SyncTrigger;
+}
+
 /**
  * Process CSV file and import loan data
  */
 export async function processCSVFile(
   connectionId: string,
   filePath: string,
-  fieldMapping?: Record<string, string>
+  fileOptions: ProcessCSVFileOptions = {},
 ): Promise<CSVProcessingResult> {
+  const fieldMapping = fileOptions.fieldMapping;
   const startTime = Date.now();
   const errors: string[] = [];
   let recordsProcessed = 0;
@@ -321,6 +332,7 @@ export async function processCSVFile(
         connectionId,
         syncType: "csv",
         recordsSynced: recordsProcessed,
+        trigger: options.syncTrigger ?? "unknown",
       }).catch((err) =>
         console.error("[CSV Sync] Post-sync hooks error:", err.message)
       );
@@ -360,7 +372,10 @@ export async function processCSVFile(
 /**
  * Process CSV files from upload path
  */
-export async function processCSVFilesFromPath(connectionId: string): Promise<CSVProcessingResult> {
+export async function processCSVFilesFromPath(
+  connectionId: string,
+  options: ProcessCsvOptions = {},
+): Promise<CSVProcessingResult> {
   try {
     const connectionResult = await pool.query(
       'SELECT csv_upload_path, csv_field_mapping FROM public.los_connections WHERE id = $1',
@@ -408,7 +423,10 @@ export async function processCSVFilesFromPath(connectionId: string): Promise<CSV
 
     for (const file of files) {
       const fieldMapping = csv_field_mapping ? JSON.parse(csv_field_mapping) : undefined;
-      const result = await processCSVFile(connectionId, file, fieldMapping);
+      const result = await processCSVFile(connectionId, file, {
+        fieldMapping,
+        syncTrigger: options.syncTrigger,
+      });
       
       totalProcessed += result.records_processed;
       totalFailed += result.records_failed;

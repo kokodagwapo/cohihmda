@@ -68,6 +68,13 @@ import {
   TopTieringActor as APIActorData,
   CustomDateRange,
 } from "@/hooks/useTopTieringComparisonData";
+import {
+  ActorStatusBadge,
+  ActorStatusFilter,
+  formatActorLastLogin,
+  type ActorStatus,
+  type ActorStatusFilterValue,
+} from "@/components/common/ActorStatusFilter";
 import { DatePeriodPicker, computePresetDateRange, type PeriodSelection, type PeriodPreset } from "@/components/ui/DatePeriodPicker";
 import { api } from "@/lib/api";
 import { DashboardInsightsStrip } from "@/components/dashboard/DashboardInsightsStrip";
@@ -146,6 +153,8 @@ interface ActorData {
   volume: number;
   revenueBPS: number;
   revenuePerLoan: number;
+  actorStatus?: ActorStatus;
+  lastLogin?: string | null;
 }
 
 interface TopTieringComparisonViewProps {
@@ -208,6 +217,8 @@ export function TopTieringComparisonView({
   >("revenue-bps");
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [actorStatusFilter, setActorStatusFilter] =
+    useState<ActorStatusFilterValue>("all");
 
   // Expanded chart states
   const [expandedChart, setExpandedChart] = useState<
@@ -441,7 +452,9 @@ export function TopTieringComparisonView({
     timeFilter as TimeFilterType,
     selectedTenantId,
     selectedChannel,
-    customDateRange
+    customDateRange,
+    undefined,
+    actorStatusFilter,
   );
 
   const dashboardInsightFilters = useMemo(() => ({}), []);
@@ -582,6 +595,8 @@ export function TopTieringComparisonView({
         volume: Number(actor.volume ?? 0),
         revenueBPS: Number(actor.revenueBPS ?? 0),
         revenuePerLoan: Number(actor.revenuePerLoan ?? 0),
+        actorStatus: actor.actorStatus,
+        lastLogin: actor.lastLogin,
       }));
     }
     // Return empty array when no API data available
@@ -789,6 +804,7 @@ export function TopTieringComparisonView({
   const topTierItems = focusScopedData.filter((item) => item.tier === "top");
   const secondTierItems = focusScopedData.filter((item) => item.tier === "second");
   const bottomTierItems = focusScopedData.filter((item) => item.tier === "bottom");
+  const tierCountSummary = apiData?.tierSummary;
 
   const topTierRevenue = topTierItems.reduce(
     (sum, item) => sum + item.revenue,
@@ -1318,6 +1334,12 @@ export function TopTieringComparisonView({
               </CardHeader>
               <CardContent className="pt-4 sm:pt-5 space-y-4 sm:space-y-5">
                 {focusPanelContent}
+
+                <ActorStatusFilter
+                  value={actorStatusFilter}
+                  onChange={setActorStatusFilter}
+                  summary={apiData?.actorStatusSummary}
+                />
 
                 {/* Search Filter */}
                 <div>
@@ -1986,8 +2008,10 @@ export function TopTieringComparisonView({
                         isDarkMode ? "text-slate-500" : "text-slate-600"
                       }`}
                     >
-                      {topTierItems.length} Top | {secondTierItems.length}{" "}
-                      Second | {bottomTierItems.length} Bottom
+                      {tierCountSummary?.top?.count ?? topTierItems.length} Top |{" "}
+                      {tierCountSummary?.second?.count ?? secondTierItems.length}{" "}
+                      Second |{" "}
+                      {tierCountSummary?.bottom?.count ?? bottomTierItems.length} Bottom
                     </p>
                   </div>
                   <div
@@ -2412,6 +2436,20 @@ export function TopTieringComparisonView({
                               {actorLabelSingular}
                             </th>
                             <th
+                              className={`text-left py-1 px-2 font-semibold ${
+                                isDarkMode ? "text-slate-400" : "text-slate-600"
+                              }`}
+                            >
+                              Status
+                            </th>
+                            <th
+                              className={`text-left py-1 px-2 font-semibold ${
+                                isDarkMode ? "text-slate-400" : "text-slate-600"
+                              }`}
+                            >
+                              Last Login
+                            </th>
+                            <th
                               className={`text-right py-1 px-2 font-semibold ${
                                 isDarkMode ? "text-slate-400" : "text-slate-600"
                               }`}
@@ -2504,6 +2542,12 @@ export function TopTieringComparisonView({
                                   >
                                     {actor.id}
                                   </div>
+                                </td>
+                                <td className="py-2 px-3">
+                                  <ActorStatusBadge status={actor.actorStatus} />
+                                </td>
+                                <td className="py-2 px-3">
+                                  {formatActorLastLogin(actor.lastLogin)}
                                 </td>
                                 <td className="text-right py-2 px-3 tabular-nums">
                                   {formatNumber(actor.units)}

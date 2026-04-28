@@ -18,6 +18,7 @@ import { tenantDbManager } from "../config/tenantDatabaseManager.js";
 import { listTenants } from "../services/tenantProvisioningService.js";
 import { AdditionalFieldService } from "../services/additionalFieldService.js";
 import { createEncompassUserSyncService } from "../services/encompassUserSyncService.js";
+import { summarizeLoanActorReportingCoverage } from "../services/actorStatusService.js";
 import ssoConfigRoutes from "./admin/ssoConfig.js";
 import * as cognitoAuth from "../services/cognito/cognitoAuthService.js";
 import {
@@ -1789,6 +1790,47 @@ router.get(
 );
 
 /**
+ * Distinct loan-book actors vs Encompass sync coverage (matched / unmatched / status mix).
+ * GET /api/admin/encompass-users/actor-reconciliation-summary?tenant_id=&channel_group=
+ */
+router.get(
+  "/encompass-users/actor-reconciliation-summary",
+  authenticateToken,
+  requireRole("super_admin", "platform_admin", "tenant_admin"),
+  async (req: AuthRequest, res) => {
+    try {
+      const tenant_id = req.query.tenant_id as string | undefined;
+      const channel_group = req.query.channel_group as string | undefined;
+
+      const tenantContext = await resolveTenantContext(req, tenant_id);
+      if (!tenantContext) {
+        return res.status(400).json({ error: "Tenant context required" });
+      }
+
+      const tenantPool = await tenantDbManager.getTenantPool(
+        tenantContext.tenantSlug,
+      );
+      if (!tenantPool) {
+        return res.status(404).json({ error: "Tenant not found" });
+      }
+
+      const summary = await summarizeLoanActorReportingCoverage(tenantPool, {
+        channelGroup: channel_group,
+      });
+      return res.json(summary);
+    } catch (error: any) {
+      logError("Error building actor reconciliation summary", error, {
+        userId: req.userId,
+      });
+      return res.status(500).json({
+        error: "Failed to build actor reconciliation summary",
+        details: error.message,
+      });
+    }
+  },
+);
+
+/**
  * Sync Encompass users from API
  */
 router.post(
@@ -2589,7 +2631,10 @@ router.get(
           const connectionsResult = await tenantPool.query(
             `SELECT id, name, los_type, connection_method, sync_enabled, sync_frequency,
                     last_synced_at, last_sync_status, last_sync_error, last_loan_modified_at,
-                    is_active, insights_auto_enabled, podcast_auto_enabled, created_at, updated_at
+                    is_active, insights_auto_enabled, podcast_auto_enabled,
+                    encompass_users_sync_enabled, sync_business_days_only, insights_business_days_only,
+                    scheduler_timezone, last_encompass_users_sync_at,
+                    created_at, updated_at
              FROM public.los_connections
              ORDER BY name`
           );
@@ -2810,7 +2855,17 @@ router.put(
   async (req: AuthRequest, res) => {
     try {
       const connectionId = req.params.connectionId as string;
-      const { tenant_id, sync_enabled, sync_frequency, insights_auto_enabled, podcast_auto_enabled } = req.body;
+      const {
+        tenant_id,
+        sync_enabled,
+        sync_frequency,
+        insights_auto_enabled,
+        podcast_auto_enabled,
+        encompass_users_sync_enabled,
+        sync_business_days_only,
+        insights_business_days_only,
+        scheduler_timezone,
+      } = req.body;
 
       if (!tenant_id) {
         return res.status(400).json({ error: "tenant_id is required" });
@@ -2851,6 +2906,26 @@ router.put(
         values.push(podcast_auto_enabled);
       }
 
+      if (typeof encompass_users_sync_enabled === "boolean") {
+        updates.push(`encompass_users_sync_enabled = $${paramIndex++}`);
+        values.push(encompass_users_sync_enabled);
+      }
+      if (typeof sync_business_days_only === "boolean") {
+        updates.push(`sync_business_days_only = $${paramIndex++}`);
+        values.push(sync_business_days_only);
+      }
+      if (typeof insights_business_days_only === "boolean") {
+        updates.push(`insights_business_days_only = $${paramIndex++}`);
+        values.push(insights_business_days_only);
+      }
+      if (typeof scheduler_timezone === "string" && scheduler_timezone.trim()) {
+        const { normalizeSchedulerTimezone } = await import(
+          "../utils/schedulerPolicy.js"
+        );
+        updates.push(`scheduler_timezone = $${paramIndex++}`);
+        values.push(normalizeSchedulerTimezone(scheduler_timezone));
+      }
+
       if (updates.length === 0) {
         return res.status(400).json({ error: "No valid fields to update" });
       }
@@ -2862,7 +2937,9 @@ router.put(
         `UPDATE public.los_connections 
          SET ${updates.join(", ")} 
          WHERE id = $${paramIndex} 
-         RETURNING id, name, sync_enabled, sync_frequency, insights_auto_enabled, podcast_auto_enabled, last_synced_at, last_sync_status`,
+         RETURNING id, name, sync_enabled, sync_frequency, insights_auto_enabled, podcast_auto_enabled,
+                   encompass_users_sync_enabled, sync_business_days_only, insights_business_days_only,
+                   scheduler_timezone, last_encompass_users_sync_at, last_synced_at, last_sync_status`,
         values
       );
 
@@ -2882,6 +2959,10 @@ router.put(
           sync_frequency,
           insights_auto_enabled,
           podcast_auto_enabled,
+          encompass_users_sync_enabled,
+          sync_business_days_only,
+          insights_business_days_only,
+          scheduler_timezone,
         },
       }).catch(() => {});
 
@@ -2893,6 +2974,10 @@ router.put(
         sync_frequency,
         insights_auto_enabled,
         podcast_auto_enabled,
+        encompass_users_sync_enabled,
+        sync_business_days_only,
+        insights_business_days_only,
+        scheduler_timezone,
       });
 
       return res.json({ connection: result.rows[0] });
@@ -3047,7 +3132,7 @@ router.post(
         const { syncLoansFromAPI } = await import(
           "../services/losApiService.js"
         );
-        syncLoansFromAPI(connectionId).catch((error) => {
+        syncLoansFromAPI(connectionId, { syncTrigger: "manual" }).catch((error) => {
           logError("Background API sync error (admin trigger)", error, {
             userId: req.userId,
             connectionId,

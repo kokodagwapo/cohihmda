@@ -12,8 +12,59 @@ import { queueAutoRefreshForSourceTenant } from "../tenantRefreshService.js";
 import {
   enqueueCohiPrefetchJob,
 } from "../cohiPrefetchWorker.js";
+import {
+  normalizeSchedulerTimezone,
+  shouldRunScheduledPostSyncInsights,
+  type SyncTrigger,
+} from "../../utils/schedulerPolicy.js";
 
 let registered = false;
+
+export interface PostSyncInsightPolicy {
+  insightsAutoEnabled: boolean;
+  insightsBusinessDaysOnly: boolean;
+  schedulerTimezone: string;
+}
+
+export async function loadPostSyncInsightPolicy(ctx: PostSyncContext): Promise<PostSyncInsightPolicy> {
+  const connResult = await ctx.tenantPool.query(
+    `SELECT insights_auto_enabled, insights_business_days_only, scheduler_timezone
+     FROM public.los_connections WHERE id = $1`,
+    [ctx.connectionId],
+  );
+  const row = connResult.rows[0];
+  return {
+    insightsAutoEnabled: row?.insights_auto_enabled ?? true,
+    insightsBusinessDaysOnly: row?.insights_business_days_only ?? false,
+    schedulerTimezone: normalizeSchedulerTimezone(row?.scheduler_timezone),
+  };
+}
+
+export function shouldRunInsightHookForPolicy(input: {
+  policy: PostSyncInsightPolicy;
+  trigger?: SyncTrigger;
+  now?: Date;
+}): boolean {
+  if (!input.policy.insightsAutoEnabled) return false;
+  return shouldRunScheduledPostSyncInsights({
+    trigger: input.trigger,
+    businessDaysOnly: input.policy.insightsBusinessDaysOnly,
+    timeZone: input.policy.schedulerTimezone,
+    now: input.now,
+  });
+}
+
+async function loadPostSyncInsightPolicyForHook(ctx: PostSyncContext): Promise<{
+  insightsAutoEnabled: boolean;
+  insightsBusinessDaysOnly: boolean;
+  schedulerTimezone: string;
+}> {
+  return loadPostSyncInsightPolicy(ctx);
+}
+
+function insightTrigger(ctx: PostSyncContext): SyncTrigger {
+  return ctx.trigger ?? "unknown";
+}
 
 export function registerInsightHooks(): void {
   if (registered) return;
@@ -24,14 +75,23 @@ export function registerInsightHooks(): void {
     "prediction-pipeline",
     async (ctx: PostSyncContext) => {
       try {
-        const connResult = await ctx.tenantPool.query(
-          "SELECT insights_auto_enabled FROM public.los_connections WHERE id = $1",
-          [ctx.connectionId],
-        );
-        const enabled = connResult.rows[0]?.insights_auto_enabled ?? true;
-        if (!enabled) {
+        const policy = await loadPostSyncInsightPolicyForHook(ctx);
+        if (!policy.insightsAutoEnabled) {
           logInfo(
             `[PostSyncHook] Auto-insights disabled for connection ${ctx.connectionId} — skipping prediction pipeline`,
+          );
+          return;
+        }
+        if (
+          !shouldRunInsightHookForPolicy({
+            trigger: insightTrigger(ctx),
+            policy,
+          })
+        ) {
+          logInfo(
+            `[PostSyncHook] Skipping prediction pipeline (business-day insight policy, trigger=${insightTrigger(
+              ctx,
+            )}) for connection ${ctx.connectionId}`,
           );
           return;
         }
@@ -62,14 +122,23 @@ export function registerInsightHooks(): void {
     "agent-insight-generation",
     async (ctx: PostSyncContext) => {
       try {
-        const connResult = await ctx.tenantPool.query(
-          "SELECT insights_auto_enabled FROM public.los_connections WHERE id = $1",
-          [ctx.connectionId],
-        );
-        const enabled = connResult.rows[0]?.insights_auto_enabled ?? true;
-        if (!enabled) {
+        const policy = await loadPostSyncInsightPolicyForHook(ctx);
+        if (!policy.insightsAutoEnabled) {
           logInfo(
             `[PostSyncHook] Auto-insights disabled for connection ${ctx.connectionId} — skipping`,
+          );
+          return;
+        }
+        if (
+          !shouldRunInsightHookForPolicy({
+            trigger: insightTrigger(ctx),
+            policy,
+          })
+        ) {
+          logInfo(
+            `[PostSyncHook] Skipping agent insight generation (business-day insight policy, trigger=${insightTrigger(
+              ctx,
+            )}) for connection ${ctx.connectionId}`,
           );
           return;
         }
@@ -100,12 +169,21 @@ export function registerInsightHooks(): void {
     "tracked-insight-evaluation",
     async (ctx: PostSyncContext) => {
       try {
-        const connResult = await ctx.tenantPool.query(
-          "SELECT insights_auto_enabled FROM public.los_connections WHERE id = $1",
-          [ctx.connectionId],
-        );
-        const enabled = connResult.rows[0]?.insights_auto_enabled ?? true;
-        if (!enabled) return;
+        const policy = await loadPostSyncInsightPolicyForHook(ctx);
+        if (!policy.insightsAutoEnabled) return;
+        if (
+          !shouldRunInsightHookForPolicy({
+            trigger: insightTrigger(ctx),
+            policy,
+          })
+        ) {
+          logInfo(
+            `[PostSyncHook] Skipping tracked insight evaluation (business-day insight policy, trigger=${insightTrigger(
+              ctx,
+            )}) for connection ${ctx.connectionId}`,
+          );
+          return;
+        }
 
         const { evaluateTrackedInsights } = await import(
           "../insights/trackedInsightEvaluator.js"

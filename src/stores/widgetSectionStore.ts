@@ -19,6 +19,7 @@ export type SectionType =
   | 'operations-scorecard'
   | 'operations-trends'
   | 'sales-trends'
+  | 'production-trends'
   | 'funnel'
   | 'top-tiering-comparison'
   | 'leaderboard'
@@ -137,6 +138,32 @@ export interface SectionFilters {
   salesScorecardOverviewMeasure?: 'volume' | 'units';
   /** Sales Scorecard Overview: time granularity (quarterly, monthly, weekly, daily) */
   salesScorecardOverviewTimeMeasure?: 'quarterly' | 'monthly' | 'weekly' | 'daily';
+  /** Production Trends: date type (funded, closed, applications) */
+  productionTrendsDateType?: 'funded' | 'closed' | 'applications';
+  /** Production Trends: measure (volume, units) */
+  productionTrendsMeasure?: 'volume' | 'units';
+  /** Production Trends: dimension */
+  productionTrendsDimension?:
+    | 'loan_purpose'
+    | 'loan_type'
+    | 'channel'
+    | 'branch'
+    | 'broker_lender_name'
+    | 'investor'
+    | 'warehouse_co_name';
+  /** Production Trends: selected YearMonth values (YYYY-MM). Empty = all. */
+  productionTrendsYearMonths?: string[];
+  /** Production Trends: chart-driven largest-category selections */
+  productionTrendsSliceCategories?: string[];
+  /** Production Trends: chart-driven selected months (1..12) */
+  productionTrendsSliceLineMonths?: number[];
+  /** Production Trends: drilldown selection (single-level at a time) */
+  productionTrendsSliceDrilldown?: {
+    branches: string[];
+    lienPositions: string[];
+    productTypes: string[];
+    loanPrograms: string[];
+  } | null;
   /** Sales Scorecard Overview: milestone date columns to show (e.g. started_date, application_date). Empty = backend default five. */
   salesScorecardOverviewMilestoneColumns?: string[];
   /** Lock Stratification: locked filter (active_locked, active_not_locked, all_active) */

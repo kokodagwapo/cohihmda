@@ -12,6 +12,7 @@ import { coheusAliasToColumnName } from "../encompassFieldMapper.js";
 import { FieldBackfillService } from "./fieldBackfillService.js";
 import { FolderReconciliationService } from "./folderReconciliationService.js";
 import { runPostSyncHooks } from "../hooks/postSyncHookService.js";
+import type { SyncTrigger } from "../../utils/schedulerPolicy.js";
 import { attachPersistedComplexityScores } from "../scoring/persistedLoanComplexity.js";
 
 export interface SyncResult {
@@ -40,6 +41,8 @@ export interface SyncOptions {
   // Chunked processing options for memory efficiency with large datasets
   chunkSize?: number; // Process loans in chunks of this size (default: 5000)
   useChunkedProcessing?: boolean; // Enable chunked processing (default: true for datasets > 10000 loans)
+  /** Post-sync hooks use this for business-day insight policy (default unknown). */
+  syncTrigger?: SyncTrigger;
 }
 
 const LOAD_BATCH_SIZE = 500;
@@ -442,6 +445,7 @@ export class EncompassEtlService {
           loansAdded,
           loansUpdated,
           syncHistoryId,
+          trigger: options.syncTrigger ?? "unknown",
         }).catch((err) =>
           console.error("[Sync] Post-sync hooks error:", err.message)
         );

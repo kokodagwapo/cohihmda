@@ -227,6 +227,7 @@ export class EncompassWebhookService {
           modifiedFrom,
           folderNames: selectedFolders,
           limit: 500,
+          syncTrigger: "webhook",
         });
 
         await this.tenantPool.query(
@@ -315,6 +316,7 @@ export class EncompassWebhookService {
           modifiedFrom: options?.modifiedFrom || new Date(Date.now() - 2 * 60 * 60 * 1000),
           folderNames: selectedFolders,
           limit: 2000,
+          syncTrigger: "unknown",
         });
         await this.tenantPool.query(
           `UPDATE public.los_connections
