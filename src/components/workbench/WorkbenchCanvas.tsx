@@ -738,6 +738,15 @@ const SECTION_TO_WIDGETS: Record<
       "sales-trends-lo-table",
     ],
   },
+  productionTrends: {
+    sectionType: "production-trends",
+    widgetIds: [
+      "production-trends-yoy",
+      "production-trends-largest-category",
+      "production-trends-line",
+      "production-trends-drilldown",
+    ],
+  },
   loanFunnel: {
     sectionType: "funnel",
     widgetIds: [

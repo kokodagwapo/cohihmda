@@ -35,6 +35,7 @@ export type DataSourceId =
   | 'pricing-dashboard'
   | 'pipeline-analysis'
   | 'sales-scorecard-overview'
+  | 'production-trends'
   | 'lock-stratification'
   | 'loan-complexity'
   | 'estimated-closings-risk';
