@@ -30,6 +30,7 @@ import {
 } from "../services/mockLosHelper.js";
 import { logError, logWarn, logInfo, logDebug } from "../services/logger.js";
 import { pool as managementPool } from "../config/managementDatabase.js";
+import { normalizeSchedulerTimezone } from "../utils/schedulerPolicy.js";
 
 /**
  * Ensure los_connections table has all required columns (migration helper)
@@ -123,6 +124,46 @@ async function ensureLosConnectionsSchema(
         ADD COLUMN last_loan_modified_at TIMESTAMPTZ
       `);
       logInfo("Successfully added last_loan_modified_at column", { tenantId });
+    }
+
+    const cohi351Cols: { name: string; ddl: string }[] = [
+      {
+        name: "encompass_users_sync_enabled",
+        ddl: "ALTER TABLE public.los_connections ADD COLUMN encompass_users_sync_enabled BOOLEAN NOT NULL DEFAULT TRUE",
+      },
+      {
+        name: "sync_business_days_only",
+        ddl: "ALTER TABLE public.los_connections ADD COLUMN sync_business_days_only BOOLEAN NOT NULL DEFAULT FALSE",
+      },
+      {
+        name: "insights_business_days_only",
+        ddl: "ALTER TABLE public.los_connections ADD COLUMN insights_business_days_only BOOLEAN NOT NULL DEFAULT FALSE",
+      },
+      {
+        name: "scheduler_timezone",
+        ddl: "ALTER TABLE public.los_connections ADD COLUMN scheduler_timezone TEXT NOT NULL DEFAULT 'America/New_York'",
+      },
+      {
+        name: "last_encompass_users_sync_at",
+        ddl: "ALTER TABLE public.los_connections ADD COLUMN last_encompass_users_sync_at TIMESTAMPTZ",
+      },
+    ];
+    for (const col of cohi351Cols) {
+      const chk = await pool.query(
+        `
+        SELECT EXISTS (
+          SELECT FROM information_schema.columns
+          WHERE table_schema = 'public'
+          AND table_name = 'los_connections'
+          AND column_name = $1
+        )
+      `,
+        [col.name],
+      );
+      if (!chk.rows[0]?.exists) {
+        logInfo(`Adding ${col.name} column to los_connections (COHI-351)`, { tenantId });
+        await pool.query(col.ddl);
+      }
     }
 
     // Migration: Change loan_officer_id from UUID to TEXT to handle Encompass string values
@@ -298,6 +339,10 @@ const losConnectionSchema = z.object({
   encompass_sa_username: z.string().optional(),
   encompass_sa_password: z.string().optional(),
   encompass_selected_folders: z.array(z.string()).optional(), // Array of folder names to sync from
+  encompass_users_sync_enabled: z.boolean().optional(),
+  sync_business_days_only: z.boolean().optional(),
+  insights_business_days_only: z.boolean().optional(),
+  scheduler_timezone: z.string().optional(),
 });
 
 /**
@@ -463,6 +508,8 @@ router.get(
               db_host, db_port, db_name, db_user,
               encompass_instance_id, encompass_api_server, encompass_extraction_method, encompass_secret_arn,
               encompass_selected_folders,
+              encompass_users_sync_enabled, sync_business_days_only, insights_business_days_only,
+              scheduler_timezone, last_encompass_users_sync_at,
               is_active, last_synced_at, last_loan_modified_at, last_sync_status, last_sync_error,
               created_at, updated_at
             FROM public.los_connections 
@@ -546,6 +593,8 @@ router.get(
         db_host, db_port, db_name, db_user,
         encompass_instance_id, encompass_api_server, encompass_extraction_method, encompass_secret_arn,
         encompass_selected_folders,
+        encompass_users_sync_enabled, sync_business_days_only, insights_business_days_only,
+        scheduler_timezone, last_encompass_users_sync_at,
         is_active, last_synced_at, last_loan_modified_at, last_sync_status, last_sync_error,
         created_at, updated_at
       FROM public.los_connections 
@@ -833,7 +882,6 @@ router.post(
       }
 
       // Insert into tenant database (los_connections table)
-      // Count: 29 columns, need 29 values
       const result = await tenantPool.query(
         `INSERT INTO public.los_connections (
         los_type, name, connection_method,
@@ -844,10 +892,11 @@ router.post(
         db_host, db_port, db_name, db_user,
         encompass_instance_id, encompass_api_server, encompass_extraction_method, encompass_secret_arn,
         encompass_selected_folders,
+        encompass_users_sync_enabled, sync_business_days_only, insights_business_days_only, scheduler_timezone,
         api_client_id_encrypted, api_client_secret_encrypted,
         encompass_sa_username_encrypted, encompass_sa_password_encrypted,
         db_password_encrypted
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35)
       RETURNING id, los_type, name, connection_method, api_environment, sync_enabled, sync_frequency, is_active, created_at`,
         [
           data.los_type,
@@ -888,6 +937,10 @@ router.post(
           data.encompass_selected_folders
             ? JSON.stringify(data.encompass_selected_folders)
             : "[]",
+          data.encompass_users_sync_enabled ?? true,
+          data.sync_business_days_only ?? false,
+          data.insights_business_days_only ?? false,
+          normalizeSchedulerTimezone(data.scheduler_timezone),
           encryptedFields.api_client_id_encrypted || null,
           encryptedFields.api_client_secret_encrypted || null,
           encryptedFields.encompass_sa_username_encrypted || null,
@@ -1033,6 +1086,22 @@ router.put(
       if (data.encompass_selected_folders !== undefined) {
         updates.push(`encompass_selected_folders = $${paramIndex++}`);
         values.push(JSON.stringify(data.encompass_selected_folders || []));
+      }
+      if (data.encompass_users_sync_enabled !== undefined) {
+        updates.push(`encompass_users_sync_enabled = $${paramIndex++}`);
+        values.push(data.encompass_users_sync_enabled);
+      }
+      if (data.sync_business_days_only !== undefined) {
+        updates.push(`sync_business_days_only = $${paramIndex++}`);
+        values.push(data.sync_business_days_only);
+      }
+      if (data.insights_business_days_only !== undefined) {
+        updates.push(`insights_business_days_only = $${paramIndex++}`);
+        values.push(data.insights_business_days_only);
+      }
+      if (data.scheduler_timezone !== undefined) {
+        updates.push(`scheduler_timezone = $${paramIndex++}`);
+        values.push(normalizeSchedulerTimezone(data.scheduler_timezone));
       }
 
       updates.push(`updated_at = NOW()`);
@@ -1832,7 +1901,7 @@ router.post(
         );
 
         // Run sync asynchronously (don't block response)
-        syncLoansFromAPI(id).catch((error) => {
+        syncLoansFromAPI(id, { syncTrigger: "manual" }).catch((error) => {
           logError("Background sync error", error, {
             userId: req.userId,
             connectionId: id,
@@ -1850,7 +1919,7 @@ router.post(
         );
 
         // Run CSV processing asynchronously
-        processCSVFilesFromPath(id).catch((error) => {
+        processCSVFilesFromPath(id, { syncTrigger: "manual" }).catch((error) => {
           logError("CSV processing error", error, {
             userId: req.userId,
             connectionId: id,
@@ -2308,7 +2377,10 @@ router.post(
       const { processCSVFile } = await import("../services/csvProcessor.js");
 
       // filePath from multer is already the full path to the uploaded file
-      const result = await processCSVFile(connectionId, filePath, fieldMapping);
+      const result = await processCSVFile(connectionId, filePath, {
+        fieldMapping,
+        syncTrigger: "manual",
+      });
 
       res.json(result);
     } catch (error: any) {

@@ -7,6 +7,7 @@ import { pool } from '../config/database.js';
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { getApiBaseUrl, getCredentials } from './mockLosHelper.js';
 import { runPostSyncHooks } from './hooks/postSyncHookService.js';
+import type { SyncTrigger } from '../utils/schedulerPolicy.js';
 import { attachPersistedComplexityScores } from './scoring/persistedLoanComplexity.js';
 
 export interface LOSConnection {
@@ -352,10 +353,17 @@ export function createLOSClient(connection: LOSConnection): BaseLOSClient {
   }
 }
 
+export interface SyncLoansFromApiOptions {
+  syncTrigger?: SyncTrigger;
+}
+
 /**
  * Sync loans from LOS API
  */
-export async function syncLoansFromAPI(connectionId: string): Promise<SyncResult> {
+export async function syncLoansFromAPI(
+  connectionId: string,
+  options: SyncLoansFromApiOptions = {},
+): Promise<SyncResult> {
   const startTime = Date.now();
   let recordsSynced = 0;
   let recordsFailed = 0;
@@ -457,6 +465,7 @@ export async function syncLoansFromAPI(connectionId: string): Promise<SyncResult
         connectionId,
         syncType: "api",
         recordsSynced,
+        trigger: options.syncTrigger ?? "unknown",
       }).catch((err) =>
         console.error("[LOS API Sync] Post-sync hooks error:", err.message)
       );

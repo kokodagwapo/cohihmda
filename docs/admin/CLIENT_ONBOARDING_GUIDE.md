@@ -604,6 +604,8 @@ Content-Type: application/json
 
 Monitor sync progress in the admin panel or via API.
 
+**Optional — scheduler policies (COHI-351):** In **Admin → Sync Management**, you can set per-connection **business-day-only** automatic loan sync, **business-day-only** automatic post-sync insights (for scheduled runs only), **scheduler timezone**, and **sync Encompass users after loan sync**. Manual sync remains available any day. Details: [ENCOMPASS_USER_SYNC.md](./ENCOMPASS_USER_SYNC.md#business-day-scheduling).
+
 ### Step 6.2: Validate Data Quality
 
 After the initial sync, verify:

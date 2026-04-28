@@ -20,6 +20,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -59,6 +60,11 @@ interface SyncConnection {
   is_active: boolean;
   insights_auto_enabled: boolean;
   podcast_auto_enabled: boolean;
+  encompass_users_sync_enabled?: boolean;
+  sync_business_days_only?: boolean;
+  insights_business_days_only?: boolean;
+  scheduler_timezone?: string;
+  last_encompass_users_sync_at?: string | null;
   created_at: string;
   updated_at: string;
   tenant_id: string;
@@ -130,6 +136,22 @@ const FREQUENCY_OPTIONS = [
   { value: 'daily', label: 'Daily (2 AM)' },
   { value: 'weekly', label: 'Weekly (Mon 2 AM)' },
 ];
+
+const SCHEDULER_TIMEZONE_OPTIONS = [
+  { value: 'America/New_York', label: 'Eastern (America/New_York)' },
+  { value: 'America/Chicago', label: 'Central (America/Chicago)' },
+  { value: 'America/Denver', label: 'Mountain (America/Denver)' },
+  { value: 'America/Los_Angeles', label: 'Pacific (America/Los_Angeles)' },
+  { value: 'UTC', label: 'UTC' },
+];
+
+function schedulerTimezoneSelectOptions(current?: string | null) {
+  const cur = (current && current.trim()) || 'America/New_York';
+  if (SCHEDULER_TIMEZONE_OPTIONS.some((o) => o.value === cur)) {
+    return SCHEDULER_TIMEZONE_OPTIONS;
+  }
+  return [{ value: cur, label: `${cur} (custom)` }, ...SCHEDULER_TIMEZONE_OPTIONS];
+}
 
 function formatRelativeTime(dateStr: string | null): string {
   if (!dateStr) return 'Never';
@@ -461,6 +483,145 @@ export const SyncManagementSection = () => {
       toast({
         title: 'Error',
         description: error.message || 'Failed to update schedule',
+        variant: 'destructive',
+      });
+    } finally {
+      setUpdatingIds(prev => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
+
+  const handleToggleEncompassUsersAfterLoanSync = async (connection: SyncConnection) => {
+    if (connection.los_type !== 'encompass') return;
+    const newVal = !(connection.encompass_users_sync_enabled ?? true);
+    const key = connKey(connection);
+    setUpdatingIds(prev => new Set(prev).add(key));
+    try {
+      await api.request(`/api/admin/sync-management/${connection.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          tenant_id: connection.tenant_id,
+          encompass_users_sync_enabled: newVal,
+        }),
+      });
+      setConnections(prev =>
+        prev.map(c =>
+          connKey(c) === key ? { ...c, encompass_users_sync_enabled: newVal } : c
+        )
+      );
+      toast({
+        title: newVal ? 'User cache sync enabled' : 'User cache sync disabled',
+        description: connection.name,
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to update setting',
+        variant: 'destructive',
+      });
+    } finally {
+      setUpdatingIds(prev => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
+
+  const handleToggleBusinessDaysLoanSync = async (connection: SyncConnection) => {
+    const newVal = !(connection.sync_business_days_only ?? false);
+    const key = connKey(connection);
+    setUpdatingIds(prev => new Set(prev).add(key));
+    try {
+      await api.request(`/api/admin/sync-management/${connection.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          tenant_id: connection.tenant_id,
+          sync_business_days_only: newVal,
+        }),
+      });
+      setConnections(prev =>
+        prev.map(c =>
+          connKey(c) === key ? { ...c, sync_business_days_only: newVal } : c
+        )
+      );
+      toast({
+        title: newVal ? 'Business-day loan sync enabled' : 'Business-day loan sync disabled',
+        description: 'Applies to automatic scheduler only',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to update setting',
+        variant: 'destructive',
+      });
+    } finally {
+      setUpdatingIds(prev => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
+
+  const handleToggleBusinessDaysInsights = async (connection: SyncConnection) => {
+    const newVal = !(connection.insights_business_days_only ?? false);
+    const key = connKey(connection);
+    setUpdatingIds(prev => new Set(prev).add(key));
+    try {
+      await api.request(`/api/admin/sync-management/${connection.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          tenant_id: connection.tenant_id,
+          insights_business_days_only: newVal,
+        }),
+      });
+      setConnections(prev =>
+        prev.map(c =>
+          connKey(c) === key ? { ...c, insights_business_days_only: newVal } : c
+        )
+      );
+      toast({
+        title: newVal ? 'Business-day insights enabled' : 'Business-day insights disabled',
+        description: 'Scheduled-trigger post-sync hooks only',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to update setting',
+        variant: 'destructive',
+      });
+    } finally {
+      setUpdatingIds(prev => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
+
+  const handleSchedulerTimezoneChange = async (connection: SyncConnection, tz: string) => {
+    const key = connKey(connection);
+    setUpdatingIds(prev => new Set(prev).add(key));
+    try {
+      await api.request(`/api/admin/sync-management/${connection.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          tenant_id: connection.tenant_id,
+          scheduler_timezone: tz,
+        }),
+      });
+      setConnections(prev =>
+        prev.map(c => (connKey(c) === key ? { ...c, scheduler_timezone: tz } : c))
+      );
+      toast({ title: 'Timezone updated', description: tz });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to update timezone',
         variant: 'destructive',
       });
     } finally {
@@ -1172,6 +1333,104 @@ export const SyncManagementSection = () => {
                       <TableRow key={`${key}-history`}>
                         <TableCell colSpan={11} className="p-0 bg-slate-50/50 dark:bg-slate-900/30">
                           <div className="px-6 py-4 space-y-5">
+                            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/40 p-4 space-y-4">
+                              <div className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                                Scheduler &amp; policies
+                              </div>
+                              <p className="text-xs text-slate-500 dark:text-slate-400 font-light leading-relaxed">
+                                Business-day options affect the automatic 15-minute scheduler and scheduled-trigger
+                                post-sync insight hooks only. Manual sync and manual triggers still run any day.
+                              </p>
+                              {connection.los_type === 'encompass' && (
+                                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                                  <div className="space-y-0.5">
+                                    <Label className="text-sm font-medium text-slate-800 dark:text-slate-200">
+                                      Sync Encompass users after loan sync
+                                    </Label>
+                                    <p className="text-xs text-slate-500 font-light">
+                                      Keeps actor status and last-login data current for reporting.
+                                    </p>
+                                  </div>
+                                  <Switch
+                                    checked={connection.encompass_users_sync_enabled ?? true}
+                                    onCheckedChange={() =>
+                                      handleToggleEncompassUsersAfterLoanSync(connection)
+                                    }
+                                    disabled={updatingIds.has(key) || !connection.is_active}
+                                    className="data-[state=checked]:bg-sky-500 shrink-0"
+                                  />
+                                </div>
+                              )}
+                              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                                <div className="space-y-0.5">
+                                  <Label className="text-sm font-medium text-slate-800 dark:text-slate-200">
+                                    Run automatic loan sync on business days only
+                                  </Label>
+                                  <p className="text-xs text-slate-500 font-light">
+                                    Scheduler skips Saturday/Sunday in the timezone below.
+                                  </p>
+                                </div>
+                                <Switch
+                                  checked={connection.sync_business_days_only ?? false}
+                                  onCheckedChange={() => handleToggleBusinessDaysLoanSync(connection)}
+                                  disabled={updatingIds.has(key) || !connection.is_active}
+                                  className="data-[state=checked]:bg-amber-500 shrink-0"
+                                />
+                              </div>
+                              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                                <div className="space-y-0.5">
+                                  <Label className="text-sm font-medium text-slate-800 dark:text-slate-200">
+                                    Generate automatic insights on business days only
+                                  </Label>
+                                  <p className="text-xs text-slate-500 font-light">
+                                    Applies to post-sync prediction/agent/tracked hooks from scheduled syncs only.
+                                  </p>
+                                </div>
+                                <Switch
+                                  checked={connection.insights_business_days_only ?? false}
+                                  onCheckedChange={() => handleToggleBusinessDaysInsights(connection)}
+                                  disabled={updatingIds.has(key) || !connection.is_active}
+                                  className="data-[state=checked]:bg-violet-500 shrink-0"
+                                />
+                              </div>
+                              <div className="space-y-2 max-w-md">
+                                <Label className="text-sm font-medium text-slate-800 dark:text-slate-200">
+                                  Scheduler timezone
+                                </Label>
+                                <Select
+                                  value={connection.scheduler_timezone || 'America/New_York'}
+                                  onValueChange={(val) =>
+                                    handleSchedulerTimezoneChange(connection, val)
+                                  }
+                                  disabled={updatingIds.has(key) || !connection.is_active}
+                                >
+                                  <SelectTrigger className="h-9 text-xs font-light">
+                                    <SelectValue placeholder="Timezone" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {schedulerTimezoneSelectOptions(connection.scheduler_timezone).map(
+                                      (opt) => (
+                                        <SelectItem
+                                          key={opt.value}
+                                          value={opt.value}
+                                          className="text-xs"
+                                        >
+                                          {opt.label}
+                                        </SelectItem>
+                                      ),
+                                    )}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              {connection.los_type === 'encompass' && (
+                                <div className="text-xs text-slate-500 font-light">
+                                  <span className="font-medium text-slate-600 dark:text-slate-300">
+                                    Last Encompass user cache sync:{' '}
+                                  </span>
+                                  {formatRelativeTime(connection.last_encompass_users_sync_at ?? null)}
+                                </div>
+                              )}
+                            </div>
                             {/* Sync History */}
                             <div>
                               <div className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3">
