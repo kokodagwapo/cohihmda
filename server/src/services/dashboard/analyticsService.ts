@@ -31,6 +31,13 @@ import {
 import { getStaffingUnitTargets, type StaffingUnitTargets } from "../../utils/staffingUnitTargets.js";
 import { buildUnderstoryBullets } from "../insights/understoryBullets.js";
 import { selectBulletSource } from "../insights/bulletSource.js";
+import {
+  buildActorStatusSummary,
+  enrichActorsWithStatus,
+  filterActorsByStatus,
+  normalizeActorStatusFilter,
+  type ActorStatus,
+} from "../actorStatusService.js";
 
 /**
  * Analytics Service
@@ -70,6 +77,8 @@ export interface LeaderboardEntry {
   name: string;
   role: string;
   branch: string;
+  actorStatus?: ActorStatus;
+  lastLogin?: string | null;
   loansClosed: number;
   loansStarted?: number;
   totalVolume: number;
@@ -476,8 +485,9 @@ export async function getLeaderboardData(
     endDate?: string; // For custom date range
     channelGroup?: string; // Channel filter (Retail, TPO, or specific channel)
     dimensionFilterClause?: string; // Additional SQL WHERE fragment from dimension filters
+    actorStatusFilter?: string | null;
   }
-): Promise<{ leaderboard: LeaderboardEntry[]; timeframe: string }> {
+): Promise<{ leaderboard: LeaderboardEntry[]; timeframe: string; actorStatusFilter?: string; actorStatusSummary?: ReturnType<typeof buildActorStatusSummary> }> {
   try {
     const dateRange = getDateRangeForTimeframe(
       timeframe,
@@ -532,6 +542,10 @@ export async function getLeaderboardData(
     const leaderboardResult = await tenantPool.query(
       `SELECT 
         ${actorExpression} as name,
+        CASE
+          WHEN '${actorColumn}' = 'loan_officer' THEN MIN(l.loan_officer_id)
+          ELSE NULL
+        END AS actor_id,
         l.branch,
         COUNT(*) FILTER (
           WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
@@ -605,7 +619,12 @@ export async function getLeaderboardData(
 
     // If no results, return empty
     if (leaderboardResult.rows.length === 0) {
-      return { leaderboard: [], timeframe };
+      return {
+        leaderboard: [],
+        timeframe,
+        actorStatusFilter: normalizeActorStatusFilter(filters?.actorStatusFilter),
+        actorStatusSummary: buildActorStatusSummary([]),
+      };
     }
 
     // Query previous period for delta calculation
@@ -658,7 +677,7 @@ export async function getLeaderboardData(
 
         return {
           rank: index + 1,
-          employeeId: `lo-${index + 1}`, // Generate placeholder ID since we're using name
+          employeeId: row.actor_id || `lo-${index + 1}`,
           name: row.name || "Unknown",
           role: "Loan Officer", // Default role (could be enhanced with employees table lookup)
           branch: row.branch || "Unknown",
@@ -673,7 +692,22 @@ export async function getLeaderboardData(
       }
     );
 
-    return { leaderboard, timeframe };
+    const enrichedLeaderboard = await enrichActorsWithStatus(tenantPool, leaderboard, {
+      actorKind: actorColumn,
+      getActorId: (row) => row.employeeId,
+      getActorName: (row) => row.name,
+    });
+    const actorStatusFilter = normalizeActorStatusFilter(filters?.actorStatusFilter);
+    const visibleLeaderboard = filterActorsByStatus(enrichedLeaderboard, actorStatusFilter).map(
+      (row, index) => ({ ...row, rank: index + 1 }),
+    );
+
+    return {
+      leaderboard: visibleLeaderboard,
+      timeframe,
+      actorStatusFilter,
+      actorStatusSummary: buildActorStatusSummary(enrichedLeaderboard),
+    };
   } catch (dbError: any) {
     console.error("[Leaderboard] Error:", dbError.message);
     // If loans table doesn't exist, return empty array

@@ -2,11 +2,14 @@ import React from 'react';
 import { Card } from '@/components/ui/card';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { BranchData, ScorecardTotals } from '@/hooks/useCompanyScorecardData';
+import { ActorStatusBadge, formatActorLastLogin } from '@/components/common/ActorStatusFilter';
 
 export type DetailActor = 'branch' | 'loan_officer';
 
 export type SortKey =
   | 'name'
+  | 'actorStatus'
+  | 'lastLogin'
   | 'applicationsTakenDollar'
   | 'applicationsTaken'
   | 'avgLoanSize'
@@ -90,6 +93,8 @@ export function CompanyScorecardDetailTable({
 
   const sortTypes: Record<SortKey, 'string' | 'number'> = {
     name: 'string',
+    actorStatus: 'string',
+    lastLogin: 'string',
     applicationsTakenDollar: 'number',
     applicationsTaken: 'number',
     avgLoanSize: 'number',
@@ -117,6 +122,10 @@ export function CompanyScorecardDetailTable({
     switch (key) {
       case 'name':
         return row.name || '';
+      case 'actorStatus':
+        return row.actorStatus || 'Unknown';
+      case 'lastLogin':
+        return row.lastLogin || '';
       case 'applicationsTakenDollar':
         return row.tieringVolume;
       case 'applicationsTaken':
@@ -226,12 +235,14 @@ export function CompanyScorecardDetailTable({
   return (
     <Card className={`rounded-xl shadow-sm border overflow-hidden ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'} ${containerClassName ?? ''}`}>
       <div className={`overflow-auto ${tableWrapperClassName ?? ''}`}>
-        <table className="w-full border-collapse min-w-[1400px]">
+        <table className="w-full border-collapse min-w-[1550px]">
           <thead>
             <tr className={`border-b-2 ${borderTh}`}>
               <th className={`text-left py-2 px-2 text-[10px] sm:text-xs sm:py-3 sm:px-3 font-medium sticky left-0 z-10 ${bgTh} border-r ${borderTh}`}>
                 {renderHeaderButton(actorLabel === 'Branch' ? 'Branch' : 'LO', actorLabel, 'name')}
               </th>
+              <th className={`text-left py-2 px-2 text-[10px] sm:text-xs sm:py-3 sm:px-3 font-medium ${bgTh}`}>{renderHeaderButton('Status', 'Actor Status', 'actorStatus')}</th>
+              <th className={`text-left py-2 px-2 text-[10px] sm:text-xs sm:py-3 sm:px-3 font-medium ${bgTh}`}>{renderHeaderButton('Last Login', 'Encompass Last Login', 'lastLogin')}</th>
               <th className={`text-right py-2 px-2 text-[10px] sm:text-xs sm:py-3 sm:px-3 font-medium ${bgTh}`}>{renderHeaderButton('Apps $', 'Applications Taken ($)', 'applicationsTakenDollar')}</th>
               <th className={`text-right py-2 px-2 text-[10px] sm:text-xs sm:py-3 sm:px-3 font-medium ${bgTh}`}>{renderHeaderButton('Apps', 'Applications Taken', 'applicationsTaken')}</th>
               <th className={`text-right py-2 px-2 text-[10px] sm:text-xs sm:py-3 sm:px-3 font-medium ${bgTh}`}>{renderHeaderButton('Orig %', 'Originated Units %', 'originatedUnitsPct')}</th>
@@ -258,6 +269,8 @@ export function CompanyScorecardDetailTable({
             {/* Totals row */}
             <tr className={`border-b ${borderTd} ${hoverTd} font-semibold`}>
               <td className={`py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 sticky left-0 z-10 ${stickyCell}`}>Totals</td>
+              <td className={`py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 ${textDefault}`}>—</td>
+              <td className={`py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 ${textDefault}`}>—</td>
               <td className={`text-right py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 font-mono ${textDefault}`}>{formatLargeNumber(t.totalVolume)}</td>
               <td className={`text-right py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 font-mono ${textDefault}`}>{formatNumber(t.totalLoansWithRespa)}</td>
               <td className={`text-right py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 font-mono ${pctClass('goodHigh', originatedPctTotals, isDarkMode)}`}>{originatedPctTotals.toFixed(1)}%</td>
@@ -289,6 +302,12 @@ export function CompanyScorecardDetailTable({
               return (
                 <tr key={row.name} className={`border-b ${borderTd} ${hoverTd} transition-colors`}>
                   <td className={`py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 sticky left-0 z-10 ${stickyCell}`}>{row.name}</td>
+                  <td className="py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3">
+                    <ActorStatusBadge status={row.actorStatus} />
+                  </td>
+                  <td className={`py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 ${textDefault}`}>
+                    {formatActorLastLogin(row.lastLogin)}
+                  </td>
                   <td className={`text-right py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 font-mono ${textDefault}`}>{formatLargeNumber(row.tieringVolume)}</td>
                   <td className={`text-right py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 font-mono ${textDefault}`}>{formatNumber(row.totalLoansWithRespa)}</td>
                   <td className={`text-right py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 font-mono ${pctClass('goodHigh', origPct, isDarkMode)}`}>{origPct.toFixed(1)}%</td>

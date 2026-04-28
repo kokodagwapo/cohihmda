@@ -21,6 +21,12 @@ import { apiLimiter } from "../../middleware/rateLimiter.js";
 import { logError, logWarn, logInfo, logDebug } from "../../services/logger.js";
 import { getLoanAccessContext } from "../../services/userLoanAccessService.js";
 import {
+  buildActorStatusSummary,
+  enrichActorsWithStatus,
+  filterActorsByStatus,
+  normalizeActorStatusFilter,
+} from "../../services/actorStatusService.js";
+import {
   isActorMissing,
   buildChannelWhereClause,
   buildDimensionFilterWhereClause,
@@ -93,6 +99,7 @@ router.get(
       const startDate = req.query.startDate as string | undefined;
       const endDate = req.query.endDate as string | undefined;
       const channelGroup = req.query.channel_group as string | undefined;
+      const actorStatusFilter = normalizeActorStatusFilter(req.query.actor_status);
 
       // Validate actor type
       if (!["branch", "loan_officer"].includes(actor)) {
@@ -525,8 +532,17 @@ router.get(
         pullThrough: totalPullThrough,
       };
 
+      const enrichedActors = await enrichActorsWithStatus(tenantPool, actors, {
+        actorKind: actor === "branch" ? "branch" : actorColumn,
+        getActorId: (row: any) => row.id,
+        getActorName: (row: any) => row.name,
+      });
+      const visibleActors = filterActorsByStatus(enrichedActors, actorStatusFilter);
+      const actorStatusSummary = buildActorStatusSummary(enrichedActors);
+
       logInfo("[TopTiering] Complete", {
-        actors: actors.length,
+        actors: visibleActors.length,
+        allActors: actors.length,
         tiers: {
           top: topTierActors.length,
           second: secondTierActors.length,
@@ -535,9 +551,11 @@ router.get(
       });
 
       res.json({
-        actors,
+        actors: visibleActors,
         totals,
         tierSummary,
+        actorStatusFilter,
+        actorStatusSummary,
         dateRange: {
           startDate: effectiveStartDate.toISOString(),
           endDate: effectiveEndDate.toISOString(),
@@ -588,6 +606,7 @@ router.get(
       const startDateParam = req.query.start_date as string | undefined;
       const endDateParam = req.query.end_date as string | undefined;
       const channelGroup = req.query.channel_group as string | undefined;
+      const actorStatusFilter = normalizeActorStatusFilter(req.query.actor_status);
 
       // Validate actor type
       if (!["branch", "loan-officer"].includes(actorType)) {
@@ -930,14 +949,23 @@ router.get(
         });
       }
 
+      const enrichedActors = await enrichActorsWithStatus(tenantPool, actorsWithTiers, {
+        actorKind: actorType === "branch" ? "branch" : actorColumn,
+        getActorId: (row: any) => row.id,
+        getActorName: (row: any) => row.name,
+      });
+      const visibleActors = filterActorsByStatus(enrichedActors, actorStatusFilter);
+      const actorStatusSummary = buildActorStatusSummary(enrichedActors);
+
       logInfo("[TopTiering/Comparison] Complete", {
-        actors: actorsWithTiers.length,
+        actors: visibleActors.length,
+        allActors: actorsWithTiers.length,
         totalRevenue,
         totalUnits,
       });
 
       res.json({
-        actors: actorsWithTiers,
+        actors: visibleActors,
         totals: {
           revenue: totalRevenue,
           units: totalUnits,
@@ -955,6 +983,8 @@ router.get(
               : 0,
         },
         tierSummary,
+        actorStatusFilter,
+        actorStatusSummary,
         dateRange: {
           start: effectiveStartDate.toISOString().split("T")[0],
           end: effectiveEndDate.toISOString().split("T")[0],

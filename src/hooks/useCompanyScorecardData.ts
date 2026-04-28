@@ -4,6 +4,10 @@
  */
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '@/lib/api';
+import type {
+  ActorStatus,
+  ActorStatusFilterValue,
+} from '@/components/common/ActorStatusFilter';
 
 export interface ScorecardFilters {
   year: number;
@@ -16,6 +20,7 @@ export interface ScorecardFilters {
   tenantId?: string | null; // Tenant ID for multi-tenant support (admins viewing other tenants)
   /** Additional dimension filters from workbench "Add Filter" (branch, loan_officer, channel, etc.) */
   dimensionFilters?: Array<{ column: string; value: string }>;
+  actorStatusFilter?: ActorStatusFilterValue;
 }
 
 export interface GroupedMetricResult {
@@ -23,6 +28,8 @@ export interface GroupedMetricResult {
   value: number;
   metadata?: {
     count?: number;
+    actorStatus?: ActorStatus;
+    lastLogin?: string | null;
   };
 }
 
@@ -68,6 +75,8 @@ export interface ScorecardTotals {
 
 export interface BranchData {
   name: string;
+  actorStatus?: ActorStatus;
+  lastLogin?: string | null;
   loansStarted: number;           // Denominator: all loans started (by started_date)
   totalLoansWithRespa: number;    // Numerator: applications with RESPA (by application_date)
   originatedLoans: number;
@@ -139,14 +148,18 @@ function transformGroupedToRows(groupedData: MetricsByGroup, sortByVolume = true
     });
   });
 
-  const getMetricValue = (metricId: string, groupKey: string): number => {
+  const getMetricResult = (metricId: string, groupKey: string): GroupedMetricResult | undefined => {
     const results = groupedData[metricId] || [];
-    const match = results.find(r => r.groupKey === groupKey);
-    return match?.value || 0;
+    return results.find(r => r.groupKey === groupKey);
+  };
+  const getMetricValue = (metricId: string, groupKey: string): number => {
+    return getMetricResult(metricId, groupKey)?.value || 0;
   };
 
   const rows = Array.from(names).map(groupKey => ({
     name: groupKey,
+    actorStatus: getMetricResult('loans_started', groupKey)?.metadata?.actorStatus,
+    lastLogin: getMetricResult('loans_started', groupKey)?.metadata?.lastLogin,
     loansStarted: getMetricValue('loans_started', groupKey),
     totalLoansWithRespa: getMetricValue('scorecard_total_loans', groupKey),
     originatedLoans: getMetricValue('scorecard_originated_loans', groupKey),
@@ -243,6 +256,7 @@ export function useCompanyScorecardData(filters: ScorecardFilters) {
       const requestBody = {
         metricIds: SCORECARD_METRICS,
         dateRange: { start: dateRangeStart, end: dateRangeEnd },
+        actorStatusFilter: filters.actorStatusFilter,
         ...(Object.keys(additionalFilters).length > 0 && { additionalFilters })
       };
 

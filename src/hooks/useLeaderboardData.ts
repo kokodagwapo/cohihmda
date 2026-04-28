@@ -1,11 +1,18 @@
 import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
+import type {
+  ActorStatus,
+  ActorStatusFilterValue,
+  ActorStatusSummary,
+} from "@/components/common/ActorStatusFilter";
 
 export interface LeaderboardLeader {
   id: string;
   name: string;
   role: string;
   branch: string;
+  actorStatus?: ActorStatus;
+  lastLogin?: string | null;
   avatarUrl?: string;
   points: number;
   rank: number;
@@ -28,6 +35,7 @@ export interface LeaderboardFilters {
   endDate?: string; // ISO date string for custom range
   /** Channel filter (e.g., 'Retail', 'TPO', or specific channel) */
   channelGroup?: string;
+  actorStatusFilter?: ActorStatusFilterValue;
 }
 
 // Extended timeframe types including "Last" periods
@@ -57,6 +65,7 @@ export const useLeaderboardData = (
       // Check if user has a valid token before making API call
       if (!api.hasToken()) {
         setLeaderboardData([]);
+        setActorStatusSummary(null);
         setLoading(false);
         return;
       }
@@ -67,6 +76,7 @@ export const useLeaderboardData = (
         (!additionalFilters?.startDate || !additionalFilters?.endDate)
       ) {
         setLeaderboardData([]);
+        setActorStatusSummary(null);
         setLoading(false);
         return;
       }
@@ -88,6 +98,9 @@ export const useLeaderboardData = (
           additionalFilters.channelGroup !== "All"
         )
           params.append("channel_group", additionalFilters.channelGroup);
+        if (additionalFilters?.actorStatusFilter && additionalFilters.actorStatusFilter !== "all") {
+          params.append("actor_status", additionalFilters.actorStatusFilter);
+        }
 
         // Add custom date range if provided
         if (
@@ -114,12 +127,15 @@ export const useLeaderboardData = (
         const data = await api.request<{
           leaderboard: any[];
           timeframe: string;
+          actorStatusSummary?: ActorStatusSummary;
         }>(`/api/dashboard/leaderboard?${params.toString()}`);
 
         console.log("[useLeaderboardData] Received data:", {
           count: data.leaderboard?.length || 0,
           sample: data.leaderboard?.slice(0, 2),
         });
+
+        setActorStatusSummary(data.actorStatusSummary ?? null);
 
         if (data.leaderboard && data.leaderboard.length > 0) {
           const transformed: LeaderboardLeader[] = data.leaderboard.map(
@@ -128,6 +144,8 @@ export const useLeaderboardData = (
               name: emp.name || "Unknown",
               role: emp.role || "Loan Officer",
               branch: emp.branch || "Unknown",
+              actorStatus: emp.actorStatus,
+              lastLogin: emp.lastLogin,
               avatarUrl: undefined,
               points: Math.round(
                 (emp.loansClosed || 0) * 60 +
@@ -164,15 +182,18 @@ export const useLeaderboardData = (
           error.message?.includes("401")
         ) {
           setLeaderboardData([]);
+          setActorStatusSummary(null);
         } else if (
           error.message?.includes("timed out") ||
           error.message?.includes("timeout")
         ) {
           console.warn("Leaderboard request timed out:", error.message);
           setLeaderboardData([]);
+          setActorStatusSummary(null);
         } else {
           console.error("Failed to fetch leaderboard:", error);
           setLeaderboardData([]);
+          setActorStatusSummary(null);
         }
       } finally {
         setLoading(false);
@@ -187,11 +208,12 @@ export const useLeaderboardData = (
     additionalFilters?.startDate,
     additionalFilters?.endDate,
     additionalFilters?.channelGroup,
+    additionalFilters?.actorStatusFilter,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     JSON.stringify(dimensionFilters),
   ]);
 
-  return { leaderboardData, loading };
+  return { leaderboardData, loading, actorStatusSummary };
 };
 
 function generateBadges(emp: any): string[] {
