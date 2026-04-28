@@ -643,8 +643,8 @@ const SalesCompanyOverview = () => {
   }, [companyOverviewData?.window?.startDate]);
 
   const submittedDateLabel =
-    companyOverviewData?.definitions?.submittedDateField === "processing_date"
-      ? "Processing Date"
+    companyOverviewData?.definitions?.submittedDateField === "submitted_to_underwriting_date"
+      ? "Submitted to Underwriting date"
       : "Submitted to Processing date";
 
   const kpis = [
