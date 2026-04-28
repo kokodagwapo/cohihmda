@@ -86,6 +86,7 @@ export const DASHBOARD_SECTION_GROUPS: { label: string; items: DashboardSectionI
       { id: 'topTieringComparison', title: 'TopTiering Comparison', icon: ArrowLeftRight, iconClass: 'text-sky-500' },
       { id: 'salesTrends', title: 'Sales Trends', icon: TrendingUp, iconClass: 'text-emerald-500' },
       { id: 'productionTrends', title: 'Production Trends', icon: LineChart, iconClass: 'text-indigo-500' },
+      { id: 'productionSummaryByWeek', title: 'Production Summary by Week', icon: LineChart, iconClass: 'text-blue-500' },
       { id: 'operationsTrends', title: 'Operations Trends', icon: LineChart, iconClass: 'text-blue-500' },
       { id: 'pricingDashboard', title: 'Pricing Dashboard', icon: DollarSign, iconClass: 'text-emerald-500' },
       { id: 'pipelineAnalysis', title: 'Pipeline Analysis', icon: LineChart, iconClass: 'text-sky-500' },

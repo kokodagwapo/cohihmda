@@ -47,6 +47,7 @@ const sectionIdToRegistryGroup: Record<string, string> = {
   operationsTrends: "Operations Trends",
   salesTrends: "Sales Trends",
   productionTrends: "Production Trends",
+  productionSummaryByWeek: "Production Summary by Week",
   creditRiskManagement: "Credit Risk",
   /*   loanFunnel: 'Loan Funnel', */
   workflowConversion: "Workflow Conversion",

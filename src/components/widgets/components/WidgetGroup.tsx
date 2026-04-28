@@ -386,6 +386,21 @@ const SECTION_FILTER_CONFIG: Partial<
       ],
     },
   ],
+  "production-summary-by-week": [
+    {
+      key: "branch",
+      label: "Branch",
+      allLabel: "All Branches",
+      optionsSource: "branch",
+    },
+    {
+      key: "loanOfficer",
+      label: "Loan Officer",
+      allLabel: "All Loan Officers",
+      optionsSource: "loan_officer",
+      dependsOn: "branch",
+    },
+  ],
   "sales-company-overview": [],
   "high-performers": [],
   actors: [],
@@ -422,6 +437,7 @@ const SECTION_BUILTIN_FILTER_COLUMNS: Partial<Record<SectionType, string[]>> = {
   "pricing-dashboard": ["current_loan_status"],
   "sales-scorecard-overview": ["branch", "loan_officer"],
   "production-trends": [],
+  "production-summary-by-week": ["branch", "loan_officer"],
   "sales-company-overview": [],
   "loan-complexity": ["current_loan_status"],
 };
@@ -446,6 +462,17 @@ const PRICING_ACTOR_OPTIONS = [
   { value: "loan_officer", label: "Loan Officer" },
   { value: "account_executive", label: "Account Executive" },
 ];
+
+const PRODUCTION_SUMMARY_YEARWEEK_LABELS: Record<
+  "started_date" | "application_date" | "investor_lock_date" | "funding_date" | "closing_date",
+  string
+> = {
+  started_date: "Started YearWeek",
+  application_date: "Application YearWeek",
+  investor_lock_date: "Lock YearWeek",
+  funding_date: "Funding YearWeek",
+  closing_date: "Closing YearWeek",
+};
 const PRICING_DATE_RANGE_OPTIONS = [
   { value: "all", label: "All Time" },
   { value: "mtd", label: "Month to Date" },
@@ -1292,6 +1319,12 @@ const SECTION_COLORS: Record<
     bg: "bg-indigo-50/50 dark:bg-indigo-950/20",
     accent: "text-indigo-600 dark:text-indigo-400",
     dot: "bg-indigo-500",
+  },
+  "production-summary-by-week": {
+    border: "border-blue-400/50",
+    bg: "bg-blue-50/50 dark:bg-blue-950/20",
+    accent: "text-blue-600 dark:text-blue-400",
+    dot: "bg-blue-500",
   },
   funnel: {
     border: "border-sky-400/50",
@@ -2177,6 +2210,12 @@ function GridCellRegistryWidget({
     : {};
   const isProductionTrends = defId?.startsWith("production-trends-");
   const productionTrendsConfig = isProductionTrends ? { groupId } : {};
+  const isProductionSummaryByWeek = defId?.startsWith(
+    "production-summary-by-week-",
+  );
+  const productionSummaryByWeekConfig = isProductionSummaryByWeek
+    ? { groupId, variant: definition.config?.variant }
+    : {};
   const isSalesCompanyOverview = defId?.startsWith("sales-company-overview-");
   const salesCompanyOverviewConfig = isSalesCompanyOverview
     ? { groupId, variant: definition.config?.variant }
@@ -2342,6 +2381,7 @@ function GridCellRegistryWidget({
     ...workflowConfig,
     ...salesScorecardOverviewConfig,
     ...productionTrendsConfig,
+    ...productionSummaryByWeekConfig,
     ...salesCompanyOverviewConfig,
     ...lockStratificationConfig,
     ...loanComplexityConfig,
@@ -3373,6 +3413,18 @@ export function WidgetGroup({
           showYears: false,
         };
       case "production-trends":
+        return {
+          presets: [
+            "mtd",
+            "last-month",
+            "qtd",
+            "last-quarter",
+            "ytd",
+            "last-year",
+          ],
+          showYears: false,
+        };
+      case "production-summary-by-week":
         return {
           presets: [
             "mtd",
@@ -4655,6 +4707,81 @@ export function WidgetGroup({
                             </button>
                           </span>
                         )}
+                      </>
+                    )}
+                  {sectionType === "production-summary-by-week" &&
+                    Object.entries(
+                      filters.productionSummaryByWeekYearWeeks ?? {
+                        started_date: [],
+                        application_date: [],
+                        investor_lock_date: [],
+                        funding_date: [],
+                        closing_date: [],
+                      },
+                    ).some(([, values]) => (values as string[]).length > 0) && (
+                      <>
+                        {(
+                          [
+                            "started_date",
+                            "application_date",
+                            "investor_lock_date",
+                            "funding_date",
+                            "closing_date",
+                          ] as const
+                        ).map((field) => {
+                          const selected =
+                            filters.productionSummaryByWeekYearWeeks?.[field] ?? [];
+                          if (selected.length === 0) return null;
+                          return (
+                            <span
+                              key={`psw-yw-${field}`}
+                              className="inline-flex items-center gap-1 rounded-md bg-blue-100 dark:bg-blue-900/40 px-2 py-0.5 text-xs"
+                            >
+                              {selected.length === 1
+                                ? `${PRODUCTION_SUMMARY_YEARWEEK_LABELS[field]}: ${selected[0]}`
+                                : `${PRODUCTION_SUMMARY_YEARWEEK_LABELS[field]}: ${selected.length} selected`}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateFilters(groupId, {
+                                    productionSummaryByWeekYearWeeks: {
+                                      ...(filters.productionSummaryByWeekYearWeeks ?? {
+                                        started_date: [],
+                                        application_date: [],
+                                        investor_lock_date: [],
+                                        funding_date: [],
+                                        closing_date: [],
+                                      }),
+                                      [field]: [],
+                                    },
+                                  })
+                                }
+                                className="p-0.5 rounded hover:bg-blue-200 dark:hover:bg-blue-800"
+                                aria-label={`Clear ${PRODUCTION_SUMMARY_YEARWEEK_LABELS[field]} filter`}
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </span>
+                          );
+                        })}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-xs"
+                          onClick={() =>
+                            updateFilters(groupId, {
+                              productionSummaryByWeekYearWeeks: {
+                                started_date: [],
+                                application_date: [],
+                                investor_lock_date: [],
+                                funding_date: [],
+                                closing_date: [],
+                              },
+                            })
+                          }
+                        >
+                          Clear YearWeek filters
+                        </Button>
                       </>
                     )}
 
