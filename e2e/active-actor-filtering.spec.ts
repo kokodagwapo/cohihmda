@@ -129,7 +129,7 @@ const tierSummaryBlock = {
 };
 
 async function mockTopTieringComparison(page: Page) {
-  await page.route("**/api/toptiering/comparison?**", async (route) => {
+  await page.route("**/api/toptiering/comparison**", async (route) => {
     const url = route.request().url();
     const allActors = [
       {
@@ -202,6 +202,8 @@ async function mockTopTieringComparison(page: Page) {
 }
 
 test.describe("Active actor filtering (COHI-350)", () => {
+  test.describe.configure({ mode: "serial" });
+
   test("@critical @COHI-350 leaderboard shows actor status filter, summary, and active-only narrows rows", async ({
     userPage,
   }) => {
@@ -211,20 +213,13 @@ test.describe("Active actor filtering (COHI-350)", () => {
     await expect(userPage.getByTestId("actor-status-filter")).toBeVisible();
     await expect(userPage.getByText(/1 active · 1 inactive · 1 unknown/)).toBeVisible();
 
-    await expect(
-      userPage.locator("#leaderboard-main-table").getByText("Active LO"),
-    ).toBeVisible();
-    await expect(
-      userPage.locator("#leaderboard-main-table").getByText("Inactive LO"),
-    ).toBeVisible();
+    const lbTable = userPage.locator("#leaderboard-main-table");
+    await expect(lbTable.getByText("Active LO", { exact: true })).toBeVisible();
+    await expect(lbTable.getByText("Inactive LO", { exact: true })).toBeVisible();
 
     await userPage.getByTestId("actor-status-filter-active").click();
-    await expect(
-      userPage.locator("#leaderboard-main-table").getByText("Active LO"),
-    ).toBeVisible();
-    await expect(
-      userPage.locator("#leaderboard-main-table").getByText("Inactive LO"),
-    ).toHaveCount(0);
+    await expect(lbTable.getByText("Active LO", { exact: true })).toBeVisible();
+    await expect(lbTable.getByText("Inactive LO", { exact: true })).toHaveCount(0);
   });
 
   test("@critical @COHI-350 TopTiering comparison keeps tier totals while filtering visible actors", async ({
@@ -236,15 +231,22 @@ test.describe("Active actor filtering (COHI-350)", () => {
     });
 
     await expect(userPage.getByTestId("actor-status-filter")).toBeVisible();
-    await expect(userPage.locator("#ttc-kpi-actor-count")).toContainText("2");
-    const main = userPage.locator("main");
-    await expect(main.getByText("Active Actor")).toBeVisible();
-    await expect(main.getByText("Inactive Actor")).toBeVisible();
+    await expect(
+      userPage.locator("#ttc-kpi-actor-count div.min-w-0.flex-1 > p").nth(1),
+    ).toHaveText("2");
+    await userPage.getByRole("tab", { name: "Detail" }).first().click();
+    const detailTable = userPage.locator("#ttc-detail-table");
+    await expect(detailTable.getByText("Active Actor", { exact: true })).toBeVisible();
+    await expect(detailTable.getByText("Inactive Actor", { exact: true })).toBeVisible();
 
     await userPage.getByTestId("actor-status-filter-active").click();
-    await expect(userPage.locator("#ttc-kpi-actor-count")).toContainText("2");
-    await expect(main.getByText("Active Actor")).toBeVisible();
-    await expect(main.getByText("Inactive Actor")).not.toBeVisible();
+    // KPI headline count is filtered actor rows; tier subline reflects tierSummary from the API.
+    await expect(
+      userPage.locator("#ttc-kpi-actor-count div.min-w-0.flex-1 > p").nth(1),
+    ).toHaveText("1");
+    await expect(userPage.locator("#ttc-kpi-actor-count")).toContainText("1 Top | 1 Second | 0 Bottom");
+    await expect(detailTable.getByText("Active Actor", { exact: true })).toBeVisible();
+    await expect(detailTable.getByText("Inactive Actor", { exact: true })).not.toBeVisible();
   });
 
   test("@critical @COHI-350 admin Encompass directory shows loan actor reconciliation summary", async ({
@@ -280,7 +282,7 @@ test.describe("Active actor filtering (COHI-350)", () => {
         body: JSON.stringify({ history: [] }),
       });
     });
-    await adminPage.route("**/api/admin/encompass-users/actor-reconciliation-summary?**", async (route) => {
+    await adminPage.route("**/api/admin/encompass-users/actor-reconciliation-summary**", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
