@@ -40,6 +40,7 @@ import CaptureAnalysis from "./pages/CaptureAnalysis";
 import SalesScorecard from "./pages/SalesScorecard";
 import SalesTrends from "./pages/SalesTrends";
 import ProductionTrends from "./pages/ProductionTrends";
+import ProductionSummaryByWeek from "./pages/ProductionSummaryByWeek";
 import SalesScorecardOverview from "./pages/SalesScorecardOverview";
 import SalesCompanyOverview from "./pages/SalesCompanyOverview";
 import CompanyScorecard from "./pages/CompanyScorecard";
@@ -231,6 +232,7 @@ const App = () => (
               <Route path="/sales-company-overview" element={<SalesCompanyOverview />} />
               <Route path="/sales-trends" element={<SalesTrends />} />
               <Route path="/production-trends" element={<ProductionTrends />} />
+              <Route path="/production-summary-by-week" element={<ProductionSummaryByWeek />} />
               <Route path="/sales-scorecard-overview" element={<SalesScorecardOverview />} />
               <Route path="/performance/operation-scorecard" element={<OperationScorecard />} />
               <Route path="/performance/operation-scorecard-trends" element={<OperationScorecardTrends />} />

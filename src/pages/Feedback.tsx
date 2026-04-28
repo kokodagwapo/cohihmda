@@ -80,6 +80,7 @@ const DASHBOARD_DESCRIPTION_PREFIXES: Record<string, string> = {
   "/capture-analysis": "Capture Analysis",
   "/sales-scorecard": "Sales Scorecard",
   "/sales-trends": "Sales Trends",
+  "/production-summary-by-week": "Production Summary by Week",
   "/sales-scorecard-overview": "Sales Scorecard Overview",
   "/performance/toptiering-comparison": "Top Tiering Comparison",
   "/performance/operation-scorecard": "Operation Scorecard",
@@ -109,6 +110,7 @@ const DASHBOARD_AREA_PREFIXES = [
   "/sales-scorecard",
   "/sales-scorecard-overview",
   "/sales-trends",
+  "/production-summary-by-week",
   "/performance/",
   "/loans",
 ];

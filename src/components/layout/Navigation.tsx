@@ -204,6 +204,12 @@ const topTieringMenuGroups = {
         icon: LineChart,
         iconColor: "emerald" as const,
       },
+      {
+        id: "productionSummaryByWeek",
+        label: "Production Summary by Week",
+        icon: LineChart,
+        iconColor: "emerald" as const,
+      },
     ],
   },
   secondaryMarket: {
@@ -338,6 +344,7 @@ const routeMap: Record<string, string> = {
   salesCompanyOverview: "/sales-company-overview",
   salesTrends: "/sales-trends",
   productionTrends: "/production-trends",
+  productionSummaryByWeek: "/production-summary-by-week",
   operationsScorecard: "/performance/operation-scorecard",
   operationsTrends: "/performance/operation-scorecard-trends",
   estimatedClosingsRisk: "/performance/estimated-closings-risk",
@@ -655,6 +662,7 @@ export function Navigation(
       "/sales-company-overview",
       "/sales-trends",
       "/production-trends",
+      "/production-summary-by-week",
       "/performance/operation-scorecard",
       "/performance/operation-scorecard-trends",
       "/performance/estimated-closings-risk",
