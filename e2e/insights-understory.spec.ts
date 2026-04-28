@@ -197,6 +197,12 @@ async function ensureInsightsSectionVisible(page: Page) {
     }
 
     await expect(page).toHaveURL(/\/insights/);
+    // `domcontentloaded` can fire while `ProtectedRoute` is still hydrating auth from
+    // storage state (full-screen spinner). Dashboard — and `#CohiInsights` — only mount
+    // after that finishes; CI is slower than most laptops, so wait for the shell first.
+    await expect(
+      page.getByRole("navigation", { name: /main navigation/i }),
+    ).toBeVisible({ timeout: 30_000 });
     await confirmInsightsVisibilityInputs(page);
     await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
     await dismissBlockingOverlays(page);
@@ -213,8 +219,11 @@ async function ensureInsightsSectionVisible(page: Page) {
   }
 
   // Final strict assertion so failure output still points to the missing anchor.
+  await expect(
+    page.getByRole("navigation", { name: /main navigation/i }),
+  ).toBeVisible({ timeout: 30_000 });
   const insightsSection = page.locator("#CohiInsights");
-  await expect(insightsSection).toBeVisible({ timeout: 15_000 });
+  await expect(insightsSection).toBeVisible({ timeout: 30_000 });
   return insightsSection;
 }
 
