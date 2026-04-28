@@ -252,7 +252,23 @@ test.describe("Active actor filtering (COHI-350)", () => {
   test("@critical @COHI-350 admin Encompass directory shows loan actor reconciliation summary", async ({
     adminPage,
   }) => {
-    await adminPage.route("**/api/los/connections?**", async (route) => {
+    const tenantId = "e2e-admin-tenant";
+    await adminPage.addInitScript((selectedTenantId) => {
+      localStorage.setItem(
+        "cohi-tenant-selection",
+        JSON.stringify({ state: { selectedTenantId }, version: 0 }),
+      );
+    }, tenantId);
+    await adminPage.route("**/api/tenants**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          tenants: [{ id: tenantId, name: "E2E Admin Tenant", status: "active" }],
+        }),
+      });
+    });
+    await adminPage.route("**/api/los/connections**", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
