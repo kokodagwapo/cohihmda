@@ -7,6 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { useTenantStore } from "@/stores/tenantStore";
 import { useAuth } from "@/contexts/AuthContext";
+import { useWidgetSectionStore } from "@/stores/widgetSectionStore";
 import { useLoanDetailData, type LoanDetailRow } from "@/hooks/useLoanDetailData";
 import { ArrowDown, ArrowUp, Download, Loader2, X } from "lucide-react";
 import { getWeek, startOfWeek } from "date-fns";
@@ -55,6 +56,13 @@ const YEARWEEK_FILTER_LABELS: Record<SummaryDateField, string> = {
   investor_lock_date: "Lock YearWeek",
   funding_date: "Funding YearWeek",
   closing_date: "Closing YearWeek",
+};
+const EMPTY_YEARWEEK_FILTERS: YearWeekFilterState = {
+  started_date: [],
+  application_date: [],
+  investor_lock_date: [],
+  funding_date: [],
+  closing_date: [],
 };
 
 const SUMMARY_TABLE_CONFIGS: Array<{
@@ -517,6 +525,7 @@ function LoanDetailWeekTable({ rows }: { rows: LoanDetailDisplayRow[] }) {
   const [sortKey, setSortKey] = useState<LoanDetailSortKey>("startedDate");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [isSortingPending, startSortingTransition] = useTransition();
+  const loanCount = rows.length;
 
   const sortedRows = useMemo(() => {
     const copy = [...rows];
@@ -605,10 +614,15 @@ function LoanDetailWeekTable({ rows }: { rows: LoanDetailDisplayRow[] }) {
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-base">Loan List</CardTitle>
-          <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5" onClick={handleDownload}>
-            <Download className="h-3.5 w-3.5" />
-            Download
-          </Button>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+              Loan count: {formatUnits(loanCount)}
+            </span>
+            <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5" onClick={handleDownload}>
+              <Download className="h-3.5 w-3.5" />
+              Download
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent>
@@ -674,24 +688,109 @@ function LoanDetailWeekTable({ rows }: { rows: LoanDetailDisplayRow[] }) {
   );
 }
 
-const ProductionSummaryByWeek = () => {
+type ProductionSummaryByWeekViewProps = {
+  embeddedInWorkbench?: boolean;
+  groupId?: string | null;
+  widgetVariant?:
+    | "full"
+    | "started"
+    | "application"
+    | "lock"
+    | "funding"
+    | "closing"
+    | "loan-detail";
+};
+
+export function ProductionSummaryByWeekView({
+  embeddedInWorkbench = false,
+  groupId = null,
+  widgetVariant = "full",
+}: ProductionSummaryByWeekViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [loadingNotice, setLoadingNotice] = useState<string | null>(null);
   const [activePillField, setActivePillField] = useState<SummaryDateField | null>(null);
   const [draftYearWeeks, setDraftYearWeeks] = useState<string[]>([]);
-  const [selectedYearWeeksByField, setSelectedYearWeeksByField] = useState<YearWeekFilterState>({
-    started_date: [],
-    application_date: [],
-    investor_lock_date: [],
-    funding_date: [],
-    closing_date: [],
-  });
+  const [localSelectedYearWeeksByField, setLocalSelectedYearWeeksByField] =
+    useState<YearWeekFilterState>(EMPTY_YEARWEEK_FILTERS);
   const hasSeenLoadingRef = useRef(false);
   const completeTimeoutRef = useRef<number | null>(null);
   const { selectedTenantId } = useTenantStore();
   const { user } = useAuth();
+  const sectionFilters = useWidgetSectionStore((s) =>
+    groupId ? s.sections[groupId] : undefined,
+  );
+  const updateSectionFilters = useWidgetSectionStore((s) => s.updateFilters);
   const tenantId = selectedTenantId ?? user?.tenant_id ?? null;
-  const { data, loading, error } = useLoanDetailData(tenantId);
+  const sectionDateRange = useMemo(
+    () => sectionFilters?.periodSelection?.dateRange ?? sectionFilters?.dateRange,
+    [sectionFilters?.periodSelection?.dateRange, sectionFilters?.dateRange],
+  );
+  const sectionDimensionFilters = useMemo(() => {
+    if (!sectionFilters?.dynamicFilters?.length) return undefined;
+    const list = sectionFilters.dynamicFilters
+      .filter(
+        (df) =>
+          df.value &&
+          df.value !== "all" &&
+          df.column !== "branch" &&
+          df.column !== "loan_officer",
+      )
+      .map((df) => ({ column: df.column, value: df.value }));
+    return list.length > 0 ? list : undefined;
+  }, [sectionFilters?.dynamicFilters]);
+  const loanFilters = useMemo(
+    () =>
+      sectionFilters
+        ? {
+            dateField: sectionFilters.dateField,
+            dateRange: sectionDateRange,
+            branch: sectionFilters.branch,
+            loanOfficer: sectionFilters.loanOfficer,
+            dimensionFilters: sectionDimensionFilters,
+          }
+        : undefined,
+    [
+      sectionDateRange,
+      sectionDimensionFilters,
+      sectionFilters?.branch,
+      sectionFilters?.dateField,
+      sectionFilters?.loanOfficer,
+    ],
+  );
+  const { data, loading, error } = useLoanDetailData(tenantId, loanFilters);
+  const selectedYearWeeksByField = useMemo<YearWeekFilterState>(() => {
+    if (embeddedInWorkbench && groupId) {
+      const fromStore = sectionFilters?.productionSummaryByWeekYearWeeks;
+      if (!fromStore) return EMPTY_YEARWEEK_FILTERS;
+      return {
+        started_date: fromStore.started_date ?? [],
+        application_date: fromStore.application_date ?? [],
+        investor_lock_date: fromStore.investor_lock_date ?? [],
+        funding_date: fromStore.funding_date ?? [],
+        closing_date: fromStore.closing_date ?? [],
+      };
+    }
+    return localSelectedYearWeeksByField;
+  }, [
+    embeddedInWorkbench,
+    groupId,
+    localSelectedYearWeeksByField,
+    sectionFilters?.productionSummaryByWeekYearWeeks,
+  ]);
+
+  const setSelectedYearWeeksByField = (
+    updater:
+      | YearWeekFilterState
+      | ((prev: YearWeekFilterState) => YearWeekFilterState),
+  ) => {
+    const next =
+      typeof updater === "function" ? updater(selectedYearWeeksByField) : updater;
+    if (embeddedInWorkbench && groupId) {
+      updateSectionFilters(groupId, { productionSummaryByWeekYearWeeks: next });
+      return;
+    }
+    setLocalSelectedYearWeeksByField(next);
+  };
   const hasLoadedAllLoans = useMemo(() => {
     if (!data) return false;
     if (data.total <= 0) return true;
@@ -767,6 +866,29 @@ const ProductionSummaryByWeek = () => {
       })),
     [filteredLoans],
   );
+  const visibleSummaryFields = useMemo<SummaryDateField[]>(() => {
+    switch (widgetVariant) {
+      case "started":
+        return ["started_date"];
+      case "application":
+        return ["application_date"];
+      case "lock":
+        return ["investor_lock_date"];
+      case "funding":
+        return ["funding_date"];
+      case "closing":
+        return ["closing_date"];
+      case "loan-detail":
+        return [];
+      default:
+        return SUMMARY_TABLE_CONFIGS.map((c) => c.key);
+    }
+  }, [widgetVariant]);
+  const visibleSummaryTables = useMemo(
+    () => summaryTables.filter((table) => visibleSummaryFields.includes(table.key)),
+    [summaryTables, visibleSummaryFields],
+  );
+  const showLoanDetailTable = widgetVariant === "full" || widgetVariant === "loan-detail";
 
   const loanDetailRows = useMemo<LoanDetailDisplayRow[]>(
     () =>
@@ -806,140 +928,145 @@ const ProductionSummaryByWeek = () => {
     if (activePillField === field) setActivePillField(null);
   };
 
+  const content = (
+    <div className="flex min-h-[calc(100vh-4rem)] flex-col">
+      {!embeddedInWorkbench && <TopTieringTopBar title="Production Summary by Week" />}
+      <main className={embeddedInWorkbench ? "flex-1 overflow-y-auto px-2 py-2" : "flex-1 overflow-y-auto px-2 py-2 sm:px-4 sm:py-3"}>
+        <div ref={containerRef} className="mx-auto max-w-[1800px] space-y-4">
+          {loadingNotice && (
+            <div className="sticky top-2 z-50">
+              <div
+                className={`w-full rounded-lg border px-4 py-2 text-center text-sm font-semibold shadow-sm ${
+                  loadingNotice === "Loading complete"
+                    ? "border-green-300 bg-green-50 text-green-800 dark:border-green-700/60 dark:bg-green-900/40 dark:text-green-200"
+                    : "border-yellow-300 bg-yellow-50 text-yellow-800 dark:border-yellow-700/60 dark:bg-yellow-900/40 dark:text-yellow-200"
+                }`}
+              >
+                {loadingNotice}
+              </div>
+            </div>
+          )}
+          {widgetVariant === "full" &&
+            SUMMARY_TABLE_CONFIGS.some((cfg) => selectedYearWeeksByField[cfg.key].length > 0) && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-100/80 bg-blue-50/50 px-3 py-2 dark:border-slate-700/80 dark:bg-slate-900/40">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Active filters</span>
+              {SUMMARY_TABLE_CONFIGS.map((cfg) => {
+                const selected = selectedYearWeeksByField[cfg.key];
+                if (selected.length === 0) return null;
+                const label =
+                  selected.length === 1
+                    ? `${YEARWEEK_FILTER_LABELS[cfg.key]}: ${selected[0]}`
+                    : `${YEARWEEK_FILTER_LABELS[cfg.key]}: ${selected.length} selected`;
+                return (
+                  <div key={cfg.key} className="flex items-center gap-0.5">
+                    <YearWeekFilterPopover
+                      title={YEARWEEK_FILTER_LABELS[cfg.key]}
+                      open={activePillField === cfg.key}
+                      onOpenChange={(open) => {
+                        if (open) {
+                          setDraftYearWeeks([...selected]);
+                          setActivePillField(cfg.key);
+                        } else {
+                          setActivePillField(null);
+                        }
+                      }}
+                      options={yearWeekOptionsByField[cfg.key]}
+                      draftSelected={draftYearWeeks}
+                      onToggleDraftValue={(value) =>
+                        setDraftYearWeeks((prev) => {
+                          const set = new Set(prev);
+                          if (set.has(value)) set.delete(value);
+                          else set.add(value);
+                          return [...set].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+                        })
+                      }
+                      onApply={() =>
+                        setSelectedYearWeeksByField((prev) => ({
+                          ...prev,
+                          [cfg.key]: [...draftYearWeeks].sort((a, b) =>
+                            b.localeCompare(a, undefined, { numeric: true }),
+                          ),
+                        }))
+                      }
+                      onClearSelection={() => setDraftYearWeeks([])}
+                      trigger={
+                        <button
+                          type="button"
+                          className="inline-flex max-w-[min(280px,calc(100vw-6rem))] cursor-pointer items-center gap-1 rounded-full border border-blue-200/80 bg-white px-2.5 py-0.5 text-left text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700/80"
+                        >
+                          <span className="truncate">{label}</span>
+                        </button>
+                      }
+                    />
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        clearYearWeekFieldFilter(cfg.key);
+                      }}
+                      className="rounded-sm p-0.5 text-slate-500 hover:bg-blue-100/80 hover:text-slate-800 dark:hover:bg-slate-700/80 dark:hover:text-slate-200"
+                      aria-label={`Remove ${YEARWEEK_FILTER_LABELS[cfg.key]} filter`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                );
+              })}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 text-xs"
+                onClick={() =>
+                  setSelectedYearWeeksByField(EMPTY_YEARWEEK_FILTERS)
+                }
+              >
+                Clear all filters
+              </Button>
+            </div>
+          )}
+          {loading && (
+            <div className="flex min-h-[280px] items-center justify-center">
+              <Loader2 className="h-6 w-6 animate-spin text-slate-500" />
+            </div>
+          )}
+          {!loading && error && (
+            <Card className={rowBg}>
+              <CardContent className="py-10 text-center text-sm text-red-600">{error}</CardContent>
+            </Card>
+          )}
+          {!loading && !error && (
+            <div className={widgetVariant === "full" ? "grid grid-cols-1 gap-4 xl:grid-cols-2" : "space-y-4"}>
+              {visibleSummaryTables.map((table) => (
+                <SummaryWeekTable
+                  key={table.key}
+                  dateField={table.key}
+                  title={table.title}
+                  earliestDateLabel={table.earliestDateLabel}
+                  rows={table.rows}
+                  selectedYearWeeks={selectedYearWeeksByField[table.key]}
+                  onToggleYearWeek={toggleYearWeekFilter}
+                />
+              ))}
+              {showLoanDetailTable && <LoanDetailWeekTable rows={loanDetailRows} />}
+            </div>
+          )}
+        </div>
+      </main>
+    </div>
+  );
+
+  if (embeddedInWorkbench) {
+    return content;
+  }
+
   return (
     <TopTieringLayout>
-      <div className="flex min-h-[calc(100vh-4rem)] flex-col">
-        <TopTieringTopBar title="Production Summary by Week" />
-        <main className="flex-1 overflow-y-auto px-2 py-2 sm:px-4 sm:py-3">
-          <div ref={containerRef} className="mx-auto max-w-[1800px] space-y-4">
-            {loadingNotice && (
-              <div className="sticky top-2 z-50">
-                <div
-                  className={`w-full rounded-lg border px-4 py-2 text-center text-sm font-semibold shadow-sm ${
-                    loadingNotice === "Loading complete"
-                      ? "border-green-300 bg-green-50 text-green-800 dark:border-green-700/60 dark:bg-green-900/40 dark:text-green-200"
-                      : "border-yellow-300 bg-yellow-50 text-yellow-800 dark:border-yellow-700/60 dark:bg-yellow-900/40 dark:text-yellow-200"
-                  }`}
-                >
-                  {loadingNotice}
-                </div>
-              </div>
-            )}
-            {SUMMARY_TABLE_CONFIGS.some((cfg) => selectedYearWeeksByField[cfg.key].length > 0) && (
-              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-100/80 bg-blue-50/50 px-3 py-2 dark:border-slate-700/80 dark:bg-slate-900/40">
-                <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Active filters</span>
-                {SUMMARY_TABLE_CONFIGS.map((cfg) => {
-                  const selected = selectedYearWeeksByField[cfg.key];
-                  if (selected.length === 0) return null;
-                  const label =
-                    selected.length === 1
-                      ? `${YEARWEEK_FILTER_LABELS[cfg.key]}: ${selected[0]}`
-                      : `${YEARWEEK_FILTER_LABELS[cfg.key]}: ${selected.length} selected`;
-                  return (
-                    <div key={cfg.key} className="flex items-center gap-0.5">
-                      <YearWeekFilterPopover
-                        title={YEARWEEK_FILTER_LABELS[cfg.key]}
-                        open={activePillField === cfg.key}
-                        onOpenChange={(open) => {
-                          if (open) {
-                            setDraftYearWeeks([...selected]);
-                            setActivePillField(cfg.key);
-                          } else {
-                            setActivePillField(null);
-                          }
-                        }}
-                        options={yearWeekOptionsByField[cfg.key]}
-                        draftSelected={draftYearWeeks}
-                        onToggleDraftValue={(value) =>
-                          setDraftYearWeeks((prev) => {
-                            const set = new Set(prev);
-                            if (set.has(value)) set.delete(value);
-                            else set.add(value);
-                            return [...set].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
-                          })
-                        }
-                        onApply={() =>
-                          setSelectedYearWeeksByField((prev) => ({
-                            ...prev,
-                            [cfg.key]: [...draftYearWeeks].sort((a, b) =>
-                              b.localeCompare(a, undefined, { numeric: true }),
-                            ),
-                          }))
-                        }
-                        onClearSelection={() => setDraftYearWeeks([])}
-                        trigger={
-                          <button
-                            type="button"
-                            className="inline-flex max-w-[min(280px,calc(100vw-6rem))] cursor-pointer items-center gap-1 rounded-full border border-blue-200/80 bg-white px-2.5 py-0.5 text-left text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700/80"
-                          >
-                            <span className="truncate">{label}</span>
-                          </button>
-                        }
-                      />
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          clearYearWeekFieldFilter(cfg.key);
-                        }}
-                        className="rounded-sm p-0.5 text-slate-500 hover:bg-blue-100/80 hover:text-slate-800 dark:hover:bg-slate-700/80 dark:hover:text-slate-200"
-                        aria-label={`Remove ${YEARWEEK_FILTER_LABELS[cfg.key]} filter`}
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </div>
-                  );
-                })}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 text-xs"
-                  onClick={() =>
-                    setSelectedYearWeeksByField({
-                      started_date: [],
-                      application_date: [],
-                      investor_lock_date: [],
-                      funding_date: [],
-                      closing_date: [],
-                    })
-                  }
-                >
-                  Clear all filters
-                </Button>
-              </div>
-            )}
-            {loading && (
-              <div className="flex min-h-[280px] items-center justify-center">
-                <Loader2 className="h-6 w-6 animate-spin text-slate-500" />
-              </div>
-            )}
-            {!loading && error && (
-              <Card className={rowBg}>
-                <CardContent className="py-10 text-center text-sm text-red-600">{error}</CardContent>
-              </Card>
-            )}
-            {!loading && !error && (
-              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-                {summaryTables.map((table, index) => (
-                  <SummaryWeekTable
-                    key={table.key}
-                    dateField={table.key}
-                    title={table.title}
-                    earliestDateLabel={table.earliestDateLabel}
-                    rows={table.rows}
-                    selectedYearWeeks={selectedYearWeeksByField[table.key]}
-                    onToggleYearWeek={toggleYearWeekFilter}
-                  />
-                ))}
-                <LoanDetailWeekTable rows={loanDetailRows} />
-              </div>
-            )}
-          </div>
-        </main>
-      </div>
+      {content}
     </TopTieringLayout>
   );
-};
+}
 
-export default ProductionSummaryByWeek;
+export default function ProductionSummaryByWeek() {
+  return <ProductionSummaryByWeekView />;
+}

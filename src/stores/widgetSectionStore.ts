@@ -20,6 +20,7 @@ export type SectionType =
   | 'operations-trends'
   | 'sales-trends'
   | 'production-trends'
+  | 'production-summary-by-week'
   | 'funnel'
   | 'top-tiering-comparison'
   | 'leaderboard'
@@ -164,6 +165,14 @@ export interface SectionFilters {
     productTypes: string[];
     loanPrograms: string[];
   } | null;
+  /** Production Summary by Week: selected YearWeek groups by date field. */
+  productionSummaryByWeekYearWeeks?: {
+    started_date: string[];
+    application_date: string[];
+    investor_lock_date: string[];
+    funding_date: string[];
+    closing_date: string[];
+  };
   /** Sales Scorecard Overview: milestone date columns to show (e.g. started_date, application_date). Empty = backend default five. */
   salesScorecardOverviewMilestoneColumns?: string[];
   /** Lock Stratification: locked filter (active_locked, active_not_locked, all_active) */
@@ -395,6 +404,17 @@ export const useWidgetSectionStore = create<WidgetSectionState>((set, get) => ({
           ...base,
           salesCompanyOverviewLoanTypes: [],
           salesCompanyOverviewAgingBuckets: [],
+        };
+      } else if (sectionType === 'production-summary-by-week') {
+        filters = {
+          ...base,
+          productionSummaryByWeekYearWeeks: {
+            started_date: [],
+            application_date: [],
+            investor_lock_date: [],
+            funding_date: [],
+            closing_date: [],
+          },
         };
       }
       return {

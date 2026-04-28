@@ -786,6 +786,11 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
       loading: false,
       error: null,
     },
+    'production-summary-by-week': {
+      data: { ready: true },
+      loading: false,
+      error: null,
+    },
     'high-performers': {
       data: highPerformersData,
       loading: highPerformersLoading,

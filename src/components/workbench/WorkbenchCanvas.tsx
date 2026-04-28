@@ -747,6 +747,17 @@ const SECTION_TO_WIDGETS: Record<
       "production-trends-drilldown",
     ],
   },
+  productionSummaryByWeek: {
+    sectionType: "production-summary-by-week",
+    widgetIds: [
+      "production-summary-by-week-started",
+      "production-summary-by-week-application",
+      "production-summary-by-week-lock",
+      "production-summary-by-week-funding",
+      "production-summary-by-week-closing",
+      "production-summary-by-week-loan-detail",
+    ],
+  },
   loanFunnel: {
     sectionType: "funnel",
     widgetIds: [

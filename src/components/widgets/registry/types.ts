@@ -36,6 +36,7 @@ export type DataSourceId =
   | 'pipeline-analysis'
   | 'sales-scorecard-overview'
   | 'production-trends'
+  | 'production-summary-by-week'
   | 'lock-stratification'
   | 'loan-complexity'
   | 'estimated-closings-risk'
