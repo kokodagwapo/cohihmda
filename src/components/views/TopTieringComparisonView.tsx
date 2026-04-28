@@ -804,6 +804,7 @@ export function TopTieringComparisonView({
   const topTierItems = focusScopedData.filter((item) => item.tier === "top");
   const secondTierItems = focusScopedData.filter((item) => item.tier === "second");
   const bottomTierItems = focusScopedData.filter((item) => item.tier === "bottom");
+  const tierCountSummary = apiData?.tierSummary;
 
   const topTierRevenue = topTierItems.reduce(
     (sum, item) => sum + item.revenue,
@@ -2007,8 +2008,10 @@ export function TopTieringComparisonView({
                         isDarkMode ? "text-slate-500" : "text-slate-600"
                       }`}
                     >
-                      {topTierItems.length} Top | {secondTierItems.length}{" "}
-                      Second | {bottomTierItems.length} Bottom
+                      {tierCountSummary?.top?.count ?? topTierItems.length} Top |{" "}
+                      {tierCountSummary?.second?.count ?? secondTierItems.length}{" "}
+                      Second |{" "}
+                      {tierCountSummary?.bottom?.count ?? bottomTierItems.length} Bottom
                     </p>
                   </div>
                   <div
