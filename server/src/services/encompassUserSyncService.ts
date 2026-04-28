@@ -23,11 +23,14 @@ export interface CachedEncompassUser {
   username: string;
   email?: string;
   first_name?: string;
+  middle_name?: string;
   last_name?: string;
   full_name?: string;
+  encompass_full_name?: string;
   user_indicators: string[];
   is_enabled: boolean;
   cohi_user_id?: string;
+  encompass_last_login?: Date | string | null;
   last_synced_at: Date;
   created_at: Date;
 }
@@ -230,16 +233,18 @@ export class EncompassUserSyncService {
     const result = await this.tenantPool.query(
       `
       INSERT INTO encompass_users 
-        (los_connection_id, encompass_user_id, username, email, first_name, last_name, 
+        (los_connection_id, encompass_user_id, username, email, first_name, middle_name, last_name, encompass_full_name,
          user_indicators, is_enabled, job_title, personas, org_id, org_name, 
          nmls_id, phone, cell_phone, encompass_last_login, last_synced_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW())
       ON CONFLICT (los_connection_id, encompass_user_id) 
       DO UPDATE SET 
         username = EXCLUDED.username,
         email = EXCLUDED.email,
         first_name = EXCLUDED.first_name,
+        middle_name = EXCLUDED.middle_name,
         last_name = EXCLUDED.last_name,
+        encompass_full_name = EXCLUDED.encompass_full_name,
         user_indicators = EXCLUDED.user_indicators,
         is_enabled = EXCLUDED.is_enabled,
         job_title = EXCLUDED.job_title,
@@ -259,7 +264,9 @@ export class EncompassUserSyncService {
         user.username,
         user.email,
         user.firstName,
+        user.middleName,
         user.lastName,
+        user.fullName,
         user.userIndicators || [],
         user.isEnabled,
         user.jobTitle || null,
@@ -313,7 +320,7 @@ export class EncompassUserSyncService {
 
     if (search) {
       conditions.push(`(
-        full_name ILIKE $${paramIndex} OR 
+        COALESCE(encompass_full_name, full_name) ILIKE $${paramIndex} OR 
         email ILIKE $${paramIndex} OR 
         username ILIKE $${paramIndex}
       )`);
@@ -335,11 +342,14 @@ export class EncompassUserSyncService {
       `
       SELECT 
         id, los_connection_id, encompass_user_id, username, email,
-        first_name, last_name, full_name, user_indicators, is_enabled,
-        cohi_user_id, last_synced_at, created_at
+        first_name, middle_name, last_name,
+        COALESCE(encompass_full_name, full_name) AS full_name,
+        encompass_full_name,
+        user_indicators, is_enabled,
+        cohi_user_id, encompass_last_login, last_synced_at, created_at
       FROM encompass_users 
       WHERE ${whereClause}
-      ORDER BY full_name ASC, username ASC
+      ORDER BY COALESCE(encompass_full_name, full_name) ASC, username ASC
       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
     `,
       [...params, limit, offset],
