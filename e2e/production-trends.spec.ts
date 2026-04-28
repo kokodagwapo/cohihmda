@@ -182,6 +182,61 @@ async function gotoProductionTrends(userPage: Page) {
   await dismissBlockingOverlays(userPage);
 }
 
+async function gotoNewWorkbenchCanvas(userPage: Page) {
+  await userPage.goto("/my-dashboard/new", { waitUntil: "domcontentloaded" });
+  await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
+  await dismissBlockingOverlays(userPage);
+  await expect(userPage).toHaveURL(/\/my-dashboard\/new/);
+  await expect(userPage.getByTestId("workbench-canvas-title-input")).toBeVisible({
+    timeout: 20_000,
+  });
+}
+
+async function addProductionTrendsDashboardSection(userPage: Page) {
+  const dashboardsTab = userPage.getByTestId("workbench-cohi-tab-dashboards");
+  const tabVisible = await dashboardsTab.isVisible().catch(() => false);
+  if (!tabVisible) {
+    await userPage.getByTestId("workbench-cohi-toggle").click();
+    await expect(dashboardsTab).toBeVisible({ timeout: 15_000 });
+  }
+  await dashboardsTab.click();
+  await userPage.getByRole("button", { name: "Production Trends" }).first().click();
+  await userPage
+    .getByRole("button", { name: "Add entire Production Trends" })
+    .click();
+}
+
+function productionTrendsWorkbenchGroup(userPage: Page) {
+  return userPage
+    .locator("div.group\\/widgetgroup")
+    .filter({
+      has: userPage.getByText("Production Trends Largest Category", {
+        exact: true,
+      }),
+    })
+    .first();
+}
+
+function groupFilterRow(group: ReturnType<typeof productionTrendsWorkbenchGroup>) {
+  return group.locator("div.flex.items-center.gap-1\\.5.px-2\\.5.pb-1\\.5.flex-wrap").first();
+}
+
+async function ensureGroupFiltersExpanded(
+  group: ReturnType<typeof productionTrendsWorkbenchGroup>,
+) {
+  const row = groupFilterRow(group);
+  const dateTypeSelect = row.locator("select").first();
+  const selectVisible = await dateTypeSelect.isVisible().catch(() => false);
+  if (selectVisible) return;
+
+  const filtersToggle = group.getByRole("button", { name: "Filters" }).first();
+  if (await filtersToggle.isVisible().catch(() => false)) {
+    await filtersToggle.click();
+  }
+
+  await expect(dateTypeSelect).toBeVisible({ timeout: 15_000 });
+}
+
 /** Slice-filter popover is portaled; scope by Apply Filters to avoid other poppers (e.g. YearMonth). */
 function sliceFilterPopover(userPage: Page) {
   return userPage
@@ -366,5 +421,130 @@ test.describe("Production Trends (COHI-346)", () => {
     await filterGrid.getByRole("combobox").nth(2).click();
     await userPage.getByRole("option", { name: "Loan Type", exact: true }).click();
     await expect(main.getByRole("button", { name: /^Branch: North$/ })).toHaveCount(0);
+  });
+
+  test("@critical @COHI-346 workbench adds Production Trends group and default widget layout (AC16–18)", async ({
+    userPage,
+  }) => {
+    await suppressWelcomeTour(userPage);
+    await setupProductionTrendsApiMock(userPage);
+    await gotoNewWorkbenchCanvas(userPage);
+    await addProductionTrendsDashboardSection(userPage);
+
+    const group = productionTrendsWorkbenchGroup(userPage);
+    await expect(group).toBeVisible({ timeout: 20_000 });
+    await expect(group.getByText("Production Trends YoY", { exact: true })).toBeVisible();
+    await expect(
+      group.getByText("Production Trends Largest Category", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      group.getByText("Production Trends YoY Line", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      group.getByText("Production Trends Drilldown", { exact: true }),
+    ).toBeVisible();
+
+    const filterRow = group
+      .locator("div.flex.items-center.gap-1\\.5.px-2\\.5.pb-1\\.5.flex-wrap")
+      .first();
+    await expect(filterRow.getByRole("button", { name: "MTD" })).toBeVisible();
+    await expect(filterRow.getByRole("button", { name: "LM" })).toBeVisible();
+    await expect(filterRow.getByRole("button", { name: "QTD" })).toBeVisible();
+    await expect(filterRow.getByRole("button", { name: "LQ" })).toBeVisible();
+    await expect(filterRow.getByRole("button", { name: "YTD" })).toBeVisible();
+    await expect(filterRow.getByRole("button", { name: "LY" })).toBeVisible();
+    await expect(filterRow.getByRole("button", { name: "Custom" })).toBeVisible();
+    await expect(filterRow.getByText("Date Type", { exact: true })).toBeVisible();
+    await expect(filterRow.getByText("Measure", { exact: true })).toBeVisible();
+    await expect(filterRow.getByText("Dimension", { exact: true })).toBeVisible();
+
+    const yoyCard = group.getByText("Production Trends YoY", { exact: true }).first();
+    const largestCard = group
+      .getByText("Production Trends Largest Category", { exact: true })
+      .first();
+    const lineCard = group
+      .getByText("Production Trends YoY Line", { exact: true })
+      .first();
+    const drilldownCard = group
+      .getByText("Production Trends Drilldown", { exact: true })
+      .first();
+    const yoyBox = await yoyCard.boundingBox();
+    const largestBox = await largestCard.boundingBox();
+    const lineBox = await lineCard.boundingBox();
+    const drilldownBox = await drilldownCard.boundingBox();
+    expect(yoyBox).toBeTruthy();
+    expect(largestBox).toBeTruthy();
+    expect(lineBox).toBeTruthy();
+    expect(drilldownBox).toBeTruthy();
+
+    // Row 1: YoY + Largest near same Y. Row 2: Line below. Row 3: Drilldown below line.
+    expect(Math.abs((yoyBox?.y ?? 0) - (largestBox?.y ?? 0))).toBeLessThan(30);
+    expect((lineBox?.y ?? 0)).toBeGreaterThan((yoyBox?.y ?? 0) + 40);
+    expect((drilldownBox?.y ?? 0)).toBeGreaterThan((lineBox?.y ?? 0) + 40);
+  });
+
+  test("@critical @COHI-346 workbench controls send expected production-trends API params (AC19)", async ({
+    userPage,
+  }) => {
+    await suppressWelcomeTour(userPage);
+    const { productionTrendsUrls } = await setupProductionTrendsApiMock(userPage);
+    await gotoNewWorkbenchCanvas(userPage);
+    await addProductionTrendsDashboardSection(userPage);
+
+    const group = productionTrendsWorkbenchGroup(userPage);
+    await expect(group).toBeVisible({ timeout: 20_000 });
+    await ensureGroupFiltersExpanded(group);
+
+    const filterRow = groupFilterRow(group);
+    const dateTypeSelect = filterRow.locator("select").nth(0);
+    const measureSelect = filterRow.locator("select").nth(1);
+    const dimensionSelect = filterRow.locator("select").nth(2);
+
+    await expect(dateTypeSelect).toBeVisible();
+    await expect(measureSelect).toBeVisible();
+    await expect(dimensionSelect).toBeVisible();
+
+    await dateTypeSelect.selectOption("closed");
+    await measureSelect.selectOption("units");
+    await dimensionSelect.selectOption("loan_type");
+    await userPage.waitForTimeout(250);
+
+    const latest = productionTrendsUrls[productionTrendsUrls.length - 1] ?? "";
+    expect(latest).toContain("date_type=closed");
+    expect(latest).toContain("measure=units");
+    expect(latest).toContain("dimension=loan_type");
+  });
+
+  test("@critical @COHI-346 workbench cross-widget filters and drilldown expand/collapse (AC20–22)", async ({
+    userPage,
+  }) => {
+    await suppressWelcomeTour(userPage);
+    await setupProductionTrendsApiMock(userPage);
+    await gotoNewWorkbenchCanvas(userPage);
+    await addProductionTrendsDashboardSection(userPage);
+
+    const group = productionTrendsWorkbenchGroup(userPage);
+    await expect(group).toBeVisible({ timeout: 20_000 });
+
+    await expect(group.locator(".recharts-bar-rectangle").first()).toBeVisible({
+      timeout: 20_000,
+    });
+    await group.locator(".recharts-bar-rectangle").first().click();
+    await expect(group.getByText(/^Dimension:/)).toBeVisible();
+
+    await group.locator("circle.cursor-pointer").first().click({ force: true });
+    await expect(group.getByText(/^Month:/)).toBeVisible();
+
+    // Cross-widget sync indicator: line chart still visible and filtered chips shown in shared header row.
+    await expect(group.getByText("Production Trends YoY Line")).toBeVisible();
+    await expect(group.getByText("Production Trends Drilldown")).toBeVisible();
+
+    await expect(group.getByRole("button", { name: "Expand All" })).toBeVisible();
+    await expect(group.getByRole("button", { name: "Collapse All" })).toBeVisible();
+
+    await group.getByRole("button", { name: "Expand All" }).click();
+    await expect(group.getByText("First Lien", { exact: true })).toBeVisible();
+    await group.getByRole("button", { name: "Collapse All" }).click();
+    await expect(group.getByText("First Lien", { exact: true })).toHaveCount(0);
   });
 });
