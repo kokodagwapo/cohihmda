@@ -177,6 +177,46 @@ async function setupSalesCompanyOverviewMocks(
   return { overviewRequestUrls, preferencePuts };
 }
 
+async function setupWorkbenchSalesCompanyOverviewMocks(page: Page): Promise<{
+  overviewRequestUrls: string[];
+}> {
+  const overviewRequestUrls: string[] = [];
+
+  await page.route(/\/api\/loans\/sales-company-overview(\?|$)/, async (route: Route) => {
+    const reqUrl = route.request().url();
+    overviewRequestUrls.push(reqUrl);
+    const url = new URL(reqUrl);
+
+    const hasLoanTypeFha = url.searchParams.getAll("loan_type").includes("FHA");
+    const hasAging0to15 = url.searchParams.getAll("aging_bucket").includes("0-15");
+
+    const payload = cloneBaseOverviewPayload();
+
+    if (hasLoanTypeFha) {
+      payload.activeLoans = { count: 40, volume: 12400000, avgInterestRate: 6.032 };
+      payload.submittedMTD = { count: 20, volume: 6200000, avgInterestRate: 6.001 };
+      payload.fundedMTD = { count: 15, volume: 4800000, avgInterestRate: 5.988 };
+      payload.aging = { "0-15": 12, "16-30": 9, "31-45": 8, "46-60": 6, "61-90": 4, ">90": 1 };
+      payload.submittedByType = { FHA: 20 };
+      payload.fundedByType = { FHA: 15 };
+    }
+
+    if (hasAging0to15) {
+      payload.activeLoans = { count: 30, volume: 9200000, avgInterestRate: 6.077 };
+      payload.submittedMTD = { count: 14, volume: 4600000, avgInterestRate: 6.041 };
+      payload.fundedMTD = { count: 10, volume: 3400000, avgInterestRate: 5.997 };
+    }
+
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(payload),
+    });
+  });
+
+  return { overviewRequestUrls };
+}
+
 test.describe("Sales Company Overview (COHI-344)", () => {
   test("@critical @COHI-344 route renders page shell and company overview KPI section", async ({ userPage }) => {
     await suppressWelcomeTour(userPage);
@@ -292,5 +332,93 @@ test.describe("Sales Company Overview (COHI-344)", () => {
     await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
     await expect(userPage.getByRole("heading", { name: "Company Overview", exact: true })).toBeVisible();
     await expect(userPage.getByText("Active Loans", { exact: true })).toBeVisible();
+  });
+});
+
+test.describe("Sales Company Overview Workbench (COHI-344)", () => {
+  test("@critical @COHI-344 workbench adds Sales Company Overview as widget group with section widgets", async ({
+    userPage,
+  }) => {
+    await suppressWelcomeTour(userPage);
+    const { overviewRequestUrls } = await setupWorkbenchSalesCompanyOverviewMocks(userPage);
+
+    await userPage.goto("/my-dashboard/new", { waitUntil: "domcontentloaded" });
+    await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
+    await dismissBlockingOverlays(userPage);
+
+    await userPage.getByRole("button", { name: /^Add$/ }).first().click();
+    await userPage.getByRole("button", { name: "Scorecards", exact: true }).click();
+    await userPage.getByRole("menuitem", { name: "Sales Company Overview", exact: true }).click();
+
+    await expect(userPage.getByRole("heading", { name: "Sales Company Overview", exact: true })).toBeVisible();
+    await expect(userPage.getByText("Active Loans KPI", { exact: true })).toBeVisible();
+    await expect(userPage.getByText("Submitted MTD KPI", { exact: true })).toBeVisible();
+    await expect(userPage.getByText("Funded MTD KPI", { exact: true })).toBeVisible();
+    await expect(userPage.getByText("Aging of Active Loans", { exact: true }).first()).toBeVisible();
+    await expect(userPage.getByText("Loan Type MTD Submitted", { exact: true }).first()).toBeVisible();
+    await expect(userPage.getByText("Loan Type MTD Funded", { exact: true }).first()).toBeVisible();
+    await expect
+      .poll(() => overviewRequestUrls.some((u) => u.includes("/api/loans/sales-company-overview")))
+      .toBe(true);
+  });
+
+  test("@critical @COHI-344 workbench loan-type selection sends filtered request and updates active filters", async ({
+    userPage,
+  }) => {
+    await suppressWelcomeTour(userPage);
+    const { overviewRequestUrls } = await setupWorkbenchSalesCompanyOverviewMocks(userPage);
+
+    await userPage.goto("/my-dashboard/new", { waitUntil: "domcontentloaded" });
+    await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
+    await dismissBlockingOverlays(userPage);
+
+    await userPage.getByRole("button", { name: /^Add$/ }).first().click();
+    await userPage.getByRole("button", { name: "Scorecards", exact: true }).click();
+    await userPage.getByRole("menuitem", { name: "Sales Company Overview", exact: true }).click();
+
+    await userPage.getByRole("button", { name: "FHA", exact: true }).first().click();
+
+    await expect(userPage.getByText("Loan type: FHA", { exact: true })).toBeVisible();
+    await expect
+      .poll(() => overviewRequestUrls.some((u) => u.includes("loan_type=FHA")))
+      .toBe(true);
+
+    const activeLoansKpi = userPage
+      .locator("div")
+      .filter({ has: userPage.getByText("Active Loans KPI", { exact: true }) })
+      .first();
+    await expect(activeLoansKpi.locator("div.text-3xl.font-bold").first()).toHaveText("40");
+  });
+
+  test("@critical @COHI-344 workbench aging-bucket selection updates request context and widget values", async ({
+    userPage,
+  }) => {
+    await suppressWelcomeTour(userPage);
+    const { overviewRequestUrls } = await setupWorkbenchSalesCompanyOverviewMocks(userPage);
+
+    await userPage.goto("/my-dashboard/new", { waitUntil: "domcontentloaded" });
+    await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
+    await dismissBlockingOverlays(userPage);
+
+    await userPage.getByRole("button", { name: /^Add$/ }).first().click();
+    await userPage.getByRole("button", { name: "Scorecards", exact: true }).click();
+    await userPage.getByRole("menuitem", { name: "Sales Company Overview", exact: true }).click();
+
+    const agingCard = userPage
+      .locator("div")
+      .filter({ has: userPage.getByText("Aging of Active Loans", { exact: true }) })
+      .first();
+    await agingCard.locator(".recharts-bar-rectangle").first().click();
+
+    await expect(userPage.getByText("Aging: 0-15", { exact: true })).toBeVisible();
+    await expect
+      .poll(() => overviewRequestUrls.some((u) => u.includes("aging_bucket=0-15")))
+      .toBe(true);
+
+    const activeLoansKpi = userPage
+      .locator("div")
+      .filter({ has: userPage.getByText("Active Loans KPI", { exact: true }) })
+      .first();
+    await expect(activeLoansKpi.locator("div.text-3xl.font-bold").first()).toHaveText("30");
   });
 });

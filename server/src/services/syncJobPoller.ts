@@ -201,6 +201,7 @@ async function processJob(job: SyncJobRow): Promise<void> {
       folderNames: opts.folderNames,
       loanStartDate: opts.loanStartDate ? new Date(opts.loanStartDate) : undefined,
       loanStartDateField: opts.loanStartDateField,
+      syncTrigger: "manual",
     });
 
     // After a full sync, enqueue tenant-wide persisted complexity recompute.

@@ -51,6 +51,7 @@ import { useLoanComplexityPivot } from '@/hooks/useLoanComplexityPivot';
 import { useLoanComplexityGroupLoans } from '@/hooks/useLoanComplexityGroupLoans';
 import { useLoanComplexityStatusOptions } from '@/hooks/useLoanComplexityStatusOptions';
 import { useEstimatedClosingsRiskData } from '@/hooks/useEstimatedClosingsRiskData';
+import { useSalesCompanyOverviewData } from '@/hooks/useSalesCompanyOverviewData';
 
 /** Build dimension filter array from section dynamicFilters (for APIs that accept them).
  *  @param exclude – column names already handled natively by the hook (e.g. branch, loan_officer). */
@@ -238,6 +239,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
   const paFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'pipeline-analysis'), [sections, scopedFilters]);
   const lcFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'loan-complexity'), [sections, scopedFilters]);
   const ecrFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'estimated-closings-risk'), [sections, scopedFilters]);
+  const scoFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'sales-company-overview'), [sections, scopedFilters]);
 
   const hasLoanComplexitySection = useMemo(
     () =>
@@ -679,6 +681,15 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     detailColumnFilters: ecrFilters?.estimatedClosingsDetailColumnFilters,
   });
 
+  const salesCompanyOverview = useSalesCompanyOverviewData(
+    effectiveTenantId,
+    selectedChannel,
+    {
+      loanTypes: scoFilters?.salesCompanyOverviewLoanTypes ?? [],
+      agingBuckets: scoFilters?.salesCompanyOverviewAgingBuckets ?? [],
+    },
+  );
+
   // Build lookup
   const sourceMap = useMemo<Record<string, SourceResult>>(() => ({
     'company-scorecard': {
@@ -770,6 +781,11 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
       loading: false,
       error: null,
     },
+    'production-trends': {
+      data: { ready: true },
+      loading: false,
+      error: null,
+    },
     'high-performers': {
       data: highPerformersData,
       loading: highPerformersLoading,
@@ -811,6 +827,11 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
       loading: estimatedClosingsRisk.loading,
       error: estimatedClosingsRisk.error,
     },
+    'sales-company-overview': {
+      data: salesCompanyOverview.data,
+      loading: salesCompanyOverview.loading,
+      error: null,
+    },
   }), [
     companyScorecard.data, companyScorecard.loading, companyScorecard.error,
     creditRisk.data, creditRisk.loading, creditRisk.error,
@@ -835,6 +856,8 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     estimatedClosingsRisk.data,
     estimatedClosingsRisk.loading,
     estimatedClosingsRisk.error,
+    salesCompanyOverview.data,
+    salesCompanyOverview.loading,
   ]);
 
   const contextValue = useMemo<WidgetDataContextValue>(

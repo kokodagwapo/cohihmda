@@ -10,6 +10,7 @@
  */
 
 import { logAlways, logError } from "../logger.js";
+import type { SyncTrigger } from "../../utils/schedulerPolicy.js";
 
 export interface PostSyncContext {
   tenantId: string;
@@ -21,6 +22,8 @@ export interface PostSyncContext {
   loansUpdated?: number;
   /** ID of the los_sync_history row that triggered this hook run (optional). */
   syncHistoryId?: number;
+  /** How the loan sync was initiated (for scheduler vs manual vs webhook policy). */
+  trigger?: SyncTrigger;
 }
 
 type PostSyncHookFn = (ctx: PostSyncContext) => Promise<void>;

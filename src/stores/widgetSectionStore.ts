@@ -10,6 +10,7 @@
 import { create } from 'zustand';
 import type { PeriodSelection } from '@/components/ui/DatePeriodPicker';
 import type { ColumnFilterState } from '@/utils/loanDetailFilters';
+import type { SalesCompanyOverviewAgingBucket } from '@/hooks/useSalesCompanyOverviewData';
 
 export type SectionType =
   | 'company-scorecard'
@@ -18,6 +19,7 @@ export type SectionType =
   | 'operations-scorecard'
   | 'operations-trends'
   | 'sales-trends'
+  | 'production-trends'
   | 'funnel'
   | 'top-tiering-comparison'
   | 'leaderboard'
@@ -31,7 +33,8 @@ export type SectionType =
   | 'sales-scorecard-overview'
   | 'lock-stratification'
   | 'loan-complexity'
-  | 'estimated-closings-risk';
+  | 'estimated-closings-risk'
+  | 'sales-company-overview';
 
 /**
  * A dynamic (user-added) filter dimension.
@@ -135,6 +138,32 @@ export interface SectionFilters {
   salesScorecardOverviewMeasure?: 'volume' | 'units';
   /** Sales Scorecard Overview: time granularity (quarterly, monthly, weekly, daily) */
   salesScorecardOverviewTimeMeasure?: 'quarterly' | 'monthly' | 'weekly' | 'daily';
+  /** Production Trends: date type (funded, closed, applications) */
+  productionTrendsDateType?: 'funded' | 'closed' | 'applications';
+  /** Production Trends: measure (volume, units) */
+  productionTrendsMeasure?: 'volume' | 'units';
+  /** Production Trends: dimension */
+  productionTrendsDimension?:
+    | 'loan_purpose'
+    | 'loan_type'
+    | 'channel'
+    | 'branch'
+    | 'broker_lender_name'
+    | 'investor'
+    | 'warehouse_co_name';
+  /** Production Trends: selected YearMonth values (YYYY-MM). Empty = all. */
+  productionTrendsYearMonths?: string[];
+  /** Production Trends: chart-driven largest-category selections */
+  productionTrendsSliceCategories?: string[];
+  /** Production Trends: chart-driven selected months (1..12) */
+  productionTrendsSliceLineMonths?: number[];
+  /** Production Trends: drilldown selection (single-level at a time) */
+  productionTrendsSliceDrilldown?: {
+    branches: string[];
+    lienPositions: string[];
+    productTypes: string[];
+    loanPrograms: string[];
+  } | null;
   /** Sales Scorecard Overview: milestone date columns to show (e.g. started_date, application_date). Empty = backend default five. */
   salesScorecardOverviewMilestoneColumns?: string[];
   /** Lock Stratification: locked filter (active_locked, active_not_locked, all_active) */
@@ -163,6 +192,10 @@ export interface SectionFilters {
   estimatedClosingsRemainingComplexityGroup?: string | null;
   estimatedClosingsRemainingProcessingStage?: string | null;
   estimatedClosingsDetailColumnFilters?: ColumnFilterState;
+  /** Sales Company Overview: selected loan type slices (multi-select) */
+  salesCompanyOverviewLoanTypes?: string[];
+  /** Sales Company Overview: selected aging buckets (multi-select) */
+  salesCompanyOverviewAgingBuckets?: SalesCompanyOverviewAgingBucket[];
   /** User-added dynamic filters (column = value conditions) */
   dynamicFilters?: DynamicFilterEntry[];
 }
@@ -356,6 +389,12 @@ export const useWidgetSectionStore = create<WidgetSectionState>((set, get) => ({
           estimatedClosingsRemainingComplexityGroup: null,
           estimatedClosingsRemainingProcessingStage: null,
           estimatedClosingsDetailColumnFilters: {},
+        };
+      } else if (sectionType === 'sales-company-overview') {
+        filters = {
+          ...base,
+          salesCompanyOverviewLoanTypes: [],
+          salesCompanyOverviewAgingBuckets: [],
         };
       }
       return {

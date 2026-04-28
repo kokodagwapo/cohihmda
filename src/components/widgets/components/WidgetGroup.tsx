@@ -351,6 +351,42 @@ const SECTION_FILTER_CONFIG: Partial<
       dependsOn: "branch",
     },
   ],
+  "production-trends": [
+    {
+      key: "productionTrendsDateType",
+      label: "Date Type",
+      allLabel: "",
+      staticOptions: [
+        { value: "applications", label: "Applications Taken" },
+        { value: "closed", label: "Closed Loans" },
+        { value: "funded", label: "Funded Loans" },
+      ],
+    },
+    {
+      key: "productionTrendsMeasure",
+      label: "Measure",
+      allLabel: "",
+      staticOptions: [
+        { value: "volume", label: "Volume" },
+        { value: "units", label: "Units" },
+      ],
+    },
+    {
+      key: "productionTrendsDimension",
+      label: "Dimension",
+      allLabel: "",
+      staticOptions: [
+        { value: "loan_purpose", label: "Loan Purpose" },
+        { value: "loan_type", label: "Loan Type" },
+        { value: "channel", label: "Channel" },
+        { value: "branch", label: "Branch" },
+        { value: "broker_lender_name", label: "Broker Lender Name" },
+        { value: "investor", label: "Investor" },
+        { value: "warehouse_co_name", label: "Warehouse Co Name" },
+      ],
+    },
+  ],
+  "sales-company-overview": [],
   "high-performers": [],
   actors: [],
   "pricing-dashboard": [],
@@ -385,6 +421,8 @@ const SECTION_BUILTIN_FILTER_COLUMNS: Partial<Record<SectionType, string[]>> = {
   "pipeline-analysis": ["loan_type", "loan_purpose", "branch"],
   "pricing-dashboard": ["current_loan_status"],
   "sales-scorecard-overview": ["branch", "loan_officer"],
+  "production-trends": [],
+  "sales-company-overview": [],
   "loan-complexity": ["current_loan_status"],
 };
 
@@ -1201,6 +1239,14 @@ const AVAILABLE_FILTER_DIMENSIONS: { column: string; label: string }[] = [
   { column: "investor_name", label: "Investor" },
 ];
 
+function formatProductionSliceMonthLabel(month: number): string {
+  if (!Number.isInteger(month) || month < 1 || month > 12) return `M${month}`;
+  return new Date(Date.UTC(2020, month - 1, 1)).toLocaleString("en-US", {
+    month: "short",
+    timeZone: "UTC",
+  });
+}
+
 const SECTION_COLORS: Record<
   SectionType,
   { border: string; bg: string; accent: string; dot: string }
@@ -1240,6 +1286,12 @@ const SECTION_COLORS: Record<
     bg: "bg-fuchsia-50/50 dark:bg-fuchsia-950/20",
     accent: "text-fuchsia-600 dark:text-fuchsia-400",
     dot: "bg-fuchsia-500",
+  },
+  "production-trends": {
+    border: "border-indigo-400/50",
+    bg: "bg-indigo-50/50 dark:bg-indigo-950/20",
+    accent: "text-indigo-600 dark:text-indigo-400",
+    dot: "bg-indigo-500",
   },
   funnel: {
     border: "border-sky-400/50",
@@ -1325,6 +1377,12 @@ const SECTION_COLORS: Record<
     accent: "text-emerald-600 dark:text-emerald-400",
     dot: "bg-emerald-500",
   },
+  "sales-company-overview": {
+    border: "border-blue-400/50",
+    bg: "bg-blue-50/50 dark:bg-blue-950/20",
+    accent: "text-blue-600 dark:text-blue-400",
+    dot: "bg-blue-500",
+  },
 };
 
 /**
@@ -1395,6 +1453,24 @@ function getGridSizeForItem(item: GroupWidgetItem): GridSize {
   ) {
     return { w: 36, h: 20, minW: 24, minH: 12 };
   }
+  if (item.kind === "registry" && item.defId === "production-trends-yoy") {
+    return { w: 18, h: 20, minW: 12, minH: 12 };
+  }
+  if (
+    item.kind === "registry" &&
+    item.defId === "production-trends-largest-category"
+  ) {
+    return { w: 18, h: 20, minW: 12, minH: 12 };
+  }
+  if (item.kind === "registry" && item.defId === "production-trends-line") {
+    return { w: 36, h: 20, minW: 24, minH: 12 };
+  }
+  if (
+    item.kind === "registry" &&
+    item.defId === "production-trends-drilldown"
+  ) {
+    return { w: 36, h: 24, minW: 24, minH: 14 };
+  }
   if (
     item.kind === "registry" &&
     item.defId.startsWith("lock-stratification-")
@@ -1454,6 +1530,15 @@ function getGridSizeForItem(item: GroupWidgetItem): GridSize {
     )
       return { w: 18, h: 20, minW: 12, minH: 14 };
     // table: use standard table grid size
+  }
+  if (
+    item.kind === "registry" &&
+    item.defId.startsWith("sales-company-overview-")
+  ) {
+    if (item.defId.includes("-kpi")) return { w: 12, h: 10, minW: 8, minH: 7 };
+    if (item.defId === "sales-company-overview-aging-chart")
+      return { w: 24, h: 20, minW: 16, minH: 14 };
+    return { w: 18, h: 20, minW: 12, minH: 14 };
   }
   const def = getWidgetDefinition(item.defId);
   return (def && GRID_SIZES[def.category]) || DEFAULT_GRID;
@@ -2090,6 +2175,12 @@ function GridCellRegistryWidget({
   const salesScorecardOverviewConfig = isSalesScorecardOverview
     ? { groupId }
     : {};
+  const isProductionTrends = defId?.startsWith("production-trends-");
+  const productionTrendsConfig = isProductionTrends ? { groupId } : {};
+  const isSalesCompanyOverview = defId?.startsWith("sales-company-overview-");
+  const salesCompanyOverviewConfig = isSalesCompanyOverview
+    ? { groupId, variant: definition.config?.variant }
+    : {};
   const isLockStratification = defId?.startsWith("lock-stratification-");
   const lockStratificationConfig = isLockStratification
     ? { groupId, variant: definition.config?.variant }
@@ -2250,6 +2341,8 @@ function GridCellRegistryWidget({
     ...pricingConfig,
     ...workflowConfig,
     ...salesScorecardOverviewConfig,
+    ...productionTrendsConfig,
+    ...salesCompanyOverviewConfig,
     ...lockStratificationConfig,
     ...loanComplexityConfig,
     ...estimatedClosingsRiskConfig,
@@ -2750,6 +2843,20 @@ export function WidgetGroup({
       )
         toSave.salesScorecardOverviewMilestoneColumns =
           filters.salesScorecardOverviewMilestoneColumns;
+    }
+    if (sectionType === "sales-company-overview") {
+      if (
+        filters.salesCompanyOverviewLoanTypes &&
+        filters.salesCompanyOverviewLoanTypes.length > 0
+      )
+        toSave.salesCompanyOverviewLoanTypes =
+          filters.salesCompanyOverviewLoanTypes;
+      if (
+        filters.salesCompanyOverviewAgingBuckets &&
+        filters.salesCompanyOverviewAgingBuckets.length > 0
+      )
+        toSave.salesCompanyOverviewAgingBuckets =
+          filters.salesCompanyOverviewAgingBuckets;
     }
     if (sectionType === "pricing-dashboard") {
       if (
@@ -3254,6 +3361,18 @@ export function WidgetGroup({
           showYears: false,
         };
       case "sales-scorecard-overview":
+        return {
+          presets: [
+            "mtd",
+            "last-month",
+            "qtd",
+            "last-quarter",
+            "ytd",
+            "last-year",
+          ],
+          showYears: false,
+        };
+      case "production-trends":
         return {
           presets: [
             "mtd",
@@ -4338,7 +4457,8 @@ export function WidgetGroup({
                 </>
               ) : (
                 <>
-                  {sectionType !== "estimated-closings-risk" ? (
+                  {sectionType !== "estimated-closings-risk" &&
+                  sectionType !== "sales-company-overview" ? (
                     <DatePeriodPicker
                       year={filters.year}
                       onYearChange={handleYearChange}
@@ -4361,12 +4481,79 @@ export function WidgetGroup({
                       }
                       periodSelectionFromStore={
                         sectionType === "loan-detail" ||
-                        sectionType === "sales-scorecard-overview"
+                        sectionType === "sales-scorecard-overview" ||
+                        sectionType === "production-trends"
                           ? filters.periodSelection
                           : undefined
                       }
                     />
                   ) : null}
+
+                  {sectionType === "sales-company-overview" && (
+                    <>
+                      {(filters.salesCompanyOverviewLoanTypes ?? []).map((loanType) => (
+                        <span
+                          key={`lt-${loanType}`}
+                          className="inline-flex items-center gap-1 rounded-md bg-blue-100 dark:bg-blue-900/40 px-2 py-0.5 text-xs"
+                        >
+                          Loan type: {loanType}
+                          <button
+                            type="button"
+                            className="rounded p-0.5 hover:bg-blue-200 dark:hover:bg-blue-800"
+                            onClick={() =>
+                              updateFilters(groupId, {
+                                salesCompanyOverviewLoanTypes: (
+                                  filters.salesCompanyOverviewLoanTypes ?? []
+                                ).filter((x) => x !== loanType),
+                              })
+                            }
+                            aria-label={`Remove loan type ${loanType}`}
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      ))}
+                      {(filters.salesCompanyOverviewAgingBuckets ?? []).map((bucket) => (
+                        <span
+                          key={`ab-${bucket}`}
+                          className="inline-flex items-center gap-1 rounded-md bg-blue-100 dark:bg-blue-900/40 px-2 py-0.5 text-xs"
+                        >
+                          Aging: {bucket}
+                          <button
+                            type="button"
+                            className="rounded p-0.5 hover:bg-blue-200 dark:hover:bg-blue-800"
+                            onClick={() =>
+                              updateFilters(groupId, {
+                                salesCompanyOverviewAgingBuckets: (
+                                  filters.salesCompanyOverviewAgingBuckets ?? []
+                                ).filter((x) => x !== bucket),
+                              })
+                            }
+                            aria-label={`Remove aging bucket ${bucket}`}
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      ))}
+                      {((filters.salesCompanyOverviewLoanTypes?.length ?? 0) > 0 ||
+                        (filters.salesCompanyOverviewAgingBuckets?.length ?? 0) >
+                          0) && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-xs"
+                          onClick={() =>
+                            updateFilters(groupId, {
+                              salesCompanyOverviewLoanTypes: [],
+                              salesCompanyOverviewAgingBuckets: [],
+                            })
+                          }
+                        >
+                          Clear chart filters
+                        </Button>
+                      )}
+                    </>
+                  )}
 
                   {/* Data-driven filters from SECTION_FILTER_CONFIG */}
                   {(SECTION_FILTER_CONFIG[sectionType] ?? []).map((field) => {
@@ -4393,6 +4580,83 @@ export function WidgetGroup({
                       />
                     );
                   })}
+
+                  {sectionType === "production-trends" &&
+                    ((filters.productionTrendsSliceCategories ?? []).length > 0 ||
+                      (filters.productionTrendsSliceLineMonths ?? []).length > 0 ||
+                      !!filters.productionTrendsSliceDrilldown) && (
+                      <>
+                        {(filters.productionTrendsSliceCategories ?? []).length >
+                          0 && (
+                          <span className="inline-flex items-center gap-1 rounded-md bg-indigo-100 dark:bg-indigo-900/40 px-2 py-0.5 text-xs">
+                            Dimension:{" "}
+                            {(filters.productionTrendsSliceCategories ?? []).join(
+                              ", ",
+                            )}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateFilters(groupId, {
+                                  productionTrendsSliceCategories: [],
+                                })
+                              }
+                              className="p-0.5 rounded hover:bg-indigo-200 dark:hover:bg-indigo-800"
+                              aria-label="Clear dimension slice filter"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </span>
+                        )}
+                        {(filters.productionTrendsSliceLineMonths ?? []).length >
+                          0 && (
+                          <span className="inline-flex items-center gap-1 rounded-md bg-indigo-100 dark:bg-indigo-900/40 px-2 py-0.5 text-xs">
+                            Month:{" "}
+                            {(filters.productionTrendsSliceLineMonths ?? [])
+                              .map((m) => formatProductionSliceMonthLabel(m))
+                              .join(", ")}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateFilters(groupId, {
+                                  productionTrendsSliceLineMonths: [],
+                                })
+                              }
+                              className="p-0.5 rounded hover:bg-indigo-200 dark:hover:bg-indigo-800"
+                              aria-label="Clear month slice filter"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </span>
+                        )}
+                        {filters.productionTrendsSliceDrilldown && (
+                          <span className="inline-flex items-center gap-1 rounded-md bg-indigo-100 dark:bg-indigo-900/40 px-2 py-0.5 text-xs">
+                            Drilldown:{" "}
+                            {[
+                              ...(filters.productionTrendsSliceDrilldown
+                                ?.branches ?? []),
+                              ...(filters.productionTrendsSliceDrilldown
+                                ?.lienPositions ?? []),
+                              ...(filters.productionTrendsSliceDrilldown
+                                ?.productTypes ?? []),
+                              ...(filters.productionTrendsSliceDrilldown
+                                ?.loanPrograms ?? []),
+                            ].join(", ")}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateFilters(groupId, {
+                                  productionTrendsSliceDrilldown: null,
+                                })
+                              }
+                              className="p-0.5 rounded hover:bg-indigo-200 dark:hover:bg-indigo-800"
+                              aria-label="Clear drilldown slice filter"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </span>
+                        )}
+                      </>
+                    )}
 
                   {/* Edit Columns (Loan Detail only) — next to filters like pricing dashboard */}
                   {sectionType === "loan-detail" && (

@@ -1998,7 +1998,8 @@ function buildSalesCompanyOverviewMultiAgingFilterSql(buckets: string[]): string
  * - loan_type: COALESCE(loan_type,'Other') IN (…) when multiple
  * - aging_bucket: active pipeline loans must fall in one of the selected age buckets (OR); non–active-pipeline loans remain eligible
  *
- * Chart breakdowns: aging bars always use tenant+channel only (full-size bars; UI greys non-selected buckets).
+ * Chart breakdowns: aging bars respect loan-type filters (so selecting FHA recalculates buckets),
+ * but ignore aging-bucket filters themselves (UI still controls bucket highlighting via grey-out).
  * KPIs use filtered loans. Submitted/Funded MTD donuts use filtered loans when at least one aging bucket is selected
  * (shares readjust to that cohort); with loan-type-only filters, donut counts stay on the full population (grey-out only).
  *
@@ -2080,16 +2081,26 @@ router.get(
       const filteredConditions: string[] = [...baseConditions];
       const filteredParams: any[] = [...params];
       let filteredParamIndex = paramIndex;
+      const agingConditions: string[] = [...baseConditions];
+      const agingParams: any[] = [...params];
+      let agingParamIndex = paramIndex;
 
       if (loanTypesUnique.length === 1) {
         filteredConditions.push(`COALESCE(loan_type, 'Other') = $${filteredParamIndex}`);
         filteredParams.push(loanTypesUnique[0]);
         filteredParamIndex++;
+        agingConditions.push(`COALESCE(loan_type, 'Other') = $${agingParamIndex}`);
+        agingParams.push(loanTypesUnique[0]);
+        agingParamIndex++;
       } else if (loanTypesUnique.length > 1) {
         const placeholders = loanTypesUnique.map((_, i) => `$${filteredParamIndex + i}`).join(", ");
         filteredConditions.push(`COALESCE(loan_type, 'Other') IN (${placeholders})`);
         filteredParams.push(...loanTypesUnique);
         filteredParamIndex += loanTypesUnique.length;
+        const agingPlaceholders = loanTypesUnique.map((_, i) => `$${agingParamIndex + i}`).join(", ");
+        agingConditions.push(`COALESCE(loan_type, 'Other') IN (${agingPlaceholders})`);
+        agingParams.push(...loanTypesUnique);
+        agingParamIndex += loanTypesUnique.length;
       }
 
       const agingFilterSql = buildSalesCompanyOverviewMultiAgingFilterSql(agingBucketsUnique);
@@ -2099,6 +2110,7 @@ router.get(
 
       const whereBaseline = baselineConditions.join(" AND ");
       const whereFiltered = filteredConditions.join(" AND ");
+      const whereAging = agingConditions.join(" AND ");
 
       const sliceLoanTypeListSql = `
         SELECT DISTINCT COALESCE(loan_type, 'Other') AS v
@@ -2310,7 +2322,7 @@ router.get(
       } else {
         const kpiOnlySql = `${baseCte(whereFiltered)}
 ${kpiSelectBody(startMonthFiltered, endDateFiltered)}`;
-        const agingOnlySql = `${baseCte(whereBaseline)}
+        const agingOnlySql = `${baseCte(whereAging)}
 ${agingSelectBody()}`;
 
         // When aging buckets are selected, MTD donut distributions follow the filtered cohort (shares readjust).
@@ -2323,7 +2335,7 @@ ${agingSelectBody()}`;
 
         const [kpiResult, agingResult, submittedTypeResult, fundedTypeResult, loanTypesListResult] = await Promise.all([
           retryQuery(() => tenantPool.query(kpiOnlySql, paramsWithDatesFiltered), 2, 500),
-          retryQuery(() => tenantPool.query(agingOnlySql, baselineParams), 2, 500),
+          retryQuery(() => tenantPool.query(agingOnlySql, agingParams), 2, 500),
           retryQuery(() => tenantPool.query(submittedTypeQuery(donutWhere, donutStart, donutEnd), donutParams), 2, 500),
           retryQuery(() => tenantPool.query(fundedTypeQuery(donutWhere, donutStart, donutEnd), donutParams), 2, 500),
           retryQuery(() => tenantPool.query(sliceLoanTypeListSql, baselineParams), 2, 500),
