@@ -41,7 +41,7 @@ import {
   LineChart,
   Line,
 } from "recharts";
-import { ChevronDown, ChevronRight, Loader2, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, Loader2, X } from "lucide-react";
 
 const dateTypeOptions: Array<{ value: ProductionDateType; label: string }> = [
   { value: "applications", label: "Applications Taken" },
@@ -290,6 +290,23 @@ const CALENDAR_MONTH_ROWS = Array.from({ length: 12 }, (_, i) => {
   const month = i + 1;
   return { month, label: formatSliceMonthLabel(month) };
 });
+
+function escapeCsv(value: string): string {
+  if (value.includes(",") || value.includes('"') || value.includes("\n")) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
+function downloadCsv(filename: string, rows: string[][]): void {
+  const csv = rows.map((row) => row.map(escapeCsv).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
 
 function ProductionTrendsMonthFilterPopover({
   open,
@@ -922,6 +939,38 @@ const ProductionTrends = () => {
     return `${data.dateTypeLabel} Year over Year`;
   }, [data]);
 
+  const handleExportYoyComparison = useCallback(() => {
+    if (!data) return;
+    const rows: string[][] = [
+      ["Time Range", String(data.currentYear), String(data.previousYear), "YoY %"],
+      ...data.yoyComparison.map((row) => [
+        row.timeRange,
+        String(row.currentYear),
+        String(row.previousYear),
+        row.yoyPercent == null ? "" : `${row.yoyPercent.toFixed(1)}%`,
+      ]),
+    ];
+    downloadCsv(`production-trends-yoy-${data.dateTypeLabel.toLowerCase().replace(/\s+/g, "-")}.csv`, rows);
+  }, [data]);
+
+  const handleExportDrilldown = useCallback(() => {
+    if (!data) return;
+    const rows: string[][] = [
+      ["Group", "Depth", "Units", "Volume", "Avg Loan Amt", "Avg LTV", "WAC", data.drilldown.turnTimeLabel],
+      ...data.drilldown.rows.map((row) => [
+        row.label,
+        String(row.depth),
+        String(row.units),
+        String(row.volume),
+        String(row.avgLoanAmount),
+        row.avgLtv == null ? "" : row.avgLtv.toFixed(2),
+        row.wac == null ? "" : row.wac.toFixed(4),
+        row.avgTurnTime == null ? "" : row.avgTurnTime.toFixed(2),
+      ]),
+    ];
+    downloadCsv(`production-trends-drilldown-${data.dateTypeLabel.toLowerCase().replace(/\s+/g, "-")}.csv`, rows);
+  }, [data]);
+
   return (
     <TopTieringLayout>
       <div className="flex min-h-[calc(100vh-4rem)] flex-col">
@@ -1208,9 +1257,21 @@ const ProductionTrends = () => {
                 <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
                   <Card className={rowBg}>
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-base">
-                        {data.dateTypeLabel} Year over Year Comparison
-                      </CardTitle>
+                      <div className="flex items-center justify-between gap-2">
+                        <CardTitle className="text-base">
+                          {data.dateTypeLabel} Year over Year Comparison
+                        </CardTitle>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 gap-1.5"
+                          onClick={handleExportYoyComparison}
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                          Download
+                        </Button>
+                      </div>
                       <p className="text-xs text-slate-500">{data.measureLabel}</p>
                     </CardHeader>
                     <CardContent>
@@ -1323,9 +1384,21 @@ const ProductionTrends = () => {
 
                 <Card className={rowBg}>
                   <CardHeader className="pb-2">
-                    <div className="flex items-center gap-2">
-                      <CardTitle className="text-base">{data.dateTypeLabel} Drilldown</CardTitle>
-                      <Badge variant="secondary">Branch → Lien Position → Product Type → Loan Program</Badge>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <CardTitle className="text-base">{data.dateTypeLabel} Drilldown</CardTitle>
+                        <Badge variant="secondary">Branch → Lien Position → Product Type → Loan Program</Badge>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 gap-1.5"
+                        onClick={handleExportDrilldown}
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        Download
+                      </Button>
                     </div>
                   </CardHeader>
                   <CardContent>
