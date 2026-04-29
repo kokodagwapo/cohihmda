@@ -241,7 +241,23 @@ async function ensureGroupFiltersExpanded(
 function sliceFilterPopover(userPage: Page) {
   return userPage
     .locator("[data-radix-popper-content-wrapper]")
-    .filter({ has: userPage.getByRole("button", { name: "Apply Filters" }) });
+    .filter({ has: userPage.getByRole("button", { name: "Apply Filters" }) })
+    .last();
+}
+
+async function clickSlicePopoverButton(userPage: Page, label: "Clear Selection" | "Cancel" | "Apply Filters") {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const pop = sliceFilterPopover(userPage);
+    await expect(pop).toBeVisible({ timeout: 15_000 });
+    const button = pop.getByRole("button", { name: label });
+    await expect(button).toBeVisible({ timeout: 15_000 });
+    try {
+      await button.click({ force: true, timeout: 5_000 });
+      return;
+    } catch (error) {
+      if (attempt === 2) throw error;
+    }
+  }
 }
 
 test.describe("Production Trends (COHI-346)", () => {
@@ -351,21 +367,13 @@ test.describe("Production Trends (COHI-346)", () => {
     await expect(pop.getByRole("button", { name: "Apply Filters" })).toBeVisible();
 
     await main.getByRole("button", { name: /^Branch: North$/ }).click();
-    pop = sliceFilterPopover(userPage);
-    await expect(pop).toBeVisible({ timeout: 15_000 });
-    await pop.getByRole("button", { name: "Clear Selection" }).click({ force: true });
-    pop = sliceFilterPopover(userPage);
-    await expect(pop).toBeVisible({ timeout: 15_000 });
-    await pop.getByRole("button", { name: "Cancel" }).click({ force: true });
+    await clickSlicePopoverButton(userPage, "Clear Selection");
+    await clickSlicePopoverButton(userPage, "Cancel");
     await expect(main.getByRole("button", { name: /^Branch: North$/ })).toBeVisible();
 
     await main.getByRole("button", { name: /^Branch: North$/ }).click();
-    pop = sliceFilterPopover(userPage);
-    await expect(pop).toBeVisible({ timeout: 15_000 });
-    await pop.getByRole("button", { name: "Clear Selection" }).click({ force: true });
-    pop = sliceFilterPopover(userPage);
-    await expect(pop).toBeVisible({ timeout: 15_000 });
-    await pop.getByRole("button", { name: "Apply Filters" }).click();
+    await clickSlicePopoverButton(userPage, "Clear Selection");
+    await clickSlicePopoverButton(userPage, "Apply Filters");
     await expect(main.getByRole("button", { name: /^Branch: North$/ })).toHaveCount(0);
   });
 
