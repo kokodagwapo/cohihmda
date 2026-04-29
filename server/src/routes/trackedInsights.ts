@@ -246,6 +246,7 @@ router.post(
         understory,
         metric_signature,
         source_insight_id,
+        research_artifact_id: researchArtifactIdRaw,
         source_type: rawSourceType,
         tags,
         display_metadata,
@@ -260,6 +261,7 @@ router.post(
         source_type === "dashboard_insights" && source_insight_id != null;
       const isAgentTrack = source_type === "agent";
       const isPipelineTrack = source_type === "pipeline";
+      const isResearchTrack = source_type === "research";
 
       if (!headline) {
         return res.status(400).json({ error: "headline is required" });
@@ -267,6 +269,7 @@ router.post(
 
       let effectiveMetricSignature = metric_signature;
       let effectiveDisplayMetadata = display_metadata;
+      let researchArtifactIdForInsert: string | null = null;
 
       /* Plan §0: dashboard tracking — server derives signature/metadata; client payload optional */
       if (isDashboardTrack) {
@@ -393,6 +396,97 @@ router.post(
             original_severity_score: sourceRow.severity_score,
           });
         }
+      } else if (isResearchTrack && researchArtifactIdRaw != null && String(researchArtifactIdRaw).trim()) {
+        const artifactId = String(researchArtifactIdRaw).trim();
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(artifactId)) {
+          return res.status(400).json({ error: "research_artifact_id must be a UUID" });
+        }
+        let hasResearchArtifactsTable = false;
+        try {
+          const t = await ctx.tenantPool.query(`
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_name = 'research_artifacts'
+          `);
+          hasResearchArtifactsTable = t.rows.length > 0;
+        } catch {
+          hasResearchArtifactsTable = false;
+        }
+        if (!hasResearchArtifactsTable) {
+          return res.status(503).json({
+            error: "Research artifacts are not available on this tenant yet (pending migration).",
+          });
+        }
+        const artRes = await ctx.tenantPool.query(
+          `SELECT id, sql, key_fields, session_id
+           FROM research_artifacts
+           WHERE id = $1::uuid AND user_id = $2
+           LIMIT 1`,
+          [artifactId, req.userId]
+        );
+        if (artRes.rows.length === 0) {
+          return res.status(404).json({ error: "Research artifact not found" });
+        }
+        const row = artRes.rows[0] as {
+          sql: string;
+          key_fields: unknown;
+          session_id: string;
+        };
+        let keyFieldsParsed: string[] = [];
+        if (Array.isArray(row.key_fields)) {
+          keyFieldsParsed = row.key_fields
+            .filter((k: unknown) => typeof k === "string")
+            .map((k: string) => String(k).trim())
+            .filter((k) => k.length > 0);
+        } else if (typeof row.key_fields === "string") {
+          try {
+            const parsed = JSON.parse(row.key_fields) as unknown;
+            if (Array.isArray(parsed)) {
+              keyFieldsParsed = parsed
+                .filter((k: unknown) => typeof k === "string")
+                .map((k: string) => String(k).trim())
+                .filter((k) => k.length > 0);
+            }
+          } catch {
+            keyFieldsParsed = [];
+          }
+        }
+        const chosen = normalizeMetricSignature(
+          { sql: row.sql, keyFields: keyFieldsParsed },
+          { allowEmptySql: false }
+        );
+        if (!chosen) {
+          return res.status(400).json({
+            error: "Research artifact must include non-empty sql and keyFields for evaluable tracking",
+          });
+        }
+        effectiveMetricSignature = chosen;
+        researchArtifactIdForInsert = artifactId;
+        effectiveDisplayMetadata = {
+          ...(display_metadata && typeof display_metadata === "object"
+            ? display_metadata
+            : {}),
+          research_session_id: row.session_id,
+          research_artifact_id: artifactId,
+          evaluable: true,
+        };
+      } else if (isResearchTrack) {
+        /* Research Lab headline bookmark without SQL — not auto-updating (watchlist UX) */
+        const bookmarkSig = normalizeMetricSignature(
+          { sql: "", keyFields: [] },
+          { allowEmptySql: true }
+        );
+        if (!bookmarkSig) {
+          return res.status(400).json({ error: "Invalid metric_signature for research bookmark" });
+        }
+        effectiveMetricSignature = bookmarkSig;
+        effectiveDisplayMetadata = {
+          ...(display_metadata && typeof display_metadata === "object"
+            ? display_metadata
+            : {}),
+          evaluable: false,
+          non_evaluable_reason: "research_bookmark_no_sql",
+          source: "research_lab",
+        };
       } else {
         const normalized = normalizeMetricSignature(metric_signature, {
           allowEmptySql: false,
@@ -416,12 +510,31 @@ router.post(
         hasDisplayMetaCol = colCheck.rows.length > 0;
       } catch { /* pre-migration */ }
 
+      let hasResearchArtifactCol = false;
+      try {
+        const raCol = await ctx.tenantPool.query(`
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'tracked_insights' AND column_name = 'research_artifact_id'
+        `);
+        hasResearchArtifactCol = raCol.rows.length > 0;
+      } catch {
+        hasResearchArtifactCol = false;
+      }
+
       const insertCols = hasDisplayMetaCol
-        ? `(user_id, user_email, headline, understory, metric_signature, source_insight_id, source_type, tags, display_metadata)`
-        : `(user_id, user_email, headline, understory, metric_signature, source_insight_id, source_type, tags)`;
+        ? hasResearchArtifactCol
+          ? `(user_id, user_email, headline, understory, metric_signature, source_insight_id, source_type, tags, display_metadata, research_artifact_id)`
+          : `(user_id, user_email, headline, understory, metric_signature, source_insight_id, source_type, tags, display_metadata)`
+        : hasResearchArtifactCol
+          ? `(user_id, user_email, headline, understory, metric_signature, source_insight_id, source_type, tags, research_artifact_id)`
+          : `(user_id, user_email, headline, understory, metric_signature, source_insight_id, source_type, tags)`;
       const insertVals = hasDisplayMetaCol
-        ? `($1, $2, $3, $4, $5, $6, $7, $8, $9)`
-        : `($1, $2, $3, $4, $5, $6, $7, $8)`;
+        ? hasResearchArtifactCol
+          ? `($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
+          : `($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+        : hasResearchArtifactCol
+          ? `($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+          : `($1, $2, $3, $4, $5, $6, $7, $8)`;
       const params: any[] = [
         req.userId,
         req.userEmail,
@@ -438,6 +551,9 @@ router.post(
             ? JSON.stringify(effectiveDisplayMetadata)
             : null
         );
+      }
+      if (hasResearchArtifactCol) {
+        params.push(researchArtifactIdForInsert);
       }
 
       const result = await ctx.tenantPool.query(

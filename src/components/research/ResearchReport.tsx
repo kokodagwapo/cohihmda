@@ -65,6 +65,7 @@ import type {
   RankedInsight,
   Finding,
 } from "@/hooks/useResearchSession";
+import { primarySqlEvidenceForRankedInsight } from "@/lib/researchTrackPayload";
 
 // ============================================================================
 // Types
@@ -85,8 +86,12 @@ interface ResearchReportProps {
   onDrillDown?: (finding: Finding) => void;
   /** Whether this insight is already on the watchlist (for research insights). */
   isTracked?: (headline: string, detail: string) => boolean;
-  /** Toggle track/untrack on the watchlist. */
-  onToggleTrack?: (headline: string, detail: string) => void;
+  /** Toggle track/untrack on the watchlist. Optional third arg carries SQL for evaluable tracking (COHI-362). */
+  onToggleTrack?: (
+    headline: string,
+    detail: string,
+    extras?: { sql?: string; keyFields?: string[] }
+  ) => void;
   /** @deprecated Use isTracked + onToggleTrack for toggle behavior. */
   onTrackInsight?: (headline: string, detail: string) => void;
   /** When user clicks "Run this investigation" on a further-investigation suggestion. */
@@ -606,7 +611,11 @@ function InsightCard({
   onFeedback?: (id: string, rating: -1 | 1, comment: string) => void;
   onDrillDown?: (finding: Finding) => void;
   isTracked?: (headline: string, detail: string) => boolean;
-  onToggleTrack?: (headline: string, detail: string) => void;
+  onToggleTrack?: (
+    headline: string,
+    detail: string,
+    extras?: { sql?: string; keyFields?: string[] }
+  ) => void;
   onTrackInsight?: (headline: string, detail: string) => void;
   selectedTenantId?: string | null;
   defaultEvidenceOpen?: boolean;
@@ -658,6 +667,11 @@ function InsightCard({
     [insight, relatedFindings]
   );
 
+  const trackSqlExtras = useMemo(
+    () => primarySqlEvidenceForRankedInsight(insight, findings),
+    [insight, findings]
+  );
+
   const impactBorderClass =
     insight.impact === "high"
       ? "border-l-4 border-l-red-500 shadow-sm"
@@ -685,7 +699,11 @@ function InsightCard({
                       <button
                         onClick={() => {
                           if (onToggleTrack) {
-                            onToggleTrack(insight.headline, insight.detail);
+                            onToggleTrack(
+                              insight.headline,
+                              insight.detail,
+                              trackSqlExtras
+                            );
                           } else {
                             onTrackInsight?.(insight.headline, insight.detail);
                           }

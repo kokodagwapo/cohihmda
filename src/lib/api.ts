@@ -1289,12 +1289,34 @@ export class ApiClient {
     /** Omitted for `dashboard_insights`; server derives from source row (plan §0). */
     metric_signature?: any;
     source_insight_id?: number;
+    /** Research Lab durable artifact UUID (COHI-362). */
+    research_artifact_id?: string;
     source_type?: string;
     tags?: string[];
     display_metadata?: Record<string, any>;
   }, tenantId?: string | null) {
     const tenantParam = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
     return this.request(`/api/insights/tracked${tenantParam}`, { method: "POST", body: JSON.stringify(data) });
+  }
+
+  /** Persist Research Lab SQL evidence for watchlist / Workbench (COHI-362). */
+  async createResearchArtifact(
+    data: {
+      session_id: string;
+      sql: string;
+      keyFields: string[];
+      title?: string;
+      explanation?: string;
+      headline_fingerprint?: string;
+      viz_config?: Record<string, unknown>;
+    },
+    tenantId?: string | null
+  ) {
+    const tenantParam = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request<{ id: string }>(`/api/research/artifacts${tenantParam}`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
   }
 
   async getTrackedInsights(tenantId?: string | null) {
