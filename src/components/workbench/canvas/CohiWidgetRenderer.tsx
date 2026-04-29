@@ -9,7 +9,7 @@
  * can re-scope the data range without re-prompting the LLM.
  */
 
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   BarChart,
   Bar,
@@ -63,7 +63,7 @@ import {
   type DateRange,
 } from '@/components/ui/DatePeriodPicker';
 import type { VisualizationConfig } from '@/hooks/useCohiChat';
-import type { WidgetFilterState } from '@/components/workbench/canvas/types';
+import type { WidgetFilterState, ResearchArtifactCapabilities } from '@/components/workbench/canvas/types';
 import { useFilterPresetStore, type FilterPreset } from '@/stores/filterPresetStore';
 import { useTenantStore } from '@/stores/tenantStore';
 
@@ -236,8 +236,23 @@ interface CohiWidgetRendererProps {
    * the title visible.
    */
   hideTitle?: boolean;
-  /** Source type — research widgets skip the date filter bar entirely. */
+  /** Source type — used with artifact capabilities for filter / run-as-is behavior */
   sourceType?: 'research' | 'chat';
+  /** When set with research source, enables capability-driven behavior (COHI-363) */
+  sourceArtifactId?: string;
+  artifactCapabilities?: ResearchArtifactCapabilities;
+  /** When false, inline title / chart controls are read-only */
+  canEdit?: boolean;
+  /**
+   * Persist partial payload updates (title, vizConfig, sql, savedFilters) to the canvas.
+   */
+  onPersistPatch?: (patch: {
+    sql?: string;
+    title?: string;
+    vizConfig?: VisualizationConfig;
+    explanation?: string;
+    savedFilters?: WidgetFilterState;
+  }) => void;
   /** User-approved override to allow low-sample pull-through segments. */
   allowLowSamplePullThrough?: boolean;
   /**
@@ -1117,6 +1132,10 @@ export function CohiWidgetRenderer({
   canvasItemId,
   hideTitle,
   sourceType,
+  sourceArtifactId,
+  artifactCapabilities,
+  canEdit = true,
+  onPersistPatch,
   allowLowSamplePullThrough = false,
   onSqlFixed,
 }: CohiWidgetRendererProps) {
@@ -1137,10 +1156,19 @@ export function CohiWidgetRenderer({
   };
 
   const [chartType, setChartTypeLocal] = useState<VisualizationConfig['type']>(normalizeVizType(vizConfig.type));
+  useEffect(() => {
+    setChartTypeLocal(normalizeVizType(vizConfig.type));
+  }, [vizConfig.type]);
+
+  const presentationLocked = artifactCapabilities?.canEditPresentation === false;
+  const persistPresentation = canEdit && !!onPersistPatch && !presentationLocked;
+
   const setChartType = useCallback((type: VisualizationConfig['type']) => {
-    setChartTypeLocal(normalizeVizType(type));
-    onVizTypeChange?.(normalizeVizType(type));
-  }, [onVizTypeChange]);
+    const next = normalizeVizType(type);
+    setChartTypeLocal(next);
+    onVizTypeChange?.(next);
+    onPersistPatch?.({ vizConfig: { ...vizConfig, type: next } });
+  }, [onVizTypeChange, onPersistPatch, vizConfig]);
 
   // ─── Timeframe state ───
   // Each widget always has its own filter controls.
@@ -1174,7 +1202,7 @@ export function CohiWidgetRenderer({
   useEffect(() => {
     filterChangeSerialRef.current += 1;
     if (filterChangeSerialRef.current <= 1) return; // skip mount
-    if (!onFilterChange) return;
+    if (!onFilterChange && !onPersistPatch) return;
     const state: WidgetFilterState = {};
     if (dateField && dateField !== 'application_date') state.dateField = dateField;
     if (activePreset) state.preset = activePreset;
@@ -1185,7 +1213,9 @@ export function CohiWidgetRenderer({
     } else if (activeYear) {
       state.dateRange = { start: `${activeYear}-01-01`, end: `${activeYear}-12-31` };
     }
-    onFilterChange(Object.keys(state).length > 0 ? state : {});
+    const payload = Object.keys(state).length > 0 ? state : {};
+    onFilterChange?.(payload);
+    onPersistPatch?.({ savedFilters: payload });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dateField, activePreset, activeYear]);
 
@@ -1205,13 +1235,37 @@ export function CohiWidgetRenderer({
     return null; // no filter → original SQL range
   }, [activePreset, activeYear, dateField]);
 
-  // Research widgets skip all date/dimension filtering — their SQL has its own scoping.
-  // When sync is enabled, group filter wins. Otherwise, use the widget's own controls.
-  const isResearch = sourceType === 'research';
-  const effectiveDateFilter = isResearch ? null : (filterSyncEnabled ? (groupDateFilter ?? null) : localDateFilter);
-  const effectiveDimFilters = isResearch ? null : (filterSyncEnabled ? (groupDimensionFilters ?? null) : null);
+  // Research Lab SQL defaults to run-as-is on the server unless the artifact explicitly allows filter injection.
+  const runSqlAsStored =
+    sourceType === 'research' && artifactCapabilities?.canInjectFilters !== true;
 
-  const { data, loading, error, refetch } = useCohiWidgetData(sql, tenantId, effectiveDateFilter, effectiveDimFilters, isResearch, onSqlFixed);
+  const effectiveDateFilter = runSqlAsStored
+    ? null
+    : filterSyncEnabled
+      ? (groupDateFilter ?? null)
+      : localDateFilter;
+  const effectiveDimFilters = runSqlAsStored
+    ? null
+    : filterSyncEnabled
+      ? (groupDimensionFilters ?? null)
+      : null;
+
+  const handleSqlFixed = useCallback(
+    (newSql: string) => {
+      onSqlFixed?.(newSql);
+      onPersistPatch?.({ sql: newSql });
+    },
+    [onSqlFixed, onPersistPatch],
+  );
+
+  const { data, loading, error, refetch } = useCohiWidgetData(
+    sql,
+    tenantId,
+    effectiveDateFilter,
+    effectiveDimFilters,
+    runSqlAsStored,
+    handleSqlFixed,
+  );
   const effectiveConfig = { ...vizConfig, type: chartType };
 
   // Compute compatible viz types based on actual data shape
@@ -1300,6 +1354,16 @@ export function CohiWidgetRenderer({
       ? String(activeYear)
       : null;
 
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(title);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    setTitleDraft(title);
+  }, [title]);
+  useEffect(() => {
+    if (editingTitle) titleInputRef.current?.focus();
+  }, [editingTitle]);
+
   const pullThroughQuality = useMemo(() => {
     const text = `${title || ''} ${explanation || ''} ${sql || ''}`.toLowerCase();
     const isPullThrough = /pull[\s-]?through/.test(text);
@@ -1327,9 +1391,41 @@ export function CohiWidgetRenderer({
       {!hideTitle && (
         <div className="flex items-center gap-1.5 px-2.5 h-7 min-h-[28px] shrink-0 border-b border-slate-200/70 dark:border-slate-700/70 bg-slate-50/60 dark:bg-slate-800/40">
           <Sparkles className="h-3 w-3 text-indigo-500 shrink-0" />
-          <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300 truncate flex-1 min-w-0">
-            {title}
-          </span>
+          {persistPresentation && editingTitle ? (
+            <input
+              ref={titleInputRef}
+              className="flex-1 min-w-0 h-5 px-1 text-[11px] font-semibold rounded border border-indigo-200 dark:border-indigo-800 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100"
+              value={titleDraft}
+              onChange={(e) => setTitleDraft(e.target.value)}
+              onBlur={() => {
+                setEditingTitle(false);
+                const next = titleDraft.trim();
+                if (next && next !== title) onPersistPatch?.({ title: next });
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                if (e.key === 'Escape') {
+                  setTitleDraft(title);
+                  setEditingTitle(false);
+                }
+              }}
+            />
+          ) : (
+            <span
+              className={cn(
+                'text-[11px] font-semibold text-slate-700 dark:text-slate-300 truncate flex-1 min-w-0',
+                persistPresentation && 'cursor-text',
+              )}
+              title={persistPresentation ? 'Double-click to rename' : undefined}
+              onDoubleClick={() => {
+                if (!persistPresentation) return;
+                setTitleDraft(title);
+                setEditingTitle(true);
+              }}
+            >
+              {title}
+            </span>
+          )}
           <button
             type="button"
             onClick={refetch}
@@ -1341,8 +1437,14 @@ export function CohiWidgetRenderer({
         </div>
       )}
 
-      {/* ─── Compact filter toolbar (hidden for research widgets) ─── */}
-      {!filterSyncEnabled && !isResearch && (
+      {runSqlAsStored && sourceType === 'research' && (
+        <div className="shrink-0 px-2 py-0.5 text-[9px] leading-snug text-amber-900 bg-amber-50/90 dark:bg-amber-950/50 dark:text-amber-100 border-b border-amber-100/80 dark:border-amber-900/40">
+          Research SQL runs as saved. Timeframe filters are not injected unless this widget&apos;s artifact allows it.
+        </div>
+      )}
+
+      {/* ─── Compact filter toolbar (hidden when SQL must run as stored) ─── */}
+      {!filterSyncEnabled && !runSqlAsStored && (
         <div className="shrink-0 border-b border-slate-200/70 dark:border-slate-700/70 bg-slate-50/60 dark:bg-slate-800/40">
           {/* Collapsed: single compact row with toggle + summary + actions */}
           <div className="flex items-center gap-1 px-1.5 h-6 min-h-[24px]">
@@ -1518,11 +1620,13 @@ export function CohiWidgetRenderer({
           <button
             key={type}
             type="button"
+            disabled={!persistPresentation}
             className={cn(
               'h-5 px-1.5 rounded text-[9px] font-medium whitespace-nowrap canvas-interactive transition-colors flex items-center gap-0.5 shrink-0',
               chartType === type
                 ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300'
                 : 'text-slate-400 dark:text-slate-500 hover:bg-slate-200/60 dark:hover:bg-slate-700/60 hover:text-slate-600 dark:hover:text-slate-300',
+              !persistPresentation && 'opacity-50',
             )}
             onClick={() => setChartType(type)}
             title={label}
