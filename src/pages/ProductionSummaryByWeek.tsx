@@ -3,13 +3,14 @@ import { TopTieringLayout } from "@/components/layout/TopTieringLayout";
 import { TopTieringTopBar } from "@/components/layout/TopTieringTopBar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { useTenantStore } from "@/stores/tenantStore";
 import { useAuth } from "@/contexts/AuthContext";
 import { useWidgetSectionStore } from "@/stores/widgetSectionStore";
 import { useLoanDetailData, type LoanDetailRow } from "@/hooks/useLoanDetailData";
-import { ArrowDown, ArrowUp, Download, Loader2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Download, Loader2, Maximize2, X } from "lucide-react";
 import { getWeek, startOfWeek } from "date-fns";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
@@ -118,9 +119,9 @@ function toNumberSafe(value: unknown): number {
 }
 
 function getYearWeekLabel(date: Date): string {
-  const weekStart = startOfWeek(date, { weekStartsOn: 1 });
+  const weekStart = startOfWeek(date, { weekStartsOn: 0 });
   const year = weekStart.getFullYear();
-  const week = getWeek(weekStart, { weekStartsOn: 1, firstWeekContainsDate: 1 });
+  const week = getWeek(weekStart, { weekStartsOn: 0, firstWeekContainsDate: 1 });
   return `${year}-W${String(week).padStart(2, "0")}`;
 }
 
@@ -382,6 +383,7 @@ function SummaryWeekTable({
 }) {
   const [sortKey, setSortKey] = useState<SummarySortKey>("yearWeek");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
 
   const sortedRows = useMemo(() => {
     const copy = [...rows];
@@ -439,20 +441,9 @@ function SummaryWeekTable({
     downloadCsv(`${title.toLowerCase().replace(/\s+/g, "-")}.csv`, csvRows);
   };
 
-  return (
-    <Card className={rowBg}>
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between gap-2">
-          <CardTitle className="text-base">{title}</CardTitle>
-          <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5" onClick={handleDownload}>
-            <Download className="h-3.5 w-3.5" />
-            Download
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="overflow-auto" style={{ maxHeight: `${TABLE_SCROLL_HEIGHT_PX}px` }}>
-          <table className="w-full min-w-[920px] text-sm">
+  const renderTable = (maxHeight: string) => (
+    <div className="overflow-auto" style={{ maxHeight }}>
+      <table className="w-full min-w-[920px] text-sm">
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-700">
                 <th className="sticky top-0 z-30 h-9 bg-slate-50 px-3 py-2 text-left dark:bg-slate-900">
@@ -513,10 +504,39 @@ function SummaryWeekTable({
                 </tr>
               ))}
             </tbody>
-          </table>
-        </div>
-      </CardContent>
-    </Card>
+      </table>
+    </div>
+  );
+
+  return (
+    <>
+      <Card className={rowBg}>
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle className="text-base">{title}</CardTitle>
+            <div className="flex items-center gap-2">
+              <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setIsFullscreenOpen(true)}>
+                <Maximize2 className="h-3.5 w-3.5" />
+                Fullscreen
+              </Button>
+              <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5" onClick={handleDownload}>
+                <Download className="h-3.5 w-3.5" />
+                Download
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>{renderTable(`${TABLE_SCROLL_HEIGHT_PX}px`)}</CardContent>
+      </Card>
+      <Dialog open={isFullscreenOpen} onOpenChange={setIsFullscreenOpen}>
+        <DialogContent className="max-w-[95vw] w-[95vw] max-h-[92vh] h-[90vh]">
+          <DialogHeader>
+            <DialogTitle>{title}</DialogTitle>
+          </DialogHeader>
+          {renderTable("calc(90vh - 120px)")}
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -525,6 +545,7 @@ function LoanDetailWeekTable({ rows }: { rows: LoanDetailDisplayRow[] }) {
   const [sortKey, setSortKey] = useState<LoanDetailSortKey>("startedDate");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [isSortingPending, startSortingTransition] = useTransition();
+  const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
   const loanCount = rows.length;
 
   const sortedRows = useMemo(() => {
@@ -609,25 +630,9 @@ function LoanDetailWeekTable({ rows }: { rows: LoanDetailDisplayRow[] }) {
     downloadCsv("production-summary-weekly-loan-detail.csv", csvRows);
   };
 
-  return (
-    <Card className={rowBg}>
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between gap-2">
-          <CardTitle className="text-base">Loan List</CardTitle>
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-              Loan count: {formatUnits(loanCount)}
-            </span>
-            <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5" onClick={handleDownload}>
-              <Download className="h-3.5 w-3.5" />
-              Download
-            </Button>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div ref={scrollContainerRef} className="overflow-auto" style={{ maxHeight: `${TABLE_SCROLL_HEIGHT_PX}px` }}>
-          <table className="w-full min-w-[1400px] text-sm">
+  const renderTable = (maxHeight: string, virtualized: boolean) => (
+    <div ref={virtualized ? scrollContainerRef : null} className="overflow-auto" style={{ maxHeight }}>
+      <table className="w-full min-w-[1400px] text-sm">
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-700">
                 <th className="sticky top-0 z-30 h-9 bg-slate-50 px-3 py-2 text-left dark:bg-slate-900"><SortButton label="Loan Number" isActive={sortKey === "loanNumber"} direction={sortDirection} onClick={() => setSort("loanNumber")} /></th>
@@ -643,21 +648,20 @@ function LoanDetailWeekTable({ rows }: { rows: LoanDetailDisplayRow[] }) {
                 <th className="sticky top-0 z-30 h-9 bg-slate-50 px-3 py-2 text-left dark:bg-slate-900"><SortButton label="Closing Date" isActive={sortKey === "closingDate"} direction={sortDirection} onClick={() => setSort("closingDate")} /></th>
               </tr>
             </thead>
-            <tbody>
+        <tbody>
               <tr className="bg-slate-50/95 font-semibold dark:bg-slate-900" style={{ position: "sticky", top: `${TABLE_ROW_HEIGHT_PX}px`, zIndex: 20 }}>
                 <td className="h-9 px-3 py-2">Totals</td>
                 <td className="h-9 px-3 py-2 text-right tabular-nums">{formatVolume(totalVolume)}</td>
                 <td className="h-9 px-3 py-2" colSpan={9} />
               </tr>
-              {paddingTop > 0 && (
+              {virtualized && paddingTop > 0 && (
                 <tr>
                   <td colSpan={11} style={{ height: `${paddingTop}px` }} />
                 </tr>
               )}
-              {virtualItems.map((virtualRow) => {
-                const row = sortedRows[virtualRow.index];
+              {(virtualized ? virtualItems.map((virtualRow) => sortedRows[virtualRow.index]) : sortedRows).map((row, index) => {
                 return (
-                  <tr key={`${row.loanNumber}-${row.startedDate}-${row.applicationDate}-${virtualRow.index}`} className="border-b border-slate-100 dark:border-slate-800">
+                  <tr key={`${row.loanNumber}-${row.startedDate}-${row.applicationDate}-${index}`} className="border-b border-slate-100 dark:border-slate-800">
                     <td className="h-9 px-3 py-2">{row.loanNumber}</td>
                     <td className="h-9 px-3 py-2 text-right tabular-nums">{formatVolume(row.loanVolume)}</td>
                     <td className="h-9 px-3 py-2">{row.currentLoanStatus}</td>
@@ -672,19 +676,53 @@ function LoanDetailWeekTable({ rows }: { rows: LoanDetailDisplayRow[] }) {
                   </tr>
                 );
               })}
-              {paddingBottom > 0 && (
+              {virtualized && paddingBottom > 0 && (
                 <tr>
                   <td colSpan={11} style={{ height: `${paddingBottom}px` }} />
                 </tr>
               )}
-            </tbody>
-          </table>
-        </div>
-        {isSortingPending && (
-          <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">Sorting loans...</div>
-        )}
-      </CardContent>
-    </Card>
+        </tbody>
+      </table>
+    </div>
+  );
+
+  return (
+    <>
+      <Card className={rowBg}>
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle className="text-base">Loan List</CardTitle>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                Loan count: {formatUnits(loanCount)}
+              </span>
+              <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setIsFullscreenOpen(true)}>
+                <Maximize2 className="h-3.5 w-3.5" />
+                Fullscreen
+              </Button>
+              <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5" onClick={handleDownload}>
+                <Download className="h-3.5 w-3.5" />
+                Download
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {renderTable(`${TABLE_SCROLL_HEIGHT_PX}px`, true)}
+          {isSortingPending && (
+            <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">Sorting loans...</div>
+          )}
+        </CardContent>
+      </Card>
+      <Dialog open={isFullscreenOpen} onOpenChange={setIsFullscreenOpen}>
+        <DialogContent className="max-w-[96vw] w-[96vw] max-h-[92vh] h-[90vh]">
+          <DialogHeader>
+            <DialogTitle>Loan List</DialogTitle>
+          </DialogHeader>
+          {renderTable("calc(90vh - 120px)", false)}
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
