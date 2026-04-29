@@ -6232,16 +6232,14 @@ router.get(
         });
       }
 
-      const { accessClause, accessParams, nextParamIndex } = accessCtx.buildWhereClause("", 1);
+      const { accessClause, accessParams } = accessCtx.buildWhereClause("", 1);
       const whereParts: string[] = ["1=1"];
       const params: any[] = [];
-      let pIdx = 1;
       if (accessClause) {
         const accessCondition = accessClause.replace(/^AND\s+/, "").trim();
         if (accessCondition && accessCondition !== "FALSE") {
           whereParts.push(accessCondition);
           params.push(...accessParams);
-          pIdx = nextParamIndex;
         }
       }
 
@@ -6358,7 +6356,7 @@ router.get(
       const paramsForOptions = [...params];
 
       if (yearMonths.length > 0) {
-        const placeholders = yearMonths.map((_, i) => `$${pIdx + i}`).join(", ");
+        const placeholders = yearMonths.map((_, i) => `$${params.length + i + 1}`).join(", ");
         whereParts.push(`TO_CHAR(${dateExpr}, 'YYYY-MM') IN (${placeholders})`);
         params.push(...yearMonths);
       }
