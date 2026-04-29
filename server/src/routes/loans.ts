@@ -6343,6 +6343,9 @@ router.get(
       if (sliceCategories.length > 0) {
         appendInClause(dimensionMap[dimension].column, sliceCategories);
       }
+      const wherePartsNoTimeFilters = [...whereParts];
+      const whereSqlNoTimeFilters = wherePartsNoTimeFilters.join(" AND ");
+      const paramsNoTimeFilters = [...params];
       if (sliceMonthsFromChart.length > 0) {
         appendInClause(
           `TO_CHAR(${dateExpr}, 'MM')`,
@@ -6360,6 +6363,10 @@ router.get(
         params.push(...yearMonths);
       }
       const whereSql = whereParts.join(" AND ");
+      const wherePartsLine = [...wherePartsNoTimeFilters];
+      const paramsLine = [...paramsNoTimeFilters];
+      appendYearMonthPickerToWhere(wherePartsLine, paramsLine);
+      const whereSqlLine = wherePartsLine.join(" AND ");
 
       const optDimWhere = buildLoansWhereForSliceOptionLists({ category: true });
       const optBranchWhere = buildLoansWhereForSliceOptionLists({ branch: true });
@@ -6427,6 +6434,8 @@ router.get(
       `;
 
       const baseCte = baseCteForWhere(whereSql);
+      const baseCteNoTimeFilters = baseCteForWhere(whereSqlNoTimeFilters);
+      const baseCteLine = baseCteForWhere(whereSqlLine);
       const baseCteOptions = baseCteForWhere(whereSqlForOptions);
 
       const [yearMonthResult, yearsResult] = await Promise.all([
@@ -6438,111 +6447,110 @@ router.get(
           paramsForOptions,
         ),
         tenantPool.query(
-          `${baseCte}
+          `${baseCteNoTimeFilters}
           SELECT
             COALESCE(MAX(EXTRACT(YEAR FROM selected_date))::int, EXTRACT(YEAR FROM CURRENT_DATE)::int) AS current_year,
-            COALESCE(MIN(EXTRACT(YEAR FROM selected_date))::int, EXTRACT(YEAR FROM CURRENT_DATE)::int) AS min_year,
-            COALESCE(MAX(selected_date), CURRENT_DATE) AS current_max_date
+            COALESCE(MIN(EXTRACT(YEAR FROM selected_date))::int, EXTRACT(YEAR FROM CURRENT_DATE)::int) AS min_year
           FROM scoped`,
-          params,
+          paramsNoTimeFilters,
         ),
       ]);
 
       const currentYear = Number(yearsResult.rows[0]?.current_year || new Date().getFullYear());
       const minYear = Number(yearsResult.rows[0]?.min_year || currentYear);
-      const currentMaxDate = new Date(yearsResult.rows[0]?.current_max_date || new Date().toISOString());
+      const today = new Date();
       const previousYear = currentYear - 1;
-      const cutoffMonth = currentMaxDate.getUTCMonth() + 1;
-      const cutoffDay = currentMaxDate.getUTCDate();
+      const cutoffMonth = today.getMonth() + 1;
+      const cutoffDay = today.getDate();
       const currentQuarter = Math.floor((cutoffMonth - 1) / 3) + 1;
 
       const yoyResult = await tenantPool.query(
-        `${baseCte}
+        `${baseCteNoTimeFilters}
         SELECT
           COALESCE(COUNT(*) FILTER (
-            WHERE EXTRACT(YEAR FROM selected_date) = $${params.length + 1}
-              AND EXTRACT(MONTH FROM selected_date) = $${params.length + 2}
-              AND EXTRACT(DAY FROM selected_date) <= $${params.length + 3}
+            WHERE EXTRACT(YEAR FROM selected_date) = $${paramsNoTimeFilters.length + 1}
+              AND EXTRACT(MONTH FROM selected_date) = $${paramsNoTimeFilters.length + 2}
+              AND EXTRACT(DAY FROM selected_date) <= $${paramsNoTimeFilters.length + 3}
           ), 0) AS mtd_current_units,
           COALESCE(SUM(loan_amount) FILTER (
-            WHERE EXTRACT(YEAR FROM selected_date) = $${params.length + 1}
-              AND EXTRACT(MONTH FROM selected_date) = $${params.length + 2}
-              AND EXTRACT(DAY FROM selected_date) <= $${params.length + 3}
+            WHERE EXTRACT(YEAR FROM selected_date) = $${paramsNoTimeFilters.length + 1}
+              AND EXTRACT(MONTH FROM selected_date) = $${paramsNoTimeFilters.length + 2}
+              AND EXTRACT(DAY FROM selected_date) <= $${paramsNoTimeFilters.length + 3}
           ), 0) AS mtd_current_volume,
           COALESCE(COUNT(*) FILTER (
-            WHERE EXTRACT(YEAR FROM selected_date) = $${params.length + 4}
-              AND EXTRACT(MONTH FROM selected_date) = $${params.length + 2}
-              AND EXTRACT(DAY FROM selected_date) <= $${params.length + 3}
+            WHERE EXTRACT(YEAR FROM selected_date) = $${paramsNoTimeFilters.length + 4}
+              AND EXTRACT(MONTH FROM selected_date) = $${paramsNoTimeFilters.length + 2}
+              AND EXTRACT(DAY FROM selected_date) <= $${paramsNoTimeFilters.length + 3}
           ), 0) AS mtd_prev_units,
           COALESCE(SUM(loan_amount) FILTER (
-            WHERE EXTRACT(YEAR FROM selected_date) = $${params.length + 4}
-              AND EXTRACT(MONTH FROM selected_date) = $${params.length + 2}
-              AND EXTRACT(DAY FROM selected_date) <= $${params.length + 3}
+            WHERE EXTRACT(YEAR FROM selected_date) = $${paramsNoTimeFilters.length + 4}
+              AND EXTRACT(MONTH FROM selected_date) = $${paramsNoTimeFilters.length + 2}
+              AND EXTRACT(DAY FROM selected_date) <= $${paramsNoTimeFilters.length + 3}
           ), 0) AS mtd_prev_volume,
 
           COALESCE(COUNT(*) FILTER (
-            WHERE EXTRACT(YEAR FROM selected_date) = $${params.length + 1}
-              AND EXTRACT(QUARTER FROM selected_date) = $${params.length + 5}
+            WHERE EXTRACT(YEAR FROM selected_date) = $${paramsNoTimeFilters.length + 1}
+              AND EXTRACT(QUARTER FROM selected_date) = $${paramsNoTimeFilters.length + 5}
               AND (
-                EXTRACT(MONTH FROM selected_date) < $${params.length + 2}
-                OR (EXTRACT(MONTH FROM selected_date) = $${params.length + 2} AND EXTRACT(DAY FROM selected_date) <= $${params.length + 3})
+                EXTRACT(MONTH FROM selected_date) < $${paramsNoTimeFilters.length + 2}
+                OR (EXTRACT(MONTH FROM selected_date) = $${paramsNoTimeFilters.length + 2} AND EXTRACT(DAY FROM selected_date) <= $${paramsNoTimeFilters.length + 3})
               )
           ), 0) AS qtd_current_units,
           COALESCE(SUM(loan_amount) FILTER (
-            WHERE EXTRACT(YEAR FROM selected_date) = $${params.length + 1}
-              AND EXTRACT(QUARTER FROM selected_date) = $${params.length + 5}
+            WHERE EXTRACT(YEAR FROM selected_date) = $${paramsNoTimeFilters.length + 1}
+              AND EXTRACT(QUARTER FROM selected_date) = $${paramsNoTimeFilters.length + 5}
               AND (
-                EXTRACT(MONTH FROM selected_date) < $${params.length + 2}
-                OR (EXTRACT(MONTH FROM selected_date) = $${params.length + 2} AND EXTRACT(DAY FROM selected_date) <= $${params.length + 3})
+                EXTRACT(MONTH FROM selected_date) < $${paramsNoTimeFilters.length + 2}
+                OR (EXTRACT(MONTH FROM selected_date) = $${paramsNoTimeFilters.length + 2} AND EXTRACT(DAY FROM selected_date) <= $${paramsNoTimeFilters.length + 3})
               )
           ), 0) AS qtd_current_volume,
           COALESCE(COUNT(*) FILTER (
-            WHERE EXTRACT(YEAR FROM selected_date) = $${params.length + 4}
-              AND EXTRACT(QUARTER FROM selected_date) = $${params.length + 5}
+            WHERE EXTRACT(YEAR FROM selected_date) = $${paramsNoTimeFilters.length + 4}
+              AND EXTRACT(QUARTER FROM selected_date) = $${paramsNoTimeFilters.length + 5}
               AND (
-                EXTRACT(MONTH FROM selected_date) < $${params.length + 2}
-                OR (EXTRACT(MONTH FROM selected_date) = $${params.length + 2} AND EXTRACT(DAY FROM selected_date) <= $${params.length + 3})
+                EXTRACT(MONTH FROM selected_date) < $${paramsNoTimeFilters.length + 2}
+                OR (EXTRACT(MONTH FROM selected_date) = $${paramsNoTimeFilters.length + 2} AND EXTRACT(DAY FROM selected_date) <= $${paramsNoTimeFilters.length + 3})
               )
           ), 0) AS qtd_prev_units,
           COALESCE(SUM(loan_amount) FILTER (
-            WHERE EXTRACT(YEAR FROM selected_date) = $${params.length + 4}
-              AND EXTRACT(QUARTER FROM selected_date) = $${params.length + 5}
+            WHERE EXTRACT(YEAR FROM selected_date) = $${paramsNoTimeFilters.length + 4}
+              AND EXTRACT(QUARTER FROM selected_date) = $${paramsNoTimeFilters.length + 5}
               AND (
-                EXTRACT(MONTH FROM selected_date) < $${params.length + 2}
-                OR (EXTRACT(MONTH FROM selected_date) = $${params.length + 2} AND EXTRACT(DAY FROM selected_date) <= $${params.length + 3})
+                EXTRACT(MONTH FROM selected_date) < $${paramsNoTimeFilters.length + 2}
+                OR (EXTRACT(MONTH FROM selected_date) = $${paramsNoTimeFilters.length + 2} AND EXTRACT(DAY FROM selected_date) <= $${paramsNoTimeFilters.length + 3})
               )
           ), 0) AS qtd_prev_volume,
 
           COALESCE(COUNT(*) FILTER (
-            WHERE EXTRACT(YEAR FROM selected_date) = $${params.length + 1}
+            WHERE EXTRACT(YEAR FROM selected_date) = $${paramsNoTimeFilters.length + 1}
               AND (
-                EXTRACT(MONTH FROM selected_date) < $${params.length + 2}
-                OR (EXTRACT(MONTH FROM selected_date) = $${params.length + 2} AND EXTRACT(DAY FROM selected_date) <= $${params.length + 3})
+                EXTRACT(MONTH FROM selected_date) < $${paramsNoTimeFilters.length + 2}
+                OR (EXTRACT(MONTH FROM selected_date) = $${paramsNoTimeFilters.length + 2} AND EXTRACT(DAY FROM selected_date) <= $${paramsNoTimeFilters.length + 3})
               )
           ), 0) AS ytd_current_units,
           COALESCE(SUM(loan_amount) FILTER (
-            WHERE EXTRACT(YEAR FROM selected_date) = $${params.length + 1}
+            WHERE EXTRACT(YEAR FROM selected_date) = $${paramsNoTimeFilters.length + 1}
               AND (
-                EXTRACT(MONTH FROM selected_date) < $${params.length + 2}
-                OR (EXTRACT(MONTH FROM selected_date) = $${params.length + 2} AND EXTRACT(DAY FROM selected_date) <= $${params.length + 3})
+                EXTRACT(MONTH FROM selected_date) < $${paramsNoTimeFilters.length + 2}
+                OR (EXTRACT(MONTH FROM selected_date) = $${paramsNoTimeFilters.length + 2} AND EXTRACT(DAY FROM selected_date) <= $${paramsNoTimeFilters.length + 3})
               )
           ), 0) AS ytd_current_volume,
           COALESCE(COUNT(*) FILTER (
-            WHERE EXTRACT(YEAR FROM selected_date) = $${params.length + 4}
+            WHERE EXTRACT(YEAR FROM selected_date) = $${paramsNoTimeFilters.length + 4}
               AND (
-                EXTRACT(MONTH FROM selected_date) < $${params.length + 2}
-                OR (EXTRACT(MONTH FROM selected_date) = $${params.length + 2} AND EXTRACT(DAY FROM selected_date) <= $${params.length + 3})
+                EXTRACT(MONTH FROM selected_date) < $${paramsNoTimeFilters.length + 2}
+                OR (EXTRACT(MONTH FROM selected_date) = $${paramsNoTimeFilters.length + 2} AND EXTRACT(DAY FROM selected_date) <= $${paramsNoTimeFilters.length + 3})
               )
           ), 0) AS ytd_prev_units,
           COALESCE(SUM(loan_amount) FILTER (
-            WHERE EXTRACT(YEAR FROM selected_date) = $${params.length + 4}
+            WHERE EXTRACT(YEAR FROM selected_date) = $${paramsNoTimeFilters.length + 4}
               AND (
-                EXTRACT(MONTH FROM selected_date) < $${params.length + 2}
-                OR (EXTRACT(MONTH FROM selected_date) = $${params.length + 2} AND EXTRACT(DAY FROM selected_date) <= $${params.length + 3})
+                EXTRACT(MONTH FROM selected_date) < $${paramsNoTimeFilters.length + 2}
+                OR (EXTRACT(MONTH FROM selected_date) = $${paramsNoTimeFilters.length + 2} AND EXTRACT(DAY FROM selected_date) <= $${paramsNoTimeFilters.length + 3})
               )
           ), 0) AS ytd_prev_volume
         FROM scoped`,
-        [...params, currentYear, cutoffMonth, cutoffDay, previousYear, currentQuarter],
+        [...paramsNoTimeFilters, currentYear, cutoffMonth, cutoffDay, previousYear, currentQuarter],
       );
       const yoy = yoyResult.rows[0] || {};
 
@@ -6584,16 +6592,21 @@ router.get(
       }));
 
       const monthlyResult = await tenantPool.query(
-        `${baseCte}
+        `${baseCteLine}
         SELECT
           EXTRACT(YEAR FROM selected_date)::int AS year,
           EXTRACT(MONTH FROM selected_date)::int AS month,
           COUNT(*) AS units,
           COALESCE(SUM(loan_amount), 0) AS volume
         FROM scoped
+        WHERE (
+          EXTRACT(YEAR FROM selected_date) <> $${paramsLine.length + 1}
+          OR EXTRACT(MONTH FROM selected_date) <> $${paramsLine.length + 2}
+          OR EXTRACT(DAY FROM selected_date) <= $${paramsLine.length + 3}
+        )
         GROUP BY EXTRACT(YEAR FROM selected_date), EXTRACT(MONTH FROM selected_date)
         ORDER BY year DESC, month ASC`,
-        params,
+        [...paramsLine, currentYear, cutoffMonth, cutoffDay],
       );
       const byYearMonth = new Map<string, { units: number; volume: number }>();
       for (const row of monthlyResult.rows) {
@@ -6802,8 +6815,8 @@ router.get(
       res.json({
         currentYear,
         previousYear,
-        currentMaxYear: currentMaxDate.getUTCFullYear(),
-        currentMaxMonth: currentMaxDate.getUTCMonth() + 1,
+        currentMaxYear: today.getFullYear(),
+        currentMaxMonth: today.getMonth() + 1,
         dateTypeLabel: dateTypeLabelMap[dateType],
         measureLabel: measureLabelMap[measure],
         dimensionLabel: dimensionMap[dimension].label,

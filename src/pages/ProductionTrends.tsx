@@ -176,7 +176,7 @@ function rowMatchesDrilldownSlice(row: ProductionDrilldownRow, d: ProductionTren
 }
 
 const pillBadgeTriggerClass =
-  "inline-flex max-w-[min(280px,calc(100vw-6rem))] cursor-pointer items-center gap-1 rounded-full border border-blue-200/80 bg-white px-2.5 py-0.5 text-left text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700/80";
+  "inline-flex max-w-[min(340px,calc(100vw-6rem))] cursor-pointer items-center gap-1 rounded-full border border-blue-200/80 bg-white px-2.5 py-0.5 text-left text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700/80";
 
 function ProductionTrendsStringFilterPopover({
   title,
@@ -389,33 +389,6 @@ function ProductionTrendsMonthFilterPopover({
     </Popover>
   );
 }
-
-const formatRangeDate = (d: Date) =>
-  d.toLocaleDateString("en-US", {
-    month: "long",
-    day: "numeric",
-  });
-
-const getTimeRangeDefinition = (timeRange: "Month to Date" | "Quarter to Date" | "Year to Date") => {
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = today.getMonth();
-  const day = today.getDate();
-
-  if (timeRange === "Month to Date") {
-    const start = new Date(year, month, 1);
-    return `${formatRangeDate(start)}-${formatRangeDate(today)}`;
-  }
-
-  if (timeRange === "Quarter to Date") {
-    const quarterStartMonth = Math.floor(month / 3) * 3;
-    const start = new Date(year, quarterStartMonth, 1);
-    return `${formatRangeDate(start)}-${formatRangeDate(today)}`;
-  }
-
-  const start = new Date(year, 0, 1);
-  return `${formatRangeDate(start)}-${formatRangeDate(today)}`;
-};
 
 function DrilldownRows({
   rows,
@@ -829,7 +802,11 @@ const ProductionTrends = () => {
       ? ""
       : sliceLineMonths.length === 1
         ? `Month: ${formatSliceMonthLabel(sliceLineMonths[0])}`
-        : `Months: ${sliceLineMonths.length} selected`;
+        : (() => {
+            const labels = sliceLineMonths.slice(0, 5).map((m) => formatSliceMonthLabel(m));
+            const remaining = sliceLineMonths.length - labels.length;
+            return remaining > 0 ? `Months: ${labels.join(", ")} +${remaining} more` : `Months: ${labels.join(", ")}`;
+          })();
 
   const applyDrilldownDraft = useCallback(
     (kind: Exclude<PillEditorKind, null | "dimension" | "lineMonth">) => {
@@ -907,15 +884,32 @@ const ProductionTrends = () => {
   const currentCalendarMonth = today.getMonth() + 1;
   const selectedSeriesPoints = useMemo(() => {
     if (!selectedSeries || !data) return [];
+    let runningCurrent = 0;
+    let runningPrevious = 0;
     return selectedSeries.points.map((p) => {
+      runningCurrent += p.currentValue;
+      runningPrevious += p.previousValue;
       const isFutureMonthForCurrentYear =
         selectedSeries.currentYear === currentCalendarYear && p.month > currentCalendarMonth;
       return {
         ...p,
-        currentValueDisplay: isFutureMonthForCurrentYear ? null : p.currentValue,
+        previousValue: runningPrevious,
+        currentValueDisplay: isFutureMonthForCurrentYear ? null : runningCurrent,
       };
     });
   }, [selectedSeries, data, currentCalendarMonth, currentCalendarYear]);
+  const lineTooltipFormatter = useCallback(
+    (v: number, name: string, item: { payload?: { month?: number } }) => {
+      const month = item?.payload?.month;
+      const isCurrentYearYtdPoint =
+        selectedSeries?.currentYear === currentCalendarYear &&
+        month === currentCalendarMonth &&
+        name === String(selectedSeries.currentYear);
+      const displayName = isCurrentYearYtdPoint ? `${name} YTD` : name;
+      return [formatMeasure(Number(v), measure), displayName];
+    },
+    [currentCalendarMonth, currentCalendarYear, measure, selectedSeries],
+  );
   const topDimensionLabel = data?.dimensionLabel || "Dimension";
   const topUnitsOrVolume = data?.largestCategory.titleCategory || "-";
   const topShare = data?.largestCategory.titleSharePercent ?? 0;
@@ -1048,7 +1042,7 @@ const ProductionTrends = () => {
 
             {hasChartFilters && (
               <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-100/80 bg-blue-50/50 px-3 py-2 dark:border-slate-700/80 dark:bg-slate-900/40">
-                <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Active filters</span>
+                <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Active filters</span>
                 {sliceCategories.length > 0 && (
                   <div className="flex items-center gap-0.5">
                     <ProductionTrendsStringFilterPopover
@@ -1232,14 +1226,7 @@ const ProductionTrends = () => {
                         <tbody>
                           {data.yoyComparison.map((row) => (
                             <tr key={row.timeRange} className="border-b border-slate-100 dark:border-slate-800">
-                              <td className="py-2">
-                                <div className="flex flex-col">
-                                  <span>{row.timeRange}</span>
-                                  <span className="text-xs text-slate-500">
-                                    {getTimeRangeDefinition(row.timeRange)}
-                                  </span>
-                                </div>
-                              </td>
+                              <td className="py-2">{row.timeRange}</td>
                               <td className="py-2 text-right">{metricCell(row.currentYear, measure)}</td>
                               <td className="py-2 text-right">{metricCell(row.previousYear, measure)}</td>
                               <td className="py-2 text-right">{formatPct(row.yoyPercent)}</td>
@@ -1281,7 +1268,7 @@ const ProductionTrends = () => {
                 <Card className={rowBg}>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-base">{lineChartTitle}</CardTitle>
-                    <p className="text-xs text-slate-500">{data.measureLabel}</p>
+                    <p className="text-xs text-slate-500">{data.measureLabel} (Cumulative by month)</p>
                   </CardHeader>
                   <CardContent>
                     {series.length > 0 ? (
@@ -1302,7 +1289,7 @@ const ProductionTrends = () => {
                                 <CartesianGrid strokeDasharray="3 3" />
                                 <XAxis dataKey="monthLabel" />
                                 <YAxis tickFormatter={(v) => formatMeasure(v, measure)} />
-                                <Tooltip formatter={(v: number) => formatMeasure(Number(v), measure)} />
+                                <Tooltip formatter={lineTooltipFormatter} />
                                 <Legend />
                                 <Line
                                   type="monotone"

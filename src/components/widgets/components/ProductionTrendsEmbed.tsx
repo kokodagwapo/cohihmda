@@ -239,6 +239,37 @@ function ProductionTrendsEmbedInner({ width, height, config }: WidgetRenderProps
     () => ({ width, minHeight: height }),
     [width, height],
   );
+  const currentCalendarYear = new Date().getFullYear();
+  const currentCalendarMonth = new Date().getMonth() + 1;
+  const selectedSeries = data?.yoySeries?.[0] ?? null;
+  const selectedSeriesPoints = useMemo(() => {
+    if (!selectedSeries) return [];
+    let runningCurrent = 0;
+    let runningPrevious = 0;
+    return selectedSeries.points.map((p) => {
+      runningCurrent += Number(p.currentValue || 0);
+      runningPrevious += Number(p.previousValue || 0);
+      const isFutureMonthForCurrentYear =
+        selectedSeries.currentYear === currentCalendarYear && p.month > currentCalendarMonth;
+      return {
+        ...p,
+        previousValue: runningPrevious,
+        currentValueDisplay: isFutureMonthForCurrentYear ? null : runningCurrent,
+      };
+    });
+  }, [currentCalendarMonth, currentCalendarYear, selectedSeries]);
+  const lineTooltipFormatter = React.useCallback(
+    (v: number, name: string, item: { payload?: { month?: number } }) => {
+      const month = item?.payload?.month;
+      const isCurrentYearYtdPoint =
+        selectedSeries?.currentYear === currentCalendarYear &&
+        month === currentCalendarMonth &&
+        name === String(selectedSeries.currentYear);
+      const displayName = isCurrentYearYtdPoint ? `${name} YTD` : name;
+      return [formatMeasure(Number(v || 0), measure), displayName];
+    },
+    [currentCalendarMonth, currentCalendarYear, measure, selectedSeries],
+  );
 
   const toggleCategory = (category: string) => {
     const prev = section?.productionTrendsSliceCategories ?? [];
@@ -316,19 +347,20 @@ function ProductionTrendsEmbedInner({ width, height, config }: WidgetRenderProps
         </div>
       ) : variant === "line" ? (
         <div className="h-full min-h-[260px]">
-          {data.yoySeries[0] ? (
+          {selectedSeries ? (
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={data.yoySeries[0].points.map((p) => ({ ...p, monthLabel: monthLabel(p.month) }))}>
+              <LineChart data={selectedSeriesPoints.map((p) => ({ ...p, monthLabel: monthLabel(p.month) }))}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="monthLabel" />
                 <YAxis tickFormatter={(v) => formatMeasure(Number(v || 0), measure)} />
-                <Tooltip formatter={(v: any) => formatMeasure(Number(v || 0), measure)} />
+                <Tooltip formatter={lineTooltipFormatter} />
                 <Line
                   type="monotone"
-                  dataKey="currentValue"
-                  name={String(data.yoySeries[0].currentYear)}
+                  dataKey="currentValueDisplay"
+                  name={String(selectedSeries.currentYear)}
                   stroke="#0ea5e9"
                   strokeWidth={2}
+                  connectNulls={false}
                   dot={(props: any) => {
                     const month = Number(props?.payload?.month ?? 0);
                     const dimmed = sliceLineMonths.length > 0 && !sliceLineMonths.includes(month);
@@ -353,7 +385,7 @@ function ProductionTrendsEmbedInner({ width, height, config }: WidgetRenderProps
                 <Line
                   type="monotone"
                   dataKey="previousValue"
-                  name={String(data.yoySeries[0].previousYear)}
+                  name={String(selectedSeries.previousYear)}
                   stroke="#64748b"
                   strokeWidth={2}
                 />
