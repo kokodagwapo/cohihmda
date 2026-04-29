@@ -112,6 +112,47 @@ function DrilldownRows({
     return out;
   }, [byParent, expanded]);
 
+  const totalsRow = useMemo(() => {
+    const topLevelRows = rows.filter((row) => row.parentId === null);
+    if (topLevelRows.length === 0) return null;
+
+    const totalUnits = topLevelRows.reduce((sum, row) => sum + Number(row.units || 0), 0);
+    const totalVolume = topLevelRows.reduce((sum, row) => sum + Number(row.volume || 0), 0);
+    const avgLoanAmount = totalUnits > 0 ? totalVolume / totalUnits : 0;
+
+    const weightedAverage = (
+      getValue: (row: ProductionDrilldownRow) => number | null,
+    ): number | null => {
+      let weightedSum = 0;
+      let weightedCount = 0;
+      let fallbackSum = 0;
+      let fallbackCount = 0;
+      for (const row of topLevelRows) {
+        const value = getValue(row);
+        if (value == null || !Number.isFinite(value)) continue;
+        fallbackSum += value;
+        fallbackCount += 1;
+        const weight = Number(row.units || 0);
+        if (weight > 0) {
+          weightedSum += value * weight;
+          weightedCount += weight;
+        }
+      }
+      if (weightedCount > 0) return weightedSum / weightedCount;
+      if (fallbackCount > 0) return fallbackSum / fallbackCount;
+      return null;
+    };
+
+    return {
+      units: totalUnits,
+      volume: totalVolume,
+      avgLoanAmount,
+      avgLtv: weightedAverage((row) => row.avgLtv),
+      wac: weightedAverage((row) => row.wac),
+      avgTurnTime: weightedAverage((row) => row.avgTurnTime),
+    };
+  }, [rows]);
+
   const toggle = (id: string) =>
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -143,6 +184,17 @@ function DrilldownRows({
           </tr>
         </thead>
         <tbody>
+          {totalsRow && (
+            <tr className="border-b border-slate-200 bg-slate-50/80 dark:border-slate-700 dark:bg-slate-800/60">
+              <td className="px-2 py-2 font-semibold text-slate-800 dark:text-slate-200">Total</td>
+              <td className="px-2 py-2 text-right">{formatMeasure(totalsRow.units, "units")}</td>
+              <td className="px-2 py-2 text-right">{formatMeasure(totalsRow.volume, "volume")}</td>
+              <td className="px-2 py-2 text-right">{formatMeasure(totalsRow.avgLoanAmount, "volume")}</td>
+              <td className="px-2 py-2 text-right">{totalsRow.avgLtv == null ? "-" : `${totalsRow.avgLtv.toFixed(1)}%`}</td>
+              <td className="px-2 py-2 text-right">{totalsRow.wac == null ? "-" : totalsRow.wac.toFixed(3)}</td>
+              <td className="px-2 py-2 text-right">{totalsRow.avgTurnTime == null ? "-" : `${totalsRow.avgTurnTime.toFixed(1)} days`}</td>
+            </tr>
+          )}
           {visibleRows.map((row) => {
             const hasChildren = (byParent.get(row.id) || []).length > 0;
             const rowSelected = rowMatchesDrilldownSlice(row, sliceDrilldown);
