@@ -1365,6 +1365,7 @@ export function CohiWidgetRenderer({
   }, [editingTitle]);
 
   const pullThroughQuality = useMemo(() => {
+    if (sourceType === 'research') return null;
     const text = `${title || ''} ${explanation || ''} ${sql || ''}`.toLowerCase();
     const isPullThrough = /pull[\s-]?through/.test(text);
     if (!isPullThrough) return null;
@@ -1383,7 +1384,7 @@ export function CohiWidgetRenderer({
       ),
     );
     return { minCompleted, hasAuditCounts, over100 };
-  }, [title, explanation, sql, data]);
+  }, [sourceType, title, explanation, sql, data]);
 
   return (
     <div className="h-full w-full flex flex-col bg-white dark:bg-slate-900 rounded-lg overflow-hidden">
@@ -1439,7 +1440,7 @@ export function CohiWidgetRenderer({
 
       {runSqlAsStored && sourceType === 'research' && (
         <div className="shrink-0 px-2 py-0.5 text-[9px] leading-snug text-amber-900 bg-amber-50/90 dark:bg-amber-950/50 dark:text-amber-100 border-b border-amber-100/80 dark:border-amber-900/40">
-          Research SQL runs as saved. Timeframe filters are not injected unless this widget&apos;s artifact allows it.
+          Research artifact SQL runs as saved. Ask Cohi to rewrite the SQL for logic or filter changes.
         </div>
       )}
 
