@@ -1745,26 +1745,6 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
                                   );
                                 })()}
                               </div>
-                              <div className="mt-2 flex items-center gap-2">
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => setOpenDetailFilterColumnId(null)}
-                                >
-                                  Cancel
-                                </Button>
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  onClick={() => {
-                                    applyDraftFilter(String(column.key));
-                                    setOpenDetailFilterColumnId(null);
-                                  }}
-                                >
-                                  Apply Filters
-                                </Button>
-                              </div>
                             </PopoverContent>
                           </Popover>
                         )}
