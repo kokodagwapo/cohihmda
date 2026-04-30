@@ -1103,13 +1103,30 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
   };
 
   const applyDraftFilter = (columnId: string) => {
+    const actorColumnId = String(ACTOR_TO_FIELD[actor]);
+    const draft = draftDetailFilters[columnId];
+    const hasActiveDraft = Boolean(draft && isFilterActive(draft));
+
     setAppliedDetailFilters((prev) => {
       const next = { ...prev };
-      const draft = draftDetailFilters[columnId];
-      if (draft && isFilterActive(draft)) next[columnId] = draft;
+      if (hasActiveDraft && draft) next[columnId] = draft;
       else delete next[columnId];
       return next;
     });
+
+    // Shared dimensions are promoted to slice filters. When the detail-popover
+    // draft is cleared and applied, clear the linked slice filter too.
+    if (!hasActiveDraft) {
+      if (columnId === "currentMilestone") {
+        setSliceMilestones([]);
+      } else if (
+        columnId === actorColumnId ||
+        columnId === "loanType" ||
+        columnId === "loanPurpose"
+      ) {
+        setSliceDrilldown(emptyDrilldownSlice());
+      }
+    }
   };
 
   const getLinkedColumnFilter = (columnId: string): ColumnFilter | undefined => {
