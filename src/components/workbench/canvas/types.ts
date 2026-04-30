@@ -4,6 +4,7 @@
 
 import type { VisualizationConfig } from '@/hooks/useCohiChat';
 import type { SectionType, SectionFilters } from '@/stores/widgetSectionStore';
+import type { ResearchVisualizationSource } from '@/types/researchWorkbench';
 
 /** Single upload record for canvas (file analyzed via /api/cohi-chat/analyze-file) */
 export interface CanvasUpload {
@@ -216,6 +217,8 @@ export type CanvasWidgetPayload =
       explanation?: string;
       sourceType?: 'research' | 'chat';
       sourceSessionId?: string;
+      /** When set, UI shows a link back to the canonical in-app dashboard (COHI-365). */
+      sourceDashboard?: ResearchVisualizationSource;
       /** Persisted Research Lab artifact id (server `research_artifacts.id`) */
       sourceArtifactId?: string;
       artifactCapabilities?: ResearchArtifactCapabilities;

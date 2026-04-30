@@ -64,8 +64,10 @@ import {
 } from '@/components/ui/DatePeriodPicker';
 import type { VisualizationConfig } from '@/hooks/useCohiChat';
 import type { WidgetFilterState, ResearchArtifactCapabilities } from '@/components/workbench/canvas/types';
+import type { ResearchVisualizationSource } from '@/types/researchWorkbench';
 import { useFilterPresetStore, type FilterPreset } from '@/stores/filterPresetStore';
 import { useTenantStore } from '@/stores/tenantStore';
+import { ResearchSourceDashboardLink } from '@/components/research/ResearchSourceDashboardLink';
 
 // ---------------------------------------------------------------------------
 // Stable empty array to avoid Zustand selector re-render loops
@@ -241,6 +243,8 @@ interface CohiWidgetRendererProps {
   /** When set with research source, enables capability-driven behavior (COHI-363) */
   sourceArtifactId?: string;
   artifactCapabilities?: ResearchArtifactCapabilities;
+  /** Link back to canonical dashboard when inferred at save time (COHI-365). */
+  sourceDashboard?: ResearchVisualizationSource | null;
   /** When false, inline title / chart controls are read-only */
   canEdit?: boolean;
   /**
@@ -252,6 +256,7 @@ interface CohiWidgetRendererProps {
     vizConfig?: VisualizationConfig;
     explanation?: string;
     savedFilters?: WidgetFilterState;
+    sourceDashboard?: ResearchVisualizationSource | null;
   }) => void;
   /** User-approved override to allow low-sample pull-through segments. */
   allowLowSamplePullThrough?: boolean;
@@ -1134,6 +1139,7 @@ export function CohiWidgetRenderer({
   sourceType,
   sourceArtifactId,
   artifactCapabilities,
+  sourceDashboard,
   canEdit = true,
   onPersistPatch,
   allowLowSamplePullThrough = false,
@@ -1435,6 +1441,9 @@ export function CohiWidgetRenderer({
           >
             <RefreshCw className="h-2.5 w-2.5" />
           </button>
+          {sourceDashboard && (
+            <ResearchSourceDashboardLink source={sourceDashboard} compact className="shrink-0 max-w-[160px] truncate" />
+          )}
         </div>
       )}
 

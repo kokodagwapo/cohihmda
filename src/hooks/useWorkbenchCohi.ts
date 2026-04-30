@@ -267,6 +267,7 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
           filterConfig: cohiPayload?.filterConfig,
           savedFilters: cohiPayload?.savedFilters,
           sql: cohiPayload?.sql,
+          sourceDashboard: cohiPayload?.sourceDashboard,
           selected: item.i === selectedWidgetId,
         });
       }

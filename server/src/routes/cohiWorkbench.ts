@@ -97,6 +97,16 @@ interface CanvasStateSnapshot {
     filterConfig?: { filterable?: boolean; dateColumn?: string; defaultPreset?: string | null };
     savedFilters?: Record<string, unknown>;
     sql?: string;
+    /** Canonical dashboard / widget lineage when saved from Research Lab (COHI-365). */
+    sourceDashboard?: {
+      kind?: string;
+      dashboardPath?: string;
+      dashboardLabel?: string;
+      sectionId?: string;
+      definitionId?: string;
+      widgetName?: string;
+      matchConfidence?: string;
+    };
     selected?: boolean;
   }[];
   totalItems: number;
@@ -540,9 +550,15 @@ function buildCanvasContext(state: CanvasStateSnapshot): string {
       const caps =
         w.artifactCapabilities?.canInjectFilters === true ? ' [research: filter-injectable]' : '';
       const dateCol = w.filterConfig?.dateColumn ? ` [dateColumn=${w.filterConfig.dateColumn}]` : '';
+      const lineage =
+        w.sourceDashboard?.dashboardLabel && w.sourceDashboard?.dashboardPath
+          ? ` [lineage=${w.sourceDashboard.dashboardLabel} → ${w.sourceDashboard.dashboardPath}${
+              w.sourceDashboard.definitionId ? ` def=${w.sourceDashboard.definitionId}` : ''
+            }]`
+          : '';
       const selectedLabel = w.selected ? ' [SELECTED]' : '';
       lines.push(
-        `- ${w.id} (${w.type})${w.title ? ": " + w.title : ""}${source}${artifact}${caps}${dateCol}${selectedLabel}`,
+        `- ${w.id} (${w.type})${w.title ? ": " + w.title : ""}${source}${artifact}${caps}${dateCol}${lineage}${selectedLabel}`,
       );
       if (w.sql) {
         const sqlLimit = w.selected ? w.sql.length : 1000;

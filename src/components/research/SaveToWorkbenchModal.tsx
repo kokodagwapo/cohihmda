@@ -34,6 +34,7 @@ import type { VisualizationConfig } from "@/hooks/useCohiChat";
 import type { ResearchArtifactCapabilities } from "@/components/workbench/canvas/types";
 import { inferResearchArtifactKeyFields } from "@/lib/inferResearchArtifactKeyFields";
 import { computeResearchSqlFilterInjectionEligibility } from "@/lib/researchSqlFilterInjectionEligibility";
+import type { ResearchVisualizationSource } from "@/types/researchWorkbench";
 
 const DEFAULT_WIDGET_W = 520;
 
@@ -64,6 +65,8 @@ export interface SaveToWorkbenchPayload {
   /** When set, skip POST /api/research/artifacts and reference this row */
   sourceArtifactId?: string;
   artifactCapabilities?: ResearchArtifactCapabilities;
+  /** Inferred or explicit link to a canonical dashboard (COHI-365). */
+  sourceDashboard?: ResearchVisualizationSource;
 }
 
 interface SaveToWorkbenchModalProps {
@@ -216,6 +219,7 @@ export function SaveToWorkbenchModal({
           sourceType: payload.sourceType,
           sourceSessionId: payload.sourceSessionId,
           ...researchPayloadExtras,
+          ...(payload.sourceDashboard ? { sourceDashboard: payload.sourceDashboard } : {}),
         },
       };
 
