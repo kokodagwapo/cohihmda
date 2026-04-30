@@ -7,6 +7,7 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { Bookmark, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -78,6 +79,7 @@ export function SaveToWorkbenchModal({
   onSaved,
 }: SaveToWorkbenchModalProps) {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const selectedTenantId = useTenantStore((s) => s.selectedTenantId);
   const effectiveTenantId = selectedTenantId || user?.tenant_id;
@@ -176,6 +178,8 @@ export function SaveToWorkbenchModal({
         },
       };
 
+      let savedCanvasId = "";
+      let savedCanvasTitle = "";
       if (createNew) {
         const data = await api.request<{ id: string }>(`/api/workbench/canvases${tenantQs}`, {
           method: "POST",
@@ -185,8 +189,9 @@ export function SaveToWorkbenchModal({
             layout: [newItem],
           }),
         });
-        toast({ title: "Saved to workbench", description: `Added to new canvas "${newCanvasTitle || "New canvas"}".` });
-        onSaved?.(data.id, newCanvasTitle.trim() || "New canvas");
+        savedCanvasId = data.id;
+        savedCanvasTitle = newCanvasTitle.trim() || "New canvas";
+        toast({ title: "Saved to workbench", description: `Opening "${savedCanvasTitle}".` });
       } else {
         if (!selectedCanvasId) {
           toast({ title: "Select a canvas", variant: "destructive" });
@@ -205,9 +210,13 @@ export function SaveToWorkbenchModal({
           method: "PUT",
           body: JSON.stringify({ content: updatedContent }),
         });
-        const canvasTitle = canvases.find((c) => c.id === selectedCanvasId)?.title ?? "Canvas";
-        toast({ title: "Saved to workbench", description: `Added to "${canvasTitle}".` });
-        onSaved?.(selectedCanvasId, canvasTitle);
+        savedCanvasId = selectedCanvasId;
+        savedCanvasTitle = canvases.find((c) => c.id === selectedCanvasId)?.title ?? "Canvas";
+        toast({ title: "Saved to workbench", description: `Opening "${savedCanvasTitle}".` });
+      }
+      if (savedCanvasId) {
+        onSaved?.(savedCanvasId, savedCanvasTitle || "Canvas");
+        navigate(`/my-dashboard/${savedCanvasId}`);
       }
       onClose();
     } catch (err) {

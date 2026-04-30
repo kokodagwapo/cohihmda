@@ -295,6 +295,24 @@ function validatePullThroughSqlGuardrails(
   return null;
 }
 
+function getStandaloneWidgetForAction(
+  canvasState: CanvasStateSnapshot | undefined,
+  action: { type?: string; instanceId?: string },
+): CanvasStateSnapshot["standaloneWidgets"][number] | undefined {
+  if (action.type !== "modify_widget" || !action.instanceId) return undefined;
+  return canvasState?.standaloneWidgets?.find((w) => w.id === action.instanceId);
+}
+
+export function shouldValidateInjectedFilters(
+  action: any,
+  widget?: CanvasStateSnapshot["standaloneWidgets"][number],
+): boolean {
+  if (action.type === "modify_widget" && widget?.sourceType === "research") {
+    return widget.artifactCapabilities?.canInjectFilters === true;
+  }
+  return action.filterConfig?.filterable !== false;
+}
+
 /**
  * Auto-selects which persona(s) should guide this request.
  * We intentionally allow blended behavior: many questions need both
@@ -1354,7 +1372,12 @@ router.post(
           );
 
           for (const action of actionsToValidate) {
-            const dateCol = action.filterConfig?.filterable !== false
+            const targetWidget = getStandaloneWidgetForAction(canvasState, action);
+            const validateInjectedFilters = shouldValidateInjectedFilters(
+              action,
+              targetWidget,
+            );
+            const dateCol = validateInjectedFilters
               ? (action.filterConfig?.dateColumn ?? 'application_date')
               : undefined;
 

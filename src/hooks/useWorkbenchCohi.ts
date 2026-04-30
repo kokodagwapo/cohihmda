@@ -189,28 +189,6 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
   }, [tenantId, conversationScopeId]);
 
   // -------------------------------------------------------------------------
-  // Auto-seed intro message when canvas has a sourceInsight and no history
-  // -------------------------------------------------------------------------
-  const introSeeded = useRef(false);
-  useEffect(() => {
-    if (introSeeded.current || !sourceInsight?.headline) return;
-    // Wait a tick to let conversation load finish
-    const timer = setTimeout(() => {
-      if (messages.length > 0 || introSeeded.current) return;
-      introSeeded.current = true;
-      const introMsg: WorkbenchChatMessage = {
-        id: `wb-msg-intro`,
-        role: 'assistant',
-        content: `This canvas was created to explore: **${sourceInsight.headline}**.\n\nI've set up initial visualizations for you. Ask me to dig deeper into any aspect — break down by officer, compare periods, or investigate root causes.`,
-        timestamp: new Date(),
-      };
-      setMessages([introMsg]);
-      messageIdCounter.current = 1;
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [sourceInsight, messages.length]);
-
-  // -------------------------------------------------------------------------
   // Build canvas state snapshot from current items
   // -------------------------------------------------------------------------
 
