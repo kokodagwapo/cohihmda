@@ -900,6 +900,7 @@ function CohiWidgetRendererWithTenant({
         sourceType={payload.sourceType}
         sourceArtifactId={payload.sourceArtifactId}
         artifactCapabilities={payload.artifactCapabilities}
+        sourceDashboard={payload.sourceDashboard}
         initialFilters={payload.savedFilters}
         canEdit={canEdit}
         onPersistPatch={onPersistPatch}

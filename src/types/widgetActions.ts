@@ -10,6 +10,7 @@ import type { VisualizationConfig } from '@/hooks/useCohiChat';
 import type { ReportDefinition } from '@/types/reportTypes';
 import type { SectionFilters, SectionType } from '@/stores/widgetSectionStore';
 import type { ResearchArtifactCapabilities } from '@/components/workbench/canvas/types';
+import type { ResearchVisualizationSource } from '@/types/researchWorkbench';
 
 // ---------------------------------------------------------------------------
 // Action union
@@ -291,6 +292,10 @@ export interface CanvasStateSnapshot {
     sourceArtifactId?: string;
     /** Capability flags for research-backed widgets (filter injection, presentation edits) */
     artifactCapabilities?: ResearchArtifactCapabilities;
+    /** Optional link to canonical product dashboard (COHI-365). */
+    sourceDashboard?: ResearchVisualizationSource;
+    filterConfig?: { filterable?: boolean; dateColumn?: string; defaultPreset?: string | null };
+    savedFilters?: Record<string, unknown>;
     /** For cohi_widget items: the SQL backing the widget */
     sql?: string;
     /** True when this widget is the one the user is editing via Cohi */

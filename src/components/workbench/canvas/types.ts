@@ -4,6 +4,7 @@
 
 import type { VisualizationConfig } from '@/hooks/useCohiChat';
 import type { SectionType, SectionFilters } from '@/stores/widgetSectionStore';
+import type { ResearchVisualizationSource } from '@/types/researchWorkbench';
 
 /** Single upload record for canvas (file analyzed via /api/cohi-chat/analyze-file) */
 export interface CanvasUpload {
@@ -216,9 +217,16 @@ export type CanvasWidgetPayload =
       explanation?: string;
       sourceType?: 'research' | 'chat';
       sourceSessionId?: string;
+      /** When set, UI shows a link back to the canonical in-app dashboard (COHI-365). */
+      sourceDashboard?: ResearchVisualizationSource;
       /** Persisted Research Lab artifact id (server `research_artifacts.id`) */
       sourceArtifactId?: string;
       artifactCapabilities?: ResearchArtifactCapabilities;
+      /**
+       * When set (e.g. Research Lab save with filter injection), declares filterability
+       * and primary date column — mirrors `GroupWidgetItem` filterConfig for Cohi SQL widgets.
+       */
+      filterConfig?: WidgetFilterConfig;
       /** Standalone widget date/dimension filter state (when not using group sync) */
       savedFilters?: WidgetFilterState;
       allowLowSamplePullThrough?: boolean;

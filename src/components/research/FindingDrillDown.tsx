@@ -85,6 +85,17 @@ import {
   type FieldFormat,
 } from "@/config/insightFieldRegistry";
 import type { Finding, EvidenceItem } from "@/hooks/useResearchSession";
+import { resolveResearchVisualizationLineage } from "@/lib/researchVisualizationLineage";
+import { ResearchSourceDashboardLink } from "@/components/research/ResearchSourceDashboardLink";
+
+/** Best-effort lineage for Research Lab evidence → canonical dashboard / registry widget (COHI-365). */
+function lineageForEvidence(evidence: EvidenceItem, heading?: string | null) {
+  return resolveResearchVisualizationLineage({
+    sql: evidence.sql,
+    explanation: evidence.explanation,
+    findingTitle: heading ?? undefined,
+  });
+}
 
 // ============================================================================
 // Types
@@ -463,14 +474,26 @@ function EvidenceTable({ evidence, index, findingTitle, sessionId, onSaveToWorkb
   const gridCols = { display: "grid" as const, gridTemplateColumns: `repeat(${evidence.fields.length}, minmax(80px, 1fr))` };
   const canLoadMore = totalFiltered > visibleRowCount;
 
+  const sourceDashboardLineage = useMemo(
+    () => lineageForEvidence(evidence, findingTitle),
+    [evidence, findingTitle],
+  );
+
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap min-w-0">
           <Badge variant="outline" className="text-xs">Query {index + 1}</Badge>
           <span className="text-xs text-muted-foreground">
             {evidence.rowCount} rows
           </span>
+          {sourceDashboardLineage && (
+            <ResearchSourceDashboardLink
+              source={sourceDashboardLineage}
+              compact
+              className="max-w-[220px] truncate"
+            />
+          )}
         </div>
         <div className="flex items-center gap-1.5">
           <div className="relative">
@@ -520,6 +543,7 @@ function EvidenceTable({ evidence, index, findingTitle, sessionId, onSaveToWorkb
                       sourceType: "research",
                       sourceSessionId: sessionId ?? undefined,
                       keyFields: evidence.fields,
+                      ...(sourceDashboardLineage ? { sourceDashboard: sourceDashboardLineage } : {}),
                     })
                   }
                 >
@@ -761,6 +785,11 @@ export function EvidencePreviewTable({ evidence, maxRows = EVIDENCE_PREVIEW_MAX_
     return formats;
   }, [evidence.fields, evidence.rows, evidence.columnFormats]);
 
+  const sourceDashboardLineage = useMemo(
+    () => lineageForEvidence(evidence, saveTitle),
+    [evidence, saveTitle],
+  );
+
   const isNumericFormat = (fmt: FieldFormat) =>
     ["currency", "number", "percent", "rate", "days", "bps"].includes(fmt);
 
@@ -789,9 +818,14 @@ export function EvidencePreviewTable({ evidence, maxRows = EVIDENCE_PREVIEW_MAX_
   return (
     <div className="rounded-md border overflow-hidden" role="region" aria-label="Evidence preview table">
       <div className="flex items-center justify-between px-2 py-1 bg-muted/30 border-b">
-        <span className="text-[10px] text-muted-foreground font-medium">
-          {totalRows} row{totalRows !== 1 ? "s" : ""}
-        </span>
+        <div className="flex items-center gap-2 min-w-0 flex-wrap">
+          <span className="text-[10px] text-muted-foreground font-medium">
+            {totalRows} row{totalRows !== 1 ? "s" : ""}
+          </span>
+          {sourceDashboardLineage && (
+            <ResearchSourceDashboardLink source={sourceDashboardLineage} compact className="max-w-[200px] truncate" />
+          )}
+        </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="h-6 w-6">
@@ -830,6 +864,7 @@ export function EvidencePreviewTable({ evidence, maxRows = EVIDENCE_PREVIEW_MAX_
                     sourceType: "research",
                     sourceSessionId: sessionId ?? undefined,
                     keyFields: evidence.fields,
+                    ...(sourceDashboardLineage ? { sourceDashboard: sourceDashboardLineage } : {}),
                   })
                 }
               >
@@ -1619,6 +1654,17 @@ function AutoChartShell({ title, hero = false, minWidth, minHeight, children, on
   const scrollsX = !!minWidth;
   const scrollsY = !!minHeight && minHeight > effectiveHeight;
 
+  const sourceDashboardLineage = useMemo(
+    () =>
+      evidence
+        ? lineageForEvidence(
+            evidence,
+            [saveTitle, title].filter(Boolean).join(" — ") || undefined,
+          )
+        : null,
+    [evidence, saveTitle, title],
+  );
+
   const renderChart = (forDialog: boolean) => {
     const height = forDialog ? "calc(80vh - 6rem)" : effectiveHeight;
     const minW = forDialog ? (minWidth ? Math.max(minWidth, 600) : undefined) : minWidth;
@@ -1646,6 +1692,9 @@ function AutoChartShell({ title, hero = false, minWidth, minHeight, children, on
           <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 min-w-0">
             <BarChart3 className="h-3 w-3 flex-shrink-0" />
             <span className="truncate">{title}</span>
+            {sourceDashboardLineage && (
+              <ResearchSourceDashboardLink source={sourceDashboardLineage} compact className="shrink-0" />
+            )}
           </p>
           <div className="flex items-center gap-0.5 flex-shrink-0">
             {onSaveToWorkbench && evidence && (
@@ -1674,6 +1723,7 @@ function AutoChartShell({ title, hero = false, minWidth, minHeight, children, on
                         sourceType: "research",
                         sourceSessionId: sessionId ?? undefined,
                         keyFields: evidence.fields,
+                        ...(sourceDashboardLineage ? { sourceDashboard: sourceDashboardLineage } : {}),
                       })
                     }
                   >
