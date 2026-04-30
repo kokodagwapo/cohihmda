@@ -40,7 +40,8 @@ export type DataSourceId =
   | 'lock-stratification'
   | 'loan-complexity'
   | 'estimated-closings-risk'
-  | 'sales-company-overview';
+  | 'sales-company-overview'
+  | 'active-workload';
 
 // ---------------------------------------------------------------------------
 // Widget categories – drives catalog grouping & icon selection

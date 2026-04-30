@@ -899,6 +899,16 @@ const SECTION_TO_WIDGETS: Record<
       "estimated-closings-detail-table",
     ],
   },
+  activeWorkload: {
+    sectionType: "active-workload",
+    widgetIds: [
+      "active-workload-kpi-active-files",
+      "active-workload-kpi-days-active",
+      "active-workload-drilldown",
+      "active-workload-milestone-chart",
+      "active-workload-detail-table",
+    ],
+  },
 };
 
 /**

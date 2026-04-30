@@ -93,6 +93,7 @@ export const DASHBOARD_SECTION_GROUPS: { label: string; items: DashboardSectionI
       { id: 'lockStratification', title: 'Lock Stratification', icon: Lock, iconClass: 'text-blue-500' },
       { id: 'loanComplexity', title: 'Loan Complexity', icon: Layers, iconClass: 'text-indigo-500' },
       { id: 'estimatedClosingsRisk', title: 'Estimated Closings & Risk Analysis', icon: LineChart, iconClass: 'text-emerald-500' },
+      { id: 'activeWorkload', title: 'Active Workload', icon: Layers, iconClass: 'text-indigo-500' },
     ],
   },
 ];
