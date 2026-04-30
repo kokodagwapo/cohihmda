@@ -94,6 +94,8 @@ interface CanvasStateSnapshot {
       canEditColumns?: boolean;
       requiresSqlRewriteForLogicChanges?: boolean;
     };
+    filterConfig?: { filterable?: boolean; dateColumn?: string; defaultPreset?: string | null };
+    savedFilters?: Record<string, unknown>;
     sql?: string;
     selected?: boolean;
   }[];
@@ -535,8 +537,13 @@ function buildCanvasContext(state: CanvasStateSnapshot): string {
         w.sourceArtifactId != null && String(w.sourceArtifactId).trim()
           ? ` [artifact=${w.sourceArtifactId}]`
           : '';
+      const caps =
+        w.artifactCapabilities?.canInjectFilters === true ? ' [research: filter-injectable]' : '';
+      const dateCol = w.filterConfig?.dateColumn ? ` [dateColumn=${w.filterConfig.dateColumn}]` : '';
       const selectedLabel = w.selected ? ' [SELECTED]' : '';
-      lines.push(`- ${w.id} (${w.type})${w.title ? ": " + w.title : ""}${source}${artifact}${selectedLabel}`);
+      lines.push(
+        `- ${w.id} (${w.type})${w.title ? ": " + w.title : ""}${source}${artifact}${caps}${dateCol}${selectedLabel}`,
+      );
       if (w.sql) {
         const sqlLimit = w.selected ? w.sql.length : 1000;
         const sqlSnippet = w.sql.length <= sqlLimit ? w.sql : w.sql.substring(0, sqlLimit) + '...';

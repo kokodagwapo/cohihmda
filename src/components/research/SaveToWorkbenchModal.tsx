@@ -33,6 +33,7 @@ import { useTenantStore } from "@/stores/tenantStore";
 import type { VisualizationConfig } from "@/hooks/useCohiChat";
 import type { ResearchArtifactCapabilities } from "@/components/workbench/canvas/types";
 import { inferResearchArtifactKeyFields } from "@/lib/inferResearchArtifactKeyFields";
+import { computeResearchSqlFilterInjectionEligibility } from "@/lib/researchSqlFilterInjectionEligibility";
 
 const DEFAULT_WIDGET_W = 520;
 
@@ -124,7 +125,26 @@ export function SaveToWorkbenchModal({
     setSaving(true);
     try {
       let sourceArtifactId = payload.sourceArtifactId;
-      const caps = payload.artifactCapabilities ?? DEFAULT_RESEARCH_ARTIFACT_CAPS;
+      const eligibility =
+        payload.sourceType === "research"
+          ? computeResearchSqlFilterInjectionEligibility(payload.sql, {
+              title: widgetTitle.trim() || payload.title,
+              explanation: payload.explanation,
+            })
+          : { eligible: false as const, dateColumn: null as const, reason: "not_research" };
+
+      const caps: ResearchArtifactCapabilities = {
+        ...DEFAULT_RESEARCH_ARTIFACT_CAPS,
+        ...payload.artifactCapabilities,
+      };
+      if (payload.sourceType === "research") {
+        if (payload.artifactCapabilities?.canInjectFilters === false) {
+          caps.canInjectFilters = false;
+        } else {
+          caps.canInjectFilters = eligibility.eligible;
+        }
+      }
+
       if (
         payload.sourceType === "research" &&
         payload.sql?.trim() &&
@@ -157,6 +177,29 @@ export function SaveToWorkbenchModal({
       }
 
       const layoutItemId = `cohi-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const filterExtras =
+        payload.sourceType === "research" &&
+        caps.canInjectFilters === true &&
+        eligibility.dateColumn
+          ? {
+              savedFilters: { dateField: eligibility.dateColumn },
+              filterConfig: {
+                filterable: true,
+                dateColumn: eligibility.dateColumn,
+                defaultPreset: "L12M" as const,
+              },
+            }
+          : {};
+
+      const researchPayloadExtras =
+        payload.sourceType === "research"
+          ? {
+              artifactCapabilities: caps,
+              ...(sourceArtifactId ? { sourceArtifactId } : {}),
+              ...filterExtras,
+            }
+          : {};
+
       const newItem = {
         i: layoutItemId,
         x: 20,
@@ -172,9 +215,7 @@ export function SaveToWorkbenchModal({
           explanation: payload.explanation,
           sourceType: payload.sourceType,
           sourceSessionId: payload.sourceSessionId,
-          ...(sourceArtifactId
-            ? { sourceArtifactId, artifactCapabilities: caps }
-            : {}),
+          ...researchPayloadExtras,
         },
       };
 

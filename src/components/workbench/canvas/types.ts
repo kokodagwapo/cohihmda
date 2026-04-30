@@ -219,6 +219,11 @@ export type CanvasWidgetPayload =
       /** Persisted Research Lab artifact id (server `research_artifacts.id`) */
       sourceArtifactId?: string;
       artifactCapabilities?: ResearchArtifactCapabilities;
+      /**
+       * When set (e.g. Research Lab save with filter injection), declares filterability
+       * and primary date column — mirrors `GroupWidgetItem` filterConfig for Cohi SQL widgets.
+       */
+      filterConfig?: WidgetFilterConfig;
       /** Standalone widget date/dimension filter state (when not using group sync) */
       savedFilters?: WidgetFilterState;
       allowLowSamplePullThrough?: boolean;
