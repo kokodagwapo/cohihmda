@@ -13,6 +13,7 @@
  * POST /sessions/:id/followup — SSE: run follow-up question
  * POST /sessions/:id/feedback — Submit feedback on a step/finding/session
  * DELETE /sessions/:id        — Delete a session
+ * POST /artifacts            — Persist SQL evidence for watchlist / Workbench (COHI-362)
  */
 
 import { Router, type Response } from "express";
@@ -45,6 +46,85 @@ const router = Router();
 
 // Mount upload sub-routes at /uploads
 router.use("/uploads", uploadRoutes);
+
+// ============================================================================
+// POST /artifacts — Persist SQL evidence for watchlist / Workbench (COHI-362)
+// ============================================================================
+
+router.post(
+  "/artifacts",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { tenantPool } = getTenantContext(req);
+      const userId = req.userId || "";
+      const body = req.body || {};
+      const sessionId =
+        typeof body.session_id === "string" ? body.session_id.trim() : "";
+      const sql = typeof body.sql === "string" ? body.sql.trim() : "";
+      if (!sessionId) {
+        return res.status(400).json({ error: "session_id is required" });
+      }
+      if (!sql) {
+        return res.status(400).json({ error: "sql is required" });
+      }
+      const session =
+        getSession(sessionId) || (await loadSession(sessionId, tenantPool));
+      if (!session || !canAccessSession(session, userId)) {
+        return res.status(404).json({ error: "Session not found" });
+      }
+      const keyFieldsRaw = body.keyFields;
+      const keyFields = Array.isArray(keyFieldsRaw)
+        ? keyFieldsRaw
+            .filter((k: unknown) => typeof k === "string")
+            .map((k: string) => String(k).trim())
+            .filter((k) => k.length > 0)
+        : [];
+      const title = typeof body.title === "string" ? body.title.trim() : null;
+      const explanation =
+        typeof body.explanation === "string" ? body.explanation.trim() : null;
+      const headlineFingerprint =
+        typeof body.headline_fingerprint === "string"
+          ? body.headline_fingerprint.trim().slice(0, 512)
+          : null;
+      let vizConfigJson: string | null = null;
+      if (body.viz_config != null && typeof body.viz_config === "object") {
+        vizConfigJson = JSON.stringify(body.viz_config);
+      }
+      const ins = await tenantPool.query(
+        `INSERT INTO research_artifacts
+         (user_id, session_id, headline_fingerprint, sql, key_fields, title, viz_config, explanation)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8)
+         RETURNING id`,
+        [
+          userId,
+          sessionId,
+          headlineFingerprint,
+          sql,
+          JSON.stringify(keyFields),
+          title,
+          vizConfigJson,
+          explanation,
+        ]
+      );
+      res.status(201).json({ id: ins.rows[0].id });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (
+        typeof message === "string" &&
+        message.includes('relation "research_artifacts" does not exist')
+      ) {
+        return res.status(503).json({
+          error:
+            "Research artifacts are not available on this tenant yet (pending migration).",
+        });
+      }
+      console.error("[Research] POST /artifacts failed:", err);
+      res.status(500).json({ error: message });
+    }
+  }
+);
 
 // ============================================================================
 // Helper: set up SSE response

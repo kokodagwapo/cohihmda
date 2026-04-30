@@ -150,6 +150,7 @@ export const ROLE_MATRIX: RouteExpectation[] = [
   { routeGroup: "/api/workbench/reports", method: "GET", path: "/api/workbench/reports/__rbac_probe", policy: "auth", expect: AUTH_BLOCKS_CANVAS_ONLY },
   { routeGroup: "/api/distributions", method: "GET", path: "/api/distributions/__rbac_probe", policy: "distributions_admin", expect: DISTRIBUTIONS_ADMIN_EXPECTED },
   { routeGroup: "/api/research", method: "GET", path: "/api/research/__rbac_probe", policy: "auth", expect: AUTH_BLOCKS_CANVAS_ONLY },
+  { routeGroup: "/api/research", method: "POST", path: "/api/research/artifacts/__rbac_probe", policy: "auth", expect: AUTH_BLOCKS_CANVAS_ONLY },
   { routeGroup: "/api/insights/tracked", method: "GET", path: "/api/insights/tracked/__rbac_probe", policy: "auth", expect: AUTH_BLOCKS_CANVAS_ONLY },
   { routeGroup: "/api/onboarding", method: "GET", path: "/api/onboarding/__rbac_probe", policy: "auth", expect: AUTH_BLOCKS_CANVAS_ONLY },
   { routeGroup: "/api/jobs", method: "GET", path: "/api/jobs/__rbac_probe", policy: "auth", expect: AUTH_BLOCKS_CANVAS_ONLY },

@@ -11,7 +11,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useWidgetSectionStore } from "@/stores/widgetSectionStore";
 import { useLoanDetailData, type LoanDetailRow } from "@/hooks/useLoanDetailData";
 import { ArrowDown, ArrowUp, Download, Loader2, Maximize2, X } from "lucide-react";
-import { getWeek, startOfWeek } from "date-fns";
+import { endOfWeek, getWeek, startOfWeek } from "date-fns";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 type SummaryDateField = "started_date" | "application_date" | "investor_lock_date" | "funding_date" | "closing_date";
@@ -120,7 +120,8 @@ function toNumberSafe(value: unknown): number {
 
 function getYearWeekLabel(date: Date): string {
   const weekStart = startOfWeek(date, { weekStartsOn: 0 });
-  const year = weekStart.getFullYear();
+  const weekEnd = endOfWeek(date, { weekStartsOn: 0 });
+  const year = weekStart.getFullYear() === weekEnd.getFullYear() ? weekStart.getFullYear() : weekEnd.getFullYear();
   const week = getWeek(weekStart, { weekStartsOn: 0, firstWeekContainsDate: 1 });
   return `${year}-W${String(week).padStart(2, "0")}`;
 }

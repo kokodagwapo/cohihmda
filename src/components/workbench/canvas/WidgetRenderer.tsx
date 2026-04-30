@@ -873,12 +873,16 @@ function CohiWidgetRendererWithTenant({
   width,
   height,
   canvasItemId,
+  canEdit,
+  onPersistPatch,
 }: {
   payload: Extract<CanvasWidgetPayload, { type: 'cohi_widget' }>;
   style: React.CSSProperties;
   width?: number;
   height?: number;
   canvasItemId?: string;
+  canEdit?: boolean;
+  onPersistPatch?: (patch: Partial<Extract<CanvasWidgetPayload, { type: 'cohi_widget' }>>) => void;
 }) {
   const { selectedTenantId } = useTenantStore();
   return (
@@ -893,6 +897,11 @@ function CohiWidgetRendererWithTenant({
         height={height}
         canvasItemId={canvasItemId}
         sourceType={payload.sourceType}
+        sourceArtifactId={payload.sourceArtifactId}
+        artifactCapabilities={payload.artifactCapabilities}
+        initialFilters={payload.savedFilters}
+        canEdit={canEdit}
+        onPersistPatch={onPersistPatch}
         allowLowSamplePullThrough={payload.allowLowSamplePullThrough}
       />
     </div>
@@ -1216,6 +1225,11 @@ export function WidgetRenderer({
     );
   }
   if (type === "cohi_widget" && payload.type === "cohi_widget") {
+    const onPersistPatch =
+      canEdit && onUpdatePayload
+        ? (patch: Partial<typeof payload>) =>
+            onUpdatePayload({ ...payload, ...patch, type: "cohi_widget" })
+        : undefined;
     return (
       <CohiWidgetRendererWithTenant
         payload={payload}
@@ -1223,6 +1237,8 @@ export function WidgetRenderer({
         width={width}
         height={height}
         canvasItemId={item.i}
+        canEdit={canEdit}
+        onPersistPatch={onPersistPatch}
       />
     );
   }

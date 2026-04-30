@@ -519,6 +519,7 @@ function EvidenceTable({ evidence, index, findingTitle, sessionId, onSaveToWorkb
                       explanation: evidence.explanation,
                       sourceType: "research",
                       sourceSessionId: sessionId ?? undefined,
+                      keyFields: evidence.fields,
                     })
                   }
                 >
@@ -828,6 +829,7 @@ export function EvidencePreviewTable({ evidence, maxRows = EVIDENCE_PREVIEW_MAX_
                     explanation: evidence.explanation,
                     sourceType: "research",
                     sourceSessionId: sessionId ?? undefined,
+                    keyFields: evidence.fields,
                   })
                 }
               >
@@ -1671,6 +1673,7 @@ function AutoChartShell({ title, hero = false, minWidth, minHeight, children, on
                         explanation: evidence.explanation,
                         sourceType: "research",
                         sourceSessionId: sessionId ?? undefined,
+                        keyFields: evidence.fields,
                       })
                     }
                   >
@@ -1787,6 +1790,7 @@ export function FindingDrillDown({ finding, onClose, sessionId }: FindingDrillDo
                         explanation: primaryEvidence.explanation,
                         sourceType: "research",
                         sourceSessionId: sessionId ?? undefined,
+                        keyFields: primaryEvidence.fields,
                       })
                     }
                   >

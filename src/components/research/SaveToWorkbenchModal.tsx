@@ -30,8 +30,17 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTenantStore } from "@/stores/tenantStore";
 import type { VisualizationConfig } from "@/hooks/useCohiChat";
+import type { ResearchArtifactCapabilities } from "@/components/workbench/canvas/types";
+import { inferResearchArtifactKeyFields } from "@/lib/inferResearchArtifactKeyFields";
 
 const DEFAULT_WIDGET_W = 520;
+
+const DEFAULT_RESEARCH_ARTIFACT_CAPS: ResearchArtifactCapabilities = {
+  canInjectFilters: false,
+  canEditPresentation: true,
+  canEditColumns: true,
+  requiresSqlRewriteForLogicChanges: true,
+};
 const DEFAULT_WIDGET_H = 360;
 
 interface CanvasListItem {
@@ -48,6 +57,11 @@ export interface SaveToWorkbenchPayload {
   explanation?: string;
   sourceType?: "research";
   sourceSessionId?: string;
+  /** Column keys for research_artifacts.key_fields (optional — inferred from vizConfig) */
+  keyFields?: string[];
+  /** When set, skip POST /api/research/artifacts and reference this row */
+  sourceArtifactId?: string;
+  artifactCapabilities?: ResearchArtifactCapabilities;
 }
 
 interface SaveToWorkbenchModalProps {
@@ -107,6 +121,39 @@ export function SaveToWorkbenchModal({
     if (!payload) return;
     setSaving(true);
     try {
+      let sourceArtifactId = payload.sourceArtifactId;
+      const caps = payload.artifactCapabilities ?? DEFAULT_RESEARCH_ARTIFACT_CAPS;
+      if (
+        payload.sourceType === "research" &&
+        payload.sql?.trim() &&
+        payload.sourceSessionId &&
+        !sourceArtifactId
+      ) {
+        try {
+          const keyFields = inferResearchArtifactKeyFields(payload.vizConfig, payload.keyFields);
+          const created = await api.createResearchArtifact(
+            {
+              session_id: payload.sourceSessionId,
+              sql: payload.sql,
+              keyFields,
+              title: widgetTitle.trim() || payload.title,
+              explanation: payload.explanation,
+              viz_config: payload.vizConfig as Record<string, unknown>,
+            },
+            effectiveTenantId,
+          );
+          sourceArtifactId = created?.id;
+        } catch (e) {
+          console.warn("[SaveToWorkbench] research artifact create failed", e);
+          toast({
+            title: "Could not link research artifact",
+            description:
+              "The widget was saved, but without a durable research artifact link. Tracking/Cohi context may be limited.",
+            variant: "destructive",
+          });
+        }
+      }
+
       const layoutItemId = `cohi-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const newItem = {
         i: layoutItemId,
@@ -123,6 +170,9 @@ export function SaveToWorkbenchModal({
           explanation: payload.explanation,
           sourceType: payload.sourceType,
           sourceSessionId: payload.sourceSessionId,
+          ...(sourceArtifactId
+            ? { sourceArtifactId, artifactCapabilities: caps }
+            : {}),
         },
       };
 
