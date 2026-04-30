@@ -31,6 +31,7 @@ import { salesScorecardOverviewWidgets } from './salesScorecardOverviewWidgets';
 import { productionTrendsWidgets } from './productionTrendsWidgets';
 import { salesCompanyOverviewWidgets } from './salesCompanyOverviewWidgets';
 import { productionSummaryByWeekWidgets } from './productionSummaryByWeekWidgets';
+import { activeWorkloadWidgets } from './activeWorkloadWidgets';
 
 // Lock Stratification – import embed component once to avoid circular or chunk issues
 import { LockStratificationEmbed } from '../components/LockStratificationEmbed';
@@ -75,6 +76,7 @@ const allWidgets: WidgetDefinition[] = [
   ...productionTrendsWidgets,
   ...salesCompanyOverviewWidgets,
   ...productionSummaryByWeekWidgets,
+  ...activeWorkloadWidgets,
   ...lockStratificationWidgets,
   ...loanComplexityWidgets,
   ...estimatedClosingsRiskWidgets,

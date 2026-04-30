@@ -761,6 +761,100 @@ const DETAIL_LIST_DIMENSION_FILTER_COLUMNS: Record<string, string> = {
   investor_name: "investor", // frontend sends investor_name, map to DB column investor
 };
 router.get(
+  "/active-detail-list",
+  authenticateToken,
+  attachTenantContext,
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantPool = getTenantContext(req).tenantPool;
+      const limit = Math.min(
+        Math.max(parseInt((req.query.limit as string) || "100", 10) || 100, 1),
+        5000,
+      );
+      const offset = Math.max(
+        parseInt((req.query.offset as string) || "0", 10) || 0,
+      );
+
+      const conditions: string[] = [];
+      const params: any[] = [];
+      let paramIndex = 1;
+
+      const accessCtx = await getLoanAccessContext(req, tenantPool);
+      if (accessCtx.hasNoAccess) {
+        return res.json({
+          loans: [],
+          total: 0,
+          limit,
+          offset,
+          page: 1,
+          totalPages: 0,
+        });
+      }
+      const accessFilter = accessCtx.getFilter("", paramIndex);
+      if (accessFilter) {
+        conditions.push(accessFilter.sql);
+        params.push(...accessFilter.params);
+        paramIndex += accessFilter.paramOffset;
+      }
+
+      // Channel group filter (Retail, TPO, etc.)
+      const channelGroup = req.query.channel_group as string | undefined;
+      if (channelGroup && channelGroup !== "All") {
+        const clause = buildChannelWhereClause(channelGroup);
+        if (clause) {
+          conditions.push(clause.replace(/^AND\s+/i, ""));
+        }
+      }
+
+      // Canonical active-loan definition used by KPI.
+      conditions.push(
+        `(current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND TRIM(COALESCE(application_date::text, '')) <> '' AND (is_archived IS DISTINCT FROM TRUE))`,
+      );
+
+      const whereClause =
+        conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+      const query = `
+        SELECT *
+        FROM public.loans
+        ${whereClause}
+        ORDER BY COALESCE(application_date, started_date, created_at) DESC NULLS LAST
+        LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+      `;
+      params.push(limit, offset);
+
+      const result = await tenantPool.query(query, params);
+      const countParams = params.slice(0, -2);
+      const countQuery = `SELECT COUNT(*) FROM public.loans ${whereClause}`;
+      const countResult = await tenantPool.query(countQuery, countParams);
+      const total = parseInt(countResult.rows[0].count, 10);
+
+      res.json({
+        loans: result.rows,
+        total,
+        limit,
+        offset,
+        page: Math.floor(offset / limit) + 1,
+        totalPages: Math.ceil(total / limit) || 1,
+      });
+    } catch (error: any) {
+      logError("Error fetching active loan detail list", error, {
+        userId: req.userId,
+      });
+      if (
+        handleDatabaseError(error, res, "Failed to fetch active loan detail list")
+      ) {
+        return;
+      }
+      res
+        .status(500)
+        .json({ error: error.message || "Failed to fetch active loan detail list" });
+    }
+  },
+);
+
+router.get(
   "/detail-list",
   authenticateToken,
   attachTenantContext,
