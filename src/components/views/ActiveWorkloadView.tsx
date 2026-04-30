@@ -1591,7 +1591,12 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-sm">Active Loans Detail</CardTitle>
+          <div>
+            <CardTitle className="text-sm">Active Loans Detail</CardTitle>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              {sortedDetailRows.length.toLocaleString()} loans
+            </p>
+          </div>
           <div className="flex items-center gap-2">
             <Button size="sm" variant="outline" onClick={() => setShowDetailColumnFilters((s) => !s)}>
               <Filter className="mr-1 h-4 w-4" />
