@@ -53,6 +53,7 @@ import PricingDashboard from "./pages/PricingDashboard";
 import LockStratification from "./pages/LockStratification";
 import PipelineAnalysisDashboard from "./pages/PipelineAnalysisDashboard";
 import DataQualityDashboard from "./pages/DataQualityDashboard";
+import ActiveWorkload from "./pages/ActiveWorkload";
 import LoanComplexity from "./pages/LoanComplexity";
 import LeaderboardDashboard from "./pages/LeaderboardDashboard";
 import BusinessOverviewDashboard from "./pages/BusinessOverviewDashboard";
@@ -237,6 +238,7 @@ const App = () => (
               <Route path="/performance/operation-scorecard" element={<OperationScorecard />} />
               <Route path="/performance/operation-scorecard-trends" element={<OperationScorecardTrends />} />
               <Route path="/performance/estimated-closings-risk" element={<EstimatedClosingsRisk />} />
+              <Route path="/performance/active-workload" element={<ActiveWorkload />} />
               
               {/* Admin route - requires admin role */}
               <Route path="/admin" element={
