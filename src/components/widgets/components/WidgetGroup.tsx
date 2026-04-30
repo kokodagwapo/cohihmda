@@ -60,6 +60,14 @@ import {
 } from "@/components/ui/DatePeriodPicker";
 import { Button } from "@/components/ui/button";
 import {
+  Command,
+  CommandEmpty,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { Input } from "@/components/ui/input";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -133,6 +141,28 @@ import type {
 // ---------------------------------------------------------------------------
 
 const EMPTY_FILTER_PRESETS: FilterPreset[] = [];
+const ACTIVE_WORKLOAD_ACTOR_TO_DB_COLUMN: Record<string, string> = {
+  Channel: "channel",
+  Processor: "processor",
+  Closer: "closer",
+  Underwriter: "underwriter",
+  "Loan Officer": "loan_officer",
+  "Account Executive": "account_executive",
+  "Account Manager": "account_manager",
+  "Broker Lender Name": "broker_lender_name",
+  Branch: "branch",
+  "TPO Company Name": "tpo_company_name",
+  Investor: "investor",
+  "Retail Branch ID": "retail_branch_id",
+  "Retail LO": "retail_lo",
+  "Originator Loan Officer Name": "originator_loan_officer_name",
+  "Originator Loan Processor Name": "originator_loan_processor_name",
+  "Correspondent Sales Rep/AE": "correspondent_sales_rep_ae",
+  "Correspondent Lender Name": "correspondent_lender_name",
+  "Sales Rep/AE": "sales_rep_ae",
+  "Warehouse Co Name": "warehouse_co_name",
+  "Warehouse Bank Name": "warehouse_bank_name",
+};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -419,6 +449,53 @@ const SECTION_FILTER_CONFIG: Partial<
       ],
     },
   ],
+  "active-workload": [
+    {
+      key: "activeWorkloadActor",
+      label: "Actor Selector",
+      allLabel: "",
+      staticOptions: [
+        { value: "Channel", label: "Channel" },
+        { value: "Processor", label: "Processor" },
+        { value: "Closer", label: "Closer" },
+        { value: "Underwriter", label: "Underwriter" },
+        { value: "Loan Officer", label: "Loan Officer" },
+        { value: "Account Executive", label: "Account Executive" },
+        { value: "Account Manager", label: "Account Manager" },
+        { value: "Broker Lender Name", label: "Broker Lender Name" },
+        { value: "Branch", label: "Branch" },
+        { value: "TPO Company Name", label: "TPO Company Name" },
+        { value: "Investor", label: "Investor" },
+        { value: "Retail Branch ID", label: "Retail Branch ID" },
+        { value: "Retail LO", label: "Retail LO" },
+        { value: "Originator Loan Officer Name", label: "Originator Loan Officer Name" },
+        { value: "Originator Loan Processor Name", label: "Originator Loan Processor Name" },
+        { value: "Correspondent Sales Rep/AE", label: "Correspondent Sales Rep/AE" },
+        { value: "Correspondent Lender Name", label: "Correspondent Lender Name" },
+        { value: "Sales Rep/AE", label: "Sales Rep/AE" },
+        { value: "Warehouse Co Name", label: "Warehouse Co Name" },
+        { value: "Warehouse Bank Name", label: "Warehouse Bank Name" },
+      ],
+    },
+    {
+      key: "activeWorkloadAggregation",
+      label: "Calculation Selector",
+      allLabel: "",
+      staticOptions: [
+        { value: "average", label: "Average" },
+        { value: "median", label: "Median" },
+      ],
+    },
+    {
+      key: "activeWorkloadDayCalcType",
+      label: "Date Range Calculation Type",
+      allLabel: "",
+      staticOptions: [
+        { value: "calendar_days", label: "Calendar Days" },
+        { value: "business_days", label: "Business Days" },
+      ],
+    },
+  ],
 };
 
 /**
@@ -440,6 +517,7 @@ const SECTION_BUILTIN_FILTER_COLUMNS: Partial<Record<SectionType, string[]>> = {
   "production-summary-by-week": ["branch", "loan_officer"],
   "sales-company-overview": [],
   "loan-complexity": ["current_loan_status"],
+  "active-workload": [],
 };
 
 const HIGH_PERFORMERS_DATE_TYPE_OPTIONS: {
@@ -1404,6 +1482,12 @@ const SECTION_COLORS: Record<
     accent: "text-indigo-600 dark:text-indigo-400",
     dot: "bg-indigo-500",
   },
+  "active-workload": {
+    border: "border-indigo-400/50",
+    bg: "bg-indigo-50/50 dark:bg-indigo-950/20",
+    accent: "text-indigo-600 dark:text-indigo-400",
+    dot: "bg-indigo-500",
+  },
   "estimated-closings-risk": {
     border: "border-emerald-400/50",
     bg: "bg-emerald-50/50 dark:bg-emerald-950/20",
@@ -1572,6 +1656,24 @@ function getGridSizeForItem(item: GroupWidgetItem): GridSize {
     if (item.defId === "sales-company-overview-aging-chart")
       return { w: 24, h: 20, minW: 16, minH: 14 };
     return { w: 18, h: 20, minW: 12, minH: 14 };
+  }
+  if (item.kind === "registry" && item.defId.startsWith("active-workload-")) {
+    if (
+      item.defId === "active-workload-kpi-active-files" ||
+      item.defId === "active-workload-kpi-days-active"
+    ) {
+      return { w: 13, h: 9, minW: 10, minH: 8 };
+    }
+    if (item.defId === "active-workload-milestone-chart") {
+      return { w: GRID_COLS, h: 30, minW: 24, minH: 20 };
+    }
+    if (item.defId === "active-workload-detail-table") {
+      return { w: 36, h: 30, minW: 24, minH: 20 };
+    }
+    if (item.defId === "active-workload-drilldown") {
+      return { w: GRID_COLS, h: 24, minW: 24, minH: 14 };
+    }
+    return { w: 24, h: 20, minW: 12, minH: 10 };
   }
   const def = getWidgetDefinition(item.defId);
   return (def && GRID_SIZES[def.category]) || DEFAULT_GRID;
@@ -2210,6 +2312,10 @@ function GridCellRegistryWidget({
     : {};
   const isProductionTrends = defId?.startsWith("production-trends-");
   const productionTrendsConfig = isProductionTrends ? { groupId } : {};
+  const isActiveWorkload = defId?.startsWith("active-workload-");
+  const activeWorkloadConfig = isActiveWorkload
+    ? { groupId, variant: definition.config?.variant }
+    : {};
   const isProductionSummaryByWeek = defId?.startsWith(
     "production-summary-by-week-",
   );
@@ -2382,6 +2488,7 @@ function GridCellRegistryWidget({
     ...salesScorecardOverviewConfig,
     ...productionTrendsConfig,
     ...productionSummaryByWeekConfig,
+    ...activeWorkloadConfig,
     ...salesCompanyOverviewConfig,
     ...lockStratificationConfig,
     ...loanComplexityConfig,
@@ -2613,6 +2720,15 @@ export function WidgetGroup({
     selectedTenantId ?? null,
   );
   const pipelineConfig = usePipelineAnalysisConfig(selectedTenantId ?? null);
+  const activeWorkloadActor = String(filters.activeWorkloadActor ?? "Processor");
+  const activeWorkloadActorColumn =
+    ACTIVE_WORKLOAD_ACTOR_TO_DB_COLUMN[activeWorkloadActor] ?? "processor";
+  const [activeWorkloadPillOptions, setActiveWorkloadPillOptions] = useState<{
+    milestone: string[];
+    actor: string[];
+    loanType: string[];
+    loanPurpose: string[];
+  }>({ milestone: [], actor: [], loanType: [], loanPurpose: [] });
 
   // Normalize legacy widgetIds to items
   const items = useMemo(
@@ -2645,12 +2761,116 @@ export function WidgetGroup({
   ] = useState(false);
   const [loanDetailColumnsModalOpen, setLoanDetailColumnsModalOpen] =
     useState(false);
+  const [activeWorkloadPillPopover, setActiveWorkloadPillPopover] = useState<
+    string | null
+  >(null);
+  const [activeWorkloadPillSearch, setActiveWorkloadPillSearch] = useState<
+    Record<string, string>
+  >({});
+  const [activeWorkloadDraftMilestones, setActiveWorkloadDraftMilestones] =
+    useState<string[]>([]);
+  const [activeWorkloadDraftActorValues, setActiveWorkloadDraftActorValues] =
+    useState<string[]>([]);
+  const [activeWorkloadDraftLoanTypes, setActiveWorkloadDraftLoanTypes] =
+    useState<string[]>([]);
+  const [activeWorkloadDraftLoanPurposes, setActiveWorkloadDraftLoanPurposes] =
+    useState<string[]>([]);
   const [
     salesScorecardMilestoneDatesModalOpen,
     setSalesScorecardMilestoneDatesModalOpen,
   ] = useState(false);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const filtersRestoredRef = useRef(false);
+  const toggleStringDraftValue = useCallback(
+    (key: "milestone" | "actor" | "loanType" | "loanPurpose", value: string) => {
+      const updater = (prev: string[]) => {
+        const set = new Set(prev);
+        if (set.has(value)) set.delete(value);
+        else set.add(value);
+        return [...set].sort((a, b) =>
+          a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }),
+        );
+      };
+      if (key === "milestone") setActiveWorkloadDraftMilestones(updater);
+      else if (key === "actor") setActiveWorkloadDraftActorValues(updater);
+      else if (key === "loanType") setActiveWorkloadDraftLoanTypes(updater);
+      else setActiveWorkloadDraftLoanPurposes(updater);
+    },
+    [],
+  );
+  useEffect(() => {
+    if (sectionType !== "active-workload" || !selectedTenantId) {
+      setActiveWorkloadPillOptions({
+        milestone: [],
+        actor: [],
+        loanType: [],
+        loanPurpose: [],
+      });
+      return;
+    }
+    let cancelled = false;
+    const fetchOptions = async () => {
+      try {
+        const limit = 5000;
+        let offset = 0;
+        let total = 0;
+        const milestone = new Set<string>();
+        const actor = new Set<string>();
+        const loanType = new Set<string>();
+        const loanPurpose = new Set<string>();
+        do {
+          const params = new URLSearchParams();
+          params.set("tenant_id", selectedTenantId);
+          params.set("limit", String(limit));
+          params.set("offset", String(offset));
+          const response = await api.request<{
+            loans: Array<Record<string, unknown>>;
+            total: number;
+          }>(`/api/loans/detail-list?${params.toString()}`);
+          total = response.total ?? 0;
+          for (const row of response.loans ?? []) {
+            const milestoneValue = String(row.current_milestone ?? "").trim();
+            const actorValue = String(row[activeWorkloadActorColumn] ?? "").trim();
+            const loanTypeValue = String(row.loan_type ?? "").trim();
+            const loanPurposeValue = String(row.loan_purpose ?? "").trim();
+            if (milestoneValue) milestone.add(milestoneValue);
+            if (actorValue) actor.add(actorValue);
+            if (loanTypeValue) loanType.add(loanTypeValue);
+            if (loanPurposeValue) loanPurpose.add(loanPurposeValue);
+          }
+          offset += limit;
+          if (cancelled) return;
+        } while (offset < total);
+        if (cancelled) return;
+        const sortValues = (values: Set<string>) =>
+          [...values].sort((a, b) =>
+            a.localeCompare(b, undefined, {
+              sensitivity: "base",
+              numeric: true,
+            }),
+          );
+        setActiveWorkloadPillOptions({
+          milestone: sortValues(milestone),
+          actor: sortValues(actor),
+          loanType: sortValues(loanType),
+          loanPurpose: sortValues(loanPurpose),
+        });
+      } catch {
+        if (!cancelled) {
+          setActiveWorkloadPillOptions({
+            milestone: [],
+            actor: [],
+            loanType: [],
+            loanPurpose: [],
+          });
+        }
+      }
+    };
+    void fetchOptions();
+    return () => {
+      cancelled = true;
+    };
+  }, [sectionType, selectedTenantId, activeWorkloadActorColumn]);
 
   // Sync collapsed with prop
   useEffect(() => {
@@ -4707,6 +4927,421 @@ export function WidgetGroup({
                             </button>
                           </span>
                         )}
+                      </>
+                    )}
+                  {sectionType === "active-workload" &&
+                    (((filters.activeWorkloadSliceMilestones ?? []).length > 0) ||
+                      ((filters.activeWorkloadSliceDrilldown?.actorValues ?? []).length > 0) ||
+                      ((filters.activeWorkloadSliceDrilldown?.loanTypes ?? []).length > 0) ||
+                      ((filters.activeWorkloadSliceDrilldown?.loanPurposes ?? []).length > 0) ||
+                      Object.keys(
+                        normalizeFilterState(
+                          filters.activeWorkloadDetailColumnFilters ?? {},
+                        ),
+                      ).length > 0) && (
+                      <>
+                        {(() => {
+                          const listOrSelected = (label: string, values: string[]) =>
+                            `${label}: ${
+                              values.length <= 2 ? values.join(", ") : `${values.length} selected`
+                            }`;
+                          const detailLabel = (
+                            columnId: string,
+                            filter: ColumnFilterState[string] | undefined,
+                          ) => {
+                            if (filter?.kind === "text") {
+                              return listOrSelected(`Detail ${columnId}`, filter.selectedValues ?? []);
+                            }
+                            if (filter?.kind === "number") {
+                              if (filter.mode === "all") {
+                                return listOrSelected(`Detail ${columnId}`, filter.selectedValues ?? []);
+                              }
+                              if (filter.mode === "range") {
+                                return `Detail ${columnId}: ${filter.min ?? ""}-${filter.max ?? ""}`;
+                              }
+                              return `Detail ${columnId}: ${filter.mode === "min" ? ">=" : "<="} ${filter.value ?? ""}`;
+                            }
+                            if (filter?.kind === "date") {
+                              return `Detail ${columnId}: ${filter.shortcut || `${filter.from ?? ""} to ${filter.to ?? ""}`}`;
+                            }
+                            if (filter?.kind === "boolean") {
+                              return `Detail ${columnId}: ${filter.value}`;
+                            }
+                            return `Detail ${columnId}: active`;
+                          };
+                          return (
+                            <>
+                        {(filters.activeWorkloadSliceMilestones ?? []).length > 0 && (
+                          <Popover
+                            open={activeWorkloadPillPopover === "aw:milestone"}
+                            onOpenChange={(open) => {
+                              if (open) {
+                                setActiveWorkloadDraftMilestones([
+                                  ...(filters.activeWorkloadSliceMilestones ?? []),
+                                ]);
+                                setActiveWorkloadPillSearch((prev) => ({
+                                  ...prev,
+                                  "aw:milestone": "",
+                                }));
+                                setActiveWorkloadPillPopover("aw:milestone");
+                              } else {
+                                setActiveWorkloadPillPopover(null);
+                              }
+                            }}
+                          >
+                            <span className="inline-flex items-center gap-1 rounded-md bg-indigo-100 dark:bg-indigo-900/40 px-2 py-0.5 text-xs">
+                              <PopoverTrigger asChild>
+                                <button type="button" className="truncate text-left">
+                                  {listOrSelected("Milestone", filters.activeWorkloadSliceMilestones ?? [])}
+                                </button>
+                              </PopoverTrigger>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  updateFilters(groupId, { activeWorkloadSliceMilestones: [] });
+                                  setActiveWorkloadPillPopover(null);
+                                }}
+                                className="p-0.5 rounded hover:bg-indigo-200 dark:hover:bg-indigo-800"
+                                aria-label="Clear milestone slice filter"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </span>
+                            <PopoverContent align="start" className="w-[420px] p-3">
+                              <div className="mb-2 flex items-center justify-between gap-2">
+                                <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                                  Milestone
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => setActiveWorkloadPillPopover(null)}
+                                  >
+                                    Cancel
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    onClick={() => {
+                                      updateFilters(groupId, {
+                                        activeWorkloadSliceMilestones:
+                                          activeWorkloadDraftMilestones,
+                                      });
+                                      setActiveWorkloadPillPopover(null);
+                                    }}
+                                  >
+                                    Apply Filters
+                                  </Button>
+                                </div>
+                              </div>
+                              <Command shouldFilter={false}>
+                                <CommandInput
+                                  placeholder="Search Milestone"
+                                  value={activeWorkloadPillSearch["aw:milestone"] ?? ""}
+                                  onValueChange={(value) =>
+                                    setActiveWorkloadPillSearch((prev) => ({
+                                      ...prev,
+                                      "aw:milestone": value,
+                                    }))
+                                  }
+                                />
+                                <CommandList>
+                                  <CommandEmpty>No values found.</CommandEmpty>
+                                  {[...new Set([...(activeWorkloadPillOptions.milestone ?? []), ...(filters.activeWorkloadSliceMilestones ?? []), ...activeWorkloadDraftMilestones])]
+                                    .filter((v) =>
+                                      String(v)
+                                        .toLowerCase()
+                                        .includes(
+                                          (
+                                            activeWorkloadPillSearch["aw:milestone"] ?? ""
+                                          ).toLowerCase(),
+                                        ),
+                                    )
+                                    .map((value) => {
+                                      const isSelected =
+                                        activeWorkloadDraftMilestones.includes(value);
+                                      return (
+                                        <CommandItem
+                                          key={value}
+                                          onSelect={() =>
+                                            toggleStringDraftValue("milestone", value)
+                                          }
+                                          className={cn(
+                                            "cursor-pointer",
+                                            isSelected
+                                              ? "!bg-accent !text-accent-foreground"
+                                              : "",
+                                          )}
+                                        >
+                                          <span className="mr-2">
+                                            {isSelected ? "✓" : ""}
+                                          </span>
+                                          {value}
+                                        </CommandItem>
+                                      );
+                                    })}
+                                </CommandList>
+                              </Command>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="mt-2 w-full"
+                                onClick={() => setActiveWorkloadDraftMilestones([])}
+                              >
+                                Clear Selection
+                              </Button>
+                            </PopoverContent>
+                          </Popover>
+                        )}
+                        {(filters.activeWorkloadSliceDrilldown?.actorValues ?? []).length > 0 && (
+                          <Popover
+                            open={activeWorkloadPillPopover === "aw:actor"}
+                            onOpenChange={(open) => {
+                              if (open) {
+                                setActiveWorkloadDraftActorValues([
+                                  ...(filters.activeWorkloadSliceDrilldown
+                                    ?.actorValues ?? []),
+                                ]);
+                                setActiveWorkloadPillSearch((prev) => ({
+                                  ...prev,
+                                  "aw:actor": "",
+                                }));
+                                setActiveWorkloadPillPopover("aw:actor");
+                              } else {
+                                setActiveWorkloadPillPopover(null);
+                              }
+                            }}
+                          >
+                            <span className="inline-flex items-center gap-1 rounded-md bg-indigo-100 dark:bg-indigo-900/40 px-2 py-0.5 text-xs">
+                              <PopoverTrigger asChild>
+                                <button type="button" className="truncate text-left">
+                                  {listOrSelected("Actor", filters.activeWorkloadSliceDrilldown?.actorValues ?? [])}
+                                </button>
+                              </PopoverTrigger>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  updateFilters(groupId, {
+                                    activeWorkloadSliceDrilldown: {
+                                      actorValues: [],
+                                      loanTypes: [],
+                                      loanPurposes: [],
+                                    },
+                                  });
+                                  setActiveWorkloadPillPopover(null);
+                                }}
+                                className="p-0.5 rounded hover:bg-indigo-200 dark:hover:bg-indigo-800"
+                                aria-label="Clear actor drilldown filter"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </span>
+                            <PopoverContent align="start" className="w-[420px] p-3">
+                              <div className="mb-2 flex items-center justify-between gap-2">
+                                <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                                  Actor
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Button type="button" size="sm" variant="outline" onClick={() => setActiveWorkloadPillPopover(null)}>Cancel</Button>
+                                  <Button type="button" size="sm" onClick={() => { updateFilters(groupId, { activeWorkloadSliceDrilldown: { actorValues: activeWorkloadDraftActorValues, loanTypes: [], loanPurposes: [] } }); setActiveWorkloadPillPopover(null); }}>Apply Filters</Button>
+                                </div>
+                              </div>
+                              <Command shouldFilter={false}>
+                                <CommandInput placeholder="Search Actor" value={activeWorkloadPillSearch["aw:actor"] ?? ""} onValueChange={(value) => setActiveWorkloadPillSearch((prev) => ({ ...prev, "aw:actor": value }))} />
+                                <CommandList>
+                                  <CommandEmpty>No values found.</CommandEmpty>
+                                  {[...new Set([...(activeWorkloadPillOptions.actor ?? []), ...(filters.activeWorkloadSliceDrilldown?.actorValues ?? []), ...activeWorkloadDraftActorValues])].filter((v) => String(v).toLowerCase().includes((activeWorkloadPillSearch["aw:actor"] ?? "").toLowerCase())).map((value) => { const isSelected = activeWorkloadDraftActorValues.includes(value); return <CommandItem key={value} onSelect={() => toggleStringDraftValue("actor", value)} className={cn("cursor-pointer", isSelected ? "!bg-accent !text-accent-foreground" : "")}><span className="mr-2">{isSelected ? "✓" : ""}</span>{value}</CommandItem>; })}
+                                </CommandList>
+                              </Command>
+                              <Button type="button" size="sm" variant="ghost" className="mt-2 w-full" onClick={() => setActiveWorkloadDraftActorValues([])}>Clear Selection</Button>
+                            </PopoverContent>
+                          </Popover>
+                        )}
+                        {(filters.activeWorkloadSliceDrilldown?.loanTypes ?? []).length > 0 && (
+                          <Popover
+                            open={activeWorkloadPillPopover === "aw:loanType"}
+                            onOpenChange={(open) => {
+                              if (open) {
+                                setActiveWorkloadDraftLoanTypes([
+                                  ...(filters.activeWorkloadSliceDrilldown
+                                    ?.loanTypes ?? []),
+                                ]);
+                                setActiveWorkloadPillSearch((prev) => ({
+                                  ...prev,
+                                  "aw:loanType": "",
+                                }));
+                                setActiveWorkloadPillPopover("aw:loanType");
+                              } else {
+                                setActiveWorkloadPillPopover(null);
+                              }
+                            }}
+                          >
+                            <span className="inline-flex items-center gap-1 rounded-md bg-indigo-100 dark:bg-indigo-900/40 px-2 py-0.5 text-xs">
+                              <PopoverTrigger asChild>
+                                <button type="button" className="truncate text-left">
+                                  {listOrSelected("Loan Type", filters.activeWorkloadSliceDrilldown?.loanTypes ?? [])}
+                                </button>
+                              </PopoverTrigger>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  updateFilters(groupId, {
+                                    activeWorkloadSliceDrilldown: {
+                                      actorValues: [],
+                                      loanTypes: [],
+                                      loanPurposes: [],
+                                    },
+                                  });
+                                  setActiveWorkloadPillPopover(null);
+                                }}
+                                className="p-0.5 rounded hover:bg-indigo-200 dark:hover:bg-indigo-800"
+                                aria-label="Clear loan type drilldown filter"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </span>
+                            <PopoverContent align="start" className="w-[420px] p-3">
+                              <div className="mb-2 flex items-center justify-between gap-2">
+                                <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                                  Loan Type
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Button type="button" size="sm" variant="outline" onClick={() => setActiveWorkloadPillPopover(null)}>Cancel</Button>
+                                  <Button type="button" size="sm" onClick={() => { updateFilters(groupId, { activeWorkloadSliceDrilldown: { actorValues: [], loanTypes: activeWorkloadDraftLoanTypes, loanPurposes: [] } }); setActiveWorkloadPillPopover(null); }}>Apply Filters</Button>
+                                </div>
+                              </div>
+                              <Command shouldFilter={false}>
+                                <CommandInput placeholder="Search Loan Type" value={activeWorkloadPillSearch["aw:loanType"] ?? ""} onValueChange={(value) => setActiveWorkloadPillSearch((prev) => ({ ...prev, "aw:loanType": value }))} />
+                                <CommandList>
+                                  <CommandEmpty>No values found.</CommandEmpty>
+                                  {[...new Set([...(activeWorkloadPillOptions.loanType ?? []), ...(filters.activeWorkloadSliceDrilldown?.loanTypes ?? []), ...activeWorkloadDraftLoanTypes])].filter((v) => String(v).toLowerCase().includes((activeWorkloadPillSearch["aw:loanType"] ?? "").toLowerCase())).map((value) => { const isSelected = activeWorkloadDraftLoanTypes.includes(value); return <CommandItem key={value} onSelect={() => toggleStringDraftValue("loanType", value)} className={cn("cursor-pointer", isSelected ? "!bg-accent !text-accent-foreground" : "")}><span className="mr-2">{isSelected ? "✓" : ""}</span>{value}</CommandItem>; })}
+                                </CommandList>
+                              </Command>
+                              <Button type="button" size="sm" variant="ghost" className="mt-2 w-full" onClick={() => setActiveWorkloadDraftLoanTypes([])}>Clear Selection</Button>
+                            </PopoverContent>
+                          </Popover>
+                        )}
+                        {(filters.activeWorkloadSliceDrilldown?.loanPurposes ?? []).length > 0 && (
+                          <Popover
+                            open={activeWorkloadPillPopover === "aw:loanPurpose"}
+                            onOpenChange={(open) => {
+                              if (open) {
+                                setActiveWorkloadDraftLoanPurposes([
+                                  ...(filters.activeWorkloadSliceDrilldown
+                                    ?.loanPurposes ?? []),
+                                ]);
+                                setActiveWorkloadPillSearch((prev) => ({
+                                  ...prev,
+                                  "aw:loanPurpose": "",
+                                }));
+                                setActiveWorkloadPillPopover("aw:loanPurpose");
+                              } else {
+                                setActiveWorkloadPillPopover(null);
+                              }
+                            }}
+                          >
+                            <span className="inline-flex items-center gap-1 rounded-md bg-indigo-100 dark:bg-indigo-900/40 px-2 py-0.5 text-xs">
+                              <PopoverTrigger asChild>
+                                <button type="button" className="truncate text-left">
+                                  {listOrSelected("Loan Purpose", filters.activeWorkloadSliceDrilldown?.loanPurposes ?? [])}
+                                </button>
+                              </PopoverTrigger>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  updateFilters(groupId, {
+                                    activeWorkloadSliceDrilldown: {
+                                      actorValues: [],
+                                      loanTypes: [],
+                                      loanPurposes: [],
+                                    },
+                                  });
+                                  setActiveWorkloadPillPopover(null);
+                                }}
+                                className="p-0.5 rounded hover:bg-indigo-200 dark:hover:bg-indigo-800"
+                                aria-label="Clear loan purpose drilldown filter"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </span>
+                            <PopoverContent align="start" className="w-[420px] p-3">
+                              <div className="mb-2 flex items-center justify-between gap-2">
+                                <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                                  Loan Purpose
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Button type="button" size="sm" variant="outline" onClick={() => setActiveWorkloadPillPopover(null)}>Cancel</Button>
+                                  <Button type="button" size="sm" onClick={() => { updateFilters(groupId, { activeWorkloadSliceDrilldown: { actorValues: [], loanTypes: [], loanPurposes: activeWorkloadDraftLoanPurposes } }); setActiveWorkloadPillPopover(null); }}>Apply Filters</Button>
+                                </div>
+                              </div>
+                              <Command shouldFilter={false}>
+                                <CommandInput placeholder="Search Loan Purpose" value={activeWorkloadPillSearch["aw:loanPurpose"] ?? ""} onValueChange={(value) => setActiveWorkloadPillSearch((prev) => ({ ...prev, "aw:loanPurpose": value }))} />
+                                <CommandList>
+                                  <CommandEmpty>No values found.</CommandEmpty>
+                                  {[...new Set([...(activeWorkloadPillOptions.loanPurpose ?? []), ...(filters.activeWorkloadSliceDrilldown?.loanPurposes ?? []), ...activeWorkloadDraftLoanPurposes])].filter((v) => String(v).toLowerCase().includes((activeWorkloadPillSearch["aw:loanPurpose"] ?? "").toLowerCase())).map((value) => { const isSelected = activeWorkloadDraftLoanPurposes.includes(value); return <CommandItem key={value} onSelect={() => toggleStringDraftValue("loanPurpose", value)} className={cn("cursor-pointer", isSelected ? "!bg-accent !text-accent-foreground" : "")}><span className="mr-2">{isSelected ? "✓" : ""}</span>{value}</CommandItem>; })}
+                                </CommandList>
+                              </Command>
+                              <Button type="button" size="sm" variant="ghost" className="mt-2 w-full" onClick={() => setActiveWorkloadDraftLoanPurposes([])}>Clear Selection</Button>
+                            </PopoverContent>
+                          </Popover>
+                        )}
+                        {Object.entries(
+                          normalizeFilterState(
+                            filters.activeWorkloadDetailColumnFilters ?? {},
+                          ),
+                        ).map(([columnId, filter]) => (
+                          <Popover
+                            key={`aw-detail-${columnId}`}
+                            open={activeWorkloadPillPopover === `aw:detail:${columnId}`}
+                            onOpenChange={(open) =>
+                              setActiveWorkloadPillPopover(
+                                open ? `aw:detail:${columnId}` : null,
+                              )
+                            }
+                          >
+                            <span className="inline-flex items-center gap-1 rounded-md bg-indigo-100 dark:bg-indigo-900/40 px-2 py-0.5 text-xs">
+                              <PopoverTrigger asChild>
+                                <button type="button" className="truncate text-left">
+                                  {detailLabel(columnId, filter)}
+                                </button>
+                              </PopoverTrigger>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const next = {
+                                    ...(filters.activeWorkloadDetailColumnFilters ?? {}),
+                                  };
+                                  delete next[columnId];
+                                  updateFilters(groupId, {
+                                    activeWorkloadDetailColumnFilters: next,
+                                  });
+                                  setActiveWorkloadPillPopover(null);
+                                }}
+                                className="p-0.5 rounded hover:bg-indigo-200 dark:hover:bg-indigo-800"
+                                aria-label={`Clear active workload detail filter ${columnId}`}
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </span>
+                            <PopoverContent align="start" className="w-[360px] p-3 text-xs">
+                              <div className="font-semibold mb-1">{columnId}</div>
+                              <div className="text-slate-600 dark:text-slate-300">
+                                {detailLabel(columnId, filter)}
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                        ))}
+                            </>
+                          );
+                        })()}
                       </>
                     )}
                   {sectionType === "production-summary-by-week" &&

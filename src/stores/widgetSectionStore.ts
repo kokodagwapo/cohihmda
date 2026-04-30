@@ -35,7 +35,8 @@ export type SectionType =
   | 'lock-stratification'
   | 'loan-complexity'
   | 'estimated-closings-risk'
-  | 'sales-company-overview';
+  | 'sales-company-overview'
+  | 'active-workload';
 
 /**
  * A dynamic (user-added) filter dimension.
@@ -205,6 +206,26 @@ export interface SectionFilters {
   salesCompanyOverviewLoanTypes?: string[];
   /** Sales Company Overview: selected aging buckets (multi-select) */
   salesCompanyOverviewAgingBuckets?: SalesCompanyOverviewAgingBucket[];
+  /** Active Workload: actor dimension */
+  activeWorkloadActor?: string;
+  /** Active Workload: average vs median */
+  activeWorkloadAggregation?: 'average' | 'median';
+  /** Active Workload: calendar vs business days */
+  activeWorkloadDayCalcType?: 'calendar_days' | 'business_days';
+  /** Active Workload: milestone chart slice filter */
+  activeWorkloadSliceMilestones?: string[];
+  /** Active Workload: drilldown slice filter */
+  activeWorkloadSliceDrilldown?: {
+    actorValues: string[];
+    loanTypes: string[];
+    loanPurposes: string[];
+  };
+  /** Active Workload: detail table column filters */
+  activeWorkloadDetailColumnFilters?: ColumnFilterState;
+  /** Active Workload: detail table sort */
+  activeWorkloadDetailSort?: { key: string; direction: 'asc' | 'desc' };
+  /** Active Workload: show/hide detail header filter icons */
+  activeWorkloadShowDetailColumnFilters?: boolean;
   /** User-added dynamic filters (column = value conditions) */
   dynamicFilters?: DynamicFilterEntry[];
 }
@@ -404,6 +425,22 @@ export const useWidgetSectionStore = create<WidgetSectionState>((set, get) => ({
           ...base,
           salesCompanyOverviewLoanTypes: [],
           salesCompanyOverviewAgingBuckets: [],
+        };
+      } else if (sectionType === 'active-workload') {
+        filters = {
+          ...base,
+          activeWorkloadActor: 'Processor',
+          activeWorkloadAggregation: 'average',
+          activeWorkloadDayCalcType: 'calendar_days',
+          activeWorkloadSliceMilestones: [],
+          activeWorkloadSliceDrilldown: {
+            actorValues: [],
+            loanTypes: [],
+            loanPurposes: [],
+          },
+          activeWorkloadDetailColumnFilters: {},
+          activeWorkloadDetailSort: { key: 'applicationDate', direction: 'asc' },
+          activeWorkloadShowDetailColumnFilters: false,
         };
       } else if (sectionType === 'production-summary-by-week') {
         filters = {

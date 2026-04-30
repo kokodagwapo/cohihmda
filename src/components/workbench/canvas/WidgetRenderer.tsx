@@ -773,6 +773,7 @@ const SECTION_ACCENT: Record<string, string> = {
   'high-performers': 'border-l-amber-500',
   'pricing-dashboard': 'border-l-emerald-500',
   'pipeline-analysis': 'border-l-sky-500',
+  'active-workload': 'border-l-indigo-500',
 };
 
 /** Renders a registry-based widget using the widget architecture.

@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -18,6 +18,7 @@ import {
   evaluateLoanDetailFilters,
   isDateFilterBlankOnlyShortcut,
   isFilterActive,
+  normalizeFilterState,
   type ColumnFilter,
   type ColumnFilterState,
   type DateColumnFilter,
@@ -415,6 +416,9 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
     key: "activeFiles",
     direction: "desc",
   });
+  const [renderStage, setRenderStage] = useState<"kpi" | "charts" | "detail">("kpi");
+  const [detailRowsRenderLimit, setDetailRowsRenderLimit] = useState(250);
+  const detailTableScrollRef = useRef<HTMLDivElement | null>(null);
 
   const isTpoTenant = (selectedChannel ?? "").toLowerCase().includes("tpo");
   const storageKey = useMemo(
@@ -494,7 +498,7 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
           params.set("offset", String(offset));
           if (selectedChannel && selectedChannel !== "All") params.set("channel_group", selectedChannel);
           const response = await api.request<{ loans: Array<Record<string, unknown>>; total: number }>(
-            `/api/loans/detail-list?${params.toString()}`,
+            `/api/loans/active-detail-list?${params.toString()}`,
           );
           total = response.total ?? 0;
           all.push(...(response.loans ?? []).map(normalizeLoan).filter((row): row is LoanRecord => row != null));
@@ -572,6 +576,70 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
     return { kind: "boolean", value: filter.value };
   };
 
+  const arraysEqual = (a: string[], b: string[]) =>
+    a.length === b.length && a.every((value, index) => value === b[index]);
+  const drilldownEqual = (a: DrilldownSlice, b: DrilldownSlice) =>
+    arraysEqual(a.actorValues, b.actorValues) &&
+    arraysEqual(a.loanTypes, b.loanTypes) &&
+    arraysEqual(a.loanPurposes, b.loanPurposes);
+  const extractSharedValuesFromFilter = (filter: ColumnFilter | undefined): string[] => {
+    if (!filter || !isFilterActive(filter)) return [];
+    if (filter.kind === "text") {
+      return filter.selectedValues.filter((v) => v !== EMPTY_FILTER_TOKEN);
+    }
+    if (filter.kind === "number" && filter.mode === "all") {
+      return [...filter.selectedValues];
+    }
+    return [];
+  };
+
+  useEffect(() => {
+    const actorColumnId = String(ACTOR_TO_FIELD[actor]);
+    const normalized = normalizeFilterState(appliedDetailFilters);
+    const nextDetail: ColumnFilterState = { ...normalized };
+    let detailChanged = false;
+    let nextMilestones: string[] | null = null;
+    let nextDrilldown: DrilldownSlice | null = null;
+
+    const milestoneValues = extractSharedValuesFromFilter(nextDetail.currentMilestone);
+    if (milestoneValues.length > 0) {
+      nextMilestones = milestoneValues;
+      delete nextDetail.currentMilestone;
+      detailChanged = true;
+    }
+
+    const actorValues = extractSharedValuesFromFilter(nextDetail[actorColumnId]);
+    if (actorValues.length > 0) {
+      nextDrilldown = { actorValues, loanTypes: [], loanPurposes: [] };
+      delete nextDetail[actorColumnId];
+      detailChanged = true;
+    } else {
+      const loanTypeValues = extractSharedValuesFromFilter(nextDetail.loanType);
+      if (loanTypeValues.length > 0) {
+        nextDrilldown = { actorValues: [], loanTypes: loanTypeValues, loanPurposes: [] };
+        delete nextDetail.loanType;
+        detailChanged = true;
+      } else {
+        const loanPurposeValues = extractSharedValuesFromFilter(nextDetail.loanPurpose);
+        if (loanPurposeValues.length > 0) {
+          nextDrilldown = { actorValues: [], loanTypes: [], loanPurposes: loanPurposeValues };
+          delete nextDetail.loanPurpose;
+          detailChanged = true;
+        }
+      }
+    }
+
+    if (nextMilestones && !arraysEqual(nextMilestones, sliceMilestones)) {
+      setSliceMilestones(nextMilestones);
+    }
+    if (nextDrilldown && !drilldownEqual(nextDrilldown, sliceDrilldown)) {
+      setSliceDrilldown(nextDrilldown);
+    }
+    if (detailChanged) {
+      setAppliedDetailFilters(nextDetail);
+    }
+  }, [actor, appliedDetailFilters, sliceMilestones, sliceDrilldown]);
+
   const toggleMilestoneSlice = (milestone: string) => {
     if (!milestone) return;
     setSliceMilestones((prev) => (prev.includes(milestone) ? prev.filter((v) => v !== milestone) : [...prev, milestone]));
@@ -611,18 +679,39 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
 
   const milestoneTick = (props: { x?: number; y?: number; payload?: { value?: string } }) => {
     const value = String(props.payload?.value ?? "");
+    const maxCharsPerLine = 28;
+    const words = value.split(/\s+/).filter(Boolean);
+    const lines: string[] = [];
+    let currentLine = "";
+    for (const word of words) {
+      const candidate = currentLine ? `${currentLine} ${word}` : word;
+      if (candidate.length <= maxCharsPerLine) {
+        currentLine = candidate;
+      } else if (!currentLine) {
+        lines.push(word.slice(0, maxCharsPerLine));
+      } else {
+        lines.push(currentLine);
+        currentLine = word;
+      }
+    }
+    if (currentLine) lines.push(currentLine);
+    const safeLines = lines.length > 0 ? lines : [value];
     return (
       <g transform={`translate(${props.x ?? 0},${props.y ?? 0})`}>
         <text
           x={-8}
           y={0}
-          dy={4}
+          dy={safeLines.length > 1 ? -(safeLines.length - 1) * 6 : 4}
           textAnchor="end"
           className="fill-slate-700 dark:fill-slate-300"
           style={{ cursor: "pointer" }}
           onClick={() => toggleMilestoneSlice(value)}
         >
-          {value}
+          {safeLines.map((line, index) => (
+            <tspan key={`${line}-${index}`} x={-8} dy={index === 0 ? 0 : 12}>
+              {line}
+            </tspan>
+          ))}
         </text>
       </g>
     );
@@ -662,6 +751,16 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
     [loansAfterSliceFilters, appliedDetailFilters],
   );
 
+  useEffect(() => {
+    setRenderStage("kpi");
+    const frameId = window.requestAnimationFrame(() => setRenderStage("charts"));
+    const timeoutId = window.setTimeout(() => setRenderStage("detail"), 80);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.clearTimeout(timeoutId);
+    };
+  }, [filteredActiveLoans, detailSort, actor, aggregation, dayCalcType]);
+
   const aggregateDays = (days: number[]) => {
     if (days.length === 0) return 0;
     if (aggregation === "median") return median(days);
@@ -677,6 +776,7 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
   }, [filteredActiveLoans, aggregation]);
 
   const drillRows = useMemo<DrillRow[]>(() => {
+    if (renderStage === "kpi") return [];
     const actorField = ACTOR_TO_FIELD[actor];
     const rows: DrillRow[] = [];
     const group = new Map<string, typeof filteredActiveLoans>();
@@ -737,7 +837,7 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
       }
     }
     return rows;
-  }, [filteredActiveLoans, actor, aggregation]);
+  }, [filteredActiveLoans, actor, aggregation, renderStage]);
 
   const drillRowsByParent = useMemo(() => {
     const map = new Map<string | null, DrillRow[]>();
@@ -790,6 +890,7 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
   }, [drillRowsByParent, expanded]);
 
   const milestoneData = useMemo(() => {
+    if (renderStage === "kpi") return [];
     const byMilestone = new Map<string, number[]>();
     for (const loan of filteredActiveLoans) {
       const list = byMilestone.get(loan.currentMilestone) ?? [];
@@ -801,9 +902,14 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
       activeFiles: days.length,
       daysActive: aggregateDays(days),
     }));
-  }, [filteredActiveLoans, aggregation]);
+  }, [filteredActiveLoans, aggregation, renderStage]);
+  const milestoneAxisWidth = useMemo(() => {
+    const longest = milestoneData.reduce((max, row) => Math.max(max, row.name.length), 0);
+    return Math.min(360, Math.max(140, longest * 8 + 28));
+  }, [milestoneData]);
 
   const sortedDetailRows = useMemo(() => {
+    if (renderStage !== "detail") return [];
     const dir = detailSort.direction === "asc" ? 1 : -1;
     return [...filteredActiveLoans].sort((a, b) => {
       const av = detailSort.key === "daysActive" ? a.daysActive : a[detailSort.key];
@@ -813,7 +919,30 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
       if (!Number.isNaN(an) && !Number.isNaN(bn)) return (an - bn) * dir;
       return String(av ?? "").localeCompare(String(bv ?? ""), undefined, { sensitivity: "base" }) * dir;
     });
-  }, [filteredActiveLoans, detailSort]);
+  }, [filteredActiveLoans, detailSort, renderStage]);
+  const visibleDetailRows = useMemo(
+    () => sortedDetailRows.slice(0, detailRowsRenderLimit),
+    [sortedDetailRows, detailRowsRenderLimit],
+  );
+
+  useEffect(() => {
+    setDetailRowsRenderLimit(250);
+  }, [sortedDetailRows]);
+
+  const loadMoreDetailRows = useCallback(() => {
+    setDetailRowsRenderLimit((prev) =>
+      Math.min(sortedDetailRows.length, prev + 250),
+    );
+  }, [sortedDetailRows.length]);
+
+  const handleDetailTableScroll = useCallback(() => {
+    const el = detailTableScrollRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 180;
+    if (nearBottom && detailRowsRenderLimit < sortedDetailRows.length) {
+      loadMoreDetailRows();
+    }
+  }, [detailRowsRenderLimit, sortedDetailRows.length, loadMoreDetailRows]);
 
   const toggleSort = (key: keyof LoanRecord | "daysActive") => {
     setDetailSort((prev) => {
@@ -894,16 +1023,57 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
   );
 
   const detailFilterOptionsByColumn = useMemo(() => {
+    const detailFilterUiActive =
+      openDetailFilterColumnId != null ||
+      (typeof pillEditor === "string" && pillEditor.startsWith("detail:"));
+    if (!detailFilterUiActive) return {};
     const map: Record<string, string[]> = {};
+    const actorFieldKey = String(ACTOR_TO_FIELD[actor]);
+    const actorField = ACTOR_TO_FIELD[actor];
+
+    const matchesSlices = (
+      loan: LoanRecord & { daysActive?: number },
+      ignored: "milestone" | "actor" | "loanType" | "loanPurpose" | null,
+    ) => {
+      if (ignored !== "milestone" && sliceMilestones.length > 0 && !sliceMilestones.includes(loan.currentMilestone)) {
+        return false;
+      }
+      const actorValue = String(loan[actorField] ?? "Unknown");
+      if (ignored !== "actor" && sliceDrilldown.actorValues.length > 0 && !sliceDrilldown.actorValues.includes(actorValue)) {
+        return false;
+      }
+      if (ignored !== "loanType" && sliceDrilldown.loanTypes.length > 0 && !sliceDrilldown.loanTypes.includes(loan.loanType)) {
+        return false;
+      }
+      if (ignored !== "loanPurpose" && sliceDrilldown.loanPurposes.length > 0 && !sliceDrilldown.loanPurposes.includes(loan.loanPurpose)) {
+        return false;
+      }
+      return true;
+    };
+
     for (const col of detailColumns) {
+      const colKey = String(col.key);
+      const ignored =
+        colKey === "currentMilestone"
+          ? "milestone"
+          : colKey === actorFieldKey
+            ? "actor"
+            : colKey === "loanType"
+              ? "loanType"
+              : colKey === "loanPurpose"
+                ? "loanPurpose"
+                : null;
       const values = new Set<string>();
-      for (const loan of loansAfterSliceFilters) {
+      const optionSource = ignored
+        ? activeLoans.filter((loan) => matchesSlices(loan, ignored))
+        : loansAfterSliceFilters;
+      for (const loan of optionSource) {
         values.add(getCellDisplayValue(loan, col.key));
       }
       map[col.key] = [...values].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }));
     }
     return map;
-  }, [detailColumns, loansAfterSliceFilters, getCellDisplayValue]);
+  }, [detailColumns, activeLoans, loansAfterSliceFilters, getCellDisplayValue, actor, sliceMilestones, sliceDrilldown, openDetailFilterColumnId, pillEditor]);
 
   const toggleDraftValue = (columnId: string, value: string, kind: "text" | "number") => {
     setDraftDetailFilters((prev) => {
@@ -942,6 +1112,29 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
     });
   };
 
+  const getLinkedColumnFilter = (columnId: string): ColumnFilter | undefined => {
+    if (columnId === "currentMilestone" && sliceMilestones.length > 0) {
+      return { kind: "text", selectedValues: [...sliceMilestones] };
+    }
+    const actorColumnId = String(ACTOR_TO_FIELD[actor]);
+    if (columnId === actorColumnId && sliceDrilldown.actorValues.length > 0) {
+      return { kind: "text", selectedValues: [...sliceDrilldown.actorValues] };
+    }
+    if (columnId === "loanType" && sliceDrilldown.loanTypes.length > 0) {
+      return { kind: "text", selectedValues: [...sliceDrilldown.loanTypes] };
+    }
+    if (columnId === "loanPurpose" && sliceDrilldown.loanPurposes.length > 0) {
+      return { kind: "text", selectedValues: [...sliceDrilldown.loanPurposes] };
+    }
+    return undefined;
+  };
+
+  const getEffectiveColumnFilter = (columnId: string): ColumnFilter | undefined =>
+    cloneFilter(appliedDetailFilters[columnId]) ?? getLinkedColumnFilter(columnId);
+
+  const summarizeSelectedValues = (label: string, values: string[], listWhenLessThan: number): string =>
+    `${label}: ${values.length < listWhenLessThan ? values.join(", ") : `${values.length} selected`}`;
+
   const summarizeFilter = (columnId: string, filter: ColumnFilter): string => {
     const label = detailColumns.find((c) => String(c.key) === columnId)?.label ?? columnId;
     if (filter.kind === "date") {
@@ -949,11 +1142,11 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
       return `${label}: ${filter.shortcut || `${filter.from || ""} to ${filter.to || ""}`}`;
     }
     if (filter.kind === "number") {
-      if (filter.mode === "all") return `${label}: ${filter.selectedValues.length} selected`;
+      if (filter.mode === "all") return summarizeSelectedValues(label, filter.selectedValues, 5);
       if (filter.mode === "range") return `${label}: ${filter.min || ""} - ${filter.max || ""}`;
       return `${label}: ${filter.mode === "min" ? ">=" : "<="} ${filter.value || ""}`;
     }
-    if (filter.kind === "text") return `${label}: ${filter.selectedValues.length} selected`;
+    if (filter.kind === "text") return summarizeSelectedValues(label, filter.selectedValues, 5);
     return `${label}: ${filter.value}`;
   };
 
@@ -996,9 +1189,7 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
   const milestonePillLabel =
     sliceMilestones.length === 0
       ? ""
-      : sliceMilestones.length === 1
-        ? `Milestone: ${sliceMilestones[0]}`
-        : `Milestone: ${sliceMilestones.length} selected`;
+      : summarizeSelectedValues("Milestone", sliceMilestones, 5);
 
   return (
     <div className="space-y-4">
@@ -1132,7 +1323,9 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
                 }}
                 trigger={
                   <button type="button" className={pillBadgeTriggerClass}>
-                    <span className="truncate">{`${actor}: ${sliceDrilldown.actorValues[0]}`}</span>
+                    <span className="truncate">
+                      {summarizeSelectedValues(actor, sliceDrilldown.actorValues, 5)}
+                    </span>
                   </button>
                 }
                 options={drillActorOptions}
@@ -1175,7 +1368,9 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
                 }}
                 trigger={
                   <button type="button" className={pillBadgeTriggerClass}>
-                    <span className="truncate">{`Loan Type: ${sliceDrilldown.loanTypes[0]}`}</span>
+                    <span className="truncate">
+                      {summarizeSelectedValues("Loan Type", sliceDrilldown.loanTypes, 5)}
+                    </span>
                   </button>
                 }
                 options={drillTypeOptions}
@@ -1218,7 +1413,9 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
                 }}
                 trigger={
                   <button type="button" className={pillBadgeTriggerClass}>
-                    <span className="truncate">{`Loan Purpose: ${sliceDrilldown.loanPurposes[0]}`}</span>
+                    <span className="truncate">
+                      {summarizeSelectedValues("Loan Purpose", sliceDrilldown.loanPurposes, 5)}
+                    </span>
                   </button>
                 }
                 options={drillPurposeOptions}
@@ -1546,6 +1743,9 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
         <Card>
           <CardHeader><CardTitle className="text-sm">Active Loans by Current Milestone</CardTitle></CardHeader>
           <CardContent className="h-[720px]">
+            {renderStage === "kpi" && (
+              <div className="pb-2 text-xs text-slate-500 dark:text-slate-400">Loading chart...</div>
+            )}
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart
                 data={milestoneData}
@@ -1557,7 +1757,7 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
               >
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis type="number" />
-                <YAxis type="category" dataKey="name" width={140} interval={0} tick={milestoneTick} />
+                <YAxis type="category" dataKey="name" width={milestoneAxisWidth} interval={0} tick={milestoneTick} />
                 <Tooltip />
                 <ReferenceLine
                   x={kpis.daysActive}
@@ -1585,6 +1785,16 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
                 </Bar>
               </ComposedChart>
             </ResponsiveContainer>
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-4 text-xs text-slate-600 dark:text-slate-300">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-full bg-[#3b82f6]" />
+                Loan Count
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-full bg-[#e11d48]" />
+                {aggregation === "average" ? "Average Days Active" : "Median Days Active"}
+              </span>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -1618,7 +1828,11 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="relative max-h-[520px] overflow-auto border-t border-slate-200 dark:border-slate-700">
+          <div
+            ref={detailTableScrollRef}
+            onScroll={handleDetailTableScroll}
+            className="relative max-h-[520px] overflow-auto border-t border-slate-200 dark:border-slate-700"
+          >
             <table className="w-full border-separate border-spacing-0 text-sm">
               <thead className="sticky top-0 z-40 bg-slate-50 dark:bg-slate-800">
                 <tr className="bg-slate-50 dark:bg-slate-800">
@@ -1641,7 +1855,7 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
                                 setOpenDetailFilterColumnId(String(column.key));
                                 setDraftDetailFilters((prev) => ({
                                   ...prev,
-                                  [String(column.key)]: cloneFilter(appliedDetailFilters[String(column.key)]),
+                                  [String(column.key)]: getEffectiveColumnFilter(String(column.key)),
                                 }));
                               } else {
                                 setOpenDetailFilterColumnId((cur) => (cur === String(column.key) ? null : cur));
@@ -1652,7 +1866,7 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
                               <button
                                 type="button"
                                 className={`rounded p-1 ${
-                                  isFilterActive(appliedDetailFilters[String(column.key)])
+                                  isFilterActive(getEffectiveColumnFilter(String(column.key)))
                                     ? "text-emerald-600 dark:text-emerald-400"
                                     : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100"
                                 }`}
@@ -1759,12 +1973,12 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
                 </tr>
               </thead>
               <tbody>
-                {sortedDetailRows.map((loan) => (
+                {visibleDetailRows.map((loan) => (
                   <tr key={loan.loanNumber} className="border-b border-slate-200 transition-colors hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-700/40">
                     {detailColumns.map((column) => {
                       const display = getCellDisplayValue(loan, column.key);
                       const columnId = String(column.key);
-                      const isFiltered = isFilterActive(appliedDetailFilters[columnId]);
+                      const isFiltered = isFilterActive(getEffectiveColumnFilter(columnId));
                       return (
                         <td key={String(column.key)} className="p-4 align-middle">
                           <button
@@ -1812,6 +2026,12 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
                 ))}
               </tbody>
             </table>
+            {visibleDetailRows.length < sortedDetailRows.length && (
+              <div className="px-4 py-2 text-center text-xs text-slate-500 dark:text-slate-400">
+                Showing {visibleDetailRows.length.toLocaleString()} of{" "}
+                {sortedDetailRows.length.toLocaleString()} loans
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

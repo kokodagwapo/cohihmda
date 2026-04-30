@@ -837,6 +837,11 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
       loading: salesCompanyOverview.loading,
       error: null,
     },
+    'active-workload': {
+      data: { ready: true },
+      loading: false,
+      error: null,
+    },
   }), [
     companyScorecard.data, companyScorecard.loading, companyScorecard.error,
     creditRisk.data, creditRisk.loading, creditRisk.error,
