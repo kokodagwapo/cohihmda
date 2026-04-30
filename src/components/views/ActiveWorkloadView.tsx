@@ -1,18 +1,37 @@
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Download, Filter, X } from "lucide-react";
 import { Bar, CartesianGrid, ComposedChart, LabelList, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import {
+  DATE_FILTER_BLANK_LABEL,
+  DATE_FILTER_BLANK_SHORTCUT,
+  EMPTY_FILTER_TOKEN,
+  evaluateLoanDetailFilters,
+  isDateFilterBlankOnlyShortcut,
+  isFilterActive,
+  type ColumnFilter,
+  type ColumnFilterState,
+  type DateColumnFilter,
+  type LoanDetailFilterKind,
+  type NumberColumnFilter,
+  type NumericFilterMode,
+  type TextColumnFilter,
+} from "@/utils/loanDetailFilters";
+import { computePresetDateRange, type PeriodPreset } from "@/components/ui/DatePeriodPicker";
 
 type AggregationType = "average" | "median";
 type DayCalcType = "calendar_days" | "business_days";
 type SortDirection = "asc" | "desc";
+type DrillSortKey = "label" | "activeFiles" | "daysActive";
 
 interface ActiveWorkloadViewProps {
   selectedTenantId?: string | null;
@@ -73,7 +92,6 @@ type DrillRow = {
   daysActive: number;
 };
 
-type DetailFilterState = Record<string, string[]>;
 type DrilldownSlice = {
   actorValues: string[];
   loanTypes: string[];
@@ -125,6 +143,7 @@ const DATE_COLUMN_KEYS = new Set([
   "investorLockDate",
   "lockExpirationDate",
 ]);
+const NUMERIC_COLUMN_KEYS = new Set(["daysActive"]);
 
 const toCsvCell = (value: unknown) => {
   const text = value == null ? "" : String(value);
@@ -379,17 +398,22 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
   const [showDetailColumnFilters, setShowDetailColumnFilters] = useState(false);
   const [openDetailFilterColumnId, setOpenDetailFilterColumnId] = useState<string | null>(null);
   const [pillEditor, setPillEditor] = useState<PillEditorKind>(null);
-  const [appliedDetailFilters, setAppliedDetailFilters] = useState<DetailFilterState>({});
-  const [draftDetailFilters, setDraftDetailFilters] = useState<DetailFilterState>({});
+  const [appliedDetailFilters, setAppliedDetailFilters] = useState<ColumnFilterState>({});
+  const [draftDetailFilters, setDraftDetailFilters] = useState<ColumnFilterState>({});
   const [draftMilestoneSlice, setDraftMilestoneSlice] = useState<string[]>([]);
   const [draftDrilldownSlice, setDraftDrilldownSlice] = useState<DrilldownSlice>(emptyDrilldownSlice());
-  const [draftDetailPillValues, setDraftDetailPillValues] = useState<string[]>([]);
+  const [filterSearchByColumn, setFilterSearchByColumn] = useState<Record<string, string>>({});
   const [sourceRows, setSourceRows] = useState<LoanRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const suppressNextChartClickRef = useRef(false);
   const [detailSort, setDetailSort] = useState<{ key: keyof LoanRecord | "daysActive"; direction: SortDirection }>({
     key: "applicationDate",
     direction: "asc",
+  });
+  const [drillSort, setDrillSort] = useState<{ key: DrillSortKey; direction: SortDirection }>({
+    key: "activeFiles",
+    direction: "desc",
   });
 
   const isTpoTenant = (selectedChannel ?? "").toLowerCase().includes("tpo");
@@ -408,7 +432,7 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
         dayCalcType?: DayCalcType;
         sliceMilestones?: string[];
         sliceDrilldown?: DrilldownSlice;
-        appliedDetailFilters?: DetailFilterState;
+        appliedDetailFilters?: ColumnFilterState;
         showDetailColumnFilters?: boolean;
         detailSort?: { key: keyof LoanRecord | "daysActive"; direction: SortDirection };
       };
@@ -520,9 +544,88 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
     [],
   );
 
+  const getFilterKindForColumn = (key: keyof LoanRecord | "daysActive"): LoanDetailFilterKind => {
+    if (NUMERIC_COLUMN_KEYS.has(String(key))) return "number";
+    if (DATE_COLUMN_KEYS.has(String(key))) return "date";
+    return "text";
+  };
+
+  const getFilterRawValue = (loan: LoanRecord & { daysActive?: number }, key: keyof LoanRecord | "daysActive"): unknown => {
+    if (key === "daysActive") return loan.daysActive ?? 0;
+    return loan[key];
+  };
+
+  const cloneFilter = (filter: ColumnFilter | undefined): ColumnFilter | undefined => {
+    if (!filter) return undefined;
+    if (filter.kind === "text") return { kind: "text", selectedValues: [...filter.selectedValues] };
+    if (filter.kind === "number") {
+      return {
+        kind: "number",
+        mode: filter.mode,
+        selectedValues: [...filter.selectedValues],
+        min: filter.min,
+        max: filter.max,
+        value: filter.value,
+      };
+    }
+    if (filter.kind === "date") return { kind: "date", from: filter.from, to: filter.to, shortcut: filter.shortcut };
+    return { kind: "boolean", value: filter.value };
+  };
+
   const toggleMilestoneSlice = (milestone: string) => {
     if (!milestone) return;
     setSliceMilestones((prev) => (prev.includes(milestone) ? prev.filter((v) => v !== milestone) : [...prev, milestone]));
+  };
+
+  const handleMilestoneChartClick = (state: unknown) => {
+    if (suppressNextChartClickRef.current) {
+      suppressNextChartClickRef.current = false;
+      return;
+    }
+    const activeLabel =
+      typeof state === "object" && state != null && "activeLabel" in state
+        ? String((state as { activeLabel?: string }).activeLabel ?? "")
+        : "";
+    if (activeLabel) toggleMilestoneSlice(activeLabel);
+  };
+
+  const handleMilestoneBarClick = (data: unknown, index?: number) => {
+    suppressNextChartClickRef.current = true;
+    const fromPayload =
+      typeof data === "object" && data != null
+        ? String(
+            (data as { payload?: { name?: string }; name?: string }).payload?.name ??
+              (data as { payload?: { name?: string }; name?: string }).name ??
+              "",
+          )
+        : "";
+    if (fromPayload) {
+      toggleMilestoneSlice(fromPayload);
+      return;
+    }
+    if (typeof index === "number") {
+      const row = milestoneData[index];
+      if (row?.name) toggleMilestoneSlice(row.name);
+    }
+  };
+
+  const milestoneTick = (props: { x?: number; y?: number; payload?: { value?: string } }) => {
+    const value = String(props.payload?.value ?? "");
+    return (
+      <g transform={`translate(${props.x ?? 0},${props.y ?? 0})`}>
+        <text
+          x={-8}
+          y={0}
+          dy={4}
+          textAnchor="end"
+          className="fill-slate-700 dark:fill-slate-300"
+          style={{ cursor: "pointer" }}
+          onClick={() => toggleMilestoneSlice(value)}
+        >
+          {value}
+        </text>
+      </g>
+    );
   };
 
   const toggleDrilldownSlice = (row: DrillRow) => {
@@ -554,16 +657,10 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
     });
   }, [activeLoans, sliceMilestones, sliceDrilldown, actor]);
 
-  const filteredActiveLoans = useMemo(() => {
-    return loansAfterSliceFilters.filter((loan) => {
-      for (const [key, selected] of Object.entries(appliedDetailFilters)) {
-        if (!selected.length) continue;
-        const token = getCellDisplayValue(loan, key as keyof LoanRecord | "daysActive");
-        if (!selected.includes(token)) return false;
-      }
-      return true;
-    });
-  }, [loansAfterSliceFilters, appliedDetailFilters, getCellDisplayValue]);
+  const filteredActiveLoans = useMemo(
+    () => evaluateLoanDetailFilters(loansAfterSliceFilters, appliedDetailFilters, (loan, columnId) => getFilterRawValue(loan, columnId as keyof LoanRecord | "daysActive")),
+    [loansAfterSliceFilters, appliedDetailFilters],
+  );
 
   const aggregateDays = (days: number[]) => {
     if (days.length === 0) return 0;
@@ -649,18 +746,35 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
       list.push(row);
       map.set(row.parentId, list);
     }
-    // Keep deterministic ordering by active files within each sibling group.
+    // Keep deterministic ordering within each sibling group.
+    const sortDirection = drillSort.direction === "asc" ? 1 : -1;
     for (const [parentId, siblings] of map.entries()) {
       map.set(
         parentId,
         [...siblings].sort((a, b) => {
-          if (b.activeFiles !== a.activeFiles) return b.activeFiles - a.activeFiles;
+          if (drillSort.key === "label") {
+            const cmp = a.label.localeCompare(b.label, undefined, { sensitivity: "base", numeric: true });
+            if (cmp !== 0) return cmp * sortDirection;
+            if (b.activeFiles !== a.activeFiles) return b.activeFiles - a.activeFiles;
+            return a.daysActive - b.daysActive;
+          }
+          if (drillSort.key === "activeFiles") {
+            const cmp = (a.activeFiles - b.activeFiles) * sortDirection;
+            if (cmp !== 0) return cmp;
+            const labelCmp = a.label.localeCompare(b.label, undefined, { sensitivity: "base", numeric: true });
+            if (labelCmp !== 0) return labelCmp;
+            return a.daysActive - b.daysActive;
+          }
+          const cmp = (a.daysActive - b.daysActive) * sortDirection;
+          if (cmp !== 0) return cmp;
+          const labelCmp = a.label.localeCompare(b.label, undefined, { sensitivity: "base", numeric: true });
+          if (labelCmp !== 0) return labelCmp;
           return a.label.localeCompare(b.label, undefined, { sensitivity: "base" });
         }),
       );
     }
     return map;
-  }, [drillRows]);
+  }, [drillRows, drillSort]);
 
   const visibleDrillRows = useMemo(() => {
     const out: DrillRow[] = [];
@@ -713,6 +827,20 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
   const SortIcon = ({ columnKey }: { columnKey: keyof LoanRecord | "daysActive" }) => {
     if (detailSort.key !== columnKey) return <ArrowUpDown className="h-3.5 w-3.5 opacity-40" />;
     return detailSort.direction === "asc" ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />;
+  };
+
+  const toggleDrillSort = (key: DrillSortKey) => {
+    setDrillSort((prev) => {
+      if (prev.key === key) {
+        return { key, direction: prev.direction === "asc" ? "desc" : "asc" };
+      }
+      return { key, direction: key === "label" ? "asc" : "desc" };
+    });
+  };
+
+  const DrillSortIcon = ({ columnKey }: { columnKey: DrillSortKey }) => {
+    if (drillSort.key !== columnKey) return <ArrowUpDown className="h-3.5 w-3.5 opacity-40" />;
+    return drillSort.direction === "asc" ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />;
   };
 
   const actorRowIds = useMemo(() => drillRows.filter((r) => r.level === "actor").map((r) => r.id), [drillRows]);
@@ -777,6 +905,58 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
     return map;
   }, [detailColumns, loansAfterSliceFilters, getCellDisplayValue]);
 
+  const toggleDraftValue = (columnId: string, value: string, kind: "text" | "number") => {
+    setDraftDetailFilters((prev) => {
+      const current = prev[columnId];
+      if (kind === "number") {
+        const filter: NumberColumnFilter =
+          current?.kind === "number" ? current : { kind: "number", mode: "all", selectedValues: [] };
+        const selectedValues = filter.selectedValues.includes(value)
+          ? filter.selectedValues.filter((v) => v !== value)
+          : [...filter.selectedValues, value];
+        return { ...prev, [columnId]: { ...filter, mode: "all", selectedValues } };
+      }
+      const filter: TextColumnFilter = current?.kind === "text" ? current : { kind: "text", selectedValues: [] };
+      const selectedValues = filter.selectedValues.includes(value)
+        ? filter.selectedValues.filter((v) => v !== value)
+        : [...filter.selectedValues, value];
+      return { ...prev, [columnId]: { kind: "text", selectedValues } };
+    });
+  };
+
+  const clearDraftFilter = (columnId: string) => {
+    setDraftDetailFilters((prev) => {
+      const next = { ...prev };
+      delete next[columnId];
+      return next;
+    });
+  };
+
+  const applyDraftFilter = (columnId: string) => {
+    setAppliedDetailFilters((prev) => {
+      const next = { ...prev };
+      const draft = draftDetailFilters[columnId];
+      if (draft && isFilterActive(draft)) next[columnId] = draft;
+      else delete next[columnId];
+      return next;
+    });
+  };
+
+  const summarizeFilter = (columnId: string, filter: ColumnFilter): string => {
+    const label = detailColumns.find((c) => String(c.key) === columnId)?.label ?? columnId;
+    if (filter.kind === "date") {
+      if (isDateFilterBlankOnlyShortcut(filter.shortcut)) return `${label}: ${DATE_FILTER_BLANK_LABEL}`;
+      return `${label}: ${filter.shortcut || `${filter.from || ""} to ${filter.to || ""}`}`;
+    }
+    if (filter.kind === "number") {
+      if (filter.mode === "all") return `${label}: ${filter.selectedValues.length} selected`;
+      if (filter.mode === "range") return `${label}: ${filter.min || ""} - ${filter.max || ""}`;
+      return `${label}: ${filter.mode === "min" ? ">=" : "<="} ${filter.value || ""}`;
+    }
+    if (filter.kind === "text") return `${label}: ${filter.selectedValues.length} selected`;
+    return `${label}: ${filter.value}`;
+  };
+
   const milestoneOptions = useMemo(
     () =>
       [...new Set(activeLoans.map((loan) => loan.currentMilestone))].sort((a, b) =>
@@ -811,7 +991,7 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
     sliceDrilldown.actorValues.length > 0 ||
     sliceDrilldown.loanTypes.length > 0 ||
     sliceDrilldown.loanPurposes.length > 0 ||
-    Object.values(appliedDetailFilters).some((v) => v.length > 0);
+    Object.values(appliedDetailFilters).some((v) => isFilterActive(v));
 
   const milestonePillLabel =
     sliceMilestones.length === 0
@@ -1069,46 +1249,147 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
             </div>
           )}
           {Object.entries(appliedDetailFilters)
-            .filter(([, vals]) => vals.length > 0)
-            .map(([col, values]) => (
+            .filter(([, filter]) => isFilterActive(filter))
+            .map(([col, filter]) => (
               <div key={col} className="flex items-center gap-0.5">
-                <ActiveWorkloadStringFilterPopover
-                  title={detailColumns.find((c) => c.key === col)?.label ?? col}
+                <Popover
                   open={pillEditor === `detail:${col}`}
                   onOpenChange={(o) => {
                     if (o) {
-                      setDraftDetailPillValues([...(appliedDetailFilters[col] ?? [])]);
+                      setDraftDetailFilters((prev) => ({ ...prev, [col]: cloneFilter(appliedDetailFilters[col]) }));
                       setPillEditor(`detail:${col}`);
                     } else setPillEditor(null);
                   }}
-                  trigger={
+                >
+                  <PopoverTrigger asChild>
                     <button type="button" className={pillBadgeTriggerClass}>
-                      <span className="truncate">
-                        {(detailColumns.find((c) => c.key === col)?.label ?? col) +
-                          `: ${values.length === 1 ? values[0] : `${values.length} selected`}`}
-                      </span>
+                      <span className="truncate">{summarizeFilter(col, filter!)}</span>
                     </button>
-                  }
-                  options={detailFilterOptionsByColumn[col] ?? []}
-                  draftSelected={draftDetailPillValues}
-                  onToggleDraftValue={(v) =>
-                    setDraftDetailPillValues((prev) => {
-                      const s = new Set(prev);
-                      if (s.has(v)) s.delete(v);
-                      else s.add(v);
-                      return [...s].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-                    })
-                  }
-                  onApply={() =>
-                    setAppliedDetailFilters((prev) => {
-                      const next = { ...prev };
-                      if (draftDetailPillValues.length) next[col] = draftDetailPillValues;
-                      else delete next[col];
-                      return next;
-                    })
-                  }
-                  onClearSelection={() => setDraftDetailPillValues([])}
-                />
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className="w-[420px] p-3">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                        {detailColumns.find((c) => String(c.key) === col)?.label ?? col}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button type="button" size="sm" variant="outline" onClick={() => setPillEditor(null)}>Cancel</Button>
+                        <Button type="button" size="sm" onClick={() => { applyDraftFilter(col); setPillEditor(null); }}>
+                          Apply Filters
+                        </Button>
+                      </div>
+                    </div>
+                    {/** Reuse the same typed editor in pill and header popovers */}
+                    {(() => {
+                      const column = detailColumns.find((c) => String(c.key) === col);
+                      if (!column) return null;
+                      const columnId = String(column.key);
+                      const kind = getFilterKindForColumn(column.key);
+                      const current = draftDetailFilters[columnId];
+                      const options = detailFilterOptionsByColumn[columnId] ?? [];
+                      if (kind === "date") {
+                        const dateFilter: DateColumnFilter = current?.kind === "date" ? current : { kind: "date" };
+                        const yearToken = String(new Date().getFullYear());
+                        const fixedYears = ["2025", "2024", "2023"];
+                        const dateShortcutOptions: Array<{ token: string; label: string; kind: "preset" | "year" | "ytd" }> = [
+                          { token: "last-30-days", label: "Last 30 Days", kind: "preset" },
+                          { token: "mtd", label: "MTD", kind: "preset" },
+                          { token: "last-month", label: "Last Month", kind: "preset" },
+                          { token: "ytd", label: `${yearToken} YTD`, kind: "ytd" },
+                          ...fixedYears.map((y) => ({ token: y, label: y, kind: "year" as const })),
+                          { token: "rolling-13", label: "L13M", kind: "preset" },
+                          { token: "rolling-12", label: "L12M", kind: "preset" },
+                        ];
+                        return (
+                          <div className="space-y-3">
+                            <Button type="button" size="sm" variant={isDateFilterBlankOnlyShortcut(dateFilter.shortcut) ? "default" : "outline"} className="w-full justify-start" onClick={() => setDraftDetailFilters((prev) => ({ ...prev, [columnId]: { kind: "date", shortcut: DATE_FILTER_BLANK_SHORTCUT, from: "", to: "" } }))}>
+                              {DATE_FILTER_BLANK_LABEL}
+                            </Button>
+                            <div className="grid grid-cols-2 gap-2">
+                              <Input type="date" value={dateFilter.from ?? ""} onChange={(e) => setDraftDetailFilters((prev) => ({ ...prev, [columnId]: { kind: "date", from: e.target.value, to: dateFilter.to, shortcut: undefined } }))} />
+                              <Input type="date" value={dateFilter.to ?? ""} onChange={(e) => setDraftDetailFilters((prev) => ({ ...prev, [columnId]: { kind: "date", from: dateFilter.from, to: e.target.value, shortcut: undefined } }))} />
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              {dateShortcutOptions.map((opt) => (
+                                <Button
+                                  key={opt.token}
+                                  type="button"
+                                  size="sm"
+                                  variant={dateFilter.shortcut === opt.token ? "default" : "outline"}
+                                  onClick={() => {
+                                    if (opt.kind === "year") {
+                                      setDraftDetailFilters((prev) => ({ ...prev, [columnId]: { kind: "date", shortcut: opt.token, from: `${opt.token}-01-01`, to: `${opt.token}-12-31` } }));
+                                      return;
+                                    }
+                                    const range = computePresetDateRange(opt.kind === "ytd" ? "ytd" : (opt.token as PeriodPreset));
+                                    setDraftDetailFilters((prev) => ({ ...prev, [columnId]: { kind: "date", shortcut: opt.token, from: range.start, to: range.end } }));
+                                  }}
+                                >
+                                  {opt.label}
+                                </Button>
+                              ))}
+                            </div>
+                            <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(columnId)}>Clear Selection</Button>
+                          </div>
+                        );
+                      }
+                      if (kind === "number") {
+                        const numberFilter: NumberColumnFilter = current?.kind === "number" ? current : { kind: "number", mode: "all", selectedValues: [] };
+                        const selected = numberFilter.mode === "all" ? numberFilter.selectedValues : [];
+                        const ordered = [...options].sort((a, b) => {
+                          const as = selected.includes(a) ? 1 : 0;
+                          const bs = selected.includes(b) ? 1 : 0;
+                          if (as !== bs) return bs - as;
+                          return a.localeCompare(b, undefined, { numeric: true });
+                        });
+                        return (
+                          <Tabs value={numberFilter.mode} onValueChange={(mode) => setDraftDetailFilters((prev) => ({ ...prev, [columnId]: { kind: "number", mode: mode as NumericFilterMode, selectedValues: [] } }))}>
+                            <TabsList className="grid w-full grid-cols-4">
+                              <TabsTrigger value="all">All</TabsTrigger><TabsTrigger value="range">Range</TabsTrigger><TabsTrigger value="min">Greater Than</TabsTrigger><TabsTrigger value="max">Less Than</TabsTrigger>
+                            </TabsList>
+                            <TabsContent value="all" className="space-y-2">
+                              <Command shouldFilter={false}>
+                                <CommandInput placeholder={`Search ${column.label}`} value={filterSearchByColumn[columnId] ?? ""} onValueChange={(value) => setFilterSearchByColumn((prev) => ({ ...prev, [columnId]: value }))} />
+                                <CommandList><CommandEmpty>No values found.</CommandEmpty>{ordered.filter((v) => v.toLowerCase().includes((filterSearchByColumn[columnId] ?? "").toLowerCase())).map((value) => {
+                                  const isSelected = selected.includes(value);
+                                  return <CommandItem key={value} onSelect={() => toggleDraftValue(columnId, value, "number")} className={cn("cursor-pointer", isSelected ? "!bg-accent !text-accent-foreground" : "")}><span className="mr-2">{isSelected ? "✓" : ""}</span>{value}</CommandItem>;
+                                })}</CommandList>
+                              </Command>
+                              <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(columnId)}>Clear Selection</Button>
+                            </TabsContent>
+                            <TabsContent value="range" className="space-y-2">
+                              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2"><Input type="number" placeholder="Min" value={numberFilter.min ?? ""} onChange={(e) => setDraftDetailFilters((prev) => ({ ...prev, [columnId]: { kind: "number", mode: "range", selectedValues: [], min: e.target.value, max: numberFilter.max } }))} /><span>-</span><Input type="number" placeholder="Max" value={numberFilter.max ?? ""} onChange={(e) => setDraftDetailFilters((prev) => ({ ...prev, [columnId]: { kind: "number", mode: "range", selectedValues: [], min: numberFilter.min, max: e.target.value } }))} /></div>
+                              <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(columnId)}>Clear Selection</Button>
+                            </TabsContent>
+                            <TabsContent value="min" className="space-y-2"><div className="flex items-center gap-2"><span className="text-sm">{">="}</span><Input type="number" placeholder="Value" value={numberFilter.value ?? ""} onChange={(e) => setDraftDetailFilters((prev) => ({ ...prev, [columnId]: { kind: "number", mode: "min", selectedValues: [], value: e.target.value } }))} /></div><Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(columnId)}>Clear Selection</Button></TabsContent>
+                            <TabsContent value="max" className="space-y-2"><div className="flex items-center gap-2"><span className="text-sm">{"<="}</span><Input type="number" placeholder="Value" value={numberFilter.value ?? ""} onChange={(e) => setDraftDetailFilters((prev) => ({ ...prev, [columnId]: { kind: "number", mode: "max", selectedValues: [], value: e.target.value } }))} /></div><Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(columnId)}>Clear Selection</Button></TabsContent>
+                          </Tabs>
+                        );
+                      }
+                      const textFilter: TextColumnFilter = current?.kind === "text" ? current : { kind: "text", selectedValues: [] };
+                      const ordered = [...options].sort((a, b) => {
+                        const as = textFilter.selectedValues.includes(a) ? 1 : 0;
+                        const bs = textFilter.selectedValues.includes(b) ? 1 : 0;
+                        if (as !== bs) return bs - as;
+                        return a.localeCompare(b, undefined, { numeric: true });
+                      });
+                      return (
+                        <div className="space-y-2">
+                          <Command shouldFilter={false}>
+                            <CommandInput placeholder={`Search ${column.label}`} value={filterSearchByColumn[columnId] ?? ""} onValueChange={(value) => setFilterSearchByColumn((prev) => ({ ...prev, [columnId]: value }))} />
+                            <CommandList>
+                              <CommandEmpty>No values found.</CommandEmpty>
+                              {ordered.filter((v) => v.toLowerCase().includes((filterSearchByColumn[columnId] ?? "").toLowerCase())).map((value) => {
+                                const isSelected = textFilter.selectedValues.includes(value);
+                                return <CommandItem key={value} onSelect={() => toggleDraftValue(columnId, value, "text")} className={cn("cursor-pointer", isSelected ? "!bg-accent !text-accent-foreground" : "")}><span className="mr-2">{isSelected ? "✓" : ""}</span>{value === EMPTY_FILTER_TOKEN ? "(Blank)" : value}</CommandItem>;
+                              })}
+                            </CommandList>
+                          </Command>
+                          <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(columnId)}>Clear Selection</Button>
+                        </div>
+                      );
+                    })()}
+                  </PopoverContent>
+                </Popover>
                 <button
                   type="button"
                   onClick={(e) => {
@@ -1178,15 +1459,30 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
                   <col style={{ width: "150px" }} />
                 </colgroup>
                 <thead>
-                  <tr className="border-b border-slate-200 dark:border-slate-700">
-                    <th className="px-3 py-2 text-left">{actor}</th>
-                    <th className="px-3 py-2 text-right whitespace-nowrap">Active Files</th>
-                    <th className="px-3 py-2 text-right whitespace-nowrap">{aggregation === "average" ? "Average" : "Median"} Days Active</th>
+                  <tr className="sticky top-0 z-30 border-b border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800">
+                    <th className="px-3 py-2 text-left">
+                      <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleDrillSort("label")}>
+                        {actor}
+                        <DrillSortIcon columnKey="label" />
+                      </button>
+                    </th>
+                    <th className="px-3 py-2 text-right whitespace-nowrap">
+                      <button type="button" className="inline-flex w-full items-center justify-end gap-1" onClick={() => toggleDrillSort("activeFiles")}>
+                        Active Files
+                        <DrillSortIcon columnKey="activeFiles" />
+                      </button>
+                    </th>
+                    <th className="px-3 py-2 text-right whitespace-nowrap">
+                      <button type="button" className="inline-flex w-full items-center justify-end gap-1" onClick={() => toggleDrillSort("daysActive")}>
+                        {aggregation === "average" ? "Average" : "Median"} Days Active
+                        <DrillSortIcon columnKey="daysActive" />
+                      </button>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {drilldownTotals && (
-                    <tr className="border-b border-slate-200 bg-slate-50/80 dark:border-slate-700 dark:bg-slate-800/60">
+                    <tr className="sticky top-[41px] z-20 border-b border-slate-200 bg-slate-50/95 dark:border-slate-700 dark:bg-slate-800/95">
                       <td className="px-3 py-2 font-semibold text-slate-800 dark:text-slate-200">Total</td>
                       <td className="px-3 py-2 text-right font-medium text-slate-800 dark:text-slate-200">
                         {drilldownTotals.activeFiles.toLocaleString()}
@@ -1201,7 +1497,7 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
                     return (
                       <tr
                         key={row.id}
-                        className={`border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50/90 dark:hover:bg-slate-800/50 ${
+                        className={`cursor-pointer border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50/90 dark:hover:bg-slate-700/60 ${
                           (row.level === "actor" && sliceDrilldown.actorValues.includes(row.label)) ||
                           (row.level === "loanType" && sliceDrilldown.loanTypes.includes(row.label)) ||
                           (row.level === "loanPurpose" && sliceDrilldown.loanPurposes.includes(row.label))
@@ -1251,10 +1547,17 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
           <CardHeader><CardTitle className="text-sm">Active Loans by Current Milestone</CardTitle></CardHeader>
           <CardContent className="h-[720px]">
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={milestoneData} layout="vertical" margin={{ top: 24, left: 8, right: 16, bottom: 12 }} barCategoryGap="28%">
+              <ComposedChart
+                data={milestoneData}
+                layout="vertical"
+                margin={{ top: 24, left: 8, right: 16, bottom: 12 }}
+                barCategoryGap="28%"
+                onClick={handleMilestoneChartClick}
+                style={{ cursor: "pointer" }}
+              >
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis type="number" />
-                <YAxis type="category" dataKey="name" width={140} interval={0} />
+                <YAxis type="category" dataKey="name" width={140} interval={0} tick={milestoneTick} />
                 <Tooltip />
                 <ReferenceLine
                   x={kpis.daysActive}
@@ -1267,7 +1570,7 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
                     fontSize: 11,
                   }}
                 />
-                <Bar dataKey="activeFiles" fill="#3b82f6" name="Active Files" barSize={10} onClick={(d) => toggleMilestoneSlice(String((d as { name?: string }).name ?? ""))}>
+                <Bar dataKey="activeFiles" fill="#3b82f6" name="Active Files" barSize={10} cursor="pointer" onClick={handleMilestoneBarClick}>
                   <LabelList dataKey="activeFiles" position="right" />
                 </Bar>
                 <Bar
@@ -1275,7 +1578,8 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
                   fill="#e11d48"
                   name={`${aggregation === "average" ? "Average" : "Median"} Days Active`}
                   barSize={10}
-                  onClick={(d) => toggleMilestoneSlice(String((d as { name?: string }).name ?? ""))}
+                  cursor="pointer"
+                  onClick={handleMilestoneBarClick}
                 >
                   <LabelList dataKey="daysActive" position="right" formatter={(value: number) => value.toFixed(2)} />
                 </Bar>
@@ -1309,12 +1613,12 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="max-h-[520px] overflow-auto border-t border-slate-200 dark:border-slate-700">
-            <Table>
-              <TableHeader className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-800">
-                <TableRow>
+          <div className="relative max-h-[520px] overflow-auto border-t border-slate-200 dark:border-slate-700">
+            <table className="w-full border-separate border-spacing-0 text-sm">
+              <thead className="sticky top-0 z-40 bg-slate-50 dark:bg-slate-800">
+                <tr className="bg-slate-50 dark:bg-slate-800">
                   {detailColumns.map((column) => (
-                    <TableHead key={column.key}>
+                    <th key={column.key} className="h-12 border-b border-slate-200 bg-slate-50 px-4 text-left align-middle font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
                       <div className="inline-flex items-center gap-1">
                         <button
                           type="button"
@@ -1332,7 +1636,7 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
                                 setOpenDetailFilterColumnId(String(column.key));
                                 setDraftDetailFilters((prev) => ({
                                   ...prev,
-                                  [String(column.key)]: [...(appliedDetailFilters[String(column.key)] ?? [])],
+                                  [String(column.key)]: cloneFilter(appliedDetailFilters[String(column.key)]),
                                 }));
                               } else {
                                 setOpenDetailFilterColumnId((cur) => (cur === String(column.key) ? null : cur));
@@ -1343,7 +1647,7 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
                               <button
                                 type="button"
                                 className={`rounded p-1 ${
-                                  (appliedDetailFilters[String(column.key)] ?? []).length > 0
+                                  isFilterActive(appliedDetailFilters[String(column.key)])
                                     ? "text-emerald-600 dark:text-emerald-400"
                                     : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100"
                                 }`}
@@ -1351,30 +1655,95 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
                                 <Filter className="h-3.5 w-3.5" />
                               </button>
                             </PopoverTrigger>
-                            <PopoverContent align="start" className="w-72 p-3">
-                              <div className="mb-2 text-xs font-semibold text-slate-500 dark:text-slate-400">{column.label}</div>
-                              <div className="max-h-56 overflow-auto space-y-1">
-                                {(detailFilterOptionsByColumn[String(column.key)] ?? []).map((value) => {
-                                  const selected = (draftDetailFilters[String(column.key)] ?? []).includes(value);
+                            <PopoverContent align="start" className="w-[420px] p-3">
+                              <div className="mb-2 flex items-center justify-between gap-2">
+                                <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">{column.label}</div>
+                                <div className="flex items-center gap-2">
+                                  <Button type="button" size="sm" variant="outline" onClick={() => setOpenDetailFilterColumnId(null)}>
+                                    Cancel
+                                  </Button>
+                                  <Button type="button" size="sm" onClick={() => { applyDraftFilter(String(column.key)); setOpenDetailFilterColumnId(null); }}>
+                                    Apply Filters
+                                  </Button>
+                                </div>
+                              </div>
+                              <div className="space-y-2">
+                                {(() => {
+                                  const columnId = String(column.key);
+                                  const kind = getFilterKindForColumn(column.key);
+                                  const current = draftDetailFilters[columnId];
+                                  const options = detailFilterOptionsByColumn[columnId] ?? [];
+                                  if (kind === "date") {
+                                    const dateFilter: DateColumnFilter = current?.kind === "date" ? current : { kind: "date" };
+                                    const yearToken = String(new Date().getFullYear());
+                                    const fixedYears = ["2025", "2024", "2023"];
+                                    const dateShortcutOptions: Array<{ token: string; label: string; kind: "preset" | "year" | "ytd" }> = [
+                                      { token: "last-30-days", label: "Last 30 Days", kind: "preset" },
+                                      { token: "mtd", label: "MTD", kind: "preset" },
+                                      { token: "last-month", label: "Last Month", kind: "preset" },
+                                      { token: "ytd", label: `${yearToken} YTD`, kind: "ytd" },
+                                      ...fixedYears.map((y) => ({ token: y, label: y, kind: "year" as const })),
+                                      { token: "rolling-13", label: "L13M", kind: "preset" },
+                                      { token: "rolling-12", label: "L12M", kind: "preset" },
+                                    ];
+                                    return (
+                                      <div className="space-y-3">
+                                        <Button type="button" size="sm" variant={isDateFilterBlankOnlyShortcut(dateFilter.shortcut) ? "default" : "outline"} className="w-full justify-start" onClick={() => setDraftDetailFilters((prev) => ({ ...prev, [columnId]: { kind: "date", shortcut: DATE_FILTER_BLANK_SHORTCUT, from: "", to: "" } }))}>
+                                          {DATE_FILTER_BLANK_LABEL}
+                                        </Button>
+                                        <div className="grid grid-cols-2 gap-2">
+                                          <Input type="date" value={dateFilter.from ?? ""} onChange={(e) => setDraftDetailFilters((prev) => ({ ...prev, [columnId]: { kind: "date", from: e.target.value, to: dateFilter.to, shortcut: undefined } }))} />
+                                          <Input type="date" value={dateFilter.to ?? ""} onChange={(e) => setDraftDetailFilters((prev) => ({ ...prev, [columnId]: { kind: "date", from: dateFilter.from, to: e.target.value, shortcut: undefined } }))} />
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-2">
+                                          {dateShortcutOptions.map((opt) => (
+                                            <Button key={opt.token} type="button" size="sm" variant={dateFilter.shortcut === opt.token ? "default" : "outline"} onClick={() => {
+                                              if (opt.kind === "year") { setDraftDetailFilters((prev) => ({ ...prev, [columnId]: { kind: "date", shortcut: opt.token, from: `${opt.token}-01-01`, to: `${opt.token}-12-31` } })); return; }
+                                              const range = computePresetDateRange(opt.kind === "ytd" ? "ytd" : (opt.token as PeriodPreset));
+                                              setDraftDetailFilters((prev) => ({ ...prev, [columnId]: { kind: "date", shortcut: opt.token, from: range.start, to: range.end } }));
+                                            }}>{opt.label}</Button>
+                                          ))}
+                                        </div>
+                                        <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(columnId)}>Clear Selection</Button>
+                                      </div>
+                                    );
+                                  }
+                                  if (kind === "number") {
+                                    const numberFilter: NumberColumnFilter = current?.kind === "number" ? current : { kind: "number", mode: "all", selectedValues: [] };
+                                    const selected = numberFilter.mode === "all" ? numberFilter.selectedValues : [];
+                                    const ordered = [...options].sort((a, b) => {
+                                      const as = selected.includes(a) ? 1 : 0;
+                                      const bs = selected.includes(b) ? 1 : 0;
+                                      if (as !== bs) return bs - as;
+                                      return a.localeCompare(b, undefined, { numeric: true });
+                                    });
+                                    return (
+                                      <Tabs value={numberFilter.mode} onValueChange={(mode) => setDraftDetailFilters((prev) => ({ ...prev, [columnId]: { kind: "number", mode: mode as NumericFilterMode, selectedValues: [] } }))}>
+                                        <TabsList className="grid w-full grid-cols-4"><TabsTrigger value="all">All</TabsTrigger><TabsTrigger value="range">Range</TabsTrigger><TabsTrigger value="min">Greater Than</TabsTrigger><TabsTrigger value="max">Less Than</TabsTrigger></TabsList>
+                                        <TabsContent value="all" className="space-y-2"><Command shouldFilter={false}><CommandInput placeholder={`Search ${column.label}`} value={filterSearchByColumn[columnId] ?? ""} onValueChange={(value) => setFilterSearchByColumn((prev) => ({ ...prev, [columnId]: value }))} /><CommandList><CommandEmpty>No values found.</CommandEmpty>{ordered.filter((v) => v.toLowerCase().includes((filterSearchByColumn[columnId] ?? "").toLowerCase())).map((value) => { const isSelected = selected.includes(value); return <CommandItem key={value} onSelect={() => toggleDraftValue(columnId, value, "number")} className={cn("cursor-pointer", isSelected ? "!bg-accent !text-accent-foreground" : "")}><span className="mr-2">{isSelected ? "✓" : ""}</span>{value}</CommandItem>; })}</CommandList></Command><Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(columnId)}>Clear Selection</Button></TabsContent>
+                                        <TabsContent value="range" className="space-y-2"><div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2"><Input type="number" placeholder="Min" value={numberFilter.min ?? ""} onChange={(e) => setDraftDetailFilters((prev) => ({ ...prev, [columnId]: { kind: "number", mode: "range", selectedValues: [], min: e.target.value, max: numberFilter.max } }))} /><span>-</span><Input type="number" placeholder="Max" value={numberFilter.max ?? ""} onChange={(e) => setDraftDetailFilters((prev) => ({ ...prev, [columnId]: { kind: "number", mode: "range", selectedValues: [], min: numberFilter.min, max: e.target.value } }))} /></div><Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(columnId)}>Clear Selection</Button></TabsContent>
+                                        <TabsContent value="min" className="space-y-2"><div className="flex items-center gap-2"><span className="text-sm">{">="}</span><Input type="number" placeholder="Value" value={numberFilter.value ?? ""} onChange={(e) => setDraftDetailFilters((prev) => ({ ...prev, [columnId]: { kind: "number", mode: "min", selectedValues: [], value: e.target.value } }))} /></div><Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(columnId)}>Clear Selection</Button></TabsContent>
+                                        <TabsContent value="max" className="space-y-2"><div className="flex items-center gap-2"><span className="text-sm">{"<="}</span><Input type="number" placeholder="Value" value={numberFilter.value ?? ""} onChange={(e) => setDraftDetailFilters((prev) => ({ ...prev, [columnId]: { kind: "number", mode: "max", selectedValues: [], value: e.target.value } }))} /></div><Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(columnId)}>Clear Selection</Button></TabsContent>
+                                      </Tabs>
+                                    );
+                                  }
+                                  const textFilter: TextColumnFilter = current?.kind === "text" ? current : { kind: "text", selectedValues: [] };
+                                  const ordered = [...options].sort((a, b) => {
+                                    const as = textFilter.selectedValues.includes(a) ? 1 : 0;
+                                    const bs = textFilter.selectedValues.includes(b) ? 1 : 0;
+                                    if (as !== bs) return bs - as;
+                                    return a.localeCompare(b, undefined, { numeric: true });
+                                  });
                                   return (
-                                    <button
-                                      key={value}
-                                      type="button"
-                                      className={`w-full rounded px-2 py-1.5 text-left text-sm ${
-                                        selected ? "bg-accent text-accent-foreground" : "hover:bg-slate-100 dark:hover:bg-slate-700/70"
-                                      }`}
-                                      onClick={() =>
-                                        setDraftDetailFilters((prev) => {
-                                          const cur = prev[String(column.key)] ?? [];
-                                          const next = cur.includes(value) ? cur.filter((v) => v !== value) : [...cur, value];
-                                          return { ...prev, [String(column.key)]: next };
-                                        })
-                                      }
-                                    >
-                                      {selected ? "✓ " : ""}{value}
-                                    </button>
+                                    <div className="space-y-2">
+                                      <Command shouldFilter={false}>
+                                        <CommandInput placeholder={`Search ${column.label}`} value={filterSearchByColumn[columnId] ?? ""} onValueChange={(value) => setFilterSearchByColumn((prev) => ({ ...prev, [columnId]: value }))} />
+                                        <CommandList><CommandEmpty>No values found.</CommandEmpty>{ordered.filter((v) => v.toLowerCase().includes((filterSearchByColumn[columnId] ?? "").toLowerCase())).map((value) => { const isSelected = textFilter.selectedValues.includes(value); return <CommandItem key={value} onSelect={() => toggleDraftValue(columnId, value, "text")} className={cn("cursor-pointer", isSelected ? "!bg-accent !text-accent-foreground" : "")}><span className="mr-2">{isSelected ? "✓" : ""}</span>{value === EMPTY_FILTER_TOKEN ? "(Blank)" : value}</CommandItem>; })}</CommandList>
+                                      </Command>
+                                      <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(columnId)}>Clear Selection</Button>
+                                    </div>
                                   );
-                                })}
+                                })()}
                               </div>
                               <div className="mt-2 flex items-center gap-2">
                                 <Button
@@ -1389,13 +1758,7 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
                                   type="button"
                                   size="sm"
                                   onClick={() => {
-                                    setAppliedDetailFilters((prev) => {
-                                      const next = { ...prev };
-                                      const values = draftDetailFilters[String(column.key)] ?? [];
-                                      if (values.length > 0) next[String(column.key)] = values;
-                                      else delete next[String(column.key)];
-                                      return next;
-                                    });
+                                    applyDraftFilter(String(column.key));
                                     setOpenDetailFilterColumnId(null);
                                   }}
                                 >
@@ -1406,18 +1769,19 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
                           </Popover>
                         )}
                       </div>
-                    </TableHead>
+                    </th>
                   ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+                </tr>
+              </thead>
+              <tbody>
                 {sortedDetailRows.map((loan) => (
-                  <TableRow key={loan.loanNumber}>
+                  <tr key={loan.loanNumber} className="border-b border-slate-200 transition-colors hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-700/40">
                     {detailColumns.map((column) => {
                       const display = getCellDisplayValue(loan, column.key);
-                      const isFiltered = (appliedDetailFilters[String(column.key)] ?? []).includes(display);
+                      const columnId = String(column.key);
+                      const isFiltered = isFilterActive(appliedDetailFilters[columnId]);
                       return (
-                        <TableCell key={String(column.key)}>
+                        <td key={String(column.key)} className="p-4 align-middle">
                           <button
                             type="button"
                             className={`rounded px-1 py-0.5 -mx-1 -my-0.5 text-left transition-colors hover:bg-sky-100/80 dark:hover:bg-sky-900/40 ${
@@ -1426,23 +1790,43 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
                             onClick={() =>
                               setAppliedDetailFilters((prev) => {
                                 const key = String(column.key);
-                                const cur = prev[key] ?? [];
                                 const next = { ...prev };
-                                if (cur.length === 1 && cur[0] === display) delete next[key];
-                                else next[key] = [display];
+                                const kind = getFilterKindForColumn(column.key);
+                                if (kind === "number") {
+                                  const current = prev[key];
+                                  const token = String(getFilterRawValue(loan, column.key));
+                                  const selected =
+                                    current?.kind === "number" && current.mode === "all" ? current.selectedValues : [];
+                                  const nextSelected = selected.includes(token) ? selected.filter((v) => v !== token) : [token];
+                                  if (nextSelected.length === 0) delete next[key];
+                                  else next[key] = { kind: "number", mode: "all", selectedValues: nextSelected };
+                                  return next;
+                                }
+                                if (kind === "date") {
+                                  const raw = String(getFilterRawValue(loan, column.key) ?? "");
+                                  const current = prev[key];
+                                  if (current?.kind === "date" && current.from === raw && current.to === raw) delete next[key];
+                                  else next[key] = { kind: "date", from: raw, to: raw, shortcut: undefined };
+                                  return next;
+                                }
+                                const current = prev[key];
+                                const selected = current?.kind === "text" ? current.selectedValues : [];
+                                const nextSelected = selected.includes(display) ? selected.filter((v) => v !== display) : [display];
+                                if (nextSelected.length === 0) delete next[key];
+                                else next[key] = { kind: "text", selectedValues: nextSelected };
                                 return next;
                               })
                             }
                           >
                             {display}
                           </button>
-                        </TableCell>
+                        </td>
                       );
                     })}
-                  </TableRow>
+                  </tr>
                 ))}
-              </TableBody>
-            </Table>
+              </tbody>
+            </table>
           </div>
         </CardContent>
       </Card>
