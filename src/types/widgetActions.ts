@@ -9,6 +9,7 @@
 import type { VisualizationConfig } from '@/hooks/useCohiChat';
 import type { ReportDefinition } from '@/types/reportTypes';
 import type { SectionFilters, SectionType } from '@/stores/widgetSectionStore';
+import type { ResearchArtifactCapabilities } from '@/components/workbench/canvas/types';
 
 // ---------------------------------------------------------------------------
 // Action union
@@ -286,6 +287,10 @@ export interface CanvasStateSnapshot {
     sourceType?: 'research' | 'chat';
     /** For research-sourced widgets: the research session that produced them */
     sourceSessionId?: string;
+    /** Durable research artifact row (when saved from Research Lab) */
+    sourceArtifactId?: string;
+    /** Capability flags for research-backed widgets (filter injection, presentation edits) */
+    artifactCapabilities?: ResearchArtifactCapabilities;
     /** For cohi_widget items: the SQL backing the widget */
     sql?: string;
     /** True when this widget is the one the user is editing via Cohi */

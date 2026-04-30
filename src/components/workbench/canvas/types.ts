@@ -89,6 +89,22 @@ export interface WidgetFilterState {
   dimensionFilters?: Array<{ column: string; value: string }>;
 }
 
+/**
+ * Declares what Workbench / Cohi may change for SQL widgets tied to a
+ * Research Lab artifact (COHI-363). When omitted, research widgets behave as
+ * before: SQL runs as stored and filter injection is skipped.
+ */
+export interface ResearchArtifactCapabilities {
+  /** When true, date/dimension filters are injected like chat-sourced widgets */
+  canInjectFilters?: boolean;
+  /** Title, chart type, colors — without rewriting SQL */
+  canEditPresentation?: boolean;
+  /** tableConfig.columns visibility/labels */
+  canEditColumns?: boolean;
+  /** When true, logic changes should use a full SQL rewrite (Cohi guidance) */
+  requiresSqlRewriteForLogicChanges?: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // WidgetFilterConfig – AI-declared filter capabilities for a Cohi widget
 // ---------------------------------------------------------------------------
@@ -192,7 +208,21 @@ export type CanvasWidgetPayload =
   | { type: 'text_block'; content: string; title?: string }
   | { type: 'rich_text'; html: string }
   | { type: 'image'; src: string; alt?: string }
-  | { type: 'cohi_widget'; sql: string; title: string; vizConfig: VisualizationConfig; explanation?: string; sourceType?: 'research' | 'chat'; sourceSessionId?: string; allowLowSamplePullThrough?: boolean };
+  | {
+      type: 'cohi_widget';
+      sql: string;
+      title: string;
+      vizConfig: VisualizationConfig;
+      explanation?: string;
+      sourceType?: 'research' | 'chat';
+      sourceSessionId?: string;
+      /** Persisted Research Lab artifact id (server `research_artifacts.id`) */
+      sourceArtifactId?: string;
+      artifactCapabilities?: ResearchArtifactCapabilities;
+      /** Standalone widget date/dimension filter state (when not using group sync) */
+      savedFilters?: WidgetFilterState;
+      allowLowSamplePullThrough?: boolean;
+    };
 
 export const DEFAULT_LAYOUT_ITEM: Partial<CanvasLayoutItem> = {
   w: 360,

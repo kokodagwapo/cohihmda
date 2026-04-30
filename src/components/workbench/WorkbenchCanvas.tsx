@@ -2853,9 +2853,13 @@ export function WorkbenchCanvas({
   );
 
   const updateWidgetPayload = useCallback(
-    (id: string, payload: CanvasLayoutItem["payload"]) => {
+    (
+      id: string,
+      payload: CanvasLayoutItem["payload"],
+      options?: { recordHistory?: boolean },
+    ) => {
       if (!canEdit) return;
-      setItems((prev) =>
+      const mapper = (prev: CanvasLayoutItem[]) =>
         prev.map((i) => {
           if (i.i !== id) return i;
           try {
@@ -2864,10 +2868,14 @@ export function WorkbenchCanvas({
             // Fall through and update the payload if serialization fails.
           }
           return { ...i, payload };
-        }),
-      );
+        });
+      if (options?.recordHistory) {
+        setItemsWithHistory(mapper);
+      } else {
+        setItems(mapper);
+      }
     },
-    [canEdit],
+    [canEdit, setItems, setItemsWithHistory],
   );
 
   const addTextBlock = useCallback(() => {
@@ -4899,8 +4907,15 @@ export function WorkbenchCanvas({
                             canEdit &&
                             (item.type === "text_block" ||
                               item.type === "rich_text" ||
-                              item.type === "widget_group")
-                              ? (p) => updateWidgetPayload(item.i, p)
+                              item.type === "widget_group" ||
+                              (item.type === "cohi_widget" &&
+                                payload.type === "cohi_widget"))
+                              ? (p) =>
+                                  updateWidgetPayload(
+                                    item.i,
+                                    p,
+                                    item.type === "cohi_widget" ? { recordHistory: true } : undefined,
+                                  )
                               : canEdit && isLegacyLoanDetail
                                 ? (p) =>
                                     setItemsWithHistory((prev) =>

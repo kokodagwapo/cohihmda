@@ -284,6 +284,8 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
               : undefined,
           sourceType: cohiPayload?.sourceType,
           sourceSessionId: cohiPayload?.sourceSessionId,
+          sourceArtifactId: cohiPayload?.sourceArtifactId,
+          artifactCapabilities: cohiPayload?.artifactCapabilities,
           sql: cohiPayload?.sql,
           selected: item.i === selectedWidgetId,
         });
