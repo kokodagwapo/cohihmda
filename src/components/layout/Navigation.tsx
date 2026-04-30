@@ -264,6 +264,12 @@ const topTieringMenuGroups = {
         iconColor: "emerald" as const,
       },
       {
+        id: "activeWorkload",
+        label: "Active Workload",
+        icon: BarChart3,
+        iconColor: "blue" as const,
+      },
+      {
         id: "dataQuality",
         label: "Data Quality",
         icon: Database,
@@ -348,6 +354,7 @@ const routeMap: Record<string, string> = {
   operationsScorecard: "/performance/operation-scorecard",
   operationsTrends: "/performance/operation-scorecard-trends",
   estimatedClosingsRisk: "/performance/estimated-closings-risk",
+  activeWorkload: "/performance/active-workload",
   financialModeling: "/performance/financial-modeling-sandbox",
   captureAnalysis: "/capture-analysis",
   dataQuality: "/data-quality",
@@ -666,6 +673,7 @@ export function Navigation(
       "/performance/operation-scorecard",
       "/performance/operation-scorecard-trends",
       "/performance/estimated-closings-risk",
+      "/performance/active-workload",
       "/performance/financial-modeling-sandbox",
       "/capture-analysis",
       "/data-quality",

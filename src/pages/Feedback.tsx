@@ -86,6 +86,7 @@ const DASHBOARD_DESCRIPTION_PREFIXES: Record<string, string> = {
   "/performance/operation-scorecard": "Operation Scorecard",
   "/performance/operation-scorecard-trends": "Operation Scorecard Trends",
   "/performance/estimated-closings-risk": "Estimated Closings Risk",
+  "/performance/active-workload": "Active Workload",
   "/performance/financial-modeling-sandbox": "Financial Modeling Sandbox",
   "/fallout-forecast": "Fallout Forecast",
 };

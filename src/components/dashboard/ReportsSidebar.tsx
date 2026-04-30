@@ -244,6 +244,7 @@ const TOPTIERING_CHILDREN = [
   { type: 'route' as const, id: 'operationsScorecard', label: 'Scorecard', icon: Target, path: '/performance/operation-scorecard', subsectionKey: 'operations' as SubsectionKey },
   { type: 'route' as const, id: 'operationsTrends', label: 'Trends', icon: LineChart, path: '/performance/operation-scorecard-trends', subsectionKey: 'operations' as SubsectionKey },
   { type: 'route' as const, id: 'estimatedClosingsRisk', label: 'Estimated Closings and Risk Analysis', icon: BarChart3, path: '/performance/estimated-closings-risk', subsectionKey: 'operations' as SubsectionKey },
+  { type: 'route' as const, id: 'activeWorkload', label: 'Active Workload', icon: BarChart3, path: '/performance/active-workload', subsectionKey: 'operations' as SubsectionKey },
   { type: 'subheader' as const, label: 'Financial Modeling', subsectionKey: 'financialModeling' as SubsectionKey },
   { type: 'route' as const, id: 'financialModeling', label: 'Financial Modeling Sandbox', icon: Calculator, path: '/performance/financial-modeling-sandbox', subsectionKey: 'financialModeling' as SubsectionKey },
   { type: 'subheader' as const, label: 'Data', subsectionKey: 'operations' as SubsectionKey },
@@ -302,6 +303,7 @@ const navIconColorByItemId: Record<string, string> = {
   operationsScorecard: 'blue',
   operationsTrends: 'indigo',
   estimatedClosingsRisk: 'emerald',
+  activeWorkload: 'blue',
   dataQuality: 'emerald',
 };
 
