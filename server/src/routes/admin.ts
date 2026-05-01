@@ -2552,6 +2552,27 @@ router.post(
 // Cross-tenant view of all LOS connections and their sync status
 // ============================================================================
 
+const VALID_SYNC_WEEKDAYS = new Set([0, 1, 2, 3, 4, 5, 6]);
+const VALID_SYNC_HOURS = new Set(Array.from({ length: 24 }, (_, hour) => hour));
+
+function validateSyncNumberArray(
+  value: unknown,
+  allowedValues: Set<number>,
+  fieldName: string,
+): { valid: true; value: number[] } | { valid: false; error: string } {
+  if (!Array.isArray(value)) {
+    return { valid: false, error: `${fieldName} must be an array` };
+  }
+  const numbers = [...new Set(value.map(Number))].sort((a, b) => a - b);
+  if (numbers.length === 0) {
+    return { valid: false, error: `${fieldName} must include at least one value` };
+  }
+  if (numbers.some((item) => !Number.isInteger(item) || !allowedValues.has(item))) {
+    return { valid: false, error: `${fieldName} contains an invalid value` };
+  }
+  return { valid: true, value: numbers };
+}
+
 /**
  * GET /api/admin/sync-management
  * Get all LOS connections across all tenants with sync status
@@ -2591,7 +2612,8 @@ router.get(
                     last_synced_at, last_sync_status, last_sync_error, last_loan_modified_at,
                     is_active, insights_auto_enabled, podcast_auto_enabled,
                     encompass_users_sync_enabled, sync_business_days_only, insights_business_days_only,
-                    scheduler_timezone, last_encompass_users_sync_at,
+                    scheduler_timezone, sync_allowed_weekdays, sync_allowed_hours,
+                    last_encompass_users_sync_at,
                     created_at, updated_at
              FROM public.los_connections
              ORDER BY name`
@@ -2823,6 +2845,8 @@ router.put(
         sync_business_days_only,
         insights_business_days_only,
         scheduler_timezone,
+        sync_allowed_weekdays,
+        sync_allowed_hours,
       } = req.body;
 
       if (!tenant_id) {
@@ -2835,6 +2859,20 @@ router.put(
         return res.status(400).json({
           error: `Invalid sync_frequency. Must be one of: ${validFrequencies.join(", ")}`,
         });
+      }
+
+      const validatedWeekdays = sync_allowed_weekdays !== undefined
+        ? validateSyncNumberArray(sync_allowed_weekdays, VALID_SYNC_WEEKDAYS, "sync_allowed_weekdays")
+        : undefined;
+      if (validatedWeekdays?.valid === false) {
+        return res.status(400).json({ error: validatedWeekdays.error });
+      }
+
+      const validatedHours = sync_allowed_hours !== undefined
+        ? validateSyncNumberArray(sync_allowed_hours, VALID_SYNC_HOURS, "sync_allowed_hours")
+        : undefined;
+      if (validatedHours?.valid === false) {
+        return res.status(400).json({ error: validatedHours.error });
       }
 
       const tenantPool = await tenantDbManager.getTenantPool(tenant_id);
@@ -2883,6 +2921,14 @@ router.put(
         updates.push(`scheduler_timezone = $${paramIndex++}`);
         values.push(normalizeSchedulerTimezone(scheduler_timezone));
       }
+      if (validatedWeekdays?.valid) {
+        updates.push(`sync_allowed_weekdays = $${paramIndex++}`);
+        values.push(validatedWeekdays.value);
+      }
+      if (validatedHours?.valid) {
+        updates.push(`sync_allowed_hours = $${paramIndex++}`);
+        values.push(validatedHours.value);
+      }
 
       if (updates.length === 0) {
         return res.status(400).json({ error: "No valid fields to update" });
@@ -2897,7 +2943,8 @@ router.put(
          WHERE id = $${paramIndex} 
          RETURNING id, name, sync_enabled, sync_frequency, insights_auto_enabled, podcast_auto_enabled,
                    encompass_users_sync_enabled, sync_business_days_only, insights_business_days_only,
-                   scheduler_timezone, last_encompass_users_sync_at, last_synced_at, last_sync_status`,
+                   scheduler_timezone, sync_allowed_weekdays, sync_allowed_hours,
+                   last_encompass_users_sync_at, last_synced_at, last_sync_status`,
         values
       );
 
@@ -2921,6 +2968,8 @@ router.put(
           sync_business_days_only,
           insights_business_days_only,
           scheduler_timezone,
+          sync_allowed_weekdays: validatedWeekdays?.valid ? validatedWeekdays.value : undefined,
+          sync_allowed_hours: validatedHours?.valid ? validatedHours.value : undefined,
         },
       }).catch(() => {});
 
@@ -2936,6 +2985,8 @@ router.put(
         sync_business_days_only,
         insights_business_days_only,
         scheduler_timezone,
+        sync_allowed_weekdays: validatedWeekdays?.valid ? validatedWeekdays.value : undefined,
+        sync_allowed_hours: validatedHours?.valid ? validatedHours.value : undefined,
       });
 
       return res.json({ connection: result.rows[0] });
