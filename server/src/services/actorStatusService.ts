@@ -124,12 +124,38 @@ export async function loadActorStatusIndex(tenantPool: pg.Pool): Promise<ActorSt
     `);
     return buildActorStatusIndex(result.rows);
   } catch (error: any) {
-    if (error?.code !== "42P01" && error?.code !== "42703") {
-      console.warn("[ActorStatus] Failed to load encompass_users", {
-        code: error?.code,
-        message: error?.message,
-      });
+    if (error?.code === "42P01") {
+      return { byId: new Map(), byName: new Map(), hasSyncedUsers: false };
     }
+    if (error?.code === "42703") {
+      console.warn(
+        "[ActorStatus] encompass_users is missing a required column; falling back. Apply tenant migration 117_encompass_users_source_names.sql (or later) so actor status resolves.",
+        { code: error?.code, message: error?.message },
+      );
+      try {
+        const fallback = await tenantPool.query<ActorStatusUserRow>(`
+          SELECT encompass_user_id,
+                 username,
+                 full_name,
+                 is_enabled,
+                 encompass_last_login
+          FROM public.encompass_users
+        `);
+        return buildActorStatusIndex(fallback.rows);
+      } catch (fallbackError: any) {
+        if (fallbackError?.code !== "42P01" && fallbackError?.code !== "42703") {
+          console.warn("[ActorStatus] Fallback encompass_users load failed", {
+            code: fallbackError?.code,
+            message: fallbackError?.message,
+          });
+        }
+        return { byId: new Map(), byName: new Map(), hasSyncedUsers: false };
+      }
+    }
+    console.warn("[ActorStatus] Failed to load encompass_users", {
+      code: error?.code,
+      message: error?.message,
+    });
     return { byId: new Map(), byName: new Map(), hasSyncedUsers: false };
   }
 }
