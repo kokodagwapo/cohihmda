@@ -7,6 +7,7 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { Bookmark, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -74,6 +75,7 @@ export function SaveToWorkbenchModal({
   onSaved,
 }: SaveToWorkbenchModalProps) {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const selectedTenantId = useTenantStore((s) => s.selectedTenantId);
   const effectiveTenantId = selectedTenantId || user?.tenant_id;
@@ -112,6 +114,26 @@ export function SaveToWorkbenchModal({
       }
     }
   }, [open, payload, loadCanvases]);
+
+  const positionBelowExistingLayout = (
+    item: Record<string, unknown>,
+    layout: unknown[],
+  ): Record<string, unknown> => {
+    const maxBottom = layout.reduce((bottom, rawItem) => {
+      if (!rawItem || typeof rawItem !== "object") return bottom;
+      const candidate = rawItem as { y?: unknown; h?: unknown };
+      const y = Number(candidate.y);
+      const h = Number(candidate.h);
+      if (!Number.isFinite(y) || !Number.isFinite(h)) return bottom;
+      return Math.max(bottom, y + h);
+    }, 0);
+
+    return {
+      ...item,
+      x: 20,
+      y: maxBottom > 0 ? maxBottom + 24 : 20,
+    };
+  };
 
   const handleSave = async () => {
     if (!payload) return;
@@ -167,6 +189,9 @@ export function SaveToWorkbenchModal({
         };
       }
 
+      let savedCanvasId = "";
+      let savedCanvasTitle = "";
+
       if (createNew) {
         const data = await api.request<{ id: string }>(`/api/workbench/canvases${tenantQs}`, {
           method: "POST",
@@ -176,8 +201,8 @@ export function SaveToWorkbenchModal({
             layout: [newItem],
           }),
         });
-        toast({ title: "Saved to workbench", description: `Added to new canvas "${newCanvasTitle || "New canvas"}".` });
-        onSaved?.(data.id, newCanvasTitle.trim() || "New canvas");
+        savedCanvasId = data.id;
+        savedCanvasTitle = newCanvasTitle.trim() || "New canvas";
       } else {
         if (!selectedCanvasId) {
           toast({ title: "Select a canvas", variant: "destructive" });
@@ -188,17 +213,23 @@ export function SaveToWorkbenchModal({
           `/api/workbench/canvases/${selectedCanvasId}${tenantQs}`,
         );
         const layout = Array.isArray(existing?.content?.layout) ? existing.content.layout : [];
+        const positionedItem = positionBelowExistingLayout(newItem, layout);
         const updatedContent = {
           ...existing.content,
-          layout: [...layout, newItem],
+          layoutVersion: "freeform-v1",
+          layout: [...layout, positionedItem],
         };
         await api.request(`/api/workbench/canvases/${selectedCanvasId}${tenantQs}`, {
           method: "PUT",
           body: JSON.stringify({ content: updatedContent }),
         });
-        const canvasTitle = canvases.find((c) => c.id === selectedCanvasId)?.title ?? "Canvas";
-        toast({ title: "Saved to workbench", description: `Added to "${canvasTitle}".` });
-        onSaved?.(selectedCanvasId, canvasTitle);
+        savedCanvasId = selectedCanvasId;
+        savedCanvasTitle = canvases.find((c) => c.id === selectedCanvasId)?.title ?? "Canvas";
+      }
+      if (savedCanvasId) {
+        toast({ title: "Saved to workbench", description: `Opening "${savedCanvasTitle}".` });
+        onSaved?.(savedCanvasId, savedCanvasTitle || "Canvas");
+        navigate(`/my-dashboard/${savedCanvasId}`);
       }
       onClose();
     } catch (err) {
