@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import { ExternalLink } from "lucide-react";
-import type { ResearchVisualizationSource } from "@/types/researchWorkbench";
 import { cn } from "@/lib/utils";
+import type { ResearchVisualizationSource } from "@/types/researchWorkbench";
 
 export function ResearchSourceDashboardLink({
   source,

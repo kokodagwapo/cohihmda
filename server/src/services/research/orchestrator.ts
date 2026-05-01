@@ -32,6 +32,7 @@ import {
   buildUploadTableSchemaContext,
   migrateContextUploadToTable,
 } from "./uploadProcessor.js";
+import type { ResearchWidgetContext } from "../../types/researchWidgetContext.js";
 
 // ============================================================================
 // Types
@@ -101,6 +102,8 @@ export interface ResearchSession {
   sharedWithUserIds?: string[];
   // Upload attachments
   uploadIds?: string[];
+  /** Client-snapshotted widget catalog for the analyst (COHI-366). */
+  widgetContext?: ResearchWidgetContext;
 }
 
 // ============================================================================
@@ -168,6 +171,37 @@ function getPrimaryCategory(plan: ResearchPlan | undefined): string | null {
   return (first?.category as string) || null;
 }
 
+const SAVE_SESSION_WITH_CATEGORY_AND_WIDGET = `
+  INSERT INTO research_sessions (id, tenant_id, user_id, user_email, topic, phase, plan, findings, report, events, follow_up_history, error, primary_category, upload_ids, widget_context, created_at, updated_at)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, to_timestamp($16::double precision / 1000), NOW())
+  ON CONFLICT (id) DO UPDATE SET
+    phase = EXCLUDED.phase,
+    plan = EXCLUDED.plan,
+    findings = EXCLUDED.findings,
+    report = EXCLUDED.report,
+    events = EXCLUDED.events,
+    follow_up_history = EXCLUDED.follow_up_history,
+    error = EXCLUDED.error,
+    primary_category = EXCLUDED.primary_category,
+    upload_ids = EXCLUDED.upload_ids,
+    widget_context = EXCLUDED.widget_context,
+    updated_at = NOW()`;
+
+const SAVE_SESSION_WITHOUT_CATEGORY_AND_WIDGET = `
+  INSERT INTO research_sessions (id, tenant_id, user_id, user_email, topic, phase, plan, findings, report, events, follow_up_history, error, upload_ids, widget_context, created_at, updated_at)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, to_timestamp($15::double precision / 1000), NOW())
+  ON CONFLICT (id) DO UPDATE SET
+    phase = EXCLUDED.phase,
+    plan = EXCLUDED.plan,
+    findings = EXCLUDED.findings,
+    report = EXCLUDED.report,
+    events = EXCLUDED.events,
+    follow_up_history = EXCLUDED.follow_up_history,
+    error = EXCLUDED.error,
+    upload_ids = EXCLUDED.upload_ids,
+    widget_context = EXCLUDED.widget_context,
+    updated_at = NOW()`;
+
 const SAVE_SESSION_WITH_CATEGORY = `
   INSERT INTO research_sessions (id, tenant_id, user_id, user_email, topic, phase, plan, findings, report, events, follow_up_history, error, primary_category, upload_ids, created_at, updated_at)
   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, to_timestamp($15::double precision / 1000), NOW())
@@ -200,6 +234,42 @@ const SAVE_SESSION_WITHOUT_CATEGORY = `
 export async function saveSession(session: ResearchSession, tenantPool: pg.Pool): Promise<void> {
   const primaryCategory = getPrimaryCategory(session.plan);
   const uploadIdsJson = JSON.stringify(session.uploadIds || []);
+  const widgetCtxJson = session.widgetContext ? JSON.stringify(session.widgetContext) : null;
+  const paramsWithCategoryAndWidget = [
+    session.id,
+    session.tenantId,
+    session.userId,
+    session.userEmail,
+    session.topic || null,
+    session.phase,
+    session.plan ? JSON.stringify(session.plan) : null,
+    JSON.stringify(session.findings),
+    session.report ? JSON.stringify(session.report) : null,
+    JSON.stringify(session.events),
+    JSON.stringify(session.followUpHistory),
+    session.error || null,
+    primaryCategory,
+    uploadIdsJson,
+    widgetCtxJson,
+    session.createdAt,
+  ];
+  const paramsWithoutCategoryAndWidget = [
+    session.id,
+    session.tenantId,
+    session.userId,
+    session.userEmail,
+    session.topic || null,
+    session.phase,
+    session.plan ? JSON.stringify(session.plan) : null,
+    JSON.stringify(session.findings),
+    session.report ? JSON.stringify(session.report) : null,
+    JSON.stringify(session.events),
+    JSON.stringify(session.followUpHistory),
+    session.error || null,
+    uploadIdsJson,
+    widgetCtxJson,
+    session.createdAt,
+  ];
   const paramsWithCategory = [
     session.id,
     session.tenantId,
@@ -234,16 +304,39 @@ export async function saveSession(session: ResearchSession, tenantPool: pg.Pool)
     session.createdAt,
   ];
   try {
-    await tenantPool.query(SAVE_SESSION_WITH_CATEGORY, paramsWithCategory);
+    await tenantPool.query(SAVE_SESSION_WITH_CATEGORY_AND_WIDGET, paramsWithCategoryAndWidget);
   } catch (err: any) {
-    if (err.message?.includes("primary_category") && err.message?.includes("does not exist")) {
+    const msg = err.message || "";
+    if (msg.includes("widget_context") && msg.includes("does not exist")) {
       try {
-        await tenantPool.query(SAVE_SESSION_WITHOUT_CATEGORY, paramsWithoutCategory);
-      } catch (fallbackErr: any) {
-        console.error(`[Research] Failed to save session ${session.id}:`, fallbackErr.message);
+        await tenantPool.query(SAVE_SESSION_WITH_CATEGORY, paramsWithCategory);
+      } catch (err2: any) {
+        if (err2.message?.includes("primary_category") && err2.message?.includes("does not exist")) {
+          try {
+            await tenantPool.query(SAVE_SESSION_WITHOUT_CATEGORY, paramsWithoutCategory);
+          } catch (fallbackErr: any) {
+            console.error(`[Research] Failed to save session ${session.id}:`, fallbackErr.message);
+          }
+        } else {
+          console.error(`[Research] Failed to save session ${session.id}:`, err2.message);
+        }
+      }
+    } else if (msg.includes("primary_category") && msg.includes("does not exist")) {
+      try {
+        await tenantPool.query(SAVE_SESSION_WITHOUT_CATEGORY_AND_WIDGET, paramsWithoutCategoryAndWidget);
+      } catch (err3: any) {
+        if (err3.message?.includes("widget_context") && err3.message?.includes("does not exist")) {
+          try {
+            await tenantPool.query(SAVE_SESSION_WITHOUT_CATEGORY, paramsWithoutCategory);
+          } catch (fallbackErr: any) {
+            console.error(`[Research] Failed to save session ${session.id}:`, fallbackErr.message);
+          }
+        } else {
+          console.error(`[Research] Failed to save session ${session.id}:`, err3.message);
+        }
       }
     } else {
-      console.error(`[Research] Failed to save session ${session.id}:`, err.message);
+      console.error(`[Research] Failed to save session ${session.id}:`, msg);
     }
   }
 }
@@ -261,6 +354,19 @@ export async function loadSession(sessionId: string, tenantPool: pg.Pool): Promi
     if (result.rows.length === 0) return undefined;
 
     const row = result.rows[0];
+    let widgetContext: ResearchWidgetContext | undefined;
+    const rawWc = row.widget_context;
+    if (rawWc != null) {
+      if (typeof rawWc === "object" && rawWc !== null && "catalog" in rawWc) {
+        widgetContext = rawWc as ResearchWidgetContext;
+      } else if (typeof rawWc === "string") {
+        try {
+          widgetContext = JSON.parse(rawWc) as ResearchWidgetContext;
+        } catch {
+          widgetContext = undefined;
+        }
+      }
+    }
     const session: ResearchSession = {
       id: row.id,
       tenantId: row.tenant_id,
@@ -283,6 +389,7 @@ export async function loadSession(sessionId: string, tenantPool: pg.Pool): Promi
       visibility: row.visibility ?? "private",
       sharedWithUserIds: Array.isArray(row.shared_with_user_ids) ? row.shared_with_user_ids : [],
       uploadIds: Array.isArray(row.upload_ids) ? row.upload_ids : [],
+      widgetContext,
     };
 
     sessions.set(session.id, session);
@@ -466,7 +573,8 @@ export async function createSession(
   topic?: string,
   initialContext?: InsightContext,
   mode: ResearchMode = "deep",
-  uploadIds: string[] = []
+  uploadIds: string[] = [],
+  widgetContext?: ResearchWidgetContext
 ): Promise<ResearchSession> {
   pruneExpiredSessions();
 
@@ -516,6 +624,11 @@ export async function createSession(
     _emitters: [],
     _isRunning: false,
     uploadIds: uploadIds.length > 0 ? uploadIds : undefined,
+    widgetContext:
+      widgetContext &&
+      (String(widgetContext.catalog || "").trim().length > 0 || (widgetContext.meta?.length ?? 0) > 0)
+        ? widgetContext
+        : undefined,
   };
 
   sessions.set(session.id, session);
@@ -706,7 +819,8 @@ export async function runResearchPipeline(
         getSteeringDirective,
         checkPause,
         enrichedKnowledgeContext,
-        businessKnowledge
+        businessKnowledge,
+        session.widgetContext ?? null
       );
 
       session.plan = { summary: "Quick answer", questions: [quickQuestion] };
@@ -822,7 +936,8 @@ export async function runResearchPipeline(
 
           return runDataAnalystAgent(
             question, combinedSchemaContext, metricDefs, tenantPool, apiKey,
-            onStep, getSteeringDirective, checkPause, enrichedKnowledgeContext, businessKnowledge
+            onStep, getSteeringDirective, checkPause, enrichedKnowledgeContext, businessKnowledge,
+            session.widgetContext ?? null
           );
         })
       );
@@ -1002,7 +1117,8 @@ export async function runFollowUp(
 
     const finding = await runDataAnalystAgent(
       followUpQuestion, followUpSchemaContext, metricDefs, tenantPool, apiKey,
-      onStep, getSteeringDirective, checkPause, enrichedFollowUpContext, businessKnowledge
+      onStep, getSteeringDirective, checkPause, enrichedFollowUpContext, businessKnowledge,
+      session.widgetContext ?? null
     );
 
     session.findings.push(finding);

@@ -23,6 +23,7 @@ import {
 import { pool as managementPool } from "../../../config/managementDatabase.js";
 import type { InvestigationQuestion } from "./plannerAgent.js";
 import { VIZ_STANDARDS_MEDIUM } from "../../../config/visualizationStandards.js";
+import type { ResearchWidgetContext } from "../../../types/researchWidgetContext.js";
 
 // ============================================================================
 // Types
@@ -58,7 +59,26 @@ export interface ChartHint {
   buckets?: number;
 }
 
-export interface EvidenceItem {
+/** Period preset IDs the analyst may pass on reference_widget (mirrors client PeriodPreset). */
+export const RESEARCH_WIDGET_PERIOD_PRESETS = [
+  "rolling-3",
+  "rolling-6",
+  "rolling-12",
+  "rolling-13",
+  "last-30-days",
+  "mtd",
+  "qtd",
+  "ytd",
+  "last-month",
+  "last-quarter",
+  "last-year",
+  "trailing-12",
+] as const;
+
+export type ResearchWidgetPeriodPreset = (typeof RESEARCH_WIDGET_PERIOD_PRESETS)[number];
+
+export interface EvidenceItemSql {
+  kind?: "sql";
   sql: string;
   explanation: string;
   rows: Record<string, any>[];
@@ -66,6 +86,27 @@ export interface EvidenceItem {
   fields: string[];
   columnFormats?: Record<string, string>;
   chartHint?: ChartHint;
+}
+
+export interface EvidenceItemRegistryWidget {
+  kind: "registry_widget";
+  definitionId: string;
+  definitionName: string;
+  /** Matches client DataSourceId string */
+  dataSourceId: string;
+  dashboardPath: string;
+  dashboardLabel: string;
+  sectionId?: string;
+  period?: ResearchWidgetPeriodPreset;
+  filters?: { branch?: string; channel?: string; loanOfficer?: string };
+  confidence: "high" | "medium";
+  explanation: string;
+}
+
+export type EvidenceItem = EvidenceItemSql | EvidenceItemRegistryWidget;
+
+export function isSqlEvidenceItem(e: EvidenceItem): e is EvidenceItemSql {
+  return (e as EvidenceItemRegistryWidget).kind !== "registry_widget";
 }
 
 export type AgentStepType =
@@ -191,6 +232,27 @@ VISUALIZATION GUIDANCE (include chartHint with every query action):
 - Always include xLabel and yLabel as human-readable axis labels (e.g. xLabel: "Branch", yLabel: "Funded Volume ($)").
 - For grouped_bar and stacked_bar: yKeys must list every numeric column name to be plotted.
 - Maximum 30 rows per chart query; aggregate with GROUP BY and LIMIT if needed.
+
+{{WIDGET_CATALOG}}
+
+CANONICAL DASHBOARD WIDGETS (action "reference_widget"):
+- **Prefer canonical widgets** from the AVAILABLE DASHBOARD WIDGETS list when one cleanly answers the question with **high** confidence — you may emit \`reference_widget\` and **skip SQL** for that slice of the investigation.
+- If a widget **partially** covers the question, emit **both** SQL \`query\` actions and up to **3** \`reference_widget\` entries **total** in evidence for this finding (count existing widget references in your evidence before adding another).
+- **Never** emit more than **3** \`reference_widget\` evidence items before your final \`finding\`.
+- Use **only** these period preset IDs on \`reference_widget\`: ${RESEARCH_WIDGET_PERIOD_PRESETS.join(", ")}.
+- \`filters\` is optional: { "branch", "channel", "loanOfficer" } — only set when the question clearly implies a slice.
+- Always include a clear \`explanation\` naming the period and why this widget answers the question.
+
+When action is \`reference_widget\`, respond with JSON:
+{
+  "thinking": "...",
+  "action": "reference_widget",
+  "definitionId": "<id from AVAILABLE DASHBOARD WIDGETS list>",
+  "period": "rolling-12",
+  "filters": { "channel": "Retail" },
+  "confidence": "high" | "medium",
+  "explanation": "..."
+}
 
 chartHint schema (include inside each query action response):
 "chartHint": {
@@ -328,7 +390,7 @@ DERIVED METRICS AND TIERS (CRITICAL — READ BEFORE ANY PERSONNEL INVESTIGATION)
 Respond in JSON format:
 {
   "thinking": "Your reasoning about what to investigate next",
-  "action": "query" | "finding",
+  "action": "query" | "finding" | "reference_widget",
   "sql": "SELECT ... (only when action=query)",
   "explanation": "What this query investigates (only when action=query)",
   "columnFormats": { "column_alias": "number|currency|percent|days|date|text", ... },
@@ -402,14 +464,26 @@ export async function runDataAnalystAgent(
   getSteeringDirective: () => string | null,
   checkPause: () => Promise<void>,
   knowledgeContext?: string,
-  businessKnowledge?: string
+  businessKnowledge?: string,
+  researchWidgetContext?: ResearchWidgetContext | null
 ): Promise<Finding> {
   const now = new Date();
   const todayStr = now.toISOString().split("T")[0];
 
+  const metaById = new Map(
+    (researchWidgetContext?.meta ?? []).map((m) => [m.id, m])
+  );
+
   // Fetch training examples for few-shot injection
   const trainingSection = await fetchTrainingExamples("research.analyst");
-  const systemPrompt = ANALYST_SYSTEM_PROMPT + VIZ_STANDARDS_MEDIUM + trainingSection;
+  const catalogBlock =
+    researchWidgetContext?.catalog?.trim().length
+      ? `\n\n## AVAILABLE DASHBOARD WIDGETS (canonical — prefer these over reinventing SQL when they answer the question)\n${researchWidgetContext.catalog}\n`
+      : "\n\n## AVAILABLE DASHBOARD WIDGETS\nNo catalog was attached to this session — use SQL to investigate.\n";
+  const systemPrompt =
+    ANALYST_SYSTEM_PROMPT.replace("{{WIDGET_CATALOG}}", catalogBlock) +
+    VIZ_STANDARDS_MEDIUM +
+    trainingSection;
 
   const userContentParts = [
     `Today: ${todayStr}. Current year: ${now.getFullYear()}.`,
@@ -554,6 +628,7 @@ export async function runDataAnalystAgent(
         });
 
         evidence.push({
+          kind: "sql",
           sql: parsed.sql,
           explanation: parsed.explanation || "",
           rows: inlineRows,
@@ -611,6 +686,7 @@ export async function runDataAnalystAgent(
       });
 
       evidence.push({
+        kind: "sql",
         sql: parsed.sql,
         explanation: parsed.explanation || "",
         rows: queryResult.rows,
@@ -634,12 +710,97 @@ export async function runDataAnalystAgent(
           content: `Query results (${queryResult.rowCount} rows, ${queryResult.executionTimeMs}ms):\n\n${formattedResults}\n\nAnalyze these results. Either run another query for more data, or produce your final finding if you have enough evidence.${urgency}`,
         }
       );
+    } else if (parsed.action === "reference_widget") {
+      const registryCount = evidence.filter((e) => !isSqlEvidenceItem(e)).length;
+      if (registryCount >= 3) {
+        conversationHistory.push(
+          { role: "assistant", content: raw },
+          {
+            role: "user",
+            content:
+              "You already have 3 canonical widget references in evidence (the maximum). Do not add more reference_widget actions. Produce your final finding or use SQL query if you still need data.",
+          },
+        );
+        continue;
+      }
+
+      const defId =
+        typeof parsed.definitionId === "string" ? parsed.definitionId.trim() : "";
+      const meta = defId ? metaById.get(defId) : undefined;
+      const confRaw = parsed.confidence === "high" || parsed.confidence === "medium" ? parsed.confidence : "medium";
+      const explanation =
+        typeof parsed.explanation === "string" && parsed.explanation.trim().length > 0
+          ? parsed.explanation.trim()
+          : "Referenced dashboard widget from catalog.";
+
+      if (!meta) {
+        onStep({
+          iteration,
+          type: "analysis",
+          content: `reference_widget rejected: unknown or filtered-out definitionId "${defId}"`,
+          timestamp: Date.now(),
+        });
+        conversationHistory.push(
+          { role: "assistant", content: raw },
+          {
+            role: "user",
+            content: `Unknown or unavailable widget id "${defId}". Pick a definitionId exactly from the AVAILABLE DASHBOARD WIDGETS list in your context, or use action "query".`,
+          },
+        );
+        continue;
+      }
+
+      let period: ResearchWidgetPeriodPreset | undefined;
+      if (parsed.period != null && parsed.period !== "") {
+        const p = String(parsed.period);
+        if ((RESEARCH_WIDGET_PERIOD_PRESETS as readonly string[]).includes(p)) {
+          period = p as ResearchWidgetPeriodPreset;
+        }
+      }
+
+      const filters: { branch?: string; channel?: string; loanOfficer?: string } = {};
+      if (parsed.filters && typeof parsed.filters === "object") {
+        const f = parsed.filters as Record<string, unknown>;
+        if (typeof f.branch === "string" && f.branch.trim()) filters.branch = f.branch.trim();
+        if (typeof f.channel === "string" && f.channel.trim()) filters.channel = f.channel.trim();
+        if (typeof f.loanOfficer === "string" && f.loanOfficer.trim()) filters.loanOfficer = f.loanOfficer.trim();
+      }
+
+      const widgetEvidence: EvidenceItemRegistryWidget = {
+        kind: "registry_widget",
+        definitionId: meta.id,
+        definitionName: meta.name,
+        dataSourceId: meta.dataSource,
+        dashboardPath: meta.dashboardPath,
+        dashboardLabel: meta.dashboardLabel,
+        sectionId: meta.sectionId,
+        period,
+        filters: Object.keys(filters).length ? filters : undefined,
+        confidence: confRaw,
+        explanation,
+      };
+      evidence.push(widgetEvidence);
+
+      onStep({
+        iteration,
+        type: "analysis",
+        content: `Referenced widget "${meta.name}" (${meta.id}) on ${meta.dashboardLabel}`,
+        timestamp: Date.now(),
+      });
+
+      conversationHistory.push(
+        { role: "assistant", content: raw },
+        {
+          role: "user",
+          content: `Widget reference recorded: ${meta.name} (${meta.id}) on ${meta.dashboardLabel}. Continue with SQL if needed, or produce your final finding.`,
+        },
+      );
     } else {
       conversationHistory.push(
         { role: "assistant", content: raw },
         {
           role: "user",
-          content: `Your response did not include a valid "action" of "query" or "finding". Please respond with a valid JSON object.`,
+          content: `Your response did not include a valid "action" of "query", "reference_widget", or "finding". Please respond with a valid JSON object.`,
         }
       );
     }
@@ -650,7 +811,7 @@ export async function runDataAnalystAgent(
     try {
       conversationHistory.push({
         role: "user",
-        content: `You have reached the iteration limit. You MUST produce your finding NOW using action "finding". Summarize what you found from the ${evidence.length} queries you ran. The last query's results are your primary evidence table. Do not run any more queries.`,
+        content: `You have reached the iteration limit. You MUST produce your finding NOW using action "finding". Summarize what you found from the ${evidence.length} evidence step(s) collected (SQL queries and/or widget references). Do not run any more queries.`,
       });
 
       const finalRaw = await callLLM(conversationHistory, apiKey, {

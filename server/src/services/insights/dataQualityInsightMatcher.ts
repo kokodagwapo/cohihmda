@@ -1,5 +1,6 @@
 import { DATA_QUALITY_TESTS, type DataQualityTest } from "../dataQuality/dataQualityTests.js";
 import type { InsightFinding } from "./agents/insightInvestigatorAgent.js";
+import { isSqlEvidenceItem } from "../research/agents/dataAnalystAgent.js";
 
 export interface DataQualityMatcherInput {
   finding?: InsightFinding;
@@ -145,7 +146,9 @@ export function matchInsightToDataQualityTests(input: DataQualityMatcherInput): 
     input.finding?.title ?? "",
     input.finding?.summary ?? "",
     ...Object.keys(input.finding?.keyMetrics || {}),
-    ...(input.finding?.evidence || []).map((e) => `${e.explanation || ""} ${e.sql || ""}`),
+    ...(input.finding?.evidence || []).map((e) =>
+      `${e.explanation || ""} ${isSqlEvidenceItem(e) ? e.sql || "" : ""}`,
+    ),
   ]
     .join(" ")
     .trim();

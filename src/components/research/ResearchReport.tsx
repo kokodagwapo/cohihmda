@@ -57,15 +57,15 @@ import { cn } from "@/lib/utils";
 import { renderMarkdownText } from "@/utils/renderMarkdown";
 import { InsightChat } from "@/components/dashboard/InsightChat";
 import { AutoChart, EvidencePreviewTable } from "@/components/research/FindingDrillDown";
+import { RegistryWidgetEmbed } from "@/components/research/RegistryWidgetEmbed";
 import { SaveToWorkbenchModal, type SaveToWorkbenchPayload } from "@/components/research/SaveToWorkbenchModal";
-import { FindingSummaryContent } from "@/components/research/FindingSummaryContent";
 import type {
   ResearchReport as ResearchReportType,
   ResearchTheme,
   RankedInsight,
   Finding,
 } from "@/hooks/useResearchSession";
-import { primarySqlEvidenceForRankedInsight } from "@/lib/researchTrackPayload";
+import { isSqlEvidence, isRegistryWidgetEvidence } from "@/hooks/useResearchSession";
 
 // ============================================================================
 // Types
@@ -86,12 +86,8 @@ interface ResearchReportProps {
   onDrillDown?: (finding: Finding) => void;
   /** Whether this insight is already on the watchlist (for research insights). */
   isTracked?: (headline: string, detail: string) => boolean;
-  /** Toggle track/untrack on the watchlist. Optional third arg carries SQL for evaluable tracking (COHI-362). */
-  onToggleTrack?: (
-    headline: string,
-    detail: string,
-    extras?: { sql?: string; keyFields?: string[] }
-  ) => void;
+  /** Toggle track/untrack on the watchlist. */
+  onToggleTrack?: (headline: string, detail: string) => void;
   /** @deprecated Use isTracked + onToggleTrack for toggle behavior. */
   onTrackInsight?: (headline: string, detail: string) => void;
   /** When user clicks "Run this investigation" on a further-investigation suggestion. */
@@ -227,12 +223,7 @@ export function QuickAnswerView({
             </Badge>
           </div>
           <div className="text-sm text-muted-foreground leading-relaxed mt-1 prose prose-sm dark:prose-invert max-w-none">
-            <FindingSummaryContent
-              summary={finding.summary}
-              preferredBullets={finding.summary_bullets}
-              paragraphClassName="min-w-0 break-words [overflow-wrap:anywhere]"
-              listClassName="list-disc pl-5 space-y-1 min-w-0 break-words [overflow-wrap:anywhere]"
-            />
+            {renderMarkdownText(finding.summary)}
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -265,7 +256,11 @@ export function QuickAnswerView({
                         {ev.explanation}
                       </p>
                     )}
-                    <EvidencePreviewTable evidence={ev} maxRows={20} onSaveToWorkbench={onSaveToWorkbench} saveTitle={finding.title} sessionId={sessionId} />
+                    {isRegistryWidgetEvidence(ev) ? (
+                      <RegistryWidgetEmbed evidence={ev} />
+                    ) : (
+                      <EvidencePreviewTable evidence={ev} maxRows={20} onSaveToWorkbench={onSaveToWorkbench} saveTitle={finding.title} sessionId={sessionId} />
+                    )}
                   </div>
                 ))}
               </div>
@@ -611,11 +606,7 @@ function InsightCard({
   onFeedback?: (id: string, rating: -1 | 1, comment: string) => void;
   onDrillDown?: (finding: Finding) => void;
   isTracked?: (headline: string, detail: string) => boolean;
-  onToggleTrack?: (
-    headline: string,
-    detail: string,
-    extras?: { sql?: string; keyFields?: string[] }
-  ) => void;
+  onToggleTrack?: (headline: string, detail: string) => void;
   onTrackInsight?: (headline: string, detail: string) => void;
   selectedTenantId?: string | null;
   defaultEvidenceOpen?: boolean;
@@ -656,7 +647,7 @@ function InsightCard({
         {} as Record<string, string | number>
       ),
       evidence: relatedFindings.flatMap((f) =>
-        f.evidence.map((e) => ({
+        f.evidence.filter(isSqlEvidence).map((e) => ({
           sql: e.sql,
           explanation: e.explanation,
           rowCount: e.rowCount,
@@ -665,11 +656,6 @@ function InsightCard({
       ),
     }),
     [insight, relatedFindings]
-  );
-
-  const trackSqlExtras = useMemo(
-    () => primarySqlEvidenceForRankedInsight(insight, findings),
-    [insight, findings]
   );
 
   const impactBorderClass =
@@ -699,11 +685,7 @@ function InsightCard({
                       <button
                         onClick={() => {
                           if (onToggleTrack) {
-                            onToggleTrack(
-                              insight.headline,
-                              insight.detail,
-                              trackSqlExtras
-                            );
+                            onToggleTrack(insight.headline, insight.detail);
                           } else {
                             onTrackInsight?.(insight.headline, insight.detail);
                           }
@@ -856,14 +838,41 @@ function InsightCard({
 
           {/* Inline evidence: table + chart from first finding */}
           {(() => {
-            const firstWithEvidence = relatedFindings.find((f) => f.evidence?.length > 0);
-            const firstEvidence = firstWithEvidence?.evidence?.[0];
-            if (!firstEvidence?.rows?.length) return null;
+            const registryEvs = relatedFindings
+              .flatMap((f) => f.evidence)
+              .filter(isRegistryWidgetEvidence)
+              .slice(0, 3);
+            const heroReg = registryEvs[0];
+            const lazyRegs = registryEvs.slice(1);
+            const firstSql = relatedFindings
+              .flatMap((f) => f.evidence)
+              .find((e) => isSqlEvidence(e) && e.rows?.length);
+            if (!heroReg && !firstSql?.rows?.length) return null;
             return (
               <CollapsibleEvidence defaultOpen={defaultEvidenceOpen}>
                 <div className="space-y-3 pt-1 min-w-0">
-                  <EvidencePreviewTable evidence={firstEvidence} maxRows={defaultEvidenceOpen ? 20 : 12} onSaveToWorkbench={onSaveToWorkbench} saveTitle={insight.headline} sessionId={sessionId} />
-                  <AutoChart evidence={firstEvidence} onSaveToWorkbench={onSaveToWorkbench} saveTitle={insight.headline} sessionId={sessionId} />
+                  {heroReg && <RegistryWidgetEmbed evidence={heroReg} hero />}
+                  {lazyRegs.length > 0 && (
+                    <Collapsible>
+                      <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+                        <ChevronDown className="h-3 w-3" />
+                        Show {lazyRegs.length} more visualization{lazyRegs.length > 1 ? "s" : ""}
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <div className="grid gap-3 md:grid-cols-2 mt-2">
+                          {lazyRegs.map((ev, j) => (
+                            <RegistryWidgetEmbed key={`${ev.definitionId}-${j}`} evidence={ev} />
+                          ))}
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  )}
+                  {firstSql && firstSql.rows.length > 0 && (
+                    <>
+                      <EvidencePreviewTable evidence={firstSql} maxRows={defaultEvidenceOpen ? 20 : 12} onSaveToWorkbench={onSaveToWorkbench} saveTitle={insight.headline} sessionId={sessionId} />
+                      <AutoChart evidence={firstSql} onSaveToWorkbench={onSaveToWorkbench} saveTitle={insight.headline} sessionId={sessionId} />
+                    </>
+                  )}
                 </div>
               </CollapsibleEvidence>
             );

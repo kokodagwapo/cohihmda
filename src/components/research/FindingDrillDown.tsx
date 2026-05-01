@@ -9,7 +9,7 @@
  *   - SQL queries (collapsible, debug-mode only)
  */
 
-import { useState, useMemo, useRef, cloneElement } from "react";
+import { useState, useMemo, useRef, cloneElement, type ReactNode } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   BarChart,
@@ -78,24 +78,19 @@ import { cn } from "@/lib/utils";
 import { useDebugMode } from "@/contexts/DebugModeContext";
 import { exportDataAsExcel } from "@/utils/exportUtils";
 import { SaveToWorkbenchModal, type SaveToWorkbenchPayload } from "@/components/research/SaveToWorkbenchModal";
-import { FindingSummaryContent } from "@/components/research/FindingSummaryContent";
 import {
   FIELD_REGISTRY,
   SUMMARY_REGISTRY,
   type FieldFormat,
 } from "@/config/insightFieldRegistry";
-import type { Finding, EvidenceItem } from "@/hooks/useResearchSession";
-import { resolveResearchVisualizationLineage } from "@/lib/researchVisualizationLineage";
+import type { Finding, EvidenceItem, EvidenceItemSql } from "@/hooks/useResearchSession";
+import { isSqlEvidence, isRegistryWidgetEvidence } from "@/hooks/useResearchSession";
+import { RegistryWidgetEmbed } from "@/components/research/RegistryWidgetEmbed";
+import {
+  resolveResearchVisualizationLineage,
+  shouldShowResearchSqlLineageLink,
+} from "@/lib/researchVisualizationLineage";
 import { ResearchSourceDashboardLink } from "@/components/research/ResearchSourceDashboardLink";
-
-/** Best-effort lineage for Research Lab evidence → canonical dashboard / registry widget (COHI-365). */
-function lineageForEvidence(evidence: EvidenceItem, heading?: string | null) {
-  return resolveResearchVisualizationLineage({
-    sql: evidence.sql,
-    explanation: evidence.explanation,
-    findingTitle: heading ?? undefined,
-  });
-}
 
 // ============================================================================
 // Types
@@ -318,14 +313,15 @@ const EVIDENCE_INITIAL_ROWS = 100;
 const EVIDENCE_LOAD_MORE_STEP = 100;
 
 interface EvidenceTableProps {
-  evidence: EvidenceItem;
+  evidence: EvidenceItemSql;
   index: number;
   findingTitle?: string;
   sessionId?: string | null;
   onSaveToWorkbench?: (payload: SaveToWorkbenchPayload) => void;
+  lineageSlot?: ReactNode;
 }
 
-function EvidenceTable({ evidence, index, findingTitle, sessionId, onSaveToWorkbench }: EvidenceTableProps) {
+function EvidenceTable({ evidence, index, findingTitle, sessionId, onSaveToWorkbench, lineageSlot }: EvidenceTableProps) {
   const { isDebugMode } = useDebugMode();
   const [sort, setSort] = useState<SortState>({ column: "", direction: null });
   const [filter, setFilter] = useState("");
@@ -474,26 +470,15 @@ function EvidenceTable({ evidence, index, findingTitle, sessionId, onSaveToWorkb
   const gridCols = { display: "grid" as const, gridTemplateColumns: `repeat(${evidence.fields.length}, minmax(80px, 1fr))` };
   const canLoadMore = totalFiltered > visibleRowCount;
 
-  const sourceDashboardLineage = useMemo(
-    () => lineageForEvidence(evidence, findingTitle),
-    [evidence, findingTitle],
-  );
-
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 flex-wrap min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
           <Badge variant="outline" className="text-xs">Query {index + 1}</Badge>
           <span className="text-xs text-muted-foreground">
             {evidence.rowCount} rows
           </span>
-          {sourceDashboardLineage && (
-            <ResearchSourceDashboardLink
-              source={sourceDashboardLineage}
-              compact
-              className="max-w-[220px] truncate"
-            />
-          )}
+          {lineageSlot}
         </div>
         <div className="flex items-center gap-1.5">
           <div className="relative">
@@ -542,8 +527,6 @@ function EvidenceTable({ evidence, index, findingTitle, sessionId, onSaveToWorkb
                       explanation: evidence.explanation,
                       sourceType: "research",
                       sourceSessionId: sessionId ?? undefined,
-                      keyFields: evidence.fields,
-                      ...(sourceDashboardLineage ? { sourceDashboard: sourceDashboardLineage } : {}),
                     })
                   }
                 >
@@ -752,6 +735,7 @@ function EvidenceCell({
 
 export function EvidencePreviewTable({ evidence, maxRows = EVIDENCE_PREVIEW_MAX_ROWS, onSaveToWorkbench, saveTitle, sessionId }: EvidencePreviewTableProps) {
   const [expanded, setExpanded] = useState(false);
+  if (!isSqlEvidence(evidence)) return null;
   const columnFormats = useMemo(() => {
     const formats: Record<string, FieldFormat> = {};
     const agentFmts = evidence.columnFormats || {};
@@ -785,11 +769,6 @@ export function EvidencePreviewTable({ evidence, maxRows = EVIDENCE_PREVIEW_MAX_
     return formats;
   }, [evidence.fields, evidence.rows, evidence.columnFormats]);
 
-  const sourceDashboardLineage = useMemo(
-    () => lineageForEvidence(evidence, saveTitle),
-    [evidence, saveTitle],
-  );
-
   const isNumericFormat = (fmt: FieldFormat) =>
     ["currency", "number", "percent", "rate", "days", "bps"].includes(fmt);
 
@@ -818,14 +797,9 @@ export function EvidencePreviewTable({ evidence, maxRows = EVIDENCE_PREVIEW_MAX_
   return (
     <div className="rounded-md border overflow-hidden" role="region" aria-label="Evidence preview table">
       <div className="flex items-center justify-between px-2 py-1 bg-muted/30 border-b">
-        <div className="flex items-center gap-2 min-w-0 flex-wrap">
-          <span className="text-[10px] text-muted-foreground font-medium">
-            {totalRows} row{totalRows !== 1 ? "s" : ""}
-          </span>
-          {sourceDashboardLineage && (
-            <ResearchSourceDashboardLink source={sourceDashboardLineage} compact className="max-w-[200px] truncate" />
-          )}
-        </div>
+        <span className="text-[10px] text-muted-foreground font-medium">
+          {totalRows} row{totalRows !== 1 ? "s" : ""}
+        </span>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="h-6 w-6">
@@ -863,8 +837,6 @@ export function EvidencePreviewTable({ evidence, maxRows = EVIDENCE_PREVIEW_MAX_
                     explanation: evidence.explanation,
                     sourceType: "research",
                     sourceSessionId: sessionId ?? undefined,
-                    keyFields: evidence.fields,
-                    ...(sourceDashboardLineage ? { sourceDashboard: sourceDashboardLineage } : {}),
                   })
                 }
               >
@@ -1117,6 +1089,7 @@ function ensureUniqueX(
  *  4. Single-series fallback: best label + best numeric value.
  */
 function _computeConfig(evidence: EvidenceItem): ResolvedChartConfig | null {
+  if (!isSqlEvidence(evidence)) return null;
   const { fields, rows, chartHint, columnFormats } = evidence;
   if (rows.length < 2) return null;
 
@@ -1411,6 +1384,7 @@ function calcMinWidthLine(numPoints: number): number | undefined {
 }
 
 export function AutoChart({ evidence, hero = false, onSaveToWorkbench, saveTitle, sessionId }: AutoChartProps) {
+  if (!isSqlEvidence(evidence)) return null;
   const config = evidenceToChartConfig(evidence);
   if (!config) return null;
 
@@ -1654,17 +1628,6 @@ function AutoChartShell({ title, hero = false, minWidth, minHeight, children, on
   const scrollsX = !!minWidth;
   const scrollsY = !!minHeight && minHeight > effectiveHeight;
 
-  const sourceDashboardLineage = useMemo(
-    () =>
-      evidence
-        ? lineageForEvidence(
-            evidence,
-            [saveTitle, title].filter(Boolean).join(" — ") || undefined,
-          )
-        : null,
-    [evidence, saveTitle, title],
-  );
-
   const renderChart = (forDialog: boolean) => {
     const height = forDialog ? "calc(80vh - 6rem)" : effectiveHeight;
     const minW = forDialog ? (minWidth ? Math.max(minWidth, 600) : undefined) : minWidth;
@@ -1692,12 +1655,9 @@ function AutoChartShell({ title, hero = false, minWidth, minHeight, children, on
           <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 min-w-0">
             <BarChart3 className="h-3 w-3 flex-shrink-0" />
             <span className="truncate">{title}</span>
-            {sourceDashboardLineage && (
-              <ResearchSourceDashboardLink source={sourceDashboardLineage} compact className="shrink-0" />
-            )}
           </p>
           <div className="flex items-center gap-0.5 flex-shrink-0">
-            {onSaveToWorkbench && evidence && (
+            {onSaveToWorkbench && evidence && isSqlEvidence(evidence) && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
@@ -1722,8 +1682,6 @@ function AutoChartShell({ title, hero = false, minWidth, minHeight, children, on
                         explanation: evidence.explanation,
                         sourceType: "research",
                         sourceSessionId: sessionId ?? undefined,
-                        keyFields: evidence.fields,
-                        ...(sourceDashboardLineage ? { sourceDashboard: sourceDashboardLineage } : {}),
                       })
                     }
                   >
@@ -1770,12 +1728,29 @@ export function FindingDrillDown({ finding, onClose, sessionId }: FindingDrillDo
   const [kpiExpanded, setKpiExpanded] = useState(false);
   const [extraChartsOpen, setExtraChartsOpen] = useState(false);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const [extraRegistryOpen, setExtraRegistryOpen] = useState(false);
 
   const hasMetrics = Object.keys(finding.keyMetrics).length > 0;
   const hasEvidence = finding.evidence.length > 0;
 
+  const registryDashboardPaths = useMemo(
+    () => finding.evidence.filter(isRegistryWidgetEvidence).map((e) => e.dashboardPath),
+    [finding.evidence],
+  );
+
+  const registryEvidence = useMemo(
+    () => finding.evidence.filter(isRegistryWidgetEvidence).slice(0, 3),
+    [finding.evidence],
+  );
+  const heroRegistry = registryEvidence[0];
+  const extraRegistry = registryEvidence.slice(1);
+
   const chartableEvidence = finding.evidence.filter(
-    (e) => e.rows.length >= 2 && e.rows.length <= 50 && e.fields.length >= 2
+    (e) =>
+      isSqlEvidence(e) &&
+      e.rows.length >= 2 &&
+      e.rows.length <= 50 &&
+      e.fields.length >= 2,
   );
 
   // Hero = last chartable evidence (agent's final, most complete query)
@@ -1789,8 +1764,13 @@ export function FindingDrillDown({ finding, onClose, sessionId }: FindingDrillDo
   const allMetrics = Object.entries(finding.keyMetrics);
   const visibleMetrics = kpiExpanded ? allMetrics : allMetrics.slice(0, KPI_INITIAL_VISIBLE);
   const hiddenCount = allMetrics.length - KPI_INITIAL_VISIBLE;
-  // Primary evidence for the header Save to Workbench action
-  const primaryEvidence = finding.evidence[finding.evidence.length - 1] ?? null;
+  const summaryBullets =
+    Array.isArray(finding.summary_bullets) && finding.summary_bullets.length > 0
+      ? finding.summary_bullets
+      : (finding.summary ? [finding.summary] : []);
+
+  const primarySqlEvidence = [...finding.evidence].reverse().find(isSqlEvidence) ?? null;
+  const primaryRegistryEvidence = [...finding.evidence].reverse().find(isRegistryWidgetEvidence) ?? null;
 
   return (
     <div className="space-y-4">
@@ -1811,13 +1791,16 @@ export function FindingDrillDown({ finding, onClose, sessionId }: FindingDrillDo
               {finding.confidence}
             </Badge>
           </div>
-          <FindingSummaryContent
-            summary={finding.summary}
-            preferredBullets={finding.summary_bullets}
-          />
+          {summaryBullets.length > 0 && (
+            <ul className="list-disc pl-5 space-y-1 text-sm text-muted-foreground leading-relaxed">
+              {summaryBullets.map((bullet, idx) => (
+                <li key={`${idx}-${bullet.slice(0, 24)}`}>{bullet}</li>
+              ))}
+            </ul>
+          )}
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
-          {primaryEvidence && (
+          {primaryRegistryEvidence && (
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -1827,27 +1810,54 @@ export function FindingDrillDown({ finding, onClose, sessionId }: FindingDrillDo
                     className="h-8 w-8"
                     onClick={() =>
                       setSaveToWorkbenchPayload({
-                        sql: primaryEvidence.sql,
                         title: finding.title.slice(0, 120),
-                        vizConfig: {
-                          type: "table",
-                          title: finding.title.slice(0, 80),
-                          data: [],
-                          tableConfig: {
-                            columns: primaryEvidence.fields.map((f) => ({ key: f, label: humanizeKey(f) })),
-                          },
+                        registryWidget: {
+                          definitionId: primaryRegistryEvidence.definitionId,
+                          period: primaryRegistryEvidence.period,
+                          filters: primaryRegistryEvidence.filters,
                         },
-                        explanation: primaryEvidence.explanation,
                         sourceType: "research",
                         sourceSessionId: sessionId ?? undefined,
-                        keyFields: primaryEvidence.fields,
                       })
                     }
                   >
                     <Bookmark className="h-3.5 w-3.5" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="left" className="text-xs">Save to Workbench</TooltipContent>
+                <TooltipContent side="left" className="text-xs">Save canonical widget to Workbench</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+          {primarySqlEvidence && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() =>
+                      setSaveToWorkbenchPayload({
+                        sql: primarySqlEvidence.sql,
+                        title: finding.title.slice(0, 120),
+                        vizConfig: {
+                          type: "table",
+                          title: finding.title.slice(0, 80),
+                          data: [],
+                          tableConfig: {
+                            columns: primarySqlEvidence.fields.map((f) => ({ key: f, label: humanizeKey(f) })),
+                          },
+                        },
+                        explanation: primarySqlEvidence.explanation,
+                        sourceType: "research",
+                        sourceSessionId: sessionId ?? undefined,
+                      })
+                    }
+                  >
+                    <Bookmark className="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="left" className="text-xs">Save SQL table to Workbench</TooltipContent>
               </Tooltip>
             </TooltipProvider>
           )}
@@ -1856,6 +1866,29 @@ export function FindingDrillDown({ finding, onClose, sessionId }: FindingDrillDo
           </Button>
         </div>
       </div>
+
+      {/* Canonical registry widgets (hero + optional extras) */}
+      {heroRegistry && (
+        <div className="space-y-3">
+          <RegistryWidgetEmbed evidence={heroRegistry} hero />
+          {extraRegistry.length > 0 && (
+            <Collapsible open={extraRegistryOpen} onOpenChange={setExtraRegistryOpen}>
+              <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors w-full">
+                {extraRegistryOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                {extraRegistryOpen ? "Hide" : "Show"} {extraRegistry.length} more visualization
+                {extraRegistry.length > 1 ? "s" : ""}
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="grid gap-3 md:grid-cols-2 mt-3">
+                  {extraRegistry.map((ev, i) => (
+                    <RegistryWidgetEmbed key={`${ev.definitionId}-${i}`} evidence={ev} />
+                  ))}
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+          )}
+        </div>
+      )}
 
       {/* Hero chart — full-width, prominent */}
       {heroEvidence && (
@@ -1916,20 +1949,53 @@ export function FindingDrillDown({ finding, onClose, sessionId }: FindingDrillDo
           <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors w-full">
             {evidenceOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
             <Table2 className="h-3.5 w-3.5" />
-            {evidenceOpen ? "Hide" : "View"} evidence data &mdash; {finding.evidence.length} {finding.evidence.length === 1 ? "query" : "queries"}
+            {evidenceOpen ? "Hide" : "View"} evidence data &mdash; {finding.evidence.length}{" "}
+            {finding.evidence.length === 1 ? "item" : "items"}
+            {" "}(SQL tables + widgets)
           </CollapsibleTrigger>
           <CollapsibleContent>
             <div className="space-y-5 mt-3">
-              {finding.evidence.map((ev, i) => (
-                <EvidenceTable
-                  key={i}
-                  evidence={ev}
-                  index={i}
-                  findingTitle={finding.title}
-                  sessionId={sessionId}
-                  onSaveToWorkbench={setSaveToWorkbenchPayload}
-                />
-              ))}
+              {(() => {
+                let registryRendered = 0;
+                return finding.evidence.map((ev, i) => {
+                  if (isRegistryWidgetEvidence(ev)) {
+                    if (registryRendered >= 3) return null;
+                    registryRendered += 1;
+                    return (
+                      <div key={`rw-${i}`} className="space-y-1">
+                        <RegistryWidgetEmbed evidence={ev} />
+                      </div>
+                    );
+                  }
+                  if (!isSqlEvidence(ev)) return null;
+                  const lineage = resolveResearchVisualizationLineage({
+                    sql: ev.sql,
+                    explanation: ev.explanation,
+                    findingTitle: finding.title,
+                  });
+                  const showLineage =
+                    lineage &&
+                    shouldShowResearchSqlLineageLink({
+                      resolvedLineage: lineage,
+                      registryDashboardPaths,
+                    });
+                  const lineageSlot =
+                    showLineage && lineage ? (
+                      <ResearchSourceDashboardLink source={lineage} compact className="ml-1" />
+                    ) : null;
+                  return (
+                    <EvidenceTable
+                      key={`sql-${i}`}
+                      evidence={ev}
+                      index={i}
+                      findingTitle={finding.title}
+                      sessionId={sessionId}
+                      onSaveToWorkbench={setSaveToWorkbenchPayload}
+                      lineageSlot={lineageSlot}
+                    />
+                  );
+                });
+              })()}
             </div>
           </CollapsibleContent>
         </Collapsible>

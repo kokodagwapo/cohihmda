@@ -8,6 +8,10 @@
 
 import { useState, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
+import { serializeResearchWidgetCatalog } from "@/utils/researchWidgetCatalog";
+import type { PeriodPreset } from "@/components/ui/DatePeriodPicker";
+import type { DataSourceId } from "@/components/widgets/registry/types";
 
 // ============================================================================
 // Types (mirrors server-side types)
@@ -51,7 +55,8 @@ export interface ChartHint {
   buckets?: number;
 }
 
-export interface EvidenceItem {
+export interface EvidenceItemSql {
+  kind?: "sql";
   sql: string;
   explanation: string;
   rows: Record<string, any>[];
@@ -59,6 +64,30 @@ export interface EvidenceItem {
   fields: string[];
   columnFormats?: Record<string, string>;
   chartHint?: ChartHint;
+}
+
+export interface EvidenceItemRegistryWidget {
+  kind: "registry_widget";
+  definitionId: string;
+  definitionName: string;
+  dataSourceId: DataSourceId;
+  dashboardPath: string;
+  dashboardLabel: string;
+  sectionId?: string;
+  period?: PeriodPreset;
+  filters?: { branch?: string; channel?: string; loanOfficer?: string };
+  confidence: "high" | "medium";
+  explanation: string;
+}
+
+export type EvidenceItem = EvidenceItemSql | EvidenceItemRegistryWidget;
+
+export function isSqlEvidence(ev: EvidenceItem): ev is EvidenceItemSql {
+  return (ev as EvidenceItemRegistryWidget).kind !== "registry_widget";
+}
+
+export function isRegistryWidgetEvidence(ev: EvidenceItem): ev is EvidenceItemRegistryWidget {
+  return (ev as EvidenceItemRegistryWidget).kind === "registry_widget";
 }
 
 export interface Finding {
@@ -141,6 +170,7 @@ export interface SessionListItem {
 // ============================================================================
 
 export function useResearchSession(tenantId?: string | null) {
+  const { user } = useAuth();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [phase, setPhase] = useState<SessionPhase>("idle");
   const [plan, setPlan] = useState<ResearchPlan | null>(null);
@@ -285,6 +315,9 @@ export function useResearchSession(tenantId?: string | null) {
         if (initialContext) body.initialContext = initialContext;
         body.mode = mode;
         if (uploadIds && uploadIds.length > 0) body.uploadIds = uploadIds;
+        const snap = serializeResearchWidgetCatalog(user ?? undefined);
+        body.widgetCatalog = snap.catalog;
+        body.widgetCatalogMeta = snap.meta;
 
         const result = await api.request<{ sessionId: string }>(
           `/api/research/sessions${tenantParam}`,
@@ -303,7 +336,7 @@ export function useResearchSession(tenantId?: string | null) {
         setIsRunning(false);
       }
     },
-    [tenantParam, readSSEStream]
+    [tenantParam, readSSEStream, user],
   );
 
   // ── Send steering command ──
