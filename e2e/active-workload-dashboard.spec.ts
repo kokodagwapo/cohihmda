@@ -405,11 +405,11 @@ test.describe("Active Workload Dashboard (COHI-347)", () => {
     await expect(filterRow.locator("select")).toHaveCount(3);
   });
 
-  test("@critical @COHI-347 workbench shared pills open full popover editor and use detail-list options", async ({
+  test("@critical @COHI-347 workbench shared pills open full popover editor and use active-detail-list options", async ({
     userPage,
   }) => {
     await suppressWelcomeTour(userPage);
-    const { detailListUrls } = await setupActiveWorkloadMocks(userPage);
+    const { activeDetailUrls } = await setupActiveWorkloadMocks(userPage);
 
     await userPage.goto("/my-dashboard/new", { waitUntil: "domcontentloaded" });
     await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
@@ -440,7 +440,7 @@ test.describe("Active Workload Dashboard (COHI-347)", () => {
     await expect(popover.getByRole("button", { name: "Apply Filters" })).toBeVisible();
     await expect(popover.getByRole("button", { name: "Clear Selection" })).toBeVisible();
 
-    await expect.poll(() => detailListUrls.length).toBeGreaterThan(0);
+    await expect.poll(() => activeDetailUrls.length).toBeGreaterThan(0);
   });
 });
 
