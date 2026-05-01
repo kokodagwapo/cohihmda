@@ -2782,7 +2782,7 @@ export function WidgetGroup({
   ] = useState(false);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const filtersRestoredRef = useRef(false);
-  /** Prevents a slow detail-list fetch for a previous actor column from overwriting pill options after the user switches role. */
+  /** Prevents a stale active-detail-list fetch for a previous actor column from overwriting pill options after the user switches role. */
   const activeWorkloadPillOptionsFetchIdRef = useRef(0);
   const toggleStringDraftValue = useCallback(
     (key: "milestone" | "actor" | "loanType" | "loanPurpose", value: string) => {

@@ -117,10 +117,8 @@ async function setupActiveWorkloadMocks(
   options: { delayedFirstResponseMs?: number; forceActiveDetailError?: boolean } = {},
 ): Promise<{
   activeDetailUrls: string[];
-  detailListUrls: string[];
 }> {
   const activeDetailUrls: string[] = [];
-  const detailListUrls: string[] = [];
   let activeDetailCallCount = 0;
 
   await page.route(/\/api\/loans\/active-detail-list(\?|$)/, async (route: Route) => {
@@ -157,8 +155,8 @@ async function setupActiveWorkloadMocks(
     });
   });
 
+  // Other dashboard surfaces may still call detail-list during these flows; keep a harmless stub.
   await page.route(/\/api\/loans\/detail-list(\?|$)/, async (route: Route) => {
-    detailListUrls.push(route.request().url());
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -173,7 +171,7 @@ async function setupActiveWorkloadMocks(
     });
   });
 
-  return { activeDetailUrls, detailListUrls };
+  return { activeDetailUrls };
 }
 
 function activeWorkloadWorkbenchGroup(page: Page) {
