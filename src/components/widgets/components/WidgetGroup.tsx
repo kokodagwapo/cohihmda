@@ -5126,12 +5126,13 @@ export function WidgetGroup({
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  const prev = filters.activeWorkloadSliceDrilldown ?? {
+                                    actorValues: [],
+                                    loanTypes: [],
+                                    loanPurposes: [],
+                                  };
                                   updateFilters(groupId, {
-                                    activeWorkloadSliceDrilldown: {
-                                      actorValues: [],
-                                      loanTypes: [],
-                                      loanPurposes: [],
-                                    },
+                                    activeWorkloadSliceDrilldown: { ...prev, actorValues: [] },
                                   });
                                   setActiveWorkloadPillPopover(null);
                                 }}
@@ -5148,7 +5149,23 @@ export function WidgetGroup({
                                 </div>
                                 <div className="flex items-center gap-2">
                                   <Button type="button" size="sm" variant="outline" onClick={() => setActiveWorkloadPillPopover(null)}>Cancel</Button>
-                                  <Button type="button" size="sm" onClick={() => { updateFilters(groupId, { activeWorkloadSliceDrilldown: { actorValues: activeWorkloadDraftActorValues, loanTypes: [], loanPurposes: [] } }); setActiveWorkloadPillPopover(null); }}>Apply Filters</Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    onClick={() => {
+                                      const prev = filters.activeWorkloadSliceDrilldown ?? {
+                                        actorValues: [],
+                                        loanTypes: [],
+                                        loanPurposes: [],
+                                      };
+                                      updateFilters(groupId, {
+                                        activeWorkloadSliceDrilldown: { ...prev, actorValues: activeWorkloadDraftActorValues },
+                                      });
+                                      setActiveWorkloadPillPopover(null);
+                                    }}
+                                  >
+                                    Apply Filters
+                                  </Button>
                                 </div>
                               </div>
                               <Command shouldFilter={false}>
@@ -5191,12 +5208,13 @@ export function WidgetGroup({
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  const prev = filters.activeWorkloadSliceDrilldown ?? {
+                                    actorValues: [],
+                                    loanTypes: [],
+                                    loanPurposes: [],
+                                  };
                                   updateFilters(groupId, {
-                                    activeWorkloadSliceDrilldown: {
-                                      actorValues: [],
-                                      loanTypes: [],
-                                      loanPurposes: [],
-                                    },
+                                    activeWorkloadSliceDrilldown: { ...prev, loanTypes: [] },
                                   });
                                   setActiveWorkloadPillPopover(null);
                                 }}
@@ -5213,7 +5231,23 @@ export function WidgetGroup({
                                 </div>
                                 <div className="flex items-center gap-2">
                                   <Button type="button" size="sm" variant="outline" onClick={() => setActiveWorkloadPillPopover(null)}>Cancel</Button>
-                                  <Button type="button" size="sm" onClick={() => { updateFilters(groupId, { activeWorkloadSliceDrilldown: { actorValues: [], loanTypes: activeWorkloadDraftLoanTypes, loanPurposes: [] } }); setActiveWorkloadPillPopover(null); }}>Apply Filters</Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    onClick={() => {
+                                      const prev = filters.activeWorkloadSliceDrilldown ?? {
+                                        actorValues: [],
+                                        loanTypes: [],
+                                        loanPurposes: [],
+                                      };
+                                      updateFilters(groupId, {
+                                        activeWorkloadSliceDrilldown: { ...prev, loanTypes: activeWorkloadDraftLoanTypes },
+                                      });
+                                      setActiveWorkloadPillPopover(null);
+                                    }}
+                                  >
+                                    Apply Filters
+                                  </Button>
                                 </div>
                               </div>
                               <Command shouldFilter={false}>
@@ -5256,12 +5290,13 @@ export function WidgetGroup({
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  const prev = filters.activeWorkloadSliceDrilldown ?? {
+                                    actorValues: [],
+                                    loanTypes: [],
+                                    loanPurposes: [],
+                                  };
                                   updateFilters(groupId, {
-                                    activeWorkloadSliceDrilldown: {
-                                      actorValues: [],
-                                      loanTypes: [],
-                                      loanPurposes: [],
-                                    },
+                                    activeWorkloadSliceDrilldown: { ...prev, loanPurposes: [] },
                                   });
                                   setActiveWorkloadPillPopover(null);
                                 }}
@@ -5278,7 +5313,23 @@ export function WidgetGroup({
                                 </div>
                                 <div className="flex items-center gap-2">
                                   <Button type="button" size="sm" variant="outline" onClick={() => setActiveWorkloadPillPopover(null)}>Cancel</Button>
-                                  <Button type="button" size="sm" onClick={() => { updateFilters(groupId, { activeWorkloadSliceDrilldown: { actorValues: [], loanTypes: [], loanPurposes: activeWorkloadDraftLoanPurposes } }); setActiveWorkloadPillPopover(null); }}>Apply Filters</Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    onClick={() => {
+                                      const prev = filters.activeWorkloadSliceDrilldown ?? {
+                                        actorValues: [],
+                                        loanTypes: [],
+                                        loanPurposes: [],
+                                      };
+                                      updateFilters(groupId, {
+                                        activeWorkloadSliceDrilldown: { ...prev, loanPurposes: activeWorkloadDraftLoanPurposes },
+                                      });
+                                      setActiveWorkloadPillPopover(null);
+                                    }}
+                                  >
+                                    Apply Filters
+                                  </Button>
                                 </div>
                               </div>
                               <Command shouldFilter={false}>
