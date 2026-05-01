@@ -423,6 +423,17 @@ function ActiveWorkloadEmbedInner({ width, height, config }: WidgetRenderProps) 
     return out;
   }, [drillRowsByParent, expanded]);
 
+  const drilldownTotals = useMemo(() => {
+    const topLevel = drillRows.filter((row) => row.parentId === null);
+    if (topLevel.length === 0) return null;
+    const activeFiles = topLevel.reduce((sum, row) => sum + row.activeFiles, 0);
+    const weightedDays =
+      activeFiles > 0
+        ? topLevel.reduce((sum, row) => sum + row.daysActive * row.activeFiles, 0) / activeFiles
+        : 0;
+    return { activeFiles, daysActive: weightedDays };
+  }, [drillRows]);
+
   const milestoneData = useMemo(() => {
     if (!needsChartOrDrill || renderStage === "kpi") return [];
     const byMilestone = new Map<string, number[]>();
@@ -647,7 +658,88 @@ function ActiveWorkloadEmbedInner({ width, height, config }: WidgetRenderProps) 
       <div className="h-full w-full rounded-lg bg-white dark:bg-slate-900/80 p-3" style={rootStyle}>
         <div className="flex items-center justify-between pb-2"><CardTitle className="text-sm">Drilldown</CardTitle><div className="flex items-center gap-2"><Button size="sm" variant="outline" onClick={() => setExpanded(new Set(drillRows.filter((r) => r.level !== "loanPurpose").map((r) => r.id)))}>Expand All</Button><Button size="sm" variant="outline" onClick={() => setExpanded(new Set())}>Collapse All</Button></div></div>
         <div className="h-[calc(100%-40px)] overflow-auto">
-          <table className="w-full min-w-[720px] text-sm"><thead><tr className="border-b border-slate-200 dark:border-slate-700"><th className="px-3 py-2 text-left">{actor}</th><th className="px-3 py-2 text-right whitespace-nowrap">Active Files</th><th className="px-3 py-2 text-right whitespace-nowrap">{aggregation === "average" ? "Average" : "Median"} Days Active</th></tr></thead><tbody>{visibleDrillRows.map((row) => { const hasChildren = (drillRowsByParent.get(row.id) ?? []).length > 0; return <tr key={row.id} className={`cursor-pointer border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50/90 dark:hover:bg-slate-700/60 ${((row.level === "actor" && (sliceDrilldown.actorValues ?? []).includes(row.label)) || (row.level === "loanType" && (sliceDrilldown.loanTypes ?? []).includes(row.label)) || (row.level === "loanPurpose" && (sliceDrilldown.loanPurposes ?? []).includes(row.label))) ? "bg-blue-50/80 dark:bg-slate-800/80" : ""}`} onClick={() => toggleDrilldownSlice(row)}><td className="px-3 py-2"><div className="flex items-center gap-1" style={{ paddingLeft: `${row.level === "loanPurpose" ? 36 : row.level === "loanType" ? 18 : 0}px` }}>{hasChildren ? <button type="button" className="rounded p-0.5 hover:bg-slate-100 dark:hover:bg-slate-700" onClick={(event) => { event.stopPropagation(); setExpanded((prev) => { const next = new Set(prev); if (next.has(row.id)) next.delete(row.id); else next.add(row.id); return next; }); }}>{expanded.has(row.id) ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}</button> : <span className="inline-block w-4" />}<span className={row.level !== "loanPurpose" ? "font-semibold text-slate-800 dark:text-slate-200" : "text-slate-700 dark:text-slate-300"}>{row.label}</span></div></td><td className="px-3 py-2 text-right">{row.activeFiles.toLocaleString()}</td><td className="px-3 py-2 text-right">{row.daysActive.toFixed(2)}</td></tr>; })}</tbody></table>
+          <table className="w-full min-w-[720px] text-sm">
+            <thead>
+              <tr className="sticky top-0 z-30 border-b border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800">
+                <th className="px-3 py-2 text-left">{actor}</th>
+                <th className="px-3 py-2 text-right whitespace-nowrap">Active Files</th>
+                <th className="px-3 py-2 text-right whitespace-nowrap">
+                  {aggregation === "average" ? "Average" : "Median"} Days Active
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {drilldownTotals && (
+                <tr className="sticky top-[41px] z-20 border-b border-slate-200 bg-slate-50/95 dark:border-slate-700 dark:bg-slate-800/95">
+                  <td className="px-3 py-2 font-semibold text-slate-800 dark:text-slate-200">Total</td>
+                  <td className="px-3 py-2 text-right font-medium text-slate-800 dark:text-slate-200">
+                    {drilldownTotals.activeFiles.toLocaleString()}
+                  </td>
+                  <td className="px-3 py-2 text-right font-medium text-slate-800 dark:text-slate-200">
+                    {drilldownTotals.daysActive.toFixed(2)}
+                  </td>
+                </tr>
+              )}
+              {visibleDrillRows.map((row) => {
+                const hasChildren = (drillRowsByParent.get(row.id) ?? []).length > 0;
+                return (
+                  <tr
+                    key={row.id}
+                    className={`cursor-pointer border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50/90 dark:hover:bg-slate-700/60 ${
+                      (row.level === "actor" && (sliceDrilldown.actorValues ?? []).includes(row.label)) ||
+                      (row.level === "loanType" && (sliceDrilldown.loanTypes ?? []).includes(row.label)) ||
+                      (row.level === "loanPurpose" && (sliceDrilldown.loanPurposes ?? []).includes(row.label))
+                        ? "bg-blue-50/80 dark:bg-slate-800/80"
+                        : ""
+                    }`}
+                    onClick={() => toggleDrilldownSlice(row)}
+                  >
+                    <td className="px-3 py-2">
+                      <div
+                        className="flex items-center gap-1"
+                        style={{ paddingLeft: `${row.level === "loanPurpose" ? 36 : row.level === "loanType" ? 18 : 0}px` }}
+                      >
+                        {hasChildren ? (
+                          <button
+                            type="button"
+                            className="rounded p-0.5 hover:bg-slate-100 dark:hover:bg-slate-700"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setExpanded((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(row.id)) next.delete(row.id);
+                                else next.add(row.id);
+                                return next;
+                              });
+                            }}
+                          >
+                            {expanded.has(row.id) ? (
+                              <ChevronDown className="h-3.5 w-3.5" />
+                            ) : (
+                              <ChevronRight className="h-3.5 w-3.5" />
+                            )}
+                          </button>
+                        ) : (
+                          <span className="inline-block w-4" />
+                        )}
+                        <span
+                          className={
+                            row.level !== "loanPurpose"
+                              ? "font-semibold text-slate-800 dark:text-slate-200"
+                              : "text-slate-700 dark:text-slate-300"
+                          }
+                        >
+                          {row.label}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-right">{row.activeFiles.toLocaleString()}</td>
+                    <td className="px-3 py-2 text-right">{row.daysActive.toFixed(2)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
     );
