@@ -609,23 +609,24 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
     }
 
     const actorValues = extractSharedValuesFromFilter(nextDetail[actorColumnId]);
-    if (actorValues.length > 0) {
-      nextDrilldown = { actorValues, loanTypes: [], loanPurposes: [] };
-      delete nextDetail[actorColumnId];
-      detailChanged = true;
-    } else {
-      const loanTypeValues = extractSharedValuesFromFilter(nextDetail.loanType);
+    const loanTypeValues = extractSharedValuesFromFilter(nextDetail.loanType);
+    const loanPurposeValues = extractSharedValuesFromFilter(nextDetail.loanPurpose);
+    if (actorValues.length > 0 || loanTypeValues.length > 0 || loanPurposeValues.length > 0) {
+      nextDrilldown = { ...sliceDrilldown };
+      if (actorValues.length > 0) {
+        nextDrilldown.actorValues = actorValues;
+        delete nextDetail[actorColumnId];
+        detailChanged = true;
+      }
       if (loanTypeValues.length > 0) {
-        nextDrilldown = { actorValues: [], loanTypes: loanTypeValues, loanPurposes: [] };
+        nextDrilldown.loanTypes = loanTypeValues;
         delete nextDetail.loanType;
         detailChanged = true;
-      } else {
-        const loanPurposeValues = extractSharedValuesFromFilter(nextDetail.loanPurpose);
-        if (loanPurposeValues.length > 0) {
-          nextDrilldown = { actorValues: [], loanTypes: [], loanPurposes: loanPurposeValues };
-          delete nextDetail.loanPurpose;
-          detailChanged = true;
-        }
+      }
+      if (loanPurposeValues.length > 0) {
+        nextDrilldown.loanPurposes = loanPurposeValues;
+        delete nextDetail.loanPurpose;
+        detailChanged = true;
       }
     }
 
@@ -721,17 +722,17 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
     setSliceDrilldown((prev) => {
       if (row.level === "actor") {
         return prev.actorValues.length === 1 && prev.actorValues[0] === row.label
-          ? emptyDrilldownSlice()
-          : { actorValues: [row.label], loanTypes: [], loanPurposes: [] };
+          ? { ...prev, actorValues: [] }
+          : { ...prev, actorValues: [row.label] };
       }
       if (row.level === "loanType") {
         return prev.loanTypes.length === 1 && prev.loanTypes[0] === row.label
-          ? emptyDrilldownSlice()
-          : { actorValues: [], loanTypes: [row.label], loanPurposes: [] };
+          ? { ...prev, loanTypes: [] }
+          : { ...prev, loanTypes: [row.label] };
       }
       return prev.loanPurposes.length === 1 && prev.loanPurposes[0] === row.label
-        ? emptyDrilldownSlice()
-        : { actorValues: [], loanTypes: [], loanPurposes: [row.label] };
+        ? { ...prev, loanPurposes: [] }
+        : { ...prev, loanPurposes: [row.label] };
     });
   };
 
@@ -1119,12 +1120,12 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
     if (!hasActiveDraft) {
       if (columnId === "currentMilestone") {
         setSliceMilestones([]);
-      } else if (
-        columnId === actorColumnId ||
-        columnId === "loanType" ||
-        columnId === "loanPurpose"
-      ) {
-        setSliceDrilldown(emptyDrilldownSlice());
+      } else if (columnId === actorColumnId) {
+        setSliceDrilldown((prev) => ({ ...prev, actorValues: [] }));
+      } else if (columnId === "loanType") {
+        setSliceDrilldown((prev) => ({ ...prev, loanTypes: [] }));
+      } else if (columnId === "loanPurpose") {
+        setSliceDrilldown((prev) => ({ ...prev, loanPurposes: [] }));
       }
     }
   };
@@ -1332,8 +1333,8 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
                   if (o) {
                     setDraftDrilldownSlice({
                       actorValues: [...sliceDrilldown.actorValues],
-                      loanTypes: [],
-                      loanPurposes: [],
+                      loanTypes: [...sliceDrilldown.loanTypes],
+                      loanPurposes: [...sliceDrilldown.loanPurposes],
                     });
                     setPillEditor("drillActor");
                   } else setPillEditor(null);
@@ -1352,17 +1353,22 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
                     const s = new Set(prev.actorValues);
                     if (s.has(v)) s.delete(v);
                     else s.add(v);
-                    return { actorValues: [...s].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })), loanTypes: [], loanPurposes: [] };
+                    return {
+                      ...prev,
+                      actorValues: [...s].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+                    };
                   })
                 }
-                onApply={() => setSliceDrilldown({ actorValues: draftDrilldownSlice.actorValues, loanTypes: [], loanPurposes: [] })}
-                onClearSelection={() => setDraftDrilldownSlice({ actorValues: [], loanTypes: [], loanPurposes: [] })}
+                onApply={() =>
+                  setSliceDrilldown((prev) => ({ ...prev, actorValues: draftDrilldownSlice.actorValues }))
+                }
+                onClearSelection={() => setDraftDrilldownSlice((prev) => ({ ...prev, actorValues: [] }))}
               />
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  setSliceDrilldown(emptyDrilldownSlice());
+                  setSliceDrilldown((prev) => ({ ...prev, actorValues: [] }));
                   setPillEditor(null);
                 }}
                 className="rounded-sm p-0.5 text-slate-500 hover:bg-blue-100/80 hover:text-slate-800 dark:hover:bg-slate-700/80 dark:hover:text-slate-200"
@@ -1379,7 +1385,11 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
                 open={pillEditor === "drillType"}
                 onOpenChange={(o) => {
                   if (o) {
-                    setDraftDrilldownSlice({ actorValues: [], loanTypes: [...sliceDrilldown.loanTypes], loanPurposes: [] });
+                    setDraftDrilldownSlice({
+                      actorValues: [...sliceDrilldown.actorValues],
+                      loanTypes: [...sliceDrilldown.loanTypes],
+                      loanPurposes: [...sliceDrilldown.loanPurposes],
+                    });
                     setPillEditor("drillType");
                   } else setPillEditor(null);
                 }}
@@ -1397,17 +1407,22 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
                     const s = new Set(prev.loanTypes);
                     if (s.has(v)) s.delete(v);
                     else s.add(v);
-                    return { actorValues: [], loanTypes: [...s].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })), loanPurposes: [] };
+                    return {
+                      ...prev,
+                      loanTypes: [...s].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+                    };
                   })
                 }
-                onApply={() => setSliceDrilldown({ actorValues: [], loanTypes: draftDrilldownSlice.loanTypes, loanPurposes: [] })}
-                onClearSelection={() => setDraftDrilldownSlice({ actorValues: [], loanTypes: [], loanPurposes: [] })}
+                onApply={() =>
+                  setSliceDrilldown((prev) => ({ ...prev, loanTypes: draftDrilldownSlice.loanTypes }))
+                }
+                onClearSelection={() => setDraftDrilldownSlice((prev) => ({ ...prev, loanTypes: [] }))}
               />
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  setSliceDrilldown(emptyDrilldownSlice());
+                  setSliceDrilldown((prev) => ({ ...prev, loanTypes: [] }));
                   setPillEditor(null);
                 }}
                 className="rounded-sm p-0.5 text-slate-500 hover:bg-blue-100/80 hover:text-slate-800 dark:hover:bg-slate-700/80 dark:hover:text-slate-200"
@@ -1424,7 +1439,11 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
                 open={pillEditor === "drillPurpose"}
                 onOpenChange={(o) => {
                   if (o) {
-                    setDraftDrilldownSlice({ actorValues: [], loanTypes: [], loanPurposes: [...sliceDrilldown.loanPurposes] });
+                    setDraftDrilldownSlice({
+                      actorValues: [...sliceDrilldown.actorValues],
+                      loanTypes: [...sliceDrilldown.loanTypes],
+                      loanPurposes: [...sliceDrilldown.loanPurposes],
+                    });
                     setPillEditor("drillPurpose");
                   } else setPillEditor(null);
                 }}
@@ -1442,17 +1461,22 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
                     const s = new Set(prev.loanPurposes);
                     if (s.has(v)) s.delete(v);
                     else s.add(v);
-                    return { actorValues: [], loanTypes: [], loanPurposes: [...s].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })) };
+                    return {
+                      ...prev,
+                      loanPurposes: [...s].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+                    };
                   })
                 }
-                onApply={() => setSliceDrilldown({ actorValues: [], loanTypes: [], loanPurposes: draftDrilldownSlice.loanPurposes })}
-                onClearSelection={() => setDraftDrilldownSlice({ actorValues: [], loanTypes: [], loanPurposes: [] })}
+                onApply={() =>
+                  setSliceDrilldown((prev) => ({ ...prev, loanPurposes: draftDrilldownSlice.loanPurposes }))
+                }
+                onClearSelection={() => setDraftDrilldownSlice((prev) => ({ ...prev, loanPurposes: [] }))}
               />
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  setSliceDrilldown(emptyDrilldownSlice());
+                  setSliceDrilldown((prev) => ({ ...prev, loanPurposes: [] }));
                   setPillEditor(null);
                 }}
                 className="rounded-sm p-0.5 text-slate-500 hover:bg-blue-100/80 hover:text-slate-800 dark:hover:bg-slate-700/80 dark:hover:text-slate-200"
