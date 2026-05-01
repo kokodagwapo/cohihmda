@@ -2842,14 +2842,14 @@ export function WidgetGroup({
           }>(`/api/loans/active-detail-list?${params.toString()}`);
           total = response.total ?? 0;
           for (const row of response.loans ?? []) {
-            const milestoneValue = String(row.current_milestone ?? "").trim();
-            const actorValue = String(row[columnForThisFetch] ?? "").trim();
-            const loanTypeValue = String(row.loan_type ?? "").trim();
-            const loanPurposeValue = String(row.loan_purpose ?? "").trim();
-            if (milestoneValue) milestone.add(milestoneValue);
-            if (actorValue) actor.add(actorValue);
-            if (loanTypeValue) loanType.add(loanTypeValue);
-            if (loanPurposeValue) loanPurpose.add(loanPurposeValue);
+            const milestoneValue = String(row.current_milestone ?? "").trim() || "Unknown";
+            const actorValue = String(row[columnForThisFetch] ?? "").trim() || "Unknown";
+            const loanTypeValue = String(row.loan_type ?? "").trim() || "Unknown";
+            const loanPurposeValue = String(row.loan_purpose ?? "").trim() || "Unknown";
+            milestone.add(milestoneValue);
+            actor.add(actorValue);
+            loanType.add(loanTypeValue);
+            loanPurpose.add(loanPurposeValue);
           }
           offset += limit;
           if (cancelled) return;
