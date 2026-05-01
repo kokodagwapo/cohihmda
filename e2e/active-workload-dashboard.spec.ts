@@ -117,10 +117,8 @@ async function setupActiveWorkloadMocks(
   options: { delayedFirstResponseMs?: number; forceActiveDetailError?: boolean } = {},
 ): Promise<{
   activeDetailUrls: string[];
-  detailListUrls: string[];
 }> {
   const activeDetailUrls: string[] = [];
-  const detailListUrls: string[] = [];
   let activeDetailCallCount = 0;
 
   await page.route(/\/api\/loans\/active-detail-list(\?|$)/, async (route: Route) => {
@@ -157,8 +155,8 @@ async function setupActiveWorkloadMocks(
     });
   });
 
+  // Other dashboard surfaces may still call detail-list during these flows; keep a harmless stub.
   await page.route(/\/api\/loans\/detail-list(\?|$)/, async (route: Route) => {
-    detailListUrls.push(route.request().url());
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -173,7 +171,7 @@ async function setupActiveWorkloadMocks(
     });
   });
 
-  return { activeDetailUrls, detailListUrls };
+  return { activeDetailUrls };
 }
 
 function activeWorkloadWorkbenchGroup(page: Page) {
@@ -405,11 +403,11 @@ test.describe("Active Workload Dashboard (COHI-347)", () => {
     await expect(filterRow.locator("select")).toHaveCount(3);
   });
 
-  test("@critical @COHI-347 workbench shared pills open full popover editor and use detail-list options", async ({
+  test("@critical @COHI-347 workbench shared pills open full popover editor and use active-detail-list options", async ({
     userPage,
   }) => {
     await suppressWelcomeTour(userPage);
-    const { detailListUrls } = await setupActiveWorkloadMocks(userPage);
+    const { activeDetailUrls } = await setupActiveWorkloadMocks(userPage);
 
     await userPage.goto("/my-dashboard/new", { waitUntil: "domcontentloaded" });
     await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
@@ -440,7 +438,7 @@ test.describe("Active Workload Dashboard (COHI-347)", () => {
     await expect(popover.getByRole("button", { name: "Apply Filters" })).toBeVisible();
     await expect(popover.getByRole("button", { name: "Clear Selection" })).toBeVisible();
 
-    await expect.poll(() => detailListUrls.length).toBeGreaterThan(0);
+    await expect.poll(() => activeDetailUrls.length).toBeGreaterThan(0);
   });
 });
 
