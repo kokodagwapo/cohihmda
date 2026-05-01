@@ -44,7 +44,12 @@ import {
   Sparkles,
   ScrollText,
   ChevronDown as ChevronDownIcon,
+  Pencil,
 } from 'lucide-react';
+import {
+  SyncScheduleDialog,
+  type SyncSchedulePatch,
+} from '@/components/admin/SyncScheduleDialog';
 
 interface SyncConnection {
   id: string;
@@ -132,12 +137,6 @@ interface PodcastSettings {
   nightly_enabled: boolean;
   nightly_last_run_at: string | null;
 }
-
-const FREQUENCY_OPTIONS = [
-  { value: 'hourly', label: 'Hourly' },
-  { value: 'daily', label: 'Daily' },
-  { value: 'weekly', label: 'Weekly' },
-];
 
 const WEEKDAY_OPTIONS = [
   { value: 1, label: 'Mon' },
@@ -292,6 +291,7 @@ export const SyncManagementSection = () => {
   const [hookRunLogs, setHookRunLogs] = useState<Record<number, HookRunLogs>>({});
   const [expandedLogRunId, setExpandedLogRunId] = useState<number | null>(null);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [scheduleEditorConnection, setScheduleEditorConnection] = useState<SyncConnection | null>(null);
   const [historyData, setHistoryData] = useState<Record<string, SyncHistoryEntry[]>>({});
   const [historyLoading, setHistoryLoading] = useState<Set<string>>(new Set());
   const [hookRunData, setHookRunData] = useState<Record<string, HookRun[]>>({});
@@ -497,44 +497,6 @@ export const SyncManagementSection = () => {
     }
   };
 
-  const handleFrequencyChange = async (connection: SyncConnection, frequency: string) => {
-    const key = connKey(connection);
-    setUpdatingIds(prev => new Set(prev).add(key));
-
-    try {
-      await api.request(`/api/admin/sync-management/${connection.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          tenant_id: connection.tenant_id,
-          sync_frequency: frequency,
-        }),
-      });
-
-      setConnections(prev =>
-        prev.map(c =>
-          connKey(c) === key ? { ...c, sync_frequency: frequency } : c
-        )
-      );
-
-      toast({
-        title: 'Schedule updated',
-        description: `${connection.name} set to ${frequency}`,
-      });
-    } catch (error: any) {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to update schedule',
-        variant: 'destructive',
-      });
-    } finally {
-      setUpdatingIds(prev => {
-        const next = new Set(prev);
-        next.delete(key);
-        return next;
-      });
-    }
-  };
-
   const handleToggleEncompassUsersAfterLoanSync = async (connection: SyncConnection) => {
     if (connection.los_type !== 'encompass') return;
     const newVal = !(connection.encompass_users_sync_enabled ?? true);
@@ -699,6 +661,60 @@ export const SyncManagementSection = () => {
       toast({
         title: 'Error',
         description: error.message || 'Failed to update schedule window',
+        variant: 'destructive',
+      });
+    } finally {
+      setUpdatingIds(prev => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
+
+  // Persists every scheduling field in one PUT so the dialog can save
+  // frequency + timezone + weekdays + hours atomically.
+  const handleScheduleDialogSave = async (
+    connection: SyncConnection,
+    patch: SyncSchedulePatch,
+  ) => {
+    const key = connKey(connection);
+    setUpdatingIds(prev => new Set(prev).add(key));
+    try {
+      await api.request(`/api/admin/sync-management/${connection.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          tenant_id: connection.tenant_id,
+          sync_frequency: patch.sync_frequency,
+          scheduler_timezone: patch.scheduler_timezone,
+          sync_allowed_weekdays: patch.sync_allowed_weekdays,
+          sync_allowed_hours: patch.sync_allowed_hours,
+          sync_business_days_only: patch.sync_business_days_only,
+        }),
+      });
+      setConnections(prev =>
+        prev.map(c =>
+          connKey(c) === key
+            ? {
+                ...c,
+                sync_frequency: patch.sync_frequency,
+                scheduler_timezone: patch.scheduler_timezone,
+                sync_allowed_weekdays: patch.sync_allowed_weekdays,
+                sync_allowed_hours: patch.sync_allowed_hours,
+                sync_business_days_only: patch.sync_business_days_only,
+              }
+            : c,
+        ),
+      );
+      toast({
+        title: 'Schedule updated',
+        description: `${connection.name} (${connection.tenant_name})`,
+      });
+      setScheduleEditorConnection(null);
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to update schedule',
         variant: 'destructive',
       });
     } finally {
@@ -1298,27 +1314,25 @@ export const SyncManagementSection = () => {
                         )}
                       </TableCell>
                       <TableCell>
-                        <div className="space-y-1">
-                          <Select
-                            value={connection.sync_frequency || 'daily'}
-                            onValueChange={(val) => handleFrequencyChange(connection, val)}
-                            disabled={updatingIds.has(connKey(connection))}
-                          >
-                            <SelectTrigger className="w-[130px] h-8 text-xs font-light">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {FREQUENCY_OPTIONS.map(opt => (
-                                <SelectItem key={opt.value} value={opt.value} className="text-xs">
-                                  {opt.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <div className="text-[10px] text-slate-400 max-w-[180px] leading-tight" title={formatScheduleSummary(connection)}>
-                            {formatScheduleSummary(connection)}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          type="button"
+                          className="h-auto min-h-8 w-[200px] justify-start gap-2 px-2.5 py-1.5 text-left text-xs font-light"
+                          onClick={() => setScheduleEditorConnection(connection)}
+                          disabled={updatingIds.has(connKey(connection))}
+                          title="Edit schedule (frequency, days, hours, timezone)"
+                        >
+                          <Pencil className="h-3 w-3 shrink-0 text-slate-400" />
+                          <div className="flex min-w-0 flex-col leading-tight">
+                            <span className="text-xs font-medium capitalize text-slate-700 dark:text-slate-200">
+                              {connection.sync_frequency || 'daily'}
+                            </span>
+                            <span className="truncate text-[10px] text-slate-400">
+                              {formatScheduleSummary(connection)}
+                            </span>
                           </div>
-                        </div>
+                        </Button>
                       </TableCell>
                       <TableCell className="text-center">
                         <Switch
@@ -1835,6 +1849,22 @@ export const SyncManagementSection = () => {
           )}
         </CardContent>
       </Card>
+      <SyncScheduleDialog
+        open={scheduleEditorConnection !== null}
+        onOpenChange={(next) => {
+          if (!next) setScheduleEditorConnection(null);
+        }}
+        connection={scheduleEditorConnection}
+        saving={
+          scheduleEditorConnection
+            ? updatingIds.has(connKey(scheduleEditorConnection))
+            : false
+        }
+        onSave={async (patch) => {
+          if (!scheduleEditorConnection) return;
+          await handleScheduleDialogSave(scheduleEditorConnection, patch);
+        }}
+      />
     </motion.div>
   );
 };
