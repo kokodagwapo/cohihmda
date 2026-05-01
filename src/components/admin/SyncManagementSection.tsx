@@ -64,6 +64,8 @@ interface SyncConnection {
   sync_business_days_only?: boolean;
   insights_business_days_only?: boolean;
   scheduler_timezone?: string;
+  sync_allowed_weekdays?: number[];
+  sync_allowed_hours?: number[];
   last_encompass_users_sync_at?: string | null;
   created_at: string;
   updated_at: string;
@@ -133,9 +135,25 @@ interface PodcastSettings {
 
 const FREQUENCY_OPTIONS = [
   { value: 'hourly', label: 'Hourly' },
-  { value: 'daily', label: 'Daily (2 AM)' },
-  { value: 'weekly', label: 'Weekly (Mon 2 AM)' },
+  { value: 'daily', label: 'Daily' },
+  { value: 'weekly', label: 'Weekly' },
 ];
+
+const WEEKDAY_OPTIONS = [
+  { value: 1, label: 'Mon' },
+  { value: 2, label: 'Tue' },
+  { value: 3, label: 'Wed' },
+  { value: 4, label: 'Thu' },
+  { value: 5, label: 'Fri' },
+  { value: 6, label: 'Sat' },
+  { value: 0, label: 'Sun' },
+];
+
+const HOUR_OPTIONS = Array.from({ length: 24 }, (_, hour) => hour);
+const ALL_WEEKDAYS = [0, 1, 2, 3, 4, 5, 6];
+const BUSINESS_WEEKDAYS = [1, 2, 3, 4, 5];
+const ALL_HOURS = HOUR_OPTIONS;
+const BUSINESS_HOURS = Array.from({ length: 10 }, (_, index) => index + 8);
 
 const SCHEDULER_TIMEZONE_OPTIONS = [
   { value: 'America/New_York', label: 'Eastern (America/New_York)' },
@@ -234,6 +252,29 @@ function getStatusBadge(status: string | null, isActive: boolean) {
 // (connection UUIDs can collide when tenants are duplicated)
 function connKey(c: { tenant_id: string; id: string }): string {
   return `${c.tenant_id}:${c.id}`;
+}
+
+function normalizeScheduleNumbers(values: number[] | null | undefined, fallback: number[]): number[] {
+  return Array.isArray(values) && values.length > 0
+    ? [...new Set(values.map(Number))].sort((a, b) => a - b)
+    : fallback;
+}
+
+function formatScheduleSummary(connection: SyncConnection): string {
+  const weekdays = normalizeScheduleNumbers(connection.sync_allowed_weekdays, ALL_WEEKDAYS);
+  const hours = normalizeScheduleNumbers(connection.sync_allowed_hours, ALL_HOURS);
+  const dayLabel = weekdays.length === 7
+    ? 'All days'
+    : weekdays.length === 5 && BUSINESS_WEEKDAYS.every((day) => weekdays.includes(day))
+      ? 'Weekdays'
+      : WEEKDAY_OPTIONS.filter((day) => weekdays.includes(day.value)).map((day) => day.label).join(', ');
+  const hourLabel = hours.length === 24
+    ? 'All hours'
+    : hours.length <= 4
+      ? hours.map((hour) => `${hour}:00`).join(', ')
+      : `${hours[0]}:00-${hours[hours.length - 1]}:00`;
+
+  return `${dayLabel}, ${hourLabel} ${connection.scheduler_timezone || 'America/New_York'}`;
 }
 
 export const SyncManagementSection = () => {
@@ -622,6 +663,42 @@ export const SyncManagementSection = () => {
       toast({
         title: 'Error',
         description: error.message || 'Failed to update timezone',
+        variant: 'destructive',
+      });
+    } finally {
+      setUpdatingIds(prev => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
+
+  const handleScheduleWindowChange = async (
+    connection: SyncConnection,
+    patch: Partial<Pick<SyncConnection, 'sync_allowed_weekdays' | 'sync_allowed_hours' | 'sync_business_days_only'>>,
+  ) => {
+    const key = connKey(connection);
+    setUpdatingIds(prev => new Set(prev).add(key));
+    try {
+      await api.request(`/api/admin/sync-management/${connection.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          tenant_id: connection.tenant_id,
+          ...patch,
+        }),
+      });
+      setConnections(prev =>
+        prev.map(c => (connKey(c) === key ? { ...c, ...patch } : c))
+      );
+      toast({
+        title: 'Schedule window updated',
+        description: `${connection.name} (${connection.tenant_name})`,
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to update schedule window',
         variant: 'destructive',
       });
     } finally {
@@ -1180,6 +1257,8 @@ export const SyncManagementSection = () => {
                     const history = historyData[key] || [];
                     const hookRuns = hookRunData[key] || [];
                     const isLoadingHistory = historyLoading.has(key);
+                    const selectedWeekdays = normalizeScheduleNumbers(connection.sync_allowed_weekdays, ALL_WEEKDAYS);
+                    const selectedHours = normalizeScheduleNumbers(connection.sync_allowed_hours, ALL_HOURS);
                     return (
                     <Fragment key={key}><TableRow className="group">
                       <TableCell>
@@ -1219,22 +1298,27 @@ export const SyncManagementSection = () => {
                         )}
                       </TableCell>
                       <TableCell>
-                        <Select
-                          value={connection.sync_frequency || 'daily'}
-                          onValueChange={(val) => handleFrequencyChange(connection, val)}
-                          disabled={updatingIds.has(connKey(connection))}
-                        >
-                          <SelectTrigger className="w-[130px] h-8 text-xs font-light">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {FREQUENCY_OPTIONS.map(opt => (
-                              <SelectItem key={opt.value} value={opt.value} className="text-xs">
-                                {opt.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <div className="space-y-1">
+                          <Select
+                            value={connection.sync_frequency || 'daily'}
+                            onValueChange={(val) => handleFrequencyChange(connection, val)}
+                            disabled={updatingIds.has(connKey(connection))}
+                          >
+                            <SelectTrigger className="w-[130px] h-8 text-xs font-light">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {FREQUENCY_OPTIONS.map(opt => (
+                                <SelectItem key={opt.value} value={opt.value} className="text-xs">
+                                  {opt.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <div className="text-[10px] text-slate-400 max-w-[180px] leading-tight" title={formatScheduleSummary(connection)}>
+                            {formatScheduleSummary(connection)}
+                          </div>
+                        </div>
                       </TableCell>
                       <TableCell className="text-center">
                         <Switch
@@ -1421,6 +1505,116 @@ export const SyncManagementSection = () => {
                                     )}
                                   </SelectContent>
                                 </Select>
+                              </div>
+                              <div className="space-y-2">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <Label className="text-sm font-medium text-slate-800 dark:text-slate-200">
+                                    Allowed sync days
+                                  </Label>
+                                  <div className="flex gap-1">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 text-xs font-light"
+                                      onClick={() => handleScheduleWindowChange(connection, {
+                                        sync_allowed_weekdays: ALL_WEEKDAYS,
+                                        sync_business_days_only: false,
+                                      })}
+                                      disabled={updatingIds.has(key) || !connection.is_active}
+                                    >
+                                      All days
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 text-xs font-light"
+                                      onClick={() => handleScheduleWindowChange(connection, {
+                                        sync_allowed_weekdays: BUSINESS_WEEKDAYS,
+                                        sync_business_days_only: true,
+                                      })}
+                                      disabled={updatingIds.has(key) || !connection.is_active}
+                                    >
+                                      Weekdays
+                                    </Button>
+                                  </div>
+                                </div>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {WEEKDAY_OPTIONS.map((day) => {
+                                    const active = selectedWeekdays.includes(day.value);
+                                    return (
+                                      <Button
+                                        key={day.value}
+                                        type="button"
+                                        variant={active ? 'default' : 'outline'}
+                                        size="sm"
+                                        className="h-8 min-w-12 text-xs font-light"
+                                        disabled={updatingIds.has(key) || !connection.is_active || (active && selectedWeekdays.length === 1)}
+                                        onClick={() => {
+                                          const nextDays = active
+                                            ? selectedWeekdays.filter((value) => value !== day.value)
+                                            : [...selectedWeekdays, day.value].sort((a, b) => a - b);
+                                          handleScheduleWindowChange(connection, {
+                                            sync_allowed_weekdays: nextDays,
+                                            sync_business_days_only: nextDays.length === 5 && BUSINESS_WEEKDAYS.every((value) => nextDays.includes(value)),
+                                          });
+                                        }}
+                                      >
+                                        {day.label}
+                                      </Button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                              <div className="space-y-2">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <Label className="text-sm font-medium text-slate-800 dark:text-slate-200">
+                                    Allowed sync hours
+                                  </Label>
+                                  <div className="flex gap-1">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 text-xs font-light"
+                                      onClick={() => handleScheduleWindowChange(connection, { sync_allowed_hours: ALL_HOURS })}
+                                      disabled={updatingIds.has(key) || !connection.is_active}
+                                    >
+                                      All hours
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 text-xs font-light"
+                                      onClick={() => handleScheduleWindowChange(connection, { sync_allowed_hours: BUSINESS_HOURS })}
+                                      disabled={updatingIds.has(key) || !connection.is_active}
+                                    >
+                                      8 AM-5 PM
+                                    </Button>
+                                  </div>
+                                </div>
+                                <div className="grid grid-cols-6 sm:grid-cols-8 md:grid-cols-12 gap-1.5">
+                                  {HOUR_OPTIONS.map((hour) => {
+                                    const active = selectedHours.includes(hour);
+                                    const label = hour === 0 ? '12a' : hour < 12 ? `${hour}a` : hour === 12 ? '12p' : `${hour - 12}p`;
+                                    return (
+                                      <Button
+                                        key={hour}
+                                        type="button"
+                                        variant={active ? 'default' : 'outline'}
+                                        size="sm"
+                                        className="h-8 text-xs font-light"
+                                        disabled={updatingIds.has(key) || !connection.is_active || (active && selectedHours.length === 1)}
+                                        onClick={() => {
+                                          const nextHours = active
+                                            ? selectedHours.filter((value) => value !== hour)
+                                            : [...selectedHours, hour].sort((a, b) => a - b);
+                                          handleScheduleWindowChange(connection, { sync_allowed_hours: nextHours });
+                                        }}
+                                      >
+                                        {label}
+                                      </Button>
+                                    );
+                                  })}
+                                </div>
                               </div>
                               {connection.los_type === 'encompass' && (
                                 <div className="text-xs text-slate-500 font-light">

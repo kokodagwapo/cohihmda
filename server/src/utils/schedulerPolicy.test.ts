@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   getDayOfWeekInTimeZone,
+  getHourInTimeZone,
   isWeekendInTimeZone,
   normalizeSchedulerTimezone,
   shouldRunScheduledPostSyncInsights,
@@ -79,6 +80,42 @@ describe("shouldRunScheduledSync", () => {
         businessDaysOnly: false,
         timeZone: "America/New_York",
         now: saturday,
+      }),
+    ).toBe(true);
+  });
+
+  it("returns false outside configured weekdays", () => {
+    expect(
+      shouldRunScheduledSync({
+        timeZone: "America/New_York",
+        allowedWeekdays: [1],
+        allowedHours: [8, 9, 10],
+        now: saturday,
+      }),
+    ).toBe(false);
+  });
+
+  it("returns false outside configured local hours", () => {
+    const mondayTenAmEastern = new Date("2026-07-06T14:00:00.000Z");
+    expect(getHourInTimeZone(mondayTenAmEastern, "America/New_York")).toBe(10);
+    expect(
+      shouldRunScheduledSync({
+        timeZone: "America/New_York",
+        allowedWeekdays: [1],
+        allowedHours: [9],
+        now: mondayTenAmEastern,
+      }),
+    ).toBe(false);
+  });
+
+  it("returns true inside configured weekday and local hour", () => {
+    const mondayTenAmEastern = new Date("2026-07-06T14:00:00.000Z");
+    expect(
+      shouldRunScheduledSync({
+        timeZone: "America/New_York",
+        allowedWeekdays: [1],
+        allowedHours: [10],
+        now: mondayTenAmEastern,
       }),
     ).toBe(true);
   });

@@ -30,6 +30,8 @@ interface SyncJob {
   syncBusinessDaysOnly?: boolean;
   insightsBusinessDaysOnly?: boolean;
   schedulerTimezone?: string;
+  syncAllowedWeekdays?: number[];
+  syncAllowedHours?: number[];
   encompassUsersSyncEnabled?: boolean;
   lastEncompassUsersSyncAt?: Date;
 }
@@ -85,6 +87,7 @@ export async function getConnectionsToSync(tenantId: string, tenantPool: pg.Pool
               last_synced_at, last_loan_modified_at, encompass_selected_folders,
               encompass_users_sync_enabled, sync_business_days_only,
               insights_business_days_only, scheduler_timezone,
+              sync_allowed_weekdays, sync_allowed_hours,
               last_encompass_users_sync_at
        FROM public.los_connections
        WHERE sync_enabled = true
@@ -103,6 +106,8 @@ export async function getConnectionsToSync(tenantId: string, tenantPool: pg.Pool
         !shouldRunScheduledSync({
           businessDaysOnly: row.sync_business_days_only,
           timeZone: row.scheduler_timezone,
+          allowedWeekdays: row.sync_allowed_weekdays,
+          allowedHours: row.sync_allowed_hours,
         })
       ) {
         // Intentionally quiet: avoid spamming logs every 15m per connection on weekends
@@ -133,6 +138,8 @@ export async function getConnectionsToSync(tenantId: string, tenantPool: pg.Pool
         syncBusinessDaysOnly: row.sync_business_days_only,
         insightsBusinessDaysOnly: row.insights_business_days_only,
         schedulerTimezone: row.scheduler_timezone,
+        syncAllowedWeekdays: row.sync_allowed_weekdays,
+        syncAllowedHours: row.sync_allowed_hours,
         encompassUsersSyncEnabled: row.encompass_users_sync_enabled,
         lastEncompassUsersSyncAt: row.last_encompass_users_sync_at
           ? new Date(row.last_encompass_users_sync_at)
