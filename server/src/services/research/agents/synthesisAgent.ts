@@ -8,7 +8,8 @@
 
 import { callLLM, type LLMMessage } from "../tools.js";
 import type { ResearchPlan } from "./plannerAgent.js";
-import type { Finding } from "./dataAnalystAgent.js";
+import type { Finding, EvidenceItemSql, EvidenceItemRegistryWidget } from "./dataAnalystAgent.js";
+import { isSqlEvidenceItem } from "./dataAnalystAgent.js";
 
 // ============================================================================
 // Types
@@ -128,7 +129,15 @@ export async function runSynthesisAgent(
         .map(([k, v]) => `  - ${k}: ${v}`)
         .join("\n");
       const evidenceStr = f.evidence
-        .map((e) => `  Query: ${e.explanation} (${e.rowCount} rows)`)
+        .map((e) => {
+          if (!isSqlEvidenceItem(e)) {
+            const w = e as EvidenceItemRegistryWidget;
+            const period = w.period ? `, period=${w.period}` : "";
+            return `  [widget] ${w.definitionName} (${w.definitionId}) on ${w.dashboardLabel}${period} — ${w.explanation}`;
+          }
+          const s = e as EvidenceItemSql;
+          return `  Query: ${s.explanation} (${s.rowCount} rows)`;
+        })
         .join("\n");
       return [
         `### Finding for Q${f.questionId}: ${f.title}`,

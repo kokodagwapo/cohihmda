@@ -12,6 +12,7 @@
  */
 
 import { callLLM, type LLMMessage } from "../../research/tools.js";
+import { isSqlEvidenceItem } from "../../research/agents/dataAnalystAgent.js";
 import type { InsightFinding } from "./insightInvestigatorAgent.js";
 import { SOURCE_TO_CATEGORY } from "./categoryDefinitions.js";
 import {
@@ -361,7 +362,7 @@ export async function runInsightEvaluator(
               label: k,
               value: v,
             })),
-            evidenceQueries: originalFinding.evidence.map((e) => ({
+            evidenceQueries: originalFinding.evidence.filter(isSqlEvidenceItem).map((e) => ({
               sql: e.sql,
               explanation: e.explanation,
               rowCount: e.rowCount,

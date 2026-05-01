@@ -51,7 +51,12 @@ import { useLoanComplexityPivot } from '@/hooks/useLoanComplexityPivot';
 import { useLoanComplexityGroupLoans } from '@/hooks/useLoanComplexityGroupLoans';
 import { useLoanComplexityStatusOptions } from '@/hooks/useLoanComplexityStatusOptions';
 import { useEstimatedClosingsRiskData } from '@/hooks/useEstimatedClosingsRiskData';
-import { useSalesCompanyOverviewData } from '@/hooks/useSalesCompanyOverviewData';
+import {
+  mapToLeaderboardTimeframe,
+  mapToOpsDateRange,
+  mapToSalesTrendsDateRange,
+  mapToTopTieringTimeFilter,
+} from '@/components/widgets/data/periodAdapters';
 
 /** Build dimension filter array from section dynamicFilters (for APIs that accept them).
  *  @param exclude – column names already handled natively by the hook (e.g. branch, loan_officer). */
@@ -94,99 +99,16 @@ export interface WidgetDataProviderProps {
 }
 
 // ---------------------------------------------------------------------------
-// Preset → Hook-param mapping helpers
+// Preset → Hook-param mapping helpers (see periodAdapters.ts)
 // ---------------------------------------------------------------------------
-
-/** Map PeriodPreset to Operations Scorecard DateRangeType ('3-months'|'6-months'|'12-months') */
-function mapToOpsDateRange(filters: SectionFilters): '3-months' | '6-months' | '12-months' {
-  const preset = filters.periodSelection?.preset;
-  if (preset === 'rolling-6') return '6-months';
-  if (preset === 'rolling-12') return '12-months';
-  return '3-months'; // default
-}
-
-/** Map PeriodPreset to Sales Trends DateRangeOption ('3-months'|'6-months') */
-function mapToSalesTrendsDateRange(filters: SectionFilters): '3-months' | '6-months' {
-  const preset = filters.periodSelection?.preset;
-  if (preset === 'rolling-6') return '6-months';
-  return '3-months'; // default
-}
-
-/** Map PeriodPreset to TopTiering TimeFilterType */
-type TimeFilterType = 'last-year' | 'last-quarter' | 'last-month' | 'ytd' | 'qtd' | 'mtd' | 'trailing-12' | 'custom';
-function mapToTopTieringTimeFilter(filters: SectionFilters): {
-  timeFilter: TimeFilterType;
-  customDateRange?: { start: string; end: string };
-} {
-  const ps = filters.periodSelection;
-  if (!ps) return { timeFilter: 'last-year' };
-
-  if (ps.type === 'custom') {
-    return { timeFilter: 'custom', customDateRange: ps.dateRange };
-  }
-
-  // Direct preset mapping – these presets match the hook's TimeFilterType exactly
-  const directMap: Record<string, TimeFilterType> = {
-    'mtd': 'mtd',
-    'qtd': 'qtd',
-    'ytd': 'ytd',
-    'last-month': 'last-month',
-    'last-quarter': 'last-quarter',
-    'last-year': 'last-year',
-    'trailing-12': 'trailing-12',
-  };
-  const preset = ps.preset;
-  if (preset && directMap[preset]) {
-    return { timeFilter: directMap[preset] };
-  }
-
-  // For rolling presets that don't map, fall back to custom with the computed range
-  if (ps.dateRange) {
-    return { timeFilter: 'custom', customDateRange: ps.dateRange };
-  }
-
-  return { timeFilter: 'last-year' };
-}
-
-/** Map PeriodPreset to LeaderboardTimeframe */
-type LeaderboardTimeframe = 'wtd' | 'mtd' | 'qtd' | 'lm' | 'lq' | 'ly' | 'custom';
-function mapToLeaderboardTimeframe(filters: SectionFilters): {
-  timeframe: LeaderboardTimeframe;
-  startDate?: string;
-  endDate?: string;
-} {
-  const ps = filters.periodSelection;
-  if (!ps) return { timeframe: 'mtd' };
-
-  if (ps.type === 'custom') {
-    return { timeframe: 'custom', startDate: ps.dateRange.start, endDate: ps.dateRange.end };
-  }
-
-  const presetMap: Record<string, LeaderboardTimeframe> = {
-    'mtd': 'mtd',
-    'qtd': 'qtd',
-    'last-month': 'lm',
-    'last-quarter': 'lq',
-    'last-year': 'ly',
-  };
-  const preset = ps.preset;
-  if (preset && presetMap[preset]) {
-    return { timeframe: presetMap[preset] };
-  }
-
-  // For presets like 'ytd' or rolling that don't map directly, use custom with computed range
-  if (ps.dateRange) {
-    return { timeframe: 'custom', startDate: ps.dateRange.start, endDate: ps.dateRange.end };
-  }
-
-  return { timeframe: 'mtd' };
-}
 
 // ---------------------------------------------------------------------------
 // Context
 // ---------------------------------------------------------------------------
 
 const WidgetDataContext = createContext<WidgetDataContextValue | null>(null);
+
+export { WidgetDataContext };
 
 const EMPTY_RESULT: SourceResult = { data: null, loading: false, error: null };
 
@@ -239,7 +161,6 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
   const paFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'pipeline-analysis'), [sections, scopedFilters]);
   const lcFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'loan-complexity'), [sections, scopedFilters]);
   const ecrFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'estimated-closings-risk'), [sections, scopedFilters]);
-  const scoFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'sales-company-overview'), [sections, scopedFilters]);
 
   const hasLoanComplexitySection = useMemo(
     () =>
@@ -681,15 +602,6 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     detailColumnFilters: ecrFilters?.estimatedClosingsDetailColumnFilters,
   });
 
-  const salesCompanyOverview = useSalesCompanyOverviewData(
-    effectiveTenantId,
-    selectedChannel,
-    {
-      loanTypes: scoFilters?.salesCompanyOverviewLoanTypes ?? [],
-      agingBuckets: scoFilters?.salesCompanyOverviewAgingBuckets ?? [],
-    },
-  );
-
   // Build lookup
   const sourceMap = useMemo<Record<string, SourceResult>>(() => ({
     'company-scorecard': {
@@ -781,16 +693,6 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
       loading: false,
       error: null,
     },
-    'production-trends': {
-      data: { ready: true },
-      loading: false,
-      error: null,
-    },
-    'production-summary-by-week': {
-      data: { ready: true },
-      loading: false,
-      error: null,
-    },
     'high-performers': {
       data: highPerformersData,
       loading: highPerformersLoading,
@@ -832,16 +734,6 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
       loading: estimatedClosingsRisk.loading,
       error: estimatedClosingsRisk.error,
     },
-    'sales-company-overview': {
-      data: salesCompanyOverview.data,
-      loading: salesCompanyOverview.loading,
-      error: null,
-    },
-    'active-workload': {
-      data: { ready: true },
-      loading: false,
-      error: null,
-    },
   }), [
     companyScorecard.data, companyScorecard.loading, companyScorecard.error,
     creditRisk.data, creditRisk.loading, creditRisk.error,
@@ -866,8 +758,6 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     estimatedClosingsRisk.data,
     estimatedClosingsRisk.loading,
     estimatedClosingsRisk.error,
-    salesCompanyOverview.data,
-    salesCompanyOverview.loading,
   ]);
 
   const contextValue = useMemo<WidgetDataContextValue>(

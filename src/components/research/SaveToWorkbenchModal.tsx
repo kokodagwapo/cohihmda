@@ -7,7 +7,6 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
 import { Bookmark, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,19 +30,11 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTenantStore } from "@/stores/tenantStore";
 import type { VisualizationConfig } from "@/hooks/useCohiChat";
-import type { ResearchArtifactCapabilities } from "@/components/workbench/canvas/types";
-import { inferResearchArtifactKeyFields } from "@/lib/inferResearchArtifactKeyFields";
-import { computeResearchSqlFilterInjectionEligibility } from "@/lib/researchSqlFilterInjectionEligibility";
-import type { ResearchVisualizationSource } from "@/types/researchWorkbench";
+import type { PeriodPreset } from "@/components/ui/DatePeriodPicker";
+import { getWidgetDefinition } from "@/components/widgets/registry";
+import { createLayoutItem } from "@/components/workbench/canvas/types";
 
 const DEFAULT_WIDGET_W = 520;
-
-const DEFAULT_RESEARCH_ARTIFACT_CAPS: ResearchArtifactCapabilities = {
-  canInjectFilters: false,
-  canEditPresentation: true,
-  canEditColumns: true,
-  requiresSqlRewriteForLogicChanges: true,
-};
 const DEFAULT_WIDGET_H = 360;
 
 interface CanvasListItem {
@@ -54,19 +45,19 @@ interface CanvasListItem {
 }
 
 export interface SaveToWorkbenchPayload {
-  sql: string;
+  /** SQL-backed research evidence (omit when saving a registry widget). */
+  sql?: string;
   title: string;
-  vizConfig: VisualizationConfig;
+  vizConfig?: VisualizationConfig;
   explanation?: string;
   sourceType?: "research";
   sourceSessionId?: string;
-  /** Column keys for research_artifacts.key_fields (optional — inferred from vizConfig) */
-  keyFields?: string[];
-  /** When set, skip POST /api/research/artifacts and reference this row */
-  sourceArtifactId?: string;
-  artifactCapabilities?: ResearchArtifactCapabilities;
-  /** Inferred or explicit link to a canonical dashboard (COHI-365). */
-  sourceDashboard?: ResearchVisualizationSource;
+  /** Save a canonical registry widget instead of a SQL cohi_widget. */
+  registryWidget?: {
+    definitionId: string;
+    period?: PeriodPreset;
+    filters?: { branch?: string; channel?: string; loanOfficer?: string };
+  };
 }
 
 interface SaveToWorkbenchModalProps {
@@ -83,7 +74,6 @@ export function SaveToWorkbenchModal({
   onSaved,
 }: SaveToWorkbenchModalProps) {
   const { toast } = useToast();
-  const navigate = useNavigate();
   const { user } = useAuth();
   const selectedTenantId = useTenantStore((s) => s.selectedTenantId);
   const effectiveTenantId = selectedTenantId || user?.tenant_id;
@@ -127,104 +117,56 @@ export function SaveToWorkbenchModal({
     if (!payload) return;
     setSaving(true);
     try {
-      let sourceArtifactId = payload.sourceArtifactId;
-      const eligibility =
-        payload.sourceType === "research"
-          ? computeResearchSqlFilterInjectionEligibility(payload.sql, {
-              title: widgetTitle.trim() || payload.title,
-              explanation: payload.explanation,
-            })
-          : { eligible: false as const, dateColumn: null as const, reason: "not_research" };
-
-      const caps: ResearchArtifactCapabilities = {
-        ...DEFAULT_RESEARCH_ARTIFACT_CAPS,
-        ...payload.artifactCapabilities,
-      };
-      if (payload.sourceType === "research") {
-        if (payload.artifactCapabilities?.canInjectFilters === false) {
-          caps.canInjectFilters = false;
-        } else {
-          caps.canInjectFilters = eligibility.eligible;
-        }
-      }
-
-      if (
-        payload.sourceType === "research" &&
-        payload.sql?.trim() &&
-        payload.sourceSessionId &&
-        !sourceArtifactId
-      ) {
-        try {
-          const keyFields = inferResearchArtifactKeyFields(payload.vizConfig, payload.keyFields);
-          const created = await api.createResearchArtifact(
-            {
-              session_id: payload.sourceSessionId,
-              sql: payload.sql,
-              keyFields,
-              title: widgetTitle.trim() || payload.title,
-              explanation: payload.explanation,
-              viz_config: payload.vizConfig as Record<string, unknown>,
-            },
-            effectiveTenantId,
-          );
-          sourceArtifactId = created?.id;
-        } catch (e) {
-          console.warn("[SaveToWorkbench] research artifact create failed", e);
-          toast({
-            title: "Could not link research artifact",
-            description:
-              "The widget was saved, but without a durable research artifact link. Tracking/Cohi context may be limited.",
-            variant: "destructive",
-          });
-        }
-      }
-
       const layoutItemId = `cohi-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const filterExtras =
-        payload.sourceType === "research" &&
-        caps.canInjectFilters === true &&
-        eligibility.dateColumn
-          ? {
-              savedFilters: { dateField: eligibility.dateColumn },
-              filterConfig: {
-                filterable: true,
-                dateColumn: eligibility.dateColumn,
-                defaultPreset: "L12M" as const,
-              },
-            }
-          : {};
 
-      const researchPayloadExtras =
-        payload.sourceType === "research"
-          ? {
-              artifactCapabilities: caps,
-              ...(sourceArtifactId ? { sourceArtifactId } : {}),
-              ...filterExtras,
-            }
-          : {};
+      let newItem: Record<string, unknown>;
 
-      const newItem = {
-        i: layoutItemId,
-        x: 20,
-        y: 20,
-        w: DEFAULT_WIDGET_W,
-        h: DEFAULT_WIDGET_H,
-        type: "cohi_widget" as const,
-        payload: {
+      if (payload.registryWidget?.definitionId) {
+        const def = getWidgetDefinition(payload.registryWidget.definitionId);
+        const w = def?.defaultSize?.w ?? DEFAULT_WIDGET_W;
+        const h = def?.defaultSize?.h ?? DEFAULT_WIDGET_H;
+        const rw = payload.registryWidget;
+        const config: Record<string, unknown> = {};
+        if (rw.period) config.period = rw.period;
+        if (rw.filters?.branch) config.branch = rw.filters.branch;
+        if (rw.filters?.channel) config.channel = rw.filters.channel;
+        if (rw.filters?.loanOfficer) config.loanOfficer = rw.filters.loanOfficer;
+        const item = createLayoutItem(
+          layoutItemId,
+          "registry_widget",
+          {
+            type: "registry_widget" as const,
+            definitionId: rw.definitionId,
+            config: Object.keys(config).length ? config : undefined,
+          },
+          { x: 20, y: 20, w, h },
+        );
+        newItem = item as unknown as Record<string, unknown>;
+      } else {
+        if (!payload.sql || !payload.vizConfig) {
+          toast({ title: "Nothing to save", description: "Missing SQL or visualization config.", variant: "destructive" });
+          setSaving(false);
+          return;
+        }
+        newItem = {
+          i: layoutItemId,
+          x: 20,
+          y: 20,
+          w: DEFAULT_WIDGET_W,
+          h: DEFAULT_WIDGET_H,
           type: "cohi_widget" as const,
-          sql: payload.sql,
-          title: widgetTitle.trim() || payload.title,
-          vizConfig: payload.vizConfig,
-          explanation: payload.explanation,
-          sourceType: payload.sourceType,
-          sourceSessionId: payload.sourceSessionId,
-          ...researchPayloadExtras,
-          ...(payload.sourceDashboard ? { sourceDashboard: payload.sourceDashboard } : {}),
-        },
-      };
+          payload: {
+            type: "cohi_widget" as const,
+            sql: payload.sql,
+            title: widgetTitle.trim() || payload.title,
+            vizConfig: payload.vizConfig,
+            explanation: payload.explanation,
+            sourceType: payload.sourceType,
+            sourceSessionId: payload.sourceSessionId,
+          },
+        };
+      }
 
-      let savedCanvasId = "";
-      let savedCanvasTitle = "";
       if (createNew) {
         const data = await api.request<{ id: string }>(`/api/workbench/canvases${tenantQs}`, {
           method: "POST",
@@ -234,9 +176,8 @@ export function SaveToWorkbenchModal({
             layout: [newItem],
           }),
         });
-        savedCanvasId = data.id;
-        savedCanvasTitle = newCanvasTitle.trim() || "New canvas";
-        toast({ title: "Saved to workbench", description: `Opening "${savedCanvasTitle}".` });
+        toast({ title: "Saved to workbench", description: `Added to new canvas "${newCanvasTitle || "New canvas"}".` });
+        onSaved?.(data.id, newCanvasTitle.trim() || "New canvas");
       } else {
         if (!selectedCanvasId) {
           toast({ title: "Select a canvas", variant: "destructive" });
@@ -255,13 +196,9 @@ export function SaveToWorkbenchModal({
           method: "PUT",
           body: JSON.stringify({ content: updatedContent }),
         });
-        savedCanvasId = selectedCanvasId;
-        savedCanvasTitle = canvases.find((c) => c.id === selectedCanvasId)?.title ?? "Canvas";
-        toast({ title: "Saved to workbench", description: `Opening "${savedCanvasTitle}".` });
-      }
-      if (savedCanvasId) {
-        onSaved?.(savedCanvasId, savedCanvasTitle || "Canvas");
-        navigate(`/my-dashboard/${savedCanvasId}`);
+        const canvasTitle = canvases.find((c) => c.id === selectedCanvasId)?.title ?? "Canvas";
+        toast({ title: "Saved to workbench", description: `Added to "${canvasTitle}".` });
+        onSaved?.(selectedCanvasId, canvasTitle);
       }
       onClose();
     } catch (err) {
@@ -275,7 +212,10 @@ export function SaveToWorkbenchModal({
     }
   };
 
-  const canSave = payload && (createNew ? newCanvasTitle.trim() : selectedCanvasId);
+  const canSave =
+    !!payload &&
+    (createNew ? !!newCanvasTitle.trim() : !!selectedCanvasId) &&
+    (!!payload.registryWidget?.definitionId || !!(payload.sql && payload.vizConfig));
 
   return (
     <Dialog open={open} onOpenChange={(open) => !open && onClose()}>
@@ -297,6 +237,11 @@ export function SaveToWorkbenchModal({
                 onChange={(e) => setWidgetTitle(e.target.value)}
                 placeholder="e.g. Conversion by channel"
               />
+              {payload.registryWidget && (
+                <p className="text-xs text-muted-foreground">
+                  Saves the canonical dashboard widget (live registry). Filters and period from Research Lab are preserved when supported.
+                </p>
+              )}
             </div>
             <div className="space-y-2">
               <Label>Canvas</Label>

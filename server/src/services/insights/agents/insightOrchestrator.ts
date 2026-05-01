@@ -33,6 +33,7 @@ import {
   runInsightEvaluator,
   type EvaluatedInsight,
 } from "./insightEvaluatorAgent.js";
+import { isSqlEvidenceItem } from "../../research/agents/dataAnalystAgent.js";
 import {
   FUNCTIONAL_CATEGORIES,
   type CategoryDefinition,
@@ -1352,7 +1353,7 @@ function buildDetailDataFromFinding(
     suggestedBucket: finding.suggestedBucket,
     impactEstimate: finding.impactEstimate,
     metricSignature: finding.metricSignature,
-    evidence: (finding.evidence || []).map((e) => ({
+    evidence: (finding.evidence || []).filter(isSqlEvidenceItem).map((e) => ({
       sql: e.sql,
       explanation: e.explanation,
       rows: (e.rows || []).slice(0, 200),
@@ -1724,7 +1725,7 @@ function buildCoverageInsight(
     },
     evidence: {
       metrics: Object.entries(finding.keyMetrics || {}).map(([label, value]) => ({ label, value })),
-      evidenceQueries: (finding.evidence || []).map((e) => ({
+      evidenceQueries: (finding.evidence || []).filter(isSqlEvidenceItem).map((e) => ({
         sql: e.sql,
         explanation: e.explanation,
         rowCount: e.rowCount,

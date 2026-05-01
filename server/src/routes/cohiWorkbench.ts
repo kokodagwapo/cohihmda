@@ -87,26 +87,7 @@ interface CanvasStateSnapshot {
     title?: string;
     sourceType?: 'research' | 'chat';
     sourceSessionId?: string;
-    sourceArtifactId?: string;
-    artifactCapabilities?: {
-      canInjectFilters?: boolean;
-      canEditPresentation?: boolean;
-      canEditColumns?: boolean;
-      requiresSqlRewriteForLogicChanges?: boolean;
-    };
-    filterConfig?: { filterable?: boolean; dateColumn?: string; defaultPreset?: string | null };
-    savedFilters?: Record<string, unknown>;
     sql?: string;
-    /** Canonical dashboard / widget lineage when saved from Research Lab (COHI-365). */
-    sourceDashboard?: {
-      kind?: string;
-      dashboardPath?: string;
-      dashboardLabel?: string;
-      sectionId?: string;
-      definitionId?: string;
-      widgetName?: string;
-      matchConfidence?: string;
-    };
     selected?: boolean;
   }[];
   totalItems: number;
@@ -305,24 +286,6 @@ function validatePullThroughSqlGuardrails(
     }
   }
   return null;
-}
-
-function getStandaloneWidgetForAction(
-  canvasState: CanvasStateSnapshot | undefined,
-  action: { type?: string; instanceId?: string },
-): CanvasStateSnapshot["standaloneWidgets"][number] | undefined {
-  if (action.type !== "modify_widget" || !action.instanceId) return undefined;
-  return canvasState?.standaloneWidgets?.find((w) => w.id === action.instanceId);
-}
-
-export function shouldValidateInjectedFilters(
-  action: any,
-  widget?: CanvasStateSnapshot["standaloneWidgets"][number],
-): boolean {
-  if (action.type === "modify_widget" && widget?.sourceType === "research") {
-    return widget.artifactCapabilities?.canInjectFilters === true;
-  }
-  return action.filterConfig?.filterable !== false;
 }
 
 /**
@@ -543,23 +506,8 @@ function buildCanvasContext(state: CanvasStateSnapshot): string {
     lines.push(`### Standalone Items (${state.standaloneWidgets.length})`);
     for (const w of state.standaloneWidgets) {
       const source = w.sourceType === 'research' ? ' [research-lab widget]' : '';
-      const artifact =
-        w.sourceArtifactId != null && String(w.sourceArtifactId).trim()
-          ? ` [artifact=${w.sourceArtifactId}]`
-          : '';
-      const caps =
-        w.artifactCapabilities?.canInjectFilters === true ? ' [research: filter-injectable]' : '';
-      const dateCol = w.filterConfig?.dateColumn ? ` [dateColumn=${w.filterConfig.dateColumn}]` : '';
-      const lineage =
-        w.sourceDashboard?.dashboardLabel && w.sourceDashboard?.dashboardPath
-          ? ` [lineage=${w.sourceDashboard.dashboardLabel} → ${w.sourceDashboard.dashboardPath}${
-              w.sourceDashboard.definitionId ? ` def=${w.sourceDashboard.definitionId}` : ''
-            }]`
-          : '';
       const selectedLabel = w.selected ? ' [SELECTED]' : '';
-      lines.push(
-        `- ${w.id} (${w.type})${w.title ? ": " + w.title : ""}${source}${artifact}${caps}${dateCol}${lineage}${selectedLabel}`,
-      );
+      lines.push(`- ${w.id} (${w.type})${w.title ? ": " + w.title : ""}${source}${selectedLabel}`);
       if (w.sql) {
         const sqlLimit = w.selected ? w.sql.length : 1000;
         const sqlSnippet = w.sql.length <= sqlLimit ? w.sql : w.sql.substring(0, sqlLimit) + '...';
@@ -649,9 +597,17 @@ async function buildResearchContext(
           blocks.push(`- **${f.title}** (${f.confidence} confidence): ${(f.summary ?? "").substring(0, 200)}`);
           if (f.evidence && f.evidence.length > 0) {
             for (const ev of f.evidence.slice(0, 2)) {
-              const sql = ev.sql ?? "";
-              blocks.push(`  SQL: \`${sql.substring(0, 200)}${sql.length > 200 ? "..." : ""}\``);
-              if (ev.explanation) blocks.push(`  Purpose: ${ev.explanation.substring(0, 150)}`);
+              if ("kind" in ev && ev.kind === "registry_widget") {
+                const w = ev as { definitionName?: string; definitionId?: string; explanation?: string };
+                blocks.push(`  [widget] ${w.definitionName ?? w.definitionId ?? "unknown"}`);
+                if (w.explanation) blocks.push(`  Purpose: ${String(w.explanation).substring(0, 150)}`);
+              } else {
+                const sql = (ev as { sql?: string }).sql ?? "";
+                blocks.push(`  SQL: \`${sql.substring(0, 200)}${sql.length > 200 ? "..." : ""}\``);
+                if ((ev as { explanation?: string }).explanation) {
+                  blocks.push(`  Purpose: ${String((ev as { explanation?: string }).explanation).substring(0, 150)}`);
+                }
+              }
             }
           }
         }
@@ -737,7 +693,6 @@ Each action in the "actions" array must be one of:
    - "changes" also accepts other VisualizationConfig overrides (type, xKey, yKey, etc.) for visual-only changes when data is unchanged.
    - "title" (optional) updates the widget title.
    - For research-lab widgets: these use complex CTEs and derived columns. When modifying them, always provide a complete new SQL query. Reference the RESEARCH LAB CONTEXT section below to understand the analytical intent behind the original query.
-   - When a research widget lists an artifact id and capability metadata in the canvas state: if canEditPresentation is true (default), prefer modify_widget with "changes" (vizConfig / tableConfig / title) for visual-only updates without rewriting SQL. If the user asks for filter or logic changes and canInjectFilters is false or requiresSqlRewriteForLogicChanges is true, provide a full new "sql" based on the exact widget SQL shown.
    - When modifying a widget's SQL, you MUST base your new query on the EXACT SQL shown for that widget in the canvas state. Do NOT invent table names, CTEs, or columns that don't appear in the original SQL. Copy the original SQL and make only the specific change the user requested.
    - Return EXACTLY ONE modify_widget action per user request. Do NOT return multiple modify_widget actions for the same widget.
 
@@ -1395,12 +1350,7 @@ router.post(
           );
 
           for (const action of actionsToValidate) {
-            const targetWidget = getStandaloneWidgetForAction(canvasState, action);
-            const validateInjectedFilters = shouldValidateInjectedFilters(
-              action,
-              targetWidget,
-            );
-            const dateCol = validateInjectedFilters
+            const dateCol = action.filterConfig?.filterable !== false
               ? (action.filterConfig?.dateColumn ?? 'application_date')
               : undefined;
 
