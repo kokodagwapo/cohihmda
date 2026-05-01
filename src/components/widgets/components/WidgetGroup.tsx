@@ -2715,6 +2715,7 @@ export function WidgetGroup({
 
   // Pipeline Analysis filter options (used when sectionType === 'pipeline-analysis')
   const { selectedTenantId } = useTenantStore();
+  const { selectedChannel } = useChannelStore();
   const pipelineRange = usePipelineAnalysisRange(selectedTenantId ?? null);
   const { options: pipelineFilterOptions } = usePipelineAnalysisFilterOptions(
     selectedTenantId ?? null,
@@ -2781,6 +2782,8 @@ export function WidgetGroup({
   ] = useState(false);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const filtersRestoredRef = useRef(false);
+  /** Prevents a slow detail-list fetch for a previous actor column from overwriting pill options after the user switches role. */
+  const activeWorkloadPillOptionsFetchIdRef = useRef(0);
   const toggleStringDraftValue = useCallback(
     (key: "milestone" | "actor" | "loanType" | "loanPurpose", value: string) => {
       const updater = (prev: string[]) => {
@@ -2800,6 +2803,7 @@ export function WidgetGroup({
   );
   useEffect(() => {
     if (sectionType !== "active-workload" || !selectedTenantId) {
+      activeWorkloadPillOptionsFetchIdRef.current += 1;
       setActiveWorkloadPillOptions({
         milestone: [],
         actor: [],
@@ -2808,6 +2812,11 @@ export function WidgetGroup({
       });
       return;
     }
+    const fetchId = ++activeWorkloadPillOptionsFetchIdRef.current;
+    setActiveWorkloadPillOptions((prev) => ({
+      ...prev,
+      actor: [],
+    }));
     let cancelled = false;
     const fetchOptions = async () => {
       try {
@@ -2818,19 +2827,23 @@ export function WidgetGroup({
         const actor = new Set<string>();
         const loanType = new Set<string>();
         const loanPurpose = new Set<string>();
+        const columnForThisFetch = activeWorkloadActorColumn;
         do {
           const params = new URLSearchParams();
           params.set("tenant_id", selectedTenantId);
           params.set("limit", String(limit));
           params.set("offset", String(offset));
+          if (selectedChannel && selectedChannel !== "All") {
+            params.set("channel_group", selectedChannel);
+          }
           const response = await api.request<{
             loans: Array<Record<string, unknown>>;
             total: number;
-          }>(`/api/loans/detail-list?${params.toString()}`);
+          }>(`/api/loans/active-detail-list?${params.toString()}`);
           total = response.total ?? 0;
           for (const row of response.loans ?? []) {
             const milestoneValue = String(row.current_milestone ?? "").trim();
-            const actorValue = String(row[activeWorkloadActorColumn] ?? "").trim();
+            const actorValue = String(row[columnForThisFetch] ?? "").trim();
             const loanTypeValue = String(row.loan_type ?? "").trim();
             const loanPurposeValue = String(row.loan_purpose ?? "").trim();
             if (milestoneValue) milestone.add(milestoneValue);
@@ -2842,6 +2855,7 @@ export function WidgetGroup({
           if (cancelled) return;
         } while (offset < total);
         if (cancelled) return;
+        if (fetchId !== activeWorkloadPillOptionsFetchIdRef.current) return;
         const sortValues = (values: Set<string>) =>
           [...values].sort((a, b) =>
             a.localeCompare(b, undefined, {
@@ -2856,7 +2870,7 @@ export function WidgetGroup({
           loanPurpose: sortValues(loanPurpose),
         });
       } catch {
-        if (!cancelled) {
+        if (!cancelled && fetchId === activeWorkloadPillOptionsFetchIdRef.current) {
           setActiveWorkloadPillOptions({
             milestone: [],
             actor: [],
@@ -2870,7 +2884,7 @@ export function WidgetGroup({
     return () => {
       cancelled = true;
     };
-  }, [sectionType, selectedTenantId, activeWorkloadActorColumn]);
+  }, [sectionType, selectedTenantId, selectedChannel, activeWorkloadActor, activeWorkloadActorColumn]);
 
   // Sync collapsed with prop
   useEffect(() => {
@@ -3691,7 +3705,6 @@ export function WidgetGroup({
     };
   }, [sectionType, filters.periodSelection?.dateRange, filters.dateRange]);
 
-  const { selectedChannel } = useChannelStore();
   const lcStatusOptionsResult = useLoanComplexityStatusOptions({
     startDate: lcDateRangeForStatus.start,
     endDate: lcDateRangeForStatus.end,
@@ -5119,7 +5132,10 @@ export function WidgetGroup({
                             <span className="inline-flex items-center gap-1 rounded-md bg-indigo-100 dark:bg-indigo-900/40 px-2 py-0.5 text-xs">
                               <PopoverTrigger asChild>
                                 <button type="button" className="truncate text-left">
-                                  {listOrSelected("Actor", filters.activeWorkloadSliceDrilldown?.actorValues ?? [])}
+                                  {listOrSelected(
+                                    activeWorkloadActor,
+                                    filters.activeWorkloadSliceDrilldown?.actorValues ?? [],
+                                  )}
                                 </button>
                               </PopoverTrigger>
                               <button
@@ -5137,7 +5153,7 @@ export function WidgetGroup({
                                   setActiveWorkloadPillPopover(null);
                                 }}
                                 className="p-0.5 rounded hover:bg-indigo-200 dark:hover:bg-indigo-800"
-                                aria-label="Clear actor drilldown filter"
+                                aria-label={`Clear ${activeWorkloadActor} drilldown filter`}
                               >
                                 <X className="h-3 w-3" />
                               </button>
@@ -5145,7 +5161,7 @@ export function WidgetGroup({
                             <PopoverContent align="start" className="w-[420px] p-3">
                               <div className="mb-2 flex items-center justify-between gap-2">
                                 <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-                                  Actor
+                                  {activeWorkloadActor}
                                 </div>
                                 <div className="flex items-center gap-2">
                                   <Button type="button" size="sm" variant="outline" onClick={() => setActiveWorkloadPillPopover(null)}>Cancel</Button>
@@ -5169,10 +5185,37 @@ export function WidgetGroup({
                                 </div>
                               </div>
                               <Command shouldFilter={false}>
-                                <CommandInput placeholder="Search Actor" value={activeWorkloadPillSearch["aw:actor"] ?? ""} onValueChange={(value) => setActiveWorkloadPillSearch((prev) => ({ ...prev, "aw:actor": value }))} />
+                                <CommandInput
+                                  placeholder={`Search ${activeWorkloadActor}`}
+                                  value={activeWorkloadPillSearch["aw:actor"] ?? ""}
+                                  onValueChange={(value) =>
+                                    setActiveWorkloadPillSearch((prev) => ({ ...prev, "aw:actor": value }))
+                                  }
+                                />
                                 <CommandList>
                                   <CommandEmpty>No values found.</CommandEmpty>
-                                  {[...new Set([...(activeWorkloadPillOptions.actor ?? []), ...(filters.activeWorkloadSliceDrilldown?.actorValues ?? []), ...activeWorkloadDraftActorValues])].filter((v) => String(v).toLowerCase().includes((activeWorkloadPillSearch["aw:actor"] ?? "").toLowerCase())).map((value) => { const isSelected = activeWorkloadDraftActorValues.includes(value); return <CommandItem key={value} onSelect={() => toggleStringDraftValue("actor", value)} className={cn("cursor-pointer", isSelected ? "!bg-accent !text-accent-foreground" : "")}><span className="mr-2">{isSelected ? "✓" : ""}</span>{value}</CommandItem>; })}
+                                  {[...new Set([...(activeWorkloadPillOptions.actor ?? []), ...(filters.activeWorkloadSliceDrilldown?.actorValues ?? []), ...activeWorkloadDraftActorValues])]
+                                    .filter((v) =>
+                                      String(v)
+                                        .toLowerCase()
+                                        .includes((activeWorkloadPillSearch["aw:actor"] ?? "").toLowerCase()),
+                                    )
+                                    .map((value) => {
+                                      const isSelected = activeWorkloadDraftActorValues.includes(value);
+                                      return (
+                                        <CommandItem
+                                          key={value}
+                                          onSelect={() => toggleStringDraftValue("actor", value)}
+                                          className={cn(
+                                            "cursor-pointer",
+                                            isSelected ? "!bg-accent !text-accent-foreground" : "",
+                                          )}
+                                        >
+                                          <span className="mr-2">{isSelected ? "✓" : ""}</span>
+                                          {value}
+                                        </CommandItem>
+                                      );
+                                    })}
                                 </CommandList>
                               </Command>
                               <Button type="button" size="sm" variant="ghost" className="mt-2 w-full" onClick={() => setActiveWorkloadDraftActorValues([])}>Clear Selection</Button>
