@@ -87,6 +87,16 @@ interface CanvasStateSnapshot {
     title?: string;
     sourceType?: 'research' | 'chat';
     sourceSessionId?: string;
+    sourceArtifactId?: string;
+    artifactCapabilities?: {
+      canInjectFilters?: boolean;
+      canEditPresentation?: boolean;
+    };
+    filterConfig?: {
+      filterable?: boolean;
+      dateColumn?: string;
+      defaultPreset?: string | null;
+    };
     sql?: string;
     selected?: boolean;
   }[];
@@ -149,6 +159,37 @@ function injectConditionForValidation(sql: string, condition: string): string {
     return body.substring(0, boundary.index) + `WHERE ${condition} ` + body.substring(boundary.index);
   }
   return body + ` WHERE ${condition}`;
+}
+
+export function shouldValidateInjectedFilters(
+  action: {
+    type?: string;
+    filterConfig?: {
+      filterable?: boolean;
+    };
+  },
+  existingWidget?: {
+    sourceType?: string;
+    sourceArtifactId?: string;
+    artifactCapabilities?: {
+      canInjectFilters?: boolean;
+    };
+  },
+): boolean {
+  if (action.filterConfig?.filterable === false) {
+    return false;
+  }
+
+  if (
+    action.type === "modify_widget" &&
+    existingWidget?.sourceType === "research" &&
+    existingWidget.sourceArtifactId &&
+    existingWidget.artifactCapabilities?.canInjectFilters !== true
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 /**
@@ -1350,8 +1391,11 @@ router.post(
           );
 
           for (const action of actionsToValidate) {
-            const dateCol = action.filterConfig?.filterable !== false
-              ? (action.filterConfig?.dateColumn ?? 'application_date')
+            const existingWidget = action.type === "modify_widget"
+              ? canvasState?.standaloneWidgets?.find((w) => w.id === action.instanceId)
+              : undefined;
+            const dateCol = shouldValidateInjectedFilters(action, existingWidget)
+              ? (action.filterConfig?.dateColumn ?? existingWidget?.filterConfig?.dateColumn ?? 'application_date')
               : undefined;
 
             let validation = await validateWidgetSql(String(action.sql), tenantPool, dateCol);
