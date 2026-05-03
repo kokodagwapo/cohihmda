@@ -16,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2 } from "lucide-react";
+import { Loader2, Plus, Trash2 } from "lucide-react";
 
 export const SYNC_FREQUENCY_OPTIONS = [
   { value: "hourly", label: "Hourly" },
@@ -35,6 +35,7 @@ export const SYNC_WEEKDAY_OPTIONS = [
 ] as const;
 
 export const SYNC_HOUR_OPTIONS = Array.from({ length: 24 }, (_, hour) => hour);
+export const SYNC_MINUTE_OPTIONS = Array.from({ length: 60 }, (_, minute) => minute);
 export const SYNC_ALL_WEEKDAYS = [0, 1, 2, 3, 4, 5, 6];
 export const SYNC_BUSINESS_WEEKDAYS = [1, 2, 3, 4, 5];
 export const SYNC_ALL_HOURS = SYNC_HOUR_OPTIONS;
@@ -78,7 +79,34 @@ function formatRangeSummary(values: number[], all: number[], formatter: (value: 
   return `${formatter(values[0])}–${formatter(values[values.length - 1])}`;
 }
 
+/** e.g. 8:05 AM (locale-formatted) */
+export function formatClockSlot(hour: number, minute: number): string {
+  const d = new Date(2000, 0, 1, hour, minute);
+  return d.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
+function parseRunAtTimes(raw: unknown): { hour: number; minute: number }[] {
+  if (!Array.isArray(raw) || raw.length === 0) return [];
+  const out: { hour: number; minute: number }[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const rec = item as Record<string, unknown>;
+    const hour = Number(rec.hour);
+    const minute = Number(rec.minute);
+    if (!Number.isInteger(hour) || !Number.isInteger(minute)) continue;
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) continue;
+    out.push({ hour, minute });
+  }
+  out.sort((a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute));
+  return out;
+}
+
 function describeSchedule(
+  runAtTimes: { hour: number; minute: number }[],
   weekdays: number[],
   hours: number[],
   timezone: string,
@@ -92,6 +120,12 @@ function describeSchedule(
         : SYNC_WEEKDAY_OPTIONS.filter((day) => weekdays.includes(day.value))
             .map((day) => day.label)
             .join(", ") || "no days";
+
+  if (runAtTimes.length > 0) {
+    const timesLabel = runAtTimes.map((t) => formatClockSlot(t.hour, t.minute)).join(", ");
+    return `${timesLabel} · ${dayLabel} (${timezone})`;
+  }
+
   const hourLabel = formatRangeSummary(hours, SYNC_ALL_HOURS, formatHourLabel);
   const freqLabel =
     SYNC_FREQUENCY_OPTIONS.find((option) => option.value === frequency)?.label ?? frequency;
@@ -106,6 +140,7 @@ export interface SyncScheduleDialogConnection {
   scheduler_timezone?: string | null;
   sync_allowed_weekdays?: number[] | null;
   sync_allowed_hours?: number[] | null;
+  sync_run_at_times?: unknown;
   sync_business_days_only?: boolean | null;
   is_active?: boolean;
 }
@@ -116,6 +151,7 @@ export interface SyncSchedulePatch {
   sync_allowed_weekdays: number[];
   sync_allowed_hours: number[];
   sync_business_days_only: boolean;
+  sync_run_at_times: Array<{ hour: number; minute: number }>;
 }
 
 interface SyncScheduleDialogProps {
@@ -137,6 +173,7 @@ export function SyncScheduleDialog({
   const [timezone, setTimezone] = useState<string>("America/New_York");
   const [weekdays, setWeekdays] = useState<number[]>(SYNC_ALL_WEEKDAYS);
   const [hours, setHours] = useState<number[]>(SYNC_ALL_HOURS);
+  const [runAtTimes, setRunAtTimes] = useState<Array<{ hour: number; minute: number }>>([]);
 
   useEffect(() => {
     if (!connection || !open) return;
@@ -144,6 +181,7 @@ export function SyncScheduleDialog({
     setTimezone(connection.scheduler_timezone || "America/New_York");
     setWeekdays(normalizeNumbers(connection.sync_allowed_weekdays, SYNC_ALL_WEEKDAYS));
     setHours(normalizeNumbers(connection.sync_allowed_hours, SYNC_ALL_HOURS));
+    setRunAtTimes(parseRunAtTimes(connection.sync_run_at_times));
   }, [connection, open]);
 
   const timezoneOptions = useMemo(
@@ -152,9 +190,11 @@ export function SyncScheduleDialog({
   );
 
   const summary = useMemo(
-    () => describeSchedule(weekdays, hours, timezone, frequency),
-    [weekdays, hours, timezone, frequency],
+    () => describeSchedule(runAtTimes, weekdays, hours, timezone, frequency),
+    [runAtTimes, weekdays, hours, timezone, frequency],
   );
+
+  const usesFixedClockTimes = runAtTimes.length > 0;
 
   const toggleWeekday = (value: number) => {
     setWeekdays((current) => {
@@ -178,15 +218,24 @@ export function SyncScheduleDialog({
     });
   };
 
+  const updateRunAtRow = (index: number, next: { hour: number; minute: number }) => {
+    setRunAtTimes((rows) => {
+      const copy = [...rows];
+      copy[index] = next;
+      return copy.sort((a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute));
+    });
+  };
+
   const handleSave = async () => {
     const businessDaysOnly =
       weekdays.length === 5 && SYNC_BUSINESS_WEEKDAYS.every((day) => weekdays.includes(day));
     await onSave({
-      sync_frequency: frequency,
+      sync_frequency: usesFixedClockTimes ? "daily" : frequency,
       scheduler_timezone: timezone,
       sync_allowed_weekdays: [...weekdays].sort((a, b) => a - b),
       sync_allowed_hours: [...hours].sort((a, b) => a - b),
       sync_business_days_only: businessDaysOnly,
+      sync_run_at_times: runAtTimes.map((t) => ({ hour: t.hour, minute: t.minute })),
     });
   };
 
@@ -207,7 +256,8 @@ export function SyncScheduleDialog({
                     for <strong>{connection.tenant_name}</strong>
                   </>
                 ) : null}
-                . Manual syncs always run on demand.
+                . Pick explicit clock times for multiple runs per day (e.g. twice daily). Manual
+                sync always runs on demand.
               </>
             ) : (
               "Configure when this connection syncs automatically."
@@ -223,9 +273,13 @@ export function SyncScheduleDialog({
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label className="text-sm font-medium text-slate-800 dark:text-slate-200">
-                Frequency
+                Interval (legacy mode only)
               </Label>
-              <Select value={frequency} onValueChange={setFrequency} disabled={disabledInputs}>
+              <Select
+                value={frequency}
+                onValueChange={setFrequency}
+                disabled={disabledInputs || usesFixedClockTimes}
+              >
                 <SelectTrigger className="h-9 text-xs font-light">
                   <SelectValue />
                 </SelectTrigger>
@@ -238,7 +292,8 @@ export function SyncScheduleDialog({
                 </SelectContent>
               </Select>
               <p className="text-[11px] text-slate-500 font-light">
-                How often to check whether this connection is due for a sync.
+                Used only when <strong>no</strong> fixed clock times are set below (minimum gap between
+                syncs: hourly / daily / weekly).
               </p>
             </div>
 
@@ -259,7 +314,7 @@ export function SyncScheduleDialog({
                 </SelectContent>
               </Select>
               <p className="text-[11px] text-slate-500 font-light">
-                Days and hours below are interpreted in this timezone.
+                Weekdays and run times use this timezone for each tenant connection.
               </p>
             </div>
           </div>
@@ -312,56 +367,170 @@ export function SyncScheduleDialog({
             </div>
           </div>
 
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <Label className="text-sm font-medium text-slate-800 dark:text-slate-200">
-                Allowed hours
-              </Label>
-              <div className="flex gap-1">
+          <div className="space-y-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/30 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <Label className="text-sm font-medium text-slate-800 dark:text-slate-200">
+                  Run at specific times
+                </Label>
+                <p className="text-[11px] text-slate-500 font-light mt-1 max-w-xl">
+                  Add one row per run (e.g. twice daily: morning and evening). The platform scheduler
+                  wakes every <strong>15 minutes</strong>; each run fires in the 15-minute window that
+                  starts at the time you pick. Clear all rows to use legacy interval + hour windows
+                  instead.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-1 shrink-0">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-7 text-xs font-light"
-                  onClick={() => setHours(SYNC_ALL_HOURS)}
-                  disabled={disabledInputs}
                   type="button"
+                  className="h-7 text-xs font-light"
+                  disabled={disabledInputs}
+                  onClick={() =>
+                    setRunAtTimes([
+                      { hour: 8, minute: 0 },
+                      { hour: 18, minute: 0 },
+                    ])
+                  }
                 >
-                  All hours
+                  Preset: 8AM &amp; 6PM
                 </Button>
                 <Button
-                  variant="outline"
+                  variant="default"
                   size="sm"
-                  className="h-7 text-xs font-light"
-                  onClick={() => setHours(SYNC_BUSINESS_HOURS)}
-                  disabled={disabledInputs}
                   type="button"
+                  className="h-7 text-xs font-light gap-1"
+                  disabled={disabledInputs || runAtTimes.length >= 24}
+                  onClick={() => setRunAtTimes((r) => [...r, { hour: 9, minute: 0 }])}
                 >
-                  8a–5p
+                  <Plus className="h-3 w-3" />
+                  Add time
                 </Button>
               </div>
             </div>
-            <div className="grid grid-cols-6 sm:grid-cols-8 md:grid-cols-12 gap-1.5">
-              {SYNC_HOUR_OPTIONS.map((hour) => {
-                const active = hours.includes(hour);
-                return (
-                  <Button
-                    key={hour}
-                    type="button"
-                    variant={active ? "default" : "outline"}
-                    size="sm"
-                    className="h-8 text-xs font-light"
-                    onClick={() => toggleHour(hour)}
-                    disabled={disabledInputs || (active && hours.length === 1)}
+
+            {runAtTimes.length === 0 ? (
+              <p className="text-xs text-slate-500 font-light italic">
+                No fixed times — scheduling uses the interval and “Allowed hours (legacy)” below.
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {runAtTimes.map((row, index) => (
+                  <li
+                    key={`${row.hour}-${row.minute}-${index}`}
+                    className="flex flex-wrap items-center gap-2"
                   >
-                    {formatHourLabel(hour)}
-                  </Button>
-                );
-              })}
-            </div>
-            <p className="text-[11px] text-slate-500 font-light">
-              Each button is one local hour (e.g. <code>9a</code> = 09:00–09:59).
-            </p>
+                    <Select
+                      value={String(row.hour)}
+                      onValueChange={(v) =>
+                        updateRunAtRow(index, { hour: Number(v), minute: row.minute })
+                      }
+                      disabled={disabledInputs}
+                    >
+                      <SelectTrigger className="h-9 w-[88px] text-xs font-light">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-[min(60vh,280px)]">
+                        {SYNC_HOUR_OPTIONS.map((h) => (
+                          <SelectItem key={h} value={String(h)} className="text-xs">
+                            {String(h).padStart(2, "0")}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <span className="text-slate-400 text-xs">:</span>
+                    <Select
+                      value={String(row.minute)}
+                      onValueChange={(v) =>
+                        updateRunAtRow(index, { hour: row.hour, minute: Number(v) })
+                      }
+                      disabled={disabledInputs}
+                    >
+                      <SelectTrigger className="h-9 w-[88px] text-xs font-light">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-[min(60vh,280px)]">
+                        {SYNC_MINUTE_OPTIONS.map((m) => (
+                          <SelectItem key={m} value={String(m)} className="text-xs">
+                            {String(m).padStart(2, "0")}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-9 w-9 p-0 text-slate-500"
+                      disabled={disabledInputs}
+                      title="Remove time"
+                      onClick={() =>
+                        setRunAtTimes((r) => r.filter((_, i) => i !== index))
+                      }
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
+
+          <details className="rounded-lg border border-dashed border-slate-200 dark:border-slate-600 p-3">
+            <summary className="text-xs font-medium text-slate-600 dark:text-slate-300 cursor-pointer">
+              Allowed hours (legacy, only when no fixed times above)
+            </summary>
+            <div className="mt-3 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[11px] text-slate-500 font-light">
+                  Which whole hours may sync start when using interval mode.
+                </span>
+                <div className="flex gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs font-light"
+                    onClick={() => setHours(SYNC_ALL_HOURS)}
+                    disabled={disabledInputs || usesFixedClockTimes}
+                    type="button"
+                  >
+                    All hours
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs font-light"
+                    onClick={() => setHours(SYNC_BUSINESS_HOURS)}
+                    disabled={disabledInputs || usesFixedClockTimes}
+                    type="button"
+                  >
+                    8a–5p
+                  </Button>
+                </div>
+              </div>
+              <div className="grid grid-cols-6 sm:grid-cols-8 md:grid-cols-12 gap-1.5 opacity-90">
+                {SYNC_HOUR_OPTIONS.map((hour) => {
+                  const active = hours.includes(hour);
+                  return (
+                    <Button
+                      key={hour}
+                      type="button"
+                      variant={active ? "default" : "outline"}
+                      size="sm"
+                      className="h-8 text-xs font-light"
+                      onClick={() => toggleHour(hour)}
+                      disabled={
+                        disabledInputs || usesFixedClockTimes || (active && hours.length === 1)
+                      }
+                    >
+                      {formatHourLabel(hour)}
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
+          </details>
         </div>
 
         <DialogFooter>
@@ -393,4 +562,5 @@ export const syncScheduleHelpers = {
   describeSchedule,
   normalizeNumbers,
   formatHourLabel,
+  formatClockSlot,
 };

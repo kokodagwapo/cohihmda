@@ -16,7 +16,11 @@
 import { pool as managementPool } from '../config/managementDatabase.js';
 import { tenantDbManager } from '../config/tenantDatabaseManager.js';
 import pg from 'pg';
-import { shouldRunScheduledSync } from '../utils/schedulerPolicy.js';
+import {
+  normalizeSyncRunAtTimes,
+  shouldRunFixedClockTimes,
+  shouldRunScheduledSync,
+} from '../utils/schedulerPolicy.js';
 
 interface SyncJob {
   tenantId: string;
@@ -87,7 +91,7 @@ export async function getConnectionsToSync(tenantId: string, tenantPool: pg.Pool
               last_synced_at, last_loan_modified_at, encompass_selected_folders,
               encompass_users_sync_enabled, sync_business_days_only,
               insights_business_days_only, scheduler_timezone,
-              sync_allowed_weekdays, sync_allowed_hours,
+              sync_allowed_weekdays, sync_allowed_hours, sync_run_at_times,
               last_encompass_users_sync_at
        FROM public.los_connections
        WHERE sync_enabled = true
@@ -98,20 +102,38 @@ export async function getConnectionsToSync(tenantId: string, tenantPool: pg.Pool
     const jobs: SyncJob[] = [];
 
     for (const row of result.rows) {
-      if (!isSyncOverdue(row.sync_frequency, row.last_synced_at)) {
-        continue;
-      }
+      const runAtParsed = normalizeSyncRunAtTimes(row.sync_run_at_times);
+      const fixedSlots = runAtParsed.valid ? runAtParsed.value : [];
 
-      if (
-        !shouldRunScheduledSync({
-          businessDaysOnly: row.sync_business_days_only,
-          timeZone: row.scheduler_timezone,
-          allowedWeekdays: row.sync_allowed_weekdays,
-          allowedHours: row.sync_allowed_hours,
-        })
-      ) {
-        // Intentionally quiet: avoid spamming logs every 15m per connection on weekends
-        continue;
+      if (fixedSlots.length > 0) {
+        if (
+          !shouldRunFixedClockTimes({
+            runAtTimes: fixedSlots,
+            timeZone: row.scheduler_timezone,
+            allowedWeekdays: row.sync_allowed_weekdays,
+            businessDaysOnly: row.sync_business_days_only,
+            lastSyncedAt: row.last_synced_at ? new Date(row.last_synced_at) : null,
+            now: new Date(),
+          })
+        ) {
+          continue;
+        }
+      } else {
+        if (!isSyncOverdue(row.sync_frequency, row.last_synced_at)) {
+          continue;
+        }
+
+        if (
+          !shouldRunScheduledSync({
+            businessDaysOnly: row.sync_business_days_only,
+            timeZone: row.scheduler_timezone,
+            allowedWeekdays: row.sync_allowed_weekdays,
+            allowedHours: row.sync_allowed_hours,
+          })
+        ) {
+          // Intentionally quiet: avoid spamming logs every 15m per connection on weekends
+          continue;
+        }
       }
 
       // Parse encompass_selected_folders safely
