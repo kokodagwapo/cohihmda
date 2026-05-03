@@ -150,27 +150,8 @@ const WEEKDAY_OPTIONS = [
   { value: 0, label: 'Sun' },
 ];
 
-const HOUR_OPTIONS = Array.from({ length: 24 }, (_, hour) => hour);
 const ALL_WEEKDAYS = [0, 1, 2, 3, 4, 5, 6];
 const BUSINESS_WEEKDAYS = [1, 2, 3, 4, 5];
-const ALL_HOURS = HOUR_OPTIONS;
-const BUSINESS_HOURS = Array.from({ length: 10 }, (_, index) => index + 8);
-
-const SCHEDULER_TIMEZONE_OPTIONS = [
-  { value: 'America/New_York', label: 'Eastern (America/New_York)' },
-  { value: 'America/Chicago', label: 'Central (America/Chicago)' },
-  { value: 'America/Denver', label: 'Mountain (America/Denver)' },
-  { value: 'America/Los_Angeles', label: 'Pacific (America/Los_Angeles)' },
-  { value: 'UTC', label: 'UTC' },
-];
-
-function schedulerTimezoneSelectOptions(current?: string | null) {
-  const cur = (current && current.trim()) || 'America/New_York';
-  if (SCHEDULER_TIMEZONE_OPTIONS.some((o) => o.value === cur)) {
-    return SCHEDULER_TIMEZONE_OPTIONS;
-  }
-  return [{ value: cur, label: `${cur} (custom)` }, ...SCHEDULER_TIMEZONE_OPTIONS];
-}
 
 function formatRelativeTime(dateStr: string | null): string {
   if (!dateStr) return 'Never';
@@ -278,31 +259,19 @@ function parseConnRunAtTimes(raw: unknown): { hour: number; minute: number }[] {
 
 function formatScheduleSummary(connection: SyncConnection): string {
   const fixed = parseConnRunAtTimes(connection.sync_run_at_times);
-  if (fixed.length > 0) {
-    const timesLabel = fixed.map((t) => formatClockSlot(t.hour, t.minute)).join(', ');
-    const weekdays = normalizeScheduleNumbers(connection.sync_allowed_weekdays, ALL_WEEKDAYS);
-    const dayLabel = weekdays.length === 7
-      ? 'All days'
-      : weekdays.length === 5 && BUSINESS_WEEKDAYS.every((day) => weekdays.includes(day))
-        ? 'Weekdays'
-        : WEEKDAY_OPTIONS.filter((day) => weekdays.includes(day.value)).map((day) => day.label).join(', ');
-    return `${timesLabel} · ${dayLabel} (${connection.scheduler_timezone || 'America/New_York'})`;
-  }
-
   const weekdays = normalizeScheduleNumbers(connection.sync_allowed_weekdays, ALL_WEEKDAYS);
-  const hours = normalizeScheduleNumbers(connection.sync_allowed_hours, ALL_HOURS);
   const dayLabel = weekdays.length === 7
     ? 'All days'
     : weekdays.length === 5 && BUSINESS_WEEKDAYS.every((day) => weekdays.includes(day))
       ? 'Weekdays'
       : WEEKDAY_OPTIONS.filter((day) => weekdays.includes(day.value)).map((day) => day.label).join(', ');
-  const hourLabel = hours.length === 24
-    ? 'All hours'
-    : hours.length <= 4
-      ? hours.map((hour) => `${hour}:00`).join(', ')
-      : `${hours[0]}:00-${hours[hours.length - 1]}:00`;
 
-  return `${dayLabel}, ${hourLabel} ${connection.scheduler_timezone || 'America/New_York'}`;
+  if (fixed.length > 0) {
+    const timesLabel = fixed.map((t) => formatClockSlot(t.hour, t.minute)).join(', ');
+    return `${timesLabel} · ${dayLabel} (${connection.scheduler_timezone || 'America/New_York'})`;
+  }
+
+  return `No run times set · ${dayLabel} (${connection.scheduler_timezone || 'America/New_York'})`;
 }
 
 export const SyncManagementSection = () => {
@@ -563,42 +532,6 @@ export const SyncManagementSection = () => {
     }
   };
 
-  const handleToggleBusinessDaysLoanSync = async (connection: SyncConnection) => {
-    const newVal = !(connection.sync_business_days_only ?? false);
-    const key = connKey(connection);
-    setUpdatingIds(prev => new Set(prev).add(key));
-    try {
-      await api.request(`/api/admin/sync-management/${connection.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          tenant_id: connection.tenant_id,
-          sync_business_days_only: newVal,
-        }),
-      });
-      setConnections(prev =>
-        prev.map(c =>
-          connKey(c) === key ? { ...c, sync_business_days_only: newVal } : c
-        )
-      );
-      toast({
-        title: newVal ? 'Business-day loan sync enabled' : 'Business-day loan sync disabled',
-        description: 'Applies to automatic scheduler only',
-      });
-    } catch (error: any) {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to update setting',
-        variant: 'destructive',
-      });
-    } finally {
-      setUpdatingIds(prev => {
-        const next = new Set(prev);
-        next.delete(key);
-        return next;
-      });
-    }
-  };
-
   const handleToggleBusinessDaysInsights = async (connection: SyncConnection) => {
     const newVal = !(connection.insights_business_days_only ?? false);
     const key = connKey(connection);
@@ -635,74 +568,7 @@ export const SyncManagementSection = () => {
     }
   };
 
-  const handleSchedulerTimezoneChange = async (connection: SyncConnection, tz: string) => {
-    const key = connKey(connection);
-    setUpdatingIds(prev => new Set(prev).add(key));
-    try {
-      await api.request(`/api/admin/sync-management/${connection.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          tenant_id: connection.tenant_id,
-          scheduler_timezone: tz,
-        }),
-      });
-      setConnections(prev =>
-        prev.map(c => (connKey(c) === key ? { ...c, scheduler_timezone: tz } : c))
-      );
-      toast({ title: 'Timezone updated', description: tz });
-    } catch (error: any) {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to update timezone',
-        variant: 'destructive',
-      });
-    } finally {
-      setUpdatingIds(prev => {
-        const next = new Set(prev);
-        next.delete(key);
-        return next;
-      });
-    }
-  };
-
-  const handleScheduleWindowChange = async (
-    connection: SyncConnection,
-    patch: Partial<Pick<SyncConnection, 'sync_allowed_weekdays' | 'sync_allowed_hours' | 'sync_business_days_only'>>,
-  ) => {
-    const key = connKey(connection);
-    setUpdatingIds(prev => new Set(prev).add(key));
-    try {
-      await api.request(`/api/admin/sync-management/${connection.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          tenant_id: connection.tenant_id,
-          ...patch,
-        }),
-      });
-      setConnections(prev =>
-        prev.map(c => (connKey(c) === key ? { ...c, ...patch } : c))
-      );
-      toast({
-        title: 'Schedule window updated',
-        description: `${connection.name} (${connection.tenant_name})`,
-      });
-    } catch (error: any) {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to update schedule window',
-        variant: 'destructive',
-      });
-    } finally {
-      setUpdatingIds(prev => {
-        const next = new Set(prev);
-        next.delete(key);
-        return next;
-      });
-    }
-  };
-
-  // Persists every scheduling field in one PUT so the dialog can save
-  // frequency + timezone + weekdays + hours atomically.
+  // Persists the explicit clock-time schedule in one PUT.
   const handleScheduleDialogSave = async (
     connection: SyncConnection,
     patch: SyncSchedulePatch,
@@ -714,10 +580,8 @@ export const SyncManagementSection = () => {
         method: 'PUT',
         body: JSON.stringify({
           tenant_id: connection.tenant_id,
-          sync_frequency: patch.sync_frequency,
           scheduler_timezone: patch.scheduler_timezone,
           sync_allowed_weekdays: patch.sync_allowed_weekdays,
-          sync_allowed_hours: patch.sync_allowed_hours,
           sync_business_days_only: patch.sync_business_days_only,
           sync_run_at_times: patch.sync_run_at_times,
         }),
@@ -727,10 +591,8 @@ export const SyncManagementSection = () => {
           connKey(c) === key
             ? {
                 ...c,
-                sync_frequency: patch.sync_frequency,
                 scheduler_timezone: patch.scheduler_timezone,
                 sync_allowed_weekdays: patch.sync_allowed_weekdays,
-                sync_allowed_hours: patch.sync_allowed_hours,
                 sync_business_days_only: patch.sync_business_days_only,
                 sync_run_at_times: patch.sync_run_at_times,
               }
@@ -1304,8 +1166,6 @@ export const SyncManagementSection = () => {
                     const history = historyData[key] || [];
                     const hookRuns = hookRunData[key] || [];
                     const isLoadingHistory = historyLoading.has(key);
-                    const selectedWeekdays = normalizeScheduleNumbers(connection.sync_allowed_weekdays, ALL_WEEKDAYS);
-                    const selectedHours = normalizeScheduleNumbers(connection.sync_allowed_hours, ALL_HOURS);
                     return (
                     <Fragment key={key}><TableRow className="group">
                       <TableCell>
@@ -1352,12 +1212,12 @@ export const SyncManagementSection = () => {
                           className="h-auto min-h-8 w-[200px] justify-start gap-2 px-2.5 py-1.5 text-left text-xs font-light"
                           onClick={() => setScheduleEditorConnection(connection)}
                           disabled={updatingIds.has(connKey(connection))}
-                          title="Edit schedule (frequency, days, hours, timezone)"
+                          title="Edit schedule (timezone, days, run times)"
                         >
                           <Pencil className="h-3 w-3 shrink-0 text-slate-400" />
                           <div className="flex min-w-0 flex-col leading-tight">
-                            <span className="text-xs font-medium capitalize text-slate-700 dark:text-slate-200">
-                              {connection.sync_frequency || 'daily'}
+                            <span className="text-xs font-medium text-slate-700 dark:text-slate-200">
+                              Run times
                             </span>
                             <span className="truncate text-[10px] text-slate-400">
                               {formatScheduleSummary(connection)}
@@ -1493,22 +1353,6 @@ export const SyncManagementSection = () => {
                               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                                 <div className="space-y-0.5">
                                   <Label className="text-sm font-medium text-slate-800 dark:text-slate-200">
-                                    Run automatic loan sync on business days only
-                                  </Label>
-                                  <p className="text-xs text-slate-500 font-light">
-                                    Scheduler skips Saturday/Sunday in the timezone below.
-                                  </p>
-                                </div>
-                                <Switch
-                                  checked={connection.sync_business_days_only ?? false}
-                                  onCheckedChange={() => handleToggleBusinessDaysLoanSync(connection)}
-                                  disabled={updatingIds.has(key) || !connection.is_active}
-                                  className="data-[state=checked]:bg-amber-500 shrink-0"
-                                />
-                              </div>
-                              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                                <div className="space-y-0.5">
-                                  <Label className="text-sm font-medium text-slate-800 dark:text-slate-200">
                                     Generate automatic insights on business days only
                                   </Label>
                                   <p className="text-xs text-slate-500 font-light">
@@ -1521,145 +1365,6 @@ export const SyncManagementSection = () => {
                                   disabled={updatingIds.has(key) || !connection.is_active}
                                   className="data-[state=checked]:bg-violet-500 shrink-0"
                                 />
-                              </div>
-                              <div className="space-y-2 max-w-md">
-                                <Label className="text-sm font-medium text-slate-800 dark:text-slate-200">
-                                  Scheduler timezone
-                                </Label>
-                                <Select
-                                  value={connection.scheduler_timezone || 'America/New_York'}
-                                  onValueChange={(val) =>
-                                    handleSchedulerTimezoneChange(connection, val)
-                                  }
-                                  disabled={updatingIds.has(key) || !connection.is_active}
-                                >
-                                  <SelectTrigger className="h-9 text-xs font-light">
-                                    <SelectValue placeholder="Timezone" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {schedulerTimezoneSelectOptions(connection.scheduler_timezone).map(
-                                      (opt) => (
-                                        <SelectItem
-                                          key={opt.value}
-                                          value={opt.value}
-                                          className="text-xs"
-                                        >
-                                          {opt.label}
-                                        </SelectItem>
-                                      ),
-                                    )}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                              <div className="space-y-2">
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                  <Label className="text-sm font-medium text-slate-800 dark:text-slate-200">
-                                    Allowed sync days
-                                  </Label>
-                                  <div className="flex gap-1">
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-7 text-xs font-light"
-                                      onClick={() => handleScheduleWindowChange(connection, {
-                                        sync_allowed_weekdays: ALL_WEEKDAYS,
-                                        sync_business_days_only: false,
-                                      })}
-                                      disabled={updatingIds.has(key) || !connection.is_active}
-                                    >
-                                      All days
-                                    </Button>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-7 text-xs font-light"
-                                      onClick={() => handleScheduleWindowChange(connection, {
-                                        sync_allowed_weekdays: BUSINESS_WEEKDAYS,
-                                        sync_business_days_only: true,
-                                      })}
-                                      disabled={updatingIds.has(key) || !connection.is_active}
-                                    >
-                                      Weekdays
-                                    </Button>
-                                  </div>
-                                </div>
-                                <div className="flex flex-wrap gap-1.5">
-                                  {WEEKDAY_OPTIONS.map((day) => {
-                                    const active = selectedWeekdays.includes(day.value);
-                                    return (
-                                      <Button
-                                        key={day.value}
-                                        type="button"
-                                        variant={active ? 'default' : 'outline'}
-                                        size="sm"
-                                        className="h-8 min-w-12 text-xs font-light"
-                                        disabled={updatingIds.has(key) || !connection.is_active || (active && selectedWeekdays.length === 1)}
-                                        onClick={() => {
-                                          const nextDays = active
-                                            ? selectedWeekdays.filter((value) => value !== day.value)
-                                            : [...selectedWeekdays, day.value].sort((a, b) => a - b);
-                                          handleScheduleWindowChange(connection, {
-                                            sync_allowed_weekdays: nextDays,
-                                            sync_business_days_only: nextDays.length === 5 && BUSINESS_WEEKDAYS.every((value) => nextDays.includes(value)),
-                                          });
-                                        }}
-                                      >
-                                        {day.label}
-                                      </Button>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                              <div className="space-y-2">
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                  <Label className="text-sm font-medium text-slate-800 dark:text-slate-200">
-                                    Allowed sync hours (legacy — when no fixed clock times)
-                                  </Label>
-                                  <div className="flex gap-1">
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-7 text-xs font-light"
-                                      onClick={() => handleScheduleWindowChange(connection, { sync_allowed_hours: ALL_HOURS })}
-                                      disabled={updatingIds.has(key) || !connection.is_active}
-                                    >
-                                      All hours
-                                    </Button>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-7 text-xs font-light"
-                                      onClick={() => handleScheduleWindowChange(connection, { sync_allowed_hours: BUSINESS_HOURS })}
-                                      disabled={updatingIds.has(key) || !connection.is_active}
-                                    >
-                                      8 AM-5 PM
-                                    </Button>
-                                  </div>
-                                </div>
-                                <div className="grid grid-cols-6 sm:grid-cols-8 md:grid-cols-12 gap-1.5">
-                                  {HOUR_OPTIONS.map((hour) => {
-                                    const active = selectedHours.includes(hour);
-                                    const label = hour === 0 ? '12a' : hour < 12 ? `${hour}a` : hour === 12 ? '12p' : `${hour - 12}p`;
-                                    return (
-                                      <Button
-                                        key={hour}
-                                        type="button"
-                                        variant={active ? 'default' : 'outline'}
-                                        size="sm"
-                                        className="h-8 text-xs font-light"
-                                        disabled={updatingIds.has(key) || !connection.is_active || (active && selectedHours.length === 1)}
-                                        onClick={() => {
-                                          const nextHours = active
-                                            ? selectedHours.filter((value) => value !== hour)
-                                            : [...selectedHours, hour].sort((a, b) => a - b);
-                                          handleScheduleWindowChange(connection, { sync_allowed_hours: nextHours });
-                                        }}
-                                      >
-                                        {label}
-                                      </Button>
-                                    );
-                                  })}
-                                </div>
                               </div>
                               {connection.los_type === 'encompass' && (
                                 <div className="text-xs text-slate-500 font-light">

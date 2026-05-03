@@ -9,8 +9,9 @@
  *  - Routes other API connections through losApiService
  *  - Routes CSV connections through csvProcessor
  *
- * Runs every 15 minutes. Each run checks which connections are overdue for sync
- * based on their configured sync_frequency and last_synced_at timestamp.
+ * Runs every 15 minutes. Each run checks each connection's explicit
+ * sync_run_at_times in scheduler_timezone and starts at most one sync per
+ * configured local-time slot per local calendar day.
  */
 
 import { pool as managementPool } from '../config/managementDatabase.js';
@@ -19,7 +20,6 @@ import pg from 'pg';
 import {
   normalizeSyncRunAtTimes,
   shouldRunFixedClockTimes,
-  shouldRunScheduledSync,
 } from '../utils/schedulerPolicy.js';
 
 interface SyncJob {
@@ -27,7 +27,6 @@ interface SyncJob {
   connectionId: string;
   connectionMethod: string;
   losType: string;
-  syncFrequency: string;
   lastSyncedAt?: Date;
   lastLoanModifiedAt?: Date;
   encompassSelectedFolders?: string[];
@@ -35,40 +34,8 @@ interface SyncJob {
   insightsBusinessDaysOnly?: boolean;
   schedulerTimezone?: string;
   syncAllowedWeekdays?: number[];
-  syncAllowedHours?: number[];
   encompassUsersSyncEnabled?: boolean;
   lastEncompassUsersSyncAt?: Date;
-}
-
-/**
- * Determine if a connection is overdue for sync based on frequency and last sync time.
- * Returns true if enough time has elapsed since the last sync.
- */
-export function isSyncOverdue(frequency: string, lastSyncedAt?: Date): boolean {
-  // Never synced before — always overdue
-  if (!lastSyncedAt) {
-    return true;
-  }
-
-  const now = Date.now();
-  const lastSync = new Date(lastSyncedAt).getTime();
-  const elapsed = now - lastSync;
-
-  switch (frequency) {
-    case 'realtime':
-      // Realtime is handled via webhooks, but if we're checking the scheduler,
-      // treat anything older than 5 minutes as overdue
-      return elapsed > 5 * 60 * 1000;
-    case 'hourly':
-      return elapsed > 60 * 60 * 1000; // 1 hour
-    case 'daily':
-      return elapsed > 24 * 60 * 60 * 1000; // 24 hours
-    case 'weekly':
-      return elapsed > 7 * 24 * 60 * 60 * 1000; // 7 days
-    default:
-      // Unknown frequency — default to hourly
-      return elapsed > 60 * 60 * 1000;
-  }
 }
 
 /**
@@ -87,11 +54,11 @@ async function getActiveTenants(): Promise<Array<{ id: string; name: string }>> 
 export async function getConnectionsToSync(tenantId: string, tenantPool: pg.Pool): Promise<SyncJob[]> {
   try {
     const result = await tenantPool.query(
-      `SELECT id, connection_method, los_type, sync_frequency,
+      `SELECT id, connection_method, los_type,
               last_synced_at, last_loan_modified_at, encompass_selected_folders,
               encompass_users_sync_enabled, sync_business_days_only,
               insights_business_days_only, scheduler_timezone,
-              sync_allowed_weekdays, sync_allowed_hours, sync_run_at_times,
+              sync_allowed_weekdays, sync_run_at_times,
               last_encompass_users_sync_at
        FROM public.los_connections
        WHERE sync_enabled = true
@@ -105,35 +72,18 @@ export async function getConnectionsToSync(tenantId: string, tenantPool: pg.Pool
       const runAtParsed = normalizeSyncRunAtTimes(row.sync_run_at_times);
       const fixedSlots = runAtParsed.valid ? runAtParsed.value : [];
 
-      if (fixedSlots.length > 0) {
-        if (
-          !shouldRunFixedClockTimes({
-            runAtTimes: fixedSlots,
-            timeZone: row.scheduler_timezone,
-            allowedWeekdays: row.sync_allowed_weekdays,
-            businessDaysOnly: row.sync_business_days_only,
-            lastSyncedAt: row.last_synced_at ? new Date(row.last_synced_at) : null,
-            now: new Date(),
-          })
-        ) {
-          continue;
-        }
-      } else {
-        if (!isSyncOverdue(row.sync_frequency, row.last_synced_at)) {
-          continue;
-        }
-
-        if (
-          !shouldRunScheduledSync({
-            businessDaysOnly: row.sync_business_days_only,
-            timeZone: row.scheduler_timezone,
-            allowedWeekdays: row.sync_allowed_weekdays,
-            allowedHours: row.sync_allowed_hours,
-          })
-        ) {
-          // Intentionally quiet: avoid spamming logs every 15m per connection on weekends
-          continue;
-        }
+      if (
+        fixedSlots.length === 0 ||
+        !shouldRunFixedClockTimes({
+          runAtTimes: fixedSlots,
+          timeZone: row.scheduler_timezone,
+          allowedWeekdays: row.sync_allowed_weekdays,
+          businessDaysOnly: row.sync_business_days_only,
+          lastSyncedAt: row.last_synced_at ? new Date(row.last_synced_at) : null,
+          now: new Date(),
+        })
+      ) {
+        continue;
       }
 
       // Parse encompass_selected_folders safely
@@ -153,7 +103,6 @@ export async function getConnectionsToSync(tenantId: string, tenantPool: pg.Pool
         connectionId: row.id,
         connectionMethod: row.connection_method,
         losType: row.los_type,
-        syncFrequency: row.sync_frequency,
         lastSyncedAt: row.last_synced_at ? new Date(row.last_synced_at) : undefined,
         lastLoanModifiedAt: row.last_loan_modified_at ? new Date(row.last_loan_modified_at) : undefined,
         encompassSelectedFolders: folders,
@@ -161,7 +110,6 @@ export async function getConnectionsToSync(tenantId: string, tenantPool: pg.Pool
         insightsBusinessDaysOnly: row.insights_business_days_only,
         schedulerTimezone: row.scheduler_timezone,
         syncAllowedWeekdays: row.sync_allowed_weekdays,
-        syncAllowedHours: row.sync_allowed_hours,
         encompassUsersSyncEnabled: row.encompass_users_sync_enabled,
         lastEncompassUsersSyncAt: row.last_encompass_users_sync_at
           ? new Date(row.last_encompass_users_sync_at)

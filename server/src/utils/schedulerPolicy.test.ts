@@ -1,12 +1,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   getDayOfWeekInTimeZone,
-  getHourInTimeZone,
   isWeekendInTimeZone,
   normalizeSchedulerTimezone,
   shouldRunFixedClockTimes,
   shouldRunScheduledPostSyncInsights,
-  shouldRunScheduledSync,
 } from "./schedulerPolicy.js";
 
 afterEach(() => {
@@ -59,66 +57,6 @@ describe("same UTC instant in multiple timezones", () => {
     expect(utcDow).toBeLessThanOrEqual(6);
     expect(tokyoDow).toBeGreaterThanOrEqual(0);
     expect(tokyoDow).toBeLessThanOrEqual(6);
-  });
-});
-
-describe("shouldRunScheduledSync", () => {
-  const saturday = new Date("2026-07-04T12:00:00.000Z");
-
-  it("returns false on weekend when businessDaysOnly", () => {
-    expect(
-      shouldRunScheduledSync({
-        businessDaysOnly: true,
-        timeZone: "America/New_York",
-        now: saturday,
-      }),
-    ).toBe(false);
-  });
-
-  it("returns true on weekend when businessDaysOnly false", () => {
-    expect(
-      shouldRunScheduledSync({
-        businessDaysOnly: false,
-        timeZone: "America/New_York",
-        now: saturday,
-      }),
-    ).toBe(true);
-  });
-
-  it("returns false outside configured weekdays", () => {
-    expect(
-      shouldRunScheduledSync({
-        timeZone: "America/New_York",
-        allowedWeekdays: [1],
-        allowedHours: [8, 9, 10],
-        now: saturday,
-      }),
-    ).toBe(false);
-  });
-
-  it("returns false outside configured local hours", () => {
-    const mondayTenAmEastern = new Date("2026-07-06T14:00:00.000Z");
-    expect(getHourInTimeZone(mondayTenAmEastern, "America/New_York")).toBe(10);
-    expect(
-      shouldRunScheduledSync({
-        timeZone: "America/New_York",
-        allowedWeekdays: [1],
-        allowedHours: [9],
-        now: mondayTenAmEastern,
-      }),
-    ).toBe(false);
-  });
-
-  it("returns true inside configured weekday and local hour", () => {
-    const mondayTenAmEastern = new Date("2026-07-06T14:00:00.000Z");
-    expect(
-      shouldRunScheduledSync({
-        timeZone: "America/New_York",
-        allowedWeekdays: [1],
-        allowedHours: [10],
-        now: mondayTenAmEastern,
-      }),
-    ).toBe(true);
   });
 });
 

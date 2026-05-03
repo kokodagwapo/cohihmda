@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SyncManagementSection } from "@/components/admin/SyncManagementSection";
 import { renderWithProviders } from "@/test/render";
@@ -37,6 +37,8 @@ const connection = {
   sync_business_days_only: false,
   insights_business_days_only: false,
   scheduler_timezone: "America/New_York",
+  sync_allowed_weekdays: [1, 2, 3, 4, 5],
+  sync_run_at_times: [],
   last_encompass_users_sync_at: null,
   created_at: "2026-01-01T00:00:00.000Z",
   updated_at: "2026-01-01T00:00:00.000Z",
@@ -72,24 +74,18 @@ describe("@COHI-351 SyncManagementSection scheduler controls", () => {
     });
   });
 
-  it("renders COHI-351 scheduler controls and updates business-day loan sync", async () => {
+  it("renders explicit clock-time scheduler controls and saves run times", async () => {
     renderWithProviders(<SyncManagementSection />);
 
     expect(await screen.findByText("Production Encompass")).toBeInTheDocument();
-    await userEvent.click(screen.getByTitle("Sync history"));
+    await userEvent.click(screen.getByTitle("Edit schedule (timezone, days, run times)"));
 
-    expect(await screen.findByText("Sync Encompass users after loan sync")).toBeInTheDocument();
-    expect(screen.getByText("Run automatic loan sync on business days only")).toBeInTheDocument();
-    expect(screen.getByText("Generate automatic insights on business days only")).toBeInTheDocument();
-    expect(screen.getByText("Scheduler timezone")).toBeInTheDocument();
-    expect(screen.getByText(/Manual sync and manual triggers still run any day/i)).toBeInTheDocument();
+    expect(await screen.findByText("Run at specific times")).toBeInTheDocument();
+    expect(screen.getByText("Timezone")).toBeInTheDocument();
+    expect(screen.getByText("Allowed days")).toBeInTheDocument();
+    expect(screen.queryByText(/legacy/i)).not.toBeInTheDocument();
 
-    const policyRow = screen
-      .getByText("Run automatic loan sync on business days only")
-      .closest("div")?.parentElement;
-    expect(policyRow).toBeTruthy();
-
-    await userEvent.click(within(policyRow as HTMLElement).getByRole("switch"));
+    await userEvent.click(screen.getByRole("button", { name: "Save schedule" }));
 
     await waitFor(() => {
       expect(requestMock).toHaveBeenCalledWith(
@@ -98,7 +94,13 @@ describe("@COHI-351 SyncManagementSection scheduler controls", () => {
           method: "PUT",
           body: JSON.stringify({
             tenant_id: "tenant-cohi-351",
+            scheduler_timezone: "America/New_York",
+            sync_allowed_weekdays: [1, 2, 3, 4, 5],
             sync_business_days_only: true,
+            sync_run_at_times: [
+              { hour: 8, minute: 0 },
+              { hour: 18, minute: 0 },
+            ],
           }),
         }),
       );
