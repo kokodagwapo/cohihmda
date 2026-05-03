@@ -32,6 +32,8 @@ const syncManagementPayload = {
       sync_business_days_only: false,
       insights_business_days_only: false,
       scheduler_timezone: "America/New_York",
+      sync_allowed_weekdays: [1, 2, 3, 4, 5],
+      sync_run_at_times: [],
       last_encompass_users_sync_at: null,
       created_at: "2026-01-01T00:00:00.000Z",
       updated_at: "2026-01-01T00:00:00.000Z",
@@ -56,7 +58,7 @@ test.describe("@COHI-351 @soc2 Sync Management scheduling controls", () => {
     "Requires E2E_PLATFORM_ADMIN_* credentials because Sync Management is platform-admin only",
   );
 
-  test("@COHI-351 platform admin can view and update scheduler-only business-day controls", async ({ platformAdminPage }) => {
+  test("@COHI-351 platform admin can view and update explicit sync run times", async ({ platformAdminPage }) => {
     const adminPage = platformAdminPage;
     let updateBody: Record<string, unknown> | undefined;
 
@@ -89,21 +91,23 @@ test.describe("@COHI-351 @soc2 Sync Management scheduling controls", () => {
     await adminPage.getByRole("button", { name: "Sync Management" }).click();
     await expect(adminPage.getByText("Production Encompass")).toBeVisible();
 
-    await adminPage.getByTitle("Sync history").click();
-    await expect(adminPage.getByText("Sync Encompass users after loan sync")).toBeVisible();
-    await expect(adminPage.getByText("Run automatic loan sync on business days only")).toBeVisible();
-    await expect(adminPage.getByText("Generate automatic insights on business days only")).toBeVisible();
-    await expect(adminPage.getByText("Scheduler timezone")).toBeVisible();
-    await expect(adminPage.getByText(/Manual sync and manual triggers still run any day/i)).toBeVisible();
+    await adminPage.getByTitle("Edit schedule (timezone, days, run times)").click();
+    await expect(adminPage.getByText("Run at specific times")).toBeVisible();
+    await expect(adminPage.getByText("Timezone")).toBeVisible();
+    await expect(adminPage.getByText("Allowed days")).toBeVisible();
+    await expect(adminPage.getByText(/legacy/i)).toHaveCount(0);
 
-    const businessDayRow = adminPage
-      .getByText("Run automatic loan sync on business days only")
-      .locator("xpath=ancestor::div[contains(@class, 'sm:justify-between')][1]");
-    await businessDayRow.getByRole("switch").click();
+    await adminPage.getByRole("button", { name: "Save schedule" }).click();
 
     expect(updateBody).toEqual({
       tenant_id: "tenant-cohi-351",
+      scheduler_timezone: "America/New_York",
+      sync_allowed_weekdays: [1, 2, 3, 4, 5],
       sync_business_days_only: true,
+      sync_run_at_times: [
+        { hour: 8, minute: 0 },
+        { hour: 18, minute: 0 },
+      ],
     });
   });
 });

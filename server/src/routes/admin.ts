@@ -2610,7 +2610,8 @@ router.get(
                AND updated_at < NOW() - INTERVAL '${STALE_THRESHOLD_MINUTES} minutes'`
           ).catch(() => {});
 
-          // Query connections from tenant database
+          // Query connections from tenant database. sync_run_at_times is required by COHI-351;
+          // if it is missing, tenant migration 119 has not been applied and the error should surface.
           const connectionsResult = await tenantPool.query(
             `SELECT id, name, los_type, connection_method, sync_enabled, sync_frequency,
                     last_synced_at, last_sync_status, last_sync_error, last_loan_modified_at,

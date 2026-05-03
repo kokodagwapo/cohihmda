@@ -9,7 +9,6 @@ export type SyncTrigger = "scheduled" | "manual" | "webhook" | "unknown";
 
 const DEFAULT_TZ = "America/New_York";
 const ALL_WEEKDAYS = [0, 1, 2, 3, 4, 5, 6];
-const ALL_HOURS = Array.from({ length: 24 }, (_, hour) => hour);
 
 const WEEKDAY_TO_NUM: Record<string, number> = {
   Sun: 0,
@@ -300,25 +299,6 @@ export function shouldRunFixedClockTimes(input: {
   }
 
   return false;
-}
-
-/** Whether the automatic LOS scheduler may start a sync at `now`. */
-export function shouldRunScheduledSync(input: {
-  businessDaysOnly?: boolean | null;
-  timeZone?: string | null;
-  allowedWeekdays?: number[] | null;
-  allowedHours?: number[] | null;
-  now?: Date;
-}): boolean {
-  const now = input.now ?? new Date();
-  const day = getDayOfWeekInTimeZone(now, input.timeZone);
-  const hour = getHourInTimeZone(now, input.timeZone);
-  const allowedWeekdays = resolveSchedulerAllowedWeekdays({
-    allowedWeekdays: input.allowedWeekdays,
-    businessDaysOnly: input.businessDaysOnly,
-  });
-  const allowedHours = normalizeAllowedNumbers(input.allowedHours, ALL_HOURS);
-  return allowedWeekdays.includes(day) && allowedHours.includes(hour);
 }
 
 /**
