@@ -49,6 +49,7 @@ import {
 import {
   SyncScheduleDialog,
   type SyncSchedulePatch,
+  formatClockSlot,
 } from '@/components/admin/SyncScheduleDialog';
 
 interface SyncConnection {
@@ -71,6 +72,7 @@ interface SyncConnection {
   scheduler_timezone?: string;
   sync_allowed_weekdays?: number[];
   sync_allowed_hours?: number[];
+  sync_run_at_times?: Array<{ hour: number; minute: number }> | unknown;
   last_encompass_users_sync_at?: string | null;
   created_at: string;
   updated_at: string;
@@ -259,7 +261,34 @@ function normalizeScheduleNumbers(values: number[] | null | undefined, fallback:
     : fallback;
 }
 
+function parseConnRunAtTimes(raw: unknown): { hour: number; minute: number }[] {
+  if (!Array.isArray(raw) || raw.length === 0) return [];
+  const out: { hour: number; minute: number }[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const rec = item as Record<string, unknown>;
+    const hour = Number(rec.hour);
+    const minute = Number(rec.minute);
+    if (!Number.isInteger(hour) || !Number.isInteger(minute)) continue;
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) continue;
+    out.push({ hour, minute });
+  }
+  return out.sort((a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute));
+}
+
 function formatScheduleSummary(connection: SyncConnection): string {
+  const fixed = parseConnRunAtTimes(connection.sync_run_at_times);
+  if (fixed.length > 0) {
+    const timesLabel = fixed.map((t) => formatClockSlot(t.hour, t.minute)).join(', ');
+    const weekdays = normalizeScheduleNumbers(connection.sync_allowed_weekdays, ALL_WEEKDAYS);
+    const dayLabel = weekdays.length === 7
+      ? 'All days'
+      : weekdays.length === 5 && BUSINESS_WEEKDAYS.every((day) => weekdays.includes(day))
+        ? 'Weekdays'
+        : WEEKDAY_OPTIONS.filter((day) => weekdays.includes(day.value)).map((day) => day.label).join(', ');
+    return `${timesLabel} · ${dayLabel} (${connection.scheduler_timezone || 'America/New_York'})`;
+  }
+
   const weekdays = normalizeScheduleNumbers(connection.sync_allowed_weekdays, ALL_WEEKDAYS);
   const hours = normalizeScheduleNumbers(connection.sync_allowed_hours, ALL_HOURS);
   const dayLabel = weekdays.length === 7
@@ -690,6 +719,7 @@ export const SyncManagementSection = () => {
           sync_allowed_weekdays: patch.sync_allowed_weekdays,
           sync_allowed_hours: patch.sync_allowed_hours,
           sync_business_days_only: patch.sync_business_days_only,
+          sync_run_at_times: patch.sync_run_at_times,
         }),
       });
       setConnections(prev =>
@@ -702,6 +732,7 @@ export const SyncManagementSection = () => {
                 sync_allowed_weekdays: patch.sync_allowed_weekdays,
                 sync_allowed_hours: patch.sync_allowed_hours,
                 sync_business_days_only: patch.sync_business_days_only,
+                sync_run_at_times: patch.sync_run_at_times,
               }
             : c,
         ),
@@ -1582,7 +1613,7 @@ export const SyncManagementSection = () => {
                               <div className="space-y-2">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                   <Label className="text-sm font-medium text-slate-800 dark:text-slate-200">
-                                    Allowed sync hours
+                                    Allowed sync hours (legacy — when no fixed clock times)
                                   </Label>
                                   <div className="flex gap-1">
                                     <Button

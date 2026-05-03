@@ -43,6 +43,10 @@ import {
   type LoanScope,
   type TenantPersona,
 } from "../utils/userAccessProfile.js";
+import {
+  normalizeSchedulerTimezone,
+  normalizeSyncRunAtTimes,
+} from "../utils/schedulerPolicy.js";
 
 const router = Router();
 
@@ -2751,7 +2755,7 @@ router.get(
                     last_synced_at, last_sync_status, last_sync_error, last_loan_modified_at,
                     is_active, insights_auto_enabled, podcast_auto_enabled,
                     encompass_users_sync_enabled, sync_business_days_only, insights_business_days_only,
-                    scheduler_timezone, sync_allowed_weekdays, sync_allowed_hours,
+                    scheduler_timezone, sync_allowed_weekdays, sync_allowed_hours, sync_run_at_times,
                     last_encompass_users_sync_at,
                     created_at, updated_at
              FROM public.los_connections
@@ -2986,6 +2990,7 @@ router.put(
         scheduler_timezone,
         sync_allowed_weekdays,
         sync_allowed_hours,
+        sync_run_at_times,
       } = req.body;
 
       if (!tenant_id) {
@@ -3012,6 +3017,14 @@ router.put(
         : undefined;
       if (validatedHours?.valid === false) {
         return res.status(400).json({ error: validatedHours.error });
+      }
+
+      const validatedRunAtTimes =
+        sync_run_at_times !== undefined
+          ? normalizeSyncRunAtTimes(sync_run_at_times)
+          : undefined;
+      if (validatedRunAtTimes && validatedRunAtTimes.valid === false) {
+        return res.status(400).json({ error: validatedRunAtTimes.error });
       }
 
       const tenantPool = await tenantDbManager.getTenantPool(tenant_id);
@@ -3054,9 +3067,6 @@ router.put(
         values.push(insights_business_days_only);
       }
       if (typeof scheduler_timezone === "string" && scheduler_timezone.trim()) {
-        const { normalizeSchedulerTimezone } = await import(
-          "../utils/schedulerPolicy.js"
-        );
         updates.push(`scheduler_timezone = $${paramIndex++}`);
         values.push(normalizeSchedulerTimezone(scheduler_timezone));
       }
@@ -3067,6 +3077,10 @@ router.put(
       if (validatedHours?.valid) {
         updates.push(`sync_allowed_hours = $${paramIndex++}`);
         values.push(validatedHours.value);
+      }
+      if (validatedRunAtTimes?.valid) {
+        updates.push(`sync_run_at_times = $${paramIndex++}::jsonb`);
+        values.push(validatedRunAtTimes.value);
       }
 
       if (updates.length === 0) {
@@ -3082,7 +3096,7 @@ router.put(
          WHERE id = $${paramIndex} 
          RETURNING id, name, sync_enabled, sync_frequency, insights_auto_enabled, podcast_auto_enabled,
                    encompass_users_sync_enabled, sync_business_days_only, insights_business_days_only,
-                   scheduler_timezone, sync_allowed_weekdays, sync_allowed_hours,
+                   scheduler_timezone, sync_allowed_weekdays, sync_allowed_hours, sync_run_at_times,
                    last_encompass_users_sync_at, last_synced_at, last_sync_status`,
         values
       );
@@ -3109,6 +3123,7 @@ router.put(
           scheduler_timezone,
           sync_allowed_weekdays: validatedWeekdays?.valid ? validatedWeekdays.value : undefined,
           sync_allowed_hours: validatedHours?.valid ? validatedHours.value : undefined,
+          sync_run_at_times: validatedRunAtTimes?.valid ? validatedRunAtTimes.value : undefined,
         },
       }).catch(() => {});
 
@@ -3126,6 +3141,7 @@ router.put(
         scheduler_timezone,
         sync_allowed_weekdays: validatedWeekdays?.valid ? validatedWeekdays.value : undefined,
         sync_allowed_hours: validatedHours?.valid ? validatedHours.value : undefined,
+        sync_run_at_times: validatedRunAtTimes?.valid ? validatedRunAtTimes.value : undefined,
       });
 
       return res.json({ connection: result.rows[0] });

@@ -4,6 +4,7 @@ import {
   getHourInTimeZone,
   isWeekendInTimeZone,
   normalizeSchedulerTimezone,
+  shouldRunFixedClockTimes,
   shouldRunScheduledPostSyncInsights,
   shouldRunScheduledSync,
 } from "./schedulerPolicy.js";
@@ -116,6 +117,66 @@ describe("shouldRunScheduledSync", () => {
         allowedWeekdays: [1],
         allowedHours: [10],
         now: mondayTenAmEastern,
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("shouldRunFixedClockTimes", () => {
+  /** Monday 2026-07-06 8:05 local Eastern (EDT): 12:05 UTC */
+  const monday805Eastern = new Date("2026-07-06T12:05:00.000Z");
+
+  it("runs once in the 15-minute window starting at the configured local time", () => {
+    expect(
+      shouldRunFixedClockTimes({
+        runAtTimes: [{ hour: 8, minute: 0 }],
+        timeZone: "America/New_York",
+        allowedWeekdays: [1],
+        lastSyncedAt: null,
+        now: monday805Eastern,
+      }),
+    ).toBe(true);
+  });
+
+  it("does not run outside the window", () => {
+    const monday815Eastern = new Date("2026-07-06T12:15:00.000Z");
+    expect(
+      shouldRunFixedClockTimes({
+        runAtTimes: [{ hour: 8, minute: 0 }],
+        timeZone: "America/New_York",
+        allowedWeekdays: [1],
+        lastSyncedAt: null,
+        now: monday815Eastern,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not double-fire the same slot on the same local day", () => {
+    const last = new Date("2026-07-06T12:03:00.000Z"); // ~8:03 Eastern
+    expect(
+      shouldRunFixedClockTimes({
+        runAtTimes: [{ hour: 8, minute: 0 }],
+        timeZone: "America/New_York",
+        allowedWeekdays: [1],
+        lastSyncedAt: last,
+        now: monday805Eastern,
+      }),
+    ).toBe(false);
+  });
+
+  it("allows a second slot later the same day after the first completed", () => {
+    const morningDone = new Date("2026-07-06T12:10:00.000Z"); // 8:10 Eastern
+    const evening = new Date("2026-07-06T23:05:00.000Z"); // 7:05 PM Eastern
+    expect(
+      shouldRunFixedClockTimes({
+        runAtTimes: [
+          { hour: 8, minute: 0 },
+          { hour: 19, minute: 0 },
+        ],
+        timeZone: "America/New_York",
+        allowedWeekdays: [1],
+        lastSyncedAt: morningDone,
+        now: evening,
       }),
     ).toBe(true);
   });
