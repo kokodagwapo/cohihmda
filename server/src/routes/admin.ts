@@ -3081,7 +3081,7 @@ router.put(
       }
       if (validatedRunAtTimes?.valid) {
         updates.push(`sync_run_at_times = $${paramIndex++}::jsonb`);
-        values.push(validatedRunAtTimes.value);
+        values.push(JSON.stringify(validatedRunAtTimes.value));
       }
 
       if (updates.length === 0) {
