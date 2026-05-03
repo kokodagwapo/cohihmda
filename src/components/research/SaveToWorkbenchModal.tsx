@@ -37,6 +37,9 @@ import { createLayoutItem } from "@/components/workbench/canvas/types";
 
 const DEFAULT_WIDGET_W = 520;
 const DEFAULT_WIDGET_H = 360;
+const CANVAS_START_X = 20;
+const CANVAS_START_Y = 20;
+const CANVAS_WIDGET_GAP = 24;
 
 interface CanvasListItem {
   id: string;
@@ -130,8 +133,8 @@ export function SaveToWorkbenchModal({
 
     return {
       ...item,
-      x: 20,
-      y: maxBottom > 0 ? maxBottom + 24 : 20,
+      x: CANVAS_START_X,
+      y: maxBottom > 0 ? maxBottom + CANVAS_WIDGET_GAP : CANVAS_START_Y,
     };
   };
 
@@ -161,7 +164,7 @@ export function SaveToWorkbenchModal({
             definitionId: rw.definitionId,
             config: Object.keys(config).length ? config : undefined,
           },
-          { x: 20, y: 20, w, h },
+          { x: CANVAS_START_X, y: CANVAS_START_Y, w, h },
         );
         newItem = item as unknown as Record<string, unknown>;
       } else {
@@ -172,8 +175,8 @@ export function SaveToWorkbenchModal({
         }
         newItem = {
           i: layoutItemId,
-          x: 20,
-          y: 20,
+          x: CANVAS_START_X,
+          y: CANVAS_START_Y,
           w: DEFAULT_WIDGET_W,
           h: DEFAULT_WIDGET_H,
           type: "cohi_widget" as const,
