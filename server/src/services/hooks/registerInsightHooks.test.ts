@@ -37,10 +37,26 @@ describe("@COHI-351 scheduled insight weekend policy", () => {
     expect(
       shouldRunInsightHookForPolicy({
         trigger: "scheduled",
+        scheduledInsightsEnabled: true,
         now: new Date("2026-07-04T12:00:00.000Z"), // Saturday
         policy: {
           insightsAutoEnabled: true,
           insightsBusinessDaysOnly: true,
+          schedulerTimezone: "America/New_York",
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it("skips scheduled-trigger insight hooks when the matched run time does not enable insights", () => {
+    expect(
+      shouldRunInsightHookForPolicy({
+        trigger: "scheduled",
+        scheduledInsightsEnabled: false,
+        now: new Date("2026-07-06T12:00:00.000Z"), // Monday
+        policy: {
+          insightsAutoEnabled: true,
+          insightsBusinessDaysOnly: false,
           schedulerTimezone: "America/New_York",
         },
       }),
@@ -55,6 +71,21 @@ describe("@COHI-351 scheduled insight weekend policy", () => {
         policy: {
           insightsAutoEnabled: true,
           insightsBusinessDaysOnly: true,
+          schedulerTimezone: "America/New_York",
+        },
+      }),
+    ).toBe(true);
+  });
+
+  it("allows scheduled-trigger insight hooks when the matched run time enables insights", () => {
+    expect(
+      shouldRunInsightHookForPolicy({
+        trigger: "scheduled",
+        scheduledInsightsEnabled: true,
+        now: new Date("2026-07-06T12:00:00.000Z"), // Monday
+        policy: {
+          insightsAutoEnabled: true,
+          insightsBusinessDaysOnly: false,
           schedulerTimezone: "America/New_York",
         },
       }),

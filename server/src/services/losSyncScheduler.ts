@@ -18,8 +18,8 @@ import { pool as managementPool } from '../config/managementDatabase.js';
 import { tenantDbManager } from '../config/tenantDatabaseManager.js';
 import pg from 'pg';
 import {
+  getDueFixedClockTime,
   normalizeSyncRunAtTimes,
-  shouldRunFixedClockTimes,
 } from '../utils/schedulerPolicy.js';
 
 interface SyncJob {
@@ -34,6 +34,7 @@ interface SyncJob {
   insightsBusinessDaysOnly?: boolean;
   schedulerTimezone?: string;
   syncAllowedWeekdays?: number[];
+  scheduledInsightsEnabled?: boolean;
   encompassUsersSyncEnabled?: boolean;
   lastEncompassUsersSyncAt?: Date;
 }
@@ -71,18 +72,16 @@ export async function getConnectionsToSync(tenantId: string, tenantPool: pg.Pool
     for (const row of result.rows) {
       const runAtParsed = normalizeSyncRunAtTimes(row.sync_run_at_times);
       const fixedSlots = runAtParsed.valid ? runAtParsed.value : [];
+      const dueSlot = getDueFixedClockTime({
+        runAtTimes: fixedSlots,
+        timeZone: row.scheduler_timezone,
+        allowedWeekdays: row.sync_allowed_weekdays,
+        businessDaysOnly: row.sync_business_days_only,
+        lastSyncedAt: row.last_synced_at ? new Date(row.last_synced_at) : null,
+        now: new Date(),
+      });
 
-      if (
-        fixedSlots.length === 0 ||
-        !shouldRunFixedClockTimes({
-          runAtTimes: fixedSlots,
-          timeZone: row.scheduler_timezone,
-          allowedWeekdays: row.sync_allowed_weekdays,
-          businessDaysOnly: row.sync_business_days_only,
-          lastSyncedAt: row.last_synced_at ? new Date(row.last_synced_at) : null,
-          now: new Date(),
-        })
-      ) {
+      if (!dueSlot) {
         continue;
       }
 
@@ -110,6 +109,7 @@ export async function getConnectionsToSync(tenantId: string, tenantPool: pg.Pool
         insightsBusinessDaysOnly: row.insights_business_days_only,
         schedulerTimezone: row.scheduler_timezone,
         syncAllowedWeekdays: row.sync_allowed_weekdays,
+        scheduledInsightsEnabled: dueSlot.runInsights === true,
         encompassUsersSyncEnabled: row.encompass_users_sync_enabled,
         lastEncompassUsersSyncAt: row.last_encompass_users_sync_at
           ? new Date(row.last_encompass_users_sync_at)
@@ -193,6 +193,7 @@ async function runEncompassSync(job: SyncJob, tenantPool: pg.Pool): Promise<void
     loanStartDateField: 'Fields.Log.MS.Date.Started',
     folderNames: job.encompassSelectedFolders?.length ? job.encompassSelectedFolders : undefined,
     syncTrigger: 'scheduled',
+    scheduledInsightsEnabled: job.scheduledInsightsEnabled === true,
   });
 
   console.log(`[SyncScheduler] Encompass sync complete for connection=${job.connectionId}: ` +
@@ -206,7 +207,10 @@ async function runGenericApiSync(job: SyncJob): Promise<void> {
   const { syncLoansFromAPI } = await import('./losApiService.js');
 
   console.log(`[SyncScheduler] Running generic API sync for connection=${job.connectionId}`);
-  const result = await syncLoansFromAPI(job.connectionId, { syncTrigger: 'scheduled' });
+  const result = await syncLoansFromAPI(job.connectionId, {
+    syncTrigger: 'scheduled',
+    scheduledInsightsEnabled: job.scheduledInsightsEnabled === true,
+  });
   console.log(`[SyncScheduler] Generic API sync complete for connection=${job.connectionId}: ` +
     `${result.records_synced} synced, ${result.records_failed} failed`);
 }
@@ -218,7 +222,10 @@ async function runCsvSync(job: SyncJob): Promise<void> {
   const { processCSVFilesFromPath } = await import('./csvProcessor.js');
 
   console.log(`[SyncScheduler] Running CSV sync for connection=${job.connectionId}`);
-  await processCSVFilesFromPath(job.connectionId, { syncTrigger: 'scheduled' });
+  await processCSVFilesFromPath(job.connectionId, {
+    syncTrigger: 'scheduled',
+    scheduledInsightsEnabled: job.scheduledInsightsEnabled === true,
+  });
   console.log(`[SyncScheduler] CSV sync complete for connection=${job.connectionId}`);
 }
 

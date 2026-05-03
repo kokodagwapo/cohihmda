@@ -43,6 +43,8 @@ export interface SyncOptions {
   useChunkedProcessing?: boolean; // Enable chunked processing (default: true for datasets > 10000 loans)
   /** Post-sync hooks use this for business-day insight policy (default unknown). */
   syncTrigger?: SyncTrigger;
+  /** For scheduled syncs, whether the matched run-time slot should run insight hooks. */
+  scheduledInsightsEnabled?: boolean;
 }
 
 const LOAD_BATCH_SIZE = 500;
@@ -446,6 +448,7 @@ export class EncompassEtlService {
           loansUpdated,
           syncHistoryId,
           trigger: options.syncTrigger ?? "unknown",
+          scheduledInsightsEnabled: options.scheduledInsightsEnabled,
         }).catch((err) =>
           console.error("[Sync] Post-sync hooks error:", err.message)
         );

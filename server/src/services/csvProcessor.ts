@@ -38,11 +38,13 @@ export interface CSVProcessingResult {
 
 export interface ProcessCsvFromPathOptions {
   syncTrigger?: SyncTrigger;
+  scheduledInsightsEnabled?: boolean;
 }
 
 export interface ProcessCSVFileOptions {
   fieldMapping?: Record<string, string>;
   syncTrigger?: SyncTrigger;
+  scheduledInsightsEnabled?: boolean;
 }
 
 /**
@@ -332,7 +334,8 @@ export async function processCSVFile(
         connectionId,
         syncType: "csv",
         recordsSynced: recordsProcessed,
-        trigger: options.syncTrigger ?? "unknown",
+        trigger: fileOptions.syncTrigger ?? "unknown",
+        scheduledInsightsEnabled: fileOptions.scheduledInsightsEnabled,
       }).catch((err) =>
         console.error("[CSV Sync] Post-sync hooks error:", err.message)
       );
@@ -426,6 +429,7 @@ export async function processCSVFilesFromPath(
       const result = await processCSVFile(connectionId, file, {
         fieldMapping,
         syncTrigger: options.syncTrigger,
+        scheduledInsightsEnabled: options.scheduledInsightsEnabled,
       });
       
       totalProcessed += result.records_processed;

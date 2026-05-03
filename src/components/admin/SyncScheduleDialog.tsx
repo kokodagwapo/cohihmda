@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -67,9 +68,11 @@ export function formatClockSlot(hour: number, minute: number): string {
   });
 }
 
-function parseRunAtTimes(raw: unknown): { hour: number; minute: number }[] {
+type RunAtTimeDraft = { hour: number; minute: number; runInsights: boolean };
+
+function parseRunAtTimes(raw: unknown): RunAtTimeDraft[] {
   if (!Array.isArray(raw) || raw.length === 0) return [];
-  const out: { hour: number; minute: number }[] = [];
+  const out: RunAtTimeDraft[] = [];
   for (const item of raw) {
     if (!item || typeof item !== "object") continue;
     const rec = item as Record<string, unknown>;
@@ -77,14 +80,18 @@ function parseRunAtTimes(raw: unknown): { hour: number; minute: number }[] {
     const minute = Number(rec.minute);
     if (!Number.isInteger(hour) || !Number.isInteger(minute)) continue;
     if (hour < 0 || hour > 23 || minute < 0 || minute > 59) continue;
-    out.push({ hour, minute });
+    out.push({
+      hour,
+      minute,
+      runInsights: rec.runInsights === true || rec.run_insights === true,
+    });
   }
   out.sort((a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute));
   return out;
 }
 
 function describeSchedule(
-  runAtTimes: { hour: number; minute: number }[],
+  runAtTimes: RunAtTimeDraft[],
   weekdays: number[],
   timezone: string,
 ): string {
@@ -99,7 +106,9 @@ function describeSchedule(
 
   const timesLabel =
     runAtTimes.length > 0
-      ? runAtTimes.map((t) => formatClockSlot(t.hour, t.minute)).join(", ")
+      ? runAtTimes
+          .map((t) => `${formatClockSlot(t.hour, t.minute)}${t.runInsights ? " + insights" : ""}`)
+          .join(", ")
       : "No run times selected";
   return `${timesLabel} · ${dayLabel} (${timezone})`;
 }
@@ -119,7 +128,7 @@ export interface SyncSchedulePatch {
   scheduler_timezone: string;
   sync_allowed_weekdays: number[];
   sync_business_days_only: boolean;
-  sync_run_at_times: Array<{ hour: number; minute: number }>;
+  sync_run_at_times: RunAtTimeDraft[];
 }
 
 interface SyncScheduleDialogProps {
@@ -139,14 +148,21 @@ export function SyncScheduleDialog({
 }: SyncScheduleDialogProps) {
   const [timezone, setTimezone] = useState<string>("America/New_York");
   const [weekdays, setWeekdays] = useState<number[]>(SYNC_ALL_WEEKDAYS);
-  const [runAtTimes, setRunAtTimes] = useState<Array<{ hour: number; minute: number }>>([]);
+  const [runAtTimes, setRunAtTimes] = useState<RunAtTimeDraft[]>([]);
 
   useEffect(() => {
     if (!connection || !open) return;
     setTimezone(connection.scheduler_timezone || "America/New_York");
     setWeekdays(normalizeNumbers(connection.sync_allowed_weekdays, SYNC_ALL_WEEKDAYS));
     const parsed = parseRunAtTimes(connection.sync_run_at_times);
-    setRunAtTimes(parsed.length > 0 ? parsed : [{ hour: 8, minute: 0 }, { hour: 18, minute: 0 }]);
+    setRunAtTimes(
+      parsed.length > 0
+        ? parsed
+        : [
+            { hour: 8, minute: 0, runInsights: false },
+            { hour: 18, minute: 0, runInsights: false },
+          ],
+    );
   }, [connection, open]);
 
   const timezoneOptions = useMemo(
@@ -170,7 +186,7 @@ export function SyncScheduleDialog({
     });
   };
 
-  const updateRunAtRow = (index: number, next: { hour: number; minute: number }) => {
+  const updateRunAtRow = (index: number, next: RunAtTimeDraft) => {
     setRunAtTimes((rows) => {
       const copy = [...rows];
       copy[index] = next;
@@ -185,7 +201,11 @@ export function SyncScheduleDialog({
       scheduler_timezone: timezone,
       sync_allowed_weekdays: [...weekdays].sort((a, b) => a - b),
       sync_business_days_only: businessDaysOnly,
-      sync_run_at_times: runAtTimes.map((t) => ({ hour: t.hour, minute: t.minute })),
+      sync_run_at_times: runAtTimes.map((t) => ({
+        hour: t.hour,
+        minute: t.minute,
+        runInsights: t.runInsights,
+      })),
     });
   };
 
@@ -208,6 +228,7 @@ export function SyncScheduleDialog({
                 ) : null}
                 . Pick explicit clock times for multiple runs per day (e.g. twice daily). Manual
                 sync always runs on demand.
+                Enable insights on the specific run times that should also refresh generated insights.
               </>
             ) : (
               "Configure when this connection syncs automatically."
@@ -312,8 +333,8 @@ export function SyncScheduleDialog({
                   disabled={disabledInputs}
                   onClick={() =>
                     setRunAtTimes([
-                      { hour: 8, minute: 0 },
-                      { hour: 18, minute: 0 },
+                      { hour: 8, minute: 0, runInsights: false },
+                      { hour: 18, minute: 0, runInsights: false },
                     ])
                   }
                 >
@@ -325,7 +346,9 @@ export function SyncScheduleDialog({
                   type="button"
                   className="h-7 text-xs font-light gap-1"
                   disabled={disabledInputs || runAtTimes.length >= 24}
-                  onClick={() => setRunAtTimes((r) => [...r, { hour: 9, minute: 0 }])}
+                  onClick={() =>
+                    setRunAtTimes((r) => [...r, { hour: 9, minute: 0, runInsights: false }])
+                  }
                 >
                   <Plus className="h-3 w-3" />
                   Add time
@@ -347,7 +370,7 @@ export function SyncScheduleDialog({
                     <Select
                       value={String(row.hour)}
                       onValueChange={(v) =>
-                        updateRunAtRow(index, { hour: Number(v), minute: row.minute })
+                        updateRunAtRow(index, { ...row, hour: Number(v) })
                       }
                       disabled={disabledInputs}
                     >
@@ -366,7 +389,7 @@ export function SyncScheduleDialog({
                     <Select
                       value={String(row.minute)}
                       onValueChange={(v) =>
-                        updateRunAtRow(index, { hour: row.hour, minute: Number(v) })
+                        updateRunAtRow(index, { ...row, minute: Number(v) })
                       }
                       disabled={disabledInputs}
                     >
@@ -381,6 +404,19 @@ export function SyncScheduleDialog({
                         ))}
                       </SelectContent>
                     </Select>
+                    <div className="ml-1 flex items-center gap-2 rounded-md border border-slate-200 px-2.5 py-1.5 dark:border-slate-700">
+                      <Switch
+                        checked={row.runInsights}
+                        onCheckedChange={(checked) =>
+                          updateRunAtRow(index, { ...row, runInsights: checked })
+                        }
+                        disabled={disabledInputs}
+                        className="data-[state=checked]:bg-violet-500"
+                      />
+                      <span className="text-xs font-light text-slate-600 dark:text-slate-300">
+                        Run insights
+                      </span>
+                    </div>
                     <Button
                       type="button"
                       variant="ghost"

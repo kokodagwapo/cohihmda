@@ -34,7 +34,7 @@ describe("@COHI-351 LOS scheduler fixed clock times", () => {
           insights_business_days_only: false,
           scheduler_timezone: "America/New_York",
           sync_allowed_weekdays: [1, 2, 3, 4, 5],
-          sync_run_at_times: [{ hour: 8, minute: 0 }],
+          sync_run_at_times: [{ hour: 8, minute: 0, runInsights: true }],
           last_encompass_users_sync_at: null,
         },
       ]),
@@ -63,7 +63,7 @@ describe("@COHI-351 LOS scheduler fixed clock times", () => {
           insights_business_days_only: false,
           scheduler_timezone: "America/New_York",
           sync_allowed_weekdays: [1],
-          sync_run_at_times: [{ hour: 8, minute: 0 }],
+          sync_run_at_times: [{ hour: 8, minute: 0, runInsights: true }],
           last_encompass_users_sync_at: null,
         },
       ]),
@@ -74,6 +74,7 @@ describe("@COHI-351 LOS scheduler fixed clock times", () => {
       connectionId: "conn-weekend-run",
       schedulerTimezone: "America/New_York",
       syncBusinessDaysOnly: false,
+      scheduledInsightsEnabled: true,
     });
   });
 });
