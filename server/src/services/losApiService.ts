@@ -355,6 +355,7 @@ export function createLOSClient(connection: LOSConnection): BaseLOSClient {
 
 export interface SyncLoansFromApiOptions {
   syncTrigger?: SyncTrigger;
+  scheduledInsightsEnabled?: boolean;
 }
 
 /**
@@ -466,6 +467,7 @@ export async function syncLoansFromAPI(
         syncType: "api",
         recordsSynced,
         trigger: options.syncTrigger ?? "unknown",
+        scheduledInsightsEnabled: options.scheduledInsightsEnabled,
       }).catch((err) =>
         console.error("[LOS API Sync] Post-sync hooks error:", err.message)
       );

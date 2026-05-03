@@ -98,8 +98,8 @@ describe("@COHI-351 SyncManagementSection scheduler controls", () => {
             sync_allowed_weekdays: [1, 2, 3, 4, 5],
             sync_business_days_only: true,
             sync_run_at_times: [
-              { hour: 8, minute: 0 },
-              { hour: 18, minute: 0 },
+              { hour: 8, minute: 0, runInsights: false },
+              { hour: 18, minute: 0, runInsights: false },
             ],
           }),
         }),

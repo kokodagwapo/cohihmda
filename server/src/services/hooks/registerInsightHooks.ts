@@ -43,9 +43,13 @@ export async function loadPostSyncInsightPolicy(ctx: PostSyncContext): Promise<P
 export function shouldRunInsightHookForPolicy(input: {
   policy: PostSyncInsightPolicy;
   trigger?: SyncTrigger;
+  scheduledInsightsEnabled?: boolean;
   now?: Date;
 }): boolean {
   if (!input.policy.insightsAutoEnabled) return false;
+  if (input.trigger === "scheduled" && input.scheduledInsightsEnabled !== true) {
+    return false;
+  }
   return shouldRunScheduledPostSyncInsights({
     trigger: input.trigger,
     businessDaysOnly: input.policy.insightsBusinessDaysOnly,
@@ -85,6 +89,7 @@ export function registerInsightHooks(): void {
         if (
           !shouldRunInsightHookForPolicy({
             trigger: insightTrigger(ctx),
+            scheduledInsightsEnabled: ctx.scheduledInsightsEnabled,
             policy,
           })
         ) {
@@ -132,6 +137,7 @@ export function registerInsightHooks(): void {
         if (
           !shouldRunInsightHookForPolicy({
             trigger: insightTrigger(ctx),
+            scheduledInsightsEnabled: ctx.scheduledInsightsEnabled,
             policy,
           })
         ) {
@@ -174,6 +180,7 @@ export function registerInsightHooks(): void {
         if (
           !shouldRunInsightHookForPolicy({
             trigger: insightTrigger(ctx),
+            scheduledInsightsEnabled: ctx.scheduledInsightsEnabled,
             policy,
           })
         ) {

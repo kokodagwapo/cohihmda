@@ -24,6 +24,8 @@ export interface PostSyncContext {
   syncHistoryId?: number;
   /** How the loan sync was initiated (for scheduler vs manual vs webhook policy). */
   trigger?: SyncTrigger;
+  /** For scheduled syncs, whether the matched schedule slot should run insight hooks. */
+  scheduledInsightsEnabled?: boolean;
 }
 
 type PostSyncHookFn = (ctx: PostSyncContext) => Promise<void>;

@@ -72,7 +72,7 @@ interface SyncConnection {
   scheduler_timezone?: string;
   sync_allowed_weekdays?: number[];
   sync_allowed_hours?: number[];
-  sync_run_at_times?: Array<{ hour: number; minute: number }> | unknown;
+  sync_run_at_times?: Array<{ hour: number; minute: number; runInsights?: boolean }> | unknown;
   last_encompass_users_sync_at?: string | null;
   created_at: string;
   updated_at: string;
@@ -242,9 +242,9 @@ function normalizeScheduleNumbers(values: number[] | null | undefined, fallback:
     : fallback;
 }
 
-function parseConnRunAtTimes(raw: unknown): { hour: number; minute: number }[] {
+function parseConnRunAtTimes(raw: unknown): { hour: number; minute: number; runInsights: boolean }[] {
   if (!Array.isArray(raw) || raw.length === 0) return [];
-  const out: { hour: number; minute: number }[] = [];
+  const out: { hour: number; minute: number; runInsights: boolean }[] = [];
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue;
     const rec = item as Record<string, unknown>;
@@ -252,7 +252,11 @@ function parseConnRunAtTimes(raw: unknown): { hour: number; minute: number }[] {
     const minute = Number(rec.minute);
     if (!Number.isInteger(hour) || !Number.isInteger(minute)) continue;
     if (hour < 0 || hour > 23 || minute < 0 || minute > 59) continue;
-    out.push({ hour, minute });
+    out.push({
+      hour,
+      minute,
+      runInsights: rec.runInsights === true || rec.run_insights === true,
+    });
   }
   return out.sort((a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute));
 }
@@ -267,7 +271,9 @@ function formatScheduleSummary(connection: SyncConnection): string {
       : WEEKDAY_OPTIONS.filter((day) => weekdays.includes(day.value)).map((day) => day.label).join(', ');
 
   if (fixed.length > 0) {
-    const timesLabel = fixed.map((t) => formatClockSlot(t.hour, t.minute)).join(', ');
+    const timesLabel = fixed
+      .map((t) => `${formatClockSlot(t.hour, t.minute)}${t.runInsights ? ' + insights' : ''}`)
+      .join(', ');
     return `${timesLabel} · ${dayLabel} (${connection.scheduler_timezone || 'America/New_York'})`;
   }
 

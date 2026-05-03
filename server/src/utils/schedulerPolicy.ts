@@ -193,7 +193,7 @@ export function getMinutesSinceMidnightInTimeZone(
   return hour * 60 + minute;
 }
 
-export type SyncRunAtTime = { hour: number; minute: number };
+export type SyncRunAtTime = { hour: number; minute: number; runInsights?: boolean };
 
 export function normalizeSyncRunAtTimes(
   value: unknown,
@@ -218,6 +218,7 @@ export function normalizeSyncRunAtTimes(
     const rec = item as Record<string, unknown>;
     const hour = Number(rec.hour);
     const minute = Number(rec.minute);
+    const runInsights = rec.runInsights === true || rec.run_insights === true;
     if (!Number.isInteger(hour) || !Number.isInteger(minute)) {
       return { valid: false, error: "sync_run_at_times entries must have integer hour and minute" };
     }
@@ -232,7 +233,7 @@ export function normalizeSyncRunAtTimes(
       continue;
     }
     seen.add(key);
-    out.push({ hour, minute });
+    out.push({ hour, minute, runInsights });
   }
   out.sort((a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute));
   return { valid: true, value: out };
@@ -246,7 +247,7 @@ export const SCHEDULER_TICK_WINDOW_MINUTES = 15;
  * (per scheduler_timezone), one run per slot per calendar day in that timezone.
  * The scheduler wakes every ~15 minutes; a slot at 08:30 fires in [08:30, 08:45).
  */
-export function shouldRunFixedClockTimes(input: {
+export function getDueFixedClockTime(input: {
   runAtTimes: SyncRunAtTime[];
   timeZone?: string | null;
   allowedWeekdays?: number[] | null;
@@ -254,10 +255,10 @@ export function shouldRunFixedClockTimes(input: {
   lastSyncedAt?: Date | null;
   now?: Date;
   tickWindowMinutes?: number;
-}): boolean {
+}): SyncRunAtTime | null {
   const slots = input.runAtTimes?.filter(Boolean) ?? [];
   if (slots.length === 0) {
-    return false;
+    return null;
   }
 
   const now = input.now ?? new Date();
@@ -269,7 +270,7 @@ export function shouldRunFixedClockTimes(input: {
 
   const day = getDayOfWeekInTimeZone(now, tz);
   if (!allowedWeekdays.includes(day)) {
-    return false;
+    return null;
   }
 
   const nowMinutes = getMinutesSinceMidnightInTimeZone(now, tz);
@@ -284,21 +285,33 @@ export function shouldRunFixedClockTimes(input: {
     }
 
     if (!lastSyncedAt) {
-      return true;
+      return slot;
     }
 
     if (!isSameLocalCalendarDay(lastSyncedAt, now, tz)) {
-      return true;
+      return slot;
     }
 
     const lastMinutes = getMinutesSinceMidnightInTimeZone(lastSyncedAt, tz);
     if (lastMinutes >= slotMinutes && lastMinutes < slotMinutes + W) {
-      return false;
+      return null;
     }
-    return true;
+    return slot;
   }
 
-  return false;
+  return null;
+}
+
+export function shouldRunFixedClockTimes(input: {
+  runAtTimes: SyncRunAtTime[];
+  timeZone?: string | null;
+  allowedWeekdays?: number[] | null;
+  businessDaysOnly?: boolean | null;
+  lastSyncedAt?: Date | null;
+  now?: Date;
+  tickWindowMinutes?: number;
+}): boolean {
+  return getDueFixedClockTime(input) !== null;
 }
 
 /**
