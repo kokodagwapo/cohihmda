@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { api } from '@/lib/api';
 import { useTenantStore } from '@/stores/tenantStore';
 import { useAuth } from '@/contexts/AuthContext';
@@ -60,6 +60,7 @@ export default function MyDashboard() {
   const autoOpenReportBuilder =
     searchParams.get("reportBuilder") === "1";
   const navigate = useNavigate();
+  const location = useLocation();
   const initialUrlCanvasIdRef = useRef<string | undefined>(urlCanvasId);
 
   // Keep in sync when the route param changes (same component instance); hydration only re-runs on tenant change.
@@ -228,6 +229,23 @@ export default function MyDashboard() {
       return urlCanvasId;
     });
   }, [urlCanvasId, activeTabId, canvasList, isHydratingWorkbench]);
+
+  /* ─── External-edit signal ───
+   * When another surface (e.g. SaveToWorkbenchModal) appends a widget to a
+   * canvas the user already had open and then navigates to /my-dashboard/:id,
+   * the URL effect above short-circuits (urlCanvasId === activeTabId), so
+   * WorkbenchCanvas never refetches. The modal passes `state.reloadCanvas`
+   * (timestamp) to force a remount via canvasKey, which re-runs the canvas
+   * fetch and discards any stale in-memory layout.
+   */
+  const reloadCanvasSignal = (location.state as { reloadCanvas?: number } | null)?.reloadCanvas;
+  useEffect(() => {
+    if (!reloadCanvasSignal || !urlCanvasId) return;
+    setLoadCanvasId(urlCanvasId);
+    setCanvasKey((k) => k + 1);
+    // Clear the signal so subsequent renders / back-nav don't re-trigger.
+    navigate(location.pathname, { replace: true, state: null });
+  }, [reloadCanvasSignal, urlCanvasId, navigate, location.pathname]);
 
   // Open a canvas tab (from sidebar click)
   const handleSelectCanvas = useCallback((id: string) => {

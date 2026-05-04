@@ -78,6 +78,78 @@ async function mockResearchFindingsSession(page: Page) {
   );
 }
 
+async function mockResearchWorkbenchSaveSession(page: Page) {
+  await page.route(/\/api\/research\/sessions(?:\?.*)?$/, async (route) => {
+    if (route.request().method() === "POST") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ sessionId: "cohi-363-save-session" }),
+      });
+      return;
+    }
+
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([]),
+    });
+  });
+
+  await page.route(
+    /\/api\/research\/sessions\/cohi-363-save-session\/stream(?:\?.*)?$/,
+    async (route) => {
+      const finding = {
+        questionId: 1,
+        title: "Channel conversion save test",
+        summary: "Channel conversion evidence is ready to save to Workbench.",
+        confidence: "high",
+        keyMetrics: { Channels: 2 },
+        evidence: [
+          {
+            kind: "sql",
+            sql: "select channel, pull_through from test_channel_conversion",
+            explanation: "Conversion by channel",
+            fields: ["channel", "pull_through"],
+            rowCount: 2,
+            rows: [
+              { channel: "Retail", pull_through: 0.42 },
+              { channel: "Wholesale", pull_through: 0.35 },
+            ],
+            chartHint: {
+              type: "bar",
+              xKey: "channel",
+              yKey: "pull_through",
+            },
+          },
+        ],
+      };
+
+      const body = [
+        `data: ${JSON.stringify({
+          type: "quick_result",
+          data: finding,
+          timestamp: Date.now(),
+        })}`,
+        "",
+        `data: ${JSON.stringify({
+          type: "complete",
+          data: {},
+          timestamp: Date.now(),
+        })}`,
+        "",
+        "",
+      ].join("\n");
+
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body,
+      });
+    },
+  );
+}
+
 test.describe("@critical Research Lab", () => {
   test("@smoke research page loads with input and mode toggle", async ({ userPage }) => {
     await userPage.goto("/research/session", { waitUntil: "domcontentloaded" });
@@ -169,5 +241,164 @@ test.describe("@critical Research Lab", () => {
     await expect(
       findingsPanel.getByText("Single sentence finding summary remains concise."),
     ).toBeVisible();
+  });
+
+  test("@critical @COHI-363 saves Research Lab visualization below existing Workbench content (real backend)", async ({
+    userPage,
+  }) => {
+    test.setTimeout(120_000);
+    await mockResearchWorkbenchSaveSession(userPage);
+
+    const seedItem = {
+      i: `seed-${Date.now()}`,
+      x: 20,
+      y: 20,
+      w: 520,
+      h: 360,
+      type: "cohi_widget",
+      payload: {
+        type: "cohi_widget",
+        sql: "select 1 as one",
+        title: "Existing Seed Widget",
+        vizConfig: { type: "table", title: "Existing", data: [] },
+      },
+    };
+
+    const canvasTitle = `COHI-363 E2E ${Date.now()}`;
+
+    // Navigate to the app first so relative-URL fetches resolve against the
+    // app origin and inherit auth cookies / tenant headers from real session.
+    await userPage.goto("/research/session", { waitUntil: "domcontentloaded" });
+
+    const createdCanvasId: string = await userPage.evaluate(
+      async ({ title, item }) => {
+        const token = localStorage.getItem("auth_token");
+        if (!token) throw new Error("No auth_token in localStorage; user fixture not authed");
+        const res = await fetch("/api/workbench/canvases", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          credentials: "include",
+          body: JSON.stringify({
+            title,
+            layoutVersion: "freeform-v1",
+            layout: [item],
+          }),
+        });
+        if (!res.ok) {
+          throw new Error(`Seed canvas POST failed: ${res.status} ${await res.text()}`);
+        }
+        const data = (await res.json()) as { id: string };
+        return data.id;
+      },
+      { title: canvasTitle, item: seedItem },
+    );
+
+    expect(createdCanvasId).toMatch(/[0-9a-f-]{8,}/i);
+
+    const fetchLayoutFromBackend = async (id: string) =>
+      userPage.evaluate(async (canvasId) => {
+        const token = localStorage.getItem("auth_token");
+        const res = await fetch(`/api/workbench/canvases/${canvasId}`, {
+          credentials: "include",
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        });
+        if (!res.ok) {
+          throw new Error(`GET canvas failed: ${res.status} ${await res.text()}`);
+        }
+        const data = (await res.json()) as {
+          content?: {
+            layoutVersion?: string;
+            layout?: Array<Record<string, unknown>>;
+          };
+        };
+        return data.content;
+      }, id);
+
+    try {
+      // Reproduce the real-world flow that exposed the autosave/stale-state
+      // bug: open the canvas in MyDashboard FIRST so WorkbenchCanvas mounts
+      // with just Viz A, then bounce to Research Lab, save Viz B, and verify
+      // the appended widget actually persists (and isn't clobbered by an
+      // autosave from the still-cached canvas state).
+      await userPage.goto(`/my-dashboard/${createdCanvasId}`, {
+        waitUntil: "domcontentloaded",
+      });
+      // Ensure the canvas actually rendered the seeded widget.
+      await expect(userPage.getByText(/Existing Seed Widget|Existing Workbench Widget/i)).toBeVisible({
+        timeout: 20_000,
+      });
+
+      await userPage.goto("/research/session", { waitUntil: "domcontentloaded" });
+
+      const prompt = userPage.getByPlaceholder(/YTD pull-through|comprehensive analysis/i);
+      await prompt.fill("Show conversion by channel.");
+      await userPage.getByRole("button", { name: /Get answer|Investigate/i }).click();
+
+      await expect(userPage.getByRole("tab", { name: /Findings/i })).toBeVisible({
+        timeout: 15_000,
+      });
+      await userPage.getByRole("tab", { name: /Findings/i }).click();
+      await userPage.getByText("Channel conversion save test").click();
+      await userPage.getByRole("button", { name: /View evidence data/i }).click();
+
+      await expect(userPage.getByRole("grid", { name: "Evidence table" })).toBeVisible({
+        timeout: 15_000,
+      });
+      await userPage
+        .getByText("Conversion by channel")
+        .locator("xpath=preceding::button[1]")
+        .click();
+      await userPage.getByRole("menuitem", { name: /Save to Workbench/i }).click();
+
+      const dialog = userPage.getByRole("dialog", { name: /Save to Workbench/i });
+      await expect(dialog).toBeVisible();
+      await dialog.getByRole("combobox").click();
+      await userPage.getByRole("option", { name: canvasTitle }).click();
+      await dialog.getByRole("button", { name: /^Save$/ }).click();
+
+      await expect(userPage).toHaveURL(new RegExp(`/my-dashboard/${createdCanvasId}`), {
+        timeout: 20_000,
+      });
+
+      // Check DB first so we distinguish "PUT never happened" from "render is
+      // stale" from "autosave clobbered the append".
+      const immediatelyAfterSave = await fetchLayoutFromBackend(createdCanvasId);
+      expect(immediatelyAfterSave?.layoutVersion).toBe("freeform-v1");
+      expect(immediatelyAfterSave?.layout?.length ?? 0).toBe(2);
+
+      const layoutArr = immediatelyAfterSave!.layout as Array<Record<string, unknown>>;
+      const appended = layoutArr[1];
+      expect(appended.x).toBe(20);
+      expect(appended.y).toBe(20 + 360 + 24);
+      expect(appended.type).toBe("cohi_widget");
+      const appendedPayload = appended.payload as Record<string, unknown>;
+      expect(appendedPayload.sourceType).toBe("research");
+
+      // Both widgets should be visible on the canvas after the forced refetch.
+      await expect(userPage.getByText(/Existing Seed Widget|Existing Workbench Widget/i)).toBeVisible({
+        timeout: 20_000,
+      });
+      await expect(userPage.getByText("Conversion by channel")).toBeVisible({
+        timeout: 20_000,
+      });
+
+      // Wait past the WorkbenchCanvas autosave debounce (5s) and confirm the
+      // appended widget hasn't been clobbered by a stale-state autosave.
+      await userPage.waitForTimeout(7_000);
+      const afterAutosave = await fetchLayoutFromBackend(createdCanvasId);
+      expect(afterAutosave?.layout?.length ?? 0).toBe(2);
+    } finally {
+      await userPage.evaluate(async (id) => {
+        const token = localStorage.getItem("auth_token");
+        await fetch(`/api/workbench/canvases/${id}`, {
+          method: "DELETE",
+          credentials: "include",
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        });
+      }, createdCanvasId);
+    }
   });
 });

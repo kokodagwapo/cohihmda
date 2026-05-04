@@ -1034,6 +1034,10 @@ export function WorkbenchCanvas({
     generateDraftScopeId(),
   );
   const [canvasLoading, setCanvasLoading] = useState(!!loadCanvasId);
+  // Bumped when an external save (e.g. SaveToWorkbenchModal) updates this
+  // canvas in the DB. Forces the fetch effect below to re-run so the user
+  // sees the appended widget without manually refreshing.
+  const [externalRefetchToken, setExternalRefetchToken] = useState(0);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [saveTitle, setSaveTitle] = useState("Untitled canvas");
   const [isSaving, setIsSaving] = useState(false);
@@ -2554,7 +2558,27 @@ export function WorkbenchCanvas({
     return () => {
       cancelled = true;
     };
-  }, [loadCanvasId, tenantQs]);
+  }, [loadCanvasId, tenantQs, externalRefetchToken]);
+
+  // Listen for external saves to this canvas (e.g. SaveToWorkbenchModal
+  // appending a widget while the canvas is the active tab). Triggering a
+  // re-fetch here covers the case where MyDashboard's URL effect short-
+  // circuits because activeTabId already matches urlCanvasId.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ canvasId?: string }>).detail;
+      if (!detail?.canvasId) return;
+      if (detail.canvasId === loadCanvasId || detail.canvasId === canvasId) {
+        // Reset baseline so the autosave that runs ~5s after this event
+        // doesn't persist the now-stale in-memory layout. Refetch will
+        // re-establish a baseline once the new content lands.
+        lastSavedSnapshotRef.current = "";
+        setExternalRefetchToken((t) => t + 1);
+      }
+    };
+    window.addEventListener("workbench:canvas-saved", handler);
+    return () => window.removeEventListener("workbench:canvas-saved", handler);
+  }, [loadCanvasId, canvasId]);
 
   // Observe the canvas root element (not outer wrapper) so width updates
   // when the Cohi panel opens/closes and the canvas area actually resizes.

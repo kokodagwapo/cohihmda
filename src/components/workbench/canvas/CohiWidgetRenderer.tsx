@@ -1449,7 +1449,7 @@ export function CohiWidgetRenderer({
 
       {runSqlAsStored && sourceType === 'research' && (
         <div className="shrink-0 px-2 py-0.5 text-[9px] leading-snug text-amber-900 bg-amber-50/90 dark:bg-amber-950/50 dark:text-amber-100 border-b border-amber-100/80 dark:border-amber-900/40">
-          Research artifact SQL runs as saved. Ask Cohi to rewrite the SQL for logic or filter changes.
+          Saved from Research Lab. Ask Cohi to change filters or logic.
         </div>
       )}
 
