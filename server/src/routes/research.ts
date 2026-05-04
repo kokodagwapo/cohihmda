@@ -563,4 +563,177 @@ router.delete(
   }
 );
 
+// ============================================================================
+// POST /artifacts — Persist a Research Lab SQL artifact for tracking / reuse
+// ============================================================================
+//
+// Created when a user bookmarks a research insight whose supporting findings
+// have SQL evidence. The artifact captures the SQL + key fields so the
+// watchlist evaluator can re-run the metric, and so future Workbench widgets
+// can rehydrate the same query. Backed by migration 111
+// (`research_artifacts` + `tracked_insights.research_artifact_id`).
+//
+// The matching frontend call is `api.createResearchArtifact` in `src/lib/api.ts`.
+// Schema (COHI-362):
+//   { id, user_id, session_id, headline_fingerprint, sql, key_fields,
+//     title, viz_config, explanation, created_at, updated_at }
+
+router.post(
+  "/artifacts",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { tenantPool } = getTenantContext(req);
+      const userId = req.userId || "";
+      if (!userId) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+
+      const body = (req.body ?? {}) as {
+        session_id?: unknown;
+        sql?: unknown;
+        keyFields?: unknown;
+        title?: unknown;
+        explanation?: unknown;
+        headline_fingerprint?: unknown;
+        viz_config?: unknown;
+      };
+
+      const sessionId =
+        typeof body.session_id === "string" ? body.session_id.trim() : "";
+      const sql = typeof body.sql === "string" ? body.sql.trim() : "";
+      if (!sessionId) {
+        res.status(400).json({ error: "session_id is required" });
+        return;
+      }
+      if (!sql) {
+        res.status(400).json({ error: "sql is required" });
+        return;
+      }
+
+      const keyFields: string[] = Array.isArray(body.keyFields)
+        ? body.keyFields
+            .filter((k): k is string => typeof k === "string")
+            .map((k) => k.trim())
+            .filter((k) => k.length > 0)
+        : [];
+
+      // Session-scoped ownership: only the session owner (or platform staff)
+      // may attach artifacts to it. Mirrors the DELETE /sessions/:id check.
+      const hasFullAccess = FULL_SESSION_ACCESS_ROLES.includes(
+        req.userRole || "",
+      );
+      if (!hasFullAccess) {
+        const session =
+          getSession(sessionId) || (await loadSession(sessionId, tenantPool));
+        if (!session) {
+          res.status(404).json({ error: "Session not found" });
+          return;
+        }
+        if (session.userId !== userId) {
+          res
+            .status(403)
+            .json({ error: "You do not have permission to add artifacts to this session" });
+          return;
+        }
+      }
+
+      const titleRaw = typeof body.title === "string" ? body.title : null;
+      const title = titleRaw ? titleRaw.slice(0, 500) : null;
+      const explanationRaw =
+        typeof body.explanation === "string" ? body.explanation : null;
+      const explanation = explanationRaw ? explanationRaw.slice(0, 8000) : null;
+      const headlineFingerprint =
+        typeof body.headline_fingerprint === "string"
+          ? body.headline_fingerprint.slice(0, 1000)
+          : null;
+      const vizConfig =
+        body.viz_config && typeof body.viz_config === "object" && !Array.isArray(body.viz_config)
+          ? (body.viz_config as Record<string, unknown>)
+          : null;
+
+      const insertResult = await tenantPool.query(
+        `INSERT INTO research_artifacts
+           (user_id, session_id, headline_fingerprint, sql, key_fields, title, viz_config, explanation)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8)
+         RETURNING id`,
+        [
+          userId,
+          sessionId,
+          headlineFingerprint,
+          sql,
+          JSON.stringify(keyFields),
+          title,
+          vizConfig ? JSON.stringify(vizConfig) : null,
+          explanation,
+        ],
+      );
+
+      const id = insertResult.rows[0]?.id as string | undefined;
+      if (!id) {
+        res.status(500).json({ error: "Failed to create research artifact" });
+        return;
+      }
+      res.json({ id });
+    } catch (err: any) {
+      console.error("[Research] Error creating artifact:", err);
+      res.status(500).json({ error: err?.message || "Failed to create research artifact" });
+    }
+  },
+);
+
+// ============================================================================
+// GET /artifacts/:id — Fetch a stored Research Lab SQL artifact
+// ============================================================================
+//
+// Used by Workbench / canvas surfaces that rehydrate a saved research widget
+// from the artifact id (e.g. after migrating a tracked insight detail view).
+
+router.get(
+  "/artifacts/:id",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { tenantPool } = getTenantContext(req);
+      const userId = req.userId || "";
+      const id = req.params.id as string;
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+        res.status(400).json({ error: "Invalid artifact id" });
+        return;
+      }
+
+      const hasFullAccess = FULL_SESSION_ACCESS_ROLES.includes(
+        req.userRole || "",
+      );
+      const result = hasFullAccess
+        ? await tenantPool.query(
+            `SELECT id, user_id, session_id, headline_fingerprint, sql, key_fields,
+                    title, viz_config, explanation, created_at, updated_at
+             FROM research_artifacts
+             WHERE id = $1::uuid`,
+            [id],
+          )
+        : await tenantPool.query(
+            `SELECT id, user_id, session_id, headline_fingerprint, sql, key_fields,
+                    title, viz_config, explanation, created_at, updated_at
+             FROM research_artifacts
+             WHERE id = $1::uuid AND user_id = $2`,
+            [id, userId],
+          );
+
+      if (result.rows.length === 0) {
+        res.status(404).json({ error: "Research artifact not found" });
+        return;
+      }
+      res.json(result.rows[0]);
+    } catch (err: any) {
+      console.error("[Research] Error fetching artifact:", err);
+      res.status(500).json({ error: err?.message || "Failed to fetch research artifact" });
+    }
+  },
+);
+
 export default router;
