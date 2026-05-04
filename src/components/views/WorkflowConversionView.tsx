@@ -46,11 +46,17 @@ import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { AlertCircle, Check, ChevronsUpDown, Loader2, Maximize2, Minus, Plus, RotateCcw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { WorkflowSegmentLoansModal } from "@/components/views/WorkflowSegmentLoansModal";
 import type { WorkflowSegmentLoanFilter } from "@/hooks/useWorkflowConversionSegmentLoans";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import { useWidgetSectionStore } from "@/stores/widgetSectionStore";
 import { api } from "@/lib/api";
@@ -59,6 +65,16 @@ import {
   type DashboardInsightItem,
 } from "@/hooks/useDashboardInsights";
 import { DashboardInsightsStrip } from "@/components/dashboard/DashboardInsightsStrip";
+import { useWorkflowConversionBookmarks } from "@/hooks/useWorkflowConversionBookmarks";
+import {
+  stateToWorkflowBookmarkPayload,
+  workflowBookmarkPayloadToState,
+  formatWorkflowBookmarkPeriodLabel,
+  workflowBookmarkCalculationLabel,
+  workflowBookmarkGroupingLabel,
+  formatWorkflowBookmarkMilestonesLine,
+  type WorkflowConversionBookmark,
+} from "@/utils/workflowConversionBookmarks";
 
 const PERIOD_PRESETS: PeriodPreset[] = [
   "mtd",
@@ -99,6 +115,13 @@ function getDefaultDateRange(): { start: string; end: string } {
     start: format(start, "yyyy-MM-dd"),
     end: format(now, "yyyy-MM-dd"),
   };
+}
+
+function makeBookmarkId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `bookmark_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
 /** Persisted state for the workflow conversion widget (survives canvas save/reload). */
@@ -160,6 +183,20 @@ export function WorkflowConversionView({
   const [generateLoading, setGenerateLoading] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [pendingInsightWidgetId, setPendingInsightWidgetId] = useState<string | null>(null);
+  const [bookmarksModalOpen, setBookmarksModalOpen] = useState(false);
+  const [saveBookmarkOpen, setSaveBookmarkOpen] = useState(false);
+  const [overwriteModalOpen, setOverwriteModalOpen] = useState(false);
+  const [selectedBookmarkId, setSelectedBookmarkId] = useState<string | null>(null);
+  const [saveBookmarkName, setSaveBookmarkName] = useState("");
+  const [editingBookmarkId, setEditingBookmarkId] = useState<string | null>(null);
+  const [editingBookmarkName, setEditingBookmarkName] = useState("");
+  const [bookmarkRestoreWarning, setBookmarkRestoreWarning] = useState<string | null>(null);
+
+  const {
+    bookmarks,
+    isLoading: bookmarksLoading,
+    saveAll: saveAllBookmarks,
+  } = useWorkflowConversionBookmarks();
 
   const dashboardInsightFilters = useMemo(() => ({}), []);
   const {
@@ -317,6 +354,124 @@ export function WorkflowConversionView({
     dimensionFilters,
   });
 
+  const milestoneIdSet = useMemo(() => new Set(milestones.map((milestone) => milestone.id)), [milestones]);
+
+  const bookmarkMilestoneLabel = useCallback(
+    (milestoneId: string) => milestones.find((m) => m.id === milestoneId)?.label ?? milestoneId,
+    [milestones],
+  );
+
+  const currentBookmarkPayload = useMemo(
+    () =>
+      stateToWorkflowBookmarkPayload({
+        segments,
+        calculationType,
+        grouping,
+        periodSelection,
+      }),
+    [segments, calculationType, grouping, periodSelection],
+  );
+
+  const selectedBookmark = useMemo(
+    () => bookmarks.find((bookmark) => bookmark.id === selectedBookmarkId) ?? null,
+    [bookmarks, selectedBookmarkId],
+  );
+
+  const bookmarkInSync = useMemo(() => {
+    if (!selectedBookmark) return false;
+    return JSON.stringify(selectedBookmark.payload) === JSON.stringify(currentBookmarkPayload);
+  }, [selectedBookmark, currentBookmarkPayload]);
+
+  const saveBookmarksAndMaybeSelect = useCallback(
+    async (nextBookmarks: WorkflowConversionBookmark[], nextSelected?: string | null) => {
+      await saveAllBookmarks(nextBookmarks);
+      if (typeof nextSelected !== "undefined") {
+        setSelectedBookmarkId(nextSelected);
+      }
+    },
+    [saveAllBookmarks],
+  );
+
+  const applyBookmark = useCallback(
+    (bookmark: WorkflowConversionBookmark) => {
+      const restore = workflowBookmarkPayloadToState(
+        bookmark.payload,
+        milestoneIdSet,
+        defaultPeriod,
+      );
+      setPeriodSelection(restore.state.periodSelection);
+      setCalculationType(restore.state.calculationType);
+      setGrouping(restore.state.grouping);
+      setSegments(restore.state.segments);
+      setSelectedBookmarkId(bookmark.id);
+      setBookmarkRestoreWarning(
+        restore.hadInvalidMilestones
+          ? "Some milestone steps in this bookmark are unavailable and were skipped."
+          : null,
+      );
+      setBookmarksModalOpen(false);
+    },
+    [defaultPeriod, milestoneIdSet],
+  );
+
+  const handleCreateBookmark = useCallback(async () => {
+    const trimmedName = saveBookmarkName.trim();
+    if (!trimmedName) return;
+    const now = new Date().toISOString();
+    const bookmark: WorkflowConversionBookmark = {
+      id: makeBookmarkId(),
+      name: trimmedName,
+      payload: currentBookmarkPayload,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await saveBookmarksAndMaybeSelect([...bookmarks, bookmark], bookmark.id);
+    setSaveBookmarkOpen(false);
+    setSaveBookmarkName("");
+  }, [saveBookmarkName, currentBookmarkPayload, saveBookmarksAndMaybeSelect, bookmarks]);
+
+  const handleOverwriteSelectedBookmark = useCallback(async () => {
+    if (!selectedBookmark) return;
+    const now = new Date().toISOString();
+    const next = bookmarks.map((bookmark) =>
+      bookmark.id === selectedBookmark.id
+        ? { ...bookmark, payload: currentBookmarkPayload, updatedAt: now }
+        : bookmark,
+    );
+    await saveBookmarksAndMaybeSelect(next, selectedBookmark.id);
+    setOverwriteModalOpen(false);
+  }, [selectedBookmark, bookmarks, currentBookmarkPayload, saveBookmarksAndMaybeSelect]);
+
+  const handleDeleteBookmark = useCallback(
+    async (bookmarkId: string) => {
+      const next = bookmarks.filter((bookmark) => bookmark.id !== bookmarkId);
+      const nextSelected = selectedBookmarkId === bookmarkId ? null : selectedBookmarkId;
+      await saveBookmarksAndMaybeSelect(next, nextSelected);
+    },
+    [bookmarks, selectedBookmarkId, saveBookmarksAndMaybeSelect],
+  );
+
+  const handleRenameBookmark = useCallback(
+    async (bookmarkId: string, nextName: string) => {
+      const trimmed = nextName.trim();
+      if (!trimmed) return;
+      const existing = bookmarks.find((bookmark) => bookmark.id === bookmarkId);
+      if (!existing || existing.name === trimmed) {
+        setEditingBookmarkId(null);
+        setEditingBookmarkName("");
+        return;
+      }
+      const now = new Date().toISOString();
+      const next = bookmarks.map((bookmark) =>
+        bookmark.id === bookmarkId ? { ...bookmark, name: trimmed, updatedAt: now } : bookmark,
+      );
+      await saveBookmarksAndMaybeSelect(next);
+      setEditingBookmarkId(null);
+      setEditingBookmarkName("");
+    },
+    [bookmarks, saveBookmarksAndMaybeSelect],
+  );
+
   const updateSegment = useCallback((index: number, field: "from" | "to", value: string) => {
     setSegments((prev) => {
       const next = prev.map((s, i) => (i === index ? { ...s, [field]: value } : s));
@@ -332,7 +487,16 @@ export function WorkflowConversionView({
   }, [grouping]);
 
   const resetToDefault = useCallback(() => {
+    setPeriodSelection({
+      type: "preset",
+      preset: "mtd",
+      dateRange: computePresetDateRange("mtd"),
+    });
+    setCalculationType("conversion");
+    setGrouping("workflow");
     setSegments([...DEFAULT_WORKFLOW_SEGMENTS]);
+    setSelectedBookmarkId(null);
+    setBookmarkRestoreWarning(null);
   }, []);
 
   const maxCardsCap = Math.max(1, (milestones?.length ?? 20) - 1);
@@ -573,7 +737,56 @@ export function WorkflowConversionView({
           <RotateCcw className={embeddedInWorkbench ? "h-2.5 w-2.5" : "h-3.5 w-3.5"} />
           Reset to Default
         </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => setBookmarksModalOpen(true)}
+          className={cn(
+            "gap-1.5",
+            embeddedInWorkbench && "!h-7 !py-0 !min-h-0 px-2.5 text-xs",
+          )}
+        >
+          Bookmarks
+        </Button>
+        <Button
+          type="button"
+          variant={selectedBookmark && bookmarkInSync ? "secondary" : "default"}
+          size="sm"
+          onClick={() => {
+            if (selectedBookmark && !bookmarkInSync) {
+              setOverwriteModalOpen(true);
+              return;
+            }
+            if (selectedBookmark && bookmarkInSync) return;
+            setSaveBookmarkName("");
+            setSaveBookmarkOpen(true);
+          }}
+          disabled={selectedBookmark != null && bookmarkInSync}
+          className={cn(embeddedInWorkbench && "!h-7 !py-0 !min-h-0 px-2.5 text-xs")}
+        >
+          {selectedBookmark && bookmarkInSync ? "Saved" : "Save"}
+        </Button>
+        {selectedBookmark && (
+          <Badge className="bg-sky-600 text-white hover:bg-sky-600">
+            {selectedBookmark.name}
+            <button
+              type="button"
+              aria-label="Clear selected bookmark"
+              className="ml-1 rounded-full p-0.5 hover:bg-white/20"
+              onClick={() => setSelectedBookmarkId(null)}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </Badge>
+        )}
       </div>
+
+      {bookmarkRestoreWarning && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50/80 px-4 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+          {bookmarkRestoreWarning}
+        </div>
+      )}
 
       {(error || milestonesError) && (
         <div className="rounded-lg border border-amber-200 bg-amber-50/80 px-4 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
@@ -635,6 +848,170 @@ export function WorkflowConversionView({
           ))}
         </div>
       )}
+
+      <Dialog open={bookmarksModalOpen} onOpenChange={setBookmarksModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Bookmarks</DialogTitle>
+            <DialogDescription>Saved Workflow Conversion bookmarks.</DialogDescription>
+          </DialogHeader>
+          {bookmarksLoading ? (
+            <p className="text-sm text-slate-500 dark:text-slate-400">Loading bookmarks...</p>
+          ) : bookmarks.length === 0 ? (
+            <p className="text-sm text-slate-500 dark:text-slate-400">No bookmarks saved yet.</p>
+          ) : (
+            <div className="space-y-2 max-h-[360px] overflow-auto">
+              {bookmarks.map((bookmark) => (
+                <div
+                  key={bookmark.id}
+                  className="flex items-start justify-between gap-2 rounded-md border border-slate-200 dark:border-slate-700 p-2"
+                >
+                  <div className="min-w-0 flex-1 space-y-1">
+                    {editingBookmarkId === bookmark.id ? (
+                      <Input
+                        value={editingBookmarkName}
+                        onChange={(event) => setEditingBookmarkName(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            handleRenameBookmark(bookmark.id, editingBookmarkName);
+                          } else if (event.key === "Escape") {
+                            setEditingBookmarkId(null);
+                            setEditingBookmarkName("");
+                          }
+                        }}
+                        autoFocus
+                      />
+                    ) : (
+                      <p className="text-sm font-medium text-slate-800 dark:text-slate-100 truncate">
+                        {bookmark.name}
+                      </p>
+                    )}
+                    <div className="text-xs text-slate-500 dark:text-slate-400 space-y-0.5">
+                      <p>
+                        <span className="font-medium text-slate-600 dark:text-slate-300">Period:</span>{" "}
+                        {formatWorkflowBookmarkPeriodLabel(bookmark.payload.period)}
+                      </p>
+                      <p>
+                        <span className="font-medium text-slate-600 dark:text-slate-300">Calculation:</span>{" "}
+                        {workflowBookmarkCalculationLabel(bookmark.payload.calculationType)}
+                      </p>
+                      <p>
+                        <span className="font-medium text-slate-600 dark:text-slate-300">Grouping:</span>{" "}
+                        {workflowBookmarkGroupingLabel(bookmark.payload.groupingType)}
+                      </p>
+                      <p>
+                        <span className="font-medium text-slate-600 dark:text-slate-300">Milestones:</span>{" "}
+                        {formatWorkflowBookmarkMilestonesLine(bookmark.payload, bookmarkMilestoneLabel)}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {editingBookmarkId === bookmark.id ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleRenameBookmark(bookmark.id, editingBookmarkName)}
+                      >
+                        Save
+                      </Button>
+                    ) : (
+                      <Button type="button" size="sm" variant="outline" onClick={() => applyBookmark(bookmark)}>
+                        Apply
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setEditingBookmarkId(bookmark.id);
+                        setEditingBookmarkName(bookmark.name);
+                      }}
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="text-red-600 hover:text-red-700"
+                      onClick={() => handleDeleteBookmark(bookmark.id)}
+                    >
+                      Delete
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              type="button"
+              onClick={() => {
+                setSaveBookmarkName("");
+                setSaveBookmarkOpen(true);
+              }}
+            >
+              Save Current as Bookmark
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={saveBookmarkOpen} onOpenChange={setSaveBookmarkOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Save Bookmark</DialogTitle>
+            <DialogDescription>Save the current Workflow Conversion setup as a bookmark.</DialogDescription>
+          </DialogHeader>
+          <Input
+            value={saveBookmarkName}
+            onChange={(event) => setSaveBookmarkName(event.target.value)}
+            placeholder="Bookmark name"
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                handleCreateBookmark();
+              }
+            }}
+          />
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setSaveBookmarkOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={handleCreateBookmark} disabled={!saveBookmarkName.trim()}>
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={overwriteModalOpen} onOpenChange={setOverwriteModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Update bookmark?</DialogTitle>
+            <DialogDescription>
+              Your current configuration differs from the selected bookmark.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setOverwriteModalOpen(false);
+                setSaveBookmarkName("");
+                setSaveBookmarkOpen(true);
+              }}
+            >
+              Create New Bookmark
+            </Button>
+            <Button type="button" onClick={handleOverwriteSelectedBookmark}>
+              Update Selected Bookmark
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
