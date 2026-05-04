@@ -90,6 +90,21 @@ async function setupSalesCompanyOverviewMocks(
     });
   });
 
+  // Shield tests from unrelated /api/los/connections regressions (e.g. missing
+  // sync_allowed_weekdays column returning 500). The dashboard shell polls this
+  // for the "Data Last Synced" indicator; flaky 500s can saturate networkidle.
+  await page.route(/\/api\/los\/(connections|types)(\?|$)/, async (route: Route) => {
+    const url = route.request().url();
+    const body = url.includes("/api/los/types")
+      ? { types: {} }
+      : { connections: [] };
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(body),
+    });
+  });
+
   await page.route(/\/api\/loans\/sales-company-overview(\?|$)/, async (route: Route) => {
     overviewCallCount += 1;
     const reqUrl = route.request().url();
@@ -181,6 +196,39 @@ async function setupWorkbenchSalesCompanyOverviewMocks(page: Page): Promise<{
   overviewRequestUrls: string[];
 }> {
   const overviewRequestUrls: string[] = [];
+
+  // Match standalone SCO mocks: avoid real /api/auth/me flaking under parallel workers
+  // (timeouts/401s clear local auth and strand the test on /login).
+  await page.route(/\/api\/auth\/me$/, async (route: Route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        user: {
+          id: "user-e2e-344",
+          email: "qa.user@example.com",
+          full_name: "QA User",
+          role: "tenant_admin",
+          is_super_admin: false,
+          tenant_id: "tenant-e2e-344",
+          tenant_slug: "tenant-e2e-344",
+        },
+      }),
+    });
+  });
+
+  // Shield from unrelated LOS backend regressions (see note above).
+  await page.route(/\/api\/los\/(connections|types)(\?|$)/, async (route: Route) => {
+    const url = route.request().url();
+    const body = url.includes("/api/los/types")
+      ? { types: {} }
+      : { connections: [] };
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(body),
+    });
+  });
 
   await page.route(/\/api\/loans\/sales-company-overview(\?|$)/, async (route: Route) => {
     const reqUrl = route.request().url();
@@ -291,6 +339,8 @@ test.describe("Sales Company Overview (COHI-344)", () => {
   test("@critical @COHI-344 filter state persists across reload for same tenant", async ({
     userPage,
   }) => {
+    // Two full page loads + networkidle waits; give headroom under parallel worker load.
+    test.setTimeout(120_000);
     await suppressWelcomeTour(userPage);
     const { preferencePuts } = await setupSalesCompanyOverviewMocks(userPage);
 
@@ -313,6 +363,9 @@ test.describe("Sales Company Overview (COHI-344)", () => {
   test("@critical @COHI-344 loading, empty, and error states show non-broken dashboard behavior", async ({
     userPage,
   }) => {
+    // Two full page loads + networkidle waits + intentional 1.2s mock delay;
+    // give headroom under parallel worker load.
+    test.setTimeout(120_000);
     await suppressWelcomeTour(userPage);
     await setupSalesCompanyOverviewMocks(userPage, {
       delayedFirstOverviewResponseMs: 1200,
@@ -339,6 +392,7 @@ test.describe("Sales Company Overview Workbench (COHI-344)", () => {
   test("@critical @COHI-344 workbench adds Sales Company Overview as widget group with section widgets", async ({
     userPage,
   }) => {
+    test.setTimeout(120_000);
     await suppressWelcomeTour(userPage);
     const { overviewRequestUrls } = await setupWorkbenchSalesCompanyOverviewMocks(userPage);
 
@@ -365,6 +419,7 @@ test.describe("Sales Company Overview Workbench (COHI-344)", () => {
   test("@critical @COHI-344 workbench loan-type selection sends filtered request and updates active filters", async ({
     userPage,
   }) => {
+    test.setTimeout(120_000);
     await suppressWelcomeTour(userPage);
     const { overviewRequestUrls } = await setupWorkbenchSalesCompanyOverviewMocks(userPage);
 
@@ -393,6 +448,7 @@ test.describe("Sales Company Overview Workbench (COHI-344)", () => {
   test("@critical @COHI-344 workbench aging-bucket selection updates request context and widget values", async ({
     userPage,
   }) => {
+    test.setTimeout(120_000);
     await suppressWelcomeTour(userPage);
     const { overviewRequestUrls } = await setupWorkbenchSalesCompanyOverviewMocks(userPage);
 
