@@ -144,6 +144,18 @@ async function ensureLosConnectionsSchema(
         ddl: "ALTER TABLE public.los_connections ADD COLUMN scheduler_timezone TEXT NOT NULL DEFAULT 'America/New_York'",
       },
       {
+        name: "sync_allowed_weekdays",
+        ddl: "ALTER TABLE public.los_connections ADD COLUMN sync_allowed_weekdays SMALLINT[] NOT NULL DEFAULT ARRAY[0,1,2,3,4,5,6]::SMALLINT[]",
+      },
+      {
+        name: "sync_allowed_hours",
+        ddl: "ALTER TABLE public.los_connections ADD COLUMN sync_allowed_hours SMALLINT[] NOT NULL DEFAULT ARRAY[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23]::SMALLINT[]",
+      },
+      {
+        name: "sync_run_at_times",
+        ddl: "ALTER TABLE public.los_connections ADD COLUMN sync_run_at_times JSONB NOT NULL DEFAULT '[]'::jsonb",
+      },
+      {
         name: "last_encompass_users_sync_at",
         ddl: "ALTER TABLE public.los_connections ADD COLUMN last_encompass_users_sync_at TIMESTAMPTZ",
       },
