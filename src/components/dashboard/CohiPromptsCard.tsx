@@ -1003,8 +1003,13 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
   // Auth context — admin controls only shown for platform staff
   const { isPlatformStaff } = useAuth();
   const isAdmin = isPlatformStaff();
-  const { lastSyncedAt: losLastSyncedAt, syncFrequency: losSyncFrequency } =
-    useTenantLosLastSyncedAt(selectedTenantId);
+  const {
+    lastSyncedAt: losLastSyncedAt,
+    syncFrequency: losSyncFrequency,
+    syncRunAtTimes: losSyncRunAtTimes,
+    syncAllowedWeekdays: losSyncAllowedWeekdays,
+    schedulerTimezone: losSchedulerTimezone,
+  } = useTenantLosLastSyncedAt(selectedTenantId);
 
   // Data hook
   const {
@@ -1573,24 +1578,22 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
                       {formatDataLastSyncedLine(losLastSyncedAt)}
                     </span>
                   );
-                  const nextSyncAt = getEstimatedNextSyncAt(
-                    losLastSyncedAt,
-                    losSyncFrequency
-                  );
+                  const syncInput = {
+                    lastSyncedAtUtc: losLastSyncedAt,
+                    syncFrequency: losSyncFrequency,
+                    syncRunAtTimes: losSyncRunAtTimes,
+                    syncAllowedWeekdays: losSyncAllowedWeekdays,
+                    schedulerTimezone: losSchedulerTimezone,
+                  };
+                  const nextSyncAt = getEstimatedNextSyncAt(syncInput);
                   if (nextSyncAt && nextSyncAt.getTime() > Date.now()) {
                     trailing.push(
                       <span
                         key="los-next-sync"
                         className={metaMuted}
-                        title={formatEstimatedNextSyncTooltip(
-                          losLastSyncedAt,
-                          losSyncFrequency
-                        )}
+                        title={formatEstimatedNextSyncTooltip(syncInput)}
                       >
-                        {formatEstimatedNextSyncLine(
-                          losLastSyncedAt,
-                          losSyncFrequency
-                        )}
+                        {formatEstimatedNextSyncLine(syncInput)}
                       </span>
                     );
                   }

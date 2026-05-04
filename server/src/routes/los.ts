@@ -509,7 +509,8 @@ router.get(
               encompass_instance_id, encompass_api_server, encompass_extraction_method, encompass_secret_arn,
               encompass_selected_folders,
               encompass_users_sync_enabled, sync_business_days_only, insights_business_days_only,
-              scheduler_timezone, last_encompass_users_sync_at,
+              scheduler_timezone, sync_allowed_weekdays, sync_run_at_times,
+              last_encompass_users_sync_at,
               is_active, last_synced_at, last_loan_modified_at, last_sync_status, last_sync_error,
               created_at, updated_at
             FROM public.los_connections 
