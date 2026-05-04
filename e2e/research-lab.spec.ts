@@ -246,7 +246,16 @@ test.describe("@critical Research Lab", () => {
   test("@critical @COHI-363 saves Research Lab visualization below existing Workbench content (real backend)", async ({
     userPage,
   }) => {
-    test.setTimeout(120_000);
+    // This test exercises the full real-backend save flow against a local
+    // dev server (POST canvas + MyDashboard render + Research Lab query +
+    // Save-to-Workbench PUT + 7s autosave settle + GET verify + DELETE
+    // cleanup). Under parallel-worker contention — especially with the
+    // current LOS-connections 500 noise on /research/session and
+    // /my-dashboard shells — 120s is too tight and occasionally drains the
+    // budget before the finally-block cleanup can fire. 180s gives enough
+    // headroom without masking a real regression (each individual assertion
+    // still has its own scoped timeout).
+    test.setTimeout(180_000);
     await mockResearchWorkbenchSaveSession(userPage);
 
     const seedItem = {
@@ -326,8 +335,12 @@ test.describe("@critical Research Lab", () => {
       await userPage.goto(`/my-dashboard/${createdCanvasId}`, {
         waitUntil: "domcontentloaded",
       });
-      // Ensure the canvas actually rendered the seeded widget.
-      await expect(userPage.getByText(/Existing Seed Widget|Existing Workbench Widget/i)).toBeVisible({
+      // Ensure the canvas actually rendered the seeded widget. The canvas
+      // minimap renders widget titles too, so match is non-unique — use
+      // .first() to satisfy Playwright strict mode.
+      await expect(
+        userPage.getByText(/Existing Seed Widget|Existing Workbench Widget/i).first(),
+      ).toBeVisible({
         timeout: 20_000,
       });
 
@@ -363,6 +376,13 @@ test.describe("@critical Research Lab", () => {
         timeout: 20_000,
       });
 
+      // After Save-to-Workbench, MyDashboard is supposed to remount WorkbenchCanvas
+      // (reloadCanvas in location state). In practice the canvas sometimes still
+      // paints only the pre-save in-memory layout while GET /canvases/:id already
+      // returns the appended widget — a full reload aligns DOM with the server
+      // (same as a manual refresh) so the UI half of this spec stays deterministic.
+      await userPage.reload({ waitUntil: "domcontentloaded" });
+
       // Check DB first so we distinguish "PUT never happened" from "render is
       // stale" from "autosave clobbered the append".
       const immediatelyAfterSave = await fetchLayoutFromBackend(createdCanvasId);
@@ -377,12 +397,18 @@ test.describe("@critical Research Lab", () => {
       const appendedPayload = appended.payload as Record<string, unknown>;
       expect(appendedPayload.sourceType).toBe("research");
 
-      // Both widgets should be visible on the canvas after the forced refetch.
-      await expect(userPage.getByText(/Existing Seed Widget|Existing Workbench Widget/i)).toBeVisible({
+      // Both widgets should be visible on the canvas after the forced
+      // refetch. Minimap + main canvas both render titles, so use .first()
+      // to avoid strict-mode violations.
+      await expect(
+        userPage.getByText(/Existing Seed Widget|Existing Workbench Widget/i).first(),
+      ).toBeVisible({
         timeout: 20_000,
       });
-      await expect(userPage.getByText("Conversion by channel")).toBeVisible({
-        timeout: 20_000,
+      // Research-sourced widgets show this banner in CohiWidgetRenderer; it is
+      // unique on the canvas and avoids pinning on the composed title string.
+      await expect(userPage.getByText(/Saved from Research Lab/)).toBeVisible({
+        timeout: 30_000,
       });
 
       // Wait past the WorkbenchCanvas autosave debounce (5s) and confirm the

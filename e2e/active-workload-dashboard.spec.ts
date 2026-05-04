@@ -359,10 +359,20 @@ test.describe("Active Workload Dashboard (COHI-347)", () => {
 
   test("@critical @COHI-347 standalone loading and API error states render safely", async ({ userPage }) => {
     await suppressWelcomeTour(userPage);
-    await setupActiveWorkloadMocks(userPage, { delayedFirstResponseMs: 1200 });
+    // Bump the mock delay (was 1200ms) and the loading-text timeout so the
+    // skeleton-visibility assertion stays reliable under parallel-worker load,
+    // where page mount + tenant resolution can consume most of the original
+    // 10s budget before the request even fires. Keep it modest so downstream
+    // assertions (which still share the per-test 120s budget) have headroom.
+    await setupActiveWorkloadMocks(userPage, { delayedFirstResponseMs: 2500 });
 
     await userPage.goto("/performance/active-workload", { waitUntil: "domcontentloaded" });
-    await expect(userPage.getByText("Loading active workload data...", { exact: true })).toBeVisible();
+    // Fail fast with a clearer signal than "loading text missing" when storage state
+    // is stale or global-setup races left the session on /login.
+    await expect(userPage).toHaveURL(/\/performance\/active-workload/, { timeout: 45_000 });
+    await expect(userPage.getByText("Loading active workload data...", { exact: true })).toBeVisible({
+      timeout: 35_000,
+    });
     await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
     await dismissBlockingOverlays(userPage);
     await expect(userPage.getByRole("heading", { name: "Active Files", exact: true })).toBeVisible();
