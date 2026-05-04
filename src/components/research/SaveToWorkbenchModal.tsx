@@ -232,7 +232,22 @@ export function SaveToWorkbenchModal({
       if (savedCanvasId) {
         toast({ title: "Saved to workbench", description: `Opening "${savedCanvasTitle}".` });
         onSaved?.(savedCanvasId, savedCanvasTitle || "Canvas");
-        navigate(`/my-dashboard/${savedCanvasId}`);
+        // Notify any mounted WorkbenchCanvas (currently rendering the same
+        // canvas in another tab/route) to refetch from the DB so the user
+        // sees the appended widget without a manual page refresh.
+        window.dispatchEvent(
+          new CustomEvent("workbench:canvas-saved", {
+            detail: { canvasId: savedCanvasId },
+          }),
+        );
+        // Pass `reloadCanvas` so MyDashboard force-remounts WorkbenchCanvas
+        // even when the URL canvas id matches the already-active tab. Without
+        // this, navigating back to a canvas the user had just opened would
+        // keep the previous in-memory layout (and a later autosave would
+        // clobber the freshly-appended widget in the DB).
+        navigate(`/my-dashboard/${savedCanvasId}`, {
+          state: { reloadCanvas: Date.now() },
+        });
       }
       onClose();
     } catch (err) {
