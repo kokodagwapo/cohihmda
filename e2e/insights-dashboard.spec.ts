@@ -28,10 +28,13 @@ test.describe("Insights Dashboard", () => {
     await expect(userPage).toHaveURL(/\/insights/);
 
     await expectInsightsSections(userPage);
-    // Verify the page has at least one top-level heading. We don't pin on a
-    // specific heading name ("Dashboards" was renamed during the workbench
-    // refactor; relying on exact text makes this spec brittle to copy changes).
-    await expect(userPage.locator("h1, h2, [role='heading']").first()).toBeVisible();
+    // Verify the page has at least one heading. We don't pin on a specific
+    // heading name ("Dashboards" was renamed during the workbench refactor;
+    // relying on exact text makes this spec brittle to copy changes).
+    // Use getByRole so implicit ARIA roles on h1-h6 are matched — the CSS
+    // selector "[role='heading']" only matches elements with an explicit role
+    // attribute, which the insights shell does not set.
+    await expect(userPage.getByRole("heading").first()).toBeVisible();
   });
 
   test("@critical insights dropdown navigates within dashboard", async ({ userPage }) => {
