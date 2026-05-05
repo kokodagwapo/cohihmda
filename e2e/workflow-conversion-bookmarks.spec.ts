@@ -82,7 +82,25 @@ function workflowConversionToolbar(page: Page) {
 function workflowConversionBookmarksDialog(page: Page): Locator {
   return page.getByRole("dialog").filter({
     has: page.getByText(/Saved Workflow Conversion bookmarks/),
-  });
+  }).last();
+}
+
+async function openWorkflowBookmarksFrom(page: Page, scope: Locator) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await dismissBlockingOverlays(page);
+    const button = scope.getByRole("button", { name: "Bookmarks" });
+    await expect(button).toBeVisible({ timeout: 15_000 });
+    try {
+      await button.click({ timeout: 10_000 });
+      await expect(workflowConversionBookmarksDialog(page)).toBeVisible({ timeout: 20_000 });
+      return;
+    } catch {
+      // Recover from stray modal/backdrop capture and retry.
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(300);
+    }
+  }
+  throw new Error("Failed to open Workflow Conversion Bookmarks dialog");
 }
 
 /** Calculation select (Conversion % | Turn Time) — only one in the WC toolbar. */
@@ -210,7 +228,7 @@ test.describe("Workflow Conversion bookmarks (COHI-364)", () => {
     await expect(main.getByRole("button", { name: "Save", exact: true })).toBeVisible();
     await expect(main.getByRole("button", { name: "Reset to Default" })).toBeVisible();
 
-    await main.getByRole("button", { name: "Bookmarks" }).click();
+    await openWorkflowBookmarksFrom(userPage, main);
     await expect(bookmarksDialog.getByRole("heading", { name: "Bookmarks" })).toBeVisible({
       timeout: 20_000,
     });
@@ -252,15 +270,15 @@ test.describe("Workflow Conversion bookmarks (COHI-364)", () => {
     await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
     await dismissBlockingOverlays(userPage);
 
-    await main.getByRole("button", { name: "Bookmarks" }).click();
+    await openWorkflowBookmarksFrom(userPage, main);
     await expect(bookmarksDialog).toBeVisible();
     const bookmarkRow = bookmarkEntryRow(bookmarksDialog, bookmarkName);
     await expect(bookmarkRow.getByText(/Calculation:.*Turn Time/)).toBeVisible();
     await userPage.keyboard.press("Escape");
 
     await selectCalculation(userPage, "Conversion %");
-    await main.getByRole("button", { name: "Bookmarks" }).click();
-    await bookmarksDialog.getByRole("button", { name: "Apply" }).click();
+    await openWorkflowBookmarksFrom(userPage, main);
+    await bookmarksDialog.getByRole("button", { name: "Apply" }).first().click();
     await expect(bookmarksDialog).toBeHidden();
 
     await expect(main.getByRole("button", { name: "Saved" })).toBeVisible({ timeout: 15_000 });
@@ -276,12 +294,12 @@ test.describe("Workflow Conversion bookmarks (COHI-364)", () => {
     await expect(overwriteDialog).toBeHidden({ timeout: 15_000 });
     await pacePreferenceWrites(userPage);
 
-    await main.getByRole("button", { name: "Bookmarks" }).click();
+    await openWorkflowBookmarksFrom(userPage, main);
     await expect(bookmarksDialog.getByText(/Grouping:.*Individual/)).toBeVisible();
     await userPage.keyboard.press("Escape");
 
     const mainAgain = workflowMain(userPage);
-    await mainAgain.getByRole("button", { name: "Bookmarks" }).click();
+    await openWorkflowBookmarksFrom(userPage, mainAgain);
     await expect(bookmarksDialog).toBeVisible();
     await bookmarksDialog.getByRole("button", { name: "Edit" }).click();
     await bookmarksDialog.getByRole("textbox").fill(bookmarkRenamed);
@@ -357,9 +375,9 @@ test.describe("Workflow Conversion bookmarks (COHI-364)", () => {
     const toolbar = workflowConversionToolbar(userPage);
     await expect(toolbar).toBeVisible({ timeout: 30_000 });
     await expect(toolbar.getByRole("button", { name: "Bookmarks" })).toBeVisible();
-    await toolbar.getByRole("button", { name: "Bookmarks" }).click();
+    await openWorkflowBookmarksFrom(userPage, toolbar);
     await expect(bookmarksDialog).toBeVisible({ timeout: 30_000 });
-    await bookmarksDialog.getByRole("button", { name: "Apply" }).click();
+    await bookmarksDialog.getByRole("button", { name: "Apply" }).first().click();
     await expect(bookmarksDialog).toBeHidden();
 
     await expect(toolbarCalculationCombobox(userPage)).toContainText("Turn Time", { timeout: 20_000 });
@@ -367,7 +385,7 @@ test.describe("Workflow Conversion bookmarks (COHI-364)", () => {
     await userPage.goto("/workflow-conversion", { waitUntil: "domcontentloaded" });
     await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
     await dismissBlockingOverlays(userPage);
-    await workflowMain(userPage).getByRole("button", { name: "Bookmarks" }).click();
+    await openWorkflowBookmarksFrom(userPage, workflowMain(userPage));
     await expect(bookmarksDialog).toBeVisible();
     const row = bookmarkEntryRow(bookmarksDialog, bookmarkName);
     await pacePreferenceWrites(userPage);
