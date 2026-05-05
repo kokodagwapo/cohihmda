@@ -18,6 +18,7 @@ export interface WorkflowConversionState {
   calculationType?: 'conversion' | 'turn_time';
   grouping?: 'workflow' | 'individual';
   segments?: { from: string; to: string }[];
+  selectedBookmarkId?: string | null;
 }
 
 function WorkflowConversionEmbedInner({ width, height, config, onConfigChange }: WidgetRenderProps) {

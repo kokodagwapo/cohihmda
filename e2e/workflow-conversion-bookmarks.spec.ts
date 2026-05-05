@@ -333,8 +333,10 @@ test.describe("Workflow Conversion bookmarks (COHI-364)", () => {
   });
 
   test("@critical @COHI-364 workbench Workflow Conversion widget applies saved bookmark", async ({ userPage }) => {
+    test.setTimeout(180_000);
     await suppressWelcomeTour(userPage);
     const bookmarkName = `qaAgentRunTag-wf-wb-${Date.now()}`;
+    const canvasName = `qaAgentRunTag-wf-canvas-${Date.now()}`;
 
     const bookmarksDialog = workflowConversionBookmarksDialog(userPage);
 
@@ -380,6 +382,38 @@ test.describe("Workflow Conversion bookmarks (COHI-364)", () => {
     await bookmarksDialog.getByRole("button", { name: "Apply" }).first().click();
     await expect(bookmarksDialog).toBeHidden();
 
+    await expect(toolbarCalculationCombobox(userPage)).toContainText("Turn Time", { timeout: 20_000 });
+    await expect(toolbar.getByText(bookmarkName, { exact: false })).toBeVisible({ timeout: 20_000 });
+
+    // Save new canvas and capture canonical /my-dashboard/:id URL.
+    const saveButton = userPage.getByTestId("workbench-save-button");
+    await expect(saveButton).toBeVisible({ timeout: 20_000 });
+    await expect(saveButton).toBeEnabled({ timeout: 20_000 });
+    await saveButton.click();
+    const saveCanvasDialog = userPage.getByRole("dialog").filter({
+      has: userPage.getByRole("heading", { name: /save canvas/i }),
+    });
+    const saveCanvasVisible = await saveCanvasDialog.isVisible().catch(() => false);
+    if (saveCanvasVisible) {
+      const titleInput = saveCanvasDialog.getByPlaceholder("Untitled canvas");
+      await titleInput.fill(canvasName);
+      await saveCanvasDialog.getByRole("button", { name: "Save" }).click();
+      await expect(saveCanvasDialog).toBeHidden({ timeout: 20_000 });
+    }
+    await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
+    const savedCanvasUrl = userPage.url();
+    expect(savedCanvasUrl).toMatch(/\/my-dashboard\/(?!new\b)[^/?#]+/);
+
+    // Leave and reopen canvas; active bookmark pill should persist with canvas state.
+    await userPage.goto("/workflow-conversion", { waitUntil: "domcontentloaded" });
+    await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
+    await userPage.goto(savedCanvasUrl, { waitUntil: "domcontentloaded" });
+    await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
+    await dismissBlockingOverlays(userPage);
+
+    const reopenedToolbar = workflowConversionToolbar(userPage);
+    await expect(reopenedToolbar).toBeVisible({ timeout: 30_000 });
+    await expect(reopenedToolbar.getByText(bookmarkName, { exact: false })).toBeVisible({ timeout: 20_000 });
     await expect(toolbarCalculationCombobox(userPage)).toContainText("Turn Time", { timeout: 20_000 });
 
     await userPage.goto("/workflow-conversion", { waitUntil: "domcontentloaded" });

@@ -130,6 +130,7 @@ export interface WorkflowConversionSavedState {
   calculationType?: WorkflowConversionMetric;
   grouping?: WorkflowGrouping;
   periodSelection?: PeriodSelection;
+  selectedBookmarkId?: string | null;
 }
 
 export interface WorkflowConversionViewProps {
@@ -235,7 +236,9 @@ export function WorkflowConversionView({
   const [bookmarksModalOpen, setBookmarksModalOpen] = useState(false);
   const [saveBookmarkOpen, setSaveBookmarkOpen] = useState(false);
   const [overwriteModalOpen, setOverwriteModalOpen] = useState(false);
-  const [selectedBookmarkId, setSelectedBookmarkId] = useState<string | null>(null);
+  const [selectedBookmarkId, setSelectedBookmarkId] = useState<string | null>(
+    () => initialState?.selectedBookmarkId ?? null,
+  );
   const [saveBookmarkName, setSaveBookmarkName] = useState("");
   const [editingBookmarkId, setEditingBookmarkId] = useState<string | null>(null);
   const [editingBookmarkName, setEditingBookmarkName] = useState("");
@@ -381,6 +384,18 @@ export function WorkflowConversionView({
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [segments, calculationType, grouping, periodSelection, onStateChange]);
+
+  // Persist bookmark-pill selection immediately (not debounced) so quick canvas saves don't drop it.
+  useEffect(() => {
+    if (!onStateChange || isFirstMountRef.current) return;
+    onStateChange({
+      segments: segments.length > 0 ? segments : undefined,
+      calculationType,
+      grouping,
+      periodSelection,
+      selectedBookmarkId,
+    });
+  }, [selectedBookmarkId, onStateChange, segments, calculationType, grouping, periodSelection]);
 
   const groupFilters = useWidgetSectionStore((s) => (groupId ? s.getFilters(groupId) : null));
   const dimensionFilters = useMemo((): Array<{ column: string; value: string }> | undefined => {
