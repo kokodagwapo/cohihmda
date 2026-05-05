@@ -4,7 +4,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate, Outlet } from "react-router-dom";
-import { useEffect, lazy, Suspense, type ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { EditProvider } from "@/contexts/EditContext";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { AnalyticsWrapper, AnalyticsPageViewTracker } from "@/contexts/AnalyticsContext";
@@ -82,7 +82,6 @@ import FeedbackPage from "./pages/Feedback";
 import FeedbackDetailPage from "./pages/FeedbackDetail";
 import DataChat from "./pages/DataChat";
 
-const AgenticSecurity = lazy(() => import("./pages/AgenticSecurity"));
 import { CanvasOnlyLayout } from "@/components/layout/CanvasOnlyLayout";
 
 const queryClient = new QueryClient();
@@ -261,20 +260,6 @@ const App = () => (
               <Route path="/feedback" element={<FeedbackPage />} />
               <Route path="/feedback/:id" element={<FeedbackDetailPage />} />
 
-              <Route
-                path="/agentic-security"
-                element={
-                  <Suspense
-                    fallback={
-                      <div className="flex min-h-[40vh] items-center justify-center bg-white text-slate-500">
-                        Loading…
-                      </div>
-                    }
-                  >
-                    <AgenticSecurity />
-                  </Suspense>
-                }
-              />
               </Route>
               
               {/* Catch-all route */}
