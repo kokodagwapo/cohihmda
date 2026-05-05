@@ -110,6 +110,34 @@ const WIDGET_ID_TO_ACTOR_TYPE: Record<string, LoanComplexityGroupBy | undefined>
   "loan-complexity-bar-chart": "loan_officer",
 };
 
+const LOAN_COMPLEXITY_FILTERS_KEY = "cohi-loan-complexity-filters";
+
+interface PersistedLoanComplexityFilters {
+  periodSelection?: PeriodSelection;
+  groupBy?: "actors" | "branch" | "current_loan_status";
+  actorType?: LoanComplexityGroupBy;
+  selectedGroups?: { dimension: LoanComplexityGroupBy; groupName: string }[];
+  currentLoanStatusFilter?: string;
+}
+
+function loadLoanComplexityFilters(): Partial<PersistedLoanComplexityFilters> {
+  try {
+    const raw = localStorage.getItem(LOAN_COMPLEXITY_FILTERS_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) as Partial<PersistedLoanComplexityFilters>;
+  } catch {
+    return {};
+  }
+}
+
+function saveLoanComplexityFilters(next: PersistedLoanComplexityFilters): void {
+  try {
+    localStorage.setItem(LOAN_COMPLEXITY_FILTERS_KEY, JSON.stringify(next));
+  } catch {
+    // ignore persistence errors
+  }
+}
+
 const LOAN_DETAIL_COLUMNS: { key: keyof LoanComplexityGroupLoanRow; label: string }[] = [
   { key: "loan_number", label: "Loan number" },
   { key: "loan_amount", label: "Volume" },
@@ -275,15 +303,20 @@ export function LoanComplexityView({
 }: LoanComplexityViewProps) {
   const { theme } = useTheme();
   const isDark = theme === "dark";
+  const saved = useMemo(() => loadLoanComplexityFilters(), []);
 
   const [periodSelection, setPeriodSelection] = useState<PeriodSelection>(() => {
+    const persisted = saved.periodSelection;
+    if (persisted?.dateRange?.start && persisted?.dateRange?.end) return persisted;
     const range = getDefaultDateRange();
     return { type: "preset", preset: "mtd", dateRange: range };
   });
-  const [groupBy, setGroupBy] = useState<"actors" | "branch" | "current_loan_status">("actors");
-  const [actorType, setActorType] = useState<LoanComplexityGroupBy>("loan_officer");
-  const [selectedGroups, setSelectedGroups] = useState<{ dimension: LoanComplexityGroupBy; groupName: string }[]>([]);
-  const [currentLoanStatusFilter, setCurrentLoanStatusFilter] = useState<string>("All");
+  const [groupBy, setGroupBy] = useState<"actors" | "branch" | "current_loan_status">(saved.groupBy ?? "actors");
+  const [actorType, setActorType] = useState<LoanComplexityGroupBy>(saved.actorType ?? "loan_officer");
+  const [selectedGroups, setSelectedGroups] = useState<{ dimension: LoanComplexityGroupBy; groupName: string }[]>(
+    saved.selectedGroups ?? []
+  );
+  const [currentLoanStatusFilter, setCurrentLoanStatusFilter] = useState<string>(saved.currentLoanStatusFilter ?? "All");
   const [statusOptions, setStatusOptions] = useState<{ statuses: string[]; hasFallout: boolean }>({
     statuses: [],
     hasFallout: false,
@@ -457,6 +490,16 @@ export function LoanComplexityView({
       setCurrentLoanStatusFilter("All");
     }
   }, [statusOptions.statuses, statusOptions.hasFallout, currentLoanStatusFilter]);
+
+  useEffect(() => {
+    saveLoanComplexityFilters({
+      periodSelection,
+      groupBy,
+      actorType,
+      selectedGroups,
+      currentLoanStatusFilter,
+    });
+  }, [periodSelection, groupBy, actorType, selectedGroups, currentLoanStatusFilter]);
 
   const { data, loading, error } = useLoanComplexityData({
     startDate: dateRange.start,

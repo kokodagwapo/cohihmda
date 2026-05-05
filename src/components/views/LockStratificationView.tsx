@@ -152,6 +152,9 @@ interface PersistedFilters {
   milestoneGroupBy?: MilestoneGroupBy;
   milestoneView?: "bar" | "pivot";
   pullThroughPeriod?: PullThroughPeriod;
+  interestRateDrill?: InterestRateDrill;
+  selectedExpirationBucket?: string | null;
+  selectedMilestoneGroup?: string | null;
 }
 
 function loadFilters(): Partial<PersistedFilters> {
@@ -226,9 +229,9 @@ export function LockStratificationView({
   const [milestoneView, setMilestoneView] = useState<"bar" | "pivot">(saved.milestoneView ?? "bar");
   const [localPullThroughPeriod, setLocalPullThroughPeriod] = useState<PullThroughPeriod>(saved.pullThroughPeriod ?? "60");
   const [expandedPivotRows, setExpandedPivotRows] = useState<Set<string>>(new Set());
-  const [localInterestRateDrill, setLocalInterestRateDrill] = useState<InterestRateDrill>(() => ({ level: 0 }));
-  const [localSelectedExpirationBucket, setLocalSelectedExpirationBucket] = useState<string | null>(null);
-  const [localSelectedMilestoneGroup, setLocalSelectedMilestoneGroup] = useState<string | null>(null);
+  const [localInterestRateDrill, setLocalInterestRateDrill] = useState<InterestRateDrill>(() => saved.interestRateDrill ?? { level: 0 });
+  const [localSelectedExpirationBucket, setLocalSelectedExpirationBucket] = useState<string | null>(saved.selectedExpirationBucket ?? null);
+  const [localSelectedMilestoneGroup, setLocalSelectedMilestoneGroup] = useState<string | null>(saved.selectedMilestoneGroup ?? null);
   const didInitMilestoneGroupRef = useRef(false);
 
   const locked = (groupFilters?.lockStratLocked as LockedFilter) ?? localLocked;
@@ -267,8 +270,29 @@ export function LockStratificationView({
   }, [groupId, updateFilters]);
 
   useEffect(() => {
-    if (!groupId) saveFilters({ locked: localLocked, measure: localMeasure, milestoneGroupBy: localMilestoneGroupBy, milestoneView, pullThroughPeriod: localPullThroughPeriod });
-  }, [groupId, localLocked, localMeasure, localMilestoneGroupBy, milestoneView, localPullThroughPeriod]);
+    if (!groupId) {
+      saveFilters({
+        locked: localLocked,
+        measure: localMeasure,
+        milestoneGroupBy: localMilestoneGroupBy,
+        milestoneView,
+        pullThroughPeriod: localPullThroughPeriod,
+        interestRateDrill: localInterestRateDrill,
+        selectedExpirationBucket: localSelectedExpirationBucket,
+        selectedMilestoneGroup: localSelectedMilestoneGroup,
+      });
+    }
+  }, [
+    groupId,
+    localLocked,
+    localMeasure,
+    localMilestoneGroupBy,
+    milestoneView,
+    localPullThroughPeriod,
+    localInterestRateDrill,
+    localSelectedExpirationBucket,
+    localSelectedMilestoneGroup,
+  ]);
 
   const filters: LockStratFilters = useMemo(() => ({ locked, measure }), [locked, measure]);
 

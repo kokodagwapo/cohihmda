@@ -4,7 +4,7 @@
  * Uses same period filter as Workflow Conversion; filters drive base loan set.
  */
 
-import React, { useState, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useMemo, useEffect } from "react";
 import { format } from "date-fns";
 import {
   Card,
@@ -93,6 +93,37 @@ const DIMENSION_OPTIONS: ActorDimension[] = [
   "warehouse_co_name",
 ];
 
+const ACTORS_VIEW_FILTERS_KEY = "cohi-actors-view-filters";
+
+interface PersistedActorsFilters {
+  periodSelection?: PeriodSelection;
+  calculation?: ActorsCalculation;
+  turnTimeType?: ActorsTurnTimeType;
+  dateRangeType?: ActorsDateRangeType;
+  measure?: ActorsMeasure;
+  selectedActor?: { type: ActorDimension; name: string } | null;
+  selectedStatus?: string | null;
+  tableDimensions?: [ActorDimension, ActorDimension, ActorDimension, ActorDimension];
+}
+
+function loadActorsFilters(): Partial<PersistedActorsFilters> {
+  try {
+    const raw = localStorage.getItem(ACTORS_VIEW_FILTERS_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) as Partial<PersistedActorsFilters>;
+  } catch {
+    return {};
+  }
+}
+
+function saveActorsFilters(next: PersistedActorsFilters): void {
+  try {
+    localStorage.setItem(ACTORS_VIEW_FILTERS_KEY, JSON.stringify(next));
+  } catch {
+    // ignore persistence errors
+  }
+}
+
 export interface ActorsViewProps {
   selectedTenantId?: string | null;
   selectedChannel?: string | null;
@@ -102,22 +133,25 @@ export function ActorsView({
   selectedTenantId,
   selectedChannel,
 }: ActorsViewProps) {
+  const saved = useMemo(() => loadActorsFilters(), []);
   const [periodSelection, setPeriodSelection] = useState<PeriodSelection>(() => {
+    const persisted = saved.periodSelection;
+    if (persisted?.dateRange?.start && persisted?.dateRange?.end) return persisted;
     const range = getDefaultDateRange();
     return { type: "preset", preset: "mtd", dateRange: range };
   });
-  const [calculation, setCalculation] = useState<ActorsCalculation>("average");
-  const [turnTimeType, setTurnTimeType] = useState<ActorsTurnTimeType>("app_to_fund_days");
-  const [dateRangeType, setDateRangeType] = useState<ActorsDateRangeType>("calendar_days");
-  const [measure, setMeasure] = useState<ActorsMeasure>("units");
+  const [calculation, setCalculation] = useState<ActorsCalculation>(saved.calculation ?? "average");
+  const [turnTimeType, setTurnTimeType] = useState<ActorsTurnTimeType>(saved.turnTimeType ?? "app_to_fund_days");
+  const [dateRangeType, setDateRangeType] = useState<ActorsDateRangeType>(saved.dateRangeType ?? "calendar_days");
+  const [measure, setMeasure] = useState<ActorsMeasure>(saved.measure ?? "units");
   const [selectedActor, setSelectedActor] = useState<{
     type: ActorDimension;
     name: string;
-  } | null>(null);
-  const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
+  } | null>(saved.selectedActor ?? null);
+  const [selectedStatus, setSelectedStatus] = useState<string | null>(saved.selectedStatus ?? null);
   const [tableDimensions, setTableDimensions] = useState<
     [ActorDimension, ActorDimension, ActorDimension, ActorDimension]
-  >(["loan_officer", "processor", "underwriter", "closer"]);
+  >(saved.tableDimensions ?? ["loan_officer", "processor", "underwriter", "closer"]);
   const [searchQueries, setSearchQueries] = useState<[string, string, string, string]>([
     "",
     "",
@@ -158,6 +192,28 @@ export function ActorsView({
 
   const clearActorFilter = useCallback(() => setSelectedActor(null), []);
   const clearStatusFilter = useCallback(() => setSelectedStatus(null), []);
+
+  useEffect(() => {
+    saveActorsFilters({
+      periodSelection,
+      calculation,
+      turnTimeType,
+      dateRangeType,
+      measure,
+      selectedActor,
+      selectedStatus,
+      tableDimensions,
+    });
+  }, [
+    periodSelection,
+    calculation,
+    turnTimeType,
+    dateRangeType,
+    measure,
+    selectedActor,
+    selectedStatus,
+    tableDimensions,
+  ]);
 
   const turnTimeLabel =
     calculation === "median"

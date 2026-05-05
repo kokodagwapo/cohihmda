@@ -139,9 +139,24 @@ export function useEstimatedClosingsRiskViewState(args: { tenantId: string | nul
     setIsLoading(true);
     try {
       const response = await api.request<PreferenceResponse>(`/api/user/preferences/${preferenceKey}`);
+      const hasServerPreferenceValue =
+        response != null &&
+        typeof response === "object" &&
+        "preference_value" in response &&
+        response.preference_value != null;
+      if (!hasServerPreferenceValue) {
+        const local = readLocal(preferenceKey);
+        if (local) {
+          const localJson = JSON.stringify(local);
+          lastHydratedJsonRef.current = localJson;
+          lastPersistedJsonRef.current = localJson;
+          return local;
+        }
+      }
       const normalized = normalizeEstimatedClosingsRiskViewState(response?.preference_value ?? null);
       const json = JSON.stringify(normalized);
       lastHydratedJsonRef.current = json;
+      lastPersistedJsonRef.current = json;
       writeLocal(preferenceKey, normalized);
       return normalized;
     } catch (error) {
@@ -151,7 +166,9 @@ export function useEstimatedClosingsRiskViewState(args: { tenantId: string | nul
       }
       const local = readLocal(preferenceKey);
       if (!local) return null;
-      lastHydratedJsonRef.current = JSON.stringify(local);
+      const localJson = JSON.stringify(local);
+      lastHydratedJsonRef.current = localJson;
+      lastPersistedJsonRef.current = localJson;
       return local;
     } finally {
       setIsLoading(false);
