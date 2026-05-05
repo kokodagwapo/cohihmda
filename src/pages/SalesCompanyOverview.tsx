@@ -114,7 +114,7 @@ const AGING_FILTER_ROWS: { key: SalesCompanyOverviewAgingBucket; label: string }
 ];
 
 const pillBadgeTriggerClass =
-  "inline-flex max-w-[min(280px,calc(100vw-6rem))] cursor-pointer items-center gap-1 rounded-full border border-blue-200/80 bg-white px-2.5 py-0.5 text-left text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700/80";
+  "inline-flex max-w-[min(340px,calc(100vw-6rem))] cursor-pointer items-center gap-1 rounded-full border border-sky-500 bg-sky-500 px-2.5 py-0.5 text-left text-sm font-medium text-white transition-colors hover:bg-sky-600 dark:border-sky-500 dark:bg-sky-500 dark:text-white dark:hover:bg-sky-600";
 
 function SalesCompanyOverviewStringFilterPopover({
   title,
@@ -734,7 +734,7 @@ const SalesCompanyOverview = () => {
 
             {hasChartFilters && (
               <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-100/80 bg-blue-50/50 px-3 py-2 dark:border-slate-700/80 dark:bg-slate-900/40">
-                <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Active filters</span>
+                <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Active filters</span>
                 {loanTypeFilters.length > 0 && (
                   <div className="flex items-center gap-0.5">
                     <SalesCompanyOverviewStringFilterPopover
@@ -820,7 +820,7 @@ const SalesCompanyOverview = () => {
                     </button>
                   </div>
                 )}
-                <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={clearAllChartFilters}>
+                <Button type="button" variant="ghost" size="sm" onClick={clearAllChartFilters}>
                   Clear all filters
                 </Button>
               </div>
