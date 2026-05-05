@@ -113,14 +113,66 @@ async function selectGrouping(page: Page, optionLabel: "Workflow" | "Individual"
   await page.getByRole("option", { name: optionLabel }).click();
 }
 
-async function waitForPreferenceGet(userPage: Page, key: string, timeout = 30_000) {
-  return userPage.waitForResponse(
-    (response) =>
-      response.url().includes(`/api/user/preferences/${key}`) &&
-      response.request().method() === "GET" &&
-      response.status() === 200,
-    { timeout },
-  );
+/** Shared dev/CI environments sometimes rate-limit `/api/user/preferences/*` (HTTP 429). Space out bursts. */
+async function pacePreferenceWrites(userPage: Page, ms = 1_000) {
+  await userPage.waitForTimeout(ms);
+}
+
+/**
+ * Waits for a successful preferences GET. Retries on 429 (Too Many Requests) by backing off and reloading,
+ * and recovers from a missed listener window by reloading until `timeout`.
+ */
+async function waitForPreferenceGet(userPage: Page, key: string, timeout = 45_000) {
+  const urlPart = `/api/user/preferences/${key}`;
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const slice = Math.min(20_000, Math.max(5_000, deadline - Date.now()));
+    let response;
+    try {
+      response = await userPage.waitForResponse(
+        (r) => r.url().includes(urlPart) && r.request().method() === "GET",
+        { timeout: slice },
+      );
+    } catch {
+      if (Date.now() >= deadline) {
+        throw new Error(`Timed out waiting for GET ${urlPart}`);
+      }
+      await userPage.waitForTimeout(800);
+      await userPage.reload({ waitUntil: "domcontentloaded" });
+      continue;
+    }
+    if (response.status() === 200) return response;
+    if (response.status() === 429) {
+      await userPage.waitForTimeout(2_500);
+      await userPage.reload({ waitUntil: "domcontentloaded" });
+      continue;
+    }
+    expect(response.status(), `GET ${urlPart}`).toBe(200);
+    return response;
+  }
+  throw new Error(`Timed out waiting for 200 GET ${urlPart}`);
+}
+
+/** Clicks delete and waits for bookmark PUT; retries when the server returns 429. */
+async function clickBookmarkDeleteAndWaitForPut(userPage: Page, deleteButton: Locator, attempts = 5) {
+  for (let i = 0; i < attempts; i += 1) {
+    const [, res] = await Promise.all([
+      deleteButton.click(),
+      userPage.waitForResponse(
+        (r) =>
+          r.url().includes("/api/user/preferences/workflowConversionBookmarksV1") &&
+          r.request().method() === "PUT" &&
+          r.status() < 500,
+        { timeout: 45_000 },
+      ),
+    ]);
+    if (res.status() !== 429) {
+      expect(res.status(), "bookmark delete should persist via PUT").toBeLessThan(300);
+      return res;
+    }
+    await pacePreferenceWrites(userPage, 2_000 + i * 1_500);
+  }
+  throw new Error("bookmark delete PUT repeatedly returned 429 (rate limited)");
 }
 
 /** One saved-bookmark row in the Bookmarks dialog (`WorkflowConversionView` card layout). */
@@ -222,6 +274,7 @@ test.describe("Workflow Conversion bookmarks (COHI-364)", () => {
     await expect(overwriteDialog.getByRole("heading", { name: "Update bookmark?" })).toBeVisible();
     await overwriteDialog.getByRole("button", { name: "Update Selected Bookmark" }).click();
     await expect(overwriteDialog).toBeHidden({ timeout: 15_000 });
+    await pacePreferenceWrites(userPage);
 
     await main.getByRole("button", { name: "Bookmarks" }).click();
     await expect(bookmarksDialog.getByText(/Grouping:.*Individual/)).toBeVisible();
@@ -236,17 +289,8 @@ test.describe("Workflow Conversion bookmarks (COHI-364)", () => {
     await expect(bookmarksDialog.getByText(bookmarkRenamed, { exact: false })).toBeVisible();
 
     const renamedRow = bookmarkEntryRow(bookmarksDialog, bookmarkRenamed);
-    const [, deleteResponse] = await Promise.all([
-      renamedRow.getByRole("button", { name: "Delete" }).click(),
-      userPage.waitForResponse(
-        (response) =>
-          response.url().includes("/api/user/preferences/workflowConversionBookmarksV1") &&
-          response.request().method() === "PUT" &&
-          response.status() < 500,
-        { timeout: 45_000 },
-      ),
-    ]);
-    expect(deleteResponse.status(), "bookmark delete should persist via PUT").toBeLessThan(300);
+    await pacePreferenceWrites(userPage);
+    await clickBookmarkDeleteAndWaitForPut(userPage, renamedRow.getByRole("button", { name: "Delete" }));
     await expect(bookmarksDialog.getByText(bookmarkRenamed, { exact: false })).toHaveCount(0);
     await userPage.keyboard.press("Escape");
 
@@ -326,17 +370,8 @@ test.describe("Workflow Conversion bookmarks (COHI-364)", () => {
     await workflowMain(userPage).getByRole("button", { name: "Bookmarks" }).click();
     await expect(bookmarksDialog).toBeVisible();
     const row = bookmarkEntryRow(bookmarksDialog, bookmarkName);
-    const [, wbDeleteResponse] = await Promise.all([
-      row.getByRole("button", { name: "Delete" }).click(),
-      userPage.waitForResponse(
-        (response) =>
-          response.url().includes("/api/user/preferences/workflowConversionBookmarksV1") &&
-          response.request().method() === "PUT" &&
-          response.status() < 500,
-        { timeout: 45_000 },
-      ),
-    ]);
-    expect(wbDeleteResponse.status()).toBeLessThan(300);
+    await pacePreferenceWrites(userPage);
+    await clickBookmarkDeleteAndWaitForPut(userPage, row.getByRole("button", { name: "Delete" }));
     await userPage.keyboard.press("Escape");
   });
 });
