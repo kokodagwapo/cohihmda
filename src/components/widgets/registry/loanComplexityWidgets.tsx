@@ -280,7 +280,7 @@ function LoanComplexityPivotWidget({
                         className={cn(
                           "border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50/50 dark:hover:bg-slate-800/30 cursor-pointer",
                           onSelectGroup && "hover:bg-sky-50/50 dark:hover:bg-sky-900/20",
-                          rowSelected && "bg-[#52b852]/20 dark:bg-[#52b852]/25"
+                          rowSelected && "bg-blue-50/80 dark:bg-slate-700/60"
                         )}
                         onClick={(e) => {
                           e.stopPropagation();
@@ -293,7 +293,7 @@ function LoanComplexityPivotWidget({
                           }
                         }}
                       >
-                        <td className={cn("pl-10 pr-3 py-1.5 whitespace-nowrap", rowSelected ? "text-[#2d7a2d] dark:text-[#6bcf6b] font-medium" : "text-slate-600 dark:text-slate-400")}>{row.groupName}</td>
+                        <td className={cn("pl-10 pr-3 py-1.5 whitespace-nowrap", rowSelected ? "text-sky-700 dark:text-sky-300 font-medium" : "text-slate-600 dark:text-slate-400")}>{row.groupName}</td>
                         <PivotCells row={row} loanTypes={loanTypes} purposes={purposes} isDark={isDark} showActive={showActive} showOriginated={showOriginated} showDenied={showDenied} showWithdrawn={showWithdrawn} />
                       </tr>
                     ); })}
@@ -336,7 +336,7 @@ function LoanComplexityChartWidget({
   const showLoadingPlaceholder = !hasData && loading;
 
   const colorScale = useCallback((val: number, isSelected: boolean) => {
-    if (isSelected) return '#52b852';
+    if (isSelected) return "#0ea5e9";
     if (val <= 100) return "#a8ccf0";
     if (val <= 115) return "#2f85da";
     return "#174d82";

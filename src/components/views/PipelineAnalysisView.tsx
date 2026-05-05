@@ -1055,50 +1055,53 @@ export function PipelineAnalysisView({
                   <SelectItem value="units">Units</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+          </div>
+
+          {((viewMode === "week" && selectedWeekValues.length > 0) ||
+            (viewMode === "month" && selectedMonths.length > 0)) && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-blue-100/80 bg-blue-50/50 px-3 py-2 dark:border-slate-700/80 dark:bg-slate-900/40">
+              <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Active filters</span>
               {viewMode === "week" && selectedWeekValues.length > 0 && (
-                <span className="inline-flex items-center gap-1 rounded-md bg-sky-100 dark:bg-sky-900/40 px-2 py-0.5 text-sm">
-                  <span className="text-muted-foreground whitespace-nowrap">
-                    Selected {snapshotDayLabel}:
-                  </span>
-                  {selectedWeekValues.sort((a, b) => a - b).map((w) => ordinal(w)).join(", ")}
-                  <UITooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedWeekValues([])}
-                        className="p-0.5 rounded hover:bg-sky-200 dark:hover:bg-sky-800"
-                        aria-label="Clear week filter"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top">Clear Selection</TooltipContent>
-                  </UITooltip>
+                <span className="inline-flex items-center gap-1 rounded-full border border-sky-500 bg-sky-500 px-2.5 py-0.5 text-sm font-medium text-white">
+                  <span className="whitespace-nowrap">Selected {snapshotDayLabel}: {selectedWeekValues.sort((a, b) => a - b).map((w) => ordinal(w)).join(", ")}</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedWeekValues([])}
+                    className="rounded-sm p-0.5 hover:bg-sky-600/80"
+                    aria-label="Clear week filter"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
                 </span>
               )}
               {viewMode === "month" && selectedMonths.length > 0 && (
-                <span className="inline-flex items-center gap-1 rounded-md bg-sky-100 dark:bg-sky-900/40 px-2 py-0.5 text-sm">
-                  <span className="text-muted-foreground whitespace-nowrap">
-                    Selected Months:
-                  </span>
-                  {selectedMonths.sort((a, b) => a - b).map((m) => MONTH_LABELS[m - 1]).join(", ")}
-                  <UITooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedMonths([])}
-                        className="p-0.5 rounded hover:bg-sky-200 dark:hover:bg-sky-800"
-                        aria-label="Clear month filter"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top">Clear Selection</TooltipContent>
-                  </UITooltip>
+                <span className="inline-flex items-center gap-1 rounded-full border border-sky-500 bg-sky-500 px-2.5 py-0.5 text-sm font-medium text-white">
+                  <span className="whitespace-nowrap">Selected Months: {selectedMonths.sort((a, b) => a - b).map((m) => MONTH_LABELS[m - 1]).join(", ")}</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedMonths([])}
+                    className="rounded-sm p-0.5 hover:bg-sky-600/80"
+                    aria-label="Clear month filter"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
                 </span>
               )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 text-xs"
+                onClick={() => {
+                  setSelectedWeekValues([]);
+                  setSelectedMonths([]);
+                }}
+              >
+                Clear all filters
+              </Button>
             </div>
-          </div>
+          )}
 
           {/* Filter row: loan type, loan purpose, branch (multi-select with Apply/Cancel) */}
           <div className="flex flex-wrap items-center gap-3 pt-1 border-t border-border/60">
@@ -1902,8 +1905,11 @@ export function PipelineAnalysisView({
                           name={`${y} Units`}
                           fill={i === 0 ? "#00008f" : "#52b852"}
                           radius={[2, 2, 0, 0]}
-                          onClick={(_, index) => {
-                            const p = pipelineChartData[index] as { week?: number; month?: number } | undefined;
+                          onClick={(barData, index) => {
+                            const directPayload = (barData as { payload?: { week?: number; month?: number } })?.payload;
+                            const p =
+                              directPayload ??
+                              (pipelineChartData[index] as { week?: number; month?: number } | undefined);
                             if (p?.week != null) toggleWeek(p.week);
                             if (p?.month != null) toggleMonth(p.month);
                           }}
@@ -1912,10 +1918,17 @@ export function PipelineAnalysisView({
                             const selected = isMonthMode
                               ? selectedMonths.includes((entry as { month?: number }).month ?? 0)
                               : selectedWeekValues.includes((entry as { week?: number }).week ?? 0);
+                            const week = (entry as { week?: number }).week;
+                            const month = (entry as { month?: number }).month;
                             return (
                               <Cell
                                 key={index}
                                 fill={selected ? "#7dd3fc" : i === 0 ? "#00008f" : "#52b852"}
+                                style={{ cursor: "pointer" }}
+                                onClick={() => {
+                                  if (week != null) toggleWeek(week);
+                                  if (month != null) toggleMonth(month);
+                                }}
                               />
                             );
                           })}
@@ -2044,8 +2057,11 @@ export function PipelineAnalysisView({
                           name={`${y} LO Count`}
                           fill={i === 0 ? "#00008f" : "#52b852"}
                           radius={[2, 2, 0, 0]}
-                          onClick={(_, index) => {
-                            const p = pipelineLoCountChartData[index] as { week?: number; month?: number } | undefined;
+                          onClick={(barData, index) => {
+                            const directPayload = (barData as { payload?: { week?: number; month?: number } })?.payload;
+                            const p =
+                              directPayload ??
+                              (pipelineLoCountChartData[index] as { week?: number; month?: number } | undefined);
                             if (p?.week != null) toggleWeek(p.week);
                             if (p?.month != null) toggleMonth(p.month);
                           }}
@@ -2054,10 +2070,17 @@ export function PipelineAnalysisView({
                             const selected = isMonthMode
                               ? selectedMonths.includes((entry as { month?: number }).month ?? 0)
                               : selectedWeekValues.includes((entry as { week?: number }).week ?? 0);
+                            const week = (entry as { week?: number }).week;
+                            const month = (entry as { month?: number }).month;
                             return (
                               <Cell
                                 key={index}
                                 fill={selected ? "#7dd3fc" : i === 0 ? "#00008f" : "#52b852"}
+                                style={{ cursor: "pointer" }}
+                                onClick={() => {
+                                  if (week != null) toggleWeek(week);
+                                  if (month != null) toggleMonth(month);
+                                }}
                               />
                             );
                           })}

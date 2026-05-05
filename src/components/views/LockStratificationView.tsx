@@ -226,12 +226,22 @@ export function LockStratificationView({
   const [milestoneView, setMilestoneView] = useState<"bar" | "pivot">(saved.milestoneView ?? "bar");
   const [localPullThroughPeriod, setLocalPullThroughPeriod] = useState<PullThroughPeriod>(saved.pullThroughPeriod ?? "60");
   const [expandedPivotRows, setExpandedPivotRows] = useState<Set<string>>(new Set());
-  const [interestRateDrill, setInterestRateDrill] = useState<InterestRateDrill>(() => ({ level: 0 }));
+  const [localInterestRateDrill, setLocalInterestRateDrill] = useState<InterestRateDrill>(() => ({ level: 0 }));
 
   const locked = (groupFilters?.lockStratLocked as LockedFilter) ?? localLocked;
   const measure = (groupFilters?.lockStratMeasure as MeasureFilter) ?? localMeasure;
   const milestoneGroupBy = (groupFilters?.lockStratMilestoneGroupBy as MilestoneGroupBy) ?? localMilestoneGroupBy;
   const pullThroughPeriod = (groupFilters?.lockStratPullThroughPeriod as PullThroughPeriod) ?? localPullThroughPeriod;
+  const interestRateDrill =
+    (groupFilters?.lockStratSelectedInterestRateGroup as InterestRateDrill | undefined) ??
+    localInterestRateDrill;
+  const setInterestRateDrill = useCallback((next: InterestRateDrill) => {
+    if (groupId) {
+      updateFilters(groupId, { lockStratSelectedInterestRateGroup: next });
+      return;
+    }
+    setLocalInterestRateDrill(next);
+  }, [groupId, updateFilters]);
 
   useEffect(() => {
     if (!groupId) saveFilters({ locked: localLocked, measure: localMeasure, milestoneGroupBy: localMilestoneGroupBy, milestoneView, pullThroughPeriod: localPullThroughPeriod });
@@ -329,12 +339,12 @@ export function LockStratificationView({
         setInterestRateDrill({ level: 2, min, max });
       }
     },
-    [interestRateDrill.level, parseBucketRange]
+    [interestRateDrill.level, parseBucketRange, setInterestRateDrill]
   );
 
   const clearInterestRateFilter = useCallback(() => {
     setInterestRateDrill({ level: 0 });
-  }, []);
+  }, [setInterestRateDrill]);
 
   const interestRateFilterLabel = useMemo(() => {
     if (interestRateDrill.level === 0) return null;
@@ -925,24 +935,29 @@ export function LockStratificationView({
             </Select>
           </div>
           </div>
-          {interestRateFilterLabel && (
-            <div className="flex flex-wrap items-center gap-2 pt-3 mt-3 border-t border-border/60">
-              <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">Active Filters:</span>
-              <span className="inline-flex items-center gap-1.5 rounded-md bg-sky-100 dark:bg-sky-900/40 px-2.5 py-1 text-sm font-medium text-sky-800 dark:text-sky-200">
-                {interestRateFilterLabel}
-                <button
-                  type="button"
-                  onClick={clearInterestRateFilter}
-                  className="p-0.5 rounded hover:bg-sky-200 dark:hover:bg-sky-800 transition-colors"
-                  aria-label="Clear interest rate filter"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </span>
-            </div>
-          )}
         </CardContent>
       </Card>
+      )}
+      {interestRateFilterLabel && (
+        <div className="mt-3">
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-100/80 bg-blue-50/50 px-3 py-2 dark:border-slate-700/80 dark:bg-slate-900/40">
+            <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Active filters</span>
+            <span className="inline-flex items-center gap-1 rounded-full border border-sky-500 bg-sky-500 px-2.5 py-0.5 text-sm font-medium text-white">
+              {interestRateFilterLabel}
+              <button
+                type="button"
+                onClick={clearInterestRateFilter}
+                className="rounded-sm p-0.5 transition-colors hover:bg-sky-600/80"
+                aria-label="Clear interest rate filter"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+            <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={clearInterestRateFilter}>
+              Clear all filters
+            </Button>
+          </div>
+        </div>
       )}
 
       {/* ── KPIs ── */}

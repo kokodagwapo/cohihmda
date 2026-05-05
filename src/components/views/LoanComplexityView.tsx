@@ -681,11 +681,9 @@ export function LoanComplexityView({
         </div>
       </div>
       {selectedGroups.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 w-full min-w-0">
-          <span
-            className="inline-flex flex-wrap items-center gap-x-1 gap-y-1 px-2 py-1.5 rounded text-xs font-medium text-white max-w-full min-w-0 break-words whitespace-normal"
-            style={{ backgroundColor: "#52b852" }}
-          >
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-100/80 bg-blue-50/50 px-3 py-2 dark:border-slate-700/80 dark:bg-slate-900/40">
+          <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Active filters</span>
+          <span className="inline-flex flex-wrap items-center gap-x-1 gap-y-1 rounded-full border border-sky-500 bg-sky-500 px-2.5 py-0.5 text-sm font-medium text-white max-w-full min-w-0 break-words whitespace-normal">
             {(() => {
               const dimLabel = (d: string) =>
                 ACTOR_TYPE_OPTIONS.find((o) => o.value === d)?.label ??
@@ -702,13 +700,16 @@ export function LoanComplexityView({
             })()}
             <button
               type="button"
-              className="ml-0.5 rounded hover:bg-white/20 p-0.5 shrink-0"
+              className="ml-0.5 rounded p-0.5 shrink-0 hover:bg-sky-600/80"
               onClick={() => setSelectedGroups([])}
               aria-label="Clear selection"
             >
               <X className="h-3 w-3" />
             </button>
           </span>
+          <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setSelectedGroups([])}>
+            Clear all filters
+          </Button>
         </div>
       )}
 
@@ -877,7 +878,7 @@ export function LoanComplexityView({
                             tabIndex={0}
                             className={cn(
                               "border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50/50 dark:hover:bg-slate-800/30 cursor-pointer",
-                              isSelected && "bg-[#52b852]/20 dark:bg-[#52b852]/25"
+                              isSelected && "bg-blue-50/80 dark:bg-slate-700/60"
                             )}
                             onClick={(e) => {
                               e.stopPropagation();
@@ -1035,7 +1036,7 @@ export function LoanComplexityView({
                     const isSelected = selectedGroups.some(
                       (g) => g.dimension === effectiveGroupBy && g.groupName === groupName
                     );
-                    const fill = isSelected ? "#52b852" : complexityColorScale(avgComplexity ?? 0);
+                    const fill = isSelected ? "#0ea5e9" : complexityColorScale(avgComplexity ?? 0);
                     return (
                       <g
                         onClick={() => handleSelectGroup(effectiveGroupBy, groupName)}

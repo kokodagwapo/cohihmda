@@ -285,8 +285,8 @@ function EcdPieWidget({ data, loading, error, config }: WidgetRenderProps<ChartD
       </CardHeader>
       <CardContent className="h-[calc(100%-48px)]">
         {active.length > 0 ? (
-          <div className="mb-2 text-[11px] text-slate-600 dark:text-slate-300">
-            Active filters: {active.join(" | ")}
+          <div className="mb-2 rounded-xl border border-blue-100/80 bg-blue-50/50 px-2 py-1 text-xs text-slate-600 dark:border-slate-700/80 dark:bg-slate-900/40 dark:text-slate-300">
+            <span className="font-medium">Active filters:</span> {active.join(" | ")}
           </div>
         ) : null}
         {error ? <div className="text-xs text-red-600">{error}</div> : null}
@@ -356,8 +356,8 @@ function ComplexityBarWidget({ data, loading, error, config }: WidgetRenderProps
       <CardHeader className="pb-2"><CardTitle className="text-sm">Max Possible Funding by Complexity</CardTitle></CardHeader>
       <CardContent className="h-[calc(100%-48px)]">
         {active.length > 0 ? (
-          <div className="mb-2 text-[11px] text-slate-600 dark:text-slate-300">
-            Active filters: {active.join(" | ")}
+          <div className="mb-2 rounded-xl border border-blue-100/80 bg-blue-50/50 px-2 py-1 text-xs text-slate-600 dark:border-slate-700/80 dark:bg-slate-900/40 dark:text-slate-300">
+            <span className="font-medium">Active filters:</span> {active.join(" | ")}
           </div>
         ) : null}
         {error ? <div className="text-xs text-red-600">{error}</div> : null}
@@ -770,17 +770,27 @@ function ActiveFiltersWidget({ config }: WidgetRenderProps<Source>) {
         {active.length === 0 ? (
           <div className="text-xs text-slate-500">No filters applied</div>
         ) : (
-          <div className="flex flex-wrap gap-1">
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-100/80 bg-blue-50/50 px-3 py-2 dark:border-slate-700/80 dark:bg-slate-900/40">
+            <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Active filters</span>
             {active.map((a) => (
               <button
                 key={a.key}
                 onClick={a.clear}
-                className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-2 py-1 text-xs dark:border-slate-700"
+                className="inline-flex items-center gap-1 rounded-full border border-sky-500 bg-sky-500 px-2.5 py-0.5 text-sm font-medium text-white"
               >
                 {a.label}
                 <X className="h-3 w-3" />
               </button>
             ))}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 text-xs"
+              onClick={() => active.forEach((item) => item.clear())}
+            >
+              Clear all filters
+            </Button>
           </div>
         )}
       </CardContent>

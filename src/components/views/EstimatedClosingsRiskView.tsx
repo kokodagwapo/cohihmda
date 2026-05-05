@@ -1329,7 +1329,7 @@ export function EstimatedClosingsRiskView({
             type="button"
             className={cn(
               "inline-flex items-center gap-1 min-w-0 shrink",
-              activeDetailFilterIds.has(colId) && "text-emerald-700 dark:text-emerald-400",
+              activeDetailFilterIds.has(colId) && "text-sky-700 dark:text-sky-300",
             )}
             onClick={() => toggleSort(sortKey, detailSort, setDetailSort)}
           >
@@ -1354,7 +1354,7 @@ export function EstimatedClosingsRiskView({
                   className={cn(
                     "shrink-0 rounded p-1",
                     activeDetailFilterIds.has(colId)
-                      ? "text-emerald-600 dark:text-emerald-400"
+                      ? "text-sky-600 dark:text-sky-300"
                       : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100",
                   )}
                   aria-label={`Filter ${label}`}
@@ -1433,11 +1433,21 @@ export function EstimatedClosingsRiskView({
       </div>
 
       {hasAnyFilter && (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200/80 bg-slate-50/80 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/40">
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-100/80 bg-blue-50/50 px-3 py-2 dark:border-slate-700/80 dark:bg-slate-900/40">
+          <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Active filters</span>
           {activeFilterChips.map((chip) => (
-            <Badge key={chip.key} variant="outline" className="gap-1 border-emerald-300/80 bg-emerald-50 text-emerald-800 dark:border-emerald-700/80 dark:bg-emerald-950/40 dark:text-emerald-200">
+            <Badge
+              key={chip.key}
+              variant="outline"
+              className="gap-1 border-sky-500 bg-sky-500 text-white dark:border-sky-500 dark:bg-sky-500 dark:text-white"
+            >
               <span className="max-w-[280px] truncate">{chip.label}</span>
-              <button type="button" onClick={chip.onRemove} className="rounded-sm p-0.5 hover:bg-emerald-200/50 dark:hover:bg-emerald-900/50" aria-label={`Remove ${chip.label}`}>
+              <button
+                type="button"
+                onClick={chip.onRemove}
+                className="rounded-sm p-0.5 hover:bg-sky-600/80"
+                aria-label={`Remove ${chip.label}`}
+              >
                 <X className="h-3 w-3" />
               </button>
             </Badge>
@@ -1560,7 +1570,7 @@ export function EstimatedClosingsRiskView({
                   return (
                     <TableRow
                       key={String(row.sortOrder)}
-                      className={cn("cursor-pointer", active && "bg-emerald-50/90 dark:bg-emerald-950/30")}
+                      className={cn("cursor-pointer", active && "bg-blue-50/80 dark:bg-slate-700/60")}
                       onClick={() => toggleRemainingComplexityGroup(g)}
                     >
                       <TableCell>{g}</TableCell>
@@ -1627,7 +1637,7 @@ export function EstimatedClosingsRiskView({
                   return (
                     <TableRow
                       key={String(row.sortOrder)}
-                      className={cn("cursor-pointer", active && "bg-emerald-50/90 dark:bg-emerald-950/30")}
+                      className={cn("cursor-pointer", active && "bg-blue-50/80 dark:bg-slate-700/60")}
                       onClick={() => toggleRemainingProcessingStage(st)}
                     >
                       <TableCell>{st}</TableCell>
@@ -1750,7 +1760,7 @@ export function EstimatedClosingsRiskView({
                       style={{ height: virtualRow.size }}
                     >
                       <TableCell className="py-1.5">
-                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "loanNumber") && "ring-1 ring-emerald-500")} onClick={() => applyDetailCellFilter("loanNumber", row)}>
+                        <button type="button" className={cn(clickableCellClass, cellHighlight(row, "loanNumber") && "ring-1 ring-sky-500")} onClick={() => applyDetailCellFilter("loanNumber", row)}>
                           {String(row.loanNumber ?? "")}
                         </button>
                       </TableCell>
