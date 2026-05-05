@@ -176,7 +176,7 @@ function rowMatchesDrilldownSlice(row: ProductionDrilldownRow, d: ProductionTren
 }
 
 const pillBadgeTriggerClass =
-  "inline-flex max-w-[min(340px,calc(100vw-6rem))] cursor-pointer items-center gap-1 rounded-full border border-blue-200/80 bg-white px-2.5 py-0.5 text-left text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700/80";
+  "inline-flex max-w-[min(340px,calc(100vw-6rem))] cursor-pointer items-center gap-1 rounded-full border border-sky-500 bg-sky-500 px-2.5 py-0.5 text-left text-sm font-medium text-white transition-colors hover:bg-sky-600 dark:border-sky-500 dark:bg-sky-500 dark:text-white dark:hover:bg-sky-600";
 
 function ProductionTrendsStringFilterPopover({
   title,
