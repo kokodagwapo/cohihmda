@@ -148,6 +148,55 @@ export interface WorkflowConversionViewProps {
 }
 
 const DEBOUNCE_MS = 300;
+const PAGE_STATE_STORAGE_KEY = "cohi-workflow-conversion-page-state-v1";
+
+interface WorkflowConversionPageStateSnapshot {
+  payload: ReturnType<typeof stateToWorkflowBookmarkPayload>;
+  selectedBookmarkId: string | null;
+}
+
+function makePageStateStorageScopeKey(
+  selectedTenantId?: string | null,
+  selectedChannel?: string | null,
+): string {
+  const tenant = selectedTenantId ?? "default-tenant";
+  const channel = selectedChannel ?? "all";
+  return `${tenant}::${channel}`;
+}
+
+function safeReadPageStateSnapshot(
+  scopeKey: string,
+): WorkflowConversionPageStateSnapshot | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(PAGE_STATE_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Record<string, WorkflowConversionPageStateSnapshot>;
+    const candidate = parsed?.[scopeKey];
+    if (!candidate || typeof candidate !== "object" || !candidate.payload) return null;
+    return {
+      payload: candidate.payload,
+      selectedBookmarkId: typeof candidate.selectedBookmarkId === "string" ? candidate.selectedBookmarkId : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function safeWritePageStateSnapshot(
+  scopeKey: string,
+  snapshot: WorkflowConversionPageStateSnapshot,
+) {
+  if (typeof window === "undefined") return;
+  try {
+    const raw = window.localStorage.getItem(PAGE_STATE_STORAGE_KEY);
+    const parsed = raw ? (JSON.parse(raw) as Record<string, WorkflowConversionPageStateSnapshot>) : {};
+    parsed[scopeKey] = snapshot;
+    window.localStorage.setItem(PAGE_STATE_STORAGE_KEY, JSON.stringify(parsed));
+  } catch {
+    // ignore localStorage write failures
+  }
+}
 
 export function WorkflowConversionView({
   selectedTenantId,
@@ -191,6 +240,12 @@ export function WorkflowConversionView({
   const [editingBookmarkId, setEditingBookmarkId] = useState<string | null>(null);
   const [editingBookmarkName, setEditingBookmarkName] = useState("");
   const [bookmarkRestoreWarning, setBookmarkRestoreWarning] = useState<string | null>(null);
+  const stateHydratedRef = useRef(false);
+  const lastHydratedScopeRef = useRef<string | null>(null);
+  const pageStateScopeKey = useMemo(
+    () => makePageStateStorageScopeKey(selectedTenantId, selectedChannel),
+    [selectedTenantId, selectedChannel],
+  );
 
   const {
     bookmarks,
@@ -356,6 +411,37 @@ export function WorkflowConversionView({
 
   const milestoneIdSet = useMemo(() => new Set(milestones.map((milestone) => milestone.id)), [milestones]);
 
+  useEffect(() => {
+    if (lastHydratedScopeRef.current !== pageStateScopeKey) {
+      stateHydratedRef.current = false;
+      lastHydratedScopeRef.current = pageStateScopeKey;
+    }
+    // Wait until milestones are loaded before validating/restoring saved segment pairs.
+    // Otherwise an empty milestone set makes valid saved pairs look "invalid" and resets to defaults.
+    if (embeddedInWorkbench || stateHydratedRef.current || milestonesLoading) return;
+    const snapshot = safeReadPageStateSnapshot(pageStateScopeKey);
+    if (!snapshot) {
+      stateHydratedRef.current = true;
+      return;
+    }
+    const restore = workflowBookmarkPayloadToState(
+      snapshot.payload,
+      milestoneIdSet,
+      defaultPeriod,
+    );
+    setPeriodSelection(restore.state.periodSelection);
+    setCalculationType(restore.state.calculationType);
+    setGrouping(restore.state.grouping);
+    setSegments(restore.state.segments);
+    setSelectedBookmarkId(snapshot.selectedBookmarkId);
+    setBookmarkRestoreWarning(
+      restore.hadInvalidMilestones
+        ? "Some saved milestone steps are unavailable and were reset."
+        : null,
+    );
+    stateHydratedRef.current = true;
+  }, [embeddedInWorkbench, pageStateScopeKey, milestoneIdSet, defaultPeriod, milestonesLoading]);
+
   const bookmarkMilestoneLabel = useCallback(
     (milestoneId: string) => milestones.find((m) => m.id === milestoneId)?.label ?? milestoneId,
     [milestones],
@@ -371,6 +457,14 @@ export function WorkflowConversionView({
       }),
     [segments, calculationType, grouping, periodSelection],
   );
+
+  useEffect(() => {
+    if (embeddedInWorkbench || !stateHydratedRef.current) return;
+    safeWritePageStateSnapshot(pageStateScopeKey, {
+      payload: currentBookmarkPayload,
+      selectedBookmarkId,
+    });
+  }, [embeddedInWorkbench, pageStateScopeKey, currentBookmarkPayload, selectedBookmarkId]);
 
   const selectedBookmark = useMemo(
     () => bookmarks.find((bookmark) => bookmark.id === selectedBookmarkId) ?? null,
