@@ -524,33 +524,26 @@ export function LockStratificationView({
         <g transform={`translate(${x},${y})`}>
           {groupLabel ? (
             <foreignObject x={-240} y={-18} width={130} height={36}>
-              <div xmlns="http://www.w3.org/1999/xhtml" style={{ height: "100%" }}>
-                <button
-                  type="button"
-                  className="hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded-sm"
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: isDark ? "#e2e8f0" : "#334155",
-                    lineHeight: "1.25",
-                    textAlign: "left",
-                    overflow: "hidden",
-                    wordWrap: "break-word",
-                    background: "none",
-                    border: "none",
-                    padding: 0,
-                    margin: 0,
-                    width: "100%",
-                    cursor: "pointer",
-                  }}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    toggleMilestoneGroupFilter(groupForFilter);
-                  }}
-                >
-                  {groupLabel}
-                </button>
+              <div
+                xmlns="http://www.w3.org/1999/xhtml"
+                style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: isDark ? "#e2e8f0" : "#334155",
+                  lineHeight: "1.25",
+                  textAlign: "left",
+                  overflow: "hidden",
+                  wordWrap: "break-word",
+                  cursor: "pointer",
+                }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  toggleMilestoneGroupFilter(groupForFilter);
+                }}
+                title={`Filter ${groupForFilter}`}
+              >
+                {groupLabel}
               </div>
             </foreignObject>
           ) : null}
