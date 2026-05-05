@@ -19,6 +19,9 @@ export interface LockStratFilters {
   measure: MeasureFilter;
   rateMin?: number;
   rateMax?: number;
+  expirationBucket?: string;
+  selectedGroupBy?: MilestoneGroupBy;
+  selectedGroupValue?: string;
 }
 
 export interface LockStratKPIs {
@@ -137,6 +140,26 @@ function buildBaseWhere(
     );
     params.push(Number(filters.rateMin), Number(filters.rateMax));
     idx += 2;
+  }
+
+  if (filters.expirationBucket && filters.expirationBucket.trim() !== "") {
+    const bucketCase = EXPIRATION_BUCKET_CASE(alias);
+    conditions.push(`((${bucketCase}) = $${idx})`);
+    params.push(filters.expirationBucket.trim());
+    idx += 1;
+  }
+
+  if (
+    filters.selectedGroupBy &&
+    filters.selectedGroupValue &&
+    filters.selectedGroupValue.trim() !== ""
+  ) {
+    const groupCol = getGroupByColumn(filters.selectedGroupBy);
+    conditions.push(
+      `(COALESCE(NULLIF(TRIM(${l}${groupCol}), ''), '(Blank)') = $${idx})`
+    );
+    params.push(filters.selectedGroupValue.trim());
+    idx += 1;
   }
 
   return { clause: `WHERE ${conditions.join(" AND ")}`, params };

@@ -117,6 +117,9 @@ export function useLockStratificationData(
     milestoneGroupBy: MilestoneGroupBy;
     pullThroughPeriod: PullThroughPeriod;
     interestRateDrill?: InterestRateDrill;
+    expirationBucket?: string | null;
+    selectedGroupBy?: MilestoneGroupBy | null;
+    selectedGroupValue?: string | null;
   }
 ): UseLockStratificationDataResult {
   const [kpis, setKpis] = useState<LockStratKPIs | null>(null);
@@ -141,6 +144,13 @@ export function useLockStratificationData(
     if (drill && drill.level >= 1) {
       base.set("rate_min", String(drill.min));
       base.set("rate_max", String(drill.max));
+    }
+    if (options.expirationBucket) {
+      base.set("expiration_bucket", options.expirationBucket);
+    }
+    if (options.selectedGroupBy && options.selectedGroupValue) {
+      base.set("selected_group_by", options.selectedGroupBy);
+      base.set("selected_group_value", options.selectedGroupValue);
     }
 
     try {
@@ -205,6 +215,9 @@ export function useLockStratificationData(
     options.milestoneGroupBy,
     options.pullThroughPeriod,
     options.interestRateDrill,
+    options.expirationBucket,
+    options.selectedGroupBy,
+    options.selectedGroupValue,
   ]);
 
   useEffect(() => {

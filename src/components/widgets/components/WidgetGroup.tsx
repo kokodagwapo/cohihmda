@@ -2762,12 +2762,37 @@ export function WidgetGroup({
   }>({ milestone: [], actor: [], loanType: [], loanPurpose: [] });
   const lockStratInterestRateSelection = (filters.lockStratSelectedInterestRateGroup ??
     { level: 0 }) as InterestRateDrill;
+  const lockStratGroupBy = (filters.lockStratMilestoneGroupBy ?? "current_milestone") as
+    | "current_milestone"
+    | "investor"
+    | "branch"
+    | "broker_lender"
+    | "lo"
+    | "ae";
+  const lockStratGroupLabel =
+    lockStratGroupBy === "current_milestone"
+      ? "Current Milestone"
+      : lockStratGroupBy === "investor"
+        ? "Investor"
+        : lockStratGroupBy === "branch"
+          ? "Branch"
+          : lockStratGroupBy === "broker_lender"
+            ? "Broker Lender"
+            : lockStratGroupBy === "lo"
+              ? "Loan Officer"
+              : "Account Executive";
   const lockStratInterestRateLabel =
     lockStratInterestRateSelection.level === 0
       ? null
       : lockStratInterestRateSelection.min === lockStratInterestRateSelection.max
         ? `Rate: ${lockStratInterestRateSelection.min.toFixed(4)}`
         : `Rate: ${lockStratInterestRateSelection.min.toFixed(3)} - ${lockStratInterestRateSelection.max.toFixed(3)}`;
+  const lockStratExpirationLabel = filters.lockStratSelectedExpirationBucket
+    ? `Days to Expiration: ${filters.lockStratSelectedExpirationBucket}`
+    : null;
+  const lockStratSelectedGroupLabel = filters.lockStratSelectedMilestoneGroup
+    ? `${lockStratGroupLabel}: ${filters.lockStratSelectedMilestoneGroup}`
+    : null;
 
   // Normalize legacy widgetIds to items
   const items = useMemo(
@@ -3207,6 +3232,12 @@ export function WidgetGroup({
       if ((filters.lockStratSelectedInterestRateGroup?.level ?? 0) > 0)
         toSave.lockStratSelectedInterestRateGroup =
           filters.lockStratSelectedInterestRateGroup;
+      if (filters.lockStratSelectedExpirationBucket)
+        toSave.lockStratSelectedExpirationBucket =
+          filters.lockStratSelectedExpirationBucket;
+      if (filters.lockStratSelectedMilestoneGroup)
+        toSave.lockStratSelectedMilestoneGroup =
+          filters.lockStratSelectedMilestoneGroup;
     }
     if (sectionType === "loan-complexity") {
       if (
@@ -3311,6 +3342,8 @@ export function WidgetGroup({
     filters.lockStratMilestoneGroupBy,
     filters.lockStratPullThroughPeriod,
     filters.lockStratSelectedInterestRateGroup,
+    filters.lockStratSelectedExpirationBucket,
+    filters.lockStratSelectedMilestoneGroup,
     filters.loanComplexityGroupBy,
     filters.loanComplexityActorType,
     filters.loanComplexityCurrentStatus,
@@ -4621,26 +4654,64 @@ export function WidgetGroup({
                       })
                     }
                   />
-                  {lockStratInterestRateLabel ? (
+                  {lockStratInterestRateLabel ||
+                  lockStratExpirationLabel ||
+                  lockStratSelectedGroupLabel ? (
                     <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-100/80 bg-blue-50/50 px-3 py-2 dark:border-slate-700/80 dark:bg-slate-900/40">
                       <span className="text-sm font-medium text-slate-500 dark:text-slate-400">
                         Active filters
                       </span>
-                      <span className="inline-flex items-center gap-1 rounded-full border border-sky-500 bg-sky-500 px-2.5 py-0.5 text-sm font-medium text-white">
-                        {lockStratInterestRateLabel}
-                        <button
-                          type="button"
-                          onClick={() =>
-                            updateFilters(groupId, {
-                              lockStratSelectedInterestRateGroup: { level: 0 },
-                            })
-                          }
-                          className="rounded-sm p-0.5 hover:bg-sky-600/80"
-                          aria-label="Clear interest rate filter"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </span>
+                      {lockStratInterestRateLabel ? (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-sky-500 bg-sky-500 px-2.5 py-0.5 text-sm font-medium text-white">
+                          {lockStratInterestRateLabel}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateFilters(groupId, {
+                                lockStratSelectedInterestRateGroup: { level: 0 },
+                              })
+                            }
+                            className="rounded-sm p-0.5 hover:bg-sky-600/80"
+                            aria-label="Clear interest rate filter"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      ) : null}
+                      {lockStratExpirationLabel ? (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-sky-500 bg-sky-500 px-2.5 py-0.5 text-sm font-medium text-white">
+                          {lockStratExpirationLabel}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateFilters(groupId, {
+                                lockStratSelectedExpirationBucket: null,
+                              })
+                            }
+                            className="rounded-sm p-0.5 hover:bg-sky-600/80"
+                            aria-label="Clear days to expiration filter"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      ) : null}
+                      {lockStratSelectedGroupLabel ? (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-sky-500 bg-sky-500 px-2.5 py-0.5 text-sm font-medium text-white">
+                          {lockStratSelectedGroupLabel}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateFilters(groupId, {
+                                lockStratSelectedMilestoneGroup: null,
+                              })
+                            }
+                            className="rounded-sm p-0.5 hover:bg-sky-600/80"
+                            aria-label="Clear milestone group filter"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      ) : null}
                       <Button
                         type="button"
                         variant="ghost"
@@ -4649,6 +4720,8 @@ export function WidgetGroup({
                         onClick={() =>
                           updateFilters(groupId, {
                             lockStratSelectedInterestRateGroup: { level: 0 },
+                            lockStratSelectedExpirationBucket: null,
+                            lockStratSelectedMilestoneGroup: null,
                           })
                         }
                       >

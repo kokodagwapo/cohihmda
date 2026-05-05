@@ -191,6 +191,10 @@ export interface SectionFilters {
   lockStratPullThroughPeriod?: string;
   /** Lock Stratification: selected interest-rate drill path for cross-widget filtering. */
   lockStratSelectedInterestRateGroup?: InterestRateDrill;
+  /** Lock Stratification: selected days-to-lock-expiration bucket. */
+  lockStratSelectedExpirationBucket?: string | null;
+  /** Lock Stratification: selected group value from Active Loans by <group>. */
+  lockStratSelectedMilestoneGroup?: string | null;
   /** Loan Complexity: group by (actors = by actor type, branch, current_loan_status) */
   loanComplexityGroupBy?: 'actors' | 'branch' | 'current_loan_status';
   /** Loan Complexity: when groupBy is actors, which actor dimension (loan_officer, processor, etc.) */
@@ -403,6 +407,8 @@ export const useWidgetSectionStore = create<WidgetSectionState>((set, get) => ({
           lockStratMilestoneGroupBy: 'current_milestone',
           lockStratPullThroughPeriod: '60',
           lockStratSelectedInterestRateGroup: { level: 0 },
+          lockStratSelectedExpirationBucket: null,
+          lockStratSelectedMilestoneGroup: null,
         };
       } else if (sectionType === 'loan-complexity') {
         const now = new Date();
