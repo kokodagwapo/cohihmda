@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { TopTieringLayout } from "@/components/layout/TopTieringLayout";
 import { TopTieringTopBar } from "@/components/layout/TopTieringTopBar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,6 +10,11 @@ import { useTenantStore } from "@/stores/tenantStore";
 import { useAuth } from "@/contexts/AuthContext";
 import { useWidgetSectionStore } from "@/stores/widgetSectionStore";
 import { useLoanDetailData, type LoanDetailRow } from "@/hooks/useLoanDetailData";
+import {
+  normalizeProductionSummaryByWeekViewState,
+  persistProductionSummaryByWeekFiltersLocally,
+  useProductionSummaryByWeekViewState,
+} from "@/hooks/useProductionSummaryByWeekViewState";
 import { ArrowDown, ArrowUp, Download, Loader2, Maximize2, X } from "lucide-react";
 import { endOfWeek, getWeek, startOfWeek } from "date-fns";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -760,6 +765,9 @@ export function ProductionSummaryByWeekView({
   );
   const updateSectionFilters = useWidgetSectionStore((s) => s.updateFilters);
   const tenantId = selectedTenantId ?? user?.tenant_id ?? null;
+  const persistedViewState = useProductionSummaryByWeekViewState({ tenantId });
+  const isPersistenceEnabled = Boolean(!embeddedInWorkbench && tenantId && persistedViewState.preferenceKey);
+  const hydratedPreferenceKeyRef = useRef<string | null>(null);
   const sectionDateRange = useMemo(
     () => sectionFilters?.periodSelection?.dateRange ?? sectionFilters?.dateRange,
     [sectionFilters?.periodSelection?.dateRange, sectionFilters?.dateRange],
@@ -830,6 +838,78 @@ export function ProductionSummaryByWeekView({
     }
     setLocalSelectedYearWeeksByField(next);
   };
+
+  useEffect(() => {
+    if (!isPersistenceEnabled || !persistedViewState.preferenceKey) {
+      hydratedPreferenceKeyRef.current = null;
+      return;
+    }
+    if (hydratedPreferenceKeyRef.current === persistedViewState.preferenceKey) return;
+
+    setLocalSelectedYearWeeksByField(EMPTY_YEARWEEK_FILTERS);
+
+    let cancelled = false;
+    void persistedViewState
+      .load()
+      .then((loaded) => {
+        if (cancelled) return;
+        if (loaded) {
+          setLocalSelectedYearWeeksByField(loaded.yearWeeksByField);
+        }
+        hydratedPreferenceKeyRef.current = persistedViewState.preferenceKey;
+      })
+      .catch(() => {
+        if (!cancelled) hydratedPreferenceKeyRef.current = persistedViewState.preferenceKey;
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isPersistenceEnabled, persistedViewState.preferenceKey, persistedViewState.load]);
+
+  const savePersistedViewState = useCallback(async () => {
+    if (!isPersistenceEnabled) return;
+    await persistedViewState.save(
+      normalizeProductionSummaryByWeekViewState({
+        version: 1,
+        yearWeeksByField: localSelectedYearWeeksByField,
+      }),
+    );
+  }, [isPersistenceEnabled, localSelectedYearWeeksByField, persistedViewState]);
+
+  useEffect(() => {
+    if (!isPersistenceEnabled) return;
+    if (!persistedViewState.preferenceKey) return;
+    if (persistedViewState.isLoading) return;
+    if (hydratedPreferenceKeyRef.current !== persistedViewState.preferenceKey) return;
+    const t = window.setTimeout(() => {
+      void savePersistedViewState();
+    }, 400);
+    return () => window.clearTimeout(t);
+  }, [
+    isPersistenceEnabled,
+    persistedViewState.preferenceKey,
+    persistedViewState.isLoading,
+    savePersistedViewState,
+  ]);
+
+  useEffect(() => {
+    if (!isPersistenceEnabled) return;
+    if (!persistedViewState.preferenceKey) return;
+    const key = persistedViewState.preferenceKey;
+    const flush = () => {
+      persistProductionSummaryByWeekFiltersLocally(
+        key,
+        normalizeProductionSummaryByWeekViewState({
+          version: 1,
+          yearWeeksByField: localSelectedYearWeeksByField,
+        }),
+      );
+    };
+    window.addEventListener("pagehide", flush);
+    return () => window.removeEventListener("pagehide", flush);
+  }, [isPersistenceEnabled, persistedViewState.preferenceKey, localSelectedYearWeeksByField]);
+
   const hasLoadedAllLoans = useMemo(() => {
     if (!data) return false;
     if (data.total <= 0) return true;
@@ -988,7 +1068,7 @@ export function ProductionSummaryByWeekView({
           {widgetVariant === "full" &&
             SUMMARY_TABLE_CONFIGS.some((cfg) => selectedYearWeeksByField[cfg.key].length > 0) && (
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-100/80 bg-blue-50/50 px-3 py-2 dark:border-slate-700/80 dark:bg-slate-900/40">
-              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Active filters</span>
+              <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Active filters</span>
               {SUMMARY_TABLE_CONFIGS.map((cfg) => {
                 const selected = selectedYearWeeksByField[cfg.key];
                 if (selected.length === 0) return null;
@@ -1031,7 +1111,7 @@ export function ProductionSummaryByWeekView({
                       trigger={
                         <button
                           type="button"
-                          className="inline-flex max-w-[min(280px,calc(100vw-6rem))] cursor-pointer items-center gap-1 rounded-full border border-blue-200/80 bg-white px-2.5 py-0.5 text-left text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700/80"
+                          className="inline-flex max-w-[min(340px,calc(100vw-6rem))] cursor-pointer items-center gap-1 rounded-full border border-sky-500 bg-sky-500 px-2.5 py-0.5 text-left text-sm font-medium text-white transition-colors hover:bg-sky-600 dark:border-sky-500 dark:bg-sky-500 dark:text-white dark:hover:bg-sky-600"
                         >
                           <span className="truncate">{label}</span>
                         </button>
@@ -1055,7 +1135,6 @@ export function ProductionSummaryByWeekView({
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-8 text-xs"
                 onClick={() =>
                   setSelectedYearWeeksByField(EMPTY_YEARWEEK_FILTERS)
                 }
