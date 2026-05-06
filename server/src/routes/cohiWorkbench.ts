@@ -187,6 +187,32 @@ function injectConditionForValidation(sql: string, condition: string): string {
   return body + ` WHERE ${condition}`;
 }
 
+function findFinalSelectOffset(sql: string): number {
+  if (!/^\s*WITH\b/i.test(sql)) return 0;
+  let depth = 0;
+  let lastSelectAtZero = 0;
+  const upper = sql.toUpperCase();
+  for (let i = 0; i < sql.length; i++) {
+    if (sql[i] === "(") {
+      depth++;
+      continue;
+    }
+    if (sql[i] === ")") {
+      depth--;
+      continue;
+    }
+    if (
+      depth === 0 &&
+      upper.startsWith("SELECT", i) &&
+      (i === 0 || /[\s\n),]/.test(sql[i - 1])) &&
+      (i + 6 >= sql.length || /[\s\n]/.test(sql[i + 6]))
+    ) {
+      lastSelectAtZero = i;
+    }
+  }
+  return lastSelectAtZero;
+}
+
 export function shouldValidateInjectedFilters(
   action: {
     type?: string;
@@ -240,14 +266,69 @@ async function validateWidgetSql(
 
   // Phase 2: SQL must remain valid after additive filter injection
   if (dateColumn) {
-    try {
-      const withFilter = injectConditionForValidation(
-        sanitized,
-        `l.${dateColumn} >= '2025-01-01'::date AND l.${dateColumn} <= '2025-12-31'::date`,
+    const col = String(dateColumn).replace(/[^a-zA-Z0-9_.]/g, "");
+    if (!/^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(col)) {
+      return { valid: false, error: `Invalid date column for filter validation: ${dateColumn}`, phase: "filtered" };
+    }
+
+    // Try several column forms to tolerate SQL alias variance:
+    // - raw configured value (e.g. application_date OR l.application_date)
+    // - unqualified terminal column for qualified inputs (e.g. application_date)
+    // - legacy l.<column> for unqualified inputs
+    const candidateColumns = new Set<string>([col]);
+    if (col.includes(".")) {
+      const parts = col.split(".");
+      const tail = parts[parts.length - 1];
+      if (tail && /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(tail)) {
+        candidateColumns.add(tail);
+      }
+    } else {
+      candidateColumns.add(`l.${col}`);
+    }
+
+    const predicates = Array.from(candidateColumns).map(
+      (c) => `${c} >= '2025-01-01'::date AND ${c} <= '2025-12-31'::date`,
+    );
+
+    // Align with execute-sql behavior: if the configured date column is not
+    // visible in the final SELECT scope (common in CTE-based RL SQL), skip
+    // filtered validation rather than forcing an impossible injection.
+    const finalSelectOffset = findFinalSelectOffset(sanitized);
+    const finalBody = sanitized.substring(finalSelectOffset);
+    const hasAccessibleDateColumn = Array.from(candidateColumns).some(
+      (candidate) => {
+        const escaped = candidate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        if (candidate.includes(".")) {
+          return new RegExp(`\\b${escaped}\\b`, "i").test(finalBody);
+        }
+        return new RegExp(
+          `\\b(?:[a-zA-Z_][a-zA-Z0-9_]*\\.)?${escaped}\\b`,
+          "i",
+        ).test(finalBody);
+      },
+    );
+    if (!hasAccessibleDateColumn && finalSelectOffset > 0) {
+      console.log(
+        `[CohiWorkbench] Skipping filtered SQL validation: date column "${col}" not accessible in final SELECT scope`,
       );
-      await pool.query(`EXPLAIN ${withFilter}`);
-    } catch (err: any) {
-      return { valid: false, error: err.message, phase: "filtered" };
+      return { valid: true };
+    }
+
+    let lastErr: string | undefined;
+    let validated = false;
+    for (const predicate of predicates) {
+      try {
+        const withFilter = injectConditionForValidation(sanitized, predicate);
+        await pool.query(`EXPLAIN ${withFilter}`);
+        validated = true;
+        break;
+      } catch (err: any) {
+        lastErr = err.message;
+      }
+    }
+
+    if (!validated) {
+      return { valid: false, error: lastErr ?? "Failed filtered SQL validation", phase: "filtered" };
     }
   }
 
@@ -395,6 +476,50 @@ function validatePullThroughSqlGuardrails(
     }
   }
   return null;
+}
+
+function normalizeTableScopeLabelsForRequest(action: any, userQuestion: string): any {
+  if (action?.type !== "modify_widget" || !action?.sql) return action;
+  const q = String(userQuestion || "").toLowerCase();
+  const title = String(action?.title || "").toLowerCase();
+  const asksFullYear =
+    q.includes("full-year") ||
+    q.includes("full year") ||
+    /\bcalendar year\b/.test(q) ||
+    /\bytd\b/.test(q) ||
+    title.includes("full-year") ||
+    title.includes("full year") ||
+    /\b20\d{2}\b/.test(title);
+  if (!asksFullYear) return action;
+
+  let sql = String(action.sql);
+  // Normalize common stale period aliases when users switch away from YTD.
+  sql = sql.replace(/\bytd_/gi, "full_year_");
+  sql = sql.replace(/\bytd\b/gi, "full_year");
+
+  const next: any = { ...action, sql };
+  if (typeof next.title === "string") {
+    next.title = next.title.replace(/\bYTD\b/gi, "Full-Year");
+  }
+  if (
+    next.changes?.tableConfig?.columns &&
+    Array.isArray(next.changes.tableConfig.columns)
+  ) {
+    next.changes = {
+      ...next.changes,
+      tableConfig: {
+        ...next.changes.tableConfig,
+        columns: next.changes.tableConfig.columns.map((c: any) => ({
+          ...c,
+          label:
+            typeof c?.label === "string"
+              ? c.label.replace(/\bYTD\b/gi, "Full-Year")
+              : c?.label,
+        })),
+      },
+    };
+  }
+  return next;
 }
 
 /**
@@ -867,6 +992,8 @@ Each action in the "actions" array must be one of:
    - "title" (optional) updates the widget title.
    - For research-lab widgets: these use complex CTEs and derived columns. When modifying them, always provide a complete new SQL query. Reference the RESEARCH LAB CONTEXT section below to understand the analytical intent behind the original query.
    - When modifying a widget's SQL, you MUST base your new query on the EXACT SQL shown for that widget in the canvas state. Do NOT invent table names, CTEs, or columns that don't appear in the original SQL. Copy the original SQL and make only the specific change the user requested.
+   - If your SQL/data logic changes what a column represents, you MUST also update user-facing labels/aliases (SELECT aliases, CASE labels, title text, and table headers) so old wording does not remain.
+   - For table widgets, include \`changes.tableConfig.columns\` whenever header labels need to be updated to match the new SQL meaning.
    - Return EXACTLY ONE modify_widget action per user request. Do NOT return multiple modify_widget actions for the same widget.
 
 5. **delete_widget**: Remove a widget from canvas
@@ -1469,6 +1596,9 @@ router.post(
           a &&
           typeof a.type === "string" &&
           VALID_ACTION_TYPES.includes(a.type),
+      );
+      validActions = validActions.map((a: any) =>
+        normalizeTableScopeLabelsForRequest(a, question),
       );
 
       // Normalize create_widget config.type — the LLM sometimes uses "chart" etc.

@@ -213,7 +213,7 @@ Parameters:
   # Platform SSO
   PlatformSsoIdpName:
     Type: String
-    Default: ""
+    Default: "CoheusEntraID"
     Description: Cognito IdP name for platform staff SSO (e.g., TestAccCognito)
 
   PlatformJitDomains:
