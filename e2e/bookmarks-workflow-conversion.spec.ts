@@ -248,28 +248,18 @@ async function gotoNewCanvas(page: Page) {
 }
 
 async function addWcSection(page: Page) {
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const tab = page.getByTestId("workbench-cohi-tab-dashboards");
-    if (!(await tab.isVisible().catch(() => false))) {
-      await page.getByTestId("workbench-cohi-toggle").click();
-      await expect(tab).toBeVisible({ timeout: 20_000 });
-    }
-    await tab.click();
-    await dismissBlockingOverlays(page);
-    const sectionBtn = page.getByRole("button", { name: /Workflow Conversion/i }).first();
-    await expect(sectionBtn).toBeVisible({ timeout: 20_000 });
-    await sectionBtn.click();
-    const addBtn = page.getByRole("button", { name: "Add entire Workflow Conversion" });
-    try {
-      await expect(addBtn).toBeVisible({ timeout: 15_000 });
-      await addBtn.click();
-      return;
-    } catch {
-      await page.keyboard.press("Escape");
-      await page.waitForTimeout(350);
-    }
-  }
-  throw new Error("Failed to add Workflow Conversion section to canvas");
+  // Use the "Add" dropdown menu — same mechanism used by sales-company-overview.spec.ts.
+  // This is more reliable than the Cohi panel DashboardBrowser because it does not
+  // depend on the Cohi toggle state or panel animation timing.
+  const addButton = page.getByRole("button", { name: /^Add$/ }).first();
+  await expect(addButton).toBeVisible({ timeout: 30_000 });
+  await addButton.click();
+
+  // Switch to the "Trends & Analysis" group (Workflow Conversion lives there).
+  await page.getByRole("button", { name: "Trends & Analysis", exact: true }).click();
+
+  // Click the Workflow Conversion section item (rendered as a DropdownMenuItem).
+  await page.getByRole("menuitem", { name: "Workflow Conversion", exact: true }).click();
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
