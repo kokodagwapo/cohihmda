@@ -238,16 +238,25 @@ async function attemptSqlFix(
   schemaContext: string,
   apiKey: string,
   phase: 'base' | 'filtered',
+  opts?: {
+    existingSql?: string;
+    userRequest?: string;
+  },
 ): Promise<string | null> {
   const phaseNote = phase === 'filtered'
     ? 'The SQL itself is syntactically valid, but it breaks when a date range filter (AND date_col >= $1 AND date_col <= $2) is appended to the WHERE clause. The most common cause is that the WHERE clause in the outermost SELECT does not reference the date column directly.'
     : 'The SQL failed to parse or plan.';
+  const hasExistingSql = !!(opts?.existingSql && String(opts.existingSql).trim());
+  const existingSqlNote = hasExistingSql
+    ? '\nWhen available, you MUST minimally edit the existing selected widget SQL instead of rewriting from scratch.'
+    : '';
 
   const fixMessages: LLMMessage[] = [
     {
       role: 'system',
       content: `You are a PostgreSQL expert. Fix the SQL query so it passes EXPLAIN validation.
 ${phaseNote}
+${existingSqlNote}
 Return ONLY the corrected SQL. No explanation, no markdown fences, no semicolon at the end.
 
 Schema context:
@@ -255,7 +264,7 @@ ${schemaContext.substring(0, 3000)}`,
     },
     {
       role: 'user',
-      content: `Original SQL:\n${originalSql}\n\nError:\n${errorMessage}\n\nFixed SQL:`,
+      content: `User request (if provided):\n${opts?.userRequest || 'N/A'}\n\nExisting selected widget SQL (if provided):\n${opts?.existingSql || 'N/A'}\n\nGenerated SQL that failed:\n${originalSql}\n\nError:\n${errorMessage}\n\nFixed SQL:`,
     },
   ];
 
@@ -1425,6 +1434,10 @@ router.post(
                   schemaContext,
                   apiKey,
                   validation.phase ?? 'base',
+                  {
+                    existingSql: action.type === "modify_widget" ? existingWidget?.sql : undefined,
+                    userRequest: question,
+                  },
                 );
                 if (fixed) {
                   const revalidation = await validateWidgetSql(fixed, tenantPool, dateCol);
@@ -1453,7 +1466,11 @@ router.post(
               } else {
                 // Drop the action — can't produce a valid widget
                 validActions = validActions.filter((a: any) => a !== action);
-                finalMessage += `\n\nI couldn't generate a valid query for "${action.title || 'a widget'}" — please try rephrasing your request.`;
+                if (action.type === "modify_widget") {
+                  finalMessage += `\n\nI couldn't safely apply the SQL edit for "${action.title || 'the selected widget'}" because the generated query failed validation. The widget was left unchanged.`;
+                } else {
+                  finalMessage += `\n\nI couldn't generate a valid query for "${action.title || 'a widget'}" — please try rephrasing your request.`;
+                }
                 console.warn(`[CohiWorkbench] Dropped action "${action.title}" after failed SQL validation`);
               }
             } else {
