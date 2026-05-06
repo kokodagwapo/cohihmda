@@ -91,6 +91,17 @@ async function suppressWelcomeTour(page: Page) {
   await page.addInitScript(() => {
     try {
       window.localStorage.setItem("cohi-welcome-tour-last-shown", new Date().toISOString());
+      // Clear any persisted Active Workload filter state on the FIRST page load
+      // only (not on reloads within a test) so tests start from a known state
+      // without affecting the "persists after reload" test.
+      if (!window.sessionStorage.getItem("__cohi_aw_test_init")) {
+        window.sessionStorage.setItem("__cohi_aw_test_init", "1");
+        for (const key of Object.keys(window.localStorage)) {
+          if (key.startsWith("cohi-active-workload-view-state:")) {
+            window.localStorage.removeItem(key);
+          }
+        }
+      }
     } catch {
       /* ignore */
     }
