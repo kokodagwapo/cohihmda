@@ -137,7 +137,10 @@ async function setupActiveWorkloadMocks(
     const url = new URL(route.request().url());
     activeDetailUrls.push(route.request().url());
     if (options.delayedFirstResponseMs && activeDetailCallCount === 1) {
-      await page.waitForTimeout(options.delayedFirstResponseMs);
+      // Use a plain timer instead of page.waitForTimeout so this doesn't throw
+      // "Target page has been closed" when the test ends while the delay is
+      // still in-flight (e.g. on the second reload in the error-states test).
+      await new Promise<void>((resolve) => setTimeout(resolve, options.delayedFirstResponseMs));
     }
     if (options.forceActiveDetailError) {
       await route.fulfill({
@@ -394,6 +397,9 @@ test.describe("Active Workload Dashboard (COHI-347)", () => {
     await expect(
       userPage.getByText(/mock active-detail-list failure|failed to load active workload data/i),
     ).toBeVisible();
+    // Unregister remaining route handlers so any in-flight callbacks don't
+    // throw "Target page has been closed" after the test ends.
+    await userPage.unrouteAll({ behavior: "ignoreErrors" });
   });
 
   test("@critical @COHI-347 workbench adds Active Workload widget group with expected widgets and filters", async ({
