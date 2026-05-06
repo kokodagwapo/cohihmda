@@ -46,15 +46,31 @@ async function gotoNewWorkbenchCanvas(userPage: Page) {
 }
 
 async function addWorkflowConversionSection(userPage: Page) {
-  const dashboardsTab = userPage.getByTestId("workbench-cohi-tab-dashboards");
-  const tabVisible = await dashboardsTab.isVisible().catch(() => false);
-  if (!tabVisible) {
-    await userPage.getByTestId("workbench-cohi-toggle").click();
-    await expect(dashboardsTab).toBeVisible({ timeout: 15_000 });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const dashboardsTab = userPage.getByTestId("workbench-cohi-tab-dashboards");
+    const tabVisible = await dashboardsTab.isVisible().catch(() => false);
+    if (!tabVisible) {
+      await userPage.getByTestId("workbench-cohi-toggle").click();
+      await expect(dashboardsTab).toBeVisible({ timeout: 20_000 });
+    }
+
+    await dashboardsTab.click();
+    await dismissBlockingOverlays(userPage);
+    const sectionButton = userPage.getByRole("button", { name: /Workflow Conversion/i }).first();
+    await expect(sectionButton).toBeVisible({ timeout: 20_000 });
+    await sectionButton.click();
+
+    const addEntireButton = userPage.getByRole("button", { name: "Add entire Workflow Conversion" });
+    try {
+      await expect(addEntireButton).toBeVisible({ timeout: 15_000 });
+      await addEntireButton.click();
+      return;
+    } catch {
+      await userPage.keyboard.press("Escape");
+      await userPage.waitForTimeout(350);
+    }
   }
-  await dashboardsTab.click();
-  await userPage.getByRole("button", { name: "Workflow Conversion" }).first().click();
-  await userPage.getByRole("button", { name: "Add entire Workflow Conversion" }).click();
+  throw new Error("Failed to add Workflow Conversion section to workbench canvas");
 }
 
 function workflowMain(userPage: Page) {
@@ -301,7 +317,7 @@ test.describe("Workflow Conversion bookmarks (COHI-364)", () => {
     const mainAgain = workflowMain(userPage);
     await openWorkflowBookmarksFrom(userPage, mainAgain);
     await expect(bookmarksDialog).toBeVisible();
-    await bookmarksDialog.getByRole("button", { name: "Edit" }).click();
+    await bookmarkEntryRow(bookmarksDialog, bookmarkName).getByRole("button", { name: "Edit" }).click();
     await bookmarksDialog.getByRole("textbox").fill(bookmarkRenamed);
     await bookmarksDialog.getByRole("button", { name: "Save", exact: true }).click();
     await expect(bookmarksDialog.getByText(bookmarkRenamed, { exact: false })).toBeVisible();
