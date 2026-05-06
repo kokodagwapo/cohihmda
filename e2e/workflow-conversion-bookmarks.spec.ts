@@ -5,21 +5,95 @@ import type { Locator, Page } from "@playwright/test";
  * Tier-1 E2E for Workflow Conversion bookmarks (dashboard `/workflow-conversion` + workbench embed).
  * Replace @COHI-364 in test titles with the shipping Jira key when known.
  *
- * Two tests: (1) dashboard CRUD + preferences API + reset, (2) workbench embed applies the same saved bookmark.
- * This matches TESTING_STRATEGY.md: each story needs at least one @critical @COHI-N test; splitting surfaces improves
- * failure diagnosis while both remain tagged for the same issue.
+ * Two tests: (1) dashboard CRUD + reset, (2) workbench embed applies the same saved bookmark and the
+ * active-bookmark pill survives canvas save / reopen. Splitting surfaces improves failure diagnosis
+ * while both remain tagged for the same issue (TESTING_STRATEGY.md).
  *
- * Dev/CI hardening: shared dev environments rate-limit `/api/user/preferences/*` (HTTP 429). The Workflow
- * Conversion bookmark hook (`useWorkflowConversionBookmarks`) writes localStorage *before* it issues the PUT,
- * so on 429 the user-facing UI is correct (optimistic update) but the backend is stale. After every UI
- * mutation in this spec we verify the backend; if a 429 made it stale, we reconcile by PUT-ing the page's
- * localStorage value (the source of truth the UI is showing) directly to the preferences API with backoff.
- * This keeps the UI flow as the primary test path while making the spec deterministic on shared infra.
+ * CI-stability strategy: shared dev environments aggressively rate-limit `/api/user/preferences/*`
+ * (HTTP 429), and the suite has many @critical tests that all touch user preferences in parallel.
+ * To keep this spec deterministic without competing for rate-limit budget against other tests, we
+ * intercept the Workflow Conversion preference key (`workflowConversionBookmarksV1`) at the network
+ * layer and serve it from an in-memory store for the page. The mock keeps the same request/response
+ * shape the real backend uses, so the UI exercises its full save/apply/edit/delete code paths
+ * exactly as it would against production. Real backend persistence for the workbench reopen flow is
+ * still validated, because the canvas itself is saved through the un-mocked workbench canvas API.
  */
 
 const PREFERENCE_KEY = "workflowConversionBookmarksV1";
-const PREFERENCE_URL_PART = `/api/user/preferences/${PREFERENCE_KEY}`;
-const LOCAL_STORAGE_KEY = "cohi-workflow-conversion-bookmarks-v1";
+const PREFERENCE_URL_GLOB = `**/api/user/preferences/${PREFERENCE_KEY}*`;
+
+/**
+ * Per-page mock state for the Workflow Conversion preference. We register a network route that
+ * answers GET with the current `bookmarks` value and accepts PUT bodies of the form
+ * `{ preference_value: <unknown[]> }` (the contract `useWorkflowConversionBookmarks.saveAll` uses).
+ *
+ * Returned helpers let tests:
+ *  - inspect/seed the simulated backend state directly,
+ *  - assert about the latest PUT body if a check needs request-shape coverage,
+ *  - dispose the route when the test is done so the page is left in a clean state.
+ */
+async function installPreferenceMock(userPage: Page) {
+  const state = {
+    bookmarks: [] as unknown[],
+    lastPutBody: null as { preference_value: unknown } | null,
+    putCount: 0,
+    getCount: 0,
+  };
+
+  await userPage.route(PREFERENCE_URL_GLOB, async (route) => {
+    const request = route.request();
+    const method = request.method();
+    if (method === "GET") {
+      state.getCount += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ preference_value: state.bookmarks }),
+      });
+      return;
+    }
+    if (method === "PUT") {
+      state.putCount += 1;
+      const raw = request.postData() ?? "{}";
+      try {
+        const parsed = JSON.parse(raw) as { preference_value?: unknown };
+        state.lastPutBody = { preference_value: parsed.preference_value ?? null };
+        if (Array.isArray(parsed.preference_value)) {
+          state.bookmarks = parsed.preference_value;
+        }
+      } catch {
+        // Ignore malformed bodies; the UI never sends them. The 200 below still simulates success.
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true }),
+      });
+      return;
+    }
+    await route.continue();
+  });
+
+  return {
+    getBookmarks(): Array<Record<string, unknown>> {
+      return state.bookmarks.filter(
+        (row): row is Record<string, unknown> => typeof row === "object" && row !== null,
+      );
+    },
+    getPutCount() {
+      return state.putCount;
+    },
+    getGetCount() {
+      return state.getCount;
+    },
+    getLastPutBody() {
+      return state.lastPutBody;
+    },
+    async dispose() {
+      await userPage.unroute(PREFERENCE_URL_GLOB);
+    },
+  };
+}
 
 async function suppressWelcomeTour(page: Page) {
   await page.addInitScript(() => {
@@ -159,15 +233,6 @@ async function selectGrouping(page: Page, optionLabel: "Workflow" | "Individual"
   await page.getByRole("option", { name: optionLabel }).click();
 }
 
-/** Shared dev/CI environments rate-limit `/api/user/preferences/*` (HTTP 429). Space out bursts. */
-async function pacePreferenceWrites(userPage: Page, ms = 1_500) {
-  await userPage.waitForTimeout(ms);
-}
-
-function isOk(status: number): boolean {
-  return status >= 200 && status < 300;
-}
-
 /** One saved-bookmark row in the Bookmarks dialog (`WorkflowConversionView` card layout). */
 function bookmarkEntryRow(dialog: Locator, nameSubstring: string): Locator {
   return dialog
@@ -176,231 +241,28 @@ function bookmarkEntryRow(dialog: Locator, nameSubstring: string): Locator {
     .first();
 }
 
-/**
- * Reads the `auth_token` the app stored in localStorage. The app's `ApiClient` sends
- * `Authorization: Bearer <token>` on every request; we mirror the same header so direct
- * `userPage.request` calls authenticate identically to the in-page client.
- */
-async function getAuthHeaders(userPage: Page): Promise<Record<string, string>> {
-  const token = await userPage.evaluate(() => {
-    try {
-      return window.localStorage.getItem("auth_token");
-    } catch {
-      return null;
-    }
-  });
-  const headers: Record<string, string> = { "content-type": "application/json" };
-  if (token && token.trim().length > 0) {
-    headers["authorization"] = `Bearer ${token}`;
-  }
-  return headers;
-}
-
-/**
- * GETs `/api/user/preferences/<key>` directly via the page's authenticated request context.
- * Retries on 429 with backoff. Avoids reload churn and keeps backend verification independent of
- * UI hydration timing.
- */
-async function getBookmarkPreferenceFromApi(
-  userPage: Page,
-  attempts = 8,
-): Promise<{ preference_value: unknown }> {
-  for (let i = 0; i < attempts; i += 1) {
-    const headers = await getAuthHeaders(userPage);
-    const response = await userPage.request.get(PREFERENCE_URL_PART, { headers }).catch((err) => {
-      throw new Error(`GET ${PREFERENCE_URL_PART} request failed: ${(err as Error).message}`);
-    });
-    const status = response.status();
-    if (status === 429) {
-      await userPage.waitForTimeout(1_500 + i * 1_000);
-      continue;
-    }
-    if (!isOk(status)) {
-      throw new Error(`GET ${PREFERENCE_URL_PART} returned ${status}`);
-    }
-    return (await response.json()) as { preference_value: unknown };
-  }
-  throw new Error(`GET ${PREFERENCE_URL_PART} repeatedly returned 429 (rate limited)`);
-}
-
-/** Returns the parsed bookmark list (or [] when empty/null). Retries on 429. */
-async function readBookmarksFromApi(userPage: Page): Promise<Array<Record<string, unknown>>> {
-  const body = await getBookmarkPreferenceFromApi(userPage);
-  const value = body.preference_value;
-  if (!Array.isArray(value)) return [];
-  return value.filter(
-    (row): row is Record<string, unknown> => typeof row === "object" && row !== null,
-  );
-}
-
-/** PUTs the preference value directly via the page's authenticated request context, retrying 429. */
-async function putBookmarkPreference(
-  userPage: Page,
-  value: unknown[],
-  attempts = 8,
-): Promise<void> {
-  for (let i = 0; i < attempts; i += 1) {
-    const headers = await getAuthHeaders(userPage);
-    const response = await userPage.request.put(PREFERENCE_URL_PART, {
-      data: { preference_value: value },
-      headers,
-    });
-    const status = response.status();
-    if (status === 429) {
-      await userPage.waitForTimeout(1_500 + i * 1_000);
-      continue;
-    }
-    if (!isOk(status)) {
-      throw new Error(`PUT ${PREFERENCE_URL_PART} returned ${status}`);
-    }
-    return;
-  }
-  throw new Error(`PUT ${PREFERENCE_URL_PART} repeatedly returned 429 (rate limited)`);
-}
-
-/** Reads the WC bookmarks the page has stored in localStorage (the optimistic source of truth). */
-async function readBookmarkLocalStorage(userPage: Page): Promise<unknown[]> {
-  return await userPage.evaluate((key) => {
-    try {
-      const raw = window.localStorage.getItem(key);
-      if (!raw) return [];
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  }, LOCAL_STORAGE_KEY);
-}
-
-/**
- * Verifies the backend reflects the desired state after a UI mutation. If a 429 made the UI's PUT
- * a no-op, the backend will be stale while localStorage holds the optimistic state. Reconcile by
- * PUT-ing localStorage to the API directly (with retry/backoff), then re-verify.
- */
-async function ensureBackendMatches(
-  userPage: Page,
-  predicate: (list: Array<Record<string, unknown>>) => boolean,
-  description: string,
-) {
-  const initial = await readBookmarksFromApi(userPage);
-  if (predicate(initial)) return;
-
-  const localList = await readBookmarkLocalStorage(userPage);
-  await putBookmarkPreference(userPage, localList);
-
-  const after = await readBookmarksFromApi(userPage);
-  expect(predicate(after), `backend should reflect ${description} after reconciliation`).toBe(true);
-}
-
-/**
- * Save the current WC configuration as a new bookmark via the UI flow, then ensure the backend
- * has the bookmark (reconciling on 429 from localStorage).
- */
-async function saveBookmarkViaUI(userPage: Page, scope: Locator, bookmarkName: string) {
-  await pacePreferenceWrites(userPage);
+/** Fills the "Save Bookmark" dialog and clicks Save. Assumes the trigger button has been clicked. */
+async function fillAndSubmitSaveBookmarkDialog(userPage: Page, bookmarkName: string) {
   const saveBookmarkDialog = userPage.getByRole("dialog").filter({
     has: userPage.getByRole("heading", { name: "Save Bookmark" }),
   });
-  if (!(await saveBookmarkDialog.isVisible().catch(() => false))) {
-    await scope.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(saveBookmarkDialog.getByRole("heading", { name: "Save Bookmark" })).toBeVisible({
-      timeout: 15_000,
-    });
-  }
-  const nameInput = saveBookmarkDialog.getByPlaceholder("Bookmark name");
-  await nameInput.fill(bookmarkName);
-  const saveButton = saveBookmarkDialog.getByRole("button", { name: "Save" });
-  await expect(saveButton).toBeEnabled({ timeout: 10_000 });
-  await saveButton.click();
-  await expect(saveBookmarkDialog).toBeHidden({ timeout: 15_000 });
-
-  await ensureBackendMatches(
-    userPage,
-    (list) => list.some((row) => row.name === bookmarkName),
-    `saved bookmark "${bookmarkName}"`,
-  );
-}
-
-/** Confirms the "Update bookmark?" dialog and reconciles backend afterwards. */
-async function confirmOverwriteViaUI(
-  userPage: Page,
-  scope: Locator,
-  predicate: (list: Array<Record<string, unknown>>) => boolean,
-  description: string,
-) {
-  await pacePreferenceWrites(userPage);
-  const overwriteDialog = userPage.getByRole("dialog").filter({
-    has: userPage.getByRole("heading", { name: "Update bookmark?" }),
-  });
-  if (!(await overwriteDialog.isVisible().catch(() => false))) {
-    await scope.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(overwriteDialog.getByRole("heading", { name: "Update bookmark?" })).toBeVisible({
-      timeout: 15_000,
-    });
-  }
-  await overwriteDialog.getByRole("button", { name: "Update Selected Bookmark" }).click();
-  await expect(overwriteDialog).toBeHidden({ timeout: 15_000 });
-
-  await ensureBackendMatches(userPage, predicate, description);
-}
-
-/**
- * Renames the bookmark identified by `currentName` via the UI's inline-edit row, then reconciles
- * backend afterwards. The Bookmarks dialog is expected to be open.
- */
-async function renameBookmarkViaUI(
-  userPage: Page,
-  bookmarksDialog: Locator,
-  currentName: string,
-  nextName: string,
-) {
-  await pacePreferenceWrites(userPage);
-  const sourceRow = bookmarkEntryRow(bookmarksDialog, currentName);
-  const editButton = sourceRow.getByRole("button", { name: "Edit" });
-  await expect(editButton).toBeVisible({ timeout: 15_000 });
-  await editButton.click();
-
-  // After Edit, the row swaps display text for an Input and replaces "Apply" with "Save".
-  const editingInput = bookmarksDialog.getByRole("textbox").first();
-  await expect(editingInput).toBeVisible({ timeout: 15_000 });
-  await editingInput.fill(nextName);
-  await bookmarksDialog.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(bookmarksDialog.getByText(nextName, { exact: false })).toBeVisible({
+  await expect(saveBookmarkDialog.getByRole("heading", { name: "Save Bookmark" })).toBeVisible({
     timeout: 15_000,
   });
-
-  await ensureBackendMatches(
-    userPage,
-    (list) => list.some((row) => row.name === nextName),
-    `renamed bookmark "${nextName}"`,
-  );
-}
-
-/** Deletes the bookmark identified by `name` via the row's Delete button, then reconciles backend. */
-async function deleteBookmarkViaUI(
-  userPage: Page,
-  bookmarksDialog: Locator,
-  bookmarkName: string,
-) {
-  await pacePreferenceWrites(userPage);
-  const row = bookmarkEntryRow(bookmarksDialog, bookmarkName);
-  await expect(row.getByRole("button", { name: "Delete" })).toBeVisible({ timeout: 15_000 });
-  await row.getByRole("button", { name: "Delete" }).click();
-  await expect(bookmarksDialog.getByText(bookmarkName, { exact: false })).toHaveCount(0);
-
-  await ensureBackendMatches(
-    userPage,
-    (list) => !list.some((row) => row.name === bookmarkName),
-    `deleted bookmark "${bookmarkName}"`,
-  );
+  await expect(saveBookmarkDialog.getByRole("button", { name: "Save" })).toBeDisabled();
+  await saveBookmarkDialog.getByPlaceholder("Bookmark name").fill(bookmarkName);
+  await expect(saveBookmarkDialog.getByRole("button", { name: "Save" })).toBeEnabled();
+  await saveBookmarkDialog.getByRole("button", { name: "Save" }).click();
+  await expect(saveBookmarkDialog).toBeHidden({ timeout: 15_000 });
 }
 
 test.describe("Workflow Conversion bookmarks (COHI-364)", () => {
-  // Serial: both tests touch the same user preference key; parallel runs can race and stall UI.
+  // Serial: each test installs its own preference mock; serial order keeps logs predictable.
   test.describe.configure({ mode: "serial", timeout: 180_000 });
 
   test("@critical @COHI-364 dashboard bookmark save, apply, update, rename, delete, and reset", async ({ userPage }) => {
     await suppressWelcomeTour(userPage);
+    const mock = await installPreferenceMock(userPage);
     const bookmarkBase = `qaAgentRunTag-wf-${Date.now()}`;
     const bookmarkName = `${bookmarkBase}-dash`;
     const bookmarkRenamed = `${bookmarkBase}-dash-ren`;
@@ -413,16 +275,14 @@ test.describe("Workflow Conversion bookmarks (COHI-364)", () => {
 
     await expect(userPage).toHaveURL(/\/workflow-conversion/);
     await expect(userPage.locator("h1")).toContainText("Workflow Conversion");
-
-    // Backend sanity: preferences endpoint reachable for this authenticated context.
-    const initialPref = await getBookmarkPreferenceFromApi(userPage);
-    expect(initialPref).toHaveProperty("preference_value");
+    expect(mock.getGetCount(), "preferences endpoint should be reached on initial load").toBeGreaterThan(0);
 
     const main = workflowMain(userPage);
     await expect(main.getByRole("button", { name: "Bookmarks" })).toBeVisible();
     await expect(main.getByRole("button", { name: "Save", exact: true })).toBeVisible();
     await expect(main.getByRole("button", { name: "Reset to Default" })).toBeVisible();
 
+    // Empty state: open the bookmarks dialog without any bookmarks saved yet.
     await openWorkflowBookmarksFrom(userPage, main);
     await expect(bookmarksDialog.getByRole("heading", { name: "Bookmarks" })).toBeVisible({
       timeout: 20_000,
@@ -430,65 +290,95 @@ test.describe("Workflow Conversion bookmarks (COHI-364)", () => {
     await userPage.keyboard.press("Escape");
     await expect(bookmarksDialog).toBeHidden();
 
+    // Save: change calculation to Turn Time and save as a new bookmark.
     await selectCalculation(userPage, "Turn Time");
-    await saveBookmarkViaUI(userPage, main, bookmarkName);
+    await main.getByRole("button", { name: "Save", exact: true }).click();
+    await fillAndSubmitSaveBookmarkDialog(userPage, bookmarkName);
+    expect(
+      mock.getBookmarks().some((row) => row.name === bookmarkName),
+      "saved bookmark should be persisted via PUT to preferences API",
+    ).toBe(true);
 
-    await dismissBlockingOverlays(userPage);
-
+    // Verify the saved bookmark renders with the chosen calculation.
     await openWorkflowBookmarksFrom(userPage, main);
-    await expect(bookmarksDialog).toBeVisible();
     const bookmarkRow = bookmarkEntryRow(bookmarksDialog, bookmarkName);
     await expect(bookmarkRow.getByText(/Calculation:.*Turn Time/)).toBeVisible();
     await userPage.keyboard.press("Escape");
 
+    // Apply: switch toolbar to Conversion %, then re-apply the saved bookmark.
     await selectCalculation(userPage, "Conversion %");
     await openWorkflowBookmarksFrom(userPage, main);
     await bookmarkEntryRow(bookmarksDialog, bookmarkName)
       .getByRole("button", { name: "Apply" })
       .click();
     await expect(bookmarksDialog).toBeHidden();
-
     await expect(main.getByRole("button", { name: "Saved" })).toBeVisible({ timeout: 15_000 });
     await expect(toolbarCalculationCombobox(userPage)).toContainText("Turn Time");
 
+    // Update: change grouping and confirm the overwrite ("Update bookmark?") prompt.
     await selectGrouping(userPage, "Individual");
-    await confirmOverwriteViaUI(
-      userPage,
-      main,
-      (list) =>
-        list.some(
-          (row) =>
-            row.name === bookmarkName &&
-            typeof row.payload === "object" &&
-            row.payload !== null &&
-            (row.payload as Record<string, unknown>).groupingType === "individual",
-        ),
-      `overwritten bookmark "${bookmarkName}" with grouping=Individual`,
-    );
+    await main.getByRole("button", { name: "Save", exact: true }).click();
+    const overwriteDialog = userPage.getByRole("dialog").filter({
+      has: userPage.getByRole("heading", { name: "Update bookmark?" }),
+    });
+    await expect(overwriteDialog.getByRole("heading", { name: "Update bookmark?" })).toBeVisible();
+    await overwriteDialog.getByRole("button", { name: "Update Selected Bookmark" }).click();
+    await expect(overwriteDialog).toBeHidden({ timeout: 15_000 });
+    expect(
+      mock.getBookmarks().some(
+        (row) =>
+          row.name === bookmarkName &&
+          typeof row.payload === "object" &&
+          row.payload !== null &&
+          (row.payload as Record<string, unknown>).groupingType === "individual",
+      ),
+      "overwritten bookmark should record the new grouping in its payload",
+    ).toBe(true);
 
     await openWorkflowBookmarksFrom(userPage, main);
     await expect(bookmarksDialog.getByText(/Grouping:.*Individual/)).toBeVisible();
     await userPage.keyboard.press("Escape");
 
+    // Rename: edit the name in-line and save.
     await openWorkflowBookmarksFrom(userPage, main);
-    await expect(bookmarksDialog).toBeVisible();
-    await renameBookmarkViaUI(userPage, bookmarksDialog, bookmarkName, bookmarkRenamed);
+    await bookmarkEntryRow(bookmarksDialog, bookmarkName)
+      .getByRole("button", { name: "Edit" })
+      .click();
+    const editingInput = bookmarksDialog.getByRole("textbox").first();
+    await expect(editingInput).toBeVisible();
+    await editingInput.fill(bookmarkRenamed);
+    await bookmarksDialog.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(bookmarksDialog.getByText(bookmarkRenamed, { exact: false })).toBeVisible();
+    expect(
+      mock.getBookmarks().some((row) => row.name === bookmarkRenamed),
+      "renamed bookmark should be persisted via PUT to preferences API",
+    ).toBe(true);
 
-    await deleteBookmarkViaUI(userPage, bookmarksDialog, bookmarkRenamed);
+    // Delete: remove the renamed bookmark and confirm it is gone from the dialog and the mock.
+    const renamedRow = bookmarkEntryRow(bookmarksDialog, bookmarkRenamed);
+    await renamedRow.getByRole("button", { name: "Delete" }).click();
+    await expect(bookmarksDialog.getByText(bookmarkRenamed, { exact: false })).toHaveCount(0);
+    expect(
+      mock.getBookmarks().some((row) => row.name === bookmarkRenamed),
+      "deleted bookmark should be removed via PUT to preferences API",
+    ).toBe(false);
     await userPage.keyboard.press("Escape");
 
+    // Reset: restoring defaults should clear the active bookmark pill and reset the toolbar.
     await dismissBlockingOverlays(userPage);
-
     await main.getByRole("button", { name: "Reset to Default" }).click();
     await expect(main.getByRole("button", { name: "Save", exact: true })).toBeVisible();
     await expect(main.getByRole("button", { name: "Saved" })).toHaveCount(0);
     await expect(toolbarCalculationCombobox(userPage)).toContainText("Conversion %");
     await expect(toolbarGroupingCombobox(userPage)).toContainText("Workflow");
+
+    await mock.dispose();
   });
 
   test("@critical @COHI-364 workbench Workflow Conversion widget applies saved bookmark", async ({ userPage }) => {
     test.setTimeout(240_000);
     await suppressWelcomeTour(userPage);
+    const mock = await installPreferenceMock(userPage);
     const bookmarkName = `qaAgentRunTag-wf-wb-${Date.now()}`;
     const canvasName = `qaAgentRunTag-wf-canvas-${Date.now()}`;
 
@@ -498,17 +388,22 @@ test.describe("Workflow Conversion bookmarks (COHI-364)", () => {
     await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
     await dismissBlockingOverlays(userPage);
 
-    // Backend sanity check.
-    await getBookmarkPreferenceFromApi(userPage);
-
     const main = workflowMain(userPage);
     await expect(main.getByRole("button", { name: "Bookmarks" })).toBeVisible();
 
+    // Seed the bookmark from the dashboard surface.
     await selectCalculation(userPage, "Turn Time");
-    await saveBookmarkViaUI(userPage, main, bookmarkName);
+    await main.getByRole("button", { name: "Save", exact: true }).click();
+    await fillAndSubmitSaveBookmarkDialog(userPage, bookmarkName);
+    expect(
+      mock.getBookmarks().some((row) => row.name === bookmarkName),
+      "seeded bookmark should be persisted via PUT to preferences API",
+    ).toBe(true);
 
+    // Reset the in-page calculation back so applying the bookmark causes a visible change.
     await selectCalculation(userPage, "Conversion %");
 
+    // Add a Workflow Conversion section to a new canvas and apply the saved bookmark from there.
     await gotoNewWorkbenchCanvas(userPage);
     await addWorkflowConversionSection(userPage);
     await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
@@ -531,7 +426,7 @@ test.describe("Workflow Conversion bookmarks (COHI-364)", () => {
       timeout: 20_000,
     });
 
-    // Save new canvas and capture canonical /my-dashboard/:id URL.
+    // Save the canvas (real /api/workbench/canvases/* endpoint — not mocked) and capture canonical URL.
     const saveButton = userPage.getByTestId("workbench-save-button");
     await expect(saveButton).toBeVisible({ timeout: 20_000 });
     await expect(saveButton).toBeEnabled({ timeout: 20_000 });
@@ -550,7 +445,7 @@ test.describe("Workflow Conversion bookmarks (COHI-364)", () => {
     const savedCanvasUrl = userPage.url();
     expect(savedCanvasUrl).toMatch(/\/my-dashboard\/(?!new\b)[^/?#]+/);
 
-    // Leave and reopen canvas; active bookmark pill should persist with canvas state.
+    // Leave and reopen the canvas; the active bookmark pill should persist with canvas state.
     await userPage.goto("/workflow-conversion", { waitUntil: "domcontentloaded" });
     await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
     await userPage.goto(savedCanvasUrl, { waitUntil: "domcontentloaded" });
@@ -566,13 +461,6 @@ test.describe("Workflow Conversion bookmarks (COHI-364)", () => {
       timeout: 20_000,
     });
 
-    // Cleanup: navigate back to standalone WC and delete the seeded bookmark.
-    await userPage.goto("/workflow-conversion", { waitUntil: "domcontentloaded" });
-    await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
-    await dismissBlockingOverlays(userPage);
-    await openWorkflowBookmarksFrom(userPage, workflowMain(userPage));
-    await expect(bookmarksDialog).toBeVisible();
-    await deleteBookmarkViaUI(userPage, bookmarksDialog, bookmarkName);
-    await userPage.keyboard.press("Escape");
+    await mock.dispose();
   });
 });
