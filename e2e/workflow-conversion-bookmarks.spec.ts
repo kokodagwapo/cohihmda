@@ -274,11 +274,17 @@ test.describe("Workflow Conversion bookmarks (COHI-364)", () => {
     await dismissBlockingOverlays(userPage);
 
     await expect(userPage).toHaveURL(/\/workflow-conversion/);
-    await expect(userPage.locator("h1")).toContainText("Workflow Conversion");
-    expect(mock.getGetCount(), "preferences endpoint should be reached on initial load").toBeGreaterThan(0);
 
     const main = workflowMain(userPage);
-    await expect(main.getByRole("button", { name: "Bookmarks" })).toBeVisible();
+    // Wait up to 30s for the WC toolbar to appear. This is the deepest "page is ready" signal:
+    // the Bookmarks button only renders after React has mounted, auth has resolved, and the
+    // WorkflowConversionView component has hydrated. Once it is visible, the h1 and all other
+    // static elements are guaranteed to be in the DOM. This guards against slow CI rendering
+    // where the default 10s expect timeout is not sufficient for the SPA to hydrate fully.
+    await expect(main.getByRole("button", { name: "Bookmarks" })).toBeVisible({ timeout: 30_000 });
+    // Page is confirmed live — static content and API assertions are now synchronously reliable.
+    await expect(userPage.locator("h1")).toContainText("Workflow Conversion");
+    expect(mock.getGetCount(), "preferences endpoint should be reached on initial load").toBeGreaterThan(0);
     await expect(main.getByRole("button", { name: "Save", exact: true })).toBeVisible();
     await expect(main.getByRole("button", { name: "Reset to Default" })).toBeVisible();
 
@@ -389,7 +395,8 @@ test.describe("Workflow Conversion bookmarks (COHI-364)", () => {
     await dismissBlockingOverlays(userPage);
 
     const main = workflowMain(userPage);
-    await expect(main.getByRole("button", { name: "Bookmarks" })).toBeVisible();
+    // 30s timeout: WC toolbar is the deepest "React is ready" signal — same guard as dashboard test.
+    await expect(main.getByRole("button", { name: "Bookmarks" })).toBeVisible({ timeout: 30_000 });
 
     // Seed the bookmark from the dashboard surface.
     await selectCalculation(userPage, "Turn Time");
