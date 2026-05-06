@@ -4,7 +4,7 @@
  * Uses same period filter as Workflow Conversion; filters drive base loan set.
  */
 
-import React, { useState, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useMemo, useEffect } from "react";
 import { format } from "date-fns";
 import {
   Card,
@@ -93,6 +93,37 @@ const DIMENSION_OPTIONS: ActorDimension[] = [
   "warehouse_co_name",
 ];
 
+const ACTORS_VIEW_FILTERS_KEY = "cohi-actors-view-filters";
+
+interface PersistedActorsFilters {
+  periodSelection?: PeriodSelection;
+  calculation?: ActorsCalculation;
+  turnTimeType?: ActorsTurnTimeType;
+  dateRangeType?: ActorsDateRangeType;
+  measure?: ActorsMeasure;
+  selectedActor?: { type: ActorDimension; name: string } | null;
+  selectedStatus?: string | null;
+  tableDimensions?: [ActorDimension, ActorDimension, ActorDimension, ActorDimension];
+}
+
+function loadActorsFilters(): Partial<PersistedActorsFilters> {
+  try {
+    const raw = localStorage.getItem(ACTORS_VIEW_FILTERS_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) as Partial<PersistedActorsFilters>;
+  } catch {
+    return {};
+  }
+}
+
+function saveActorsFilters(next: PersistedActorsFilters): void {
+  try {
+    localStorage.setItem(ACTORS_VIEW_FILTERS_KEY, JSON.stringify(next));
+  } catch {
+    // ignore persistence errors
+  }
+}
+
 export interface ActorsViewProps {
   selectedTenantId?: string | null;
   selectedChannel?: string | null;
@@ -102,22 +133,25 @@ export function ActorsView({
   selectedTenantId,
   selectedChannel,
 }: ActorsViewProps) {
+  const saved = useMemo(() => loadActorsFilters(), []);
   const [periodSelection, setPeriodSelection] = useState<PeriodSelection>(() => {
+    const persisted = saved.periodSelection;
+    if (persisted?.dateRange?.start && persisted?.dateRange?.end) return persisted;
     const range = getDefaultDateRange();
     return { type: "preset", preset: "mtd", dateRange: range };
   });
-  const [calculation, setCalculation] = useState<ActorsCalculation>("average");
-  const [turnTimeType, setTurnTimeType] = useState<ActorsTurnTimeType>("app_to_fund_days");
-  const [dateRangeType, setDateRangeType] = useState<ActorsDateRangeType>("calendar_days");
-  const [measure, setMeasure] = useState<ActorsMeasure>("units");
+  const [calculation, setCalculation] = useState<ActorsCalculation>(saved.calculation ?? "average");
+  const [turnTimeType, setTurnTimeType] = useState<ActorsTurnTimeType>(saved.turnTimeType ?? "app_to_fund_days");
+  const [dateRangeType, setDateRangeType] = useState<ActorsDateRangeType>(saved.dateRangeType ?? "calendar_days");
+  const [measure, setMeasure] = useState<ActorsMeasure>(saved.measure ?? "units");
   const [selectedActor, setSelectedActor] = useState<{
     type: ActorDimension;
     name: string;
-  } | null>(null);
-  const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
+  } | null>(saved.selectedActor ?? null);
+  const [selectedStatus, setSelectedStatus] = useState<string | null>(saved.selectedStatus ?? null);
   const [tableDimensions, setTableDimensions] = useState<
     [ActorDimension, ActorDimension, ActorDimension, ActorDimension]
-  >(["loan_officer", "processor", "underwriter", "closer"]);
+  >(saved.tableDimensions ?? ["loan_officer", "processor", "underwriter", "closer"]);
   const [searchQueries, setSearchQueries] = useState<[string, string, string, string]>([
     "",
     "",
@@ -158,6 +192,28 @@ export function ActorsView({
 
   const clearActorFilter = useCallback(() => setSelectedActor(null), []);
   const clearStatusFilter = useCallback(() => setSelectedStatus(null), []);
+
+  useEffect(() => {
+    saveActorsFilters({
+      periodSelection,
+      calculation,
+      turnTimeType,
+      dateRangeType,
+      measure,
+      selectedActor,
+      selectedStatus,
+      tableDimensions,
+    });
+  }, [
+    periodSelection,
+    calculation,
+    turnTimeType,
+    dateRangeType,
+    measure,
+    selectedActor,
+    selectedStatus,
+    tableDimensions,
+  ]);
 
   const turnTimeLabel =
     calculation === "median"
@@ -383,49 +439,37 @@ export function ActorsView({
           <Download className="h-4 w-4" />
           All tables
         </Button>
-        {selectedActor && (
-          <div className="flex items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/50 px-3 py-2">
-            <div className="flex flex-col">
-              <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                {DIMENSION_LABELS[selectedActor.type]}
-              </span>
-              <span className="text-sm text-slate-600 dark:text-slate-400">
-                {selectedActor.name}
-              </span>
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 shrink-0 rounded-full text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-              onClick={clearActorFilter}
-              aria-label="Clear actor filter"
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
-        )}
-        {selectedStatus != null && (
-          <div className="flex items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/50 px-3 py-2">
-            <div className="flex flex-col">
-              <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Status
-              </span>
-              <span className="text-sm text-slate-600 dark:text-slate-400">
-                {selectedStatus}
-              </span>
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 shrink-0 rounded-full text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-              onClick={clearStatusFilter}
-              aria-label="Clear status filter"
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
-        )}
       </div>
+
+      {(selectedActor || selectedStatus != null) && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-100/80 bg-blue-50/50 px-3 py-2 dark:border-slate-700/80 dark:bg-slate-900/40">
+          <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Active filters</span>
+          {selectedActor && (
+            <div className="inline-flex items-center gap-1 rounded-full border border-sky-500 bg-sky-500 px-2.5 py-0.5 text-sm font-medium text-white">
+              <span className="truncate max-w-[280px]">
+                {DIMENSION_LABELS[selectedActor.type]}: {selectedActor.name}
+              </span>
+              <button type="button" onClick={clearActorFilter} className="rounded-sm p-0.5 hover:bg-sky-600/80" aria-label="Clear actor filter">
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          )}
+          {selectedStatus != null && (
+            <div className="inline-flex items-center gap-1 rounded-full border border-sky-500 bg-sky-500 px-2.5 py-0.5 text-sm font-medium text-white">
+              <span className="truncate max-w-[280px]">Status: {selectedStatus}</span>
+              <button type="button" onClick={clearStatusFilter} className="rounded-sm p-0.5 hover:bg-sky-600/80" aria-label="Clear status filter">
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          )}
+          <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={() => {
+            clearActorFilter();
+            clearStatusFilter();
+          }}>
+            Clear all filters
+          </Button>
+        </div>
+      )}
 
       {error && (
         <div className="rounded-lg border border-amber-200 bg-amber-50/80 px-4 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">

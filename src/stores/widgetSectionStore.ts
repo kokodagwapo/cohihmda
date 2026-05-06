@@ -11,6 +11,7 @@ import { create } from 'zustand';
 import type { PeriodSelection } from '@/components/ui/DatePeriodPicker';
 import type { ColumnFilterState } from '@/utils/loanDetailFilters';
 import type { SalesCompanyOverviewAgingBucket } from '@/hooks/useSalesCompanyOverviewData';
+import type { InterestRateDrill } from '@/hooks/useLockStratificationData';
 
 export type SectionType =
   | 'company-scorecard'
@@ -136,6 +137,10 @@ export interface SectionFilters {
   pipelineAnalysisViewMode?: 'week' | 'month';
   /** Pipeline Analysis: percent change rows by volume or units */
   pipelineAnalysisPctMetric?: 'volume' | 'units';
+  /** Pipeline Analysis: selected week snapshot values (1..53) from table/chart interactions */
+  pipelineAnalysisSelectedWeekValues?: number[];
+  /** Pipeline Analysis: selected months (1..12) from table/chart interactions */
+  pipelineAnalysisSelectedMonths?: number[];
   /** Sales Scorecard Overview: measure (volume, units) */
   salesScorecardOverviewMeasure?: 'volume' | 'units';
   /** Sales Scorecard Overview: time granularity (quarterly, monthly, weekly, daily) */
@@ -184,6 +189,12 @@ export interface SectionFilters {
   lockStratMilestoneGroupBy?: string;
   /** Lock Stratification: pull-through period (30, 60, 90, 120, ytd) */
   lockStratPullThroughPeriod?: string;
+  /** Lock Stratification: selected interest-rate drill path for cross-widget filtering. */
+  lockStratSelectedInterestRateGroup?: InterestRateDrill;
+  /** Lock Stratification: selected days-to-lock-expiration bucket. */
+  lockStratSelectedExpirationBucket?: string | null;
+  /** Lock Stratification: selected group value from Active Loans by <group>. */
+  lockStratSelectedMilestoneGroup?: string | null;
   /** Loan Complexity: group by (actors = by actor type, branch, current_loan_status) */
   loanComplexityGroupBy?: 'actors' | 'branch' | 'current_loan_status';
   /** Loan Complexity: when groupBy is actors, which actor dimension (loan_officer, processor, etc.) */
@@ -371,6 +382,8 @@ export const useWidgetSectionStore = create<WidgetSectionState>((set, get) => ({
           pipelineAnalysisBranches: [],
           pipelineAnalysisViewMode: 'week',
           pipelineAnalysisPctMetric: 'volume',
+          pipelineAnalysisSelectedWeekValues: [],
+          pipelineAnalysisSelectedMonths: [],
         };
       } else if (sectionType === 'sales-scorecard-overview') {
         const now = new Date();
@@ -393,6 +406,9 @@ export const useWidgetSectionStore = create<WidgetSectionState>((set, get) => ({
           lockStratMeasure: 'volume',
           lockStratMilestoneGroupBy: 'current_milestone',
           lockStratPullThroughPeriod: '60',
+          lockStratSelectedInterestRateGroup: { level: 0 },
+          lockStratSelectedExpirationBucket: null,
+          lockStratSelectedMilestoneGroup: null,
         };
       } else if (sectionType === 'loan-complexity') {
         const now = new Date();

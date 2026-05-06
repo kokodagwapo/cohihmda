@@ -37,12 +37,39 @@ function parseChannelParam(query: Record<string, unknown>): string | undefined {
 function parseFilters(query: Record<string, unknown>): LockStratFilters {
   const rateMin = query.rate_min != null ? Number(query.rate_min) : undefined;
   const rateMax = query.rate_max != null ? Number(query.rate_max) : undefined;
+  const expirationBucket =
+    typeof query.expiration_bucket === "string"
+      ? query.expiration_bucket.trim()
+      : "";
+  const selectedGroupByRaw =
+    typeof query.selected_group_by === "string"
+      ? query.selected_group_by
+      : undefined;
+  const selectedGroupBy =
+    selectedGroupByRaw &&
+    [
+      "current_milestone",
+      "investor",
+      "branch",
+      "broker_lender",
+      "lo",
+      "ae",
+    ].includes(selectedGroupByRaw)
+      ? (selectedGroupByRaw as MilestoneGroupBy)
+      : undefined;
+  const selectedGroupValue =
+    typeof query.selected_group_value === "string"
+      ? query.selected_group_value.trim()
+      : "";
   return {
     channel: parseChannelParam(query),
     locked: ((query.locked as string) || "all_active") as LockedFilter,
     measure: ((query.measure as string) || "volume") as MeasureFilter,
     rateMin: Number.isFinite(rateMin) ? rateMin : undefined,
     rateMax: Number.isFinite(rateMax) ? rateMax : undefined,
+    expirationBucket: expirationBucket || undefined,
+    selectedGroupBy,
+    selectedGroupValue: selectedGroupValue || undefined,
   };
 }
 

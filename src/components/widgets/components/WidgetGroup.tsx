@@ -122,6 +122,7 @@ import {
   usePipelineAnalysisFilterOptions,
   usePipelineAnalysisConfig,
 } from "@/hooks/usePipelineAnalysisData";
+import type { InterestRateDrill } from "@/hooks/useLockStratificationData";
 import { useLoanComplexityStatusOptions } from "@/hooks/useLoanComplexityStatusOptions";
 import { useChannelStore } from "@/stores/channelStore";
 import { api } from "@/lib/api";
@@ -1453,10 +1454,10 @@ const SECTION_COLORS: Record<
     dot: "bg-cyan-500",
   },
   "pricing-dashboard": {
-    border: "border-emerald-400/50",
-    bg: "bg-emerald-50/50 dark:bg-emerald-950/20",
-    accent: "text-emerald-600 dark:text-emerald-400",
-    dot: "bg-emerald-500",
+    border: "border-blue-400/50",
+    bg: "bg-blue-50/50 dark:bg-blue-950/20",
+    accent: "text-blue-600 dark:text-blue-400",
+    dot: "bg-blue-500",
   },
   "pipeline-analysis": {
     border: "border-sky-400/50",
@@ -2331,6 +2332,34 @@ function GridCellRegistryWidget({
     ? { groupId, variant: definition.config?.variant }
     : {};
   const isLoanComplexity = defId?.startsWith("loan-complexity-");
+  const isPipelineAnalysis = defId?.startsWith("pipeline-analysis-");
+  const pipelineAnalysisConfig = isPipelineAnalysis
+    ? {
+        groupId,
+        selectedWeekValues: filters.pipelineAnalysisSelectedWeekValues ?? [],
+        selectedMonths: filters.pipelineAnalysisSelectedMonths ?? [],
+        onToggleWeek: (week: number) => {
+          const current = filters.pipelineAnalysisSelectedWeekValues ?? [];
+          const next = current.includes(week)
+            ? current.filter((w) => w !== week)
+            : [...current, week].sort((a, b) => a - b);
+          updateFilters(groupId, {
+            pipelineAnalysisSelectedWeekValues: next,
+            pipelineAnalysisSelectedMonths: [],
+          });
+        },
+        onToggleMonth: (month: number) => {
+          const current = filters.pipelineAnalysisSelectedMonths ?? [];
+          const next = current.includes(month)
+            ? current.filter((m) => m !== month)
+            : [...current, month].sort((a, b) => a - b);
+          updateFilters(groupId, {
+            pipelineAnalysisSelectedMonths: next,
+            pipelineAnalysisSelectedWeekValues: [],
+          });
+        },
+      }
+    : {};
   const lcGroupBy = filters.loanComplexityGroupBy ?? "actors";
   const lcActorType = (filters.loanComplexityActorType ?? "loan_officer") as
     | "loan_officer"
@@ -2488,6 +2517,7 @@ function GridCellRegistryWidget({
     ...salesScorecardOverviewConfig,
     ...productionTrendsConfig,
     ...productionSummaryByWeekConfig,
+    ...pipelineAnalysisConfig,
     ...activeWorkloadConfig,
     ...salesCompanyOverviewConfig,
     ...lockStratificationConfig,
@@ -2730,6 +2760,39 @@ export function WidgetGroup({
     loanType: string[];
     loanPurpose: string[];
   }>({ milestone: [], actor: [], loanType: [], loanPurpose: [] });
+  const lockStratInterestRateSelection = (filters.lockStratSelectedInterestRateGroup ??
+    { level: 0 }) as InterestRateDrill;
+  const lockStratGroupBy = (filters.lockStratMilestoneGroupBy ?? "current_milestone") as
+    | "current_milestone"
+    | "investor"
+    | "branch"
+    | "broker_lender"
+    | "lo"
+    | "ae";
+  const lockStratGroupLabel =
+    lockStratGroupBy === "current_milestone"
+      ? "Current Milestone"
+      : lockStratGroupBy === "investor"
+        ? "Investor"
+        : lockStratGroupBy === "branch"
+          ? "Branch"
+          : lockStratGroupBy === "broker_lender"
+            ? "Broker Lender"
+            : lockStratGroupBy === "lo"
+              ? "Loan Officer"
+              : "Account Executive";
+  const lockStratInterestRateLabel =
+    lockStratInterestRateSelection.level === 0
+      ? null
+      : lockStratInterestRateSelection.min === lockStratInterestRateSelection.max
+        ? `Rate: ${lockStratInterestRateSelection.min.toFixed(4)}`
+        : `Rate: ${lockStratInterestRateSelection.min.toFixed(3)} - ${lockStratInterestRateSelection.max.toFixed(3)}`;
+  const lockStratExpirationLabel = filters.lockStratSelectedExpirationBucket
+    ? `Days to Expiration: ${filters.lockStratSelectedExpirationBucket}`
+    : null;
+  const lockStratSelectedGroupLabel = filters.lockStratSelectedMilestoneGroup
+    ? `${lockStratGroupLabel}: ${filters.lockStratSelectedMilestoneGroup}`
+    : null;
 
   // Normalize legacy widgetIds to items
   const items = useMemo(
@@ -3097,6 +3160,18 @@ export function WidgetGroup({
         filters.pipelineAnalysisBranches.length > 0
       )
         toSave.pipelineAnalysisBranches = filters.pipelineAnalysisBranches;
+      if (
+        filters.pipelineAnalysisSelectedWeekValues &&
+        filters.pipelineAnalysisSelectedWeekValues.length > 0
+      )
+        toSave.pipelineAnalysisSelectedWeekValues =
+          filters.pipelineAnalysisSelectedWeekValues;
+      if (
+        filters.pipelineAnalysisSelectedMonths &&
+        filters.pipelineAnalysisSelectedMonths.length > 0
+      )
+        toSave.pipelineAnalysisSelectedMonths =
+          filters.pipelineAnalysisSelectedMonths;
     }
     if (sectionType === "sales-scorecard-overview") {
       if (
@@ -3154,6 +3229,15 @@ export function WidgetGroup({
         filters.lockStratPullThroughPeriod !== "60"
       )
         toSave.lockStratPullThroughPeriod = filters.lockStratPullThroughPeriod;
+      if ((filters.lockStratSelectedInterestRateGroup?.level ?? 0) > 0)
+        toSave.lockStratSelectedInterestRateGroup =
+          filters.lockStratSelectedInterestRateGroup;
+      if (filters.lockStratSelectedExpirationBucket)
+        toSave.lockStratSelectedExpirationBucket =
+          filters.lockStratSelectedExpirationBucket;
+      if (filters.lockStratSelectedMilestoneGroup)
+        toSave.lockStratSelectedMilestoneGroup =
+          filters.lockStratSelectedMilestoneGroup;
     }
     if (sectionType === "loan-complexity") {
       if (
@@ -3257,6 +3341,9 @@ export function WidgetGroup({
     filters.lockStratMeasure,
     filters.lockStratMilestoneGroupBy,
     filters.lockStratPullThroughPeriod,
+    filters.lockStratSelectedInterestRateGroup,
+    filters.lockStratSelectedExpirationBucket,
+    filters.lockStratSelectedMilestoneGroup,
     filters.loanComplexityGroupBy,
     filters.loanComplexityActorType,
     filters.loanComplexityCurrentStatus,
@@ -4065,7 +4152,7 @@ export function WidgetGroup({
                   </Button>
                   {((filters.pricingEntityValue ?? "").trim() !== "" ||
                     (filters.pricingActorValue ?? "").trim() !== "") && (
-                    <span className="inline-flex items-center gap-1 rounded-md bg-emerald-100 dark:bg-emerald-900/40 px-2 py-0.5 text-xs">
+                    <span className="inline-flex items-center gap-1 rounded-full border border-sky-500 bg-sky-500 px-2.5 py-0.5 text-sm font-medium text-white">
                       {(filters.pricingEntityValue ?? "").trim() !== ""
                         ? `${PRICING_ENTITY_OPTIONS.find((o) => o.value === (filters.pricingEntityFilterType ?? filters.pricingEntityType ?? "branch"))?.label ?? "Entity"}: ${filters.pricingEntityValue}`
                         : `${PRICING_ACTOR_OPTIONS.find((o) => o.value === (filters.pricingActorFilterType ?? filters.pricingActorType ?? "loan_officer"))?.label ?? "Actor"}: ${filters.pricingActorValue}`}
@@ -4079,7 +4166,7 @@ export function WidgetGroup({
                             pricingActorFilterType: undefined,
                           })
                         }
-                        className="p-0.5 rounded hover:bg-emerald-200 dark:hover:bg-emerald-800"
+                        className="rounded-sm p-0.5 hover:bg-sky-600/80"
                         aria-label="Clear entity/actor filter"
                       >
                         <X className="h-3 w-3" />
@@ -4138,6 +4225,80 @@ export function WidgetGroup({
                     loading={pipelineRange.loading}
                     tenantId={selectedTenantId ?? null}
                   />
+                  {((filters.pipelineAnalysisViewMode ?? "week") === "week" &&
+                    (filters.pipelineAnalysisSelectedWeekValues?.length ?? 0) > 0) ||
+                  ((filters.pipelineAnalysisViewMode ?? "week") === "month" &&
+                    (filters.pipelineAnalysisSelectedMonths?.length ?? 0) > 0) ? (
+                    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-100/80 bg-blue-50/50 px-3 py-2 dark:border-slate-700/80 dark:bg-slate-900/40">
+                      <span className="text-sm font-medium text-slate-500 dark:text-slate-400">
+                        Active filters
+                      </span>
+                      {(filters.pipelineAnalysisViewMode ?? "week") === "week" &&
+                        (filters.pipelineAnalysisSelectedWeekValues?.length ?? 0) >
+                          0 && (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-sky-500 bg-sky-500 px-2.5 py-0.5 text-sm font-medium text-white">
+                            Selected{" "}
+                            {(
+                              filters.pipelineAnalysisSelectedWeekValues ?? []
+                            )
+                              .slice()
+                              .sort((a, b) => a - b)
+                              .join(", ")}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateFilters(groupId, {
+                                  pipelineAnalysisSelectedWeekValues: [],
+                                })
+                              }
+                              className="rounded-sm p-0.5 hover:bg-sky-600/80"
+                              aria-label="Clear week filter"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </span>
+                        )}
+                      {(filters.pipelineAnalysisViewMode ?? "week") === "month" &&
+                        (filters.pipelineAnalysisSelectedMonths?.length ?? 0) >
+                          0 && (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-sky-500 bg-sky-500 px-2.5 py-0.5 text-sm font-medium text-white">
+                            Selected Months:{" "}
+                            {(
+                              filters.pipelineAnalysisSelectedMonths ?? []
+                            )
+                              .slice()
+                              .sort((a, b) => a - b)
+                              .join(", ")}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateFilters(groupId, {
+                                  pipelineAnalysisSelectedMonths: [],
+                                })
+                              }
+                              className="rounded-sm p-0.5 hover:bg-sky-600/80"
+                              aria-label="Clear month filter"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </span>
+                        )}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 text-xs"
+                        onClick={() =>
+                          updateFilters(groupId, {
+                            pipelineAnalysisSelectedWeekValues: [],
+                            pipelineAnalysisSelectedMonths: [],
+                          })
+                        }
+                      >
+                        Clear all filters
+                      </Button>
+                    </div>
+                  ) : null}
                   {/* Dynamic (user-added) filters */}
                   {(filters.dynamicFilters || []).map((df) => (
                     <DynamicDimensionFilter
@@ -4493,7 +4654,81 @@ export function WidgetGroup({
                       })
                     }
                   />
-
+                  {lockStratInterestRateLabel ||
+                  lockStratExpirationLabel ||
+                  lockStratSelectedGroupLabel ? (
+                    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-100/80 bg-blue-50/50 px-3 py-2 dark:border-slate-700/80 dark:bg-slate-900/40">
+                      <span className="text-sm font-medium text-slate-500 dark:text-slate-400">
+                        Active filters
+                      </span>
+                      {lockStratInterestRateLabel ? (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-sky-500 bg-sky-500 px-2.5 py-0.5 text-sm font-medium text-white">
+                          {lockStratInterestRateLabel}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateFilters(groupId, {
+                                lockStratSelectedInterestRateGroup: { level: 0 },
+                              })
+                            }
+                            className="rounded-sm p-0.5 hover:bg-sky-600/80"
+                            aria-label="Clear interest rate filter"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      ) : null}
+                      {lockStratExpirationLabel ? (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-sky-500 bg-sky-500 px-2.5 py-0.5 text-sm font-medium text-white">
+                          {lockStratExpirationLabel}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateFilters(groupId, {
+                                lockStratSelectedExpirationBucket: null,
+                              })
+                            }
+                            className="rounded-sm p-0.5 hover:bg-sky-600/80"
+                            aria-label="Clear days to expiration filter"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      ) : null}
+                      {lockStratSelectedGroupLabel ? (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-sky-500 bg-sky-500 px-2.5 py-0.5 text-sm font-medium text-white">
+                          {lockStratSelectedGroupLabel}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateFilters(groupId, {
+                                lockStratSelectedMilestoneGroup: null,
+                              })
+                            }
+                            className="rounded-sm p-0.5 hover:bg-sky-600/80"
+                            aria-label="Clear milestone group filter"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      ) : null}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 text-xs"
+                        onClick={() =>
+                          updateFilters(groupId, {
+                            lockStratSelectedInterestRateGroup: { level: 0 },
+                            lockStratSelectedExpirationBucket: null,
+                            lockStratSelectedMilestoneGroup: null,
+                          })
+                        }
+                      >
+                        Clear all filters
+                      </Button>
+                    </div>
+                  ) : null}
                   {/* Dynamic (user-added) filters */}
                   {(filters.dynamicFilters || []).map((df) => (
                     <DynamicDimensionFilter
@@ -4684,10 +4919,7 @@ export function WidgetGroup({
                       return (
                         <div className="min-h-[32px] flex flex-wrap items-center gap-2 w-full min-w-0">
                           {groups.length > 0 ? (
-                            <span
-                              className="inline-flex flex-wrap items-center gap-x-1 gap-y-1 px-2 py-1.5 rounded text-xs font-medium text-white max-w-full min-w-0 break-words whitespace-normal"
-                              style={{ backgroundColor: "#52b852" }}
-                            >
+                            <span className="inline-flex flex-wrap items-center gap-x-1 gap-y-1 rounded-full border border-sky-500 bg-sky-500 px-2.5 py-0.5 text-sm font-medium text-white max-w-full min-w-0 break-words whitespace-normal">
                               {(() => {
                                 const dimLabel = (d: string) => {
                                   const key = (d ?? "").toLowerCase();
@@ -4722,7 +4954,7 @@ export function WidgetGroup({
                               })()}
                               <button
                                 type="button"
-                                className="ml-0.5 rounded hover:bg-white/20 p-0.5 shrink-0"
+                                className="ml-0.5 rounded p-0.5 shrink-0 hover:bg-sky-600/80"
                                 onClick={() =>
                                   updateFilters(groupId, {
                                     loanComplexitySelectedGroups: [],
