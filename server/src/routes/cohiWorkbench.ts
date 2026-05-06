@@ -38,7 +38,10 @@ import {
   sanitizeGeneratedSQL,
   type ChatContext,
 } from "../services/ai/cohiChatService.js";
-import { getPromptConfig, buildPrompt } from "../services/promptConfigService.js";
+import {
+  getPromptConfig,
+  buildPrompt,
+} from "../services/promptConfigService.js";
 import { decryptAPIKeys } from "../services/encryption.js";
 import { tenantDbManager } from "../config/tenantDatabaseManager.js";
 import { loadSession as loadResearchSession } from "../services/research/orchestrator.js";
@@ -71,9 +74,18 @@ interface CanvasStateSnapshot {
     sectionType: string;
     widgetIds: string[];
     /** Widgets in this group with stable ids (for modify_group operations) */
-    widgets?: { id: string; kind: "registry" | "cohi"; defId?: string; title?: string; name?: string }[];
+    widgets?: {
+      id: string;
+      kind: "registry" | "cohi";
+      defId?: string;
+      title?: string;
+      name?: string;
+    }[];
     /** Grid layout per widget (key = widgets[].id); 36 cols, 16px rows */
-    widgetLayouts?: Record<string, { x: number; y: number; w: number; h: number }>;
+    widgetLayouts?: Record<
+      string,
+      { x: number; y: number; w: number; h: number }
+    >;
     filters?: {
       dateRange?: string;
       dateField?: string;
@@ -85,7 +97,7 @@ interface CanvasStateSnapshot {
     id: string;
     type: string;
     title?: string;
-    sourceType?: 'research' | 'chat';
+    sourceType?: "research" | "chat";
     sourceSessionId?: string;
     sourceArtifactId?: string;
     artifactCapabilities?: {
@@ -139,7 +151,10 @@ function isValidWidgetSql(sql: string): boolean {
  * Mirrors the logic in cohiChat.ts injectConditionIntoBody.
  */
 function injectConditionForValidation(sql: string, condition: string): string {
-  const body = sql.trimEnd().replace(/;+\s*$/, '').trimEnd();
+  const body = sql
+    .trimEnd()
+    .replace(/;+\s*$/, "")
+    .trimEnd();
   const whereRegex = /\bWHERE\b/gi;
   let lastWhereIdx = -1;
   let m: RegExpExecArray | null;
@@ -147,16 +162,27 @@ function injectConditionForValidation(sql: string, condition: string): string {
 
   if (lastWhereIdx >= 0) {
     const afterWhere = body.substring(lastWhereIdx + 5);
-    const boundary = /\b(GROUP\s+BY|ORDER\s+BY|LIMIT|HAVING|UNION|INTERSECT|EXCEPT)\b/i.exec(afterWhere);
+    const boundary =
+      /\b(GROUP\s+BY|ORDER\s+BY|LIMIT|HAVING|UNION|INTERSECT|EXCEPT)\b/i.exec(
+        afterWhere,
+      );
     if (boundary) {
       const insertAt = lastWhereIdx + 5 + boundary.index;
-      return body.substring(0, insertAt) + ` AND ${condition} ` + body.substring(insertAt);
+      return (
+        body.substring(0, insertAt) +
+        ` AND ${condition} ` +
+        body.substring(insertAt)
+      );
     }
     return body + ` AND ${condition}`;
   }
   const boundary = /\b(GROUP\s+BY|ORDER\s+BY|LIMIT|HAVING)\b/i.exec(body);
   if (boundary) {
-    return body.substring(0, boundary.index) + `WHERE ${condition} ` + body.substring(boundary.index);
+    return (
+      body.substring(0, boundary.index) +
+      `WHERE ${condition} ` +
+      body.substring(boundary.index)
+    );
   }
   return body + ` WHERE ${condition}`;
 }
@@ -200,16 +226,16 @@ export function shouldValidateInjectedFilters(
  */
 async function validateWidgetSql(
   sql: string,
-  pool: import('pg').Pool,
+  pool: import("pg").Pool,
   dateColumn?: string,
-): Promise<{ valid: boolean; error?: string; phase?: 'base' | 'filtered' }> {
+): Promise<{ valid: boolean; error?: string; phase?: "base" | "filtered" }> {
   const sanitized = sanitizeGeneratedSQL(sql);
 
   // Phase 1: base SQL must be parseable
   try {
     await pool.query(`EXPLAIN ${sanitized}`);
   } catch (err: any) {
-    return { valid: false, error: err.message, phase: 'base' };
+    return { valid: false, error: err.message, phase: "base" };
   }
 
   // Phase 2: SQL must remain valid after additive filter injection
@@ -221,7 +247,7 @@ async function validateWidgetSql(
       );
       await pool.query(`EXPLAIN ${withFilter}`);
     } catch (err: any) {
-      return { valid: false, error: err.message, phase: 'filtered' };
+      return { valid: false, error: err.message, phase: "filtered" };
     }
   }
 
@@ -237,23 +263,26 @@ async function attemptSqlFix(
   errorMessage: string,
   schemaContext: string,
   apiKey: string,
-  phase: 'base' | 'filtered',
+  phase: "base" | "filtered",
   opts?: {
     existingSql?: string;
     userRequest?: string;
   },
 ): Promise<string | null> {
-  const phaseNote = phase === 'filtered'
-    ? 'The SQL itself is syntactically valid, but it breaks when a date range filter (AND date_col >= $1 AND date_col <= $2) is appended to the WHERE clause. The most common cause is that the WHERE clause in the outermost SELECT does not reference the date column directly.'
-    : 'The SQL failed to parse or plan.';
-  const hasExistingSql = !!(opts?.existingSql && String(opts.existingSql).trim());
+  const phaseNote =
+    phase === "filtered"
+      ? "The SQL itself is syntactically valid, but it breaks when a date range filter (AND date_col >= $1 AND date_col <= $2) is appended to the WHERE clause. The most common cause is that the WHERE clause in the outermost SELECT does not reference the date column directly."
+      : "The SQL failed to parse or plan.";
+  const hasExistingSql = !!(
+    opts?.existingSql && String(opts.existingSql).trim()
+  );
   const existingSqlNote = hasExistingSql
-    ? '\nWhen available, you MUST minimally edit the existing selected widget SQL instead of rewriting from scratch.'
-    : '';
+    ? "\nWhen available, you MUST minimally edit the existing selected widget SQL instead of rewriting from scratch."
+    : "";
 
   const fixMessages: LLMMessage[] = [
     {
-      role: 'system',
+      role: "system",
       content: `You are a PostgreSQL expert. Fix the SQL query so it passes EXPLAIN validation.
 ${phaseNote}
 ${existingSqlNote}
@@ -263,14 +292,22 @@ Schema context:
 ${schemaContext.substring(0, 3000)}`,
     },
     {
-      role: 'user',
-      content: `User request (if provided):\n${opts?.userRequest || 'N/A'}\n\nExisting selected widget SQL (if provided):\n${opts?.existingSql || 'N/A'}\n\nGenerated SQL that failed:\n${originalSql}\n\nError:\n${errorMessage}\n\nFixed SQL:`,
+      role: "user",
+      content: `User request (if provided):\n${opts?.userRequest || "N/A"}\n\nExisting selected widget SQL (if provided):\n${opts?.existingSql || "N/A"}\n\nGenerated SQL that failed:\n${originalSql}\n\nError:\n${errorMessage}\n\nFixed SQL:`,
     },
   ];
 
   try {
-    const raw = await callLLM(fixMessages, apiKey, { temperature: 0.1, maxTokens: 1500 });
-    const fixed = raw.trim().replace(/^```sql\s*/i, '').replace(/```\s*$/, '').replace(/;+\s*$/, '').trim();
+    const raw = await callLLM(fixMessages, apiKey, {
+      temperature: 0.1,
+      maxTokens: 1500,
+    });
+    const fixed = raw
+      .trim()
+      .replace(/^```sql\s*/i, "")
+      .replace(/```\s*$/, "")
+      .replace(/;+\s*$/, "")
+      .trim();
     if (fixed && isValidWidgetSql(fixed)) return fixed;
   } catch {
     // swallow — caller handles null
@@ -279,8 +316,13 @@ ${schemaContext.substring(0, 3000)}`,
 }
 
 function isPullThroughAction(action: any): boolean {
-  const hay = `${action?.title || ""} ${action?.explanation || ""} ${action?.sql || ""}`.toLowerCase();
-  return hay.includes("pull-through") || hay.includes("pull through") || hay.includes("pullthrough");
+  const hay =
+    `${action?.title || ""} ${action?.explanation || ""} ${action?.sql || ""}`.toLowerCase();
+  return (
+    hay.includes("pull-through") ||
+    hay.includes("pull through") ||
+    hay.includes("pullthrough")
+  );
 }
 
 /**
@@ -289,28 +331,41 @@ function isPullThroughAction(action: any): boolean {
  */
 function validatePullThroughSqlGuardrails(
   sql: string,
-  opts?: { filterable?: boolean; dateColumn?: string; allowLowSamplePullThrough?: boolean },
+  opts?: {
+    filterable?: boolean;
+    dateColumn?: string;
+    allowLowSamplePullThrough?: boolean;
+  },
 ): string | null {
   const normalized = sql.toLowerCase().replace(/\s+/g, " ");
   const hasNumerator =
     normalized.includes("current_loan_status ilike '%originated%'") &&
     normalized.includes("current_loan_status ilike '%purchased%'");
   const hasCompletedDenominator =
-    normalized.includes("current_loan_status not in ('active loan','active','locked','submitted','approved')") ||
-    normalized.includes("current_loan_status not in ('active loan', 'active', 'locked', 'submitted', 'approved')");
+    normalized.includes(
+      "current_loan_status not in ('active loan','active','locked','submitted','approved')",
+    ) ||
+    normalized.includes(
+      "current_loan_status not in ('active loan', 'active', 'locked', 'submitted', 'approved')",
+    );
   const hasNullIf = normalized.includes("nullif(");
   const dangerousFundedBaseFilter =
-    /\bwhere\b[^;]*(current_loan_status\s+ilike\s+'%originated%'|current_loan_status\s+ilike\s+'%purchased%')/i.test(sql) &&
-    !/count\s*\(\s*case\s+when/i.test(sql); // allow inside CASE expression counts
+    /\bwhere\b[^;]*(current_loan_status\s+ilike\s+'%originated%'|current_loan_status\s+ilike\s+'%purchased%')/i.test(
+      sql,
+    ) && !/count\s*\(\s*case\s+when/i.test(sql); // allow inside CASE expression counts
   const isSegmented =
     /\bgroup\s+by\b/i.test(sql) &&
-    /\b(branch|loan_officer|loan officer|product|investor|channel)\b/i.test(sql);
+    /\b(branch|loan_officer|loan officer|product|investor|channel)\b/i.test(
+      sql,
+    );
   const hasFundedCountAlias = /\bas\s+funded_count\b/i.test(sql);
   const hasCompletedCountAlias = /\bas\s+completed_count\b/i.test(sql);
   const hasRateAlias = /\bas\s+(pull[_\s-]?through(_rate)?)\b/i.test(sql);
   const hasSampleSizeHaving =
     /\bhaving\b[^;]*(completed_count\s*>=\s*(5|10))/i.test(sql) ||
-    /\bhaving\b[^;]*count\s*\(\s*case\s+when\s+l?\.?current_loan_status\s+not\s+in\s*\('active loan'\s*,\s*'active'\s*,\s*'locked'\s*,\s*'submitted'\s*,\s*'approved'\)\s*then\s*1\s*end\s*\)\s*>=\s*(5|10)/i.test(sql);
+    /\bhaving\b[^;]*count\s*\(\s*case\s+when\s+l?\.?current_loan_status\s+not\s+in\s*\('active loan'\s*,\s*'active'\s*,\s*'locked'\s*,\s*'submitted'\s*,\s*'approved'\)\s*then\s*1\s*end\s*\)\s*>=\s*(5|10)/i.test(
+      sql,
+    );
 
   if (!hasNumerator) {
     return "Pull-through SQL missing canonical funded numerator (Originated/purchased statuses).";
@@ -324,7 +379,11 @@ function validatePullThroughSqlGuardrails(
   if (dangerousFundedBaseFilter) {
     return "Pull-through SQL incorrectly filters base rows to funded statuses in WHERE.";
   }
-  if (opts?.filterable !== false && opts?.dateColumn && opts.dateColumn !== "application_date") {
+  if (
+    opts?.filterable !== false &&
+    opts?.dateColumn &&
+    opts.dateColumn !== "application_date"
+  ) {
     return "Pull-through widgets must use filterConfig.dateColumn = application_date.";
   }
   if (isSegmented) {
@@ -348,7 +407,9 @@ function resolveAutoPersonas(
   canvasState?: CanvasStateSnapshot,
 ): AgentPersona[] {
   const q = (question || "").toLowerCase();
-  const selectedWidgetPresent = !!canvasState?.standaloneWidgets?.some((w) => w.selected);
+  const selectedWidgetPresent = !!canvasState?.standaloneWidgets?.some(
+    (w) => w.selected,
+  );
 
   const dataScientistSignals = [
     "distribution",
@@ -376,13 +437,21 @@ function resolveAutoPersonas(
     "product",
   ];
 
-  const dsScore = dataScientistSignals.reduce((n, k) => n + (q.includes(k) ? 1 : 0), 0);
-  const meScore = mortgageSignals.reduce((n, k) => n + (q.includes(k) ? 1 : 0), 0);
+  const dsScore = dataScientistSignals.reduce(
+    (n, k) => n + (q.includes(k) ? 1 : 0),
+    0,
+  );
+  const meScore = mortgageSignals.reduce(
+    (n, k) => n + (q.includes(k) ? 1 : 0),
+    0,
+  );
 
   // If user is editing and asks explanatory/analytical questions, blend both.
   const questionLikeWhileEditing =
     selectedWidgetPresent &&
-    /\b(why|what|explain|analyze|break down|show|compare|trend)\b/i.test(question);
+    /\b(why|what|explain|analyze|break down|show|compare|trend)\b/i.test(
+      question,
+    );
 
   const dataScientist = AGENT_PERSONAS["data-scientist"];
   const mortgageExpert = AGENT_PERSONAS["mortgage-expert"];
@@ -405,7 +474,7 @@ async function getOpenAIKey(tenantId?: string): Promise<string> {
       `);
       if (tableCheck.rows[0]?.exists) {
         const result = await tenantPool.query(
-          `SELECT openai_api_key FROM public.rag_settings LIMIT 1`
+          `SELECT openai_api_key FROM public.rag_settings LIMIT 1`,
         );
         if (result.rows[0]?.openai_api_key) {
           const decrypted = await decryptAPIKeys({
@@ -417,7 +486,7 @@ async function getOpenAIKey(tenantId?: string): Promise<string> {
     } catch (error: any) {
       console.error(
         "[CohiWorkbench] Error fetching tenant API key:",
-        error.message
+        error.message,
       );
     }
   }
@@ -457,9 +526,11 @@ function fmtNum(val: unknown): string {
   if (val == null) return "N/A";
   const n = Number(val);
   if (Number.isNaN(n)) return String(val);
-  if (Math.abs(n) >= 1_000_000_000) return `$${(n / 1_000_000_000).toFixed(1)}B`;
+  if (Math.abs(n) >= 1_000_000_000)
+    return `$${(n / 1_000_000_000).toFixed(1)}B`;
   if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
-  if (Math.abs(n) >= 1_000) return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
+  if (Math.abs(n) >= 1_000)
+    return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
   if (Number.isInteger(n)) return String(n);
   return n.toFixed(2);
 }
@@ -469,9 +540,12 @@ function formatKpiData(data: any): string {
   if (!data) return "";
   // Direct KPI shape: { value, label, format, subtitle }
   if (data.value !== undefined) {
-    const val = data.format === "currency" ? fmtNum(data.value)
-      : data.format === "percent" ? `${Number(data.value).toFixed(1)}%`
-      : fmtNum(data.value);
+    const val =
+      data.format === "currency"
+        ? fmtNum(data.value)
+        : data.format === "percent"
+          ? `${Number(data.value).toFixed(1)}%`
+          : fmtNum(data.value);
     return data.subtitle ? `${val} (${data.subtitle})` : val;
   }
   // Fallback: stringify compactly
@@ -481,7 +555,11 @@ function formatKpiData(data: any): string {
 /** Format chart data into a compact summary string */
 function formatChartData(data: any): string {
   if (!data) return "";
-  const chartData: any[] = Array.isArray(data.data) ? data.data : Array.isArray(data) ? data : [];
+  const chartData: any[] = Array.isArray(data.data)
+    ? data.data
+    : Array.isArray(data)
+      ? data
+      : [];
   if (chartData.length === 0) return "(no data)";
 
   const xKey = data.xKey || Object.keys(chartData[0] || {})[0];
@@ -493,23 +571,34 @@ function formatChartData(data: any): string {
     const y = row[yKey] ?? "";
     return `${x}: ${fmtNum(y)}`;
   });
-  const suffix = chartData.length > 8 ? ` ... (${chartData.length} total points)` : "";
+  const suffix =
+    chartData.length > 8 ? ` ... (${chartData.length} total points)` : "";
   return points.join(", ") + suffix;
 }
 
 /** Format table data into a compact summary string */
 function formatTableData(data: any): string {
   if (!data) return "";
-  const rows: any[] = Array.isArray(data.data) ? data.data : Array.isArray(data) ? data : [];
+  const rows: any[] = Array.isArray(data.data)
+    ? data.data
+    : Array.isArray(data)
+      ? data
+      : [];
   if (rows.length === 0) return "(no data)";
 
   const keys = Object.keys(rows[0] || {}).slice(0, 6);
   const header = keys.join(" | ");
   const bodyRows = rows.slice(0, 5).map((row: any) =>
-    keys.map((k) => {
-      const v = row[k];
-      return v == null ? "-" : typeof v === "number" ? fmtNum(v) : String(v).substring(0, 30);
-    }).join(" | ")
+    keys
+      .map((k) => {
+        const v = row[k];
+        return v == null
+          ? "-"
+          : typeof v === "number"
+            ? fmtNum(v)
+            : String(v).substring(0, 30);
+      })
+      .join(" | "),
   );
   const suffix = rows.length > 5 ? `\n... (${rows.length} total rows)` : "";
   return `${header}\n${bodyRows.join("\n")}${suffix}`;
@@ -538,13 +627,15 @@ function buildCanvasContext(state: CanvasStateSnapshot): string {
       }
       const widgetCount = g.widgets?.length ?? g.widgetIds.length;
       lines.push(
-        `- **${g.title}** groupId=\`${g.groupId}\` (${g.sectionType}, ${widgetCount} widgets)${filterStr}`
+        `- **${g.title}** groupId=\`${g.groupId}\` (${g.sectionType}, ${widgetCount} widgets)${filterStr}`,
       );
       if (g.widgets && g.widgets.length > 0) {
         for (const w of g.widgets) {
-          const label = w.kind === "registry" ? (w.name || w.defId) : w.title;
+          const label = w.kind === "registry" ? w.name || w.defId : w.title;
           const layout = g.widgetLayouts?.[w.id];
-          const layoutStr = layout ? ` @ grid(${layout.x},${layout.y}) size ${layout.w}x${layout.h}` : "";
+          const layoutStr = layout
+            ? ` @ grid(${layout.x},${layout.y}) size ${layout.w}x${layout.h}`
+            : "";
           lines.push(`  - \`${w.id}\` (${w.kind}) ${label ?? ""}${layoutStr}`);
         }
       }
@@ -555,12 +646,18 @@ function buildCanvasContext(state: CanvasStateSnapshot): string {
   if (state.standaloneWidgets.length > 0) {
     lines.push(`### Standalone Items (${state.standaloneWidgets.length})`);
     for (const w of state.standaloneWidgets) {
-      const source = w.sourceType === 'research' ? ' [research-lab widget]' : '';
-      const selectedLabel = w.selected ? ' [SELECTED]' : '';
-      lines.push(`- ${w.id} (${w.type})${w.title ? ": " + w.title : ""}${source}${selectedLabel}`);
+      const source =
+        w.sourceType === "research" ? " [research-lab widget]" : "";
+      const selectedLabel = w.selected ? " [SELECTED]" : "";
+      lines.push(
+        `- ${w.id} (${w.type})${w.title ? ": " + w.title : ""}${source}${selectedLabel}`,
+      );
       if (w.sql) {
         const sqlLimit = w.selected ? w.sql.length : 1000;
-        const sqlSnippet = w.sql.length <= sqlLimit ? w.sql : w.sql.substring(0, sqlLimit) + '...';
+        const sqlSnippet =
+          w.sql.length <= sqlLimit
+            ? w.sql
+            : w.sql.substring(0, sqlLimit) + "...";
         lines.push(`  SQL: \`${sqlSnippet}\``);
       }
     }
@@ -573,7 +670,13 @@ function buildCanvasContext(state: CanvasStateSnapshot): string {
 
     // Sort: KPIs first (most compact and useful), then charts, then tables
     const sorted = [...state.widgetData].sort((a, b) => {
-      const order: Record<string, number> = { kpi: 0, chart: 1, table: 2, embed: 3, other: 4 };
+      const order: Record<string, number> = {
+        kpi: 0,
+        chart: 1,
+        table: 2,
+        embed: 3,
+        other: 4,
+      };
       return (order[a.category] ?? 4) - (order[b.category] ?? 4);
     });
 
@@ -581,7 +684,9 @@ function buildCanvasContext(state: CanvasStateSnapshot): string {
 
     for (const entry of sorted) {
       if (charBudget <= 0) {
-        lines.push("... (additional widget data truncated to stay within context limits)");
+        lines.push(
+          "... (additional widget data truncated to stay within context limits)",
+        );
         break;
       }
 
@@ -615,7 +720,7 @@ function buildCanvasContext(state: CanvasStateSnapshot): string {
  */
 async function buildResearchContext(
   state: CanvasStateSnapshot | undefined,
-  tenantPool: import("pg").Pool | null
+  tenantPool: import("pg").Pool | null,
 ): Promise<string> {
   if (!state || !tenantPool) return "";
   const sessionIds = new Set<string>();
@@ -629,10 +734,10 @@ async function buildResearchContext(
   const blocks: string[] = ["\n## RESEARCH LAB CONTEXT\n"];
   blocks.push(
     "The canvas contains widgets created from Research Lab sessions. " +
-    "When the user asks to modify a research widget, use the research context " +
-    "below to understand the analytical intent, then generate a new SQL query " +
-    "that achieves the requested change. Use the modify_widget action with a " +
-    "new `sql` field.\n"
+      "When the user asks to modify a research widget, use the research context " +
+      "below to understand the analytical intent, then generate a new SQL query " +
+      "that achieves the requested change. Use the modify_widget action with a " +
+      "new `sql` field.\n",
   );
 
   for (const sid of sessionIds) {
@@ -644,18 +749,33 @@ async function buildResearchContext(
       if (session.findings && session.findings.length > 0) {
         blocks.push(`\n**Findings (${session.findings.length}):**`);
         for (const f of session.findings.slice(0, 5)) {
-          blocks.push(`- **${f.title}** (${f.confidence} confidence): ${(f.summary ?? "").substring(0, 200)}`);
+          blocks.push(
+            `- **${f.title}** (${f.confidence} confidence): ${(f.summary ?? "").substring(0, 200)}`,
+          );
           if (f.evidence && f.evidence.length > 0) {
             for (const ev of f.evidence.slice(0, 2)) {
               if ("kind" in ev && ev.kind === "registry_widget") {
-                const w = ev as { definitionName?: string; definitionId?: string; explanation?: string };
-                blocks.push(`  [widget] ${w.definitionName ?? w.definitionId ?? "unknown"}`);
-                if (w.explanation) blocks.push(`  Purpose: ${String(w.explanation).substring(0, 150)}`);
+                const w = ev as {
+                  definitionName?: string;
+                  definitionId?: string;
+                  explanation?: string;
+                };
+                blocks.push(
+                  `  [widget] ${w.definitionName ?? w.definitionId ?? "unknown"}`,
+                );
+                if (w.explanation)
+                  blocks.push(
+                    `  Purpose: ${String(w.explanation).substring(0, 150)}`,
+                  );
               } else {
                 const sql = (ev as { sql?: string }).sql ?? "";
-                blocks.push(`  SQL: \`${sql.substring(0, 200)}${sql.length > 200 ? "..." : ""}\``);
+                blocks.push(
+                  `  SQL: \`${sql.substring(0, 200)}${sql.length > 200 ? "..." : ""}\``,
+                );
                 if ((ev as { explanation?: string }).explanation) {
-                  blocks.push(`  Purpose: ${String((ev as { explanation?: string }).explanation).substring(0, 150)}`);
+                  blocks.push(
+                    `  Purpose: ${String((ev as { explanation?: string }).explanation).substring(0, 150)}`,
+                  );
                 }
               }
             }
@@ -664,7 +784,10 @@ async function buildResearchContext(
       }
       blocks.push("");
     } catch (err) {
-      console.warn(`[CohiWorkbench] Failed to load research session ${sid}:`, err);
+      console.warn(
+        `[CohiWorkbench] Failed to load research session ${sid}:`,
+        err,
+      );
     }
   }
 
@@ -1140,18 +1263,14 @@ router.post(
   apiLimiter,
   async (req: AuthRequest, res) => {
     try {
-      const {
-        question,
-        canvasState,
-        widgetCatalog,
-        conversationHistory,
-      } = req.body as {
-        question: string;
-        canvasState?: CanvasStateSnapshot;
-        widgetCatalog?: string;
-        conversationHistory?: { role: string; content: string }[];
-        tenantId?: string;
-      };
+      const { question, canvasState, widgetCatalog, conversationHistory } =
+        req.body as {
+          question: string;
+          canvasState?: CanvasStateSnapshot;
+          widgetCatalog?: string;
+          conversationHistory?: { role: string; content: string }[];
+          tenantId?: string;
+        };
 
       if (!question || typeof question !== "string") {
         return res.status(400).json({ error: "Question is required" });
@@ -1180,14 +1299,17 @@ router.post(
                MAX(funding_date),
                MAX(application_date),
                MAX(started_date)
-             ) AS max_date FROM public.loans`
+             ) AS max_date FROM public.loans`,
           );
           const raw = dateResult.rows[0]?.max_date;
           if (raw) {
             dataMaxDate = new Date(raw).toISOString().split("T")[0];
           }
         } catch (err) {
-          console.warn("[CohiWorkbench] Could not load verified metrics SQL or data max date:", err);
+          console.warn(
+            "[CohiWorkbench] Could not load verified metrics SQL or data max date:",
+            err,
+          );
         }
       }
       // Fall back to a reasonable recent default if query failed
@@ -1244,7 +1366,10 @@ router.post(
             knowledgeContext = `\n\n${ragResult.formatted}`;
           }
         } catch (err) {
-          console.warn("[CohiWorkbench] Could not load knowledge context:", err);
+          console.warn(
+            "[CohiWorkbench] Could not load knowledge context:",
+            err,
+          );
         }
       }
 
@@ -1253,21 +1378,28 @@ router.post(
       const dataMaxYear = dataMaxDate.split("-")[0];
       const systemPrompt = WORKBENCH_SYSTEM_PROMPT.replace(
         "{{currentDate}}",
-        now.toISOString().split("T")[0]
+        now.toISOString().split("T")[0],
       )
         .replaceAll("{{DATA_MAX_DATE}}", dataMaxDate)
         .replaceAll("{{DATA_MAX_DATE_YEAR}}", dataMaxYear)
         .replace("{{SCHEMA_CONTEXT}}", schemaContext + verifiedMetricsBlock)
-        .replace("{{WIDGET_CATALOG}}", widgetCatalog || "No widget catalog provided.")
+        .replace(
+          "{{WIDGET_CATALOG}}",
+          widgetCatalog || "No widget catalog provided.",
+        )
         .replace(
           "{{DATA_SOURCE_HINTS}}",
           Object.entries(DATA_SOURCE_SQL_HINTS)
             .map(([src, hint]) => `- ${src}: ${hint}`)
-            .join("\n") || "Use the schema context above and the widget's data source (e.g. company-scorecard, sales-scorecard) to write equivalent SQL."
+            .join("\n") ||
+            "Use the schema context above and the widget's data source (e.g. company-scorecard, sales-scorecard) to write equivalent SQL.",
         )
         .replace(
           "{{CANVAS_STATE}}",
-          canvasContext + researchContext + personaSupplement + knowledgeContext
+          canvasContext +
+            researchContext +
+            personaSupplement +
+            knowledgeContext,
         );
 
       // Build message history
@@ -1285,11 +1417,14 @@ router.post(
       ];
 
       console.log(
-        `[CohiWorkbench] Processing question: "${question.substring(0, 80)}..." (tenant: ${tenantId || "none"}, personas: ${personaSummary})`
+        `[CohiWorkbench] Processing question: "${question.substring(0, 80)}..." (tenant: ${tenantId || "none"}, personas: ${personaSummary})`,
       );
 
       // Use higher token limit when user appears to be requesting a report
-      const isReportRequest = /\b(report|presentation|powerpoint|pptx|pdf|slide|deck)\b/i.test(question);
+      const isReportRequest =
+        /\b(report|presentation|powerpoint|pptx|pdf|slide|deck)\b/i.test(
+          question,
+        );
       const rawResponse = await callLLM(messages, apiKey, {
         temperature: 0.3,
         maxTokens: isReportRequest ? 8000 : 4096,
@@ -1301,7 +1436,9 @@ router.post(
       try {
         parsed = JSON.parse(rawResponse);
       } catch {
-        console.warn("[CohiWorkbench] Failed to parse JSON response, treating as text");
+        console.warn(
+          "[CohiWorkbench] Failed to parse JSON response, treating as text",
+        );
         parsed = {
           message: rawResponse,
           actions: [],
@@ -1331,20 +1468,43 @@ router.post(
         (a: any) =>
           a &&
           typeof a.type === "string" &&
-          VALID_ACTION_TYPES.includes(a.type)
+          VALID_ACTION_TYPES.includes(a.type),
       );
 
       // Normalize create_widget config.type — the LLM sometimes uses "chart" etc.
-      const VALID_VIZ_TYPES = new Set(['bar','line','pie','area','table','kpi','donut','horizontal_bar','stacked_bar','grouped_bar','treemap','pivot']);
+      const VALID_VIZ_TYPES = new Set([
+        "bar",
+        "line",
+        "pie",
+        "area",
+        "table",
+        "kpi",
+        "donut",
+        "horizontal_bar",
+        "stacked_bar",
+        "grouped_bar",
+        "treemap",
+        "pivot",
+      ]);
       for (const action of validActions) {
-        if (action.type === 'create_widget' && action.config && typeof action.config.type === 'string') {
+        if (
+          action.type === "create_widget" &&
+          action.config &&
+          typeof action.config.type === "string"
+        ) {
           const t = action.config.type.toLowerCase().trim();
           if (!VALID_VIZ_TYPES.has(t)) {
-            const mapped = t === 'chart' ? (action.config.chartType || 'bar')
-              : t === 'number' || t === 'metric' || t === 'metric-card' ? 'kpi'
-              : t === 'hbar' || t === 'h_bar' ? 'horizontal_bar'
-              : 'bar';
-            console.log(`[CohiWorkbench] Normalized invalid viz type "${action.config.type}" → "${mapped}" for widget "${action.title}"`);
+            const mapped =
+              t === "chart"
+                ? action.config.chartType || "bar"
+                : t === "number" || t === "metric" || t === "metric-card"
+                  ? "kpi"
+                  : t === "hbar" || t === "h_bar"
+                    ? "horizontal_bar"
+                    : "bar";
+            console.log(
+              `[CohiWorkbench] Normalized invalid viz type "${action.config.type}" → "${mapped}" for widget "${action.title}"`,
+            );
             action.config.type = mapped;
           }
         }
@@ -1354,11 +1514,12 @@ router.post(
       for (const action of validActions) {
         if (action.type === "modify_widget") {
           const hasSql = !!(action.sql && String(action.sql).trim());
-          const changesKeys = action.changes && typeof action.changes === "object"
-            ? Object.keys(action.changes)
-            : [];
+          const changesKeys =
+            action.changes && typeof action.changes === "object"
+              ? Object.keys(action.changes)
+              : [];
           console.log(
-            `[CohiWorkbench] modify_widget: instanceId=${action.instanceId} hasSql=${hasSql} changesKeys=[${changesKeys.join(", ")}] title=${action.title ? "set" : "unset"}`
+            `[CohiWorkbench] modify_widget: instanceId=${action.instanceId} hasSql=${hasSql} changesKeys=[${changesKeys.join(", ")}] title=${action.title ? "set" : "unset"}`,
           );
         }
       }
@@ -1367,7 +1528,9 @@ router.post(
       // Two-pass flow: if the LLM emitted query_data actions, execute
       // the SQL and make a second LLM call with the results.
       // ------------------------------------------------------------------
-      const queryActions = validActions.filter((a: any) => a.type === "query_data" && a.sql);
+      const queryActions = validActions.filter(
+        (a: any) => a.type === "query_data" && a.sql,
+      );
       let finalMessage = parsed.message || "I processed your request.";
       let finalTeachingNotes = parsed.teachingNotes || undefined;
       let finalSuggestions = parsed.suggestedQuestions || [];
@@ -1376,16 +1539,21 @@ router.post(
       // Step 1: Quick structural check (syntax, hallucinated tables)
       const invalidSqlActions: string[] = [];
       validActions = validActions.filter((a: any) => {
-        if ((a.type !== "create_widget" && a.type !== "modify_widget") || !a.sql) return true;
+        if (
+          (a.type !== "create_widget" && a.type !== "modify_widget") ||
+          !a.sql
+        )
+          return true;
         const sql = String(a.sql).trim();
         if (isValidWidgetSql(sql)) return true;
         invalidSqlActions.push(a.type);
         return false;
       });
       if (invalidSqlActions.length > 0) {
-        finalMessage += "\n\nOne or more widget SQL statements were rejected (invalid or placeholder SQL). Please try a more specific request.";
+        finalMessage +=
+          "\n\nOne or more widget SQL statements were rejected (invalid or placeholder SQL). Please try a more specific request.";
         console.log(
-          `[CohiWorkbench] SQL pre-validation stripped ${invalidSqlActions.length} action(s): ${invalidSqlActions.join(", ")}`
+          `[CohiWorkbench] SQL pre-validation stripped ${invalidSqlActions.length} action(s): ${invalidSqlActions.join(", ")}`,
         );
       }
 
@@ -1396,65 +1564,113 @@ router.post(
         try {
           const tenantPool = await tenantDbManager.getTenantPool(tenantId);
           const actionsToValidate = validActions.filter(
-            (a: any) => (a.type === "create_widget" || a.type === "modify_widget") && a.sql,
+            (a: any) =>
+              (a.type === "create_widget" || a.type === "modify_widget") &&
+              a.sql,
           );
 
           for (const action of actionsToValidate) {
-            const existingWidget = action.type === "modify_widget"
-              ? canvasState?.standaloneWidgets?.find((w) => w.id === action.instanceId)
-              : undefined;
-            const dateCol = shouldValidateInjectedFilters(action, existingWidget)
-              ? (action.filterConfig?.dateColumn ?? existingWidget?.filterConfig?.dateColumn ?? 'application_date')
+            const existingWidget =
+              action.type === "modify_widget"
+                ? canvasState?.standaloneWidgets?.find(
+                    (w) => w.id === action.instanceId,
+                  )
+                : undefined;
+            const dateCol = shouldValidateInjectedFilters(
+              action,
+              existingWidget,
+            )
+              ? (action.filterConfig?.dateColumn ??
+                existingWidget?.filterConfig?.dateColumn ??
+                "application_date")
               : undefined;
 
-            let validation = await validateWidgetSql(String(action.sql), tenantPool, dateCol);
+            let validation = await validateWidgetSql(
+              String(action.sql),
+              tenantPool,
+              dateCol,
+            );
 
             // Pull-through-specific semantic guardrails
-            if (action.type === "create_widget" && isPullThroughAction(action)) {
-              const guardError = validatePullThroughSqlGuardrails(String(action.sql), {
-                filterable: action.filterConfig?.filterable !== false,
-                dateColumn: action.filterConfig?.dateColumn ?? "application_date",
-                allowLowSamplePullThrough: !!action.allowLowSamplePullThrough,
-              });
+            if (
+              action.type === "create_widget" &&
+              isPullThroughAction(action)
+            ) {
+              const guardError = validatePullThroughSqlGuardrails(
+                String(action.sql),
+                {
+                  filterable: action.filterConfig?.filterable !== false,
+                  dateColumn:
+                    action.filterConfig?.dateColumn ?? "application_date",
+                  allowLowSamplePullThrough: !!action.allowLowSamplePullThrough,
+                },
+              );
               if (guardError) {
                 validation = { valid: false, error: guardError, phase: "base" };
               }
             }
 
             if (!validation.valid) {
-              console.warn(`[CohiWorkbench] EXPLAIN validation failed (phase=${validation.phase}) for "${action.title}": ${validation.error}`);
+              console.warn(
+                `[CohiWorkbench] EXPLAIN validation failed (phase=${validation.phase}) for "${action.title}": ${validation.error}`,
+              );
 
               // Retry up to 2 times
               let fixed: string | null = null;
               for (let attempt = 1; attempt <= 2 && !fixed; attempt++) {
-                console.log(`[CohiWorkbench] SQL fix attempt ${attempt} for "${action.title}"`);
+                console.log(
+                  `[CohiWorkbench] SQL fix attempt ${attempt} for "${action.title}"`,
+                );
                 fixed = await attemptSqlFix(
                   String(action.sql),
-                  validation.error ?? 'Unknown error',
+                  validation.error ?? "Unknown error",
                   schemaContext,
                   apiKey,
-                  validation.phase ?? 'base',
+                  validation.phase ?? "base",
                   {
-                    existingSql: action.type === "modify_widget" ? existingWidget?.sql : undefined,
+                    existingSql:
+                      action.type === "modify_widget"
+                        ? existingWidget?.sql
+                        : undefined,
                     userRequest: question,
                   },
                 );
                 if (fixed) {
-                  const revalidation = await validateWidgetSql(fixed, tenantPool, dateCol);
+                  const revalidation = await validateWidgetSql(
+                    fixed,
+                    tenantPool,
+                    dateCol,
+                  );
                   if (!revalidation.valid) {
-                    console.warn(`[CohiWorkbench] Fix attempt ${attempt} still invalid: ${revalidation.error}`);
+                    console.warn(
+                      `[CohiWorkbench] Fix attempt ${attempt} still invalid: ${revalidation.error}`,
+                    );
                     fixed = null;
                     validation = revalidation;
-                  } else if (action.type === "create_widget" && isPullThroughAction(action)) {
-                    const postFixGuardError = validatePullThroughSqlGuardrails(fixed, {
-                      filterable: action.filterConfig?.filterable !== false,
-                      dateColumn: action.filterConfig?.dateColumn ?? "application_date",
-                      allowLowSamplePullThrough: !!action.allowLowSamplePullThrough,
-                    });
+                  } else if (
+                    action.type === "create_widget" &&
+                    isPullThroughAction(action)
+                  ) {
+                    const postFixGuardError = validatePullThroughSqlGuardrails(
+                      fixed,
+                      {
+                        filterable: action.filterConfig?.filterable !== false,
+                        dateColumn:
+                          action.filterConfig?.dateColumn ?? "application_date",
+                        allowLowSamplePullThrough:
+                          !!action.allowLowSamplePullThrough,
+                      },
+                    );
                     if (postFixGuardError) {
-                      console.warn(`[CohiWorkbench] Fix attempt ${attempt} failed pull-through guardrails: ${postFixGuardError}`);
+                      console.warn(
+                        `[CohiWorkbench] Fix attempt ${attempt} failed pull-through guardrails: ${postFixGuardError}`,
+                      );
                       fixed = null;
-                      validation = { valid: false, error: postFixGuardError, phase: "base" };
+                      validation = {
+                        valid: false,
+                        error: postFixGuardError,
+                        phase: "base",
+                      };
                     }
                   }
                 }
@@ -1462,39 +1678,56 @@ router.post(
 
               if (fixed) {
                 action.sql = fixed;
-                console.log(`[CohiWorkbench] SQL auto-fixed for "${action.title}"`);
+                console.log(
+                  `[CohiWorkbench] SQL auto-fixed for "${action.title}"`,
+                );
               } else {
                 // Drop the action — can't produce a valid widget
                 validActions = validActions.filter((a: any) => a !== action);
                 if (action.type === "modify_widget") {
-                  finalMessage += `\n\nI couldn't safely apply the SQL edit for "${action.title || 'the selected widget'}" because the generated query failed validation. The widget was left unchanged.`;
+                  finalMessage += `\n\nI couldn't safely apply the SQL edit for "${action.title || "the selected widget"}" because the generated query failed validation. The widget was left unchanged.`;
                 } else {
-                  finalMessage += `\n\nI couldn't generate a valid query for "${action.title || 'a widget'}" — please try rephrasing your request.`;
+                  finalMessage += `\n\nI couldn't generate a valid query for "${action.title || "a widget"}" — please try rephrasing your request.`;
                 }
-                console.warn(`[CohiWorkbench] Dropped action "${action.title}" after failed SQL validation`);
+                console.warn(
+                  `[CohiWorkbench] Dropped action "${action.title}" after failed SQL validation`,
+                );
               }
             } else {
-              console.log(`[CohiWorkbench] EXPLAIN validation passed for "${action.title}"`);
+              console.log(
+                `[CohiWorkbench] EXPLAIN validation passed for "${action.title}"`,
+              );
             }
           }
         } catch (validationErr: any) {
           // If validation itself fails (e.g. pool unavailable), log and continue
-          console.warn('[CohiWorkbench] SQL validation step failed, skipping:', validationErr.message);
+          console.warn(
+            "[CohiWorkbench] SQL validation step failed, skipping:",
+            validationErr.message,
+          );
         }
       }
 
       if (queryActions.length > 0 && tenantId) {
         console.log(
-          `[CohiWorkbench] Executing ${queryActions.length} query_data action(s) for two-pass flow`
+          `[CohiWorkbench] Executing ${queryActions.length} query_data action(s) for two-pass flow`,
         );
 
-        const queryResults: { sql: string; explanation: string; data?: any[]; error?: string }[] = [];
+        const queryResults: {
+          sql: string;
+          explanation: string;
+          data?: any[];
+          error?: string;
+        }[] = [];
 
         for (const qa of queryActions) {
           try {
             // Validate: only SELECT queries allowed
             const trimmedSql = qa.sql.trim().toUpperCase();
-            if (!trimmedSql.startsWith("SELECT") && !trimmedSql.startsWith("WITH")) {
+            if (
+              !trimmedSql.startsWith("SELECT") &&
+              !trimmedSql.startsWith("WITH")
+            ) {
               queryResults.push({
                 sql: qa.sql,
                 explanation: qa.explanation,
@@ -1521,7 +1754,10 @@ router.post(
             // Attach results to the action so frontend can display them
             qa.results = formattedRows;
           } catch (err: any) {
-            console.error(`[CohiWorkbench] query_data execution error:`, err.message);
+            console.error(
+              `[CohiWorkbench] query_data execution error:`,
+              err.message,
+            );
             queryResults.push({
               sql: qa.sql,
               explanation: qa.explanation,
@@ -1532,26 +1768,31 @@ router.post(
         }
 
         // Build follow-up prompt with query results
-        const resultsContext = queryResults.map((qr, i) => {
-          if (qr.error) {
-            return `Query ${i + 1} ("${qr.explanation}"): ERROR - ${qr.error}`;
-          }
-          const rows = qr.data || [];
-          if (rows.length === 0) {
-            return `Query ${i + 1} ("${qr.explanation}"): No results returned.`;
-          }
-          // Format results compactly
-          const cols = Object.keys(rows[0] || {});
-          const header = cols.join(" | ");
-          const dataLines = rows.slice(0, 20).map((row: any) =>
-            cols.map((c) => {
-              const v = row[c];
-              return v == null ? "-" : String(v).substring(0, 40);
-            }).join(" | ")
-          );
-          const suffix = rows.length > 20 ? `\n... (${rows.length} total rows)` : "";
-          return `Query ${i + 1} ("${qr.explanation}"):\n${header}\n${dataLines.join("\n")}${suffix}`;
-        }).join("\n\n");
+        const resultsContext = queryResults
+          .map((qr, i) => {
+            if (qr.error) {
+              return `Query ${i + 1} ("${qr.explanation}"): ERROR - ${qr.error}`;
+            }
+            const rows = qr.data || [];
+            if (rows.length === 0) {
+              return `Query ${i + 1} ("${qr.explanation}"): No results returned.`;
+            }
+            // Format results compactly
+            const cols = Object.keys(rows[0] || {});
+            const header = cols.join(" | ");
+            const dataLines = rows.slice(0, 20).map((row: any) =>
+              cols
+                .map((c) => {
+                  const v = row[c];
+                  return v == null ? "-" : String(v).substring(0, 40);
+                })
+                .join(" | "),
+            );
+            const suffix =
+              rows.length > 20 ? `\n... (${rows.length} total rows)` : "";
+            return `Query ${i + 1} ("${qr.explanation}"):\n${header}\n${dataLines.join("\n")}${suffix}`;
+          })
+          .join("\n\n");
 
         // Second LLM call with query results
         const followUpMessages: LLMMessage[] = [
@@ -1586,19 +1827,24 @@ router.post(
 
           // Merge any new actions from the second response (non-query ones)
           const secondActions = (secondParsed.actions || []).filter(
-            (a: any) => a && typeof a.type === "string" && VALID_ACTION_TYPES.includes(a.type) && a.type !== "query_data"
+            (a: any) =>
+              a &&
+              typeof a.type === "string" &&
+              VALID_ACTION_TYPES.includes(a.type) &&
+              a.type !== "query_data",
           );
           if (secondActions.length > 0) {
             validActions = [...validActions, ...secondActions];
           }
 
           console.log(
-            `[CohiWorkbench] Two-pass complete. Final message length: ${finalMessage.length}`
+            `[CohiWorkbench] Two-pass complete. Final message length: ${finalMessage.length}`,
           );
         } catch (err: any) {
           console.error("[CohiWorkbench] Second LLM call failed:", err.message);
           // Fall back to the first response's message with a note about the data
-          finalMessage += "\n\n(I ran the queries but encountered an issue formulating the final answer. The query results are attached.)";
+          finalMessage +=
+            "\n\n(I ran the queries but encountered an issue formulating the final answer. The query results are attached.)";
         }
       }
 
@@ -1611,18 +1857,18 @@ router.post(
       };
 
       console.log(
-        `[CohiWorkbench] Response: ${validActions.length} actions (${validActions.map((a: any) => a.type).join(', ') || 'none'}), ${
+        `[CohiWorkbench] Response: ${validActions.length} actions (${validActions.map((a: any) => a.type).join(", ") || "none"}), ${
           response.teachingNotes ? "with" : "no"
-        } teaching notes, msg length: ${finalMessage.length}`
+        } teaching notes, msg length: ${finalMessage.length}`,
       );
       if (validActions.length === 0 && parsed.actions?.length > 0) {
         console.log(
-          `[CohiWorkbench] WARNING: ${parsed.actions.length} actions were returned but all filtered out. Types: ${parsed.actions.map((a: any) => a?.type).join(', ')}`
+          `[CohiWorkbench] WARNING: ${parsed.actions.length} actions were returned but all filtered out. Types: ${parsed.actions.map((a: any) => a?.type).join(", ")}`,
         );
       }
       if (validActions.length === 0) {
         console.log(
-          `[CohiWorkbench] Raw response preview: ${rawResponse.substring(0, 500)}`
+          `[CohiWorkbench] Raw response preview: ${rawResponse.substring(0, 500)}`,
         );
       }
 
@@ -1635,7 +1881,7 @@ router.post(
         error: error.message,
       });
     }
-  }
+  },
 );
 
 // ============================================================================
@@ -1653,28 +1899,31 @@ router.post(
   async (req: AuthRequest, res) => {
     try {
       const tenantId = req.tenantContext?.tenantId || req.tenantId;
-      if (!tenantId) return res.status(400).json({ error: "No tenant context" });
+      if (!tenantId)
+        return res.status(400).json({ error: "No tenant context" });
 
       const { fromScopeId, toScopeId } = req.body as {
         fromScopeId?: string;
         toScopeId?: string;
       };
       if (!fromScopeId || !toScopeId) {
-        return res.status(400).json({ error: "fromScopeId and toScopeId are required" });
+        return res
+          .status(400)
+          .json({ error: "fromScopeId and toScopeId are required" });
       }
 
       const moved = await rebindConversationScope(
         tenantId,
         req.userId!,
         fromScopeId,
-        toScopeId
+        toScopeId,
       );
       res.json({ success: true, moved });
     } catch (error: any) {
       console.error("[CohiWorkbench] Rebind scope error:", error);
       res.status(500).json({ error: error.message });
     }
-  }
+  },
 );
 
 router.post(
@@ -1684,14 +1933,15 @@ router.post(
   async (req: AuthRequest, res) => {
     try {
       const tenantId = req.tenantContext?.tenantId || req.tenantId;
-      if (!tenantId) return res.status(400).json({ error: "No tenant context" });
+      if (!tenantId)
+        return res.status(400).json({ error: "No tenant context" });
 
       const { canvasId, title } = req.body;
       const conversation = await createConversation(
         tenantId,
         req.userId!,
         canvasId || null,
-        title
+        title,
       );
 
       if (!conversation) {
@@ -1703,7 +1953,7 @@ router.post(
       console.error("[CohiWorkbench] Create conversation error:", error);
       res.status(500).json({ error: error.message });
     }
-  }
+  },
 );
 
 /**
@@ -1717,14 +1967,15 @@ router.get(
   async (req: AuthRequest, res) => {
     try {
       const tenantId = req.tenantContext?.tenantId || req.tenantId;
-      if (!tenantId) return res.status(400).json({ error: "No tenant context" });
+      if (!tenantId)
+        return res.status(400).json({ error: "No tenant context" });
 
       const { canvasId, limit } = req.query;
       const conversations = await listConversations(
         tenantId,
         req.userId!,
         canvasId as string | undefined,
-        limit ? parseInt(limit as string) : 10
+        limit ? parseInt(limit as string) : 10,
       );
 
       res.json({ conversations });
@@ -1732,7 +1983,7 @@ router.get(
       console.error("[CohiWorkbench] List conversations error:", error);
       res.status(500).json({ error: error.message });
     }
-  }
+  },
 );
 
 /**
@@ -1746,12 +1997,13 @@ router.get(
   async (req: AuthRequest, res) => {
     try {
       const tenantId = req.tenantContext?.tenantId || req.tenantId;
-      if (!tenantId) return res.status(400).json({ error: "No tenant context" });
+      if (!tenantId)
+        return res.status(400).json({ error: "No tenant context" });
 
       const conversation = await getConversation(
         tenantId,
         req.params.id as string,
-        req.userId!
+        req.userId!,
       );
 
       if (!conversation) {
@@ -1763,7 +2015,7 @@ router.get(
       console.error("[CohiWorkbench] Get conversation error:", error);
       res.status(500).json({ error: error.message });
     }
-  }
+  },
 );
 
 /**
@@ -1777,7 +2029,8 @@ router.post(
   async (req: AuthRequest, res) => {
     try {
       const tenantId = req.tenantContext?.tenantId || req.tenantId;
-      if (!tenantId) return res.status(400).json({ error: "No tenant context" });
+      if (!tenantId)
+        return res.status(400).json({ error: "No tenant context" });
 
       const message = req.body as ConversationMessage;
       const qaAgentRunTag = resolveQaAgentRunTag(req);
@@ -1789,7 +2042,7 @@ router.post(
         tenantId,
         req.params.id as string,
         req.userId!,
-        qaAgentRunTag ? { ...message, qaAgentRunTag } : message
+        qaAgentRunTag ? { ...message, qaAgentRunTag } : message,
       );
 
       if (!success) {
@@ -1801,7 +2054,7 @@ router.post(
       console.error("[CohiWorkbench] Append message error:", error);
       res.status(500).json({ error: error.message });
     }
-  }
+  },
 );
 
 /**
@@ -1815,12 +2068,13 @@ router.delete(
   async (req: AuthRequest, res) => {
     try {
       const tenantId = req.tenantContext?.tenantId || req.tenantId;
-      if (!tenantId) return res.status(400).json({ error: "No tenant context" });
+      if (!tenantId)
+        return res.status(400).json({ error: "No tenant context" });
 
       const success = await deleteConversation(
         tenantId,
         req.params.id as string,
-        req.userId!
+        req.userId!,
       );
 
       if (!success) {
@@ -1832,7 +2086,7 @@ router.delete(
       console.error("[CohiWorkbench] Delete conversation error:", error);
       res.status(500).json({ error: error.message });
     }
-  }
+  },
 );
 
 export default router;
