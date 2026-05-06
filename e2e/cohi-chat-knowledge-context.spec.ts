@@ -56,6 +56,37 @@ async function mockCohiChatKnowledgeApis(page: Page) {
       }),
     });
   });
+
+  const knowledgeMarkdown =
+    "Current platform metric context: pull-through uses a rolling 90-day funded-loan denominator, fallout is categorized from Withdrawn and Denied statuses, and pipeline aging is measured from active loan milestone dates. These definitions come from the current dashboard metric knowledge base.";
+
+  await page.route(/\/api\/chat\/v1\/messages(?:\?.*)?$/, async (route) => {
+    const request = route.request().postDataJSON() as { message?: string } | null;
+    expect(request?.message ?? "").toMatch(/pull-through|fallout|pipeline/i);
+
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        conversationId: "550e8400-e29b-41d4-a716-446655440099",
+        turn: {
+          id: "6ba7b810-9dad-11d1-80b4-00c04fd430ff",
+          blocks: [{ type: "text", markdown: knowledgeMarkdown }],
+        },
+        metadata: {
+          suggestedQuestions: [
+            "How is pull-through trending by channel?",
+            "Where is fallout concentrated in the pipeline?",
+            "Which active loans are aging past expected milestones?",
+          ],
+          sources: {
+            dataQuery: false,
+            knowledgeBase: ["Platform Metrics - Current Dashboard Definitions"],
+          },
+        },
+      }),
+    });
+  });
 }
 
 test.describe("Cohi Chat knowledge context", () => {

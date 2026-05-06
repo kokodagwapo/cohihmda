@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Unified chat golden prompts (staging replay)",
+  "description": "Run against staging with UNIFIED_CHAT_ENABLED and compare block envelopes (COHI-397).",
+  "prompts": [
+    {
+      "id": "global-kpi",
+      "surface": "data_chat_page",
+      "message": "Show loan volume by month for the last 12 months."
+    },
+    {
+      "id": "workbench-add-widget",
+      "surface": "workbench_canvas",
+      "message": "Add the company scorecard volume chart to this canvas."
+    },
+    {
+      "id": "hub-ask",
+      "surface": "workbench_hub",
+      "message": "What can I do in the workbench?"
+    }
+  ]
+}

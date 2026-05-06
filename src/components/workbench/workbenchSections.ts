@@ -51,7 +51,7 @@ export const STANDALONE_WIDGETS: Record<string, { defId: string; w: number; h: n
 };
 
 // ---------------------------------------------------------------------------
-// Dashboard section groups – used by sidebar, Add dropdown, and DashboardBrowser.
+// Dashboard section groups – used by sidebar and Add dropdown.
 // Only real multi-widget dashboard sections belong here.
 // ---------------------------------------------------------------------------
 

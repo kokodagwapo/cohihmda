@@ -182,6 +182,38 @@ async function mockChatAndWorkbench(page: Page) {
     });
   });
 
+  // Unified v1 path (when VITE_UNIFIED_CHAT=true) — same chart payload as blocks.
+  await page.route(/\/api\/chat\/v1\/messages(\?|$)/, async (route) => {
+    try {
+      captured.askBodies.push(JSON.parse(route.request().postData() || "{}"));
+    } catch {
+      captured.askBodies.push(null);
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        conversationId: "44444444-4444-4444-4444-444444444444",
+        turn: {
+          id: "55555555-5555-5555-5555-555555555555",
+          blocks: [
+            { type: "text", markdown: MOCK_ASK_RESPONSE.message },
+            {
+              type: "visualization",
+              artifactId: "66666666-6666-6666-6666-666666666666",
+              config: MOCK_VISUALIZATION,
+            },
+          ],
+        },
+        metadata: {
+          sqlQuery: MOCK_ASK_RESPONSE.sqlQuery,
+          sources: MOCK_ASK_RESPONSE.sources,
+          suggestedQuestions: MOCK_ASK_RESPONSE.suggestedQuestions,
+        },
+      }),
+    });
+  });
+
   // Workbench canvas creation (Edit in PPT Editor + Save all to Workbench).
   // Match /api/workbench/canvases exactly, not /canvases/:id.
   await page.route(/\/api\/workbench\/canvases(\?|$)/, async (route) => {
@@ -623,6 +655,13 @@ test.describe("Chat visualizations: prominent export + Edit in PPT Editor (COHI-
   test("@critical @COHI-335 assistant bubble rehydrates chart from persisted session metadata", async ({
     userPage,
   }) => {
+    await userPage.addInitScript(() => {
+      try {
+        window.localStorage.setItem("cohi_e2e_legacy_chat_only", "1");
+      } catch {
+        /* noop */
+      }
+    });
     // Regression for: chart disappeared on reload because backend only saved
     // `hasVisualization` flag but not the full viz config. The client reads
     // `metadata.visualization` directly on loadSession; this test loads a
@@ -682,6 +721,14 @@ test.describe("Chat visualizations: prominent export + Edit in PPT Editor (COHI-
     await expect(
       chatPanel.getByTestId("cohi-chat-edit-in-ppt").first(),
     ).toBeVisible();
+
+    await userPage.evaluate(() => {
+      try {
+        localStorage.removeItem("cohi_e2e_legacy_chat_only");
+      } catch {
+        /* noop */
+      }
+    });
   });
 
   test("@critical @COHI-335 chart bubble stays within the chat panel (no right-edge clipping)", async ({

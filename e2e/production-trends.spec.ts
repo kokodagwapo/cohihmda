@@ -192,18 +192,13 @@ async function gotoNewWorkbenchCanvas(userPage: Page) {
   });
 }
 
+/** Add Production Trends section via canvas toolbar Add menu (same as removed Cohi Dashboards tab). */
 async function addProductionTrendsDashboardSection(userPage: Page) {
-  const dashboardsTab = userPage.getByTestId("workbench-cohi-tab-dashboards");
-  const tabVisible = await dashboardsTab.isVisible().catch(() => false);
-  if (!tabVisible) {
-    await userPage.getByTestId("workbench-cohi-toggle").click();
-    await expect(dashboardsTab).toBeVisible({ timeout: 15_000 });
-  }
-  await dashboardsTab.click();
-  await userPage.getByRole("button", { name: "Production Trends" }).first().click();
-  await userPage
-    .getByRole("button", { name: "Add entire Production Trends" })
-    .click();
+  const canvasRoot = userPage.locator("#workbench-canvas-root");
+  await canvasRoot.getByRole("button", { name: "Add" }).click();
+  // Add dropdown panels are portaled to document body — not under #workbench-canvas-root
+  await userPage.getByRole("button", { name: "Trends & Analysis" }).click();
+  await userPage.getByRole("menuitem", { name: "Production Trends" }).click();
 }
 
 function productionTrendsWorkbenchGroup(userPage: Page) {
@@ -357,7 +352,7 @@ test.describe("Production Trends (COHI-346)", () => {
     await expect(main.getByRole("button", { name: /^Branch: North$/ })).toBeVisible({ timeout: 15_000 });
 
     await main.getByRole("button", { name: /^Branch: North$/ }).click();
-    let pop = sliceFilterPopover(userPage);
+    const pop = sliceFilterPopover(userPage);
     await expect(pop).toBeVisible({ timeout: 15_000 });
     await expect(pop.getByRole("button", { name: "Apply Filters" })).toBeVisible();
     await expect(pop.getByRole("button", { name: "Cancel" })).toBeVisible();

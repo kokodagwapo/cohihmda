@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cohi.local/schemas/chat/v1/event-stream.json",
+  "title": "CohiUnifiedChatStreamEvent",
+  "type": "object",
+  "required": ["event"],
+  "properties": {
+    "event": {
+      "type": "string",
+      "enum": [
+        "turn.started",
+        "block.started",
+        "block.delta",
+        "block.completed",
+        "turn.completed",
+        "error",
+        "ping"
+      ]
+    },
+    "conversationId": { "type": "string", "format": "uuid" },
+    "turnId": { "type": "string", "format": "uuid" },
+    "blockIndex": { "type": "integer", "minimum": 0 },
+    "blockType": {
+      "type": "string",
+      "enum": [
+        "text",
+        "citations",
+        "visualization",
+        "actions",
+        "artifacts",
+        "navigation_hints",
+        "safety"
+      ]
+    },
+    "delta": {
+      "type": "string",
+      "description": "Incremental markdown or JSON fragment for block.delta."
+    },
+    "block": {
+      "description": "Completed block payload (same shapes as chat-response blocks).",
+      "type": "object"
+    },
+    "error": {
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" },
+        "retryable": { "type": "boolean" }
+      }
+    },
+    "metadata": { "type": "object" }
+  },
+  "additionalProperties": false
+}

@@ -45,16 +45,12 @@ async function gotoNewWorkbenchCanvas(userPage: Page) {
   });
 }
 
+/** Add Workflow Conversion section via canvas toolbar Add menu. */
 async function addWorkflowConversionSection(userPage: Page) {
-  const dashboardsTab = userPage.getByTestId("workbench-cohi-tab-dashboards");
-  const tabVisible = await dashboardsTab.isVisible().catch(() => false);
-  if (!tabVisible) {
-    await userPage.getByTestId("workbench-cohi-toggle").click();
-    await expect(dashboardsTab).toBeVisible({ timeout: 15_000 });
-  }
-  await dashboardsTab.click();
-  await userPage.getByRole("button", { name: "Workflow Conversion" }).first().click();
-  await userPage.getByRole("button", { name: "Add entire Workflow Conversion" }).click();
+  const canvasRoot = userPage.locator("#workbench-canvas-root");
+  await canvasRoot.getByRole("button", { name: "Add" }).click();
+  await userPage.getByRole("button", { name: "Trends & Analysis" }).click();
+  await userPage.getByRole("menuitem", { name: "Workflow Conversion" }).click();
 }
 
 function workflowMain(userPage: Page) {

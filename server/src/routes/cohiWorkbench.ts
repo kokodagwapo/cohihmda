@@ -1124,28 +1124,34 @@ router.get("/personas", authenticateToken, (_req, res) => {
   });
 });
 
-router.post(
-  "/",
-  authenticateToken,
-  attachTenantContext,
-  apiLimiter,
-  async (req: AuthRequest, res) => {
-    try {
-      const {
-        question,
-        canvasState,
-        widgetCatalog,
-        conversationHistory,
-      } = req.body as {
-        question: string;
-        canvasState?: CanvasStateSnapshot;
-        widgetCatalog?: string;
-        conversationHistory?: { role: string; content: string }[];
-        tenantId?: string;
-      };
+export async function runWorkbenchChatTurn(
+  req: AuthRequest,
+  rawBody: unknown,
+): Promise<{
+  message: string;
+  actions: unknown[];
+  teachingNotes?: string;
+  suggestedQuestions: string[];
+  error?: string;
+}> {
+  try {
+    const {
+      question,
+      canvasState,
+      widgetCatalog,
+      conversationHistory,
+    } = rawBody as {
+      question: string;
+      canvasState?: CanvasStateSnapshot;
+      widgetCatalog?: string;
+      conversationHistory?: { role: string; content: string }[];
+      tenantId?: string;
+    };
 
       if (!question || typeof question !== "string") {
-        return res.status(400).json({ error: "Question is required" });
+        const err: any = new Error("Question is required");
+        err.statusCode = 400;
+        throw err;
       }
 
       const tenantId = req.tenantContext?.tenantId || req.tenantId;
@@ -1609,16 +1615,35 @@ router.post(
         );
       }
 
-      res.json(response);
+      return response;
     } catch (error: any) {
       console.error("[CohiWorkbench] Error:", error);
-      res.status(500).json({
-        message: "Sorry, I encountered an error. Please try again.",
+      throw error;
+    }
+}
+
+router.post(
+  "/",
+  authenticateToken,
+  attachTenantContext,
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const result = await runWorkbenchChatTurn(req, req.body);
+      res.json(result);
+    } catch (error: any) {
+      console.error("[CohiWorkbench] Error:", error);
+      const status = error.statusCode ?? 500;
+      res.status(status).json({
+        message:
+          status === 400
+            ? error.message
+            : "Sorry, I encountered an error. Please try again.",
         actions: [],
         error: error.message,
       });
     }
-  }
+  },
 );
 
 // ============================================================================

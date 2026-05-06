@@ -103,6 +103,7 @@ import { computePresetDateRange } from "@/components/ui/DatePeriodPicker";
 import { getWidgetDefinition } from "@/components/widgets/registry";
 import { WidgetDataProvider } from "@/components/widgets/data";
 import { WorkbenchCohiPanel } from "@/components/workbench/WorkbenchCohiPanel";
+import { CohiChatDockChip } from "@/components/cohi/CohiChatDockChip";
 import {
   useWorkbenchCohi,
   type SourceInsightContext,
@@ -4506,31 +4507,13 @@ export function WorkbenchCanvas({
               )}
               {/* --- End canvas-only tools --- */}
 
-              {!WORKBENCH_COHI_HIDDEN && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      data-testid="workbench-cohi-toggle"
-                      aria-label="Toggle Cohi Assistant"
-                      aria-pressed={showCohiPanel}
-                      variant="outline"
-                      size="sm"
-                      className={cn(
-                        "h-8 gap-1.5 text-xs px-2.5 font-medium shrink-0",
-                        showCohiPanel
-                          ? "bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-700"
-                          : "",
-                      )}
-                      onClick={() => setShowCohiPanel(!showCohiPanel)}
-                    >
-                      <Sparkles className="h-3.5 w-3.5" />
-                      Cohi
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">
-                    Toggle Cohi Assistant
-                  </TooltipContent>
-                </Tooltip>
+              {!WORKBENCH_COHI_HIDDEN && !showCohiPanel && (
+                <CohiChatDockChip
+                  data-testid="workbench-cohi-toggle"
+                  onClick={() => setShowCohiPanel(true)}
+                  ariaLabel="Open Cohi Assistant"
+                  title="Cohi – Canvas assistant"
+                />
               )}
 
               <div className="ml-auto flex items-center gap-1">
@@ -5254,6 +5237,8 @@ export function WorkbenchCanvas({
             onSendMessage={cohiSendMessage}
             onClearMessages={cohiClearMessages}
             onExecuteAction={handleCohiAction}
+            editingWidget={editingWidget}
+            onStopEditing={() => setEditingWidgetId(null)}
           />
         )}
 

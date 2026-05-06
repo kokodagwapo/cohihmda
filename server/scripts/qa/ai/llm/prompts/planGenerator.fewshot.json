@@ -124,8 +124,8 @@
   {
     "issueKey": "COHI-177",
     "acceptanceCriteria": [
-      "1. [UI] On a workbench canvas, the Cohi panel shows Chat, Dashboards, and Schema tabs",
-      "2. [ASSERTION] Selecting Chat keeps the message composer available"
+      "1. [UI] On a workbench canvas, opening Cohi shows the chat panel (no separate Dashboards/Schema tabs)",
+      "2. [ASSERTION] The message composer is available after opening the panel"
     ],
     "testContext": {
       "seededCanvasUrl": "/my-dashboard/00000000-0000-0000-0000-000000000000"
@@ -138,12 +138,9 @@
       "generatedAt": "2026-04-20T00:00:00.000Z",
       "steps": [
         { "id": "ac1-open-seeded-canvas", "kind": "goto", "url": "/my-dashboard/00000000-0000-0000-0000-000000000000", "expect": { "locator": "[data-testid=\"workbench-cohi-toggle\"]" } },
-        { "id": "ac1-open-cohi-panel", "kind": "click", "locator": "[data-testid=\"workbench-cohi-toggle\"]", "expect": { "locator": "[data-testid=\"workbench-cohi-tab-chat\"]" } },
-        { "id": "ac1-assert-chat-tab", "kind": "assert", "locator": "[data-testid=\"workbench-cohi-tab-chat\"]", "toBeVisible": true },
-        { "id": "ac1-assert-dashboards-tab", "kind": "assert", "locator": "[data-testid=\"workbench-cohi-tab-dashboards\"]", "toBeVisible": true },
-        { "id": "ac1-assert-schema-tab", "kind": "assert", "locator": "[data-testid=\"workbench-cohi-tab-schema\"]", "toBeVisible": true },
-        { "id": "ac2-click-chat-tab", "kind": "click", "locator": "[data-testid=\"workbench-cohi-tab-chat\"]", "expect": { "locator": "textarea[placeholder*=\"Ask Cohi\"]" } },
-        { "id": "ac2-assert-chat-composer", "kind": "assert", "locator": "textarea[placeholder*=\"Ask Cohi\"]", "toBeVisible": true }
+        { "id": "ac1-open-cohi-panel", "kind": "click", "locator": "[data-testid=\"workbench-cohi-toggle\"]", "expect": { "locator": "[data-testid=\"workbench-cohi-panel\"]" } },
+        { "id": "ac1-assert-cohi-panel", "kind": "assert", "locator": "[data-testid=\"workbench-cohi-panel\"]", "toBeVisible": true },
+        { "id": "ac2-assert-chat-composer", "kind": "assert", "locator": "textarea[placeholder*=\"canvas\"]", "toBeVisible": true }
       ]
     }
   }
