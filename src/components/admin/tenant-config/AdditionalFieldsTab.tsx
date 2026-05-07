@@ -907,10 +907,9 @@ export function AdditionalFieldsTab({
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent
-                  className="w-[450px] p-0"
+                  className="w-[450px] p-0 z-[calc(var(--z-modal)+20)]"
                   align="start"
                   side="bottom"
-                  style={{ zIndex: 9999 }}
                   onOpenAutoFocus={(e) => {
                     e.preventDefault();
                     setTimeout(() => {
