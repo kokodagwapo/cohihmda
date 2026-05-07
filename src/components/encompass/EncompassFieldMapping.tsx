@@ -1645,7 +1645,7 @@ export function EncompassFieldMapping({
                             </Button>
                           </PopoverTrigger>
                           <PopoverContent
-                            className="w-[462px] p-0 z-[9999]"
+                            className="w-[462px] p-0 z-[calc(var(--z-modal)+20)]"
                             align="start"
                             side="bottom"
                             onOpenAutoFocus={(e) => {
