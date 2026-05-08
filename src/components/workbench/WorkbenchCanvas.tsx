@@ -2211,66 +2211,73 @@ export function WorkbenchCanvas({
             break;
           }
           const targetIdx = items.findIndex((it) => it.i === action.instanceId);
-          if (targetIdx < 0) {
+          const hasSql = !!(action.sql && String(action.sql).trim());
+          const hasChanges =
+            action.changes && Object.keys(action.changes).length > 0;
+          const hasTitle = !!(action.title && String(action.title).trim());
+          if (!hasSql && !hasChanges && !hasTitle) {
             toast({
-              title: "Widget not found",
-              description: `No widget with id ${action.instanceId}`,
+              title: "No changes applied",
+              description:
+                "Cohi didn't provide SQL or config changes. Try asking to remove a column or change the query explicitly.",
               variant: "destructive",
             });
             break;
           }
-          const target = items[targetIdx];
-          if (target.payload.type === "cohi_widget") {
-            const hasSql = !!(action.sql && String(action.sql).trim());
-            const hasChanges =
-              action.changes && Object.keys(action.changes).length > 0;
-            const hasTitle = !!(action.title && String(action.title).trim());
-            if (!hasSql && !hasChanges && !hasTitle) {
+          if (hasSql) {
+            const trimmed = String(action.sql).trim();
+            const upper = trimmed.toUpperCase();
+            if (!upper.startsWith("SELECT") && !upper.startsWith("WITH")) {
               toast({
-                title: "No changes applied",
+                title: "Invalid SQL",
                 description:
-                  "Cohi didn't provide SQL or config changes. Try asking to remove a column or change the query explicitly.",
+                  "Widget SQL must start with SELECT or WITH. The change was not applied.",
                 variant: "destructive",
               });
               break;
             }
-            if (hasSql) {
-              const trimmed = String(action.sql).trim();
-              const upper = trimmed.toUpperCase();
-              if (!upper.startsWith("SELECT") && !upper.startsWith("WITH")) {
-                toast({
-                  title: "Invalid SQL",
-                  description:
-                    "Widget SQL must start with SELECT or WITH. The change was not applied.",
-                  variant: "destructive",
-                });
-                break;
-              }
-            }
-            const updated = [...items];
-            const existingViz = target.payload.vizConfig || {};
+          }
+          const mergeVizConfig = (existingViz: Record<string, unknown>) => {
             const changes = action.changes as Partial<typeof existingViz> & {
               tableConfig?: Record<string, unknown>;
             };
-            const mergedViz =
-              action.changes && Object.keys(action.changes).length > 0
-                ? {
-                    ...existingViz,
-                    ...action.changes,
-                    ...(changes.tableConfig
-                      ? {
-                          tableConfig: {
-                            ...((
-                              existingViz as {
-                                tableConfig?: Record<string, unknown>;
-                              }
-                            ).tableConfig || {}),
-                            ...changes.tableConfig,
-                          },
-                        }
-                      : {}),
-                  }
-                : existingViz;
+            return action.changes && Object.keys(action.changes).length > 0
+              ? {
+                  ...existingViz,
+                  ...action.changes,
+                  ...(changes.tableConfig
+                    ? {
+                        tableConfig: {
+                          ...((
+                            existingViz as {
+                              tableConfig?: Record<string, unknown>;
+                            }
+                          ).tableConfig || {}),
+                          ...changes.tableConfig,
+                        },
+                      }
+                    : {}),
+                }
+              : existingViz;
+          };
+
+          if (targetIdx >= 0) {
+            const target = items[targetIdx];
+            if (target.payload.type !== "cohi_widget") {
+              toast({
+                title: "Cannot modify",
+                description: "Only SQL-backed widgets can be modified via chat",
+                variant: "destructive",
+              });
+              break;
+            }
+
+            const updated = [...items];
+            const existingViz = (target.payload.vizConfig || {}) as Record<
+              string,
+              unknown
+            >;
+            const mergedViz = mergeVizConfig(existingViz);
             updated[targetIdx] = {
               ...target,
               payload: {
@@ -2288,13 +2295,72 @@ export function WorkbenchCanvas({
               description:
                 action.explanation?.substring(0, 80) || "Changes applied",
             });
-          } else {
-            toast({
-              title: "Cannot modify",
-              description: "Only SQL-backed widgets can be modified via chat",
-              variant: "destructive",
-            });
+            break;
           }
+
+          // Support editing SQL widgets nested inside widget_group payload.items.
+          let modifiedGrouped = false;
+          const updatedItems = items.map((layoutItem) => {
+            if (
+              layoutItem.payload.type !== "widget_group" ||
+              !Array.isArray((layoutItem.payload as any).items)
+            ) {
+              return layoutItem;
+            }
+            const payload = layoutItem.payload as {
+              items: GroupWidgetItem[];
+            } & typeof layoutItem.payload;
+            const nextGroupItems = payload.items.map((groupItem, idx) => {
+              const groupItemKey =
+                groupItem.kind === "registry"
+                  ? `${groupItem.defId}__${idx}`
+                  : `cohi__${groupItem.id}__${idx}`;
+              if (
+                groupItem.kind !== "cohi" ||
+                groupItemKey !== action.instanceId
+              ) {
+                return groupItem;
+              }
+              modifiedGrouped = true;
+              const existingViz = (groupItem.vizConfig || {}) as Record<
+                string,
+                unknown
+              >;
+              const mergedViz = mergeVizConfig(existingViz);
+              return {
+                ...groupItem,
+                ...(action.sql ? { sql: action.sql } : {}),
+                ...(action.title ? { title: action.title } : {}),
+                ...(action.changes && Object.keys(action.changes).length > 0
+                  ? { vizConfig: mergedViz as typeof groupItem.vizConfig }
+                  : {}),
+              };
+            });
+            if (!modifiedGrouped) return layoutItem;
+            return {
+              ...layoutItem,
+              payload: {
+                ...layoutItem.payload,
+                items: nextGroupItems,
+              },
+            };
+          });
+
+          if (modifiedGrouped) {
+            setItemsWithHistory(updatedItems);
+            toast({
+              title: "Widget updated",
+              description:
+                action.explanation?.substring(0, 80) || "Changes applied",
+            });
+            break;
+          }
+
+          toast({
+            title: "Widget not found",
+            description: `No widget with id ${action.instanceId}`,
+            variant: "destructive",
+          });
           break;
         }
         default:

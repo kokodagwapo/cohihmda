@@ -74,7 +74,14 @@ interface CanvasStateSnapshot {
     sectionType: string;
     widgetIds: string[];
     /** Widgets in this group with stable ids (for modify_group operations) */
-    widgets?: { id: string; kind: "registry" | "cohi"; defId?: string; title?: string; name?: string }[];
+    widgets?: {
+      id: string;
+      kind: "registry" | "cohi";
+      defId?: string;
+      title?: string;
+      name?: string;
+      sql?: string;
+    }[];
     /** Grid layout per widget (key = widgets[].id); 36 cols, 16px rows */
     widgetLayouts?: Record<string, { x: number; y: number; w: number; h: number }>;
     filters?: {
@@ -540,6 +547,12 @@ function buildCanvasContext(state: CanvasStateSnapshot): string {
           const layout = g.widgetLayouts?.[w.id];
           const layoutStr = layout ? ` @ grid(${layout.x},${layout.y}) size ${layout.w}x${layout.h}` : "";
           lines.push(`  - \`${w.id}\` (${w.kind}) ${label ?? ""}${layoutStr}`);
+          if (w.kind === "cohi" && w.sql) {
+            const sqlLimit = 1600;
+            const sqlSnippet =
+              w.sql.length <= sqlLimit ? w.sql : `${w.sql.substring(0, sqlLimit)}...`;
+            lines.push(`    SQL: \`${sqlSnippet}\``);
+          }
         }
       }
     }

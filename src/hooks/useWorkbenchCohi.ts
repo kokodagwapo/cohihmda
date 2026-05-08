@@ -245,6 +245,7 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
               id: key,
               kind: 'cohi',
               title: groupItem.title,
+              sql: groupItem.sql,
             });
           }
         });
