@@ -55,6 +55,7 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTenantStore } from "@/stores/tenantStore";
@@ -70,6 +71,16 @@ const FREQUENCIES = [
   { value: "biweekly", label: "Every 2 weeks" },
   { value: "monthly", label: "Monthly" },
   { value: "one_time", label: "One time" },
+] as const;
+
+const WEEKDAYS = [
+  { value: "0", label: "Sunday" },
+  { value: "1", label: "Monday" },
+  { value: "2", label: "Tuesday" },
+  { value: "3", label: "Wednesday" },
+  { value: "4", label: "Thursday" },
+  { value: "5", label: "Friday" },
+  { value: "6", label: "Saturday" },
 ] as const;
 
 const COMMON_TIMEZONES = [
@@ -381,6 +392,13 @@ export default function Distributions() {
                               {FREQUENCIES.find((f) => f.value === s.frequency)
                                 ?.label ?? s.frequency}{" "}
                               at {s.schedule_time?.slice(0, 5) ?? "08:00"}
+                              {s.frequency === "monthly" &&
+                                Array.isArray(s.schedule_days) &&
+                                s.schedule_days.length > 0 && (
+                                  <span className="block text-xs text-slate-600 dark:text-slate-400">
+                                    Days: {s.schedule_days.join(", ")}
+                                  </span>
+                                )}
                               <span className="block text-xs text-slate-500">
                                 {formatTzLabel(s.timezone || "America/New_York")}
                               </span>
@@ -535,6 +553,7 @@ function DistributionScheduleDialog({
   saving: boolean;
   tenantId: string | null;
 }) {
+  const { toast } = useToast();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [contentType, setContentType] = useState<string>("canvas");
@@ -542,6 +561,10 @@ function DistributionScheduleDialog({
   const [frequency, setFrequency] = useState("weekly");
   const [scheduleTime, setScheduleTime] = useState("08:00");
   const [timezone, setTimezone] = useState(detectBrowserTimezone);
+  /** Days of month 1–31 for monthly schedules */
+  const [scheduleDays, setScheduleDays] = useState<number[]>([]);
+  /** Day of week 0–6 for weekly (Sun–Sat) */
+  const [weeklyDay, setWeeklyDay] = useState("1");
   const [recipientListId, setRecipientListId] = useState("");
   const [recipientEmails, setRecipientEmails] = useState("");
   const [autoInviteDirectEmails, setAutoInviteDirectEmails] = useState(true);
@@ -550,6 +573,39 @@ function DistributionScheduleDialog({
     queryKey: ["distributions", "schedule", scheduleId, tenantId],
     queryFn: () => api.getDistributionSchedule(scheduleId!, tenantId),
     enabled: !!scheduleId && open,
+  });
+
+  const previewQuery = useQuery({
+    queryKey: [
+      "distributions",
+      "preview-runs",
+      tenantId,
+      frequency,
+      scheduleTime,
+      timezone,
+      scheduleDays,
+      weeklyDay,
+    ],
+    queryFn: () =>
+      api.previewDistributionSchedule(
+        {
+          frequency,
+          schedule_time: scheduleTime,
+          timezone,
+          ...(frequency === "monthly" ? { schedule_days: scheduleDays } : {}),
+          ...(frequency === "weekly"
+            ? { schedule_day: Number(weeklyDay) }
+            : {}),
+          count: 3,
+        },
+        tenantId,
+      ),
+    enabled:
+      !!tenantId &&
+      open &&
+      frequency !== "one_time" &&
+      (frequency !== "monthly" || scheduleDays.length > 0) &&
+      (frequency === "weekly" ? weeklyDay !== "" : true),
   });
 
   useEffect(() => {
@@ -567,6 +623,29 @@ function DistributionScheduleDialog({
       setAutoInviteDirectEmails(
         schedule.content_config?.auto_invite_external !== false,
       );
+      const rawDays = schedule.schedule_days;
+      if (Array.isArray(rawDays) && rawDays.length > 0) {
+        setScheduleDays(
+          [...rawDays]
+            .map((n: unknown) => Number(n))
+            .filter((n) => Number.isInteger(n) && n >= 1 && n <= 31)
+            .sort((a, b) => a - b),
+        );
+      } else if (
+        schedule.schedule_day != null &&
+        schedule.frequency === "monthly"
+      ) {
+        setScheduleDays([
+          Math.max(1, Math.min(31, Number(schedule.schedule_day))),
+        ]);
+      } else {
+        setScheduleDays([]);
+      }
+      if (schedule.frequency === "weekly" && schedule.schedule_day != null) {
+        setWeeklyDay(String(Math.max(0, Math.min(6, Number(schedule.schedule_day)))));
+      } else {
+        setWeeklyDay("1");
+      }
     } else {
       setName("");
       setDescription("");
@@ -575,18 +654,36 @@ function DistributionScheduleDialog({
       setFrequency("weekly");
       setScheduleTime("08:00");
       setTimezone(detectBrowserTimezone());
+      setScheduleDays([]);
+      setWeeklyDay("1");
       setRecipientListId("");
       setRecipientEmails("");
       setAutoInviteDirectEmails(true);
     }
   }, [open, scheduleId, schedule]);
 
+  const toggleMonthDay = (day: number) => {
+    setScheduleDays((prev) =>
+      prev.includes(day)
+        ? prev.filter((x) => x !== day)
+        : [...prev, day].sort((a, b) => a - b),
+    );
+  };
+
   const handleSubmit = () => {
+    if (frequency === "monthly" && scheduleDays.length === 0) {
+      toast({
+        title: "Select days of the month",
+        description: "Choose at least one day for monthly schedules.",
+        variant: "destructive",
+      });
+      return;
+    }
     const emails = recipientEmails
       .split(/[,;\s]+/)
       .map((e) => e.trim())
       .filter((e) => e.includes("@"));
-    onSave({
+    const payload: Record<string, unknown> = {
       name: name.trim() || "Untitled schedule",
       description: description.trim() || undefined,
       content_type: contentType,
@@ -597,12 +694,21 @@ function DistributionScheduleDialog({
       timezone,
       recipient_list_id: recipientListId || undefined,
       recipient_emails: emails,
-    });
+    };
+    if (frequency === "monthly") {
+      payload.schedule_days = scheduleDays;
+    }
+    if (frequency === "weekly") {
+      payload.schedule_day = Number(weeklyDay);
+    }
+    onSave(payload);
   };
+
+  const previewRuns = previewQuery.data?.runs;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
             {scheduleId ? "Edit schedule" : "New distribution schedule"}
@@ -666,7 +772,13 @@ function DistributionScheduleDialog({
           )}
           <div>
             <Label>Frequency</Label>
-            <Select value={frequency} onValueChange={setFrequency}>
+            <Select
+              value={frequency}
+              onValueChange={(v) => {
+                setFrequency(v);
+                if (v !== "monthly") setScheduleDays([]);
+              }}
+            >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -704,6 +816,82 @@ function DistributionScheduleDialog({
               </Select>
             </div>
           </div>
+          {frequency === "weekly" && (
+            <div>
+              <Label>Day of week</Label>
+              <Select value={weeklyDay} onValueChange={setWeeklyDay}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {WEEKDAYS.map((d) => (
+                    <SelectItem key={d.value} value={d.value}>
+                      {d.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          {frequency === "monthly" && (
+            <div className="space-y-2">
+              <Label>Days of month</Label>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Select one or more days (1–31). If a day does not exist in a
+                month (e.g. 31 in April), the send runs on the last day of that
+                month.
+              </p>
+              <div className="grid grid-cols-7 gap-2 max-h-48 overflow-y-auto border rounded-md p-3 bg-slate-50/80 dark:bg-slate-900/50">
+                {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                  <label
+                    key={day}
+                    className="flex items-center gap-2 text-sm cursor-pointer"
+                  >
+                    <Checkbox
+                      checked={scheduleDays.includes(day)}
+                      onCheckedChange={() => toggleMonthDay(day)}
+                    />
+                    <span>{day}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+          {frequency !== "one_time" && (
+            <div className="rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/40 p-3">
+              <p className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                Next sends (preview)
+              </p>
+              {previewQuery.isLoading && (
+                <p className="text-xs text-slate-500">Calculating…</p>
+              )}
+              {previewQuery.isError && (
+                <p className="text-xs text-amber-600">Could not load preview.</p>
+              )}
+              {previewRuns &&
+                previewRuns.length > 0 &&
+                !previewQuery.isLoading && (
+                  <ul className="text-xs text-slate-600 dark:text-slate-400 space-y-1">
+                    {previewRuns.map((iso) => (
+                      <li key={iso}>
+                        {new Date(iso).toLocaleString(undefined, {
+                          timeZone: timezone,
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        })}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              {frequency === "monthly" &&
+                scheduleDays.length === 0 &&
+                !previewQuery.isLoading && (
+                  <p className="text-xs text-slate-500">
+                    Select at least one day to see preview times.
+                  </p>
+                )}
+            </div>
+          )}
           <div>
             <Label>Recipient list</Label>
             <Select
