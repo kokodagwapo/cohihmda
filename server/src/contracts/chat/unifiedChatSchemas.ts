@@ -1,14 +1,11 @@
 export const unifiedChatRequestSchema: Record<string, unknown> = {
+  $schema: "https://json-schema.org/draft/2020-12/schema",
   $id: "https://cohi.local/schemas/chat/v1/request.json",
   title: "CohiUnifiedChatRequest",
   type: "object",
   required: ["message"],
   properties: {
-    message: {
-      type: "string",
-      minLength: 1,
-      description: "User message text.",
-    },
+    message: { type: "string", minLength: 1, description: "User message text." },
     conversationId: {
       type: "string",
       format: "uuid",
@@ -86,10 +83,7 @@ export const unifiedChatRequestSchema: Record<string, unknown> = {
         includeRag: { type: "boolean", default: true },
         includeLiveCanvasData: { type: "boolean", default: true },
         maxHistoryTurns: { type: "integer", minimum: 0, maximum: 50 },
-        personaHints: {
-          type: "array",
-          items: { type: "string" },
-        },
+        personaHints: { type: "array", items: { type: "string" } },
         qaAgentRunTag: { type: "string" },
         planningMode: {
           type: "string",
@@ -105,6 +99,7 @@ export const unifiedChatRequestSchema: Record<string, unknown> = {
 };
 
 export const unifiedChatResponseSchema: Record<string, unknown> = {
+  $schema: "https://json-schema.org/draft/2020-12/schema",
   $id: "https://cohi.local/schemas/chat/v1/response.json",
   title: "CohiUnifiedChatResponse",
   type: "object",
@@ -116,10 +111,7 @@ export const unifiedChatResponseSchema: Record<string, unknown> = {
       required: ["id", "blocks"],
       properties: {
         id: { type: "string", format: "uuid" },
-        blocks: {
-          type: "array",
-          items: { $ref: "#/$defs/block" },
-        },
+        blocks: { type: "array", items: { $ref: "#/$defs/block" } },
       },
       additionalProperties: false,
     },
@@ -144,10 +136,7 @@ export const unifiedChatResponseSchema: Record<string, unknown> = {
           type: "string",
           description: "Monotonic cursor after transcript/snapshot compaction (opaque).",
         },
-        suggestedQuestions: {
-          type: "array",
-          items: { type: "string" },
-        },
+        suggestedQuestions: { type: "array", items: { type: "string" } },
       },
       additionalProperties: true,
     },
@@ -214,10 +203,7 @@ export const unifiedChatResponseSchema: Record<string, unknown> = {
           required: ["type", "items"],
           properties: {
             type: { const: "actions" },
-            items: {
-              type: "array",
-              items: { type: "object" },
-            },
+            items: { type: "array", items: { type: "object" } },
             teachingNotes: { type: "string" },
           },
           additionalProperties: false,
@@ -282,6 +268,7 @@ export const unifiedChatResponseSchema: Record<string, unknown> = {
 };
 
 export const unifiedChatStreamEventSchema: Record<string, unknown> = {
+  $schema: "https://json-schema.org/draft/2020-12/schema",
   $id: "https://cohi.local/schemas/chat/v1/event-stream.json",
   title: "CohiUnifiedChatStreamEvent",
   type: "object",
@@ -318,3 +305,9 @@ export const unifiedChatStreamEventSchema: Record<string, unknown> = {
   },
   additionalProperties: false,
 };
+
+export const UNIFIED_CHAT_SCHEMAS: ReadonlyArray<{ fileName: string; schema: Record<string, unknown> }> = [
+  { fileName: "chat-request.schema.json", schema: unifiedChatRequestSchema },
+  { fileName: "chat-response.schema.json", schema: unifiedChatResponseSchema },
+  { fileName: "chat-event-stream.schema.json", schema: unifiedChatStreamEventSchema },
+];

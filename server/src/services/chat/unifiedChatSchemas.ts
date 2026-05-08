@@ -9,7 +9,12 @@ import {
   unifiedChatRequestSchema,
   unifiedChatResponseSchema,
   unifiedChatStreamEventSchema,
-} from "./unifiedChatSchemaDefs.js";
+} from "../../contracts/chat/unifiedChatSchemas.js";
+
+function forAjvCompile(schema: Record<string, unknown>): Record<string, unknown> {
+  const { $schema: _ignore, ...rest } = schema;
+  return rest;
+}
 
 const ajv = new Ajv({
   allErrors: true,
@@ -18,9 +23,15 @@ const ajv = new Ajv({
 });
 addFormats(ajv);
 
-export const validateUnifiedChatRequest: ValidateFunction = ajv.compile(unifiedChatRequestSchema);
-export const validateUnifiedChatResponse: ValidateFunction = ajv.compile(unifiedChatResponseSchema);
-export const validateUnifiedStreamEvent: ValidateFunction = ajv.compile(unifiedChatStreamEventSchema);
+export const validateUnifiedChatRequest: ValidateFunction = ajv.compile(
+  forAjvCompile(unifiedChatRequestSchema),
+);
+export const validateUnifiedChatResponse: ValidateFunction = ajv.compile(
+  forAjvCompile(unifiedChatResponseSchema),
+);
+export const validateUnifiedStreamEvent: ValidateFunction = ajv.compile(
+  forAjvCompile(unifiedChatStreamEventSchema),
+);
 
 export function formatAjvErrors(errors: ErrorObject[] | null | undefined): {
   message: string;
