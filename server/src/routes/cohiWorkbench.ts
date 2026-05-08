@@ -45,6 +45,9 @@ import { loadSession as loadResearchSession } from "../services/research/orchest
 import { callLLM, type LLMMessage } from "../services/research/tools.js";
 import { AGENT_PERSONAS, type AgentPersona } from "../config/agentPersonas.js";
 import { retrieveRAGContext } from "../services/ai/ragRetrieval.js";
+import { getLoanAccessContext } from "../services/userLoanAccessService.js";
+import { safeParseMetricSpec } from "../services/metrics/metricSpec.js";
+import { composeMetricSql } from "../services/metrics/metricQueryComposer.js";
 
 const router = Router();
 
@@ -777,8 +780,9 @@ Each action in the "actions" array must be one of:
 9. **create_canvas**: Build a full multi-section dashboard canvas at once
    {"type": "create_canvas", "title": "Monthly Executive Review", "sectionKeys": ["executiveDashboard", "companyScorecard", "salesScorecard"], "explanation": "Why this combination"}
 
-10. **query_data**: Run a SQL query to answer a data question (results are returned to you automatically)
+10. **query_data**: Run a SQL query **or** a catalog **metricSpec** to answer a data question (results are returned to you automatically)
    {"type": "query_data", "sql": "SELECT ...", "explanation": "What this query checks"}
+   Or (preferred for standard KPIs): {"type": "query_data", "metricSpec": { "metricIds": ["pull_through_rate"], "dimensions": [], "window": "ytd" }, "explanation": "..."}
    Use query_data when:
    - The user asks a question that requires data NOT visible on the canvas
    - The user asks for deeper drill-down beyond what the current widgets show
@@ -1364,7 +1368,9 @@ export async function runWorkbenchChatTurn(
       // Two-pass flow: if the LLM emitted query_data actions, execute
       // the SQL and make a second LLM call with the results.
       // ------------------------------------------------------------------
-      const queryActions = validActions.filter((a: any) => a.type === "query_data" && a.sql);
+      const queryActions = validActions.filter(
+        (a: any) => a.type === "query_data" && (a.sql || a.metricSpec)
+      );
       let finalMessage = parsed.message || "I processed your request.";
       let finalTeachingNotes = parsed.teachingNotes || undefined;
       let finalSuggestions = parsed.suggestedQuestions || [];
@@ -1477,17 +1483,53 @@ export async function runWorkbenchChatTurn(
           `[CohiWorkbench] Executing ${queryActions.length} query_data action(s) for two-pass flow`
         );
 
+        const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+        const loanCtx = await getLoanAccessContext(req as AuthRequest, tenantPool);
+        let userAccessFilter: ChatContext["userAccessFilter"] = null;
+        if (loanCtx.hasNoAccess) {
+          userAccessFilter = { sql: "FALSE", params: [], paramOffset: 0 };
+        } else if (!loanCtx.hasFullAccess && loanCtx.requiresFiltering) {
+          userAccessFilter = loanCtx.getFilter("l");
+        }
+
         const queryResults: { sql: string; explanation: string; data?: any[]; error?: string }[] = [];
 
         for (const qa of queryActions) {
           try {
+            let sqlToRun = qa.sql ? String(qa.sql).trim() : "";
+            let paramsToRun: unknown[] = [];
+            let accessMergedInComposer = false;
+
+            if (qa.metricSpec != null && typeof qa.metricSpec === "object") {
+              const parsedSpec = safeParseMetricSpec(qa.metricSpec);
+              if (parsedSpec.success) {
+                try {
+                  const composed = composeMetricSql(parsedSpec.data, userAccessFilter);
+                  sqlToRun = composed.sql;
+                  paramsToRun = composed.params;
+                  accessMergedInComposer = true;
+                } catch (composeErr: any) {
+                  queryResults.push({
+                    sql: "",
+                    explanation: qa.explanation,
+                    error: composeErr.message || "metricSpec compose failed",
+                  });
+                  continue;
+                }
+              }
+            }
+
+            if (!sqlToRun.trim() && qa.sql) {
+              sqlToRun = String(qa.sql).trim();
+            }
+
             // Validate: only SELECT queries allowed
-            const trimmedSql = qa.sql.trim().toUpperCase();
+            const trimmedSql = sqlToRun.trim().toUpperCase();
             if (!trimmedSql.startsWith("SELECT") && !trimmedSql.startsWith("WITH")) {
               queryResults.push({
-                sql: qa.sql,
+                sql: sqlToRun || qa.sql,
                 explanation: qa.explanation,
-                error: "Only SELECT queries are allowed.",
+                error: "Only SELECT queries are allowed (or provide a valid metricSpec).",
               });
               continue;
             }
@@ -1496,13 +1538,14 @@ export async function runWorkbenchChatTurn(
               tenantId: tenantId!,
               userId: req.userId || "workbench",
               userRole: "user",
+              userAccessFilter: accessMergedInComposer ? null : userAccessFilter,
             };
 
-            const result = await executeQuery(qa.sql, [], context);
+            const result = await executeQuery(sqlToRun, paramsToRun as any[], context);
             const formattedRows = formatDataRows(result.rows).slice(0, 100);
 
             queryResults.push({
-              sql: qa.sql,
+              sql: sqlToRun,
               explanation: qa.explanation,
               data: formattedRows,
             });
@@ -1512,7 +1555,7 @@ export async function runWorkbenchChatTurn(
           } catch (err: any) {
             console.error(`[CohiWorkbench] query_data execution error:`, err.message);
             queryResults.push({
-              sql: qa.sql,
+              sql: qa.sql || "",
               explanation: qa.explanation,
               error: err.message,
             });

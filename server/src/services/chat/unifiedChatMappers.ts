@@ -4,6 +4,7 @@
 
 import { randomUUID } from "crypto";
 import type { CohiChatResponse, VisualizationConfig } from "../ai/cohiChatService.js";
+import { sanitizeNavigationHints } from "./unifiedChatPolicy.js";
 
 export type UnifiedBlock =
   | { type: "text"; markdown: string }
@@ -54,6 +55,11 @@ export function mapCohiChatResponseToBlocks(
       artifactId: opts?.visualizationArtifactId ?? randomUUID(),
       config: resp.visualization,
     });
+  }
+
+  const navItems = sanitizeNavigationHints(resp.navigationHints);
+  if (navItems.length > 0) {
+    blocks.push({ type: "navigation_hints", items: navItems });
   }
 
   return blocks;

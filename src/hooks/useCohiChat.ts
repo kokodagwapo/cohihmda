@@ -79,6 +79,8 @@ export interface ChatMessage {
     dataQuery?: boolean;
     knowledgeBase?: string[];
   };
+  /** In-app links suggested by Cohi (from unified envelope or legacy API) */
+  navigationHints?: { label: string; path: string }[];
 }
 
 export interface CohiChatResponse {
@@ -92,6 +94,7 @@ export interface CohiChatResponse {
     dataQuery?: boolean;
     knowledgeBase?: string[];
   };
+  navigationHints?: { label: string; path: string }[];
 }
 
 export interface ChatSession {
@@ -256,6 +259,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
             timestamp: new Date(),
             sqlQuery: parsed.sqlQuery,
             sources: parsed.sources,
+            navigationHints: parsed.navigationHints,
           };
           setMessages((prev) =>
             prev.map((m) => (m.id === assistantMessageId ? assistantMessage : m)),
@@ -292,6 +296,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
             error: response.error,
             sqlQuery: response.sqlQuery,
             sources: response.sources,
+            navigationHints: response.navigationHints,
           };
 
           setMessages((prev) =>
@@ -433,6 +438,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
             timestamp: new Date(),
             sqlQuery: parsed.sqlQuery,
             sources: parsed.sources,
+            navigationHints: parsed.navigationHints,
           };
           setMessages((prev) =>
             prev.map((m) => (m.id === assistantMessageId ? assistantMessage : m)),
@@ -468,6 +474,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
             error: response.error,
             sqlQuery: response.sqlQuery,
             sources: response.sources,
+            navigationHints: response.navigationHints,
           };
 
           setMessages((prev) =>

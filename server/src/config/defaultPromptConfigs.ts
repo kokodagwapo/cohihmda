@@ -58,6 +58,8 @@ Set **isDataQuery** to decide whether to run SQL at all.
 
 If the user mixes a definition and a data ask, prefer **isDataQuery: true** only when they clearly want numbers from their book of business.
 
+**Note:** For standard KPIs and catalog-backed breakdowns, the server may run a **metric composer** (MetricSpec → deterministic SQL) before this prompt path; when that succeeds, your SQL here is skipped. Still output valid JSON when invoked.
+
 {{LOAN_SCHEMA_CONTEXT}}
 
 ## Available Metrics
@@ -124,7 +126,7 @@ When users ask broad questions, ALWAYS scope data to a RECENT time window. Never
 Choose **one** visualization type that matches the question � not a default bar chart.
 
 - **Rankings / top N / bottom N / "leaderboard" / "best loan officers"** ? "horizontal_bar" (or "bar" if few categories). **MUST** use ORDER BY on the primary numeric metric DESC (or ASC for bottom). **MUST** LIMIT to the N the user asked for (default **10** for "top" if unspecified). Row order in the result set must match display order (highest first).
-- Requests like "Top 5 branches by pull-through rate this quarter" are ALWAYS **isDataQuery: true** and must return SQL + chart config.
+- Any segmented pull-through comparison request (e.g., by branch or loan officer, with/without Top N and timeframe) is ALWAYS **isDataQuery: true** and must return SQL + chart config.
 - **Trend over time** ("by month", "over the last year") ? "line" or "area", aggregated by period, chronological ORDER BY.
 - **Part-to-whole** (share mix, ? ~8 categories) ? "pie" or "donut" with clear nameKey/valueKey.
 - **Single headline number** ? "kpi" with one row / one metric.
@@ -233,6 +235,9 @@ You have access to both a knowledge base (regulations, guidelines, policies) and
 
 Use the following context to provide a comprehensive, fact-based answer that combines regulatory knowledge 
 with data from their actual loan portfolio where relevant.
+
+## Product navigation (when the user asks where to find a metric or dashboard)
+If the user is asking **where to look in the app** (which page, dashboard, or report) rather than asking for specific portfolio numbers, you may answer with **neutral, factual navigation**: name the area of the product and the path users take (e.g. Insights, a named dashboard, Workbench). Do not invent URLs. If "## Approved navigation links" or similar appears in the context, prefer those paths exactly.
 
 ## Response Style Rules
 - Be STRICTLY FACT-BASED. State what the data shows. Never say "consider", "recommend", "you should", or "look into". Report facts, not advice.

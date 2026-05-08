@@ -51,8 +51,11 @@ import { useChannelStore } from "@/stores/channelStore";
 import { useTenantStore } from "@/stores/tenantStore";
 import { usePinnedDashboardsStore, type PinnedItem } from "@/stores/pinnedDashboardsStore";
 import { WhatsNewButton } from "@/components/tutorial/WhatsNewButton";
-import { SidebarRouteSearch } from "@/components/dashboard/SidebarRouteSearch";
-import { getSidebarSearchTargets } from "@/data/sidebarSearchTargets";
+import {
+  SidebarRouteSearch,
+  type SidebarRouteSearchTarget,
+} from "@/components/dashboard/SidebarRouteSearch";
+import { fetchSidebarSearchTargets } from "@/data/sidebarSearchTargets";
 import { useWorkbenchNav } from "@/hooks/useWorkbenchNav";
 
 export interface NavigationProps {
@@ -422,6 +425,7 @@ export function Navigation(
   const [helpOpen, setHelpOpen] = useState(false);
   const [allPagesOpen, setAllPagesOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [sidebarSearchTargets, setSidebarSearchTargets] = useState<SidebarRouteSearchTarget[]>([]);
   const insightsRef = useRef<HTMLDivElement>(null);
   const topTieringRef = useRef<HTMLDivElement>(null);
   const workbenchRef = useRef<HTMLDivElement>(null);
@@ -455,6 +459,27 @@ export function Navigation(
       setDisplayName(null);
     }
   }, [user]);
+
+  useEffect(() => {
+    let alive = true;
+    if (!isAuthenticated) {
+      setSidebarSearchTargets([]);
+      return;
+    }
+
+    fetchSidebarSearchTargets()
+      .then((targets) => {
+        if (alive) setSidebarSearchTargets(targets);
+      })
+      .catch((err) => {
+        console.warn("[Navigation] Failed to load sidebar search targets:", err);
+        if (alive) setSidebarSearchTargets([]);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [isAuthenticated]);
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -1663,7 +1688,7 @@ export function Navigation(
 
               {/* Search Dashboards - replaces My Workbench & Research Lab pills */}
               <div className="w-[220px] min-w-[180px] max-w-[280px]">
-                <SidebarRouteSearch targets={getSidebarSearchTargets()} collapsed={false} />
+                <SidebarRouteSearch targets={sidebarSearchTargets} collapsed={false} />
               </div>
             </div>
           )}

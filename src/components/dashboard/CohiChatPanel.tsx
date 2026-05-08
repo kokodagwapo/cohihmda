@@ -5,7 +5,7 @@
  */
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, Link as RouterLink } from "react-router-dom";
 import { api } from "@/lib/api";
 import {
   MessageSquare,
@@ -2573,6 +2573,27 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
                 {renderMarkdownText(messageContent)}
               </div>
             )}
+
+            {!isUser &&
+              message.navigationHints &&
+              message.navigationHints.length > 0 && (
+                <div className="px-4 pb-3 pt-2 border-t border-slate-200/60 dark:border-slate-700/60">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 block mb-2">
+                    Go to
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    {message.navigationHints.map((h) => (
+                      <RouterLink
+                        key={`${h.path}-${h.label}`}
+                        to={h.path}
+                        className="inline-flex items-center rounded-lg border border-blue-200/90 dark:border-blue-800/80 bg-blue-50/90 dark:bg-blue-950/35 px-2.5 py-1.5 text-xs font-medium text-blue-800 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-900/45 transition-colors"
+                      >
+                        {h.label}
+                      </RouterLink>
+                    ))}
+                  </div>
+                </div>
+              )}
 
             {/* Error */}
             {message.error && (

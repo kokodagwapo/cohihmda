@@ -29,7 +29,52 @@ export interface UnifiedChatPolicyInput {
   scopeType?: UnifiedScopeType;
 }
 
-/** Allowed path prefixes for navigation_hints (Appendix A.2). */
+/** Allowed first URL path segments for in-app navigation links (see App.tsx routes). */
+const ALLOWED_APP_PATH_ROOTS = new Set([
+  "insights",
+  "research",
+  "workbench",
+  "my-dashboard",
+  "loans",
+  "data-chat",
+  "help",
+  "settings",
+  "feedback",
+  "admin",
+  "subscription",
+  "performance",
+  "company-scorecard",
+  "business-overview",
+  "leaderboard",
+  "production-trends",
+  "workflow-conversion",
+  "lock-stratification",
+  "pipeline-analysis",
+  "loan-detail",
+  "fallout-forecast",
+  "pricing-dashboard",
+  "data-quality",
+  "loan-complexity",
+  "high-performers",
+  "actors",
+  "credit-risk-management",
+  "sales-scorecard",
+  "sales-company-overview",
+  "sales-trends",
+  "production-summary-by-week",
+  "sales-scorecard-overview",
+  "capture-analysis",
+  "loan-funnel",
+  "top-tiering-comparison",
+  "landing",
+  "login",
+  "forgot-password",
+  "reset-password",
+  "auth",
+  "unsubscribe",
+]);
+
+/** Legacy prefix allowlist (Appendix A.2). Kept for backward compatibility. */
 const NAV_HINT_PREFIXES = [
   "/insights",
   "/research",
@@ -38,6 +83,19 @@ const NAV_HINT_PREFIXES = [
   "/data-chat",
   "/help",
 ];
+
+function firstPathSegment(path: string): string | null {
+  const trimmed = path.trim();
+  const withoutLeading = trimmed.startsWith("/") ? trimmed.slice(1) : trimmed;
+  const seg = withoutLeading.split(/[/?#]/)[0];
+  return seg || null;
+}
+
+function isAllowedAppNavigationPath(p: string): boolean {
+  const seg = firstPathSegment(p);
+  if (!seg) return false;
+  return ALLOWED_APP_PATH_ROOTS.has(seg);
+}
 
 export function sanitizeNavigationHints(
   hints: { label: string; path: string }[] | undefined,
@@ -49,8 +107,15 @@ export function sanitizeNavigationHints(
     const p = h.path.trim();
     if (!p.startsWith("/")) continue;
     if (p.startsWith("//")) continue;
-    const ok = NAV_HINT_PREFIXES.some((prefix) => p === prefix || p.startsWith(`${prefix}/`) || p.startsWith(`${prefix}?`));
-    if (ok) out.push({ label: h.label || "Open", path: p });
+    const legacyOk = NAV_HINT_PREFIXES.some(
+      (prefix) =>
+        p === prefix ||
+        p.startsWith(`${prefix}/`) ||
+        p.startsWith(`${prefix}?`),
+    );
+    if (legacyOk || isAllowedAppNavigationPath(p)) {
+      out.push({ label: h.label || "Open", path: p });
+    }
   }
   return out;
 }

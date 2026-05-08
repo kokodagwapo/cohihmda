@@ -33,6 +33,7 @@ import {
   migrateContextUploadToTable,
 } from "./uploadProcessor.js";
 import type { ResearchWidgetContext } from "../../types/researchWidgetContext.js";
+import { getUserLoanAccessFilter } from "../userLoanAccessService.js";
 
 // ============================================================================
 // Types
@@ -704,6 +705,10 @@ export async function runResearchPipeline(
   const isQuickMode = session.mode === "quick";
 
   try {
+    const loanAccessFilter = await getUserLoanAccessFilter(
+      session.userId,
+      tenantPool
+    );
     const apiKey = await getOpenAIKey(session.tenantId);
     const [schemaContext, metricDefs, knowledgeContext, priorSessionSummaries, businessKnowledge, trackedInsightContext] = await Promise.all([
       getSchemaContext(session.tenantId),
@@ -820,7 +825,11 @@ export async function runResearchPipeline(
         checkPause,
         enrichedKnowledgeContext,
         businessKnowledge,
-        session.widgetContext ?? null
+        session.widgetContext ?? null,
+        {
+          tenantId: session.tenantId,
+          loanAccessFilter,
+        }
       );
 
       session.plan = { summary: "Quick answer", questions: [quickQuestion] };
@@ -937,7 +946,11 @@ export async function runResearchPipeline(
           return runDataAnalystAgent(
             question, combinedSchemaContext, metricDefs, tenantPool, apiKey,
             onStep, getSteeringDirective, checkPause, enrichedKnowledgeContext, businessKnowledge,
-            session.widgetContext ?? null
+            session.widgetContext ?? null,
+            {
+              tenantId: session.tenantId,
+              loanAccessFilter,
+            }
           );
         })
       );
@@ -1029,6 +1042,10 @@ export async function runFollowUp(
   });
 
   try {
+    const loanAccessFilter = await getUserLoanAccessFilter(
+      session.userId,
+      tenantPool
+    );
     const apiKey = await getOpenAIKey(session.tenantId);
     const [schemaContext, metricDefs, knowledgeContext, trackedInsightCtx] = await Promise.all([
       getSchemaContext(session.tenantId),
@@ -1118,7 +1135,11 @@ export async function runFollowUp(
     const finding = await runDataAnalystAgent(
       followUpQuestion, followUpSchemaContext, metricDefs, tenantPool, apiKey,
       onStep, getSteeringDirective, checkPause, enrichedFollowUpContext, businessKnowledge,
-      session.widgetContext ?? null
+      session.widgetContext ?? null,
+      {
+        tenantId: session.tenantId,
+        loanAccessFilter,
+      }
     );
 
     session.findings.push(finding);

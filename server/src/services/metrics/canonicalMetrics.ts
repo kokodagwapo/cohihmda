@@ -16,6 +16,7 @@
  */
 
 import pg from "pg";
+import type { LoanAccessFilter } from "../userLoanAccessService.js";
 import {
   buildChannelWhereClause,
   buildFundedFilter,
@@ -48,6 +49,149 @@ export interface PeriodSnapshot {
 export interface DateRange {
   start: string;
   end: string;
+}
+
+export type PullThroughSegment = "branch" | "loan_officer";
+export type PullThroughWindow =
+  | "this_quarter"
+  | "last_quarter"
+  | "ytd"
+  | "last_90_days"
+  | "this_month"
+  | "all_time";
+
+export interface SegmentedPullThroughQueryOptions {
+  segment: PullThroughSegment;
+  window?: PullThroughWindow;
+  topN?: number | null;
+  minCompleted?: number;
+  /** Loan-level access filter — merged into WHERE with bound params */
+  accessFilter?: LoanAccessFilter | null;
+}
+
+export interface SegmentedPullThroughQueryResult {
+  sql: string;
+  /** Bound params for accessFilter placeholders ($1…) when present */
+  params: unknown[];
+  segmentAlias: "branch" | "loan_officer";
+  segmentLabel: "branch" | "loan officer";
+  windowLabel: string;
+}
+
+// Shared canonical pull-through predicates/expressions used across chat/workbench/insights.
+export const CANONICAL_PULL_THROUGH_FUNDED_PREDICATE = `(l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%')`;
+export const CANONICAL_PULL_THROUGH_COMPLETED_PREDICATE = `l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')`;
+export const CANONICAL_PULL_THROUGH_FUNDED_COUNT_EXPR = `COUNT(CASE WHEN ${CANONICAL_PULL_THROUGH_FUNDED_PREDICATE} THEN 1 END)`;
+export const CANONICAL_PULL_THROUGH_COMPLETED_COUNT_EXPR = `COUNT(CASE WHEN ${CANONICAL_PULL_THROUGH_COMPLETED_PREDICATE} THEN 1 END)`;
+
+function getApplicationWindowWhere(window: PullThroughWindow): {
+  whereClause: string;
+  windowLabel: string;
+} {
+  switch (window) {
+    case "this_quarter":
+      return {
+        whereClause:
+          "WHERE l.application_date >= DATE_TRUNC('quarter', CURRENT_DATE)\n  AND l.application_date < DATE_TRUNC('quarter', CURRENT_DATE) + INTERVAL '3 months'",
+        windowLabel: "this quarter",
+      };
+    case "last_quarter":
+      return {
+        whereClause:
+          "WHERE l.application_date >= DATE_TRUNC('quarter', CURRENT_DATE) - INTERVAL '3 months'\n  AND l.application_date < DATE_TRUNC('quarter', CURRENT_DATE)",
+        windowLabel: "last quarter",
+      };
+    case "ytd":
+      return {
+        whereClause:
+          "WHERE l.application_date >= DATE_TRUNC('year', CURRENT_DATE)\n  AND l.application_date < DATE_TRUNC('year', CURRENT_DATE) + INTERVAL '1 year'",
+        windowLabel: "year-to-date",
+      };
+    case "last_90_days":
+      return {
+        whereClause:
+          "WHERE l.application_date >= CURRENT_DATE - INTERVAL '90 days'\n  AND l.application_date <= CURRENT_DATE",
+        windowLabel: "last 90 days",
+      };
+    case "this_month":
+      return {
+        whereClause:
+          "WHERE l.application_date >= DATE_TRUNC('month', CURRENT_DATE)\n  AND l.application_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'",
+        windowLabel: "this month",
+      };
+    case "all_time":
+    default:
+      return {
+        whereClause: "",
+        windowLabel: "all available data",
+      };
+  }
+}
+
+/**
+ * Build a canonical segmented pull-through query using shared formulas.
+ * This keeps chat/workbench/insights aligned on metric semantics.
+ */
+export function buildSegmentedPullThroughQuery(
+  options: SegmentedPullThroughQueryOptions,
+): SegmentedPullThroughQueryResult {
+  const segmentAlias = options.segment === "branch" ? "branch" : "loan_officer";
+  const segmentLabel = options.segment === "branch" ? "branch" : "loan officer";
+  const segmentExpr =
+    options.segment === "branch"
+      ? "COALESCE(NULLIF(TRIM(l.branch), ''), 'Unknown')"
+      : "COALESCE(NULLIF(TRIM(l.loan_officer), ''), 'Unknown')";
+  const minCompleted =
+    Number.isFinite(options.minCompleted) && (options.minCompleted as number) > 0
+      ? Math.floor(options.minCompleted as number)
+      : 5;
+  const window = options.window || "all_time";
+  const { whereClause, windowLabel } = getApplicationWindowWhere(window);
+  const limitClause =
+    options.topN && Number.isFinite(options.topN)
+      ? `\nLIMIT ${Math.min(Math.max(Math.floor(options.topN), 1), 25)}`
+      : "";
+
+  const access = options.accessFilter;
+  let accessAnd = "";
+  const params: unknown[] = [];
+  if (access?.sql === "FALSE") {
+    return {
+      sql: `SELECT ${segmentExpr} AS ${segmentAlias}, 0::bigint AS funded_count, 0::bigint AS completed_count, 0::numeric AS pull_through_rate
+FROM public.loans l WHERE FALSE`,
+      params: [],
+      segmentAlias,
+      segmentLabel,
+      windowLabel,
+    };
+  }
+  if (access && access.sql && access.sql !== "FALSE") {
+    accessAnd =
+      whereClause.trim().length > 0
+        ? ` AND (${access.sql})`
+        : `WHERE (${access.sql})`;
+    params.push(...access.params);
+  }
+
+  return {
+    sql: `SELECT
+  ${segmentExpr} AS ${segmentAlias},
+  ${CANONICAL_PULL_THROUGH_FUNDED_COUNT_EXPR} AS funded_count,
+  ${CANONICAL_PULL_THROUGH_COMPLETED_COUNT_EXPR} AS completed_count,
+  ROUND(
+    (${CANONICAL_PULL_THROUGH_FUNDED_COUNT_EXPR}::numeric / NULLIF(${CANONICAL_PULL_THROUGH_COMPLETED_COUNT_EXPR}, 0)) * 100,
+    1
+  ) AS pull_through_rate
+FROM public.loans l
+${whereClause}${accessAnd}
+GROUP BY 1
+HAVING ${CANONICAL_PULL_THROUGH_COMPLETED_COUNT_EXPR} >= ${minCompleted}
+ORDER BY pull_through_rate DESC, completed_count DESC${limitClause}`,
+    params,
+    segmentAlias,
+    segmentLabel,
+    windowLabel,
+  };
 }
 
 // ============================================================================

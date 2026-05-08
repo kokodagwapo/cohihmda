@@ -10,7 +10,12 @@
  */
 
 import pg from "pg";
-import { getTenantRevenueExpression } from "../metrics/canonicalMetrics.js";
+import {
+  CANONICAL_PULL_THROUGH_COMPLETED_PREDICATE,
+  CANONICAL_PULL_THROUGH_COMPLETED_COUNT_EXPR,
+  CANONICAL_PULL_THROUGH_FUNDED_COUNT_EXPR,
+  getTenantRevenueExpression,
+} from "../metrics/canonicalMetrics.js";
 
 // ============================================================================
 // Types
@@ -69,11 +74,11 @@ function performanceWidgets(meta: SourceInsightMeta, revenueExpr: string): DeepD
       sql: `SELECT
         DATE_TRUNC('month', l.application_date) AS sort_period,
         TO_CHAR(DATE_TRUNC('month', l.application_date), 'Mon YYYY') AS period,
-        COUNT(CASE WHEN l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END) AS completed,
-        COUNT(CASE WHEN (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%') THEN 1 END) AS funded,
+        ${CANONICAL_PULL_THROUGH_COMPLETED_COUNT_EXPR} AS completed,
+        ${CANONICAL_PULL_THROUGH_FUNDED_COUNT_EXPR} AS funded,
         ROUND(
-          COUNT(CASE WHEN (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%') THEN 1 END) * 100.0
-          / NULLIF(COUNT(CASE WHEN l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END), 0),
+          ${CANONICAL_PULL_THROUGH_FUNDED_COUNT_EXPR} * 100.0
+          / NULLIF(${CANONICAL_PULL_THROUGH_COMPLETED_COUNT_EXPR}, 0),
         1) AS pull_through_rate
       FROM public.loans l
       WHERE l.application_date >= '${daysAgo(365)}'
@@ -178,18 +183,18 @@ function tieringWidgets(meta: SourceInsightMeta, revenueExpr: string): DeepDiveW
       title: "Officer Pull-Through Comparison",
       sql: `SELECT
         COALESCE(NULLIF(TRIM(l.loan_officer), ''), NULLIF(TRIM(l.account_executive), '')) AS officer,
-        COUNT(CASE WHEN l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END) AS completed,
-        COUNT(CASE WHEN (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%') THEN 1 END) AS funded,
+        ${CANONICAL_PULL_THROUGH_COMPLETED_COUNT_EXPR} AS completed,
+        ${CANONICAL_PULL_THROUGH_FUNDED_COUNT_EXPR} AS funded,
         ROUND(
-          COUNT(CASE WHEN (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%') THEN 1 END) * 100.0
-          / NULLIF(COUNT(CASE WHEN l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END), 0),
+          ${CANONICAL_PULL_THROUGH_FUNDED_COUNT_EXPR} * 100.0
+          / NULLIF(${CANONICAL_PULL_THROUGH_COMPLETED_COUNT_EXPR}, 0),
         1) AS pull_through
       FROM public.loans l
       WHERE l.application_date >= '${startOfYear()}'
         AND COALESCE(NULLIF(TRIM(l.loan_officer), ''), NULLIF(TRIM(l.account_executive), '')) IS NOT NULL
         ${nameFilter}
       GROUP BY officer
-      HAVING COUNT(CASE WHEN l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END) >= 3
+      HAVING ${CANONICAL_PULL_THROUGH_COMPLETED_COUNT_EXPR} >= 3
       ORDER BY pull_through DESC
       LIMIT 20`,
       vizConfig: {
@@ -345,13 +350,13 @@ function lostOpportunityWidgets(meta: SourceInsightMeta, revenueExpr: string): D
       sql: `SELECT
         DATE_TRUNC('month', l.application_date) AS sort_period,
         TO_CHAR(DATE_TRUNC('month', l.application_date), 'Mon YYYY') AS period,
-        COUNT(CASE WHEN l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END) AS completed,
-        COUNT(CASE WHEN l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
+        ${CANONICAL_PULL_THROUGH_COMPLETED_COUNT_EXPR} AS completed,
+        COUNT(CASE WHEN ${CANONICAL_PULL_THROUGH_COMPLETED_PREDICATE}
           AND (l.funding_date IS NULL AND l.closing_date IS NULL AND l.investor_purchase_date IS NULL) THEN 1 END) AS fallen_out,
         ROUND(
-          COUNT(CASE WHEN l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
+          COUNT(CASE WHEN ${CANONICAL_PULL_THROUGH_COMPLETED_PREDICATE}
             AND (l.funding_date IS NULL AND l.closing_date IS NULL AND l.investor_purchase_date IS NULL) THEN 1 END) * 100.0
-          / NULLIF(COUNT(CASE WHEN l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END), 0),
+          / NULLIF(${CANONICAL_PULL_THROUGH_COMPLETED_COUNT_EXPR}, 0),
         1) AS fallout_rate
       FROM public.loans l
       WHERE l.application_date >= '${daysAgo(365)}'
@@ -376,7 +381,7 @@ function lostOpportunityWidgets(meta: SourceInsightMeta, revenueExpr: string): D
         ROUND(SUM(l.loan_amount)) AS lost_volume
       FROM public.loans l
       WHERE l.application_date >= '${startOfYear()}'
-        AND l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
+        AND ${CANONICAL_PULL_THROUGH_COMPLETED_PREDICATE}
         AND (l.funding_date IS NULL AND l.closing_date IS NULL AND l.investor_purchase_date IS NULL)
         AND COALESCE(NULLIF(TRIM(l.loan_officer), ''), NULLIF(TRIM(l.account_executive), '')) IS NOT NULL
       GROUP BY officer

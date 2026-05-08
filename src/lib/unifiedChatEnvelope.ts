@@ -93,6 +93,7 @@ export interface ParsedGlobalUnifiedFields {
   sqlQuery?: string;
   sources?: { dataQuery?: boolean; knowledgeBase?: string[] };
   suggestedQuestions?: string[];
+  navigationHints?: { label: string; path: string }[];
 }
 
 export function parseGlobalUnifiedEnvelope(
@@ -102,6 +103,7 @@ export function parseGlobalUnifiedEnvelope(
   let message = "";
   let visualization: unknown;
   const kbFromCitations: string[] = [];
+  let navigationHints: { label: string; path: string }[] | undefined;
 
   for (const b of blocks) {
     if (b.type === "text") {
@@ -112,6 +114,8 @@ export function parseGlobalUnifiedEnvelope(
       for (const it of b.items) {
         if (it?.title) kbFromCitations.push(it.title);
       }
+    } else if (b.type === "navigation_hints" && Array.isArray(b.items)) {
+      navigationHints = b.items as { label: string; path: string }[];
     }
   }
 
@@ -134,6 +138,7 @@ export function parseGlobalUnifiedEnvelope(
     sqlQuery: meta.sqlQuery as string | undefined,
     sources: mergedSources,
     suggestedQuestions: meta.suggestedQuestions as string[] | undefined,
+    navigationHints,
   };
 }
 

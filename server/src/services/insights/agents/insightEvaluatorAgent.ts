@@ -49,7 +49,8 @@ export interface EvaluatedInsight {
   };
   /** Raw from investigator; canonical stored copy lives in detail_data after validation. */
   headlineMetricSignature?: {
-    sql: string;
+    sql?: string;
+    metricSpec?: unknown;
     keyFields: string[];
     comparisonKeyFields?: string[];
   };
