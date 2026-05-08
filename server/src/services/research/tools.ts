@@ -102,46 +102,21 @@ export async function getOpenAIKey(tenantId?: string): Promise<string> {
   throw new Error("OpenAI API key not configured.");
 }
 
+import {
+  executeSafeTenantSql,
+} from "../metrics/safeSqlExecutor.js";
+import type { LoanAccessFilter } from "../userLoanAccessService.js";
+import { mergeLoanAccessWithParameterizedSql } from "../metrics/accessEnforcer.js";
+
 // ============================================================================
-// Safe SQL Execution
+// Safe SQL Execution (delegates to metrics/safeSqlExecutor)
 // ============================================================================
 
-const DANGEROUS_KEYWORDS = [
-  "INSERT", "UPDATE", "DELETE", "DROP", "TRUNCATE",
-  "ALTER", "CREATE", "GRANT", "REVOKE",
-];
-
-function sanitizeSQL(sql: string): string {
-  let sanitized = sql.trim();
-  if (sanitized.endsWith(";")) sanitized = sanitized.slice(0, -1).trim();
-  return sanitized;
-}
-
-function validateSQL(sql: string): void {
-  const upper = sql.trim().toUpperCase();
-  if (!upper.startsWith("SELECT") && !upper.startsWith("WITH")) {
-    throw new Error("Only SELECT queries (and CTEs starting with WITH) are allowed.");
-  }
-  for (const kw of DANGEROUS_KEYWORDS) {
-    const regex = new RegExp(`\\b${kw}\\s`, "i");
-    if (regex.test(upper) && !upper.startsWith("SELECT") && !upper.startsWith("WITH")) {
-      throw new Error(`Query contains forbidden keyword: ${kw}`);
-    }
-  }
-}
-
-const QUERY_TIMEOUT_MS = 30_000;
-
-/** Highest $n placeholder index in SQL (0 if none). */
-export function maxPgPlaceholderIndex(sql: string): number {
-  let max = 0;
-  const re = /\$(\d+)/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(sql)) !== null) {
-    const n = parseInt(m[1], 10);
-    if (Number.isFinite(n) && n > max) max = n;
-  }
-  return max;
+export interface SafeExecuteSqlOptions {
+  /** Defaults to _research_legacy_ when omitted (circuit breaker bucket). */
+  tenantId?: string;
+  /** Row-level loan scope; merged with parameterized SQL via placeholder shifting. */
+  accessFilter?: LoanAccessFilter | null;
 }
 
 /**
@@ -151,43 +126,35 @@ export function maxPgPlaceholderIndex(sql: string): number {
 export async function safeExecuteSQL(
   sql: string,
   tenantPool: pg.Pool,
-  params?: unknown[]
+  params?: unknown[],
+  opts?: SafeExecuteSqlOptions
 ): Promise<QueryResult> {
-  const sanitized = sanitizeSQL(sql);
-  validateSQL(sanitized);
-
-  const maxIdx = maxPgPlaceholderIndex(sanitized);
-  if (maxIdx > 0) {
-    if (!params || params.length !== maxIdx) {
-      throw new Error(
-        `SQL has ${maxIdx} placeholder(s) ($1..$${maxIdx}) but received ${params?.length ?? 0} parameter(s)`
-      );
-    }
-  } else if (params && params.length > 0) {
-    throw new Error("SQL has no $n placeholders but parameters were provided");
+  const tenantKey = opts?.tenantId?.trim() || "_research_legacy_";
+  let execSql = sql;
+  let execParams = params;
+  if (opts?.accessFilter?.sql) {
+    const merged = mergeLoanAccessWithParameterizedSql(sql, params, opts.accessFilter);
+    execSql = merged.sql;
+    execParams = merged.params;
   }
 
-  const startTime = Date.now();
-
-  try {
-    await tenantPool.query(`SET statement_timeout = '${QUERY_TIMEOUT_MS}'`);
-    const result =
-      maxIdx > 0
-        ? await tenantPool.query(sanitized, params)
-        : await tenantPool.query(sanitized);
-    const executionTimeMs = Date.now() - startTime;
-    const rows = result.rows.slice(0, 1000);
-
-    return {
-      rows,
-      rowCount: result.rows.length,
-      fields: result.fields?.map((f: any) => f.name) || Object.keys(rows[0] || {}),
-      executionTimeMs,
-    };
-  } catch (err: any) {
-    throw new Error(`SQL execution error: ${err.message}`);
-  }
+  const r = await executeSafeTenantSql(
+    execSql,
+    tenantPool,
+    tenantKey,
+    execParams,
+    { statementTimeoutMs: 30_000 }
+  );
+  const rows = r.rows.slice(0, 1000);
+  return {
+    rows,
+    rowCount: r.rowCount,
+    fields: r.fields,
+    executionTimeMs: r.executionTimeMs,
+  };
 }
+
+export { maxPgPlaceholderIndex } from "../metrics/safeSqlExecutor.js";
 
 // ============================================================================
 // Schema Context

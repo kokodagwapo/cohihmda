@@ -6,6 +6,11 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { api } from "@/lib/api";
+import {
+  isUnifiedChatClientEnabled,
+  postUnifiedChatV1,
+  parseGlobalUnifiedEnvelope,
+} from "@/lib/unifiedChatEnvelope";
 
 // ============================================================================
 // Types
@@ -74,6 +79,8 @@ export interface ChatMessage {
     dataQuery?: boolean;
     knowledgeBase?: string[];
   };
+  /** In-app links suggested by Cohi (from unified envelope or legacy API) */
+  navigationHints?: { label: string; path: string }[];
 }
 
 export interface CohiChatResponse {
@@ -87,6 +94,7 @@ export interface CohiChatResponse {
     dataQuery?: boolean;
     knowledgeBase?: string[];
   };
+  navigationHints?: { label: string; path: string }[];
 }
 
 export interface ChatSession {
@@ -161,6 +169,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
   // Initialize session when chat is active and tenant context is available.
   useEffect(() => {
     if (!enabled || sessionId) return;
+    if (typeof window !== "undefined" && isUnifiedChatClientEnabled()) return;
 
     const initSession = async () => {
       try {
@@ -223,43 +232,80 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
 
       try {
         const effectiveTenantId = await getEffectiveTenantId();
-        const endpoint = effectiveTenantId
-          ? `/api/cohi-chat/ask?tenant_id=${encodeURIComponent(effectiveTenantId)}`
-          : "/api/cohi-chat/ask";
-        
-        const response = await api.request<CohiChatResponse>(endpoint, {
-          method: "POST",
-          body: JSON.stringify({
-            question: question.trim(),
-            sessionId,
-            conversationHistory: messages.slice(-6).map((m) => ({
-              id: m.id,
-              role: m.role,
-              content: m.content,
-              timestamp: m.timestamp,
-            })),
-          }),
-        });
 
-        // Update assistant message with response
-        const assistantMessage: ChatMessage = {
-          id: assistantMessageId,
-          role: "assistant",
-          content: response.message,
-          visualization: response.visualization,
-          data: response.data,
-          timestamp: new Date(),
-          error: response.error,
-          sqlQuery: response.sqlQuery,
-          sources: response.sources,
-        };
+        if (typeof window !== "undefined" && isUnifiedChatClientEnabled()) {
+          const env = await postUnifiedChatV1(
+            {
+              message: question.trim(),
+              conversationId: sessionId ?? undefined,
+              clientMessageId: crypto.randomUUID(),
+              location: { surface: "data_chat_page" },
+              scope: { type: "global_session" },
+              history: messages.slice(-6).map((m) => ({
+                role: m.role,
+                content: m.content,
+              })),
+            },
+            tenantId ?? effectiveTenantId,
+          );
+          setSessionId(env.conversationId);
+          const parsed = parseGlobalUnifiedEnvelope(env);
+          const assistantMessage: ChatMessage = {
+            id: assistantMessageId,
+            role: "assistant",
+            content: parsed.message,
+            visualization: parsed.visualization as VisualizationConfig | undefined,
+            data: undefined,
+            timestamp: new Date(),
+            sqlQuery: parsed.sqlQuery,
+            sources: parsed.sources,
+            navigationHints: parsed.navigationHints,
+          };
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantMessageId ? assistantMessage : m)),
+          );
+          if (parsed.suggestedQuestions?.length) {
+            setSuggestedQuestions(parsed.suggestedQuestions);
+          }
+        } else {
+          const endpoint = effectiveTenantId
+            ? `/api/cohi-chat/ask?tenant_id=${encodeURIComponent(effectiveTenantId)}`
+            : "/api/cohi-chat/ask";
 
-        setMessages((prev) =>
-          prev.map((m) => (m.id === assistantMessageId ? assistantMessage : m))
-        );
+          const response = await api.request<CohiChatResponse>(endpoint, {
+            method: "POST",
+            body: JSON.stringify({
+              question: question.trim(),
+              sessionId,
+              conversationHistory: messages.slice(-6).map((m) => ({
+                id: m.id,
+                role: m.role,
+                content: m.content,
+                timestamp: m.timestamp,
+              })),
+            }),
+          });
 
-        if (response.suggestedQuestions) {
-          setSuggestedQuestions(response.suggestedQuestions);
+          const assistantMessage: ChatMessage = {
+            id: assistantMessageId,
+            role: "assistant",
+            content: response.message,
+            visualization: response.visualization,
+            data: response.data,
+            timestamp: new Date(),
+            error: response.error,
+            sqlQuery: response.sqlQuery,
+            sources: response.sources,
+            navigationHints: response.navigationHints,
+          };
+
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantMessageId ? assistantMessage : m)),
+          );
+
+          if (response.suggestedQuestions) {
+            setSuggestedQuestions(response.suggestedQuestions);
+          }
         }
       } catch (error: any) {
         console.error("[CohiChat] Error sending message:", error);
@@ -283,7 +329,15 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         setIsLoading(false);
       }
     },
-    [generateMessageId, getEffectiveTenantId, isLoading, messages, sessionId]
+    [
+      generateMessageId,
+      getEffectiveTenantId,
+      isLoading,
+      messages,
+      sessionId,
+      tenantId,
+      onError,
+    ]
   );
 
   /**
@@ -356,41 +410,80 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
 
       try {
         const effectiveTenantId = await getEffectiveTenantId();
-        const endpoint = effectiveTenantId
-          ? `/api/cohi-chat/refine?tenant_id=${encodeURIComponent(effectiveTenantId)}`
-          : "/api/cohi-chat/refine";
-        
-        const response = await api.request<CohiChatResponse>(endpoint, {
-          method: "POST",
-          body: JSON.stringify({
-            originalQuestion: lastUserMessage.content,
-            refinement,
-            previousResult: {
-              message: lastAssistantMessage.content,
-              visualization: lastAssistantMessage.visualization,
+
+        if (typeof window !== "undefined" && isUnifiedChatClientEnabled()) {
+          const composed = `Refinement: ${refinement}\n\nPrevious question: ${lastUserMessage.content}\nPrevious answer (excerpt): ${lastAssistantMessage.content.slice(0, 4000)}`;
+          const env = await postUnifiedChatV1(
+            {
+              message: composed,
+              conversationId: sessionId ?? undefined,
+              clientMessageId: crypto.randomUUID(),
+              location: { surface: "data_chat_page" },
+              scope: { type: "global_session" },
+              history: messages.slice(-6).map((m) => ({
+                role: m.role,
+                content: m.content,
+              })),
             },
-            sessionId,
-          }),
-        });
+            tenantId ?? effectiveTenantId,
+          );
+          setSessionId(env.conversationId);
+          const parsed = parseGlobalUnifiedEnvelope(env);
+          const assistantMessage: ChatMessage = {
+            id: assistantMessageId,
+            role: "assistant",
+            content: parsed.message,
+            visualization: parsed.visualization as VisualizationConfig | undefined,
+            data: undefined,
+            timestamp: new Date(),
+            sqlQuery: parsed.sqlQuery,
+            sources: parsed.sources,
+            navigationHints: parsed.navigationHints,
+          };
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantMessageId ? assistantMessage : m)),
+          );
+          if (parsed.suggestedQuestions?.length) {
+            setSuggestedQuestions(parsed.suggestedQuestions);
+          }
+        } else {
+          const endpoint = effectiveTenantId
+            ? `/api/cohi-chat/refine?tenant_id=${encodeURIComponent(effectiveTenantId)}`
+            : "/api/cohi-chat/refine";
 
-        const assistantMessage: ChatMessage = {
-          id: assistantMessageId,
-          role: "assistant",
-          content: response.message,
-          visualization: response.visualization,
-          data: response.data,
-          timestamp: new Date(),
-          error: response.error,
-          sqlQuery: response.sqlQuery,
-          sources: response.sources,
-        };
+          const response = await api.request<CohiChatResponse>(endpoint, {
+            method: "POST",
+            body: JSON.stringify({
+              originalQuestion: lastUserMessage.content,
+              refinement,
+              previousResult: {
+                message: lastAssistantMessage.content,
+                visualization: lastAssistantMessage.visualization,
+              },
+              sessionId,
+            }),
+          });
 
-        setMessages((prev) =>
-          prev.map((m) => (m.id === assistantMessageId ? assistantMessage : m))
-        );
+          const assistantMessage: ChatMessage = {
+            id: assistantMessageId,
+            role: "assistant",
+            content: response.message,
+            visualization: response.visualization,
+            data: response.data,
+            timestamp: new Date(),
+            error: response.error,
+            sqlQuery: response.sqlQuery,
+            sources: response.sources,
+            navigationHints: response.navigationHints,
+          };
 
-        if (response.suggestedQuestions) {
-          setSuggestedQuestions(response.suggestedQuestions);
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantMessageId ? assistantMessage : m)),
+          );
+
+          if (response.suggestedQuestions) {
+            setSuggestedQuestions(response.suggestedQuestions);
+          }
         }
       } catch (error: any) {
         console.error("[CohiChat] Error refining query:", error);
@@ -414,7 +507,14 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         setIsLoading(false);
       }
     },
-    [generateMessageId, getEffectiveTenantId, messages, onError, sessionId]
+    [
+      generateMessageId,
+      getEffectiveTenantId,
+      messages,
+      onError,
+      sessionId,
+      tenantId,
+    ]
   );
 
   /**
@@ -422,6 +522,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
    */
   const clearMessages = useCallback(() => {
     setMessages([]);
+    setSessionId(null);
     setSuggestedQuestions([
       "What's important to know today?",
       "Show me loan volume by month",
@@ -438,6 +539,10 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
    * Fetch the list of saved chat sessions
    */
   const fetchSessions = useCallback(async () => {
+    if (typeof window !== "undefined" && isUnifiedChatClientEnabled()) {
+      setChatSessions([]);
+      return;
+    }
     setIsLoadingSessions(true);
     try {
       const effectiveTenantId = await getEffectiveTenantId();
@@ -460,6 +565,9 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
    */
   const loadSession = useCallback(
     async (targetSessionId: string) => {
+      if (typeof window !== "undefined" && isUnifiedChatClientEnabled()) {
+        return;
+      }
       setIsLoadingSession(true);
       try {
         const effectiveTenantId = await getEffectiveTenantId();
@@ -565,10 +673,13 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
    */
   const newSession = useCallback(async () => {
     clearMessages();
+    setSessionId(null);
+    if (typeof window !== "undefined" && isUnifiedChatClientEnabled()) {
+      return;
+    }
     try {
       const effectiveTenantId = await getEffectiveTenantId();
       if (!effectiveTenantId) {
-        setSessionId(null);
         return;
       }
 

@@ -7,6 +7,8 @@ import pg from "pg";
 import { safeExecuteSQL } from "../research/tools.js";
 import { inferTrackedMetricPolarity } from "./trackedPolarityInference.js";
 import { logWarn } from "../logger.js";
+import { safeParseMetricSpec } from "../metrics/metricSpec.js";
+import { composeMetricSql } from "../metrics/metricQueryComposer.js";
 
 export type HeadlineMetricPolarity = "higher_better" | "lower_better" | "neutral";
 
@@ -34,10 +36,35 @@ function derivePolarities(
 
 function parseRawHeadlineSig(
   raw: unknown
-): { sql: string; keyFields: string[]; comparisonKeyFields?: string[] } | null {
+):
+  | {
+      sql: string;
+      params?: unknown[];
+      keyFields: string[];
+      comparisonKeyFields?: string[];
+    }
+  | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
-  const sql = typeof o.sql === "string" ? o.sql.trim() : "";
+  const sqlRaw = typeof o.sql === "string" ? o.sql.trim() : "";
+  const hasMetricSpec =
+    o.metricSpec != null && typeof o.metricSpec === "object";
+
+  let sql = sqlRaw;
+  let params: unknown[] | undefined;
+
+  if (!sql && hasMetricSpec) {
+    const sp = safeParseMetricSpec(o.metricSpec);
+    if (!sp.success) return null;
+    try {
+      const composed = composeMetricSql(sp.data, null);
+      sql = composed.sql.trim();
+      params = composed.params;
+    } catch {
+      return null;
+    }
+  }
+
   if (!sql) return null;
   const kf = o.keyFields;
   if (!Array.isArray(kf) || kf.length === 0) return null;
@@ -56,7 +83,7 @@ function parseRawHeadlineSig(
       .filter((k) => keyFields.includes(k));
     if (c.length > 0) comparisonKeyFields = [...new Set(c)];
   }
-  return { sql, keyFields, comparisonKeyFields };
+  return { sql, params, keyFields, comparisonKeyFields };
 }
 
 function coerceFiniteNumber(v: unknown): number | null {
@@ -84,13 +111,14 @@ export async function validateHeadlineMetricSignatureForPersist(
   if (!parsed) {
     return {
       ok: false as const,
-      error: "headlineMetricSignature must include non-empty sql and keyFields",
+      error:
+        "headlineMetricSignature must include non-empty sql (or metricSpec) and keyFields",
     };
   }
 
   let queryResult;
   try {
-    queryResult = await safeExecuteSQL(parsed.sql, tenantPool);
+    queryResult = await safeExecuteSQL(parsed.sql, tenantPool, parsed.params);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     return { ok: false as const, error: `SQL error: ${msg}` };

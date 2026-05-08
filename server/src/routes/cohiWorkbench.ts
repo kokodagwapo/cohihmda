@@ -48,6 +48,9 @@ import { loadSession as loadResearchSession } from "../services/research/orchest
 import { callLLM, type LLMMessage } from "../services/research/tools.js";
 import { AGENT_PERSONAS, type AgentPersona } from "../config/agentPersonas.js";
 import { retrieveRAGContext } from "../services/ai/ragRetrieval.js";
+import { getLoanAccessContext } from "../services/userLoanAccessService.js";
+import { safeParseMetricSpec } from "../services/metrics/metricSpec.js";
+import { composeMetricSql } from "../services/metrics/metricQueryComposer.js";
 
 const router = Router();
 
@@ -80,6 +83,7 @@ interface CanvasStateSnapshot {
       defId?: string;
       title?: string;
       name?: string;
+      sql?: string;
     }[];
     /** Grid layout per widget (key = widgets[].id); 36 cols, 16px rows */
     widgetLayouts?: Record<
@@ -762,6 +766,12 @@ function buildCanvasContext(state: CanvasStateSnapshot): string {
             ? ` @ grid(${layout.x},${layout.y}) size ${layout.w}x${layout.h}`
             : "";
           lines.push(`  - \`${w.id}\` (${w.kind}) ${label ?? ""}${layoutStr}`);
+          if (w.kind === "cohi" && w.sql) {
+            const sqlLimit = 1600;
+            const sqlSnippet =
+              w.sql.length <= sqlLimit ? w.sql : `${w.sql.substring(0, sqlLimit)}...`;
+            lines.push(`    SQL: \`${sqlSnippet}\``);
+          }
         }
       }
     }
@@ -1036,8 +1046,9 @@ Each action in the "actions" array must be one of:
 9. **create_canvas**: Build a full multi-section dashboard canvas at once
    {"type": "create_canvas", "title": "Monthly Executive Review", "sectionKeys": ["executiveDashboard", "companyScorecard", "salesScorecard"], "explanation": "Why this combination"}
 
-10. **query_data**: Run a SQL query to answer a data question (results are returned to you automatically)
+10. **query_data**: Run a SQL query **or** a catalog **metricSpec** to answer a data question (results are returned to you automatically)
    {"type": "query_data", "sql": "SELECT ...", "explanation": "What this query checks"}
+   Or (preferred for standard KPIs): {"type": "query_data", "metricSpec": { "metricIds": ["pull_through_rate"], "dimensions": [], "window": "ytd" }, "explanation": "..."}
    Use query_data when:
    - The user asks a question that requires data NOT visible on the canvas
    - The user asks for deeper drill-down beyond what the current widgets show
@@ -1383,24 +1394,34 @@ router.get("/personas", authenticateToken, (_req, res) => {
   });
 });
 
-router.post(
-  "/",
-  authenticateToken,
-  attachTenantContext,
-  apiLimiter,
-  async (req: AuthRequest, res) => {
-    try {
-      const { question, canvasState, widgetCatalog, conversationHistory } =
-        req.body as {
-          question: string;
-          canvasState?: CanvasStateSnapshot;
-          widgetCatalog?: string;
-          conversationHistory?: { role: string; content: string }[];
-          tenantId?: string;
-        };
+export async function runWorkbenchChatTurn(
+  req: AuthRequest,
+  rawBody: unknown,
+): Promise<{
+  message: string;
+  actions: unknown[];
+  teachingNotes?: string;
+  suggestedQuestions: string[];
+  error?: string;
+}> {
+  try {
+    const {
+      question,
+      canvasState,
+      widgetCatalog,
+      conversationHistory,
+    } = rawBody as {
+      question: string;
+      canvasState?: CanvasStateSnapshot;
+      widgetCatalog?: string;
+      conversationHistory?: { role: string; content: string }[];
+      tenantId?: string;
+    };
 
       if (!question || typeof question !== "string") {
-        return res.status(400).json({ error: "Question is required" });
+        const err: any = new Error("Question is required");
+        err.statusCode = 400;
+        throw err;
       }
 
       const tenantId = req.tenantContext?.tenantId || req.tenantId;
@@ -1659,7 +1680,7 @@ router.post(
       // the SQL and make a second LLM call with the results.
       // ------------------------------------------------------------------
       const queryActions = validActions.filter(
-        (a: any) => a.type === "query_data" && a.sql,
+        (a: any) => a.type === "query_data" && (a.sql || a.metricSpec)
       );
       let finalMessage = parsed.message || "I processed your request.";
       let finalTeachingNotes = parsed.teachingNotes || undefined;
@@ -1843,6 +1864,18 @@ router.post(
           `[CohiWorkbench] Executing ${queryActions.length} query_data action(s) for two-pass flow`,
         );
 
+        const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+        const loanCtx = await getLoanAccessContext(
+          req as AuthRequest,
+          tenantPool,
+        );
+        let userAccessFilter: ChatContext["userAccessFilter"] = null;
+        if (loanCtx.hasNoAccess) {
+          userAccessFilter = { sql: "FALSE", params: [], paramOffset: 0 };
+        } else if (!loanCtx.hasFullAccess && loanCtx.requiresFiltering) {
+          userAccessFilter = loanCtx.getFilter("l");
+        }
+
         const queryResults: {
           sql: string;
           explanation: string;
@@ -1852,16 +1885,43 @@ router.post(
 
         for (const qa of queryActions) {
           try {
+            let sqlToRun = qa.sql ? String(qa.sql).trim() : "";
+            let paramsToRun: unknown[] = [];
+            let accessMergedInComposer = false;
+
+            if (qa.metricSpec != null && typeof qa.metricSpec === "object") {
+              const parsedSpec = safeParseMetricSpec(qa.metricSpec);
+              if (parsedSpec.success) {
+                try {
+                  const composed = composeMetricSql(parsedSpec.data, userAccessFilter);
+                  sqlToRun = composed.sql;
+                  paramsToRun = composed.params;
+                  accessMergedInComposer = true;
+                } catch (composeErr: any) {
+                  queryResults.push({
+                    sql: "",
+                    explanation: qa.explanation,
+                    error: composeErr.message || "metricSpec compose failed",
+                  });
+                  continue;
+                }
+              }
+            }
+
+            if (!sqlToRun.trim() && qa.sql) {
+              sqlToRun = String(qa.sql).trim();
+            }
+
             // Validate: only SELECT queries allowed
-            const trimmedSql = qa.sql.trim().toUpperCase();
+            const trimmedSql = sqlToRun.trim().toUpperCase();
             if (
               !trimmedSql.startsWith("SELECT") &&
               !trimmedSql.startsWith("WITH")
             ) {
               queryResults.push({
-                sql: qa.sql,
+                sql: sqlToRun || qa.sql,
                 explanation: qa.explanation,
-                error: "Only SELECT queries are allowed.",
+                error: "Only SELECT queries are allowed (or provide a valid metricSpec).",
               });
               continue;
             }
@@ -1870,13 +1930,14 @@ router.post(
               tenantId: tenantId!,
               userId: req.userId || "workbench",
               userRole: "user",
+              userAccessFilter: accessMergedInComposer ? null : userAccessFilter,
             };
 
-            const result = await executeQuery(qa.sql, [], context);
+            const result = await executeQuery(sqlToRun, paramsToRun as any[], context);
             const formattedRows = formatDataRows(result.rows).slice(0, 100);
 
             queryResults.push({
-              sql: qa.sql,
+              sql: sqlToRun,
               explanation: qa.explanation,
               data: formattedRows,
             });
@@ -1889,7 +1950,7 @@ router.post(
               err.message,
             );
             queryResults.push({
-              sql: qa.sql,
+              sql: qa.sql || "",
               explanation: qa.explanation,
               error: err.message,
             });
@@ -2002,11 +2063,30 @@ router.post(
         );
       }
 
-      res.json(response);
+      return response;
     } catch (error: any) {
       console.error("[CohiWorkbench] Error:", error);
-      res.status(500).json({
-        message: "Sorry, I encountered an error. Please try again.",
+      throw error;
+    }
+}
+
+router.post(
+  "/",
+  authenticateToken,
+  attachTenantContext,
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const result = await runWorkbenchChatTurn(req, req.body);
+      res.json(result);
+    } catch (error: any) {
+      console.error("[CohiWorkbench] Error:", error);
+      const status = error.statusCode ?? 500;
+      res.status(status).json({
+        message:
+          status === 400
+            ? error.message
+            : "Sorry, I encountered an error. Please try again.",
         actions: [],
         error: error.message,
       });

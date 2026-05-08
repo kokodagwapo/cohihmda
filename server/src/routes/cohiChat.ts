@@ -37,6 +37,8 @@ import { safeExecuteSQL, callLLM } from '../services/research/tools.js';
 import { getSchemaForTenant, getFallbackSchemaContext } from '../services/ai/schemaContextService.js';
 import { tenantDbManager } from '../config/tenantDatabaseManager.js';
 import { sanitizeGeneratedSQL } from '../services/ai/cohiChatService.js';
+import { getLoanAccessContext } from '../services/userLoanAccessService.js';
+import { NAVIGATION_TARGETS } from '../services/chat/navigationTargetCatalog.js';
 
 const router = Router();
 
@@ -45,18 +47,29 @@ const router = Router();
 // ============================================================================
 
 /**
- * Build chat context from request
+ * Build chat context from request (includes loan-level access filter when applicable)
  */
-function buildChatContext(req: AuthRequest): ChatContext {
+async function buildChatContext(req: AuthRequest): Promise<ChatContext> {
   const tenantId = req.tenantContext?.tenantId || req.tenantId;
   if (!tenantId) {
     throw new Error('No tenant context available');
+  }
+  const tenantPool = req.tenantContext?.tenantPool;
+  let userAccessFilter = null;
+  if (tenantPool) {
+    const ctx = await getLoanAccessContext(req, tenantPool);
+    if (ctx.hasNoAccess) {
+      userAccessFilter = { sql: "FALSE", params: [], paramOffset: 0 };
+    } else if (!ctx.hasFullAccess && ctx.requiresFiltering) {
+      userAccessFilter = ctx.getFilter("l");
+    }
   }
   return {
     userId: req.userId!,
     tenantId,
     userRole: req.userRole || 'user',
     userEmail: req.userEmail,
+    userAccessFilter,
   };
 }
 
@@ -103,6 +116,17 @@ function withQaAgentMetadata(
 // ============================================================================
 
 /**
+ * GET /api/cohi-chat/navigation-targets
+ * Canonical navigation/search target catalog used by chat + header search.
+ */
+router.get('/navigation-targets', authenticateToken, attachTenantContext, async (_req: AuthRequest, res) => {
+  res.json({
+    targets: NAVIGATION_TARGETS,
+    version: 1,
+  });
+});
+
+/**
  * POST /api/cohi-chat/ask
  * Ask a question - Cohi will automatically search data AND knowledge
  */
@@ -126,7 +150,7 @@ router.post('/ask', authenticateToken, attachTenantContext, apiLimiter, async (r
     }
 
     // Process the question
-    const chatContext = buildChatContext(req);
+    const chatContext = await buildChatContext(req);
     const response = await processCohiQuestion(
       question.trim(),
       chatContext,
@@ -207,7 +231,7 @@ router.post('/refine', authenticateToken, attachTenantContext, apiLimiter, async
       return res.status(400).json({ error: 'Original question and refinement are required' });
     }
 
-    const chatContext = buildChatContext(req);
+    const chatContext = await buildChatContext(req);
     const response = await refineCohiQuery(
       originalQuestion,
       refinement,
@@ -617,7 +641,7 @@ function injectConditionIntoBody(body: string, condition: string): string {
  * Execute a previously-generated SQL query directly without going through the LLM.
  * Used by workbench canvas widgets to refresh data for saved visualizations.
  */
-router.post('/execute-sql', authenticateToken, attachTenantContext, async (req: AuthRequest, res) => {
+router.post('/execute-sql', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
   let _executeSqlOriginal: string | undefined;
   let _executeSqlTenantId: string | undefined;
   try {
@@ -962,7 +986,7 @@ router.post('/refresh-visualization/:id', authenticateToken, attachTenantContext
     const { question } = vizResult.rows[0];
 
     // Re-run the query
-    const chatContext = buildChatContext(req);
+    const chatContext = await buildChatContext(req);
     const response = await processCohiQuestion(question, chatContext);
 
     if (response.error) {
@@ -1071,7 +1095,7 @@ router.post('/edit-widget', authenticateToken, attachTenantContext, apiLimiter, 
       return res.status(400).json({ error: 'instruction is required' });
     }
 
-    const chatContext = buildChatContext(req);
+    const chatContext = await buildChatContext(req);
     console.log(`[CohiChat] Edit-widget conversation: "${instruction.substring(0, 80)}..."`);
 
     const result = await editWidgetQuery(
@@ -1164,7 +1188,7 @@ router.post('/analyze-dashboard-image', authenticateToken, attachTenantContext, 
       return res.status(400).json({ error: 'image must be a base64 data URL (data:image/...)' });
     }
 
-    const chatContext = buildChatContext(req);
+    const chatContext = await buildChatContext(req);
     console.log(`[CohiChat] Analyzing dashboard image for tenant ${chatContext.tenantId}`);
 
     const blueprint = await analyzeDashboardImage(
@@ -1200,7 +1224,7 @@ router.post('/generate-dashboard-widgets', authenticateToken, attachTenantContex
       return res.status(400).json({ error: 'Invalid blueprint group structure' });
     }
 
-    const chatContext = buildChatContext(req);
+    const chatContext = await buildChatContext(req);
     console.log(`[CohiChat] Generating ${group.widgets.length} widget(s) for group "${group.title}"`);
 
     const result = await generateWidgetsFromBlueprint(group, chatContext);

@@ -11,10 +11,13 @@
  * Schema context is dynamically generated via SchemaContextService (per-tenant introspection)
  */
 
-import pg from "pg";
 import {
   METRICS_CATALOG,
 } from "../metrics/metricsService.js";
+import {
+  buildSegmentedPullThroughQuery,
+  type PullThroughWindow,
+} from "../metrics/canonicalMetrics.js";
 import { tenantDbManager } from "../../config/tenantDatabaseManager.js";
 import { decryptAPIKeys } from "../encryption.js";
 import { retrieveRAGContext, type RAGSource } from "./ragRetrieval.js";
@@ -24,6 +27,29 @@ import {
   getFallbackSchemaContext,
 } from "./schemaContextService.js";
 import { OPS_TTS_WEIGHTS, SALES_TTS_WEIGHTS } from "../../utils/scorecard-utils.js";
+import { sanitizeNavigationHints } from "../chat/unifiedChatPolicy.js";
+import {
+  buildGuidanceResponse,
+  expandEffectiveQuestionForNavigation,
+  hasPullThroughKeyword,
+  isCohiGuidanceIntent,
+  isNavigationIntent,
+  resolveNavigationAnswer,
+} from "../chat/cohiNavigationCatalog.js";
+import { NAVIGATION_TARGETS } from "../chat/navigationTargetCatalog.js";
+import type { LoanAccessFilter } from "../userLoanAccessService.js";
+import { isMetricComposerEnabledForSurface } from "../metrics/metricComposerFlags.js";
+import { planMetricSpec } from "../metrics/metricPlanner.js";
+import {
+  composeMetricSql,
+  type ComposerResult,
+} from "../metrics/metricQueryComposer.js";
+import { executeSafeTenantSql } from "../metrics/safeSqlExecutor.js";
+import type { MetricSpec } from "../metrics/metricSpec.js";
+import {
+  injectLoanAccessForLoansAlias,
+  mergeLoanAccessWithParameterizedSql,
+} from "../metrics/accessEnforcer.js";
 
 // ============================================================================
 // Types
@@ -35,6 +61,8 @@ export interface ChatContext {
   userRole: string;
   userEmail?: string;
   permissions?: UserPermissions;
+  /** Loan-level filter from getLoanAccessContext — applied to composed SQL */
+  userAccessFilter?: LoanAccessFilter | null;
 }
 
 export interface UserPermissions {
@@ -122,6 +150,8 @@ export interface CohiChatResponse {
   metricsUsed?: string[];
   /** The SQL query that was generated and executed (for "Show SQL" feature) */
   sqlQuery?: string;
+  /** In-app navigation links (sanitized server-side) */
+  navigationHints?: { label: string; path: string }[];
   /** Sources used to generate the response */
   sources?: {
     dataQuery?: boolean;
@@ -428,55 +458,72 @@ interface GeneratedQuery {
   explanation: string;
   visualizationType: VisualizationConfig["type"];
   chartConfig: Partial<VisualizationConfig>;
+  /** True when loan access has already been embedded in SQL/params. */
+  accessFilterApplied?: boolean;
 }
 
-function buildHeuristicDataQuery(question: string): GeneratedQuery | null {
+function buildHeuristicDataQuery(
+  question: string,
+  accessFilter?: LoanAccessFilter | null
+): GeneratedQuery | null {
   const q = question.toLowerCase();
 
-  // Deterministic fallback for a known regression:
-  // "Top 5 branches by pull-through rate this quarter"
-  const branchPullThroughQuarter =
-    /\btop\b/.test(q) &&
-    /\bbranches?\b/.test(q) &&
-    /\bpull[\s-]?through\b/.test(q) &&
-    /\bquarter\b/.test(q);
-
-  if (branchPullThroughQuarter) {
-    const topMatch = q.match(/\btop\s+(\d{1,2})\b/);
-    const requestedTop = topMatch ? Number.parseInt(topMatch[1], 10) : 5;
-    const topN = Number.isFinite(requestedTop)
+  const asksPullThrough = hasPullThroughKeyword(q);
+  const asksComparison = /\b(compare|comparison|rank|ranking|by)\b/.test(q);
+  const branchSegment = /\bbranches?\b/.test(q);
+  const officerSegment = /\b(loan officers?|officers?)\b/.test(q);
+  const topMatch = q.match(/\btop\s+(\d{1,2})\b/);
+  const requestedTop = topMatch ? Number.parseInt(topMatch[1], 10) : null;
+  const topN =
+    requestedTop && Number.isFinite(requestedTop)
       ? Math.min(Math.max(requestedTop, 1), 25)
-      : 5;
+      : null;
+  const segment = branchSegment
+    ? "branch"
+    : officerSegment
+      ? "loan_officer"
+      : null;
 
+  let window: PullThroughWindow = "all_time";
+  if (/\bthis quarter\b|\bcurrent quarter\b|\bqtd\b/.test(q)) {
+    window = "this_quarter";
+  } else if (/\blast quarter\b|\bprevious quarter\b/.test(q)) {
+    window = "last_quarter";
+  } else if (/\bytd\b|\byear to date\b|\bthis year\b/.test(q)) {
+    window = "ytd";
+  } else if (/\b(last|past)\s+90\s+days\b/.test(q)) {
+    window = "last_90_days";
+  } else if (/\bthis month\b|\bmtd\b|\bmonth to date\b/.test(q)) {
+    window = "this_month";
+  }
+
+  if (asksPullThrough && segment && (asksComparison || topN)) {
+    const canonical = buildSegmentedPullThroughQuery({
+      segment,
+      window,
+      topN,
+      minCompleted: 5,
+      accessFilter: accessFilter ?? undefined,
+    });
     return {
-      sql: `SELECT
-  COALESCE(NULLIF(TRIM(l.branch), ''), 'Unknown') AS branch,
-  COUNT(*) FILTER (WHERE l.funding_date IS NOT NULL) AS funded_count,
-  COUNT(*) FILTER (WHERE l.current_loan_status IS DISTINCT FROM 'Active Loan') AS completed_count,
-  ROUND(
-    (
-      COUNT(*) FILTER (WHERE l.funding_date IS NOT NULL)::numeric
-      / NULLIF(COUNT(*) FILTER (WHERE l.current_loan_status IS DISTINCT FROM 'Active Loan'), 0)
-    ) * 100,
-    1
-  ) AS pull_through_rate
-FROM public.loans l
-WHERE l.application_date >= DATE_TRUNC('quarter', CURRENT_DATE)
-  AND l.application_date < DATE_TRUNC('quarter', CURRENT_DATE) + INTERVAL '3 months'
-GROUP BY 1
-HAVING COUNT(*) FILTER (WHERE l.current_loan_status IS DISTINCT FROM 'Active Loan') >= 5
-ORDER BY pull_through_rate DESC, completed_count DESC
-LIMIT ${topN}`,
-      params: [],
-      explanation: `Top ${topN} branches by pull-through rate for the current quarter using an application-date cohort.`,
+      sql: canonical.sql,
+      params: canonical.params,
+      explanation: topN
+        ? `Top ${topN} ${canonical.segmentLabel}s by pull-through rate for ${canonical.windowLabel} using canonical metric definitions.`
+        : `${canonical.segmentLabel[0].toUpperCase() + canonical.segmentLabel.slice(1)} pull-through comparison for ${canonical.windowLabel} using canonical metric definitions.`,
       visualizationType: "horizontal_bar",
       chartConfig: {
-        title: `Top ${topN} branches by pull-through rate — this quarter (application cohort)`,
-        xKey: "branch",
+        title: topN
+          ? `Top ${topN} ${canonical.segmentLabel}s by pull-through rate — ${canonical.windowLabel}`
+          : `Pull-through rate by ${canonical.segmentLabel} — ${canonical.windowLabel}`,
+        xKey: canonical.segmentAlias,
         yKey: "pull_through_rate",
-        xLabel: "Branch",
+        xLabel:
+          canonical.segmentLabel[0].toUpperCase() +
+          canonical.segmentLabel.slice(1),
         yLabel: "Pull-Through Rate (%)",
       },
+      accessFilterApplied: !!accessFilter?.sql,
     };
   }
 
@@ -535,7 +582,10 @@ async function generateQuery(
 
     const parsed = JSON.parse(response);
 
-    const heuristicFallback = buildHeuristicDataQuery(question);
+    const heuristicFallback = buildHeuristicDataQuery(
+      question,
+      context.userAccessFilter
+    );
 
     // Check if this was determined to not be a data query
     if (parsed.isDataQuery === false) {
@@ -572,7 +622,10 @@ async function generateQuery(
       chartConfig: parsed.chartConfig || {},
     };
   } catch (error: any) {
-    const heuristicFallback = buildHeuristicDataQuery(question);
+    const heuristicFallback = buildHeuristicDataQuery(
+      question,
+      context.userAccessFilter
+    );
     if (heuristicFallback) {
       console.warn(
         "[CohiChat] Query generation failed for deterministic data question; using heuristic fallback query."
@@ -719,20 +772,32 @@ async function executeQuery(
   }
 
   const pool = await tenantDbManager.getTenantPool(context.tenantId);
-  const startTime = Date.now();
-  console.log(`[CohiChat] Executing SQL: ${sanitizedSql}`);
-  const result = await pool.query(sanitizedSql, params);
-  const executionTime = Date.now() - startTime;
+
+  let sqlExec = sanitizedSql;
+  let paramsExec = params ?? [];
+  const af = context.userAccessFilter;
+  if (af?.sql) {
+    const merged = mergeLoanAccessWithParameterizedSql(sanitizedSql, params ?? [], af);
+    sqlExec = merged.sql;
+    paramsExec = merged.params;
+  }
+
+  const exec = await executeSafeTenantSql(
+    sqlExec,
+    pool,
+    context.tenantId,
+    paramsExec,
+    { statementTimeoutMs: 30_000 }
+  );
 
   console.log(
-    `[CohiChat] Query executed in ${executionTime}ms, returned ${result.rows.length} rows`
+    `[CohiChat] Query executed in ${exec.executionTimeMs}ms, returned ${exec.rowCount} rows`
   );
 
   return {
-    rows: result.rows,
-    rowCount: result.rows.length,
-    fields:
-      result.fields?.map((f) => f.name) || Object.keys(result.rows[0] || {}),
+    rows: exec.rows as any[],
+    rowCount: exec.rowCount,
+    fields: exec.fields,
   };
 }
 
@@ -991,7 +1056,8 @@ async function gatherInsightMetrics(
 
   const safeQuery = async (name: string, sql: string): Promise<any[]> => {
     try {
-      const result = await tenantPool.query(sql);
+      const inj = injectLoanAccessForLoansAlias(sql, context.userAccessFilter);
+      const result = await tenantPool.query(inj.sql, inj.params);
       return result.rows;
     } catch (error) {
       console.log(`[CohiChat Insights] Query "${name}" failed:`, error);
@@ -1066,6 +1132,19 @@ function generateSuggestedQuestions(
   hasKnowledge: boolean
 ): string[] {
   const q = currentQuestion.toLowerCase();
+  const normalizedQuestion = currentQuestion.replace(/\?+$/g, "").trim();
+  const researchHandoff = normalizedQuestion
+    ? `Open Research Lab: ${normalizedQuestion}`
+    : "Open Research Lab for deeper analysis";
+
+  if (hasPullThroughKeyword(q) && /\bbranches?\b/.test(q)) {
+    return [
+      "Show top 5 branches by pull-through this quarter",
+      "Show pull-through vs fallout by branch this quarter",
+      "Compare this quarter vs last quarter pull-through by branch",
+      researchHandoff,
+    ];
+  }
 
   const dataSuggestions = [
     "Show me loan volume by month",
@@ -1090,10 +1169,11 @@ function generateSuggestedQuestions(
     return [
       ...dataSuggestions.slice(0, 2),
       ...knowledgeSuggestions.slice(0, 2),
+      researchHandoff,
     ];
   }
 
-  return dataSuggestions;
+  return [...dataSuggestions, researchHandoff];
 }
 
 // ============================================================================
@@ -1109,6 +1189,133 @@ interface GatheredContext {
   ragContext: RAGContext;
   insightMetrics?: Record<string, any>;
   topTieringWeightsContext?: string;
+}
+
+function enforceCatalogBackedNavigationCopy(
+  question: string,
+  rawMessage: string,
+): string {
+  if (!rawMessage?.trim()) return rawMessage;
+  const nav = resolveNavigationAnswer(question);
+  if (!nav || nav.hints.length === 0) return rawMessage;
+
+  const knownRouteLabels = NAVIGATION_TARGETS.filter((t) => t.kind === "route")
+    .map((t) => t.label.toLowerCase());
+
+  const lines = rawMessage.split("\n");
+  let removedUnknownDashboardLine = false;
+  const keptLines: string[] = [];
+
+  for (const line of lines) {
+    const l = line.toLowerCase();
+    const mentionsDashboard =
+      /\bdashboard\b/.test(l) || /\binsights\s*[→>-]/.test(l);
+    if (!mentionsDashboard) {
+      keptLines.push(line);
+      continue;
+    }
+
+    const includesKnownLabel = knownRouteLabels.some((label) =>
+      l.includes(label)
+    );
+    if (includesKnownLabel) {
+      keptLines.push(line);
+      continue;
+    }
+
+    // Drop ungrounded dashboard references from freeform model text.
+    removedUnknownDashboardLine = true;
+  }
+
+  if (!removedUnknownDashboardLine) return rawMessage;
+
+  const canonicalHintLines = nav.hints
+    .slice(0, 3)
+    .map((h) => `- ${h.label}`)
+    .join("\n");
+
+  const base = keptLines.join("\n").trim();
+  const correction = `Use these available dashboards/pages for this topic:\n${canonicalHintLines}`;
+  return base ? `${base}\n\n${correction}` : correction;
+}
+
+function stripSourceAttribution(rawMessage: string): string {
+  if (!rawMessage?.trim()) return rawMessage;
+  return rawMessage
+    .split("\n")
+    .filter((line) => !/^\s*(📚\s*)?\*{0,2}\s*sources?\s*[:\-]/i.test(line))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function buildPostAnswerNavigationHints(
+  question: string,
+  hasDataQueryResult: boolean
+): { label: string; path: string }[] | undefined {
+  if (!hasDataQueryResult) return undefined;
+  const q = question.toLowerCase();
+
+  if (hasPullThroughKeyword(q) && /\bbranches?\b/.test(q)) {
+    return sanitizeNavigationHints([
+      { label: "Company Scorecard", path: "/company-scorecard" },
+      { label: "Research Lab (deeper analysis)", path: "/research" },
+      { label: "Insights hub", path: "/insights" },
+    ]);
+  }
+
+  return undefined;
+}
+
+function buildRecommendedNavigationHints(
+  question: string,
+  hasDataQueryResult: boolean
+): { label: string; path: string }[] {
+  const merged: { label: string; path: string }[] = [];
+  const push = (items?: { label: string; path: string }[] | null) => {
+    if (!items) return;
+    for (const item of items) merged.push(item);
+  };
+
+  const nav = resolveNavigationAnswer(question);
+  push(nav?.hints);
+  push(buildPostAnswerNavigationHints(question, hasDataQueryResult));
+
+  // Always provide stable next-step destinations.
+  push([
+    { label: "Insights hub", path: "/insights" },
+    { label: "Research Lab", path: "/research" },
+  ]);
+
+  const sanitized = sanitizeNavigationHints(merged);
+  const deduped = sanitized.filter(
+    (hint, index, arr) => arr.findIndex((h) => h.path === hint.path) === index
+  );
+  const researchHint = deduped.find((h) => h.path === "/research") ?? {
+    label: "Research Lab",
+    path: "/research",
+  };
+  const insightsHint = deduped.find((h) => h.path === "/insights") ?? {
+    label: "Insights hub",
+    path: "/insights",
+  };
+
+  // Keep core app links consistently visible.
+  const prioritized = [
+    ...deduped.filter((h) => h.path !== "/research" && h.path !== "/insights"),
+    insightsHint,
+    researchHint,
+  ];
+
+  const capped = prioritized.slice(0, 4);
+  if (!capped.some((h) => h.path === "/research")) {
+    capped[capped.length - 1] = researchHint;
+  }
+  if (!capped.some((h) => h.path === "/insights")) {
+    const replaceIndex = capped.findIndex((h) => h.path !== "/research");
+    if (replaceIndex >= 0) capped[replaceIndex] = insightsHint;
+  }
+  return capped;
 }
 
 function isTopTieringQuestion(question: string): boolean {
@@ -1197,6 +1404,65 @@ async function getTopTieringWeightsContext(
   }
 }
 
+function mapComposerToGenerated(
+  _spec: MetricSpec,
+  composed: ComposerResult,
+  question: string
+): GeneratedQuery {
+  const primary = composed.resolvedMetricIds[0] ?? "metric";
+  const name = METRICS_CATALOG[primary]?.name ?? primary;
+  const isPt =
+    composed.resolvedMetricIds.includes("pull_through_rate") &&
+    composed.sql.toLowerCase().includes("pull_through_rate");
+  const dim = composed.resolvedDimensions[0];
+  if (isPt && dim) {
+    const xKey = dim === "branch" ? "branch" : "loan_officer";
+    return {
+      sql: composed.sql,
+      params: composed.params,
+      explanation: `Pull-through by ${xKey} (${composed.windowLabel}).`,
+      visualizationType: "horizontal_bar",
+      chartConfig: {
+        title: question.slice(0, 100),
+        xKey,
+        yKey: "pull_through_rate",
+        xLabel: xKey === "branch" ? "Branch" : "Loan officer",
+        yLabel: "Pull-Through %",
+      },
+      accessFilterApplied: true,
+    };
+  }
+  if (composed.resolvedDimensions.length > 0 || composed.sql.includes("group_key")) {
+    return {
+      sql: composed.sql,
+      params: composed.params,
+      explanation: `${name} by ${composed.resolvedDimensions.join(", ")} (${composed.windowLabel})`,
+      visualizationType: "horizontal_bar",
+      chartConfig: {
+        title: question.slice(0, 100),
+        xKey: "group_key",
+        yKey: "metric_value",
+        xLabel: "Segment",
+        yLabel: name,
+      },
+      accessFilterApplied: true,
+    };
+  }
+  return {
+    sql: composed.sql,
+    params: composed.params,
+    explanation: `${name} (${composed.windowLabel})`,
+    visualizationType: "table",
+    chartConfig: {
+      title: question.slice(0, 100),
+      tableConfig: {
+        columns: [{ key: "metric_value", label: name }],
+      },
+    },
+    accessFilterApplied: true,
+  };
+}
+
 /**
  * Gather all available context in parallel
  */
@@ -1209,35 +1475,65 @@ async function gatherAllContext(
 
   const includeTopTieringContext = isTopTieringQuestion(question);
 
-  // Run all context gathering in parallel
-  const [ragContext, queryConfig, topTieringWeightsContext] = await Promise.all([
-    retrieveRAGContextForTenant(context.tenantId, question, 5, 0.3),
-    generateQuery(question, context, conversationHistory),
-    includeTopTieringContext
-      ? getTopTieringWeightsContext(context.tenantId)
-      : Promise.resolve(undefined),
-  ]);
+  let composerQuery: GeneratedQuery | null = null;
+  if (await isMetricComposerEnabledForSurface("chat")) {
+    try {
+      const spec = await planMetricSpec(question, {
+        tenantId: context.tenantId,
+      });
+      if (spec) {
+        const composed = composeMetricSql(spec, context.userAccessFilter ?? null);
+        composerQuery = mapComposerToGenerated(spec, composed, question);
+      }
+    } catch (e: unknown) {
+      console.warn(
+        "[CohiChat] Metric composer planning failed:",
+        e instanceof Error ? e.message : e
+      );
+    }
+  }
+
+  const [ragContext, legacyQueryConfig, topTieringWeightsContext] =
+    await Promise.all([
+      retrieveRAGContextForTenant(context.tenantId, question, 5, 0.3),
+      composerQuery
+        ? Promise.resolve(null as GeneratedQuery | null)
+        : generateQuery(question, context, conversationHistory),
+      includeTopTieringContext
+        ? getTopTieringWeightsContext(context.tenantId)
+        : Promise.resolve(undefined),
+    ]);
+
+  const queryConfig = composerQuery ?? legacyQueryConfig;
 
   let dataQueryResult: GatheredContext["dataQueryResult"] = undefined;
 
   // If we got a valid query, try to execute it (with one auto-retry on failure)
   if (queryConfig?.sql) {
     const effectiveConfig = queryConfig;
-    const heuristicFallback = buildHeuristicDataQuery(question);
+    const contextForQuery = (cfg: GeneratedQuery): ChatContext =>
+      cfg.accessFilterApplied
+        ? { ...context, userAccessFilter: null }
+        : context;
+    const heuristicFallback = buildHeuristicDataQuery(
+      question,
+      context.userAccessFilter
+    );
     try {
       const result = await executeQuery(
         effectiveConfig.sql,
         effectiveConfig.params,
-        context
+        contextForQuery(effectiveConfig)
       );
-      if (result.rowCount > 0) {
-        const formattedData = formatDataRows(result.rows);
-        dataQueryResult = {
-          query: effectiveConfig,
-          result,
-          formattedData,
-        };
-      } else if (
+      const formattedPrimaryData = formatDataRows(result.rows);
+      dataQueryResult = {
+        query: effectiveConfig,
+        result,
+        formattedData: formattedPrimaryData,
+      };
+
+      if (
+        result.rowCount === 0 &&
         heuristicFallback &&
         sanitizeGeneratedSQL(effectiveConfig.sql) !==
           sanitizeGeneratedSQL(heuristicFallback.sql)
@@ -1248,7 +1544,7 @@ async function gatherAllContext(
         const fallbackResult = await executeQuery(
           heuristicFallback.sql,
           heuristicFallback.params,
-          context
+          contextForQuery(heuristicFallback)
         );
         const formattedData = formatDataRows(fallbackResult.rows);
         dataQueryResult = {
@@ -1277,16 +1573,14 @@ async function gatherAllContext(
           const retryResult = await executeQuery(
             fixedConfig.sql,
             fixedConfig.params,
-            context
+            contextForQuery(fixedConfig)
           );
-          if (retryResult.rowCount > 0) {
-            const formattedData = formatDataRows(retryResult.rows);
-            dataQueryResult = {
-              query: fixedConfig,
-              result: retryResult,
-              formattedData,
-            };
-          }
+          const formattedData = formatDataRows(retryResult.rows);
+          dataQueryResult = {
+            query: fixedConfig,
+            result: retryResult,
+            formattedData,
+          };
         }
       } catch (retryError: any) {
         console.log(
@@ -1303,7 +1597,7 @@ async function gatherAllContext(
           const fallbackResult = await executeQuery(
             heuristicFallback.sql,
             heuristicFallback.params,
-            context
+            contextForQuery(heuristicFallback)
           );
           const formattedData = formatDataRows(fallbackResult.rows);
           dataQueryResult = {
@@ -1358,6 +1652,10 @@ async function generateUnifiedResponse(
   gathered: GatheredContext
 ): Promise<CohiChatResponse> {
   const apiKey = await getOpenAIKey(context.tenantId);
+  const recommendedHints = buildRecommendedNavigationHints(
+    question,
+    !!gathered.dataQueryResult
+  );
 
   // Deterministic no-rows handling for executed SQL:
   // avoid model responses that ask the user to provide "query JSON" even though
@@ -1382,34 +1680,16 @@ async function generateUnifiedResponse(
     noDataMessage +=
       " Try widening the period (for example: last 90 days or year-to-date) to see ranked results.";
 
-    if (gathered.ragContext.sources.length > 0) {
-      noDataMessage += `\n\n📚 **Sources:** ${formatSourcesWithLinks(
-        gathered.ragContext.sources
-      )}`;
-    }
-
     return {
       message: noDataMessage,
       visualization: emptyViz,
       data: gathered.dataQueryResult.formattedData,
       sqlQuery: sanitizeGeneratedSQL(gathered.dataQueryResult.query.sql),
+      navigationHints: recommendedHints,
       suggestedQuestions: generateSuggestedQuestions(
         question,
         gathered.ragContext.totalChunks > 0
       ),
-      sources: {
-        dataQuery: true,
-        knowledgeBase:
-          gathered.ragContext.sources.length > 0
-            ? gathered.ragContext.sources.map((s) => {
-                const categoryStr = s.category ? ` (${s.category})` : "";
-                const typeStr = s.isGlobal ? " [Global]" : "";
-                return s.url
-                  ? `[${s.name}${categoryStr}](${s.url})${typeStr}`
-                  : `${s.name}${categoryStr}${typeStr}`;
-              })
-            : undefined,
-      },
     };
   }
 
@@ -1506,14 +1786,10 @@ async function generateUnifiedResponse(
     data = gathered.dataQueryResult.formattedData;
   }
 
-  // Add source attribution with links
+  // Keep message grounded to canonical dashboards only.
   let message = response;
-  if (gathered.ragContext.sources.length > 0) {
-    message += `\n\n📚 **Sources:** ${formatSourcesWithLinks(
-      gathered.ragContext.sources
-    )}`;
-  }
-
+  message = enforceCatalogBackedNavigationCopy(question, message);
+  message = stripSourceAttribution(message);
   return {
     message,
     visualization,
@@ -1521,23 +1797,11 @@ async function generateUnifiedResponse(
     sqlQuery: gathered.dataQueryResult?.query?.sql
       ? sanitizeGeneratedSQL(gathered.dataQueryResult.query.sql)
       : undefined,
+    navigationHints: recommendedHints,
     suggestedQuestions: generateSuggestedQuestions(
       question,
       gathered.ragContext.totalChunks > 0
     ),
-    sources: {
-      dataQuery: !!gathered.dataQueryResult,
-      knowledgeBase:
-        gathered.ragContext.sources.length > 0
-          ? gathered.ragContext.sources.map((s) => {
-              const categoryStr = s.category ? ` (${s.category})` : "";
-              const typeStr = s.isGlobal ? " [Global]" : "";
-              return s.url
-                ? `[${s.name}${categoryStr}](${s.url})${typeStr}`
-                : `${s.name}${categoryStr}${typeStr}`;
-            })
-          : undefined,
-    },
   };
 }
 
@@ -1574,25 +1838,7 @@ function generateGreetingResponse(): CohiChatResponse {
   };
 }
 
-function generateHelpResponse(): CohiChatResponse {
-  return {
-    message:
-      "I'm Cohi, your intelligent mortgage analytics assistant! Here's how I can help:\n\n" +
-      "**Ask me anything** - I automatically search both your loan data AND our knowledge base to give you the most complete answer.\n\n" +
-      "**Example questions:**\n" +
-      '- "Show me loans by branch" → Data visualization\n' +
-      '- "What are FHA guidelines?" → Knowledge base lookup\n' +
-      '- "How do our VA loans compare to requirements?" → Combined analysis\n' +
-      '- "What\'s happening today?" → Executive summary\n\n' +
-      "Just ask naturally - I'll figure out the best way to answer!",
-    suggestedQuestions: [
-      "What important info do I need to know today?",
-      "Show me pipeline by status",
-      "What documentation is required for VA loans?",
-      "Top performers this month",
-    ],
-  };
-}
+// (generateHelpResponse removed — use buildGuidanceResponse + navigation hints)
 
 // ============================================================================
 // Main Chat Function
@@ -1613,8 +1859,36 @@ export async function processCohiQuestion(
       return generateGreetingResponse();
     }
 
-    if (isHelp(question)) {
-      return generateHelpResponse();
+    // How-to / meta questions about Cohi (with help-center links)
+    if (isCohiGuidanceIntent(question) || isHelp(question)) {
+      const g = buildGuidanceResponse();
+      return {
+        message: g.message,
+        navigationHints: sanitizeNavigationHints(g.hints),
+        suggestedQuestions: g.suggestedQuestions,
+      };
+    }
+
+    const expandedNav = expandEffectiveQuestionForNavigation(
+      question,
+      conversationHistory.map((m) => ({ role: m.role, content: m.content })),
+    ).trim();
+
+    const nav = resolveNavigationAnswer(expandedNav);
+    const navShortcutAllowed =
+      nav !== null &&
+      (isNavigationIntent(expandedNav) ||
+        isNavigationIntent(question.trim()) ||
+        (/^(yes|yeah|yep|please|ok|okay|sure)\b/i.test(question.trim()) &&
+          expandedNav !== question.trim()) ||
+        /\bgive me (a )?(page|link)\b/i.test(question.trim()));
+
+    if (navShortcutAllowed && nav) {
+      return {
+        message: nav.message,
+        navigationHints: buildRecommendedNavigationHints(expandedNav, false),
+        suggestedQuestions: nav.suggestedQuestions,
+      };
     }
 
     // Gather all context in parallel (the key innovation!)

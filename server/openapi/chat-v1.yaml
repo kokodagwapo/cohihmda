@@ -1,0 +1,121 @@
+openapi: 3.1.0
+info:
+  title: Cohi Unified Chat API
+  version: "1.0.0"
+  description: |
+    Draft OpenAPI. Canonical JSON Schemas (machine-readable) live at
+    `docs/planning/schemas/cohi-chat-unified/` in the repo root.
+
+paths:
+  /messages:
+    post:
+      summary: Send a chat message
+      operationId: postUnifiedChatMessage
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UnifiedChatRequest"
+      responses:
+        "200":
+          description: Assistant turn
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnifiedChatResponse"
+        "400":
+          description: Validation error
+        "403":
+          description: Access denied
+        "404":
+          description: Unified API disabled (UNIFIED_CHAT_ENABLED=false)
+        "409":
+          description: Duplicate clientMessageId
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    UnifiedChatRequest:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          minLength: 1
+        conversationId:
+          type: string
+          format: uuid
+        clientMessageId:
+          type: string
+          format: uuid
+        scope:
+          type: object
+          properties:
+            type:
+              type: string
+              enum:
+                - global_session
+                - canvas
+                - draft
+                - insight
+                - widget_edit
+                - workbench_hub
+            id:
+              type: string
+        location:
+          type: object
+          properties:
+            surface:
+              type: string
+              enum:
+                - site
+                - workbench_canvas
+                - workbench_hub
+                - insight_modal
+                - data_chat_page
+            route:
+              type: string
+        context:
+          type: object
+        history:
+          type: array
+          items:
+            type: object
+            required: [role, content]
+            properties:
+              role:
+                type: string
+                enum: [user, assistant]
+              content:
+                type: string
+        options:
+          type: object
+
+    UnifiedChatResponse:
+      type: object
+      required: [conversationId, turn]
+      properties:
+        conversationId:
+          type: string
+          format: uuid
+        turn:
+          type: object
+          required: [id, blocks]
+          properties:
+            id:
+              type: string
+              format: uuid
+            blocks:
+              type: array
+              items:
+                type: object
+        metadata:
+          type: object

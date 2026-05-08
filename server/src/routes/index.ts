@@ -23,6 +23,7 @@ import tenantRoutes from "./tenants.js";
 import tenantConfigRoutes from "./tenantConfig.js";
 import cohiChatRoutes from "./cohiChat.js";
 import cohiWorkbenchRoutes from "./cohiWorkbench.js";
+import chatV1Routes from "./chatV1.js";
 import ragKnowledgeBaseRouter from "./ragKnowledgeBase.js";
 import dataQualityRoutes from "./dataQuality.js";
 import newsRoutes from "./news.js";
@@ -131,6 +132,7 @@ export function setupRoutes(app: Express) {
   app.use("/api/tenant-config", tenantConfigRoutes);
   app.use("/api/cohi-chat", cohiChatRoutes); // Cohi Chat service
   app.use("/api/cohi-chat/workbench", cohiWorkbenchRoutes); // Workbench AI assistant
+  app.use("/api/chat/v1", chatV1Routes); // Unified Cohi Chat API (v1)
   app.use("/api/data-quality", dataQualityRoutes);
   app.use("/api/news", newsRoutes);
   app.use("/api/email", emailRoutes);

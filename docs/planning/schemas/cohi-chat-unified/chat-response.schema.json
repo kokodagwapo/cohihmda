@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cohi.local/schemas/chat/v1/response.json",
+  "title": "CohiUnifiedChatResponse",
+  "type": "object",
+  "required": ["conversationId", "turn"],
+  "properties": {
+    "conversationId": { "type": "string", "format": "uuid" },
+    "turn": {
+      "type": "object",
+      "required": ["id", "blocks"],
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "blocks": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/block" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "modelId": { "type": "string" },
+        "promptHash": { "type": "string" },
+        "policyDecisionId": { "type": "string" },
+        "contextManifest": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "tier": { "type": "string" },
+              "included": { "type": "boolean" },
+              "truncated": { "type": "boolean" }
+            }
+          }
+        },
+        "compactionWatermark": {
+          "type": "string",
+          "description": "Monotonic cursor after transcript/snapshot compaction (opaque)."
+        },
+        "suggestedQuestions": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": true
+    },
+    "error": {
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" },
+        "retryable": { "type": "boolean" }
+      }
+    }
+  },
+  "$defs": {
+    "block": {
+      "oneOf": [
+        {
+          "title": "text",
+          "type": "object",
+          "required": ["type", "markdown"],
+          "properties": {
+            "type": { "const": "text" },
+            "markdown": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "title": "citations",
+          "type": "object",
+          "required": ["type", "items"],
+          "properties": {
+            "type": { "const": "citations" },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": { "type": "string" },
+                  "title": { "type": "string" },
+                  "snippet": { "type": "string" },
+                  "uri": { "type": "string" }
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "title": "visualization",
+          "type": "object",
+          "required": ["type", "config"],
+          "properties": {
+            "type": { "const": "visualization" },
+            "artifactId": { "type": "string" },
+            "config": { "type": "object", "description": "VisualizationConfig successor (bar, line, table, ...)." }
+          },
+          "additionalProperties": true
+        },
+        {
+          "title": "actions",
+          "type": "object",
+          "required": ["type", "items"],
+          "properties": {
+            "type": { "const": "actions" },
+            "items": {
+              "type": "array",
+              "items": { "type": "object" }
+            },
+            "teachingNotes": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "title": "artifacts",
+          "type": "object",
+          "required": ["type", "items"],
+          "properties": {
+            "type": { "const": "artifacts" },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": ["ppt_export", "canvas_build", "file", "chart_ref"]
+                  },
+                  "ref": { "type": "string" },
+                  "meta": { "type": "object" }
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "title": "navigation_hints",
+          "type": "object",
+          "required": ["type", "items"],
+          "properties": {
+            "type": { "const": "navigation_hints" },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "label": { "type": "string" },
+                  "path": { "type": "string" }
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "title": "safety",
+          "type": "object",
+          "required": ["type", "reason"],
+          "properties": {
+            "type": { "const": "safety" },
+            "reason": { "type": "string" },
+            "category": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "additionalProperties": false
+}

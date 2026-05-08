@@ -41,6 +41,7 @@ import {
 import type { ResearchWidgetContext } from "../types/researchWidgetContext.js";
 import { startSSEHeartbeat } from "../utils/sseUtils.js";
 import uploadRoutes from "./research/uploads.js";
+import { apiLimiter } from "../middleware/rateLimiter.js";
 
 const router = Router();
 
@@ -94,6 +95,7 @@ router.post(
   "/sessions",
   authenticateToken,
   attachTenantContext,
+  apiLimiter,
   async (req: AuthRequest, res: Response) => {
     try {
       const { tenantPool, tenantId } = getTenantContext(req);

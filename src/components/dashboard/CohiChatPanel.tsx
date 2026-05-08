@@ -5,7 +5,7 @@
  */
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, Link as RouterLink } from "react-router-dom";
 import { api } from "@/lib/api";
 import {
   MessageSquare,
@@ -107,6 +107,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuCheckboxItem,
 } from "@/components/ui/dropdown-menu";
+import { CohiChatDockChip } from "@/components/cohi/CohiChatDockChip";
 
 const CHAT_EXPORT_FORMAT_KEY = "cohi-chat-preferred-export-format";
 
@@ -1783,36 +1784,18 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     toast({ title: "Downloaded", description: "Chart saved as PNG." });
   };
 
-  const isMyDashboard = pathname === "/my-dashboard" || pathname.startsWith("/my-dashboard/");
+  const hideFloatingDockChip =
+    pathname === "/my-dashboard" ||
+    pathname.startsWith("/my-dashboard/") ||
+    pathname === "/workbench" ||
+    pathname.startsWith("/workbench/");
 
   if (!isOpen) {
     if (!onOpen) return null;
-    // Hide the floating Cohi button on /my-dashboard (it has its own Cohi integration)
-    if (isMyDashboard) return null;
+    // Workbench + embedded dashboard wire their own dock chip so only one launcher shows.
+    if (hideFloatingDockChip) return null;
 
-    return (
-      <motion.button
-        initial={{ x: 20, opacity: 0 }}
-        animate={{ x: 0, opacity: 1 }}
-        exit={{ x: 20, opacity: 0 }}
-        transition={{ type: "spring", damping: 25, stiffness: 300 }}
-        onClick={onOpen}
-        className="fixed right-0 top-1/2 -translate-y-1/2 z-50 flex flex-col items-center gap-2 px-2.5 py-4 rounded-l-xl shadow-[0_4px_24px_rgba(59,130,246,0.25)] dark:shadow-[0_4px_24px_rgba(99,102,241,0.2)] bg-gradient-to-b from-blue-600 to-indigo-600 text-white border border-l-0 border-white/10 hover:from-blue-500 hover:to-indigo-500 hover:shadow-[0_6px_28px_rgba(59,130,246,0.35)] transition-all duration-200 hover:pl-3 group"
-        title="Cohi – Ask about your pipeline & performance"
-        aria-label="Open Cohi Insights"
-      >
-        <Sparkles
-          className="w-5 h-5 text-white drop-shadow-sm"
-          strokeWidth={1.75}
-        />
-        <span
-          className="text-xs font-semibold tracking-tight"
-          style={{ writingMode: "vertical-rl", textOrientation: "mixed" }}
-        >
-          Cohi
-        </span>
-      </motion.button>
-    );
+    return <CohiChatDockChip onClick={onOpen} />;
   }
 
   return (
@@ -2590,6 +2573,27 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
                 {renderMarkdownText(messageContent)}
               </div>
             )}
+
+            {!isUser &&
+              message.navigationHints &&
+              message.navigationHints.length > 0 && (
+                <div className="px-4 pb-3 pt-2 border-t border-slate-200/60 dark:border-slate-700/60">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 block mb-2">
+                    Go to
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    {message.navigationHints.map((h) => (
+                      <RouterLink
+                        key={`${h.path}-${h.label}`}
+                        to={h.path}
+                        className="inline-flex items-center rounded-lg border border-blue-200/90 dark:border-blue-800/80 bg-blue-50/90 dark:bg-blue-950/35 px-2.5 py-1.5 text-xs font-medium text-blue-800 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-900/45 transition-colors"
+                      >
+                        {h.label}
+                      </RouterLink>
+                    ))}
+                  </div>
+                </div>
+              )}
 
             {/* Error */}
             {message.error && (

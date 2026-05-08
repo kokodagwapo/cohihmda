@@ -5,6 +5,7 @@ import { WorkbenchTopBar } from '@/components/workbench/WorkbenchTopBar';
 import { AskCohiChat } from '@/components/workbench/AskCohiChat';
 import { IconBadge } from '@/components/workbench/IconBadge';
 import { api } from '@/lib/api';
+import { isUnifiedChatClientEnabled, postUnifiedWorkbenchHubQuery } from '@/lib/unifiedChatEnvelope';
 import { DashboardLayout } from '@/components/dashboard/DashboardLayout';
 import { useDashboardVisibility } from '@/hooks/useDashboardVisibility';
 import type { ReportData } from '@/data/reportSimulations';
@@ -23,11 +24,17 @@ export default function SharedWithMe() {
     setMessages((m) => [...m, { role: 'user', content: prompt }]);
     setLoading(true);
     try {
-      const res = await api.request<{ response: string }>('/api/workbench/ai/query', {
-        method: 'POST',
-        body: JSON.stringify({ prompt }),
-      });
-      setMessages((m) => [...m, { role: 'assistant', content: res?.response ?? '' }]);
+      let answer = '';
+      if (typeof window !== 'undefined' && isUnifiedChatClientEnabled()) {
+        answer = await postUnifiedWorkbenchHubQuery(prompt);
+      } else {
+        const res = await api.request<{ response: string }>('/api/workbench/ai/query', {
+          method: 'POST',
+          body: JSON.stringify({ prompt }),
+        });
+        answer = res?.response ?? '';
+      }
+      setMessages((m) => [...m, { role: 'assistant', content: answer }]);
     } catch {
       setMessages((m) => [...m, { role: 'assistant', content: "Sorry, I couldn't process that. Please try again." }]);
     } finally {

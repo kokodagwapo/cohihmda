@@ -24,6 +24,9 @@ import { pool as managementPool } from "../../../config/managementDatabase.js";
 import type { InvestigationQuestion } from "./plannerAgent.js";
 import { VIZ_STANDARDS_MEDIUM } from "../../../config/visualizationStandards.js";
 import type { ResearchWidgetContext } from "../../../types/researchWidgetContext.js";
+import type { LoanAccessFilter } from "../../userLoanAccessService.js";
+import { safeParseMetricSpec } from "../../metrics/metricSpec.js";
+import { composeMetricSql } from "../../metrics/metricQueryComposer.js";
 
 // ============================================================================
 // Types
@@ -201,6 +204,7 @@ LANGUAGE AND FORMATTING RULES:
 - Use "%" for rates and proportions (e.g. "pull-through is 74%"). Use "percentage points" or "ppts" only when describing the change between two rates (e.g. "improved 8 ppts YoY").
 
 RULES:
+- Prefer **metricSpec** (canonical MetricSpec JSON matching server catalog metrics) for standard KPIs instead of writing raw SQL — the server composes deterministic, access-aware SQL. Use raw SQL for exploratory analysis or non-catalog fields.
 - Only generate SELECT queries (CTEs with WITH are allowed)
 - Query the public.loans table (alias as l)
 - Use CURRENT_DATE for date references, not hardcoded dates
@@ -454,6 +458,11 @@ CHART TYPE FOR TIME SERIES:
 
 const MAX_ITERATIONS = 8;
 
+export interface DataAnalystAgentOptions {
+  tenantId?: string;
+  loanAccessFilter?: LoanAccessFilter | null;
+}
+
 export async function runDataAnalystAgent(
   question: InvestigationQuestion,
   schemaContext: string,
@@ -465,7 +474,8 @@ export async function runDataAnalystAgent(
   checkPause: () => Promise<void>,
   knowledgeContext?: string,
   businessKnowledge?: string,
-  researchWidgetContext?: ResearchWidgetContext | null
+  researchWidgetContext?: ResearchWidgetContext | null,
+  analystOptions?: DataAnalystAgentOptions
 ): Promise<Finding> {
   const now = new Date();
   const todayStr = now.toISOString().split("T")[0];
@@ -473,6 +483,9 @@ export async function runDataAnalystAgent(
   const metaById = new Map(
     (researchWidgetContext?.meta ?? []).map((m) => [m.id, m])
   );
+
+  const tenantKey = analystOptions?.tenantId ?? "_research_legacy_";
+  const loanAccessFilter = analystOptions?.loanAccessFilter ?? null;
 
   // Fetch training examples for few-shot injection
   const trainingSection = await fetchTrainingExamples("research.analyst");
@@ -603,9 +616,11 @@ export async function runDataAnalystAgent(
     }
 
     // Handle query action
-    if (parsed.action === "query" && parsed.sql) {
+    if (parsed.action === "query") {
       // Check if this is an inline-data pseudo-query (not real SQL)
-      const isInlineData = typeof parsed.sql === "string" && parsed.sql.trimStart().startsWith("-- INLINE_DATA:");
+      const isInlineData =
+        typeof parsed.sql === "string" &&
+        parsed.sql.trimStart().startsWith("-- INLINE_DATA:");
       if (isInlineData && Array.isArray(parsed.inlineRows) && parsed.inlineRows.length > 0) {
         const inlineRows: Record<string, any>[] = parsed.inlineRows;
         const fields = inlineRows.length > 0 ? Object.keys(inlineRows[0]) : [];
@@ -638,12 +653,63 @@ export async function runDataAnalystAgent(
           chartHint: parsed.chartHint || undefined,
         });
 
-        const formattedInline = inlineRows.length <= 5
-          ? JSON.stringify(inlineRows, null, 2)
-          : JSON.stringify(inlineRows.slice(0, 5), null, 2) + `\n... and ${inlineRows.length - 5} more rows`;
+        const formattedInline =
+          inlineRows.length <= 5
+            ? JSON.stringify(inlineRows, null, 2)
+            : JSON.stringify(inlineRows.slice(0, 5), null, 2) +
+              `\n... and ${inlineRows.length - 5} more rows`;
         conversationHistory.push(
           { role: "assistant", content: raw },
-          { role: "user", content: `Inline data accepted (${inlineRows.length} rows). Preview:\n${formattedInline}\n\nContinue your analysis or produce your final finding.` }
+          {
+            role: "user",
+            content: `Inline data accepted (${inlineRows.length} rows). Preview:\n${formattedInline}\n\nContinue your analysis or produce your final finding.`,
+          }
+        );
+        continue;
+      }
+
+      let execSql = "";
+      let execParams: unknown[] | undefined;
+      let composedIncludedAccess = false;
+
+      if (parsed.metricSpec != null && typeof parsed.metricSpec === "object") {
+        const sp = safeParseMetricSpec(parsed.metricSpec);
+        if (sp.success && !sp.data.unsupported) {
+          try {
+            const composed = composeMetricSql(sp.data, loanAccessFilter ?? null);
+            execSql = composed.sql;
+            execParams = composed.params;
+            composedIncludedAccess = true;
+          } catch (err: any) {
+            onStep({
+              iteration,
+              type: "analysis",
+              content: `MetricSpec compose failed: ${err.message}`,
+              timestamp: Date.now(),
+            });
+            conversationHistory.push(
+              { role: "assistant", content: raw },
+              {
+                role: "user",
+                content: `metricSpec could not be composed: ${err.message}. Fix metricSpec or use raw SQL with action "query".`,
+              }
+            );
+            continue;
+          }
+        }
+      }
+
+      if (!execSql.trim() && parsed.sql && String(parsed.sql).trim()) {
+        execSql = String(parsed.sql);
+      }
+
+      if (!execSql.trim()) {
+        conversationHistory.push(
+          { role: "assistant", content: raw },
+          {
+            role: "user",
+            content: `When action is "query", provide either a valid "metricSpec" object (canonical KPIs) or non-empty "sql".`,
+          }
         );
         continue;
       }
@@ -652,26 +718,32 @@ export async function runDataAnalystAgent(
         iteration,
         type: "sql_generated",
         content: parsed.explanation || "Executing query...",
-        sql: parsed.sql,
+        sql: execSql,
         timestamp: Date.now(),
       });
 
       let queryResult: QueryResult;
       try {
-        queryResult = await safeExecuteSQL(parsed.sql, tenantPool);
+        queryResult = await safeExecuteSQL(execSql, tenantPool, execParams, {
+          tenantId: tenantKey,
+          accessFilter: composedIncludedAccess ? null : loanAccessFilter ?? null,
+        });
       } catch (err: any) {
         const errorMsg = `SQL Error: ${err.message}`;
         onStep({
           iteration,
           type: "sql_executed",
           content: errorMsg,
-          sql: parsed.sql,
+          sql: execSql,
           timestamp: Date.now(),
         });
 
         conversationHistory.push(
           { role: "assistant", content: raw },
-          { role: "user", content: `The query failed with error: ${err.message}\n\nPlease fix the query or try a different approach.` }
+          {
+            role: "user",
+            content: `The query failed with error: ${err.message}\n\nPlease fix the query or try a different approach.`,
+          }
         );
         continue;
       }
@@ -680,14 +752,14 @@ export async function runDataAnalystAgent(
         iteration,
         type: "sql_executed",
         content: `Query returned ${queryResult.rowCount} rows in ${queryResult.executionTimeMs}ms`,
-        sql: parsed.sql,
+        sql: execSql,
         result: queryResult,
         timestamp: Date.now(),
       });
 
       evidence.push({
         kind: "sql",
-        sql: parsed.sql,
+        sql: execSql,
         explanation: parsed.explanation || "",
         rows: queryResult.rows,
         rowCount: queryResult.rowCount,
@@ -698,11 +770,12 @@ export async function runDataAnalystAgent(
 
       const formattedResults = formatResultsForLLM(queryResult);
       const iterationsRemaining = MAX_ITERATIONS - iteration;
-      const urgency = iterationsRemaining <= 2
-        ? `\n\n⚠️ You have ${iterationsRemaining} iteration(s) remaining. You MUST produce your finding on the next iteration. Use the best evidence you have — do NOT run another query unless absolutely necessary. Produce action "finding" now with whatever data you've collected.`
-        : iterationsRemaining <= 3
-        ? `\n\nNote: ${iterationsRemaining} iterations remaining. Start wrapping up — produce your finding soon.`
-        : "";
+      const urgency =
+        iterationsRemaining <= 2
+          ? `\n\n⚠️ You have ${iterationsRemaining} iteration(s) remaining. You MUST produce your finding on the next iteration. Use the best evidence you have — do NOT run another query unless absolutely necessary. Produce action "finding" now with whatever data you've collected.`
+          : iterationsRemaining <= 3
+            ? `\n\nNote: ${iterationsRemaining} iterations remaining. Start wrapping up — produce your finding soon.`
+            : "";
       conversationHistory.push(
         { role: "assistant", content: raw },
         {

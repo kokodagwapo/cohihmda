@@ -11,6 +11,9 @@ To run the bulk create from this repo: copy jira-import.env.example to jira-impo
 
 BACKLOG ITEMS
 
+COHI-386   Unified Cohi Chat Platform — single API, orchestrator, policy, unified UI across site + workbench (Epic)
+           See: docs/planning/cohi-chat-unified-jira-backlog.md (COHI-387–398 story placeholders, acceptance criteria, dependencies).
+
 COHI-XXX   Cohi Builder — homebuilder / affiliated mortgage segment (JDia POC)
            Owner: JDia
            See: Cohi Builder section below. Complements Lender profile when the tenant is a builder-affiliated lender.

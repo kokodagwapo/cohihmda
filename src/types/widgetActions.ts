@@ -258,6 +258,8 @@ export interface CanvasStateSnapshotGroupWidget {
   title?: string;
   /** Display name for registry widgets */
   name?: string;
+  /** For cohi widgets inside groups: SQL backing the widget */
+  sql?: string;
 }
 
 export interface CanvasStateSnapshot {

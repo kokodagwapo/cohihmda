@@ -8,6 +8,11 @@
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { api } from '@/lib/api';
+import {
+  isUnifiedChatClientEnabled,
+  postUnifiedChatV1,
+  parseWorkbenchUnifiedEnvelope,
+} from '@/lib/unifiedChatEnvelope';
 import type {
   WorkbenchChatMessage,
   WidgetAction,
@@ -149,6 +154,9 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
           setConversationId(null);
           return;
         }
+        if (typeof window !== 'undefined' && isUnifiedChatClientEnabled()) {
+          return;
+        }
         const tid = await resolveEffectiveTenantId(tenantId);
         if (!tid || cancelled) return;
 
@@ -237,6 +245,7 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
               id: key,
               kind: 'cohi',
               title: groupItem.title,
+              sql: groupItem.sql,
             });
           }
         });
@@ -330,19 +339,46 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
 
         const effectiveTid = await resolveEffectiveTenantId(tenantId);
 
-        const response = await api.request<WorkbenchCohiResponse>(
-          withTenant('/api/cohi-chat/workbench', effectiveTid),
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              question: content.trim(),
-              canvasState,
-              widgetCatalog,
-              conversationHistory: history,
-              tenantId: effectiveTid,
-            }),
-          }
-        );
+        let response: WorkbenchCohiResponse;
+
+        if (typeof window !== 'undefined' && isUnifiedChatClientEnabled()) {
+          const env = await postUnifiedChatV1(
+            {
+              message: content.trim(),
+              conversationId: conversationId ?? undefined,
+              clientMessageId: crypto.randomUUID(),
+              location: {
+                surface: 'workbench_canvas',
+                route:
+                  typeof window !== 'undefined'
+                    ? window.location.pathname
+                    : undefined,
+              },
+              scope: canvasId
+                ? { type: 'canvas', id: conversationScopeId ?? undefined }
+                : { type: 'draft', id: conversationScopeId ?? undefined },
+              context: { canvasState, widgetCatalog },
+              history,
+            },
+            effectiveTid,
+          );
+          setConversationId(env.conversationId);
+          response = parseWorkbenchUnifiedEnvelope(env);
+        } else {
+          response = await api.request<WorkbenchCohiResponse>(
+            withTenant('/api/cohi-chat/workbench', effectiveTid),
+            {
+              method: 'POST',
+              body: JSON.stringify({
+                question: content.trim(),
+                canvasState,
+                widgetCatalog,
+                conversationHistory: history,
+                tenantId: effectiveTid,
+              }),
+            },
+          );
+        }
 
         const assistantMessage: WorkbenchChatMessage = {
           id: loadingId,
@@ -376,8 +412,13 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
           setSuggestedQuestions(response.suggestedQuestions);
         }
 
-        // Persist messages (fire-and-forget)
-        if (effectiveTid && conversationScopeId) {
+        // Persist messages (fire-and-forget) — unified API persists server-side when enabled
+        if (
+          typeof window !== 'undefined' &&
+          !isUnifiedChatClientEnabled() &&
+          effectiveTid &&
+          conversationScopeId
+        ) {
           (async () => {
             try {
               let convId = conversationId;
@@ -449,7 +490,7 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
         setIsLoading(false);
       }
     },
-    [isLoading, messages, buildCanvasSnapshot, widgetCatalog, tenantId, conversationScopeId, canvasId, conversationId, onError]
+    [isLoading, messages, buildCanvasSnapshot, widgetCatalog, tenantId, conversationScopeId, canvasId, conversationId, onError, onAutoExecuteActions]
   );
 
   // -------------------------------------------------------------------------

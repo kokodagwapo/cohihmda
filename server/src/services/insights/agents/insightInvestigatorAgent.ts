@@ -52,10 +52,13 @@ export interface InsightFinding {
     comparisonKeyFields?: string[];
   };
   /**
-   * Single-row SQL reproducing the same cohort and KPIs as the headline/keyMetrics. Validated at persist; used for tracked insights.
+   * Single-row headline KPIs matching keyMetrics. Prefer **either** `sql` **or** `metricSpec`
+   * (catalog composer — deterministic); validated at persist.
    */
   headlineMetricSignature?: {
-    sql: string;
+    sql?: string;
+    /** When set without sql, headline SQL is composed server-side from METRICS_CATALOG. */
+    metricSpec?: unknown;
     keyFields: string[];
     comparisonKeyFields?: string[];
   };
@@ -134,8 +137,8 @@ INSIGHT QUALITY STANDARDS:
 - Include a suggestedBucket: "critical" (Level 1 — immediate action required), "attention" (Level 2 — monitor closely), "working" (Level 3 — strategic review / positive signal), or "context" (Level 4 — informational).
 - Include metricSignature: the most representative analytical SQL and its key result fields (may use GROUP BY / multiple rows for breakdowns and exploration). This backs evidence and drill-down context.
 - Optional metricSignature.comparisonKeyFields: numeric-only subset when metricSignature is used for rollups.
-- REQUIRED headlineMetricSignature: a SEPARATE single SELECT that returns EXACTLY ONE ROW. It MUST match the **headline’s grain**: portfolio- or pipeline-level KPIs the headline states (same totals, percentages, and denominators the title calls out). Do NOT narrow headlineMetricSignature to a single loan officer, branch, or drill-down entity unless the **headline itself** is explicitly about that one entity. The summary/understory may name examples (e.g. a specific LO for color) — that is supplemental context only; keep headline SQL at the headline cohort. Use metricSignature / evidence queries for per-LO or dimensional breakdowns.
-- headlineMetricSignature.sql MUST be SELECT-only (CTEs allowed), must return exactly one row, and column aliases must match headlineMetricSignature.keyFields. For scope columns, use **human-readable text literals** in the SELECT (e.g. age_bucket: SQL text literals such as \`6+ Months\` or \`6 Months\`, not a bare integer 6). Same for any time-window label.
+- REQUIRED headlineMetricSignature: **either** "sql" (single SELECT, one row) **or** "metricSpec" (canonical MetricSpec JSON — server composes SQL). Same KPI grain rules as above.
+- headlineMetricSignature.sql OR headlineMetricSignature.metricSpec: headline-level aggregates only — must return 1 row when composed.
 - headlineMetricSignature.comparisonKeyFields: optional subset of keyFields for numeric KPI trend comparison only (counts, amounts, rates); omit pure scope/label columns.
 - CRITICAL: Your finding title MUST reflect what the data actually shows, NOT the original hypothesis. If you set out to investigate "missing milestones" but found milestones are fine and the real issue is stale loans, the title should be about stale loans, not missing milestones. The title is the headline users see — it must be accurate to the evidence.
 - Every key in keyMetrics MUST have a corresponding entry in keyMetricDescriptions AND keyMetricFormats.
@@ -168,7 +171,7 @@ Respond in JSON:
     "suggestedBucket": "critical" | "attention" | "working" | "context",
     "impactEstimate": { "type": "revenue_at_risk|operational|compliance", "estimated_dollars": 0, "units_affected": 0 },
     "metricSignature": { "sql": "breakdown or analytical query (may be multi-row)", "keyFields": ["dim1", "kpi1"], "comparisonKeyFields": ["kpi1"] },
-    "headlineMetricSignature": { "sql": "SELECT ... headline-level aggregates only — must return 1 row", "keyFields": ["age_bucket", "stale_loan_count", "total_active_loans"], "comparisonKeyFields": ["stale_loan_count", "total_active_loans"] }
+    "headlineMetricSignature": { "metricSpec": { "metricIds": ["pull_through_rate"], "dimensions": [], "window": "ytd" }, "keyFields": ["pull_through_rate"], "comparisonKeyFields": ["pull_through_rate"] }
   }
 }`;
 

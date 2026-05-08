@@ -27,6 +27,7 @@ import {
   normalizeActorStatusFilter,
   type ActorStatusFilter,
 } from "../actorStatusService.js";
+import type { MetricSemanticContract } from "./metricSpec.js";
 
 // Date range interface
 export interface DateRange {
@@ -52,6 +53,8 @@ export interface MetricDefinition {
   defaultDateField?: string; // Which date field to filter on by default (e.g., 'application_date')
   ignoreDateFilter?: boolean; // If true, don't apply date filtering (for current state metrics like active_loans)
   notes?: string; // Additional notes about the metric (e.g., estimation methodology, caveats)
+  /** Machine-enforced semantic contract for deterministic composer / planner validation */
+  semanticContract?: MetricSemanticContract;
 }
 
 // Metric result interface
@@ -78,6 +81,18 @@ export interface MetricQueryOptions {
   userAccessFilter?: LoanAccessFilter | null;
   actorStatusFilter?: ActorStatusFilter | string | null;
 }
+
+export type GroupByField =
+  | "loan_officer"
+  | "branch"
+  | "processor"
+  | "underwriter"
+  | "channel"
+  | "investor"
+  | "loan_type"
+  | "loan_purpose"
+  | "occupancy_type"
+  | "account_executive";
 
 // Metrics catalog - all available metrics with SQL implementations
 export const METRICS_CATALOG: Record<string, MetricDefinition> = {
@@ -1592,6 +1607,196 @@ function buildWhereClause(
 }
 
 /**
+ * Build parameterised SQL (no execution) for a single catalog metric snapshot.
+ * Mirrors queryMetric filter assembly.
+ */
+export function composeCatalogMetricSnapshotSql(
+  metricId: string,
+  options: MetricQueryOptions = {}
+): { sql: string; params: unknown[] } {
+  const metric = METRICS_CATALOG[metricId];
+  if (!metric) {
+    throw new Error(`Metric ${metricId} not found in catalog`);
+  }
+
+  if (options.userAccessFilter?.sql === "FALSE") {
+    return {
+      sql: "SELECT 0::numeric as metric_value WHERE FALSE",
+      params: [],
+    };
+  }
+
+  let currentParamIndex = 1;
+  let userAccessClause = "";
+  const userAccessParams: any[] = [];
+
+  if (options.userAccessFilter && options.userAccessFilter.sql !== "FALSE") {
+    userAccessClause = `AND ${options.userAccessFilter.sql}`;
+    userAccessParams.push(...options.userAccessFilter.params);
+    currentParamIndex += options.userAccessFilter.paramOffset;
+  }
+
+  const dateField =
+    options.dateField || metric.defaultDateField || "application_date";
+
+  let dateRangeClause;
+  if (metric.ignoreDateFilter) {
+    dateRangeClause = { clause: "", params: [] };
+  } else if (metric.id === "avg_cycle_time" && options.dateRange) {
+    dateRangeClause = buildDateRangeClauseForCycleTime(
+      options.dateRange,
+      currentParamIndex - 1
+    );
+  } else {
+    dateRangeClause = buildDateRangeClause(
+      options.dateRange,
+      dateField,
+      currentParamIndex - 1
+    );
+  }
+  currentParamIndex += dateRangeClause.params.length;
+
+  const additionalFiltersClause = options.additionalFilters
+    ? buildWhereClause(options.additionalFilters, currentParamIndex - 1)
+    : { clause: "", params: [] };
+
+  const params = [
+    ...userAccessParams,
+    ...dateRangeClause.params,
+    ...additionalFiltersClause.params,
+  ];
+
+  const sql = `
+    SELECT 
+      ${metric.sqlQuery} as metric_value
+    FROM public.loans l
+    WHERE 1=1
+      ${userAccessClause}
+      ${dateRangeClause.clause}
+      ${additionalFiltersClause.clause}
+  `.trim();
+
+  return { sql, params };
+}
+
+/**
+ * Build parameterised SQL for a catalog metric grouped by a dimension.
+ */
+export function composeCatalogMetricGroupedSql(
+  metricId: string,
+  groupBy: GroupByField,
+  options: MetricQueryOptions = {}
+): {
+  sql: string;
+  params: unknown[];
+  effectiveGroupBy: GroupByField;
+  channelGroup?: string;
+} {
+  const metric = METRICS_CATALOG[metricId];
+  if (!metric) {
+    throw new Error(`Metric ${metricId} not found in catalog`);
+  }
+
+  if (options.userAccessFilter?.sql === "FALSE") {
+    return {
+      sql:
+        "SELECT NULL::text as group_key, NULL::numeric as metric_value, 0::bigint as count WHERE FALSE",
+      params: [],
+      effectiveGroupBy: groupBy,
+    };
+  }
+
+  let currentParamIndex = 1;
+  let userAccessClause = "";
+  const userAccessParams: any[] = [];
+
+  if (options.userAccessFilter && options.userAccessFilter.sql !== "FALSE") {
+    userAccessClause = `AND ${options.userAccessFilter.sql}`;
+    userAccessParams.push(...options.userAccessFilter.params);
+    currentParamIndex += options.userAccessFilter.paramOffset;
+  }
+
+  const dateField =
+    options.dateField || metric.defaultDateField || "application_date";
+
+  let dateRangeClause;
+  if (metric.ignoreDateFilter) {
+    dateRangeClause = { clause: "", params: [] };
+  } else {
+    dateRangeClause = buildDateRangeClause(
+      options.dateRange,
+      dateField,
+      currentParamIndex - 1
+    );
+  }
+  currentParamIndex += dateRangeClause.params.length;
+
+  const additionalFiltersClause = options.additionalFilters
+    ? buildWhereClause(options.additionalFilters, currentParamIndex - 1)
+    : { clause: "", params: [] };
+
+  const params = [
+    ...userAccessParams,
+    ...dateRangeClause.params,
+    ...additionalFiltersClause.params,
+  ];
+
+  const allowedGroupByFields = [
+    "loan_officer",
+    "branch",
+    "processor",
+    "underwriter",
+    "channel",
+    "investor",
+    "loan_type",
+    "loan_purpose",
+    "occupancy_type",
+    "account_executive",
+  ];
+  if (!allowedGroupByFields.includes(groupBy)) {
+    throw new Error(
+      `Invalid groupBy field: ${groupBy}. Allowed: ${allowedGroupByFields.join(", ")}`
+    );
+  }
+
+  const channelGroup = options.additionalFilters?.consolidated_channel as
+    | string
+    | undefined;
+  let effectiveGroupBy = groupBy;
+  if (groupBy === "loan_officer") {
+    effectiveGroupBy = getActorColumnForChannel(channelGroup) as typeof groupBy;
+  }
+
+  const actorIdSelect =
+    effectiveGroupBy === "loan_officer"
+      ? "MIN(l.loan_officer_id) AS actor_id,"
+      : "NULL::text AS actor_id,";
+
+  const sql = `
+    SELECT 
+      l.${effectiveGroupBy} as group_key,
+      ${actorIdSelect}
+      ${metric.sqlQuery} as metric_value,
+      COUNT(*) as count
+    FROM public.loans l
+    WHERE l.${effectiveGroupBy} IS NOT NULL 
+      AND TRIM(l.${effectiveGroupBy}::text) != ''
+      ${userAccessClause}
+      ${dateRangeClause.clause}
+      ${additionalFiltersClause.clause}
+    GROUP BY l.${effectiveGroupBy}
+    ORDER BY ${metric.sqlQuery} DESC NULLS LAST
+  `.trim();
+
+  return {
+    sql,
+    params,
+    effectiveGroupBy,
+    channelGroup,
+  };
+}
+
+/**
  * Query a single metric
  *
  * @param tenantPool - Tenant database connection pool
@@ -1622,61 +1827,13 @@ export async function queryMetric(
     };
   }
 
-  // Build user access clause (must be first to get correct param index)
-  let currentParamIndex = 1;
-  let userAccessClause = "";
-  const userAccessParams: any[] = [];
-
-  if (options.userAccessFilter && options.userAccessFilter.sql !== "FALSE") {
-    // User has filtered access - apply the junction table filter
-    userAccessClause = `AND ${options.userAccessFilter.sql}`;
-    userAccessParams.push(...options.userAccessFilter.params);
-    currentParamIndex += options.userAccessFilter.paramOffset;
-  }
-  // null userAccessFilter means full access - no clause needed
+  const { sql: query, params } = composeCatalogMetricSnapshotSql(
+    metricId,
+    options
+  );
 
   const dateField =
     options.dateField || metric.defaultDateField || "application_date";
-  // Skip date filtering for metrics that represent current state (e.g., active_loans, locked_loans)
-  let dateRangeClause;
-  if (metric.ignoreDateFilter) {
-    dateRangeClause = { clause: "", params: [] };
-  } else if (metric.id === "avg_cycle_time" && options.dateRange) {
-    // Special handling for avg_cycle_time: filter by closing_date OR funding_date
-    dateRangeClause = buildDateRangeClauseForCycleTime(
-      options.dateRange,
-      currentParamIndex - 1
-    );
-  } else {
-    dateRangeClause = buildDateRangeClause(
-      options.dateRange,
-      dateField,
-      currentParamIndex - 1
-    );
-  }
-  currentParamIndex += dateRangeClause.params.length;
-
-  const additionalFiltersClause = options.additionalFilters
-    ? buildWhereClause(options.additionalFilters, currentParamIndex - 1)
-    : { clause: "", params: [] };
-
-  // Build parameters array in order: userAccess, dateRange, additionalFilters
-  const params = [
-    ...userAccessParams,
-    ...dateRangeClause.params,
-    ...additionalFiltersClause.params,
-  ];
-
-  // Build query with all filtering
-  const query = `
-    SELECT 
-      ${metric.sqlQuery} as metric_value
-    FROM public.loans l
-    WHERE 1=1
-      ${userAccessClause}
-      ${dateRangeClause.clause}
-      ${additionalFiltersClause.clause}
-  `;
 
   // Debug logging (SQL + params can be extremely noisy; enable explicitly)
   if (process.env.METRICS_SQL_DEBUG === "true") {
@@ -1684,10 +1841,8 @@ export async function queryMetric(
       dateRange: options.dateRange,
       dateField,
       ignoreDateFilter: metric.ignoreDateFilter,
-      dateClause: dateRangeClause.clause,
-      additionalFiltersClause: additionalFiltersClause.clause,
-      query: query,
-      params: params,
+      query,
+      params,
     });
   }
 
@@ -1881,18 +2036,6 @@ export interface GroupedMetricResult {
   metadata?: Record<string, any>;
 }
 
-type GroupByField =
-  | "loan_officer"
-  | "branch"
-  | "processor"
-  | "underwriter"
-  | "channel"
-  | "investor"
-  | "loan_type"
-  | "loan_purpose"
-  | "occupancy_type"
-  | "account_executive";
-
 export async function queryMetricGroupedBy(
   tenantPool: pg.Pool,
   metricId: string,
@@ -1909,93 +2052,12 @@ export async function queryMetricGroupedBy(
     return [];
   }
 
-  // Build user access clause first
-  let currentParamIndex = 1;
-  let userAccessClause = "";
-  const userAccessParams: any[] = [];
-
-  if (options.userAccessFilter && options.userAccessFilter.sql !== "FALSE") {
-    userAccessClause = `AND ${options.userAccessFilter.sql}`;
-    userAccessParams.push(...options.userAccessFilter.params);
-    currentParamIndex += options.userAccessFilter.paramOffset;
-  }
-
-  const dateField =
-    options.dateField || metric.defaultDateField || "application_date";
-
-  // Build date range clause
-  let dateRangeClause;
-  if (metric.ignoreDateFilter) {
-    dateRangeClause = { clause: "", params: [] };
-  } else {
-    dateRangeClause = buildDateRangeClause(
-      options.dateRange,
-      dateField,
-      currentParamIndex - 1
-    );
-  }
-  currentParamIndex += dateRangeClause.params.length;
-
-  const additionalFiltersClause = options.additionalFilters
-    ? buildWhereClause(options.additionalFilters, currentParamIndex - 1)
-    : { clause: "", params: [] };
-
-  const params = [
-    ...userAccessParams,
-    ...dateRangeClause.params,
-    ...additionalFiltersClause.params,
-  ];
-
-  // Validate groupBy field
-  const allowedGroupByFields = [
-    "loan_officer",
-    "branch",
-    "processor",
-    "underwriter",
-    "channel",
-    "investor",
-    "loan_type",
-    "loan_purpose",
-    "occupancy_type",
-    "account_executive", // Added for TPO channel support
-  ];
-  if (!allowedGroupByFields.includes(groupBy)) {
-    throw new Error(
-      `Invalid groupBy field: ${groupBy}. Allowed: ${allowedGroupByFields.join(
-        ", "
-      )}`
-    );
-  }
-
-  // Channel-aware actor column: for TPO channels, use account_executive instead of loan_officer
-  const channelGroup = options.additionalFilters?.consolidated_channel as
-    | string
-    | undefined;
-  let effectiveGroupBy = groupBy;
-  if (groupBy === "loan_officer") {
-    effectiveGroupBy = getActorColumnForChannel(channelGroup) as typeof groupBy;
-  }
-
-  // Build query with GROUP BY
-  const actorIdSelect =
-    effectiveGroupBy === "loan_officer"
-      ? "MIN(l.loan_officer_id) AS actor_id,"
-      : "NULL::text AS actor_id,";
-  const query = `
-    SELECT 
-      l.${effectiveGroupBy} as group_key,
-      ${actorIdSelect}
-      ${metric.sqlQuery} as metric_value,
-      COUNT(*) as count
-    FROM public.loans l
-    WHERE l.${effectiveGroupBy} IS NOT NULL 
-      AND TRIM(l.${effectiveGroupBy}::text) != ''
-      ${userAccessClause}
-      ${dateRangeClause.clause}
-      ${additionalFiltersClause.clause}
-    GROUP BY l.${effectiveGroupBy}
-    ORDER BY ${metric.sqlQuery} DESC NULLS LAST
-  `;
+  const {
+    sql: query,
+    params,
+    effectiveGroupBy,
+    channelGroup,
+  } = composeCatalogMetricGroupedSql(metricId, groupBy, options);
 
   if (process.env.METRICS_SQL_DEBUG === "true") {
     console.log(
