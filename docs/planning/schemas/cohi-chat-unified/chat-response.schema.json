@@ -3,17 +3,31 @@
   "$id": "https://cohi.local/schemas/chat/v1/response.json",
   "title": "CohiUnifiedChatResponse",
   "type": "object",
-  "required": ["conversationId", "turn"],
+  "required": [
+    "conversationId",
+    "turn"
+  ],
   "properties": {
-    "conversationId": { "type": "string", "format": "uuid" },
+    "conversationId": {
+      "type": "string",
+      "format": "uuid"
+    },
     "turn": {
       "type": "object",
-      "required": ["id", "blocks"],
+      "required": [
+        "id",
+        "blocks"
+      ],
       "properties": {
-        "id": { "type": "string", "format": "uuid" },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
         "blocks": {
           "type": "array",
-          "items": { "$ref": "#/$defs/block" }
+          "items": {
+            "$ref": "#/$defs/block"
+          }
         }
       },
       "additionalProperties": false
@@ -21,17 +35,29 @@
     "metadata": {
       "type": "object",
       "properties": {
-        "modelId": { "type": "string" },
-        "promptHash": { "type": "string" },
-        "policyDecisionId": { "type": "string" },
+        "modelId": {
+          "type": "string"
+        },
+        "promptHash": {
+          "type": "string"
+        },
+        "policyDecisionId": {
+          "type": "string"
+        },
         "contextManifest": {
           "type": "array",
           "items": {
             "type": "object",
             "properties": {
-              "tier": { "type": "string" },
-              "included": { "type": "boolean" },
-              "truncated": { "type": "boolean" }
+              "tier": {
+                "type": "string"
+              },
+              "included": {
+                "type": "boolean"
+              },
+              "truncated": {
+                "type": "boolean"
+              }
             }
           }
         },
@@ -41,7 +67,9 @@
         },
         "suggestedQuestions": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         }
       },
       "additionalProperties": true
@@ -49,9 +77,15 @@
     "error": {
       "type": "object",
       "properties": {
-        "code": { "type": "string" },
-        "message": { "type": "string" },
-        "retryable": { "type": "boolean" }
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
       }
     }
   },
@@ -61,28 +95,48 @@
         {
           "title": "text",
           "type": "object",
-          "required": ["type", "markdown"],
+          "required": [
+            "type",
+            "markdown"
+          ],
           "properties": {
-            "type": { "const": "text" },
-            "markdown": { "type": "string" }
+            "type": {
+              "const": "text"
+            },
+            "markdown": {
+              "type": "string"
+            }
           },
           "additionalProperties": false
         },
         {
           "title": "citations",
           "type": "object",
-          "required": ["type", "items"],
+          "required": [
+            "type",
+            "items"
+          ],
           "properties": {
-            "type": { "const": "citations" },
+            "type": {
+              "const": "citations"
+            },
             "items": {
               "type": "array",
               "items": {
                 "type": "object",
                 "properties": {
-                  "id": { "type": "string" },
-                  "title": { "type": "string" },
-                  "snippet": { "type": "string" },
-                  "uri": { "type": "string" }
+                  "id": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "snippet": {
+                    "type": "string"
+                  },
+                  "uri": {
+                    "type": "string"
+                  }
                 }
               }
             }
@@ -92,34 +146,58 @@
         {
           "title": "visualization",
           "type": "object",
-          "required": ["type", "config"],
+          "required": [
+            "type",
+            "config"
+          ],
           "properties": {
-            "type": { "const": "visualization" },
-            "artifactId": { "type": "string" },
-            "config": { "type": "object", "description": "VisualizationConfig successor (bar, line, table, ...)." }
+            "type": {
+              "const": "visualization"
+            },
+            "artifactId": {
+              "type": "string"
+            },
+            "config": {
+              "type": "object",
+              "description": "VisualizationConfig successor (bar, line, table, ...)."
+            }
           },
           "additionalProperties": true
         },
         {
           "title": "actions",
           "type": "object",
-          "required": ["type", "items"],
+          "required": [
+            "type",
+            "items"
+          ],
           "properties": {
-            "type": { "const": "actions" },
+            "type": {
+              "const": "actions"
+            },
             "items": {
               "type": "array",
-              "items": { "type": "object" }
+              "items": {
+                "type": "object"
+              }
             },
-            "teachingNotes": { "type": "string" }
+            "teachingNotes": {
+              "type": "string"
+            }
           },
           "additionalProperties": false
         },
         {
           "title": "artifacts",
           "type": "object",
-          "required": ["type", "items"],
+          "required": [
+            "type",
+            "items"
+          ],
           "properties": {
-            "type": { "const": "artifacts" },
+            "type": {
+              "const": "artifacts"
+            },
             "items": {
               "type": "array",
               "items": {
@@ -127,10 +205,19 @@
                 "properties": {
                   "kind": {
                     "type": "string",
-                    "enum": ["ppt_export", "canvas_build", "file", "chart_ref"]
+                    "enum": [
+                      "ppt_export",
+                      "canvas_build",
+                      "file",
+                      "chart_ref"
+                    ]
                   },
-                  "ref": { "type": "string" },
-                  "meta": { "type": "object" }
+                  "ref": {
+                    "type": "string"
+                  },
+                  "meta": {
+                    "type": "object"
+                  }
                 }
               }
             }
@@ -140,16 +227,25 @@
         {
           "title": "navigation_hints",
           "type": "object",
-          "required": ["type", "items"],
+          "required": [
+            "type",
+            "items"
+          ],
           "properties": {
-            "type": { "const": "navigation_hints" },
+            "type": {
+              "const": "navigation_hints"
+            },
             "items": {
               "type": "array",
               "items": {
                 "type": "object",
                 "properties": {
-                  "label": { "type": "string" },
-                  "path": { "type": "string" }
+                  "label": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  }
                 }
               }
             }
@@ -159,11 +255,20 @@
         {
           "title": "safety",
           "type": "object",
-          "required": ["type", "reason"],
+          "required": [
+            "type",
+            "reason"
+          ],
           "properties": {
-            "type": { "const": "safety" },
-            "reason": { "type": "string" },
-            "category": { "type": "string" }
+            "type": {
+              "const": "safety"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "category": {
+              "type": "string"
+            }
           },
           "additionalProperties": false
         }

@@ -14,13 +14,26 @@ const MAX_CONSECUTIVE_FAILURES = 5; // Auto-pause schedule after N failures
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 /**
- * Get active tenants from management database
+ * Normalize monthly day selection from schedule_days array and legacy schedule_day.
  */
-async function getActiveTenants(): Promise<Array<{ id: string; slug: string }>> {
-  const result = await managementPool.query(
-    `SELECT id, slug FROM coheus_tenants WHERE status = 'active'`
-  );
-  return result.rows;
+export function normalizeMonthlyDays(
+  scheduleDays: number[] | null | undefined,
+  scheduleDay: number | null
+): number[] | null {
+  if (Array.isArray(scheduleDays) && scheduleDays.length > 0) {
+    const nums = [
+      ...new Set(
+        scheduleDays
+          .map((n) => Number(n))
+          .filter((n) => Number.isInteger(n) && n >= 1 && n <= 31)
+      ),
+    ].sort((a, b) => a - b);
+    return nums.length ? nums : null;
+  }
+  if (scheduleDay != null) {
+    return [Math.max(1, Math.min(31, scheduleDay))];
+  }
+  return null;
 }
 
 /**
@@ -55,8 +68,6 @@ function wallClockToUtc(
   const month = parseInt(parts.month, 10) - 1;
   const day = parseInt(parts.day, 10);
 
-  const localTargetStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`;
-
   const refParts2 = Object.fromEntries(
     new Intl.DateTimeFormat('en-US', {
       timeZone: 'UTC',
@@ -78,7 +89,6 @@ function wallClockToUtc(
     parseInt(refParts2.second, 10)
   );
 
-  const localRefStr = `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`;
   const localRefMs = Date.UTC(
     parseInt(parts.year, 10),
     parseInt(parts.month, 10) - 1,
@@ -94,30 +104,79 @@ function wallClockToUtc(
   return new Date(localTargetMs + tzOffsetMs);
 }
 
+function computeMonthlyNextRun(
+  hours: number,
+  minutes: number,
+  tz: string,
+  scheduleDays: number[],
+  afterExclusive: Date
+): Date | null {
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const nowParts = Object.fromEntries(
+    fmt.formatToParts(afterExclusive).map((p) => [p.type, p.value])
+  );
+  let y = parseInt(nowParts.year, 10);
+  let mo = parseInt(nowParts.month, 10) - 1;
+
+  for (let iter = 0; iter < 48; iter++) {
+    const maxDay = new Date(y, mo + 1, 0).getDate();
+    const candidateTimes: number[] = [];
+    const seen = new Set<number>();
+    for (const dom of scheduleDays) {
+      const clamped = Math.min(Math.max(1, dom), maxDay);
+      const ref = new Date(Date.UTC(y, mo, clamped));
+      const instant = wallClockToUtc(hours, minutes, tz, ref);
+      const t = instant.getTime();
+      if (t > afterExclusive.getTime() && !seen.has(t)) {
+        seen.add(t);
+        candidateTimes.push(t);
+      }
+    }
+    if (candidateTimes.length > 0) {
+      return new Date(Math.min(...candidateTimes));
+    }
+    mo++;
+    if (mo > 11) {
+      mo = 0;
+      y++;
+    }
+  }
+  return null;
+}
+
 /**
- * Compute next run time from frequency, schedule_time, schedule_day, timezone.
+ * Compute next run time from frequency, schedule_time, schedule_day, schedule_days, timezone.
  * schedule_time is wall-clock time in the given IANA timezone (e.g. "07:35" in "America/New_York").
  * The returned Date is UTC (TIMESTAMPTZ-compatible).
+ *
+ * @param afterExclusive optional — only instants strictly after this time are considered (for preview chaining).
  */
 export function computeNextRunAt(
   frequency: string,
   scheduleTime: string,
   scheduleDay: number | null,
-  timezone: string
+  timezone: string,
+  scheduleDays?: number[] | null,
+  afterExclusive?: Date | null
 ): Date | null {
   try {
     const [hours, minutes] = scheduleTime.split(':').map((s) => parseInt(s, 10) || 0);
     const tz = timezone || 'America/New_York';
-    const now = new Date();
+    const floor = afterExclusive ?? new Date();
 
     if (frequency === 'one_time') {
       return null;
     }
 
     if (frequency === 'daily') {
-      let next = wallClockToUtc(hours, minutes, tz, now);
-      if (next.getTime() <= now.getTime()) {
-        const tomorrow = new Date(now.getTime() + 86_400_000);
+      let next = wallClockToUtc(hours, minutes, tz, floor);
+      if (next.getTime() <= floor.getTime()) {
+        const tomorrow = new Date(floor.getTime() + 86_400_000);
         next = wallClockToUtc(hours, minutes, tz, tomorrow);
       }
       return next;
@@ -126,64 +185,78 @@ export function computeNextRunAt(
     if (frequency === 'weekly' && scheduleDay != null) {
       const targetDow = Math.max(0, Math.min(6, scheduleDay));
       for (let offset = 0; offset <= 7; offset++) {
-        const candidate = new Date(now.getTime() + offset * 86_400_000);
+        const candidate = new Date(floor.getTime() + offset * 86_400_000);
         const candidateUtc = wallClockToUtc(hours, minutes, tz, candidate);
         const localFmt = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' });
         const dayParts = Object.fromEntries(
           localFmt.formatToParts(candidate).map((p) => [p.type, p.value])
         );
-        const dayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+        const dayMap: Record<string, number> = {
+          Sun: 0,
+          Mon: 1,
+          Tue: 2,
+          Wed: 3,
+          Thu: 4,
+          Fri: 5,
+          Sat: 6,
+        };
         const candidateDow = dayMap[dayParts.weekday] ?? candidate.getUTCDay();
 
-        if (candidateDow === targetDow && candidateUtc.getTime() > now.getTime()) {
+        if (candidateDow === targetDow && candidateUtc.getTime() > floor.getTime()) {
           return candidateUtc;
         }
       }
-      const fallback = new Date(now.getTime() + 7 * 86_400_000);
+      const fallback = new Date(floor.getTime() + 7 * 86_400_000);
       return wallClockToUtc(hours, minutes, tz, fallback);
     }
 
     if (frequency === 'biweekly') {
-      const twoWeeksOut = new Date(now.getTime() + 14 * 86_400_000);
+      const twoWeeksOut = new Date(floor.getTime() + 14 * 86_400_000);
       return wallClockToUtc(hours, minutes, tz, twoWeeksOut);
     }
 
-    if (frequency === 'monthly' && scheduleDay != null) {
-      const dayOfMonth = Math.max(1, Math.min(31, scheduleDay));
-      const fmt = new Intl.DateTimeFormat('en-US', {
-        timeZone: tz,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-      });
-      const nowParts = Object.fromEntries(
-        fmt.formatToParts(now).map((p) => [p.type, p.value])
-      );
-      let year = parseInt(nowParts.year, 10);
-      let month = parseInt(nowParts.month, 10) - 1;
-
-      const tryDate = (y: number, m: number) => {
-        const maxDay = new Date(y, m + 1, 0).getDate();
-        const d = Math.min(dayOfMonth, maxDay);
-        const ref = new Date(Date.UTC(y, m, d));
-        return wallClockToUtc(hours, minutes, tz, ref);
-      };
-
-      let candidate = tryDate(year, month);
-      if (candidate.getTime() <= now.getTime()) {
-        month++;
-        if (month > 11) { month = 0; year++; }
-        candidate = tryDate(year, month);
+    if (frequency === 'monthly') {
+      const domList = normalizeMonthlyDays(scheduleDays ?? null, scheduleDay);
+      if (domList != null && domList.length > 0) {
+        return computeMonthlyNextRun(hours, minutes, tz, domList, floor);
       }
-      return candidate;
     }
 
     // Fallback: next day
-    const tomorrow = new Date(now.getTime() + 86_400_000);
+    const tomorrow = new Date(floor.getTime() + 86_400_000);
     return wallClockToUtc(hours, minutes, tz, tomorrow);
   } catch {
     return null;
   }
+}
+
+/**
+ * Next N scheduled run instants (for preview). Uses same rules as computeNextRunAt.
+ */
+export function computeNextScheduleRuns(
+  frequency: string,
+  scheduleTime: string,
+  scheduleDay: number | null,
+  timezone: string,
+  scheduleDays: number[] | null | undefined,
+  count: number
+): Date[] {
+  const runs: Date[] = [];
+  let ref = new Date();
+  for (let i = 0; i < count; i++) {
+    const next = computeNextRunAt(
+      frequency,
+      scheduleTime,
+      scheduleDay,
+      timezone,
+      scheduleDays ?? null,
+      ref
+    );
+    if (!next) break;
+    runs.push(next);
+    ref = new Date(next.getTime() + 1);
+  }
+  return runs;
 }
 
 /**
@@ -192,7 +265,7 @@ export function computeNextRunAt(
 async function claimDueSchedules(tenantPool: pg.Pool): Promise<any[]> {
   const result = await tenantPool.query(
     `SELECT id, name, description, content_type, content_id, content_config, frequency,
-            schedule_time, schedule_day, timezone, recipient_list_id, recipient_emails,
+            schedule_time, schedule_day, schedule_days, timezone, recipient_list_id, recipient_emails,
             failure_count
      FROM public.distribution_schedules
      WHERE is_active = true
@@ -240,7 +313,8 @@ async function processDistributionSchedule(
       schedule.frequency,
       schedule.schedule_time || '08:00',
       schedule.schedule_day,
-      schedule.timezone || 'America/New_York'
+      schedule.timezone || 'America/New_York',
+      schedule.schedule_days ?? null
     );
 
     const success = result.status === 'success' || result.successfulCount > 0;
@@ -282,7 +356,8 @@ async function processDistributionSchedule(
       schedule.frequency,
       schedule.schedule_time || '08:00',
       schedule.schedule_day,
-      schedule.timezone || 'America/New_York'
+      schedule.timezone || 'America/New_York',
+      schedule.schedule_days ?? null
     );
     const isPaused = failureCount >= MAX_CONSECUTIVE_FAILURES;
 
@@ -370,4 +445,14 @@ export function stopDistributionScheduler(): void {
     pollTimer = null;
     console.log('[DistributionScheduler] Stopped');
   }
+}
+
+/**
+ * Get active tenants from management database
+ */
+async function getActiveTenants(): Promise<Array<{ id: string; slug: string }>> {
+  const result = await managementPool.query(
+    `SELECT id, slug FROM coheus_tenants WHERE status = 'active'`
+  );
+  return result.rows;
 }

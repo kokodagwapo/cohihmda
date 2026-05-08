@@ -7,6 +7,26 @@ test.describe("@critical Distributions workflows", () => {
     await expect(userPage.getByRole("button", { name: /New schedule/i })).toBeVisible();
   });
 
+  it('handles monthly day picker and preview text', async ({ userPage }) => {
+    await userPage.goto("/workbench/distributions", { waitUntil: "domcontentloaded" });
+    await userPage.getByRole("button", { name: /New schedule|Create schedule/i }).first().click();
+    await expect(
+      userPage.getByRole("heading", { name: /New distribution schedule/i }),
+    ).toBeVisible();
+
+    await userPage.getByRole("button", { name: /Weekly/i }).click();
+    await userPage.getByRole("option", { name: /^Monthly$/ }).click();
+
+    await expect(userPage.getByText(/Days of month/i)).toBeVisible();
+
+    await userPage.getByText("15", { exact: true }).click();
+
+    await expect(userPage.getByText(/Next sends \(preview\)/i)).toBeVisible();
+    await expect(userPage.locator("ul.text-xs li").first()).toBeVisible({
+      timeout: 15_000,
+    });
+  });
+
   test("schedule create and edit dialog flow", async ({ userPage }) => {
     await userPage.goto("/workbench/distributions", { waitUntil: "domcontentloaded" });
     await userPage.getByRole("button", { name: /New schedule|Create schedule/i }).first().click();

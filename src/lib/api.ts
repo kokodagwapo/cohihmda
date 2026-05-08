@@ -1484,6 +1484,20 @@ export class ApiClient {
     return this.request<any>(`/api/distributions/${id}/send-now${this._distTq(tenantId)}`, { method: "POST" });
   }
 
+  /** Preview next N run timestamps (server-side; same logic as scheduler). */
+  async previewDistributionSchedule(
+    body: Record<string, unknown>,
+    tenantId?: string | null,
+  ) {
+    return this.request<{ runs: string[] }>(
+      `/api/distributions/preview-schedule${this._distTq(tenantId)}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
+  }
+
   async getDistributionRecipientLists(tenantId?: string | null) {
     return this.request<{ lists: any[] }>(`/api/distributions/recipient-lists${this._distTq(tenantId)}`);
   }

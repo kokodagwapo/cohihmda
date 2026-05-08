@@ -3,7 +3,9 @@
   "$id": "https://cohi.local/schemas/chat/v1/event-stream.json",
   "title": "CohiUnifiedChatStreamEvent",
   "type": "object",
-  "required": ["event"],
+  "required": [
+    "event"
+  ],
   "properties": {
     "event": {
       "type": "string",
@@ -17,9 +19,18 @@
         "ping"
       ]
     },
-    "conversationId": { "type": "string", "format": "uuid" },
-    "turnId": { "type": "string", "format": "uuid" },
-    "blockIndex": { "type": "integer", "minimum": 0 },
+    "conversationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "turnId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "blockIndex": {
+      "type": "integer",
+      "minimum": 0
+    },
     "blockType": {
       "type": "string",
       "enum": [
@@ -43,12 +54,20 @@
     "error": {
       "type": "object",
       "properties": {
-        "code": { "type": "string" },
-        "message": { "type": "string" },
-        "retryable": { "type": "boolean" }
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
       }
     },
-    "metadata": { "type": "object" }
+    "metadata": {
+      "type": "object"
+    }
   },
   "additionalProperties": false
 }
