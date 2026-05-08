@@ -1,24 +1,19 @@
 /**
  * JSON Schema validators for /api/chat/v1 (draft 2020-12).
- * Schemas live in docs/planning/schemas/cohi-chat-unified/
+ * Schemas are defined in code for runtime portability.
  */
 
 import Ajv, { type ValidateFunction, type ErrorObject } from "ajv";
 import addFormats from "ajv-formats";
-import { readFileSync } from "fs";
-import { dirname, join } from "path";
-import { fileURLToPath } from "url";
+import {
+  unifiedChatRequestSchema,
+  unifiedChatResponseSchema,
+  unifiedChatStreamEventSchema,
+} from "../../contracts/chat/unifiedChatSchemas.js";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-/** Repo root: server/src/services/chat -> ../../../../ */
-const SCHEMA_ROOT = join(__dirname, "../../../../docs/planning/schemas/cohi-chat-unified");
-
-function loadJson(name: string): object {
-  const path = join(SCHEMA_ROOT, name);
-  const raw = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-  delete raw.$schema;
-  return raw;
+function forAjvCompile(schema: Record<string, unknown>): Record<string, unknown> {
+  const { $schema: _ignore, ...rest } = schema;
+  return rest;
 }
 
 const ajv = new Ajv({
@@ -28,13 +23,15 @@ const ajv = new Ajv({
 });
 addFormats(ajv);
 
-const requestSchema = loadJson("chat-request.schema.json");
-const responseSchema = loadJson("chat-response.schema.json");
-const streamEventSchema = loadJson("chat-event-stream.schema.json");
-
-export const validateUnifiedChatRequest: ValidateFunction = ajv.compile(requestSchema);
-export const validateUnifiedChatResponse: ValidateFunction = ajv.compile(responseSchema);
-export const validateUnifiedStreamEvent: ValidateFunction = ajv.compile(streamEventSchema);
+export const validateUnifiedChatRequest: ValidateFunction = ajv.compile(
+  forAjvCompile(unifiedChatRequestSchema),
+);
+export const validateUnifiedChatResponse: ValidateFunction = ajv.compile(
+  forAjvCompile(unifiedChatResponseSchema),
+);
+export const validateUnifiedStreamEvent: ValidateFunction = ajv.compile(
+  forAjvCompile(unifiedChatStreamEventSchema),
+);
 
 export function formatAjvErrors(errors: ErrorObject[] | null | undefined): {
   message: string;

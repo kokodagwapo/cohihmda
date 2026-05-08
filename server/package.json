@@ -21,6 +21,8 @@
     "seed:local": "tsx scripts/seed-local-dev.ts",
     "lint:test-tags": "tsx scripts/qa/lib/lintTestTags.ts",
     "news:refresh": "tsx scripts/refresh-news.ts",
+    "schemas:chat:sync": "tsx scripts/sync-unified-chat-schemas.ts",
+    "schemas:chat:check": "tsx scripts/sync-unified-chat-schemas.ts --check",
     "init:local": "tsx scripts/init-local-database.ts",
     "create-admin": "node ../scripts/create-admin-user.js",
     "check-user": "tsx scripts/check-user-and-create-super-admin.js",
