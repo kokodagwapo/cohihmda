@@ -16,6 +16,7 @@ import {
 import {
   ComposedChart,
   Bar,
+  Cell,
   Line,
   XAxis,
   YAxis,
@@ -84,6 +85,15 @@ export interface PipelineAnalysisSource {
   yearRange?: string | null;
   viewMode?: 'week' | 'month';
   pctMetric?: 'volume' | 'units';
+  selectedWeekValues?: number[];
+  selectedMonths?: number[];
+}
+
+interface PipelineAnalysisWidgetConfig {
+  selectedWeekValues?: number[];
+  selectedMonths?: number[];
+  onToggleWeek?: (week: number) => void;
+  onToggleMonth?: (month: number) => void;
 }
 
 function snapshotsToByYearMonth(snapshots: PipelineSnapshotRow[]): Map<string, PipelineSnapshotRow> {
@@ -246,6 +256,8 @@ function buildDerived(source: PipelineAnalysisSource | null) {
     chartXKey,
     viewMode,
     pctMetric: source.pctMetric ?? 'volume',
+    selectedWeekValues: source.selectedWeekValues ?? [],
+    selectedMonths: source.selectedMonths ?? [],
   };
 }
 
@@ -259,8 +271,10 @@ export function PipelineAnalysisTableWidget({
   error,
   width,
   height,
+  config,
 }: WidgetRenderProps<PipelineAnalysisSource>) {
   const derived = useMemo(() => buildDerived(data), [data]);
+  const widgetConfig = (config ?? {}) as PipelineAnalysisWidgetConfig;
 
   const monthHeatmapAvgs = useMemo(() => {
     if (!derived?.years?.length || !derived?.byYearMonth) {
@@ -340,7 +354,17 @@ export function PipelineAnalysisTableWidget({
     );
   }
 
-  const { years, byYearWeek, byWeekPct, byYearMonth, snapshotDayLabel, viewMode, pctMetric } = derived;
+  const {
+    years,
+    byYearWeek,
+    byWeekPct,
+    byYearMonth,
+    snapshotDayLabel,
+    viewMode,
+    pctMetric,
+    selectedWeekValues,
+    selectedMonths,
+  } = derived;
   const pctMetricLabel = pctMetric === 'volume' ? 'Volume' : 'Units';
 
   if (viewMode === 'month') {
@@ -352,8 +376,12 @@ export function PipelineAnalysisTableWidget({
             <TableHeader>
               <TableRow>
                 <TableHead className="min-w-[100px] sticky left-0 bg-background z-10 font-semibold" />
-                {MONTH_LABELS.map((label) => (
-                  <TableHead key={label} className="text-right whitespace-nowrap">
+                {MONTH_LABELS.map((label, i) => (
+                  <TableHead
+                    key={label}
+                    className={`text-right whitespace-nowrap ${selectedMonths.includes(i + 1) ? "bg-sky-100 dark:bg-sky-900/40" : ""}`}
+                    onClick={() => widgetConfig.onToggleMonth?.(i + 1)}
+                  >
                     {label}
                   </TableHead>
                 ))}
@@ -367,7 +395,11 @@ export function PipelineAnalysisTableWidget({
                     const month = i + 1;
                     const row = byYearMonth.get(`${year}-${month}`);
                     return (
-                      <TableCell key={`${year}-${month}`} className="text-right">
+                      <TableCell
+                        key={`${year}-${month}`}
+                        className={`text-right ${selectedMonths.includes(month) ? "bg-sky-100 dark:bg-sky-900/40" : ""}`}
+                        onClick={() => widgetConfig.onToggleMonth?.(month)}
+                      >
                         {row != null ? formatVolume(row.active_volume) : '—'}
                       </TableCell>
                     );
@@ -381,7 +413,11 @@ export function PipelineAnalysisTableWidget({
                     const month = i + 1;
                     const row = byYearMonth.get(`${year}-${month}`);
                     return (
-                      <TableCell key={`${year}-${month}`} className="text-right">
+                      <TableCell
+                        key={`${year}-${month}`}
+                        className={`text-right ${selectedMonths.includes(month) ? "bg-sky-100 dark:bg-sky-900/40" : ""}`}
+                        onClick={() => widgetConfig.onToggleMonth?.(month)}
+                      >
                         {row != null ? row.active_units : '—'}
                       </TableCell>
                     );
@@ -397,7 +433,11 @@ export function PipelineAnalysisTableWidget({
                   const p = byMonthPct.get(month);
                   const val = pctMetric === 'volume' ? p?.weeklyVolume : p?.weeklyUnits;
                   return (
-                    <TableCell key={`w-${month}`} className="text-right">
+                    <TableCell
+                      key={`w-${month}`}
+                      className={`text-right ${selectedMonths.includes(month) ? "bg-sky-100 dark:bg-sky-900/40" : ""}`}
+                      onClick={() => widgetConfig.onToggleMonth?.(month)}
+                    >
                       {val != null ? formatPct(val) : '—'}
                     </TableCell>
                   );
@@ -412,7 +452,11 @@ export function PipelineAnalysisTableWidget({
                   const p = byMonthPct.get(month);
                   const val = pctMetric === 'volume' ? p?.monthlyVolume : p?.monthlyUnits;
                   return (
-                    <TableCell key={`m-${month}`} className="text-right">
+                    <TableCell
+                      key={`m-${month}`}
+                      className={`text-right ${selectedMonths.includes(month) ? "bg-sky-100 dark:bg-sky-900/40" : ""}`}
+                      onClick={() => widgetConfig.onToggleMonth?.(month)}
+                    >
                       {val != null ? formatPct(val) : '—'}
                     </TableCell>
                   );
@@ -427,7 +471,11 @@ export function PipelineAnalysisTableWidget({
                   const p = byMonthPct.get(month);
                   const val = pctMetric === 'volume' ? p?.annualVolume : p?.annualUnits;
                   return (
-                    <TableCell key={`a-${month}`} className="text-right">
+                    <TableCell
+                      key={`a-${month}`}
+                      className={`text-right ${selectedMonths.includes(month) ? "bg-sky-100 dark:bg-sky-900/40" : ""}`}
+                      onClick={() => widgetConfig.onToggleMonth?.(month)}
+                    >
                       {val != null ? formatPct(val) : '—'}
                     </TableCell>
                   );
@@ -440,7 +488,11 @@ export function PipelineAnalysisTableWidget({
                     const month = i + 1;
                     const row = byYearMonth.get(`${year}-${month}`);
                     return (
-                      <TableCell key={`${year}-${month}`} className="text-right">
+                      <TableCell
+                        key={`${year}-${month}`}
+                        className={`text-right ${selectedMonths.includes(month) ? "bg-sky-100 dark:bg-sky-900/40" : ""}`}
+                        onClick={() => widgetConfig.onToggleMonth?.(month)}
+                      >
                         {row != null ? row.active_lo_count : '—'}
                       </TableCell>
                     );
@@ -454,7 +506,11 @@ export function PipelineAnalysisTableWidget({
                     const month = i + 1;
                     const row = byYearMonth.get(`${year}-${month}`);
                     return (
-                      <TableCell key={`${year}-${month}`} className="text-right">
+                      <TableCell
+                        key={`${year}-${month}`}
+                        className={`text-right ${selectedMonths.includes(month) ? "bg-sky-100 dark:bg-sky-900/40" : ""}`}
+                        onClick={() => widgetConfig.onToggleMonth?.(month)}
+                      >
                         {row != null ? row.active_ops_count : '—'}
                       </TableCell>
                     );
@@ -469,7 +525,11 @@ export function PipelineAnalysisTableWidget({
                     const row = byYearMonth.get(`${year}-${month}`);
                     const val = row && row.active_lo_count > 0 ? row.active_units / row.active_lo_count : null;
                     return (
-                      <TableCell key={`${year}-${month}`} className={`text-right ${heatmapClass(val, monthHeatmapAvgs.p35LO, monthHeatmapAvgs.p65LO)}`}>
+                      <TableCell
+                        key={`${year}-${month}`}
+                        className={`text-right ${selectedMonths.includes(month) ? "bg-sky-100 dark:bg-sky-900/40" : heatmapClass(val, monthHeatmapAvgs.p35LO, monthHeatmapAvgs.p65LO)}`}
+                        onClick={() => widgetConfig.onToggleMonth?.(month)}
+                      >
                         {row != null ? formatUnitsPerActor(row.active_units, row.active_lo_count) : '—'}
                       </TableCell>
                     );
@@ -484,7 +544,11 @@ export function PipelineAnalysisTableWidget({
                     const row = byYearMonth.get(`${year}-${month}`);
                     const val = row && row.active_ops_count > 0 ? row.active_units / row.active_ops_count : null;
                     return (
-                      <TableCell key={`${year}-${month}`} className={`text-right ${heatmapClass(val, monthHeatmapAvgs.p35OPs, monthHeatmapAvgs.p65OPs)}`}>
+                      <TableCell
+                        key={`${year}-${month}`}
+                        className={`text-right ${selectedMonths.includes(month) ? "bg-sky-100 dark:bg-sky-900/40" : heatmapClass(val, monthHeatmapAvgs.p35OPs, monthHeatmapAvgs.p65OPs)}`}
+                        onClick={() => widgetConfig.onToggleMonth?.(month)}
+                      >
                         {row != null ? formatUnitsPerActor(row.active_units, row.active_ops_count) : '—'}
                       </TableCell>
                     );
@@ -508,7 +572,11 @@ export function PipelineAnalysisTableWidget({
             <TableRow>
               <TableHead className="min-w-[100px] sticky left-0 bg-background z-10 font-semibold" />
               {weekValues.slice(0, 26).map((w) => (
-                <TableHead key={w} className="text-right whitespace-nowrap">
+                <TableHead
+                  key={w}
+                  className={`text-right whitespace-nowrap ${selectedWeekValues.includes(w) ? "bg-sky-100 dark:bg-sky-900/40" : ""}`}
+                  onClick={() => widgetConfig.onToggleWeek?.(w)}
+                >
                   {ordinal(w)} {snapshotDayLabel}
                 </TableHead>
               ))}
@@ -521,7 +589,11 @@ export function PipelineAnalysisTableWidget({
                 {weekValues.slice(0, 26).map((w) => {
                   const row = byYearWeek.get(`${year}-${w}`);
                   return (
-                    <TableCell key={`${year}-${w}`} className="text-right">
+                    <TableCell
+                      key={`${year}-${w}`}
+                      className={`text-right ${selectedWeekValues.includes(w) ? "bg-sky-100 dark:bg-sky-900/40" : ""}`}
+                      onClick={() => widgetConfig.onToggleWeek?.(w)}
+                    >
                       {row != null ? formatVolume(row.active_volume) : '—'}
                     </TableCell>
                   );
@@ -534,7 +606,11 @@ export function PipelineAnalysisTableWidget({
                 {weekValues.slice(0, 26).map((w) => {
                   const row = byYearWeek.get(`${year}-${w}`);
                   return (
-                    <TableCell key={`${year}-${w}`} className="text-right">
+                    <TableCell
+                      key={`${year}-${w}`}
+                      className={`text-right ${selectedWeekValues.includes(w) ? "bg-sky-100 dark:bg-sky-900/40" : ""}`}
+                      onClick={() => widgetConfig.onToggleWeek?.(w)}
+                    >
                       {row != null ? row.active_units : '—'}
                     </TableCell>
                   );
@@ -549,7 +625,11 @@ export function PipelineAnalysisTableWidget({
                 const p = byWeekPct.get(w);
                 const val = pctMetric === 'volume' ? p?.weeklyVolume : p?.weeklyUnits;
                 return (
-                  <TableCell key={`w-${w}`} className="text-right">
+                  <TableCell
+                    key={`w-${w}`}
+                    className={`text-right ${selectedWeekValues.includes(w) ? "bg-sky-100 dark:bg-sky-900/40" : ""}`}
+                    onClick={() => widgetConfig.onToggleWeek?.(w)}
+                  >
                     {val != null ? formatPct(val) : '—'}
                   </TableCell>
                 );
@@ -563,7 +643,11 @@ export function PipelineAnalysisTableWidget({
                 const p = byWeekPct.get(w);
                 const val = pctMetric === 'volume' ? p?.monthlyVolume : p?.monthlyUnits;
                 return (
-                  <TableCell key={`m-${w}`} className="text-right">
+                  <TableCell
+                    key={`m-${w}`}
+                    className={`text-right ${selectedWeekValues.includes(w) ? "bg-sky-100 dark:bg-sky-900/40" : ""}`}
+                    onClick={() => widgetConfig.onToggleWeek?.(w)}
+                  >
                     {val != null ? formatPct(val) : '—'}
                   </TableCell>
                 );
@@ -577,7 +661,11 @@ export function PipelineAnalysisTableWidget({
                 const p = byWeekPct.get(w);
                 const val = pctMetric === 'volume' ? p?.annualVolume : p?.annualUnits;
                 return (
-                  <TableCell key={`a-${w}`} className="text-right">
+                  <TableCell
+                    key={`a-${w}`}
+                    className={`text-right ${selectedWeekValues.includes(w) ? "bg-sky-100 dark:bg-sky-900/40" : ""}`}
+                    onClick={() => widgetConfig.onToggleWeek?.(w)}
+                  >
                     {val != null ? formatPct(val) : '—'}
                   </TableCell>
                 );
@@ -589,7 +677,11 @@ export function PipelineAnalysisTableWidget({
                 {weekValues.slice(0, 26).map((w) => {
                   const row = byYearWeek.get(`${year}-${w}`);
                   return (
-                    <TableCell key={`${year}-${w}`} className="text-right">
+                    <TableCell
+                      key={`${year}-${w}`}
+                      className={`text-right ${selectedWeekValues.includes(w) ? "bg-sky-100 dark:bg-sky-900/40" : ""}`}
+                      onClick={() => widgetConfig.onToggleWeek?.(w)}
+                    >
                       {row != null ? row.active_lo_count : '—'}
                     </TableCell>
                   );
@@ -602,7 +694,11 @@ export function PipelineAnalysisTableWidget({
                 {weekValues.slice(0, 26).map((w) => {
                   const row = byYearWeek.get(`${year}-${w}`);
                   return (
-                    <TableCell key={`${year}-${w}`} className="text-right">
+                    <TableCell
+                      key={`${year}-${w}`}
+                      className={`text-right ${selectedWeekValues.includes(w) ? "bg-sky-100 dark:bg-sky-900/40" : ""}`}
+                      onClick={() => widgetConfig.onToggleWeek?.(w)}
+                    >
                       {row != null ? row.active_ops_count : '—'}
                     </TableCell>
                   );
@@ -616,7 +712,11 @@ export function PipelineAnalysisTableWidget({
                   const row = byYearWeek.get(`${year}-${w}`);
                   const val = row && row.active_lo_count > 0 ? row.active_units / row.active_lo_count : null;
                   return (
-                    <TableCell key={`${year}-${w}`} className={`text-right ${heatmapClass(val, weekHeatmapAvgs.p35LO, weekHeatmapAvgs.p65LO)}`}>
+                    <TableCell
+                      key={`${year}-${w}`}
+                      className={`text-right ${selectedWeekValues.includes(w) ? "bg-sky-100 dark:bg-sky-900/40" : heatmapClass(val, weekHeatmapAvgs.p35LO, weekHeatmapAvgs.p65LO)}`}
+                      onClick={() => widgetConfig.onToggleWeek?.(w)}
+                    >
                       {row != null ? formatUnitsPerActor(row.active_units, row.active_lo_count) : '—'}
                     </TableCell>
                   );
@@ -630,7 +730,11 @@ export function PipelineAnalysisTableWidget({
                   const row = byYearWeek.get(`${year}-${w}`);
                   const val = row && row.active_ops_count > 0 ? row.active_units / row.active_ops_count : null;
                   return (
-                    <TableCell key={`${year}-${w}`} className={`text-right ${heatmapClass(val, weekHeatmapAvgs.p35OPs, weekHeatmapAvgs.p65OPs)}`}>
+                    <TableCell
+                      key={`${year}-${w}`}
+                      className={`text-right ${selectedWeekValues.includes(w) ? "bg-sky-100 dark:bg-sky-900/40" : heatmapClass(val, weekHeatmapAvgs.p35OPs, weekHeatmapAvgs.p65OPs)}`}
+                      onClick={() => widgetConfig.onToggleWeek?.(w)}
+                    >
                       {row != null ? formatUnitsPerActor(row.active_units, row.active_ops_count) : '—'}
                     </TableCell>
                   );
@@ -654,8 +758,10 @@ export function PipelineAnalysisChartWidget({
   error,
   width,
   height,
+  config,
 }: WidgetRenderProps<PipelineAnalysisSource>) {
   const derived = useMemo(() => buildDerived(data), [data]);
+  const widgetConfig = (config ?? {}) as PipelineAnalysisWidgetConfig;
 
   if (loading) {
     return (
@@ -682,7 +788,15 @@ export function PipelineAnalysisChartWidget({
     );
   }
 
-  const { years, pipelineChartData, snapshotDayLabel, chartXKey } = derived;
+  const {
+    years,
+    pipelineChartData,
+    snapshotDayLabel,
+    chartXKey,
+    selectedWeekValues,
+    selectedMonths,
+  } = derived;
+  const hasSelection = selectedWeekValues.length > 0 || selectedMonths.length > 0;
   const chartHeight = Math.max(280, (height ?? 300) - 48);
 
   return (
@@ -694,6 +808,13 @@ export function PipelineAnalysisChartWidget({
             margin={{ top: 8, right: 8, left: 8, bottom: 8 }}
             barCategoryGap="20%"
             barGap={2}
+            onClick={(state: unknown) => {
+              const s = state as { activePayload?: Array<{ payload?: { week?: number; month?: number } }> } | null;
+              const point = s?.activePayload?.[0]?.payload;
+              if (!point) return;
+              if (point.week != null) widgetConfig.onToggleWeek?.(point.week);
+              if (point.month != null) widgetConfig.onToggleMonth?.(point.month);
+            }}
           >
             <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
             <XAxis
@@ -750,7 +871,23 @@ export function PipelineAnalysisChartWidget({
                 name={`${y} Units`}
                 fill={i === 0 ? '#00008f' : '#52b852'}
                 radius={[2, 2, 0, 0]}
-              />
+                className="cursor-pointer"
+              >
+                {pipelineChartData.map((point, idx) => {
+                  const p = point as { week?: number; month?: number };
+                  const selected = p.week != null
+                    ? selectedWeekValues.includes(p.week)
+                    : p.month != null
+                      ? selectedMonths.includes(p.month)
+                      : false;
+                  const fill = selected
+                    ? "#0ea5e9"
+                    : i === 0
+                        ? "#00008f"
+                        : "#52b852";
+                  return <Cell key={`${y}-units-cell-${idx}`} fill={fill} />;
+                })}
+              </Bar>
             ))}
             {years.map((y, i) => (
               <Line
@@ -761,7 +898,25 @@ export function PipelineAnalysisChartWidget({
                 name={`${y} Volume`}
                 stroke={i === 0 ? '#8080c7' : '#a9dca9'}
                 strokeWidth={1.5}
-                dot={{ r: 2 }}
+                dot={(props) => {
+                  const p = props as { cx?: number; cy?: number; payload?: { week?: number; month?: number } };
+                  const week = p.payload?.week;
+                  const month = p.payload?.month;
+                  const selected = week != null
+                    ? selectedWeekValues.includes(week)
+                    : month != null
+                      ? selectedMonths.includes(month)
+                      : false;
+                  const dimmed = hasSelection && !selected;
+                  return (
+                    <circle
+                      cx={p.cx}
+                      cy={p.cy}
+                      r={2.5}
+                      fill={selected ? "#7dd3fc" : dimmed ? "#cbd5e1" : i === 0 ? "#8080c7" : "#a9dca9"}
+                    />
+                  );
+                }}
                 connectNulls
               />
             ))}
@@ -782,8 +937,10 @@ export function PipelineAnalysisLOCountWidget({
   error,
   width,
   height,
+  config,
 }: WidgetRenderProps<PipelineAnalysisSource>) {
   const derived = useMemo(() => buildDerived(data), [data]);
+  const widgetConfig = (config ?? {}) as PipelineAnalysisWidgetConfig;
 
   if (loading) {
     return (
@@ -810,7 +967,15 @@ export function PipelineAnalysisLOCountWidget({
     );
   }
 
-  const { years, pipelineLoCountChartData, snapshotDayLabel, chartXKey } = derived;
+  const {
+    years,
+    pipelineLoCountChartData,
+    snapshotDayLabel,
+    chartXKey,
+    selectedWeekValues,
+    selectedMonths,
+  } = derived;
+  const hasSelection = selectedWeekValues.length > 0 || selectedMonths.length > 0;
   const chartHeight = Math.max(280, (height ?? 300) - 48);
 
   return (
@@ -822,6 +987,13 @@ export function PipelineAnalysisLOCountWidget({
             margin={{ top: 8, right: 8, left: 8, bottom: 8 }}
             barCategoryGap="20%"
             barGap={2}
+            onClick={(state: unknown) => {
+              const s = state as { activePayload?: Array<{ payload?: { week?: number; month?: number } }> } | null;
+              const point = s?.activePayload?.[0]?.payload;
+              if (!point) return;
+              if (point.week != null) widgetConfig.onToggleWeek?.(point.week);
+              if (point.month != null) widgetConfig.onToggleMonth?.(point.month);
+            }}
           >
             <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
             <XAxis
@@ -882,7 +1054,23 @@ export function PipelineAnalysisLOCountWidget({
                 name={`${y} LO Count`}
                 fill={i === 0 ? '#00008f' : '#52b852'}
                 radius={[2, 2, 0, 0]}
-              />
+                className="cursor-pointer"
+              >
+                {pipelineLoCountChartData.map((point, idx) => {
+                  const p = point as { week?: number; month?: number };
+                  const selected = p.week != null
+                    ? selectedWeekValues.includes(p.week)
+                    : p.month != null
+                      ? selectedMonths.includes(p.month)
+                      : false;
+                  const fill = selected
+                    ? "#0ea5e9"
+                    : i === 0
+                        ? "#00008f"
+                        : "#52b852";
+                  return <Cell key={`${y}-lo-cell-${idx}`} fill={fill} />;
+                })}
+              </Bar>
             ))}
             {years.map((y, i) => (
               <Line
@@ -893,7 +1081,25 @@ export function PipelineAnalysisLOCountWidget({
                 name={`${y} Units`}
                 stroke={i === 0 ? '#8080c7' : '#a9dca9'}
                 strokeWidth={1.5}
-                dot={{ r: 2 }}
+                dot={(props) => {
+                  const p = props as { cx?: number; cy?: number; payload?: { week?: number; month?: number } };
+                  const week = p.payload?.week;
+                  const month = p.payload?.month;
+                  const selected = week != null
+                    ? selectedWeekValues.includes(week)
+                    : month != null
+                      ? selectedMonths.includes(month)
+                      : false;
+                  const dimmed = hasSelection && !selected;
+                  return (
+                    <circle
+                      cx={p.cx}
+                      cy={p.cy}
+                      r={2.5}
+                      fill={selected ? "#7dd3fc" : dimmed ? "#cbd5e1" : i === 0 ? "#8080c7" : "#a9dca9"}
+                    />
+                  );
+                }}
                 connectNulls
               />
             ))}

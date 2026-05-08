@@ -196,6 +196,32 @@ async function setupWorkbenchSalesCompanyOverviewMocks(page: Page): Promise<{
   overviewRequestUrls: string[];
 }> {
   const overviewRequestUrls: string[] = [];
+  // Workbench widgets read the same server preferences as the standalone page.
+  // Stub GET to return null so widgets always start from defaults, mirroring
+  // what setupSalesCompanyOverviewMocks does for standalone tests.
+  let persistedWorkbenchPreference: unknown = null;
+  await page.route(new RegExp(`/api/user/preferences/${VIEW_STATE_KEY}$`), async (route: Route) => {
+    const method = route.request().method();
+    if (method === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ preference_value: persistedWorkbenchPreference }),
+      });
+      return;
+    }
+    if (method === "PUT") {
+      const body = route.request().postDataJSON() as { preference_value?: unknown };
+      persistedWorkbenchPreference = body?.preference_value ?? null;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true }),
+      });
+      return;
+    }
+    await route.continue();
+  });
 
   // Match standalone SCO mocks: avoid real /api/auth/me flaking under parallel workers
   // (timeouts/401s clear local auth and strand the test on /login).

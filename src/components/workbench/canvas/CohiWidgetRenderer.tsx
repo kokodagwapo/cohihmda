@@ -166,6 +166,14 @@ const DATE_FIELD_OPTIONS = [
   { value: 'lock_date', label: 'Lock Date' },
 ];
 
+function humanizeColumnKey(key: string): string {
+  return key
+    .replace(/_/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (ch) => ch.toUpperCase());
+}
+
 // ---------------------------------------------------------------------------
 // Detect plausible date columns from the SQL text
 // ---------------------------------------------------------------------------
@@ -699,7 +707,12 @@ function renderChart(config: VisualizationConfig, data: any[], w: number, h: num
     }
 
     case 'table': {
-      const tableCols = config.tableConfig?.columns || Object.keys(chartData[0] || {}).map(k => ({ key: k, label: k }));
+      const tableCols =
+        config.tableConfig?.columns ||
+        Object.keys(chartData[0] || {}).map((k) => ({
+          key: k,
+          label: humanizeColumnKey(k),
+        }));
       return <SortableTable columns={tableCols} data={chartData} />;
     }
 

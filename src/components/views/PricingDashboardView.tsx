@@ -776,29 +776,6 @@ export function PricingDashboardView({
               </Select>
             </div>
           )}
-          {selectedEntityOrActor && (
-            <div className="flex items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/50 px-3 py-2 col-span-full sm:col-span-1">
-              <div className="flex flex-col min-w-0">
-                <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  {selectedEntityOrActor.kind === "entity"
-                    ? getEntityLabel(selectedEntityOrActor.entityType)
-                    : getActorLabel(selectedEntityOrActor.actorType)}
-                </span>
-                <span className="text-sm text-slate-600 dark:text-slate-400 truncate" title={selectedEntityOrActor.label}>
-                  {selectedEntityOrActor.label}
-                </span>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 shrink-0 rounded-full text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-                onClick={clearEntityOrActorFilter}
-                aria-label="Clear filter"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          )}
           <div className="flex items-end">
             <Button
               variant="outline"
@@ -812,6 +789,30 @@ export function PricingDashboardView({
           </div>
         </CardContent>
       </Card>
+
+      {selectedEntityOrActor && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-100/80 bg-blue-50/50 px-3 py-2 dark:border-slate-700/80 dark:bg-slate-900/40">
+          <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Active filters</span>
+          <span className="inline-flex items-center gap-1 rounded-full border border-sky-500 bg-sky-500 px-2.5 py-0.5 text-sm font-medium text-white">
+            <span className="truncate max-w-[280px]" title={selectedEntityOrActor.label}>
+              {(selectedEntityOrActor.kind === "entity"
+                ? getEntityLabel(selectedEntityOrActor.entityType)
+                : getActorLabel(selectedEntityOrActor.actorType))}: {selectedEntityOrActor.label}
+            </span>
+            <button
+              type="button"
+              onClick={clearEntityOrActorFilter}
+              className="rounded-sm p-0.5 hover:bg-sky-600/80"
+              aria-label="Clear filter"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </span>
+          <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={clearEntityOrActorFilter}>
+            Clear all filters
+          </Button>
+        </div>
+      )}
 
       {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

@@ -2018,8 +2018,8 @@ export function LoanDetailView({
                     onClick={() => handleCellClickToDraft(row, col)}
                     className={cn(
                       `whitespace-nowrap py-3 px-4 text-sm text-left ${cellClass}`,
-                      isSelectedCell && "bg-emerald-100/60 dark:bg-emerald-900/30",
-                      hasFlash && "bg-emerald-100/70 dark:bg-emerald-900/40",
+                      isSelectedCell && "bg-sky-100/60 dark:bg-sky-900/25",
+                      hasFlash && "bg-sky-100/70 dark:bg-sky-900/35",
                     )}
                     role="cell"
                   >
@@ -2124,18 +2124,25 @@ export function LoanDetailView({
         </div>
         </div>
         {(hasActiveFilters || hasBookmarkSelection || sharedBookmarkTitle || isApplyingFilters || filterFeedback) && (
-          <div className="flex flex-wrap items-center gap-2 px-4 pb-3 border-b border-slate-200/60 dark:border-slate-700/60">
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-100/80 bg-blue-50/50 px-4 py-2 dark:border-slate-700/80 dark:bg-slate-900/40">
+            {hasActiveFilters && (
+              <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Active filters</span>
+            )}
             {hasActiveFilters && activeFilterChips.map((chip) => (
-              <Badge key={chip.key} variant="outline" className="gap-1 border-emerald-300/80 bg-emerald-50 text-emerald-700 dark:border-emerald-700/80 dark:bg-emerald-900/30 dark:text-emerald-300">
+              <Badge
+                key={chip.key}
+                variant="outline"
+                className="gap-1 border-sky-500 bg-sky-500 text-white dark:border-sky-500 dark:bg-sky-500 dark:text-white"
+              >
                 <span>{chip.label}</span>
-                <button type="button" onClick={chip.onRemove} className="rounded-sm hover:bg-emerald-200/40 dark:hover:bg-emerald-800/50">
+                <button type="button" onClick={chip.onRemove} className="rounded-sm hover:bg-sky-600/80">
                   <X className="h-3 w-3" />
                 </button>
               </Badge>
             ))}
             {hasActiveFilters && (
               <Button type="button" size="sm" variant="ghost" onClick={clearAllFilters} className="h-7 px-2">
-                Clear All Filters
+                Clear all filters
               </Button>
             )}
             <Button

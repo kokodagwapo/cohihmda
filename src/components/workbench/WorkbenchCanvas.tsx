@@ -2241,7 +2241,8 @@ export function WorkbenchCanvas({
             const changes = action.changes as Partial<typeof existingViz> & {
               tableConfig?: Record<string, unknown>;
             };
-            return action.changes && Object.keys(action.changes).length > 0
+            const mergedVizBase =
+              action.changes && Object.keys(action.changes).length > 0
               ? {
                   ...existingViz,
                   ...action.changes,
@@ -2259,6 +2260,35 @@ export function WorkbenchCanvas({
                     : {}),
                 }
               : existingViz;
+            const isLikelyTableWidget =
+              (existingViz as { type?: string }).type === "table" ||
+              !!(existingViz as { tableConfig?: unknown }).tableConfig;
+            const shouldRefreshTableColumnsFromData = hasSql && isLikelyTableWidget;
+            const mergedViz = (() => {
+              if (!shouldRefreshTableColumnsFromData) return mergedVizBase;
+              const tableConfig = (
+                mergedVizBase as { tableConfig?: Record<string, unknown> }
+              ).tableConfig;
+              if (!tableConfig || typeof tableConfig !== "object")
+                return mergedVizBase;
+              // SQL changed but no explicit header mapping was provided.
+              // Drop stale saved columns so headers derive from the new result keys.
+              const { columns: _dropColumns, ...restTableConfig } = tableConfig as {
+                columns?: unknown;
+                [key: string]: unknown;
+              };
+              return {
+                ...(mergedVizBase as Record<string, unknown>),
+                tableConfig:
+                  Object.keys(restTableConfig).length > 0
+                    ? restTableConfig
+                    : undefined,
+              } as typeof mergedVizBase;
+            })();
+            const shouldPersistVizConfig =
+              (action.changes && Object.keys(action.changes).length > 0) ||
+              shouldRefreshTableColumnsFromData;
+            return { mergedViz, shouldPersistVizConfig };
           };
 
           if (targetIdx >= 0) {
@@ -2277,14 +2307,15 @@ export function WorkbenchCanvas({
               string,
               unknown
             >;
-            const mergedViz = mergeVizConfig(existingViz);
+            const { mergedViz, shouldPersistVizConfig } =
+              mergeVizConfig(existingViz);
             updated[targetIdx] = {
               ...target,
               payload: {
                 ...target.payload,
                 ...(action.sql ? { sql: action.sql } : {}),
                 ...(action.title ? { title: action.title } : {}),
-                ...(action.changes && Object.keys(action.changes).length > 0
+                ...(shouldPersistVizConfig
                   ? { vizConfig: mergedViz as typeof target.payload.vizConfig }
                   : {}),
               },
@@ -2326,12 +2357,13 @@ export function WorkbenchCanvas({
                 string,
                 unknown
               >;
-              const mergedViz = mergeVizConfig(existingViz);
+              const { mergedViz, shouldPersistVizConfig } =
+                mergeVizConfig(existingViz);
               return {
                 ...groupItem,
                 ...(action.sql ? { sql: action.sql } : {}),
                 ...(action.title ? { title: action.title } : {}),
-                ...(action.changes && Object.keys(action.changes).length > 0
+                ...(shouldPersistVizConfig
                   ? { vizConfig: mergedViz as typeof groupItem.vizConfig }
                   : {}),
               };
@@ -3517,8 +3549,28 @@ export function WorkbenchCanvas({
         return;
       }
 
+      const humanizeColumnKey = (key: string) =>
+        key
+          .replace(/_/g, " ")
+          .replace(/\s+/g, " ")
+          .trim()
+          .replace(/\b\w/g, (ch) => ch.toUpperCase());
       const columns = Object.keys(rows[0]);
-      const header = columns;
+      const sourceItem = items.find((it) => it.i === widgetId);
+      const payload =
+        sourceItem?.payload?.type === "cohi_widget"
+          ? (sourceItem.payload as {
+              vizConfig?: {
+                tableConfig?: { columns?: { key: string; label: string }[] };
+              };
+            })
+          : undefined;
+      const labelByKey = new Map(
+        (payload?.vizConfig?.tableConfig?.columns || [])
+          .filter((col) => col && typeof col.key === "string")
+          .map((col) => [col.key, col.label || humanizeColumnKey(col.key)]),
+      );
+      const header = columns.map((key) => labelByKey.get(key) || humanizeColumnKey(key));
       const dataRows = rows.map((row: any) =>
         columns.map((c) => {
           const val = row[c];
@@ -3562,7 +3614,7 @@ export function WorkbenchCanvas({
         });
       }
     },
-    [toast],
+    [items, toast],
   );
 
   // ---- Report Builder mode toggle ----

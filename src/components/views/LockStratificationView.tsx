@@ -4,7 +4,7 @@
  * days-to-lock-expiration table, and pull-through analysis.
  */
 
-import React, { useState, useMemo, useCallback, useEffect } from "react";
+import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
   Card,
   CardContent,
@@ -152,6 +152,9 @@ interface PersistedFilters {
   milestoneGroupBy?: MilestoneGroupBy;
   milestoneView?: "bar" | "pivot";
   pullThroughPeriod?: PullThroughPeriod;
+  interestRateDrill?: InterestRateDrill;
+  selectedExpirationBucket?: string | null;
+  selectedMilestoneGroup?: string | null;
 }
 
 function loadFilters(): Partial<PersistedFilters> {
@@ -226,16 +229,70 @@ export function LockStratificationView({
   const [milestoneView, setMilestoneView] = useState<"bar" | "pivot">(saved.milestoneView ?? "bar");
   const [localPullThroughPeriod, setLocalPullThroughPeriod] = useState<PullThroughPeriod>(saved.pullThroughPeriod ?? "60");
   const [expandedPivotRows, setExpandedPivotRows] = useState<Set<string>>(new Set());
-  const [interestRateDrill, setInterestRateDrill] = useState<InterestRateDrill>(() => ({ level: 0 }));
+  const [localInterestRateDrill, setLocalInterestRateDrill] = useState<InterestRateDrill>(() => saved.interestRateDrill ?? { level: 0 });
+  const [localSelectedExpirationBucket, setLocalSelectedExpirationBucket] = useState<string | null>(saved.selectedExpirationBucket ?? null);
+  const [localSelectedMilestoneGroup, setLocalSelectedMilestoneGroup] = useState<string | null>(saved.selectedMilestoneGroup ?? null);
+  const didInitMilestoneGroupRef = useRef(false);
 
   const locked = (groupFilters?.lockStratLocked as LockedFilter) ?? localLocked;
   const measure = (groupFilters?.lockStratMeasure as MeasureFilter) ?? localMeasure;
   const milestoneGroupBy = (groupFilters?.lockStratMilestoneGroupBy as MilestoneGroupBy) ?? localMilestoneGroupBy;
   const pullThroughPeriod = (groupFilters?.lockStratPullThroughPeriod as PullThroughPeriod) ?? localPullThroughPeriod;
+  const selectedExpirationBucket =
+    (groupFilters?.lockStratSelectedExpirationBucket as string | null | undefined) ??
+    localSelectedExpirationBucket;
+  const selectedMilestoneGroup =
+    (groupFilters?.lockStratSelectedMilestoneGroup as string | null | undefined) ??
+    localSelectedMilestoneGroup;
+  const interestRateDrill =
+    (groupFilters?.lockStratSelectedInterestRateGroup as InterestRateDrill | undefined) ??
+    localInterestRateDrill;
+  const setInterestRateDrill = useCallback((next: InterestRateDrill) => {
+    if (groupId) {
+      updateFilters(groupId, { lockStratSelectedInterestRateGroup: next });
+      return;
+    }
+    setLocalInterestRateDrill(next);
+  }, [groupId, updateFilters]);
+  const setSelectedExpirationBucket = useCallback((next: string | null) => {
+    if (groupId) {
+      updateFilters(groupId, { lockStratSelectedExpirationBucket: next });
+      return;
+    }
+    setLocalSelectedExpirationBucket(next);
+  }, [groupId, updateFilters]);
+  const setSelectedMilestoneGroup = useCallback((next: string | null) => {
+    if (groupId) {
+      updateFilters(groupId, { lockStratSelectedMilestoneGroup: next });
+      return;
+    }
+    setLocalSelectedMilestoneGroup(next);
+  }, [groupId, updateFilters]);
 
   useEffect(() => {
-    if (!groupId) saveFilters({ locked: localLocked, measure: localMeasure, milestoneGroupBy: localMilestoneGroupBy, milestoneView, pullThroughPeriod: localPullThroughPeriod });
-  }, [groupId, localLocked, localMeasure, localMilestoneGroupBy, milestoneView, localPullThroughPeriod]);
+    if (!groupId) {
+      saveFilters({
+        locked: localLocked,
+        measure: localMeasure,
+        milestoneGroupBy: localMilestoneGroupBy,
+        milestoneView,
+        pullThroughPeriod: localPullThroughPeriod,
+        interestRateDrill: localInterestRateDrill,
+        selectedExpirationBucket: localSelectedExpirationBucket,
+        selectedMilestoneGroup: localSelectedMilestoneGroup,
+      });
+    }
+  }, [
+    groupId,
+    localLocked,
+    localMeasure,
+    localMilestoneGroupBy,
+    milestoneView,
+    localPullThroughPeriod,
+    localInterestRateDrill,
+    localSelectedExpirationBucket,
+    localSelectedMilestoneGroup,
+  ]);
 
   const filters: LockStratFilters = useMemo(() => ({ locked, measure }), [locked, measure]);
 
@@ -254,6 +311,9 @@ export function LockStratificationView({
     milestoneGroupBy,
     pullThroughPeriod,
     interestRateDrill,
+    expirationBucket: selectedExpirationBucket,
+    selectedGroupBy: selectedMilestoneGroup ? milestoneGroupBy : null,
+    selectedGroupValue: selectedMilestoneGroup,
   });
 
   // Report data to canvasDataStore for PPT export
@@ -329,12 +389,20 @@ export function LockStratificationView({
         setInterestRateDrill({ level: 2, min, max });
       }
     },
-    [interestRateDrill.level, parseBucketRange]
+    [interestRateDrill.level, parseBucketRange, setInterestRateDrill]
   );
 
-  const clearInterestRateFilter = useCallback(() => {
+  const toggleExpirationBucketFilter = useCallback((bucket: string) => {
+    setSelectedExpirationBucket((selectedExpirationBucket ?? null) === bucket ? null : bucket);
+  }, [selectedExpirationBucket, setSelectedExpirationBucket]);
+  const toggleMilestoneGroupFilter = useCallback((groupName: string) => {
+    setSelectedMilestoneGroup((selectedMilestoneGroup ?? null) === groupName ? null : groupName);
+  }, [selectedMilestoneGroup, setSelectedMilestoneGroup]);
+  const clearAllDrillFilters = useCallback(() => {
     setInterestRateDrill({ level: 0 });
-  }, []);
+    setSelectedExpirationBucket(null);
+    setSelectedMilestoneGroup(null);
+  }, [setInterestRateDrill, setSelectedExpirationBucket, setSelectedMilestoneGroup]);
 
   const interestRateFilterLabel = useMemo(() => {
     if (interestRateDrill.level === 0) return null;
@@ -342,6 +410,51 @@ export function LockStratificationView({
     if (min === max) return `Rate: ${min.toFixed(4)}`;
     return `Rate: ${min.toFixed(3)} – ${max.toFixed(3)}`;
   }, [interestRateDrill]);
+  const groupDimensionLabel = useMemo(
+    () => MILESTONE_GROUP_OPTIONS.find((o) => o.value === milestoneGroupBy)?.label ?? "Group",
+    [milestoneGroupBy],
+  );
+  const activeFilterLabels = useMemo(() => {
+    const labels: { key: string; text: string; onClear: () => void }[] = [];
+    if (interestRateFilterLabel) {
+      labels.push({
+        key: "interest-rate",
+        text: interestRateFilterLabel,
+        onClear: () => setInterestRateDrill({ level: 0 }),
+      });
+    }
+    if (selectedExpirationBucket) {
+      labels.push({
+        key: "expiration-bucket",
+        text: `Days to Expiration: ${selectedExpirationBucket}`,
+        onClear: () => setSelectedExpirationBucket(null),
+      });
+    }
+    if (selectedMilestoneGroup) {
+      labels.push({
+        key: "milestone-group",
+        text: `${groupDimensionLabel}: ${selectedMilestoneGroup}`,
+        onClear: () => setSelectedMilestoneGroup(null),
+      });
+    }
+    return labels;
+  }, [
+    groupDimensionLabel,
+    interestRateFilterLabel,
+    selectedExpirationBucket,
+    selectedMilestoneGroup,
+    setInterestRateDrill,
+    setSelectedExpirationBucket,
+    setSelectedMilestoneGroup,
+  ]);
+
+  useEffect(() => {
+    if (!didInitMilestoneGroupRef.current) {
+      didInitMilestoneGroupRef.current = true;
+      return;
+    }
+    setSelectedMilestoneGroup(null);
+  }, [milestoneGroupBy, setSelectedMilestoneGroup]);
 
   const displayError =
     error != null
@@ -409,7 +522,6 @@ export function LockStratificationView({
     }
     return flat;
   }, [milestoneChart, milestoneGroupBy, milestonePivot.rows]);
-
   // ── Pivot rows filtered/sorted for current_milestone ──
   const sortedPivotRows = useMemo(() => {
     if (milestoneGroupBy !== "current_milestone") return milestonePivot.rows;
@@ -422,6 +534,51 @@ export function LockStratificationView({
       return aIdx - bIdx;
     });
   }, [milestonePivot.rows, milestoneGroupBy]);
+
+  const renderMilestoneYAxisTick = useCallback(
+    (props: Record<string, unknown>) => {
+      const { x, y, payload } = props as { x: number; y: number; payload: { value: string } };
+      const key = payload?.value ?? "";
+      const parts = key.split("||");
+      const row = milestoneBarData.find((r) => r.compositeKey === key);
+      const groupLabel = row?.isFirstInGroup ? parts[0] : "";
+      const bucketLabel = parts[1] || "";
+      const groupForFilter = row?.group ?? parts[0];
+      return (
+        <g transform={`translate(${x},${y})`}>
+          {groupLabel ? (
+            <foreignObject x={-240} y={-18} width={130} height={36}>
+              <div
+                xmlns="http://www.w3.org/1999/xhtml"
+                style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: isDark ? "#e2e8f0" : "#334155",
+                  lineHeight: "1.25",
+                  textAlign: "left",
+                  overflow: "hidden",
+                  wordWrap: "break-word",
+                  cursor: "pointer",
+                }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  toggleMilestoneGroupFilter(groupForFilter);
+                }}
+                title={`Filter ${groupForFilter}`}
+              >
+                {groupLabel}
+              </div>
+            </foreignObject>
+          ) : null}
+          <text x={-5} y={0} dy={4} textAnchor="end" fontSize={10} fill={isDark ? "#94a3b8" : "#64748b"}>
+            {bucketLabel}
+          </text>
+        </g>
+      );
+    },
+    [milestoneBarData, isDark, toggleMilestoneGroupFilter],
+  );
 
   // ── Interest rate color scale ──
   const rateColorScale = useMemo(() => {
@@ -650,7 +807,19 @@ export function LockStratificationView({
                       );
                     })()}
                     {daysToExpiration.map((row) => (
-                      <tr key={row.bucket} className={cn("border-b", borderRow, row.bucket === "Expired" && (isDark ? "bg-red-900/40" : "bg-red-100"))}>
+                      <tr
+                        key={row.bucket}
+                        className={cn(
+                          "border-b cursor-pointer transition-colors",
+                          borderRow,
+                          selectedExpirationBucket === row.bucket
+                            ? "bg-blue-50/80 dark:bg-slate-700/60 ring-1 ring-inset ring-sky-500/70"
+                            : row.bucket === "Expired"
+                              ? (isDark ? "bg-red-900/40" : "bg-red-100")
+                              : "hover:bg-slate-100/80 dark:hover:bg-slate-700/40",
+                        )}
+                        onClick={() => toggleExpirationBucketFilter(row.bucket)}
+                      >
                         <td className={cn("py-2 px-4", row.bucket === "Expired" ? (isDark ? "text-red-300 font-semibold" : "text-red-800 font-semibold") : textTd)}>{row.bucket}</td>
                         <td className={cn("py-2 px-4 text-right", row.bucket === "Expired" ? (isDark ? "text-red-300" : "text-red-800") : textTd)}>{formatNum(row.units)}</td>
                         <td className={cn("py-2 px-4 text-right", row.bucket === "Expired" ? (isDark ? "text-red-300" : "text-red-800") : textTd)}>{formatCurrency(row.volume)}</td>
@@ -750,7 +919,13 @@ export function LockStratificationView({
               {MILESTONE_GROUP_OPTIONS.map((opt) => (
                 <button
                   key={opt.value}
-                  onClick={() => { (groupId ? updateFilters(groupId, { lockStratMilestoneGroupBy: opt.value }) : setLocalMilestoneGroupBy(opt.value)); setExpandedPivotRows(new Set()); }}
+                  onClick={() => {
+                    (groupId
+                      ? updateFilters(groupId, { lockStratMilestoneGroupBy: opt.value })
+                      : setLocalMilestoneGroupBy(opt.value));
+                    setExpandedPivotRows(new Set());
+                    setSelectedMilestoneGroup(null);
+                  }}
                   className={cn(
                     "px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
                     milestoneGroupBy === opt.value ? (isDark ? "bg-slate-600 text-white" : "bg-slate-700 text-white") : isDark ? "bg-slate-700/50 text-slate-300 hover:bg-slate-700" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
@@ -775,28 +950,14 @@ export function LockStratificationView({
                   <BarChart data={milestoneBarData} layout="vertical" margin={{ top: 8, right: 30, left: 10, bottom: 8 }} barCategoryGap={10}>
                     <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#334155" : "#e2e8f0"} />
                     <XAxis type="number" tick={{ fontSize: 12, fill: isDark ? "#94a3b8" : "#64748b" }} tickFormatter={(v: number) => measure === "volume" ? `${(v / 1_000_000).toFixed(1)}M` : formatNum(v, 0)} label={{ value: measure === "volume" ? "Volume" : measure === "units" ? "Units" : measure === "wac" ? "WAC" : "WA FICO", position: "insideBottom", offset: -2, fontSize: 12, fill: isDark ? "#94a3b8" : "#64748b" }} />
-                    <YAxis dataKey="compositeKey" type="category" width={240} tick={(props: Record<string, unknown>) => {
-                      const { x, y, payload } = props as { x: number; y: number; payload: { value: string } };
-                      const key = payload?.value ?? "";
-                      const parts = key.split("||");
-                      const row = milestoneBarData.find((r) => r.compositeKey === key);
-                      const groupLabel = row?.isFirstInGroup ? parts[0] : "";
-                      const bucketLabel = parts[1] || "";
-                      return (
-                        <g transform={`translate(${x},${y})`}>
-                          {groupLabel && (
-                            <foreignObject x={-240} y={-18} width={130} height={36}>
-                              <div xmlns="http://www.w3.org/1999/xhtml" style={{ fontSize: 13, fontWeight: 600, color: isDark ? "#e2e8f0" : "#334155", lineHeight: "1.25", textAlign: "left", overflow: "hidden", wordWrap: "break-word" }}>{groupLabel}</div>
-                            </foreignObject>
-                          )}
-                          <text x={-5} y={0} dy={4} textAnchor="end" fontSize={10} fill={isDark ? "#94a3b8" : "#64748b"}>{bucketLabel}</text>
-                        </g>
-                      );
-                    }} />
+                    <YAxis dataKey="compositeKey" type="category" width={240} tick={renderMilestoneYAxisTick} />
                     <RechartsTooltip contentStyle={{ backgroundColor: isDark ? "#1e293b" : "#ffffff", border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`, borderRadius: "8px", fontSize: 12 }} labelFormatter={(label: string) => { const parts = String(label).split("||"); return `${parts[0]} — ${parts[1] || ""}`; }} formatter={(value: number) => [measure === "volume" ? formatCurrency(value) : formatNum(value, measure === "wac" ? 3 : 0), measure === "volume" ? "Volume" : measure === "units" ? "Units" : measure === "wac" ? "WAC" : "WA FICO"]} />
                     <Bar dataKey="value" radius={[0, 4, 4, 0]}>
                       {milestoneBarData.map((entry) => (
-                        <Cell key={entry.compositeKey} fill={entry.bucketIdx >= 0 ? BUCKET_COLORS[entry.bucketIdx] : (isDark ? "#475569" : "#94a3b8")} />
+                        <Cell
+                          key={entry.compositeKey}
+                          fill={entry.bucketIdx >= 0 ? BUCKET_COLORS[entry.bucketIdx] : (isDark ? "#475569" : "#94a3b8")}
+                        />
                       ))}
                     </Bar>
                   </BarChart>
@@ -820,7 +981,12 @@ export function LockStratificationView({
               {MILESTONE_GROUP_OPTIONS.map((opt) => (
                 <button
                   key={opt.value}
-                  onClick={() => (groupId ? updateFilters(groupId, { lockStratMilestoneGroupBy: opt.value }) : setLocalMilestoneGroupBy(opt.value))}
+                  onClick={() => {
+                    (groupId
+                      ? updateFilters(groupId, { lockStratMilestoneGroupBy: opt.value })
+                      : setLocalMilestoneGroupBy(opt.value));
+                    setSelectedMilestoneGroup(null);
+                  }}
                   className={cn(
                     "px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
                     milestoneGroupBy === opt.value ? (isDark ? "bg-slate-600 text-white" : "bg-slate-700 text-white") : isDark ? "bg-slate-700/50 text-slate-300 hover:bg-slate-700" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
@@ -862,11 +1028,35 @@ export function LockStratificationView({
                     </tr>
                     {sortedPivotRows.map((row) => (
                       <React.Fragment key={row.group}>
-                        <tr className={cn("border-b cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50", borderRow)} onClick={() => togglePivotRow(row.group)}>
+                        <tr
+                          className={cn(
+                            "border-b transition-colors",
+                            borderRow,
+                            selectedMilestoneGroup === row.group
+                              ? "bg-blue-50/80 dark:bg-slate-700/60 ring-1 ring-inset ring-sky-500/70"
+                              : "",
+                          )}
+                        >
                           <td className="py-2 px-4 font-medium">
                             <span className="inline-flex items-center gap-1">
-                              <ChevronRight className={cn("h-4 w-4 transition-transform", expandedPivotRows.has(row.group) && "rotate-90")} />
-                              {row.group}
+                              <button
+                                type="button"
+                                className="rounded-sm p-0.5 hover:bg-slate-200/70 dark:hover:bg-slate-600/70"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  togglePivotRow(row.group);
+                                }}
+                                aria-label={`Toggle ${row.group} details`}
+                              >
+                                <ChevronRight className={cn("h-4 w-4 transition-transform", expandedPivotRows.has(row.group) && "rotate-90")} />
+                              </button>
+                              <button
+                                type="button"
+                                className="text-left font-medium hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded-sm"
+                                onClick={() => toggleMilestoneGroupFilter(row.group)}
+                              >
+                                {row.group}
+                              </button>
                             </span>
                           </td>
                           <td className={cn("py-2 px-4 text-right", textTd)}>{formatNum(row.units)}</td>
@@ -925,24 +1115,31 @@ export function LockStratificationView({
             </Select>
           </div>
           </div>
-          {interestRateFilterLabel && (
-            <div className="flex flex-wrap items-center gap-2 pt-3 mt-3 border-t border-border/60">
-              <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">Active Filters:</span>
-              <span className="inline-flex items-center gap-1.5 rounded-md bg-sky-100 dark:bg-sky-900/40 px-2.5 py-1 text-sm font-medium text-sky-800 dark:text-sky-200">
-                {interestRateFilterLabel}
-                <button
-                  type="button"
-                  onClick={clearInterestRateFilter}
-                  className="p-0.5 rounded hover:bg-sky-200 dark:hover:bg-sky-800 transition-colors"
-                  aria-label="Clear interest rate filter"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </span>
-            </div>
-          )}
         </CardContent>
       </Card>
+      )}
+      {activeFilterLabels.length > 0 && (
+        <div className="mt-3">
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-100/80 bg-blue-50/50 px-3 py-2 dark:border-slate-700/80 dark:bg-slate-900/40">
+            <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Active filters</span>
+            {activeFilterLabels.map((filter) => (
+              <span key={filter.key} className="inline-flex items-center gap-1 rounded-full border border-sky-500 bg-sky-500 px-2.5 py-0.5 text-sm font-medium text-white">
+                {filter.text}
+                <button
+                  type="button"
+                  onClick={filter.onClear}
+                  className="rounded-sm p-0.5 transition-colors hover:bg-sky-600/80"
+                  aria-label={`Clear ${filter.key} filter`}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+            <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={clearAllDrillFilters}>
+              Clear all filters
+            </Button>
+          </div>
+        </div>
       )}
 
       {/* ── KPIs ── */}
@@ -1092,10 +1289,14 @@ export function LockStratificationView({
                     })()}
                     {daysToExpiration.map((row) => (
                       <tr key={row.bucket} className={cn(
-                        "border-b",
+                        "border-b cursor-pointer transition-colors",
                         borderRow,
-                        row.bucket === "Expired" && (isDark ? "bg-red-900/40" : "bg-red-100")
-                      )}>
+                        selectedExpirationBucket === row.bucket
+                          ? "bg-blue-50/80 dark:bg-slate-700/60 ring-1 ring-inset ring-sky-500/70"
+                          : row.bucket === "Expired"
+                            ? (isDark ? "bg-red-900/40" : "bg-red-100")
+                            : "hover:bg-slate-100/80 dark:hover:bg-slate-700/40",
+                      )} onClick={() => toggleExpirationBucketFilter(row.bucket)}>
                         <td className={cn("py-2 px-4", row.bucket === "Expired" ? (isDark ? "text-red-300 font-semibold" : "text-red-800 font-semibold") : textTd)}>{row.bucket}</td>
                         <td className={cn("py-2 px-4 text-right", row.bucket === "Expired" ? (isDark ? "text-red-300" : "text-red-800") : textTd)}>{formatNum(row.units)}</td>
                         <td className={cn("py-2 px-4 text-right", row.bucket === "Expired" ? (isDark ? "text-red-300" : "text-red-800") : textTd)}>{formatCurrency(row.volume)}</td>
@@ -1211,7 +1412,13 @@ export function LockStratificationView({
                 {MILESTONE_GROUP_OPTIONS.map((opt) => (
                   <button
                     key={opt.value}
-                    onClick={() => { (groupId ? updateFilters(groupId, { lockStratMilestoneGroupBy: opt.value }) : setLocalMilestoneGroupBy(opt.value)); setExpandedPivotRows(new Set()); }}
+                    onClick={() => {
+                      (groupId
+                        ? updateFilters(groupId, { lockStratMilestoneGroupBy: opt.value })
+                        : setLocalMilestoneGroupBy(opt.value));
+                      setExpandedPivotRows(new Set());
+                      setSelectedMilestoneGroup(null);
+                    }}
                     className={cn(
                       "px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
                       milestoneGroupBy === opt.value
@@ -1272,36 +1479,7 @@ export function LockStratificationView({
                         tickFormatter={(v: number) => measure === "volume" ? `${(v / 1_000_000).toFixed(1)}M` : formatNum(v, 0)}
                         label={{ value: measure === "volume" ? "Volume" : measure === "units" ? "Units" : measure === "wac" ? "WAC" : "WA FICO", position: "insideBottom", offset: -2, fontSize: 12, fill: isDark ? "#94a3b8" : "#64748b" }}
                       />
-                      <YAxis
-                        dataKey="compositeKey"
-                        type="category"
-                        width={240}
-                        tick={(props: Record<string, unknown>) => {
-                          const { x, y, payload } = props as { x: number; y: number; payload: { value: string } };
-                          const key = payload?.value ?? "";
-                          const parts = key.split("||");
-                          const row = milestoneBarData.find((r) => r.compositeKey === key);
-                          const groupLabel = row?.isFirstInGroup ? parts[0] : "";
-                          const bucketLabel = parts[1] || "";
-                          return (
-                            <g transform={`translate(${x},${y})`}>
-                              {groupLabel && (
-                                <foreignObject x={-240} y={-18} width={130} height={36}>
-                                  <div
-                                    xmlns="http://www.w3.org/1999/xhtml"
-                                    style={{ fontSize: 13, fontWeight: 600, color: isDark ? "#e2e8f0" : "#334155", lineHeight: "1.25", textAlign: "left", overflow: "hidden", wordWrap: "break-word" }}
-                                  >
-                                    {groupLabel}
-                                  </div>
-                                </foreignObject>
-                              )}
-                              <text x={-5} y={0} dy={4} textAnchor="end" fontSize={10} fill={isDark ? "#94a3b8" : "#64748b"}>
-                                {bucketLabel}
-                              </text>
-                            </g>
-                          );
-                        }}
-                      />
+                      <YAxis dataKey="compositeKey" type="category" width={240} tick={renderMilestoneYAxisTick} />
                       <RechartsTooltip
                         contentStyle={{
                           backgroundColor: isDark ? "#1e293b" : "#ffffff",
@@ -1320,7 +1498,10 @@ export function LockStratificationView({
                       />
                       <Bar dataKey="value" radius={[0, 4, 4, 0]}>
                         {milestoneBarData.map((entry) => (
-                          <Cell key={entry.compositeKey} fill={entry.bucketIdx >= 0 ? BUCKET_COLORS[entry.bucketIdx] : (isDark ? "#475569" : "#94a3b8")} />
+                          <Cell
+                            key={entry.compositeKey}
+                            fill={entry.bucketIdx >= 0 ? BUCKET_COLORS[entry.bucketIdx] : (isDark ? "#475569" : "#94a3b8")}
+                          />
                         ))}
                       </Bar>
                     </BarChart>
@@ -1357,13 +1538,34 @@ export function LockStratificationView({
                       {sortedPivotRows.map((row) => (
                         <React.Fragment key={row.group}>
                           <tr
-                            className={cn("border-b cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50", borderRow)}
-                            onClick={() => togglePivotRow(row.group)}
+                            className={cn(
+                              "border-b transition-colors",
+                              borderRow,
+                              selectedMilestoneGroup === row.group
+                                ? "bg-blue-50/80 dark:bg-slate-700/60 ring-1 ring-inset ring-sky-500/70"
+                                : "",
+                            )}
                           >
                             <td className="py-2 px-4 font-medium">
                               <span className="inline-flex items-center gap-1">
-                                <ChevronRight className={cn("h-4 w-4 transition-transform", expandedPivotRows.has(row.group) && "rotate-90")} />
-                                {row.group}
+                                <button
+                                  type="button"
+                                  className="rounded-sm p-0.5 hover:bg-slate-200/70 dark:hover:bg-slate-600/70"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    togglePivotRow(row.group);
+                                  }}
+                                  aria-label={`Toggle ${row.group} details`}
+                                >
+                                  <ChevronRight className={cn("h-4 w-4 transition-transform", expandedPivotRows.has(row.group) && "rotate-90")} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="text-left font-medium hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded-sm"
+                                  onClick={() => toggleMilestoneGroupFilter(row.group)}
+                                >
+                                  {row.group}
+                                </button>
                               </span>
                             </td>
                             <td className={cn("py-2 px-4 text-right", textTd)}>{formatNum(row.units)}</td>

@@ -64,6 +64,11 @@ async function suppressWelcomeTour(page: Page) {
         "cohi-welcome-tour-last-shown",
         new Date().toISOString(),
       );
+      for (const key of Object.keys(window.localStorage)) {
+        if (key.startsWith("cohi-production-summary-by-week-view-state:")) {
+          window.localStorage.removeItem(key);
+        }
+      }
     } catch {
       /* ignore */
     }
@@ -94,6 +99,8 @@ async function dismissBlockingOverlays(page: Page) {
 }
 
 async function setupProductionSummaryMocks(page: Page) {
+  const persistedPreference: { preference_value: unknown } = { preference_value: null };
+
   await page.route(/\/api\/loans\/detail-list\?/, async (route: Route) => {
     const url = new URL(route.request().url());
     const branch = url.searchParams.get("branch");
@@ -145,6 +152,32 @@ async function setupProductionSummaryMocks(page: Page) {
       });
     },
   );
+
+  await page.route(
+    /\/api\/user\/preferences\/productionSummaryByWeekViewState:v1:tenant:.*:standalone$/,
+    async (route) => {
+      const method = route.request().method();
+      if (method === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(persistedPreference),
+        });
+        return;
+      }
+      if (method === "PUT") {
+        const body = route.request().postDataJSON() as { preference_value?: unknown };
+        persistedPreference.preference_value = body?.preference_value ?? null;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ ok: true }),
+        });
+        return;
+      }
+      await route.continue();
+    },
+  );
 }
 
 function summaryCard(page: Page, title: string) {
@@ -152,6 +185,10 @@ function summaryCard(page: Page, title: string) {
     .locator("div")
     .filter({ has: page.getByRole("heading", { name: title, exact: true }) })
     .first();
+}
+
+function startedYearWeekPill(page: Page) {
+  return page.locator("main").getByText(/^Started YearWeek:/i).first();
 }
 
 async function readSummaryTotalsUnits(page: Page, title: string): Promise<number> {
@@ -241,11 +278,9 @@ test.describe("Production Summary by Week Dashboard (COHI-345)", () => {
     await summaryCard(userPage, "Started Date")
       .getByRole("cell", { name: "2026-W14", exact: true })
       .first()
-      .click();
+      .click({ force: true });
 
-    await expect(
-      userPage.getByRole("button", { name: /Started YearWeek: 2026-W14/i }),
-    ).toBeVisible();
+    await expect(startedYearWeekPill(userPage)).toBeVisible();
 
     const applicationUnitsAfter = await readSummaryTotalsUnits(userPage, "Application Date");
     expect(applicationUnitsAfter).toBeLessThan(applicationUnitsBefore);
@@ -287,15 +322,12 @@ test.describe("Production Summary by Week Dashboard (COHI-345)", () => {
     await summaryCard(userPage, "Started Date")
       .getByRole("cell", { name: "2026-W14", exact: true })
       .first()
-      .click();
-    await expect(
-      userPage.getByRole("button", { name: /Started YearWeek: 2026-W14/i }),
-    ).toBeVisible();
+      .click({ force: true });
+    await expect(userPage.getByText("Active filters", { exact: true })).toBeVisible();
+    await expect(startedYearWeekPill(userPage)).toBeVisible();
 
     await userPage.getByRole("button", { name: /Clear all filters/i }).click();
-    await expect(
-      userPage.getByRole("button", { name: /Started YearWeek: 2026-W14/i }),
-    ).toHaveCount(0);
+    await expect(startedYearWeekPill(userPage)).toHaveCount(0);
     await expect(userPage.getByText("Loan count: 3", { exact: true })).toBeVisible();
   });
 

@@ -234,15 +234,31 @@ async function ensureGroupFiltersExpanded(
 
 /** Slice-filter popover is portaled; scope by Apply Filters to avoid other poppers (e.g. YearMonth). */
 function sliceFilterPopover(userPage: Page) {
-  return userPage
-    .locator("[data-radix-popper-content-wrapper]")
+  return userPage.locator("[data-radix-popper-content-wrapper]");
+}
+
+async function getVisibleSliceFilterPopover(userPage: Page) {
+  const wrappers = sliceFilterPopover(userPage);
+  const count = await wrappers.count();
+  for (let i = count - 1; i >= 0; i -= 1) {
+    const candidate = wrappers.nth(i);
+    const visible = await candidate.isVisible().catch(() => false);
+    if (!visible) continue;
+    const hasApply = await candidate
+      .getByRole("button", { name: "Apply Filters" })
+      .first()
+      .isVisible()
+      .catch(() => false);
+    if (hasApply) return candidate;
+  }
+  return wrappers
     .filter({ has: userPage.getByRole("button", { name: "Apply Filters" }) })
     .last();
 }
 
 async function clickSlicePopoverButton(userPage: Page, label: "Clear Selection" | "Cancel" | "Apply Filters") {
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const pop = sliceFilterPopover(userPage);
+    const pop = await getVisibleSliceFilterPopover(userPage);
     await expect(pop).toBeVisible({ timeout: 15_000 });
     const button = pop.getByRole("button", { name: label });
     await expect(button).toBeVisible({ timeout: 15_000 });
@@ -352,7 +368,7 @@ test.describe("Production Trends (COHI-346)", () => {
     await expect(main.getByRole("button", { name: /^Branch: North$/ })).toBeVisible({ timeout: 15_000 });
 
     await main.getByRole("button", { name: /^Branch: North$/ }).click();
-    const pop = sliceFilterPopover(userPage);
+    const pop = await getVisibleSliceFilterPopover(userPage);
     await expect(pop).toBeVisible({ timeout: 15_000 });
     await expect(pop.getByRole("button", { name: "Apply Filters" })).toBeVisible();
     await expect(pop.getByRole("button", { name: "Cancel" })).toBeVisible();
@@ -363,11 +379,13 @@ test.describe("Production Trends (COHI-346)", () => {
 
     await main.getByRole("button", { name: /^Branch: North$/ }).click();
     await clickSlicePopoverButton(userPage, "Clear Selection");
+    await main.getByRole("button", { name: /^Branch: North$/ }).click();
     await clickSlicePopoverButton(userPage, "Cancel");
     await expect(main.getByRole("button", { name: /^Branch: North$/ })).toBeVisible();
 
     await main.getByRole("button", { name: /^Branch: North$/ }).click();
     await clickSlicePopoverButton(userPage, "Clear Selection");
+    await main.getByRole("button", { name: /^Branch: North$/ }).click();
     await clickSlicePopoverButton(userPage, "Apply Filters");
     await expect(main.getByRole("button", { name: /^Branch: North$/ })).toHaveCount(0);
   });
