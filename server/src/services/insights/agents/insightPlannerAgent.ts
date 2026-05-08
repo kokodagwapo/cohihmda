@@ -156,6 +156,11 @@ export interface InsightPlannerContext {
   bucketFocus?: string;
   /** When set, planner generates questions scoped to this functional category only. */
   categoryFocus?: CategoryDefinition;
+  /**
+   * My Insights only: short narrative + bullets describing this user's behavioral interests.
+   * When omitted (tenant-wide runs), the planner prompt is unchanged.
+   */
+  userInterestProfile?: string;
 }
 
 function buildUserPrompt(ctx: InsightPlannerContext): string {
@@ -209,6 +214,11 @@ function buildUserPrompt(ctx: InsightPlannerContext): string {
 
   if (ctx.staleLoanContext) {
     prompt += `## Stale Loan Data\n${ctx.staleLoanContext}\n\n`;
+  }
+
+  if (ctx.userInterestProfile && ctx.userInterestProfile.trim()) {
+    prompt += `## User interest profile\n${ctx.userInterestProfile.trim()}\n\n`;
+    prompt += `Prioritize investigation questions that align with this user's demonstrated interests and responsibilities, while still including a balanced mix of risk, performance, and context as in the global rules.\n\n`;
   }
 
   if (ctx.bucketFocus) {

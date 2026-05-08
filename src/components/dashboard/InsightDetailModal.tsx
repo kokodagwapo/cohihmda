@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, AlertTriangle, Loader2, Download, Calendar, Telescope, FlaskConical, Lightbulb, Target, ShieldAlert, Zap, User, ChevronDown, ChevronRight, Database, ArrowUpDown, ArrowUp, ArrowDown, Search, Bookmark, Check, HelpCircle, TrendingUp, TrendingDown, MessageSquare } from 'lucide-react';
+import { X, AlertTriangle, Loader2, Download, Calendar, Telescope, FlaskConical, Lightbulb, Target, ShieldAlert, Zap, User, ChevronDown, ChevronRight, Database, ArrowUpDown, ArrowUp, ArrowDown, Search, Bookmark, Check, HelpCircle, TrendingUp, TrendingDown, MessageSquare, Sparkles } from 'lucide-react';
 import {
   useReactTable,
   getCoreRowModel,
@@ -190,6 +190,8 @@ interface DetailData {
   dataAsOf?: string;
   rows?: Record<string, any>[];
   etm?: ETMSection;
+  /** My Insights: ties the card to the user's interest profile */
+  profile_relevance?: string | null;
   comparison?: ComparisonData | null;
   audit?: EvidenceAuditData | null;
   data_quality?: InsightDataQualityMeta;
@@ -1020,6 +1022,18 @@ export const InsightDetailModal = ({
               <div className="space-y-6">
                 {data.data_quality?.flagged && (
                   <DataQualityImpactBlock dq={data.data_quality} />
+                )}
+
+                {data.profile_relevance?.trim() && (
+                  <div className="rounded-xl border border-blue-200/70 dark:border-blue-800/50 bg-blue-50/60 dark:bg-blue-950/25 p-4">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300 mb-1.5 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      Why this is for you
+                    </h3>
+                    <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">
+                      {data.profile_relevance.trim()}
+                    </p>
+                  </div>
                 )}
 
                 {/* ========== Recommended Action Hero Callout ========== */}

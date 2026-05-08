@@ -156,6 +156,8 @@ export interface Insight {
   evidence_refs?: Array<{ widgetId: string; role: string; target?: { type: string; label: string }; value?: string }>;
   cited_numbers?: string[];
   supporting_data?: { byPeriod?: Array<{ period: string; periodLabel?: string; averagePullThrough?: number; totalUnits?: number; totalVolume?: number; topPerformerName?: string; topPerformerUnits?: number; topPerformerVolume?: number }> };
+  /** My Insights: sentence tying the card to the user's interest profile */
+  profile_relevance?: string | null;
 }
 
 /**
@@ -3321,5 +3323,181 @@ export async function getFinancialModelingBaseline(
       return emptyResult();
     }
     throw dbError;
+  }
+}
+
+/**
+ * Load persisted My Insights (per-user agent + custom prompts) for the briefing UI.
+ */
+export async function getMyInsights(
+  tenantPool: pg.Pool,
+  userId: string,
+  options: { tenantId?: string; dateFilter?: string } = {}
+): Promise<{
+  insights: Insight[];
+  generatedAt: string;
+  dateFilter: string;
+  usedLLM: boolean;
+  needsGeneration: boolean;
+  summary: {
+    totalLoans: number;
+    revenue: number;
+    pullThroughRate: string;
+    avgCycleTime: number;
+    totalInsights: number;
+    bySource: {
+      business_overview: number;
+      leaderboard: number;
+      industry_news: number;
+      loan_funnel: number;
+      predictions?: number;
+      dashboard_insights?: number;
+    };
+  };
+}> {
+  const dateFilter = options.dateFilter || "ytd";
+  const emptySummary = {
+    totalLoans: 0,
+    revenue: 0,
+    pullThroughRate: "0",
+    avgCycleTime: 0,
+    totalInsights: 0,
+    bySource: {
+      business_overview: 0,
+      leaderboard: 0,
+      industry_news: 0,
+      loan_funnel: 0,
+      predictions: 0,
+      dashboard_insights: 0,
+    },
+  };
+
+  try {
+    const tableCheck = await tenantPool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'user_generated_insights'
+      ) AS exists
+    `);
+    if (!tableCheck.rows[0]?.exists) {
+      return {
+        insights: [],
+        generatedAt: new Date().toISOString(),
+        dateFilter,
+        usedLLM: true,
+        needsGeneration: true,
+        summary: emptySummary,
+      };
+    }
+
+    const result = await tenantPool.query(
+      `SELECT *
+       FROM public.user_generated_insights
+       WHERE user_id = $1 AND date_filter = $2
+       ORDER BY
+         CASE bucket
+           WHEN 'critical' THEN 0
+           WHEN 'attention' THEN 1
+           WHEN 'working' THEN 2
+           WHEN 'context' THEN 3
+         END,
+         COALESCE(value_score, severity_score) DESC NULLS LAST`,
+      [userId, dateFilter]
+    );
+
+    if (result.rows.length === 0) {
+      return {
+        insights: [],
+        generatedAt: new Date().toISOString(),
+        dateFilter,
+        usedLLM: true,
+        needsGeneration: true,
+        summary: emptySummary,
+      };
+    }
+
+    const insights: Insight[] = await Promise.all(
+      result.rows.map(async (row: any) => {
+        const ev = row.evidence || {};
+        const priority =
+          parseFloat(row.severity_score) >= 0.8
+            ? "critical"
+            : parseFloat(row.severity_score) >= 0.55
+              ? "high"
+              : parseFloat(row.severity_score) >= 0.3
+                ? "medium"
+                : "low";
+        const bulletGenMethod =
+          row.detail_data?.type === "agent_finding" ? "agent" : row.generation_method || "pipeline";
+        const understory_bullets = Array.isArray(row.understory_bullets)
+          ? row.understory_bullets
+          : await buildUnderstoryBullets(
+              selectBulletSource({
+                generation_method: bulletGenMethod,
+                detail_data: row.detail_data,
+                understory: row.understory,
+              }).text,
+              {
+                headline: row.headline,
+                tenantId: options.tenantId,
+                sourceLabel: selectBulletSource({
+                  generation_method: bulletGenMethod,
+                  detail_data: row.detail_data,
+                  understory: row.understory,
+                }).sourceLabel,
+              }
+            );
+
+        return {
+          id: row.id,
+          type: row.insight_type,
+          message: row.headline,
+          priority,
+          reasoning: row.understory,
+          source: row.insight_origin === "custom_prompt" ? "custom_prompt" : row.source || "operations",
+          forPodcast: row.for_podcast,
+          bucket: row.bucket,
+          headline: row.headline,
+          understory: row.understory,
+          understory_bullets,
+          severity_score: parseFloat(row.severity_score) || 0,
+          bucketPriority: row.priority,
+          impact: row.impact || {},
+          evidence: ev,
+          what_changed: ev.what_changed,
+          why: ev.why,
+          business_impact: ev.business_impact,
+          risk_if_ignored: ev.risk_if_ignored,
+          recommended_action: ev.recommended_action,
+          owner: ev.owner,
+          generation_method: row.generation_method === "user_agent" ? "agent" : "pipeline",
+          detail_data: row.detail_data || null,
+          functional_category: row.functional_category || null,
+          profile_relevance: row.profile_relevance ?? null,
+        };
+      })
+    );
+
+    return {
+      insights,
+      generatedAt: result.rows[0].generated_at,
+      dateFilter,
+      usedLLM: true,
+      needsGeneration: false,
+      summary: {
+        ...emptySummary,
+        totalInsights: insights.length,
+      },
+    };
+  } catch (e) {
+    console.warn("[Insights] getMyInsights failed:", e);
+    return {
+      insights: [],
+      generatedAt: new Date().toISOString(),
+      dateFilter,
+      usedLLM: false,
+      needsGeneration: true,
+      summary: emptySummary,
+    };
   }
 }

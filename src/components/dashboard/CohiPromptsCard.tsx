@@ -21,6 +21,7 @@ import {
   MessageSquare,
   AlertCircle,
   AlertTriangle,
+  Info,
   CheckCircle2,
   TrendingUp,
   ChevronsDownUp,
@@ -340,6 +341,8 @@ const SOURCE_CHIP_LABELS: Record<string, string> = {
   revenue: "Revenue & Margin",
   credit_risk: "Credit Risk",
   operations: "Operations",
+  behavior: "For you",
+  custom_prompt: "Your prompt",
   // --- legacy / alias keys (kept for already-persisted insights) ---
   pipeline_velocity: "Pipeline",
   officer_performance: "Performance",
@@ -386,6 +389,55 @@ function getPrimaryCategoryChipLabel(insight: CohiInsight): string {
     return FUNCTIONAL_CATEGORY_LABELS[fc];
   }
   return getInsightChipLabel(insight);
+}
+
+function iconForInsightType(type: string) {
+  switch (type) {
+    case "success":
+      return CheckCircle2;
+    case "warning":
+      return AlertTriangle;
+    case "error":
+    case "critical":
+      return AlertCircle;
+    default:
+      return Info;
+  }
+}
+
+/** Map GET /api/dashboard/insights/my to CohiInsight (source `my` for detail API). */
+function mapMyInsightsResponse(data: { insights?: Record<string, unknown>[] }): CohiInsight[] {
+  if (!data.insights?.length) return [];
+  return data.insights.map((insight: any) => ({
+    insightId: insight.id ?? insight.insightId,
+    type: (insight.type || "info") as CohiInsight["type"],
+    icon: iconForInsightType(insight.type || "info"),
+    message: insight.headline || insight.message || "",
+    priority: (insight.priority || "standard") as CohiInsight["priority"],
+    reasoning: insight.understory || insight.reasoning || "",
+    source: "my",
+    bucket: insight.bucket,
+    headline: insight.headline,
+    understory: insight.understory,
+    understory_bullets: Array.isArray(insight.understory_bullets) ? insight.understory_bullets : undefined,
+    severity_score: insight.severity_score,
+    bucketPriority: insight.bucketPriority,
+    impact: insight.impact,
+    evidence: insight.evidence,
+    what_changed: insight.what_changed,
+    why: insight.why,
+    business_impact: insight.business_impact,
+    risk_if_ignored: insight.risk_if_ignored,
+    recommended_action: insight.recommended_action,
+    owner: insight.owner,
+    generation_method: insight.generation_method,
+    detail_data: insight.detail_data || null,
+    functional_category: insight.functional_category ?? null,
+    profile_relevance:
+      typeof insight.profile_relevance === "string" && insight.profile_relevance.trim()
+        ? insight.profile_relevance.trim()
+        : null,
+  }));
 }
 
 interface BucketLaneProps {
@@ -556,6 +608,15 @@ function BucketLane({
                 {insight.headline || insight.message}
               </p>
             </div>
+            {insight.profile_relevance?.trim() && (
+              <p
+                className="mt-1.5 text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 leading-snug border-l-2 border-blue-300/80 dark:border-blue-600/50 pl-2.5"
+                data-testid="insight-profile-relevance"
+              >
+                <span className="font-semibold text-slate-600 dark:text-slate-300">Why you&apos;re seeing this</span>
+                <span className="font-normal"> — {insight.profile_relevance}</span>
+              </p>
+            )}
             {insight.source === "dashboard_insights" && insight.sourcePageId && insight.sourcePageName && (
               <GoToDashboardPageButton
                 sourcePageId={insight.sourcePageId}
@@ -1001,8 +1062,9 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
   const [expandToggleKey, setExpandToggleKey] = useState(0);
 
   // Auth context — admin controls only shown for platform staff
-  const { isPlatformStaff } = useAuth();
+  const { isPlatformStaff, isSuperAdmin } = useAuth();
   const isAdmin = isPlatformStaff();
+  const isSuperAdminUser = isSuperAdmin();
   const {
     lastSyncedAt: losLastSyncedAt,
     syncFrequency: losSyncFrequency,
@@ -1020,6 +1082,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
     metadata,
     needsGeneration,
     refreshInsights,
+    refreshMyInsightsAllUsers,
     refreshBucket,
     generateMoreInsights,
     reloadInsightsFromDb,
@@ -1037,13 +1100,20 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
     selectedChannel
   );
 
-  const [activeTab, setActiveTab] = useState<"pipeline" | "agent" | "watchlist">("agent");
+  const [activeTab, setActiveTab] = useState<"pipeline" | "agent" | "my_insights">("agent");
+  const [myInsights, setMyInsights] = useState<CohiInsight[]>([]);
+  const [myInsightsLoading, setMyInsightsLoading] = useState(false);
+  const [myInsightsNeedsGen, setMyInsightsNeedsGen] = useState(false);
   const [activeCategoryId, setActiveCategoryId] = useState<string>("all");
   const [agentFinding, setAgentFinding] = useState<Finding | null>(null);
   const [agentFindingInsight, setAgentFindingInsight] = useState<CohiInsight | null>(null);
 
   const [refreshJobId, setRefreshJobId] = useState<string | null>(null);
   const refreshJob = useJobStatus(refreshJobId);
+
+  const [myInsightsAllUsersJobId, setMyInsightsAllUsersJobId] = useState<string | null>(null);
+  const myInsightsAllUsersJob = useJobStatus(myInsightsAllUsersJobId);
+  const [myInsightsAllUsersError, setMyInsightsAllUsersError] = useState<string | null>(null);
 
   const [agentJobId, setAgentJobId] = useState<string | null>(null);
   const agentJob = useJobStatus(agentJobId);
@@ -1096,14 +1166,50 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
   }, [fetchAndBuildPipelineMap]);
 
   const isRefreshing = refreshJob.status === "processing";
+  const isMyInsightsAllUsersRefreshing = myInsightsAllUsersJob.status === "processing";
   const isAgentGenerating = agentJob.status === "processing";
+
+  const loadMyInsights = useCallback(async () => {
+    setMyInsightsLoading(true);
+    try {
+      const tenantParam = selectedTenantId
+        ? `&tenant_id=${encodeURIComponent(selectedTenantId)}`
+        : "";
+      const data = await api.request<any>(
+        `/api/dashboard/insights/my?dateFilter=${dateFilter}${tenantParam}`
+      );
+      setMyInsights(mapMyInsightsResponse(data));
+      setMyInsightsNeedsGen(!!data.needsGeneration);
+    } catch (e) {
+      console.error("Failed to load My Insights:", e);
+      setMyInsights([]);
+      setMyInsightsNeedsGen(true);
+    } finally {
+      setMyInsightsLoading(false);
+    }
+  }, [dateFilter, selectedTenantId]);
 
   useEffect(() => {
     if (refreshJob.status === "complete") {
       reloadInsightsFromDb().catch(() => {});
+      void loadMyInsights();
       setRefreshJobId(null);
     }
-  }, [refreshJob.status, reloadInsightsFromDb]);
+  }, [refreshJob.status, reloadInsightsFromDb, loadMyInsights]);
+
+  useEffect(() => {
+    if (myInsightsAllUsersJob.status === "complete") {
+      setMyInsightsAllUsersError(null);
+      void loadMyInsights();
+      setMyInsightsAllUsersJobId(null);
+    } else if (myInsightsAllUsersJob.status === "failed") {
+      setMyInsightsAllUsersError(
+        myInsightsAllUsersJob.error || "Bulk My Insights refresh failed"
+      );
+      void loadMyInsights();
+      setMyInsightsAllUsersJobId(null);
+    }
+  }, [myInsightsAllUsersJob.status, myInsightsAllUsersJob.error, loadMyInsights]);
 
   useEffect(() => {
     if (agentJob.status === "complete") {
@@ -1125,14 +1231,23 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
     if (jobId) setRefreshJobId(jobId);
   }, [refreshInsights, isRefreshing]);
 
+  const handleRefreshMyInsightsAllUsers = useCallback(async () => {
+    if (!isSuperAdminUser || isMyInsightsAllUsersRefreshing) return;
+    setMyInsightsAllUsersError(null);
+    const jobId = await refreshMyInsightsAllUsers();
+    if (jobId) setMyInsightsAllUsersJobId(jobId);
+  }, [isSuperAdminUser, refreshMyInsightsAllUsers, isMyInsightsAllUsersRefreshing]);
+
   const handleTabSwitch = useCallback(
-    async (tab: "pipeline" | "agent" | "watchlist") => {
+    async (tab: "pipeline" | "agent" | "my_insights") => {
       setActiveTab(tab);
       if (tab === "pipeline" || tab === "agent") {
         await loadInsightsByMethod(tab);
+      } else if (tab === "my_insights") {
+        await loadMyInsights();
       }
     },
-    [loadInsightsByMethod]
+    [loadInsightsByMethod, loadMyInsights]
   );
 
   const handleCategoryRefresh = useCallback(
@@ -1443,6 +1558,21 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
     return map;
   }, [filteredInsights]);
 
+  const bucketedMyInsights = useMemo(() => {
+    const map: Record<string, CohiInsight[]> = {
+      critical: [],
+      attention: [],
+      working: [],
+      context: [],
+    };
+    for (const insight of myInsights) {
+      const bucket = insight.bucket || "context";
+      if (map[bucket]) map[bucket].push(insight);
+      else map.context.push(insight);
+    }
+    return map;
+  }, [myInsights]);
+
   // Per-category counts and critical flags for badge display
   const categoryStats = useMemo(() => {
     const stats: Record<string, { total: number; hasCritical: boolean }> = {};
@@ -1487,6 +1617,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
 
   const hasInsights = allInsights.length > 0;
   const hasFilteredInsights = filteredInsights.length > 0;
+  const hasMyInsights = myInsights.length > 0;
   const activeCategoryDef = CATEGORY_TABS.find((c) => c.id === activeCategoryId);
 
   return (
@@ -1696,7 +1827,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
         <div className="flex items-center gap-1 mb-5 border-b border-slate-200/60 dark:border-slate-700/60 -mx-1 px-1">
           {([
             { id: "agent" as const, label: "Insights", icon: Sparkles },
-            { id: "watchlist" as const, label: "Watchlist", icon: Bookmark },
+            { id: "my_insights" as const, label: "My Insights", icon: Bookmark },
           ]).map((tab) => (
             <button
               key={tab.id}
@@ -1818,31 +1949,101 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
           </div>
         )}
 
-        {/* ===== Watchlist Tab ===== */}
-        {activeTab === "watchlist" && (
+        {/* ===== My Insights Tab (personal feed + tracked section) ===== */}
+        {activeTab === "my_insights" && (
           <>
-            {isAdmin && (
-              <div className="mb-3 flex justify-end">
+            {isSuperAdminUser && (
+              <div className="mb-6 flex flex-col items-end gap-2">
                 <button
                   type="button"
-                  onClick={handleRunTrackedReevaluation}
-                  disabled={trackedReevalLoading}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
+                  onClick={() => void handleRefreshMyInsightsAllUsers()}
+                  disabled={isMyInsightsAllUsersRefreshing}
+                  className="inline-flex shrink-0 items-center justify-center gap-2 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium disabled:opacity-50"
+                  title="Super admin: refresh My Insights for all tenant users"
                 >
-                  {trackedReevalLoading ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" aria-hidden />
-                  ) : null}
-                  Run Tracked Re-Evaluation
+                  {isMyInsightsAllUsersRefreshing ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-4 h-4" />
+                  )}
+                  Regenerate for all users
                 </button>
+                {myInsightsAllUsersError && (
+                  <p className="text-xs text-rose-600 dark:text-rose-400 text-right max-w-md" role="alert">
+                    {myInsightsAllUsersError}
+                  </p>
+                )}
               </div>
             )}
-            <TrackedInsightsWatchlist
-              selectedTenantId={selectedTenantId}
-              refreshTrigger={watchlistRefreshTrigger}
-              onInsightRemoved={() => {
-                fetchAndBuildPipelineMap(true).then(setTrackedPipelineMap).catch(() => {});
-              }}
-            />
+            {myInsightsLoading && !hasMyInsights && (
+              <div className="flex flex-col gap-4 mb-6">
+                {[0, 1].map((i) => (
+                  <div
+                    key={i}
+                    className="h-24 rounded-2xl bg-slate-100/80 dark:bg-slate-800/40 animate-pulse"
+                  />
+                ))}
+              </div>
+            )}
+            {!myInsightsLoading && myInsightsNeedsGen && !hasMyInsights && (
+              <div className="rounded-2xl border border-slate-200/60 dark:border-slate-700/60 bg-slate-50/80 dark:bg-slate-800/40 backdrop-blur-sm p-6 text-center mb-6">
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  {isSuperAdminUser
+                    ? "No personalized insights yet for your account. They generate after data sync, or use Regenerate for all users to refresh every active user in this tenant."
+                    : "No personalized insights yet. They are created automatically after data sync."}
+                </p>
+              </div>
+            )}
+            {hasMyInsights && (
+              <div className="flex flex-col gap-4 mb-8">
+                {BUCKET_ORDER.map((bucket) => {
+                  const items = bucketedMyInsights[bucket.id] || [];
+                  if (items.length === 0) return null;
+                  return (
+                    <BucketLane
+                      key={`my-${bucket.id}`}
+                      config={bucket}
+                      insights={items}
+                      onInsightClick={handleInsightClick}
+                      isDrillable={isDrillable}
+                      globalExpanded={globalExpanded}
+                      expandToggleKey={expandToggleKey}
+                      onSubmitFeedback={undefined}
+                      isTracked={() => false}
+                      onToggleTrack={undefined}
+                      isAdmin={isAdmin}
+                    />
+                  );
+                })}
+              </div>
+            )}
+            <div className="border-t border-slate-200/60 dark:border-slate-700/60 pt-6">
+              <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-3">
+                Tracked insights
+              </h3>
+              {isAdmin && (
+                <div className="mb-3 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={handleRunTrackedReevaluation}
+                    disabled={trackedReevalLoading}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
+                  >
+                    {trackedReevalLoading ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" aria-hidden />
+                    ) : null}
+                    Run Tracked Re-Evaluation
+                  </button>
+                </div>
+              )}
+              <TrackedInsightsWatchlist
+                selectedTenantId={selectedTenantId}
+                refreshTrigger={watchlistRefreshTrigger}
+                onInsightRemoved={() => {
+                  fetchAndBuildPipelineMap(true).then(setTrackedPipelineMap).catch(() => {});
+                }}
+              />
+            </div>
           </>
         )}
 
@@ -1869,7 +2070,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
         )}
 
         {/* ===== Loading shimmer ===== */}
-        {activeTab !== "watchlist" && insightsLoading && !hasInsights && !(refreshJob.status === "processing") && (
+        {activeTab === "agent" && insightsLoading && !hasInsights && !(refreshJob.status === "processing") && (
           <div className="flex flex-col gap-4">
             {[0, 1, 2].map((i) => (
               <div
@@ -1881,7 +2082,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
         )}
 
         {/* ===== Needs Generation CTA ===== */}
-        {activeTab !== "watchlist" && !insightsLoading && needsGeneration && !hasInsights && (
+        {activeTab === "agent" && !insightsLoading && needsGeneration && !hasInsights && (
           <div className="rounded-2xl border border-slate-200/60 dark:border-slate-700/60 bg-slate-50/80 dark:bg-slate-800/40 backdrop-blur-sm p-8 text-center">
             <div className="flex flex-col items-center gap-4">
               <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
@@ -1920,7 +2121,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
         )}
 
         {/* ===== Empty state (no data at all) ===== */}
-        {activeTab !== "watchlist" && !insightsLoading && !needsGeneration && !hasInsights && (
+        {activeTab === "agent" && !insightsLoading && !needsGeneration && !hasInsights && (
           <div className="rounded-2xl border border-slate-200/60 dark:border-slate-700/60 bg-slate-50/80 dark:bg-slate-800/40 backdrop-blur-sm p-6 text-center">
             <p className="text-sm text-slate-600 dark:text-slate-400">
               Insights will appear once live data is available for this tenant.
@@ -1929,7 +2130,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
         )}
 
         {/* ===== Generating overlay ===== */}
-        {activeTab !== "watchlist" && isRefreshing && hasInsights && (
+        {activeTab === "agent" && isRefreshing && hasInsights && (
           <div className="mb-4 flex items-center justify-center gap-2 py-2 px-4 rounded-xl bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-800/40">
             <RefreshCw
               className="w-3.5 h-3.5 text-blue-500 animate-spin"
@@ -1984,7 +2185,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
         )}
 
         {/* ===== Bucket Lanes (stacked) ===== */}
-        {activeTab !== "watchlist" && hasFilteredInsights && (
+        {activeTab === "agent" && hasFilteredInsights && (
           <div className="flex flex-col gap-4">
             {BUCKET_ORDER.map((bucket) => {
               const items = bucketedInsights[bucket.id] || [];
@@ -2046,7 +2247,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
           setSelectedInsight(null);
           setUseDashboardEvidenceModalFallback(false);
         }}
-        insightSource={selectedInsight?.source || ""}
+        insightSource={selectedInsight?.source === "my" ? "my" : selectedInsight?.source || ""}
         insightMessage={selectedInsight?.message || ""}
         insightId={selectedInsight?.insightId}
         dateFilter={dateFilter}
