@@ -10,9 +10,23 @@ import {
   getTenantContext,
 } from '../middleware/tenantContext.js';
 import { requireRole } from '../middleware/rbac.js';
-import { computeNextRunAt } from '../services/distributionScheduler.js';
+import {
+  computeNextRunAt,
+  computeNextScheduleRuns,
+  normalizeMonthlyDays,
+} from '../services/distributionScheduler.js';
 
 const router = Router();
+
+/** Parse and dedupe schedule_days from client JSON */
+function parseScheduleDaysInput(input: unknown): number[] | null {
+  if (!Array.isArray(input)) return null;
+  const nums = input
+    .map((x) => Number(x))
+    .filter((n) => Number.isInteger(n) && n >= 1 && n <= 31);
+  const uniq = [...new Set(nums)].sort((a, b) => a - b);
+  return uniq.length ? uniq : null;
+}
 const requireDistributionsAdmin = requireRole(
   'tenant_admin',
   'super_admin',
@@ -214,7 +228,7 @@ router.get(
       }
       const result = await tenantPool.query(
         `SELECT d.id, d.name, d.description, d.created_by, d.content_type, d.content_id, d.content_config,
-                d.frequency, d.schedule_time, d.schedule_day, d.timezone,
+                d.frequency, d.schedule_time, d.schedule_day, d.schedule_days, d.timezone,
                 d.recipient_list_id, d.recipient_emails,
                 d.is_active, d.last_sent_at, d.next_run_at, d.failure_count, d.created_at, d.updated_at,
                 r.name AS recipient_list_name
@@ -259,6 +273,7 @@ router.post(
         frequency,
         schedule_time = '08:00',
         schedule_day,
+        schedule_days,
         timezone = 'America/New_York',
         recipient_list_id,
         recipient_emails = [],
@@ -279,17 +294,39 @@ router.post(
       }
       const scheduleTime = typeof schedule_time === 'string' ? schedule_time : '08:00';
       const tz = typeof timezone === 'string' ? timezone : 'America/New_York';
+      const parsedDays = parseScheduleDaysInput(schedule_days);
+      let scheduleDayOut =
+        schedule_day != null && schedule_day !== '' ? Number(schedule_day) : null;
+      let scheduleDaysOut: number[] | null = parsedDays;
+
+      if (frequency === 'monthly') {
+        const normalized = normalizeMonthlyDays(scheduleDaysOut, scheduleDayOut);
+        if (!normalized || normalized.length === 0) {
+          return res.status(400).json({
+            error: 'Monthly schedules require at least one day (schedule_days 1–31 or legacy schedule_day)',
+          });
+        }
+        scheduleDaysOut = normalized;
+        scheduleDayOut = normalized[0];
+      }
+
       const nextRunAt =
         frequency !== 'one_time'
-          ? computeNextRunAt(frequency, scheduleTime, schedule_day != null ? schedule_day : null, tz)
+          ? computeNextRunAt(
+              frequency,
+              scheduleTime,
+              scheduleDayOut,
+              tz,
+              scheduleDaysOut
+            )
           : null;
       const result = await tenantPool.query(
         `INSERT INTO public.distribution_schedules
          (name, description, created_by, content_type, content_id, content_config,
-          frequency, schedule_time, schedule_day, timezone, recipient_list_id, recipient_emails, next_run_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+          frequency, schedule_time, schedule_day, schedule_days, timezone, recipient_list_id, recipient_emails, next_run_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
          RETURNING id, name, description, created_by, content_type, content_id, content_config,
-                   frequency, schedule_time, schedule_day, timezone, recipient_list_id, recipient_emails,
+                   frequency, schedule_time, schedule_day, schedule_days, timezone, recipient_list_id, recipient_emails,
                    is_active, last_sent_at, next_run_at, failure_count, created_at, updated_at`,
         [
           name.trim(),
@@ -300,7 +337,8 @@ router.post(
           sanitizedContentConfig,
           frequency,
           scheduleTime,
-          schedule_day != null ? schedule_day : null,
+          scheduleDayOut,
+          scheduleDaysOut,
           tz,
           recipient_list_id ?? null,
           Array.isArray(recipient_emails) ? recipient_emails : [],
@@ -321,6 +359,69 @@ router.post(
 // ---------------------------------------------------------------------------
 // Schedule by id — get, update, delete, send-now, history, preview
 // ---------------------------------------------------------------------------
+
+/** POST /preview-schedule — Next N run instants (same logic as scheduler; no persistence) */
+router.post(
+  '/preview-schedule',
+  authenticateToken,
+  attachTenantContext,
+  requireDistributionsAdmin,
+  async (req: AuthRequest, res) => {
+    try {
+      const {
+        frequency,
+        schedule_time = '08:00',
+        schedule_day,
+        schedule_days,
+        timezone = 'America/New_York',
+        count = 3,
+      } = req.body ?? {};
+      if (
+        !frequency ||
+        !['daily', 'weekly', 'biweekly', 'monthly', 'one_time'].includes(frequency)
+      ) {
+        return res.status(400).json({
+          error: 'frequency must be daily, weekly, biweekly, monthly, or one_time',
+        });
+      }
+      if (frequency === 'one_time') {
+        return res.json({ runs: [] });
+      }
+      const scheduleTime = typeof schedule_time === 'string' ? schedule_time : '08:00';
+      const tz = typeof timezone === 'string' ? timezone : 'America/New_York';
+      const c = Math.min(10, Math.max(1, parseInt(String(count), 10) || 3));
+      const parsedDays = parseScheduleDaysInput(schedule_days);
+      const dayNum =
+        schedule_day != null && schedule_day !== '' ? Number(schedule_day) : null;
+
+      if (frequency === 'monthly') {
+        const normalized = normalizeMonthlyDays(parsedDays, dayNum);
+        if (!normalized?.length) {
+          return res.status(400).json({
+            error:
+              'Monthly schedules require at least one day (schedule_days 1–31 or legacy schedule_day)',
+          });
+        }
+      }
+
+      const runs = computeNextScheduleRuns(
+        frequency,
+        scheduleTime,
+        dayNum != null && !Number.isNaN(dayNum) ? dayNum : null,
+        tz,
+        parsedDays,
+        c
+      );
+      res.json({ runs: runs.map((d) => d.toISOString()) });
+    } catch (error: any) {
+      console.error('[Distributions] Error preview-schedule:', error.message);
+      res.status(500).json({
+        error: 'Failed to preview schedule',
+        message: error.message,
+      });
+    }
+  }
+);
 
 /** GET /:id — Get a single schedule */
 router.get(
@@ -365,7 +466,7 @@ router.put(
       const body = req.body ?? {};
       const fields = [
         'name', 'description', 'content_type', 'content_id', 'content_config',
-        'frequency', 'schedule_time', 'schedule_day', 'timezone',
+        'frequency', 'schedule_time', 'schedule_day', 'schedule_days', 'timezone',
         'recipient_list_id', 'recipient_emails', 'is_active',
       ];
       const setClause: string[] = [];
@@ -385,6 +486,16 @@ router.put(
             setClause.push(`content_config = $${idx}`);
             values.push(sanitizedContentConfig);
             idx++;
+          } else if (f === 'schedule_days') {
+            if (body[f] === null) {
+              setClause.push(`schedule_days = $${idx}`);
+              values.push(null);
+              idx++;
+            } else if (Array.isArray(body[f])) {
+              setClause.push(`schedule_days = $${idx}`);
+              values.push(parseScheduleDaysInput(body[f]));
+              idx++;
+            }
           } else if (['content_id', 'recipient_list_id', 'schedule_day'].includes(f)) {
             setClause.push(`${f} = $${idx}`);
             values.push(body[f] == null ? null : body[f]);
@@ -408,11 +519,16 @@ router.put(
       }
 
       // Recalculate next_run_at when any scheduling field changes
-      const scheduleFieldsChanged = ['frequency', 'schedule_time', 'schedule_day', 'timezone']
-        .some((f) => body[f] !== undefined);
+      const scheduleFieldsChanged = [
+        'frequency',
+        'schedule_time',
+        'schedule_day',
+        'schedule_days',
+        'timezone',
+      ].some((f) => body[f] !== undefined);
       if (scheduleFieldsChanged) {
         const current = await tenantPool.query(
-          'SELECT frequency, schedule_time, schedule_day, timezone FROM public.distribution_schedules WHERE id = $1',
+          'SELECT frequency, schedule_time, schedule_day, schedule_days, timezone FROM public.distribution_schedules WHERE id = $1',
           [id]
         );
         if (current.rows.length > 0) {
@@ -421,9 +537,45 @@ router.put(
           const time = body.schedule_time ?? row.schedule_time ?? '08:00';
           const day = body.schedule_day !== undefined ? body.schedule_day : row.schedule_day;
           const tz = body.timezone ?? row.timezone ?? 'America/New_York';
-          const nextRunAt = freq !== 'one_time'
-            ? computeNextRunAt(freq, typeof time === 'string' ? time : '08:00', day, tz)
-            : null;
+          let daysMerged: number[] | null =
+            body.schedule_days !== undefined
+              ? parseScheduleDaysInput(body.schedule_days)
+              : row.schedule_days != null && Array.isArray(row.schedule_days)
+                ? [...row.schedule_days.map((n: unknown) => Number(n))]
+                : null;
+          if (freq === 'monthly') {
+            const normalized = normalizeMonthlyDays(
+              daysMerged,
+              day != null ? Number(day) : null
+            );
+            if (!normalized?.length) {
+              return res.status(400).json({
+                error:
+                  'Monthly schedules require at least one day (schedule_days 1–31 or legacy schedule_day)',
+              });
+            }
+            daysMerged = normalized;
+            if (body.schedule_days === undefined) {
+              setClause.push(`schedule_days = $${idx}`);
+              values.push(normalized);
+              idx++;
+            }
+            if (body.schedule_day === undefined) {
+              setClause.push(`schedule_day = $${idx}`);
+              values.push(normalized[0]);
+              idx++;
+            }
+          }
+          const nextRunAt =
+            freq !== 'one_time'
+              ? computeNextRunAt(
+                  freq,
+                  typeof time === 'string' ? time : '08:00',
+                  day != null ? Number(day) : null,
+                  tz,
+                  daysMerged
+                )
+              : null;
           setClause.push(`next_run_at = $${idx}`);
           values.push(nextRunAt);
           idx++;
@@ -564,13 +716,19 @@ router.post(
       // After a manual send, recalculate next_run_at so the scheduler
       // doesn't double-fire for the same period.
       const fullSchedule = await tenantPool.query(
-        'SELECT frequency, schedule_time, schedule_day, timezone FROM public.distribution_schedules WHERE id = $1',
+        'SELECT frequency, schedule_time, schedule_day, schedule_days, timezone FROM public.distribution_schedules WHERE id = $1',
         [id]
       );
       if (fullSchedule.rows.length > 0) {
         const s = fullSchedule.rows[0];
         const nextRunAt = s.frequency !== 'one_time'
-          ? computeNextRunAt(s.frequency, s.schedule_time || '08:00', s.schedule_day, s.timezone || 'America/New_York')
+          ? computeNextRunAt(
+              s.frequency,
+              s.schedule_time || '08:00',
+              s.schedule_day,
+              s.timezone || 'America/New_York',
+              s.schedule_days ?? null
+            )
           : null;
         await tenantPool.query(
           `UPDATE public.distribution_schedules
