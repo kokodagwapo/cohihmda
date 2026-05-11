@@ -1,6 +1,6 @@
 import { test, expect } from "./fixtures";
 
-test.describe("@critical Distributions workflows", () => {
+test.describe("@critical @COHI-400 Distributions workflows", () => {
   test("@smoke distributions page renders with schedule controls", async ({ userPage }) => {
     await userPage.goto("/workbench/distributions", { waitUntil: "domcontentloaded" });
     await expect(userPage.getByRole("heading", { name: "Communications Center" })).toBeVisible();
