@@ -129,15 +129,28 @@ export function PlatformTeamSection() {
 
   const handleCreateUser = async () => {
     try {
-      await api.request('/api/admin/super-admins', {
+      const trimmedPassword = formData.password.trim();
+      const created = await api.request('/api/admin/users', {
         method: 'POST',
         body: JSON.stringify({
           email: formData.email,
-          password: formData.password,
+          password: trimmedPassword || undefined,
           full_name: formData.full_name,
-          role: formData.role,
+          // /api/admin/users currently accepts super_admin|tenant_admin|user.
+          // Create as super_admin first, then apply selected platform role.
+          role: 'super_admin',
         }),
       });
+
+      const createdUserId = created?.user?.id as string | undefined;
+      if (createdUserId && formData.role !== 'super_admin') {
+        await api.request(`/api/admin/super-admins/${createdUserId}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            role: formData.role,
+          }),
+        });
+      }
       
       toast({
         title: 'Success',
@@ -450,6 +463,9 @@ export function PlatformTeamSection() {
                 onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
                 placeholder="••••••••"
               />
+              <p className="text-xs text-slate-500">
+                Leave blank to send a Cognito invite email with a temporary password.
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="role">Role</Label>
@@ -460,7 +476,7 @@ export function PlatformTeamSection() {
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent position="popper" className="z-[9999]">
+                <SelectContent position="popper" className="z-[calc(var(--z-modal)+20)]">
                   <SelectItem value="super_admin">Super Admin</SelectItem>
                   <SelectItem value="platform_admin">Platform Admin</SelectItem>
                   <SelectItem value="support">Support</SelectItem>
@@ -510,7 +526,7 @@ export function PlatformTeamSection() {
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent position="popper" className="z-[9999]">
+                <SelectContent position="popper" className="z-[calc(var(--z-modal)+20)]">
                   <SelectItem value="super_admin">Super Admin</SelectItem>
                   <SelectItem value="platform_admin">Platform Admin</SelectItem>
                   <SelectItem value="support">Support</SelectItem>
