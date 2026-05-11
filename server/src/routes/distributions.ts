@@ -11,14 +11,21 @@ import {
 } from '../middleware/tenantContext.js';
 import { requireRole } from '../middleware/rbac.js';
 import {
-  computeNextRunAt,
+  computeNextRunAtFromRow,
   computeNextScheduleRuns,
   normalizeMonthlyDays,
 } from '../services/distributionScheduler.js';
+import {
+  buildPersistedDtstart,
+  buildRecurrenceDtstart,
+  encodeRRuleBodyFromLegacy,
+  validateRecurrenceRuleBody,
+  computeNextNFromRecurrence,
+} from '../services/distributionRecurrence.js';
 
 const router = Router();
 
-/** Parse and dedupe schedule_days from client JSON */
+/** Parse and dedupe schedule_days (1–31) from client JSON */
 function parseScheduleDaysInput(input: unknown): number[] | null {
   if (!Array.isArray(input)) return null;
   const nums = input
@@ -26,6 +33,84 @@ function parseScheduleDaysInput(input: unknown): number[] | null {
     .filter((n) => Number.isInteger(n) && n >= 1 && n <= 31);
   const uniq = [...new Set(nums)].sort((a, b) => a - b);
   return uniq.length ? uniq : null;
+}
+
+/** Parse and dedupe schedule_weekdays (0–6) from client JSON */
+function parseScheduleWeekdaysInput(input: unknown): number[] | null {
+  if (!Array.isArray(input)) return null;
+  const nums = input
+    .map((x) => Number(x))
+    .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6);
+  const uniq = [...new Set(nums)].sort((a, b) => a - b);
+  return uniq.length ? uniq : null;
+}
+
+function parseRecurrenceExdatesInput(input: unknown): Date[] {
+  if (!Array.isArray(input)) return [];
+  return input
+    .map((x) => new Date(String(x)))
+    .filter((d) => !Number.isNaN(d.getTime()));
+}
+
+function buildRecurrenceFieldsForApi(
+  frequency: string,
+  scheduleTime: string,
+  tz: string,
+  scheduleDayOut: number | null,
+  scheduleDaysOut: number[] | null,
+  scheduleWeekdaysOut: number[] | null,
+  body: Record<string, unknown>,
+  anchor: Date
+): {
+  recurrence_rule: string | null;
+  recurrence_dtstart: Date | null;
+  recurrence_exdates: Date[];
+  schedule_weekdays: number[] | null;
+} {
+  if (frequency === 'one_time') {
+    return {
+      recurrence_rule: null,
+      recurrence_dtstart: null,
+      recurrence_exdates: [],
+      schedule_weekdays: null,
+    };
+  }
+  if (frequency === 'custom') {
+    const rule = typeof body.recurrence_rule === 'string' ? body.recurrence_rule : '';
+    validateRecurrenceRuleBody(rule);
+    const dtRaw = body.recurrence_dtstart;
+    const dt =
+      dtRaw != null && dtRaw !== ''
+        ? new Date(String(dtRaw))
+        : buildRecurrenceDtstart(tz, scheduleTime, anchor);
+    return {
+      recurrence_rule: rule.trim(),
+      recurrence_dtstart: dt,
+      recurrence_exdates: parseRecurrenceExdatesInput(body.recurrence_exdates),
+      schedule_weekdays: null,
+    };
+  }
+  const rr = encodeRRuleBodyFromLegacy({
+    frequency,
+    scheduleDay: scheduleDayOut,
+    scheduleDays: scheduleDaysOut,
+    scheduleWeekdays: scheduleWeekdaysOut,
+  });
+  const dt = buildPersistedDtstart(
+    frequency,
+    scheduleTime,
+    tz,
+    scheduleDayOut,
+    scheduleDaysOut,
+    scheduleWeekdaysOut,
+    anchor
+  );
+  return {
+    recurrence_rule: rr,
+    recurrence_dtstart: dt,
+    recurrence_exdates: [],
+    schedule_weekdays: scheduleWeekdaysOut,
+  };
 }
 const requireDistributionsAdmin = requireRole(
   'tenant_admin',
@@ -228,7 +313,8 @@ router.get(
       }
       const result = await tenantPool.query(
         `SELECT d.id, d.name, d.description, d.created_by, d.content_type, d.content_id, d.content_config,
-                d.frequency, d.schedule_time, d.schedule_day, d.schedule_days, d.timezone,
+                d.frequency, d.schedule_time, d.schedule_day, d.schedule_days, d.schedule_weekdays,
+                d.recurrence_rule, d.recurrence_dtstart, d.recurrence_exdates, d.timezone,
                 d.recipient_list_id, d.recipient_emails,
                 d.is_active, d.last_sent_at, d.next_run_at, d.failure_count, d.created_at, d.updated_at,
                 r.name AS recipient_list_name
@@ -274,6 +360,10 @@ router.post(
         schedule_time = '08:00',
         schedule_day,
         schedule_days,
+        schedule_weekdays,
+        recurrence_rule,
+        recurrence_dtstart,
+        recurrence_exdates,
         timezone = 'America/New_York',
         recipient_list_id,
         recipient_emails = [],
@@ -289,15 +379,19 @@ router.post(
       if (!content_type || !['report', 'dashboard', 'canvas', 'insight_digest'].includes(content_type)) {
         return res.status(400).json({ error: 'content_type must be report, dashboard, canvas, or insight_digest' });
       }
-      if (!frequency || !['daily', 'weekly', 'biweekly', 'monthly', 'one_time'].includes(frequency)) {
-        return res.status(400).json({ error: 'frequency must be daily, weekly, biweekly, monthly, or one_time' });
+      if (!frequency || !['daily', 'weekly', 'biweekly', 'monthly', 'one_time', 'custom'].includes(frequency)) {
+        return res.status(400).json({
+          error: 'frequency must be daily, weekly, biweekly, monthly, one_time, or custom',
+        });
       }
       const scheduleTime = typeof schedule_time === 'string' ? schedule_time : '08:00';
       const tz = typeof timezone === 'string' ? timezone : 'America/New_York';
       const parsedDays = parseScheduleDaysInput(schedule_days);
+      const parsedWeekdays = parseScheduleWeekdaysInput(schedule_weekdays);
       let scheduleDayOut =
         schedule_day != null && schedule_day !== '' ? Number(schedule_day) : null;
       let scheduleDaysOut: number[] | null = parsedDays;
+      let scheduleWeekdaysOut: number[] | null = parsedWeekdays;
 
       if (frequency === 'monthly') {
         const normalized = normalizeMonthlyDays(scheduleDaysOut, scheduleDayOut);
@@ -308,25 +402,63 @@ router.post(
         }
         scheduleDaysOut = normalized;
         scheduleDayOut = normalized[0];
+      } else {
+        scheduleDaysOut = null;
+        if (frequency === 'weekly' || frequency === 'biweekly') {
+          if (scheduleWeekdaysOut?.length) {
+            scheduleDayOut = scheduleWeekdaysOut[0]!;
+          } else {
+            const dow =
+              scheduleDayOut != null && !Number.isNaN(Number(scheduleDayOut))
+                ? Number(scheduleDayOut)
+                : NaN;
+            if (Number.isNaN(dow) || dow < 0 || dow > 6) {
+              return res.status(400).json({
+                error:
+                  'Weekly and biweekly schedules require schedule_day (0–6) or schedule_weekdays (array of 0–6).',
+              });
+            }
+          }
+        }
       }
 
+      const anchor = new Date();
+      const rec = buildRecurrenceFieldsForApi(
+        frequency,
+        scheduleTime,
+        tz,
+        scheduleDayOut,
+        scheduleDaysOut,
+        scheduleWeekdaysOut,
+        req.body ?? {},
+        anchor
+      );
+
+      const syntheticRow = {
+        frequency,
+        schedule_time: scheduleTime,
+        schedule_day: scheduleDayOut,
+        schedule_days: scheduleDaysOut,
+        schedule_weekdays: rec.schedule_weekdays,
+        timezone: tz,
+        recurrence_rule: rec.recurrence_rule,
+        recurrence_dtstart: rec.recurrence_dtstart,
+        recurrence_exdates: rec.recurrence_exdates,
+      };
+
       const nextRunAt =
-        frequency !== 'one_time'
-          ? computeNextRunAt(
-              frequency,
-              scheduleTime,
-              scheduleDayOut,
-              tz,
-              scheduleDaysOut
-            )
-          : null;
+        frequency !== 'one_time' ? computeNextRunAtFromRow(syntheticRow, new Date()) : null;
       const result = await tenantPool.query(
         `INSERT INTO public.distribution_schedules
          (name, description, created_by, content_type, content_id, content_config,
-          frequency, schedule_time, schedule_day, schedule_days, timezone, recipient_list_id, recipient_emails, next_run_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+          frequency, schedule_time, schedule_day, schedule_days, schedule_weekdays,
+          recurrence_rule, recurrence_dtstart, recurrence_exdates,
+          timezone, recipient_list_id, recipient_emails, next_run_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW())
          RETURNING id, name, description, created_by, content_type, content_id, content_config,
-                   frequency, schedule_time, schedule_day, schedule_days, timezone, recipient_list_id, recipient_emails,
+                   frequency, schedule_time, schedule_day, schedule_days, schedule_weekdays,
+                   recurrence_rule, recurrence_dtstart, recurrence_exdates,
+                   timezone, recipient_list_id, recipient_emails,
                    is_active, last_sent_at, next_run_at, failure_count, created_at, updated_at`,
         [
           name.trim(),
@@ -339,6 +471,10 @@ router.post(
           scheduleTime,
           scheduleDayOut,
           scheduleDaysOut,
+          scheduleWeekdaysOut,
+          rec.recurrence_rule,
+          rec.recurrence_dtstart,
+          rec.recurrence_exdates,
           tz,
           recipient_list_id ?? null,
           Array.isArray(recipient_emails) ? recipient_emails : [],
@@ -373,15 +509,20 @@ router.post(
         schedule_time = '08:00',
         schedule_day,
         schedule_days,
+        schedule_weekdays,
+        recurrence_rule,
+        recurrence_dtstart,
+        recurrence_exdates,
         timezone = 'America/New_York',
         count = 3,
       } = req.body ?? {};
       if (
         !frequency ||
-        !['daily', 'weekly', 'biweekly', 'monthly', 'one_time'].includes(frequency)
+        !['daily', 'weekly', 'biweekly', 'monthly', 'one_time', 'custom'].includes(frequency)
       ) {
         return res.status(400).json({
-          error: 'frequency must be daily, weekly, biweekly, monthly, or one_time',
+          error:
+            'frequency must be daily, weekly, biweekly, monthly, one_time, or custom',
         });
       }
       if (frequency === 'one_time') {
@@ -391,8 +532,26 @@ router.post(
       const tz = typeof timezone === 'string' ? timezone : 'America/New_York';
       const c = Math.min(10, Math.max(1, parseInt(String(count), 10) || 3));
       const parsedDays = parseScheduleDaysInput(schedule_days);
+      const parsedWk = parseScheduleWeekdaysInput(schedule_weekdays);
       const dayNum =
         schedule_day != null && schedule_day !== '' ? Number(schedule_day) : null;
+
+      if (frequency === 'custom') {
+        const rule = typeof recurrence_rule === 'string' ? recurrence_rule : '';
+        validateRecurrenceRuleBody(rule);
+        const dt =
+          recurrence_dtstart != null && recurrence_dtstart !== ''
+            ? new Date(String(recurrence_dtstart))
+            : buildRecurrenceDtstart(tz, scheduleTime, new Date());
+        const runs = computeNextNFromRecurrence({
+          recurrenceRule: rule.trim(),
+          recurrenceDtstart: dt,
+          recurrenceExdates: recurrence_exdates,
+          count: c,
+          afterExclusive: new Date(),
+        });
+        return res.json({ runs: runs.map((d) => d.toISOString()) });
+      }
 
       if (frequency === 'monthly') {
         const normalized = normalizeMonthlyDays(parsedDays, dayNum);
@@ -402,6 +561,16 @@ router.post(
               'Monthly schedules require at least one day (schedule_days 1–31 or legacy schedule_day)',
           });
         }
+      } else if (frequency === 'weekly' || frequency === 'biweekly') {
+        if (!parsedWk?.length) {
+          const dow = dayNum != null && !Number.isNaN(dayNum) ? dayNum : NaN;
+          if (Number.isNaN(dow) || dow < 0 || dow > 6) {
+            return res.status(400).json({
+              error:
+                'Weekly and biweekly schedules require schedule_day (0–6) or schedule_weekdays (array of 0–6).',
+            });
+          }
+        }
       }
 
       const runs = computeNextScheduleRuns(
@@ -410,7 +579,8 @@ router.post(
         dayNum != null && !Number.isNaN(dayNum) ? dayNum : null,
         tz,
         parsedDays,
-        c
+        c,
+        parsedWk
       );
       res.json({ runs: runs.map((d) => d.toISOString()) });
     } catch (error: any) {
@@ -464,6 +634,25 @@ router.put(
       const { tenantPool } = getTenantContext(req);
       const { id } = req.params;
       const body = req.body ?? {};
+      const existing = await tenantPool.query(
+        'SELECT * FROM public.distribution_schedules WHERE id = $1',
+        [id]
+      );
+      if (existing.rows.length === 0) {
+        return res.status(404).json({ error: 'Distribution schedule not found' });
+      }
+      const baseline = existing.rows[0];
+      const currentFrequency = baseline.frequency as string;
+
+      if (body.frequency !== undefined) {
+        const ff = String(body.frequency);
+        if (!['daily', 'weekly', 'biweekly', 'monthly', 'one_time', 'custom'].includes(ff)) {
+          return res.status(400).json({
+            error: 'frequency must be daily, weekly, biweekly, monthly, one_time, or custom',
+          });
+        }
+      }
+
       const fields = [
         'name', 'description', 'content_type', 'content_id', 'content_config',
         'frequency', 'schedule_time', 'schedule_day', 'schedule_days', 'timezone',
@@ -487,6 +676,10 @@ router.put(
             values.push(sanitizedContentConfig);
             idx++;
           } else if (f === 'schedule_days') {
+            const effectiveFreq = (body.frequency as string | undefined) ?? currentFrequency;
+            if (effectiveFreq !== 'monthly') {
+              continue;
+            }
             if (body[f] === null) {
               setClause.push(`schedule_days = $${idx}`);
               values.push(null);
@@ -507,79 +700,175 @@ router.put(
           }
         }
       }
-      if (setClause.length === 0) {
-        const existing = await tenantPool.query(
-          'SELECT * FROM public.distribution_schedules WHERE id = $1',
-          [id]
-        );
-        if (existing.rows.length === 0) {
-          return res.status(404).json({ error: 'Distribution schedule not found' });
-        }
-        return res.json(existing.rows[0]);
-      }
-
-      // Recalculate next_run_at when any scheduling field changes
       const scheduleFieldsChanged = [
         'frequency',
         'schedule_time',
         'schedule_day',
         'schedule_days',
         'timezone',
+        'schedule_weekdays',
+        'recurrence_rule',
+        'recurrence_dtstart',
+        'recurrence_exdates',
       ].some((f) => body[f] !== undefined);
+
+      if (setClause.length === 0 && !scheduleFieldsChanged) {
+        return res.json(baseline);
+      }
+
       if (scheduleFieldsChanged) {
-        const current = await tenantPool.query(
-          'SELECT frequency, schedule_time, schedule_day, schedule_days, timezone FROM public.distribution_schedules WHERE id = $1',
-          [id]
-        );
-        if (current.rows.length > 0) {
-          const row = current.rows[0];
-          const freq = body.frequency ?? row.frequency;
-          const time = body.schedule_time ?? row.schedule_time ?? '08:00';
-          const day = body.schedule_day !== undefined ? body.schedule_day : row.schedule_day;
-          const tz = body.timezone ?? row.timezone ?? 'America/New_York';
-          let daysMerged: number[] | null =
-            body.schedule_days !== undefined
-              ? parseScheduleDaysInput(body.schedule_days)
-              : row.schedule_days != null && Array.isArray(row.schedule_days)
-                ? [...row.schedule_days.map((n: unknown) => Number(n))]
-                : null;
-          if (freq === 'monthly') {
-            const normalized = normalizeMonthlyDays(
-              daysMerged,
-              day != null ? Number(day) : null
-            );
-            if (!normalized?.length) {
-              return res.status(400).json({
-                error:
-                  'Monthly schedules require at least one day (schedule_days 1–31 or legacy schedule_day)',
-              });
-            }
-            daysMerged = normalized;
-            if (body.schedule_days === undefined) {
-              setClause.push(`schedule_days = $${idx}`);
-              values.push(normalized);
-              idx++;
-            }
-            if (body.schedule_day === undefined) {
-              setClause.push(`schedule_day = $${idx}`);
-              values.push(normalized[0]);
-              idx++;
+        const row = baseline;
+        const freq = (body.frequency as string | undefined) ?? row.frequency;
+        const time = body.schedule_time ?? row.schedule_time ?? '08:00';
+        const day = body.schedule_day !== undefined ? body.schedule_day : row.schedule_day;
+        const tz = body.timezone ?? row.timezone ?? 'America/New_York';
+        let daysMerged: number[] | null =
+          body.schedule_days !== undefined
+            ? parseScheduleDaysInput(body.schedule_days)
+            : row.schedule_days != null && Array.isArray(row.schedule_days)
+              ? [...row.schedule_days.map((n: unknown) => Number(n))]
+              : null;
+        let wkMerged: number[] | null =
+          body.schedule_weekdays !== undefined
+            ? parseScheduleWeekdaysInput(body.schedule_weekdays)
+            : row.schedule_weekdays != null && Array.isArray(row.schedule_weekdays)
+              ? [...row.schedule_weekdays.map((n: unknown) => Number(n))]
+              : null;
+
+        if (freq === 'monthly') {
+          const normalized = normalizeMonthlyDays(
+            daysMerged,
+            day != null ? Number(day) : null
+          );
+          if (!normalized?.length) {
+            return res.status(400).json({
+              error:
+                'Monthly schedules require at least one day (schedule_days 1–31 or legacy schedule_day)',
+            });
+          }
+          daysMerged = normalized;
+          wkMerged = null;
+          if (body.schedule_days === undefined) {
+            setClause.push(`schedule_days = $${idx}`);
+            values.push(normalized);
+            idx++;
+          }
+          if (body.schedule_day === undefined) {
+            setClause.push(`schedule_day = $${idx}`);
+            values.push(normalized[0]);
+            idx++;
+          }
+        } else if (freq === 'custom') {
+          daysMerged = null;
+          wkMerged = null;
+          if (!setClause.some((c) => c.startsWith('schedule_days'))) {
+            setClause.push(`schedule_days = $${idx}`);
+            values.push(null);
+            idx++;
+          }
+        } else {
+          daysMerged = null;
+          if (freq === 'daily' || freq === 'one_time') {
+            wkMerged = null;
+          }
+          if (freq === 'weekly' || freq === 'biweekly') {
+            if (wkMerged?.length) {
+              if (body.schedule_day === undefined) {
+                setClause.push(`schedule_day = $${idx}`);
+                values.push(wkMerged[0]);
+                idx++;
+              }
+            } else {
+              const dow = day != null ? Number(day) : NaN;
+              if (Number.isNaN(dow) || dow < 0 || dow > 6) {
+                return res.status(400).json({
+                  error:
+                    'Weekly and biweekly schedules require schedule_day (0–6) or schedule_weekdays (array of 0–6).',
+                });
+              }
             }
           }
-          const nextRunAt =
-            freq !== 'one_time'
-              ? computeNextRunAt(
-                  freq,
-                  typeof time === 'string' ? time : '08:00',
-                  day != null ? Number(day) : null,
-                  tz,
-                  daysMerged
-                )
-              : null;
-          setClause.push(`next_run_at = $${idx}`);
-          values.push(nextRunAt);
-          idx++;
+          if (!setClause.some((c) => c.startsWith('schedule_days'))) {
+            setClause.push(`schedule_days = $${idx}`);
+            values.push(null);
+            idx++;
+          }
         }
+
+        const scheduleDayOut =
+          freq === 'weekly' || freq === 'biweekly'
+            ? wkMerged?.length
+              ? wkMerged[0]!
+              : day != null && !Number.isNaN(Number(day))
+                ? Number(day)
+                : null
+            : freq === 'monthly'
+              ? daysMerged?.[0] ?? null
+              : day != null && !Number.isNaN(Number(day))
+                ? Number(day)
+                : null;
+
+        const bodyForRec: Record<string, unknown> = { ...body };
+        if (freq === 'custom') {
+          if (bodyForRec.recurrence_rule === undefined && row.recurrence_rule) {
+            bodyForRec.recurrence_rule = row.recurrence_rule;
+          }
+          if (bodyForRec.recurrence_dtstart === undefined && row.recurrence_dtstart) {
+            bodyForRec.recurrence_dtstart = row.recurrence_dtstart;
+          }
+        }
+
+        let rec = buildRecurrenceFieldsForApi(
+          freq,
+          typeof time === 'string' ? time : '08:00',
+          tz,
+          scheduleDayOut,
+          freq === 'monthly' ? daysMerged : null,
+          freq === 'weekly' || freq === 'biweekly' ? wkMerged : null,
+          bodyForRec,
+          new Date(row.created_at as string | Date)
+        );
+        if (body.recurrence_exdates !== undefined) {
+          rec = {
+            ...rec,
+            recurrence_exdates: parseRecurrenceExdatesInput(body.recurrence_exdates),
+          };
+        } else if (row.recurrence_exdates != null) {
+          rec = {
+            ...rec,
+            recurrence_exdates: parseRecurrenceExdatesInput(row.recurrence_exdates),
+          };
+        }
+
+        setClause.push(`recurrence_rule = $${idx}`);
+        values.push(rec.recurrence_rule);
+        idx++;
+        setClause.push(`recurrence_dtstart = $${idx}`);
+        values.push(rec.recurrence_dtstart);
+        idx++;
+        setClause.push(`recurrence_exdates = $${idx}`);
+        values.push(rec.recurrence_exdates);
+        idx++;
+        setClause.push(`schedule_weekdays = $${idx}`);
+        values.push(rec.schedule_weekdays);
+        idx++;
+
+        const nextRow = {
+          frequency: freq,
+          schedule_time: typeof time === 'string' ? time : '08:00',
+          schedule_day: scheduleDayOut,
+          schedule_days: freq === 'monthly' ? daysMerged : null,
+          schedule_weekdays: rec.schedule_weekdays,
+          timezone: tz,
+          recurrence_rule: rec.recurrence_rule,
+          recurrence_dtstart: rec.recurrence_dtstart,
+          recurrence_exdates: rec.recurrence_exdates,
+        };
+        const nextRunAt =
+          freq !== 'one_time' ? computeNextRunAtFromRow(nextRow, new Date()) : null;
+        setClause.push(`next_run_at = $${idx}`);
+        values.push(nextRunAt);
+        idx++;
       }
 
       setClause.push('updated_at = NOW()');
@@ -716,20 +1005,15 @@ router.post(
       // After a manual send, recalculate next_run_at so the scheduler
       // doesn't double-fire for the same period.
       const fullSchedule = await tenantPool.query(
-        'SELECT frequency, schedule_time, schedule_day, schedule_days, timezone FROM public.distribution_schedules WHERE id = $1',
+        `SELECT frequency, schedule_time, schedule_day, schedule_days, schedule_weekdays,
+                timezone, recurrence_rule, recurrence_dtstart, recurrence_exdates
+         FROM public.distribution_schedules WHERE id = $1`,
         [id]
       );
       if (fullSchedule.rows.length > 0) {
         const s = fullSchedule.rows[0];
-        const nextRunAt = s.frequency !== 'one_time'
-          ? computeNextRunAt(
-              s.frequency,
-              s.schedule_time || '08:00',
-              s.schedule_day,
-              s.timezone || 'America/New_York',
-              s.schedule_days ?? null
-            )
-          : null;
+        const nextRunAt =
+          s.frequency !== 'one_time' ? computeNextRunAtFromRow(s, new Date()) : null;
         await tenantPool.query(
           `UPDATE public.distribution_schedules
            SET last_sent_at = NOW(), next_run_at = $2, updated_at = NOW()

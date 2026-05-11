@@ -267,13 +267,26 @@ async function shareCanvasWithRecipients(
     return;
   }
 
+  const ownerRow = await tenantPool.query(
+    `SELECT user_id FROM public.workbench_canvases WHERE id = $1`,
+    [schedule.content_id]
+  );
+  const canvasOwnerId: string | null = ownerRow.rows[0]?.user_id ?? null;
+
   const uniqueUserIds = [...new Set(Array.from(userIdsByEmail.values()))];
   for (const userId of uniqueUserIds) {
+    // True owner does not need a share row; avoids clobbering access semantics.
+    if (canvasOwnerId && userId === canvasOwnerId) {
+      continue;
+    }
     await tenantPool.query(
       `INSERT INTO public.canvas_share_entries (canvas_id, user_id, permission, shared_by)
        VALUES ($1, $2, 'viewer', NULL)
        ON CONFLICT (canvas_id, user_id) WHERE user_id IS NOT NULL
-       DO UPDATE SET permission = EXCLUDED.permission`,
+       DO UPDATE SET permission = CASE
+         WHEN canvas_share_entries.permission = 'editor' THEN canvas_share_entries.permission
+         ELSE EXCLUDED.permission
+       END`,
       [schedule.content_id, userId]
     );
   }

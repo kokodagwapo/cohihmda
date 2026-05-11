@@ -68,6 +68,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -1083,10 +1090,20 @@ export function WorkbenchCanvas({
   >([]);
   const [tenantGroupsLoaded, setTenantGroupsLoaded] = useState(false);
   const [visibilitySaving, setVisibilitySaving] = useState(false);
+  /** True when this canvas row's user_id is the current user (from GET); not the same as edit capability */
+  const [isRecordOwner, setIsRecordOwner] = useState(false);
+  const [transferOwnershipUserId, setTransferOwnershipUserId] = useState("");
+  const [transferOwnershipSaving, setTransferOwnershipSaving] =
+    useState(false);
   const { user } = useAuth();
   const navigate = useNavigate();
   const isOwner = isOwnerProp ?? true; // Default to true for new/own canvases
   const canEdit = isOwner;
+  const canTransferOwnership =
+    !!canvasId &&
+    (isRecordOwner ||
+      user?.role === "super_admin" ||
+      user?.role === "platform_admin");
   const { handleExportExcel, handleEmailScreenshot } = useCanvasExport({
     items,
     saveTitle,
@@ -2611,6 +2628,11 @@ export function WorkbenchCanvas({
             })),
           );
         }
+        if (typeof data.is_owner === "boolean") {
+          setIsRecordOwner(data.is_owner);
+        } else {
+          setIsRecordOwner(false);
+        }
         setCanvasId(data.id);
         // Snapshot baseline for dirty-state tracking.
         // Use double-RAF to ensure React has flushed all state updates from the
@@ -3904,6 +3926,55 @@ export function WorkbenchCanvas({
     }
   }, [canvasId, canvasVisibility, canvasShares, tenantQs, toast]);
 
+  useEffect(() => {
+    if (shareDialogOpen) {
+      setTransferOwnershipUserId("");
+    }
+  }, [shareDialogOpen]);
+
+  const handleTransferOwnership = useCallback(async () => {
+    if (!canvasId || !transferOwnershipUserId) {
+      toast({
+        title: "Choose a user",
+        description: "Select the new owner before transferring.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (
+      !window.confirm(
+        "Transfer ownership to the selected user? You will keep edit access as an editor; they will become the owner.",
+      )
+    ) {
+      return;
+    }
+    setTransferOwnershipSaving(true);
+    try {
+      await api.transferWorkbenchCanvasOwnership(
+        canvasId,
+        transferOwnershipUserId,
+        tenantId ?? null,
+      );
+      toast({
+        title: "Ownership transferred",
+        description: "The new owner can manage sharing. Your access is now as an editor.",
+      });
+      setIsRecordOwner(false);
+      setTransferOwnershipUserId("");
+      setShareDialogOpen(false);
+      setExternalRefetchToken((t) => t + 1);
+      onLoadedRef.current?.();
+    } catch (err) {
+      toast({
+        title: "Transfer failed",
+        description: err instanceof Error ? err.message : "Try again",
+        variant: "destructive",
+      });
+    } finally {
+      setTransferOwnershipSaving(false);
+    }
+  }, [canvasId, transferOwnershipUserId, tenantId, toast]);
+
   const toggleSharedUser = useCallback((userId: string) => {
     setCanvasShares((prev) => {
       const existing = prev.find((s) => s.userId === userId);
@@ -3965,6 +4036,7 @@ export function WorkbenchCanvas({
           },
         );
         setCanvasId(data.id);
+        setIsRecordOwner(true);
         try {
           await api.request(
             `/api/cohi-chat/workbench/conversations/rebind-scope${tenantQs}`,
@@ -5671,6 +5743,54 @@ export function WorkbenchCanvas({
                       read-only, Editor = can edit)
                     </p>
                   )}
+                </div>
+              )}
+
+              {canTransferOwnership && (
+                <div className="rounded-lg border border-amber-200/80 dark:border-amber-800/50 bg-amber-50/40 dark:bg-amber-950/20 p-3 space-y-2">
+                  <label className="text-sm font-medium text-slate-800 dark:text-slate-200">
+                    Transfer ownership
+                  </label>
+                  <p className="text-xs text-slate-600 dark:text-slate-400">
+                    Make another user the canvas owner. You keep edit access as
+                    an editor. Use this when a client should own a canvas you
+                    created (e.g. after moving off a platform admin account).
+                  </p>
+                  <Select
+                    value={transferOwnershipUserId || "__none__"}
+                    onValueChange={(v) =>
+                      setTransferOwnershipUserId(v === "__none__" ? "" : v)
+                    }
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Choose new owner" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Choose user…</SelectItem>
+                      {tenantUsers.map((u) => (
+                        <SelectItem key={u.id} value={u.id}>
+                          {u.full_name
+                            ? `${u.full_name} (${u.email})`
+                            : u.email}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="w-full border-amber-300/80"
+                    disabled={
+                      !transferOwnershipUserId ||
+                      transferOwnershipSaving ||
+                      !tenantUsersLoaded
+                    }
+                    onClick={handleTransferOwnership}
+                  >
+                    {transferOwnershipSaving
+                      ? "Transferring…"
+                      : "Transfer ownership"}
+                  </Button>
                 </div>
               )}
 

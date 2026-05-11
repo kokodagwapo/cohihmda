@@ -1409,6 +1409,25 @@ export class ApiClient {
     return canvas;
   }
 
+  async transferWorkbenchCanvasOwnership(
+    canvasId: string,
+    newOwnerUserId: string,
+    tenantId?: string | null,
+  ) {
+    const sp = new URLSearchParams();
+    if (tenantId) sp.set("tenant_id", tenantId);
+    const qs = sp.toString() ? `?${sp.toString()}` : "";
+    const result = await this.request<{ success: boolean; user_id: string }>(
+      `/api/workbench/canvases/${canvasId}/transfer-ownership${qs}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ new_owner_user_id: newOwnerUserId }),
+      },
+    );
+    this.invalidateCacheFor("/api/workbench/canvases");
+    return result;
+  }
+
   async insightChat(
     insightContext: any,
     messages: Array<{ role: string; content: string }>,

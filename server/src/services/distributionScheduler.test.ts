@@ -1,8 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   computeNextRunAt,
+  computeNextRunAtFromRow,
+  computeNextScheduleRuns,
+  computeWeeklyNextRun,
   normalizeMonthlyDays,
 } from './distributionScheduler.js';
+import { buildPersistedDtstart, encodeRRuleBodyFromLegacy } from './distributionRecurrence.js';
 
 describe('normalizeMonthlyDays', () => {
   it('sorts unique integers in 1..31', () => {
@@ -11,6 +15,76 @@ describe('normalizeMonthlyDays', () => {
 
   it('falls back to legacy schedule_day', () => {
     expect(normalizeMonthlyDays(null, 7)).toEqual([7]);
+  });
+});
+
+describe('computeNextRunAt weekly', () => {
+  it('returns next matching weekday in UTC (civil calendar)', () => {
+    const after = new Date('2026-05-13T15:00:00.000Z');
+    const next = computeNextRunAt('weekly', '09:00', 1, 'UTC', null, after);
+    expect(next).not.toBeNull();
+    expect(next!.toISOString()).toBe('2026-05-18T09:00:00.000Z');
+  });
+});
+
+describe('computeNextRunAt biweekly', () => {
+  it('first upcoming run matches weekly when not advancing after send', () => {
+    const after = new Date('2026-05-11T12:00:00.000Z');
+    const next = computeNextRunAt('biweekly', '09:00', 1, 'UTC', null, after);
+    expect(next).not.toBeNull();
+    expect(next!.toISOString()).toBe('2026-05-18T09:00:00.000Z');
+  });
+
+  it('after a send, next run uses stored recurrence anchor (RRULE)', () => {
+    const after = new Date('2026-05-18T09:00:05.000Z');
+    const anchorCreate = new Date('2026-05-11T12:00:00.000Z');
+    const dt0 = buildPersistedDtstart(
+      'biweekly',
+      '09:00',
+      'UTC',
+      1,
+      null,
+      null,
+      anchorCreate
+    );
+    expect(dt0).not.toBeNull();
+    const row = {
+      frequency: 'biweekly',
+      schedule_time: '09:00',
+      schedule_day: 1,
+      timezone: 'UTC',
+      recurrence_rule: encodeRRuleBodyFromLegacy({
+        frequency: 'biweekly',
+        scheduleDay: 1,
+        scheduleDays: null,
+        scheduleWeekdays: null,
+      }),
+      recurrence_dtstart: dt0,
+    };
+    const next = computeNextRunAtFromRow(row, after);
+    expect(next!.toISOString()).toBe('2026-06-01T09:00:00.000Z');
+  });
+});
+
+describe('computeNextScheduleRuns biweekly', () => {
+  it('spaces preview runs by two weeks', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-11T12:00:00.000Z'));
+    const runs = computeNextScheduleRuns('biweekly', '09:00', 1, 'UTC', null, 3);
+    vi.useRealTimers();
+    expect(runs.map((d) => d.toISOString())).toEqual([
+      '2026-05-18T09:00:00.000Z',
+      '2026-06-01T09:00:00.000Z',
+      '2026-06-15T09:00:00.000Z',
+    ]);
+  });
+});
+
+describe('computeWeeklyNextRun', () => {
+  it('finds same-week occurrence when floor is earlier same day', () => {
+    const floor = new Date('2026-05-18T07:00:00.000Z');
+    const next = computeWeeklyNextRun(9, 0, 'UTC', 1, floor);
+    expect(next!.toISOString()).toBe('2026-05-18T09:00:00.000Z');
   });
 });
 
