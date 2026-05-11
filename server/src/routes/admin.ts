@@ -490,6 +490,7 @@ router.post(
   async (req: AuthRequest, res) => {
   try {
     const validated = createUserSchema.parse(req.body);
+    const normalizedEmail = validated.email.trim().toLowerCase();
 
     // Prevent privilege escalation: non-platform staff cannot assign elevated roles
     const PLATFORM_ONLY_ROLES = new Set(["super_admin", "platform_admin", "support", "tenant_admin"]);
@@ -515,7 +516,7 @@ router.post(
     if (useCognitoInvite) {
       const existingPlatform = await managementPool.query(
         "SELECT id FROM coheus_users WHERE LOWER(email) = LOWER($1)",
-        [validated.email],
+        [normalizedEmail],
       );
       if (existingPlatform.rows.length > 0) {
         return res.status(409).json({ error: "User with this email already exists" });
@@ -524,7 +525,7 @@ router.post(
       const sendInvite = !validated.password;
       try {
         let cognitoResult = await cognitoAuth.createUser(
-          validated.email,
+          normalizedEmail,
           validated.password ?? undefined,
           validated.full_name,
           sendInvite,
@@ -533,24 +534,30 @@ router.post(
       } catch (cognitoError: any) {
         if (cognitoError.code === "USER_EXISTS") {
           try {
-            await cognitoAuth.deleteUser(validated.email);
-            logInfo("Removed orphan Cognito user for retry", { email: validated.email });
+            await cognitoAuth.deleteUser(normalizedEmail);
+            logInfo("Removed orphan Cognito user for retry", {
+              email: normalizedEmail,
+            });
             const sendInvite = !validated.password;
             const cognitoResult = await cognitoAuth.createUser(
-              validated.email,
+              normalizedEmail,
               validated.password ?? undefined,
               validated.full_name,
               sendInvite,
             );
             cognitoSub = cognitoResult.cognitoSub;
           } catch (retryError: any) {
-            logError("Failed to create Cognito user after orphan cleanup", retryError, { email: validated.email });
+            logError("Failed to create Cognito user after orphan cleanup", retryError, {
+              email: normalizedEmail,
+            });
             return res.status(retryError.statusCode || 500).json({
               error: retryError.message || "Failed to create user in identity provider",
             });
           }
         } else {
-          logError("Failed to create Cognito user", cognitoError, { email: validated.email });
+          logError("Failed to create Cognito user", cognitoError, {
+            email: normalizedEmail,
+          });
           return res.status(cognitoError.statusCode || 500).json({
             error: cognitoError.message || "Failed to create user in identity provider",
           });
@@ -563,7 +570,7 @@ router.post(
        VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
        RETURNING id, email, full_name, role, created_at`,
         [
-          validated.email,
+          normalizedEmail,
           hashedPassword,
           validated.full_name || null,
           validated.role,
@@ -587,7 +594,7 @@ router.post(
         action: "create_user",
         resource: "user",
       resourceId: newUser.id,
-      metadata: { email: validated.email, role: validated.role },
+      metadata: { email: normalizedEmail, role: validated.role },
     });
     
     res.status(201).json({ user: newUser });
@@ -628,7 +635,7 @@ router.put(
     
     if (validated.email !== undefined) {
       updates.push(`email = $${paramIndex++}`);
-      params.push(validated.email);
+      params.push(validated.email.trim().toLowerCase());
     }
     
     if (validated.full_name !== undefined) {
@@ -834,6 +841,7 @@ router.post(
     });
     
     const validated = schema.parse(req.body);
+    const normalizedEmail = validated.email.trim().toLowerCase();
     const useCognitoInvite = cognitoAuth.isCognitoAuthEnabled();
     if (!useCognitoInvite && !validated.password) {
       return res.status(400).json({
@@ -842,7 +850,6 @@ router.post(
       });
     }
 
-    const normalizedEmail = validated.email.trim();
     const hashedPassword = await bcrypt.hash(validated.password ?? "", 10);
     let cognitoSub: string | null = null;
 
@@ -970,7 +977,7 @@ router.put(
     
     if (validated.email !== undefined) {
       updates.push(`email = $${paramIndex++}`);
-      params.push(validated.email);
+      params.push(validated.email.trim().toLowerCase());
     }
     if (validated.full_name !== undefined) {
       updates.push(`full_name = $${paramIndex++}`);
@@ -1239,7 +1246,7 @@ router.post(
     if (useCognitoInvite) {
       const existingInTenant = await tenantPool.query(
         "SELECT id FROM users WHERE LOWER(email) = LOWER($1)",
-        [validated.email],
+        [normalizedEmail],
       );
       if (existingInTenant.rows.length > 0) {
         return res.status(409).json({
@@ -1250,7 +1257,7 @@ router.post(
       const sendInvite = !validated.password;
       try {
         const cognitoResult = await cognitoAuth.createUser(
-          validated.email,
+          normalizedEmail,
           validated.password ?? undefined,
           validated.full_name,
           sendInvite,
@@ -1259,24 +1266,28 @@ router.post(
       } catch (cognitoError: any) {
         if (cognitoError.code === "USER_EXISTS") {
           try {
-            await cognitoAuth.deleteUser(validated.email);
-            logInfo("Removed orphan Cognito user for retry", { email: validated.email });
+            await cognitoAuth.deleteUser(normalizedEmail);
+            logInfo("Removed orphan Cognito user for retry", { email: normalizedEmail });
             const sendInvite = !validated.password;
             const cognitoResult = await cognitoAuth.createUser(
-              validated.email,
+              normalizedEmail,
               validated.password ?? undefined,
               validated.full_name,
               sendInvite,
             );
             cognitoSub = cognitoResult.cognitoSub;
           } catch (retryError: any) {
-            logError("Failed to create Cognito user for tenant after orphan cleanup", retryError, { email: validated.email });
+            logError("Failed to create Cognito user for tenant after orphan cleanup", retryError, {
+              email: normalizedEmail,
+            });
             return res.status(retryError.statusCode || 500).json({
               error: retryError.message || "Failed to create user in identity provider",
             });
           }
         } else {
-          logError("Failed to create Cognito user for tenant", cognitoError, { email: validated.email });
+          logError("Failed to create Cognito user for tenant", cognitoError, {
+            email: normalizedEmail,
+          });
           return res.status(cognitoError.statusCode || 500).json({
             error: cognitoError.message || "Failed to create user in identity provider",
           });
@@ -1301,7 +1312,7 @@ router.post(
       RETURNING id, email, full_name, role, is_active, created_at
     `,
         [
-          validated.email,
+          normalizedEmail,
           hashedPassword,
           validated.full_name || null,
           role,
@@ -1318,7 +1329,7 @@ router.post(
     
       logInfo("Tenant user created", {
       createdBy: req.userId, 
-      newUser: validated.email,
+      newUser: normalizedEmail,
       tenantId,
         tenantName: tenantInfo.rows[0]?.name,
     });
@@ -1394,7 +1405,7 @@ router.put(
     
     if (validated.email !== undefined) {
       updates.push(`email = $${paramIndex++}`);
-      params.push(validated.email);
+      params.push(validated.email.trim().toLowerCase());
     }
     if (validated.full_name !== undefined) {
       updates.push(`full_name = $${paramIndex++}`);

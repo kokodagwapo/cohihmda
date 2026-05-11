@@ -245,6 +245,7 @@ export const Login = () => {
         setServerStatus('online');
         setMfaSession(error.session);
         setMfaChallengeName(error.challengeName || 'SOFTWARE_TOKEN_MFA');
+        if (error.email) setEmail(error.email);
         setStep('mfa');
         return;
       }
@@ -253,6 +254,7 @@ export const Login = () => {
       if (error.newPasswordRequired) {
         setServerStatus('online');
         setChallengeSession(error.session);
+        if (error.email) setEmail(error.email);
         setStep('new-password');
         return;
       }
@@ -261,6 +263,7 @@ export const Login = () => {
         setServerStatus('online');
         setChallengeSession(error.session || null);
         setCognitoAccessToken(error.cognitoAccessToken || null);
+        if (error.email) setEmail(error.email);
         if (error.cognitoAccessToken) {
           localStorage.setItem('cognito_access_token', error.cognitoAccessToken);
         }
