@@ -7,6 +7,12 @@
 import { pool as managementPool } from '../config/managementDatabase.js';
 import { tenantDbManager } from '../config/tenantDatabaseManager.js';
 import pg from 'pg';
+import {
+  buildPersistedDtstart,
+  computeNextFromRecurrence,
+  computeNextNFromRecurrence,
+  encodeRRuleBodyFromLegacy,
+} from './distributionRecurrence.js';
 
 const POLL_INTERVAL_MS = 60_000; // 60 seconds
 const MAX_CONSECUTIVE_FAILURES = 5; // Auto-pause schedule after N failures
@@ -231,8 +237,12 @@ function computeMonthlyNextRun(
  * schedule_time is wall-clock time in the given IANA timezone (e.g. "07:35" in "America/New_York").
  * The returned Date is UTC (TIMESTAMPTZ-compatible).
  *
+ * Prefer {@link computeNextRunAtFromRow} for persisted schedules: it uses stored `recurrence_rule`
+ * / `recurrence_dtstart` when present. This function remains as a fallback for rows not yet
+ * backfilled and for monthly preview chaining.
+ *
  * @param afterExclusive optional — only instants strictly after this time are considered (for preview chaining).
- * @param options.advancingAfterSend when true and frequency is biweekly, advance by two weekly slots (used after a successful send).
+ * @param _options reserved for backward compatibility (ignored for RRULE-backed frequencies).
  */
 export function computeNextRunAt(
   frequency: string,
@@ -241,7 +251,7 @@ export function computeNextRunAt(
   timezone: string,
   scheduleDays?: number[] | null,
   afterExclusive?: Date | null,
-  options?: { advancingAfterSend?: boolean }
+  _options?: { advancingAfterSend?: boolean }
 ): Date | null {
   try {
     const [hours, minutes] = scheduleTime.split(':').map((s) => parseInt(s, 10) || 0);
@@ -252,43 +262,38 @@ export function computeNextRunAt(
       return null;
     }
 
-    if (frequency === 'daily') {
-      let next = wallClockToUtc(hours, minutes, tz, floor);
-      if (next.getTime() <= floor.getTime()) {
-        const tomorrow = new Date(floor.getTime() + 86_400_000);
-        next = wallClockToUtc(hours, minutes, tz, tomorrow);
-      }
-      return next;
-    }
-
-    if (frequency === 'weekly' && scheduleDay != null && !Number.isNaN(Number(scheduleDay))) {
-      const d = Math.max(0, Math.min(6, Number(scheduleDay)));
-      return computeWeeklyNextRun(hours, minutes, tz, d, floor);
-    }
-
-    if (frequency === 'biweekly') {
-      if (scheduleDay != null && !Number.isNaN(scheduleDay)) {
-        const d = Math.max(0, Math.min(6, scheduleDay));
-        if (options?.advancingAfterSend) {
-          const w1 = computeWeeklyNextRun(hours, minutes, tz, d, floor);
-          return w1
-            ? computeWeeklyNextRun(hours, minutes, tz, d, new Date(w1.getTime() + 1))
-            : null;
-        }
-        return computeWeeklyNextRun(hours, minutes, tz, d, floor);
-      }
-      const anchor = new Date(floor.getTime() + 14 * 86_400_000);
-      return wallClockToUtc(hours, minutes, tz, anchor);
-    }
-
     if (frequency === 'monthly') {
       const domList = normalizeMonthlyDays(scheduleDays ?? null, scheduleDay);
       if (domList != null && domList.length > 0) {
         return computeMonthlyNextRun(hours, minutes, tz, domList, floor);
       }
+      const tomorrow = new Date(floor.getTime() + 86_400_000);
+      return wallClockToUtc(hours, minutes, tz, tomorrow);
     }
 
-    // Fallback: next day
+    const rr = encodeRRuleBodyFromLegacy({
+      frequency,
+      scheduleDay,
+      scheduleDays: scheduleDays ?? null,
+      scheduleWeekdays: null,
+    });
+    const dt0 = buildPersistedDtstart(
+      frequency,
+      scheduleTime,
+      tz,
+      scheduleDay,
+      scheduleDays ?? null,
+      null,
+      floor
+    );
+    if (!dt0) return null;
+    const next = computeNextFromRecurrence({
+      recurrenceRule: rr,
+      recurrenceDtstart: dt0,
+      afterExclusive: floor,
+    });
+    if (next) return next;
+
     const tomorrow = new Date(floor.getTime() + 86_400_000);
     return wallClockToUtc(hours, minutes, tz, tomorrow);
   } catch {
@@ -296,8 +301,49 @@ export function computeNextRunAt(
   }
 }
 
+export type DistributionScheduleRecurrenceRow = {
+  frequency: string;
+  schedule_time?: string | null;
+  schedule_day?: number | null;
+  schedule_days?: number[] | null;
+  schedule_weekdays?: number[] | null;
+  timezone?: string | null;
+  recurrence_rule?: string | null;
+  recurrence_dtstart?: Date | string | null;
+  recurrence_exdates?: unknown;
+};
+
+/** Prefer stored RRULE + dtstart; fall back to legacy computeNextRunAt. */
+export function computeNextRunAtFromRow(
+  row: DistributionScheduleRecurrenceRow,
+  afterExclusive?: Date | null,
+  _options?: { advancingAfterSend?: boolean }
+): Date | null {
+  const floor = afterExclusive ?? new Date();
+  if (row.frequency === 'one_time') return null;
+  const rr = row.recurrence_rule;
+  const rd = row.recurrence_dtstart;
+  if (typeof rr === 'string' && rr.trim() && rd != null) {
+    return computeNextFromRecurrence({
+      recurrenceRule: rr,
+      recurrenceDtstart: rd,
+      recurrenceExdates: row.recurrence_exdates,
+      afterExclusive: floor,
+    });
+  }
+  return computeNextRunAt(
+    row.frequency,
+    row.schedule_time || '08:00',
+    row.schedule_day ?? null,
+    row.timezone || 'America/New_York',
+    row.schedule_days ?? null,
+    afterExclusive,
+    _options
+  );
+}
+
 /**
- * Next N scheduled run instants (for preview). Uses same rules as computeNextRunAt.
+ * Next N scheduled run instants (for preview). Monthly uses legacy chaining; others use RRULE.
  */
 export function computeNextScheduleRuns(
   frequency: string,
@@ -305,49 +351,52 @@ export function computeNextScheduleRuns(
   scheduleDay: number | null,
   timezone: string,
   scheduleDays: number[] | null | undefined,
-  count: number
+  count: number,
+  scheduleWeekdays?: number[] | null
 ): Date[] {
-  const runs: Date[] = [];
-  const [hours, minutes] = scheduleTime.split(':').map((s) => parseInt(s, 10) || 0);
-  const tz = timezone || 'America/New_York';
-
-  if (
-    frequency === 'biweekly' &&
-    scheduleDay != null &&
-    !Number.isNaN(scheduleDay)
-  ) {
-    const d = Math.max(0, Math.min(6, scheduleDay));
+  if (frequency === 'monthly') {
+    const runs: Date[] = [];
     let ref = new Date();
-    const first = computeWeeklyNextRun(hours, minutes, tz, d, ref);
-    if (!first) return [];
-    runs.push(first);
-    ref = new Date(first.getTime() + 1);
-    for (let i = 1; i < count; i++) {
-      const w1 = computeWeeklyNextRun(hours, minutes, tz, d, ref);
-      if (!w1) break;
-      const w2 = computeWeeklyNextRun(hours, minutes, tz, d, new Date(w1.getTime() + 1));
-      if (!w2) break;
-      runs.push(w2);
-      ref = new Date(w2.getTime() + 1);
+    for (let i = 0; i < count; i++) {
+      const next = computeNextRunAt(
+        frequency,
+        scheduleTime,
+        scheduleDay,
+        timezone,
+        scheduleDays ?? null,
+        ref
+      );
+      if (!next) break;
+      runs.push(next);
+      ref = new Date(next.getTime() + 1);
     }
     return runs;
   }
 
-  let ref = new Date();
-  for (let i = 0; i < count; i++) {
-    const next = computeNextRunAt(
-      frequency,
-      scheduleTime,
-      scheduleDay,
-      timezone,
-      scheduleDays ?? null,
-      ref
-    );
-    if (!next) break;
-    runs.push(next);
-    ref = new Date(next.getTime() + 1);
-  }
-  return runs;
+  const tz = timezone || 'America/New_York';
+  const anchor = new Date();
+  const rr = encodeRRuleBodyFromLegacy({
+    frequency,
+    scheduleDay,
+    scheduleDays: scheduleDays ?? null,
+    scheduleWeekdays: scheduleWeekdays ?? null,
+  });
+  const dt0 = buildPersistedDtstart(
+    frequency,
+    scheduleTime,
+    tz,
+    scheduleDay,
+    scheduleDays ?? null,
+    scheduleWeekdays ?? null,
+    anchor
+  );
+  if (!dt0) return [];
+  return computeNextNFromRecurrence({
+    recurrenceRule: rr,
+    recurrenceDtstart: dt0,
+    count,
+    afterExclusive: anchor,
+  });
 }
 
 /**
@@ -356,7 +405,9 @@ export function computeNextScheduleRuns(
 async function claimDueSchedules(tenantPool: pg.Pool): Promise<any[]> {
   const result = await tenantPool.query(
     `SELECT id, name, description, content_type, content_id, content_config, frequency,
-            schedule_time, schedule_day, schedule_days, timezone, recipient_list_id, recipient_emails,
+            schedule_time, schedule_day, schedule_days, schedule_weekdays, timezone,
+            recurrence_rule, recurrence_dtstart, recurrence_exdates,
+            recipient_list_id, recipient_emails,
             failure_count
      FROM public.distribution_schedules
      WHERE is_active = true
@@ -401,15 +452,7 @@ async function processDistributionSchedule(
     );
 
     const success = result.status === 'success' || result.successfulCount > 0;
-    const nextRun = computeNextRunAt(
-      schedule.frequency,
-      schedule.schedule_time || '08:00',
-      schedule.schedule_day,
-      schedule.timezone || 'America/New_York',
-      schedule.schedule_days ?? null,
-      null,
-      success && schedule.frequency === 'biweekly' ? { advancingAfterSend: true } : undefined
-    );
+    const nextRun = computeNextRunAtFromRow(schedule, new Date());
     if (success) {
       await tenantPool.query(
         `UPDATE public.distribution_schedules
@@ -444,13 +487,7 @@ async function processDistributionSchedule(
     return { success: true };
   } catch (error: any) {
     const failureCount = (schedule.failure_count || 0) + 1;
-    const nextRun = computeNextRunAt(
-      schedule.frequency,
-      schedule.schedule_time || '08:00',
-      schedule.schedule_day,
-      schedule.timezone || 'America/New_York',
-      schedule.schedule_days ?? null
-    );
+    const nextRun = computeNextRunAtFromRow(schedule, new Date());
     const isPaused = failureCount >= MAX_CONSECUTIVE_FAILURES;
 
     await tenantPool.query(

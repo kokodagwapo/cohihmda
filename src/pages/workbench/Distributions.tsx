@@ -54,6 +54,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
@@ -68,10 +69,21 @@ const CONTENT_TYPES = [
 const FREQUENCIES = [
   { value: "daily", label: "Daily" },
   { value: "weekly", label: "Weekly" },
-  { value: "biweekly", label: "Every 2 weeks (pick day of week)" },
+  { value: "biweekly", label: "Every 2 weeks" },
   { value: "monthly", label: "Monthly" },
   { value: "one_time", label: "One time" },
+  { value: "custom", label: "Advanced schedule" },
 ] as const;
+
+/** One-line patterns (iCalendar-style) for “Advanced schedule”; insert then edit if needed. */
+const CUSTOM_SCHEDULE_SNIPPETS: { label: string; rule: string }[] = [
+  { label: "Every weekday", rule: "FREQ=WEEKLY;INTERVAL=1;BYDAY=MO,TU,WE,TH,FR" },
+  { label: "Tuesday & Friday", rule: "FREQ=WEEKLY;INTERVAL=1;BYDAY=TU,FR" },
+  { label: "Monthly on the 1st", rule: "FREQ=MONTHLY;INTERVAL=1;BYMONTHDAY=1" },
+  { label: "1st & 15th each month", rule: "FREQ=MONTHLY;INTERVAL=1;BYMONTHDAY=1,15" },
+  { label: "Every 2 weeks on Monday", rule: "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO" },
+  { label: "Every day", rule: "FREQ=DAILY;INTERVAL=1" },
+];
 
 const WEEKDAYS = [
   { value: "0", label: "Sunday" },
@@ -116,6 +128,21 @@ function scheduleTableSubtitle(s: Record<string, unknown>): string | null {
     (s.schedule_days as unknown[]).length > 0
   ) {
     return `Days: ${(s.schedule_days as number[]).join(", ")}`;
+  }
+  if (s.frequency === "custom") {
+    const r = typeof s.recurrence_rule === "string" ? s.recurrence_rule.trim() : "";
+    if (!r) return "Advanced schedule";
+    return r.length <= 40 ? r : `${r.slice(0, 37)}…`;
+  }
+  if (
+    (s.frequency === "weekly" || s.frequency === "biweekly") &&
+    Array.isArray(s.schedule_weekdays) &&
+    (s.schedule_weekdays as unknown[]).length > 0
+  ) {
+    return (s.schedule_weekdays as number[])
+      .map((n) => WEEKDAYS[Math.max(0, Math.min(6, Number(n)))]?.label)
+      .filter(Boolean)
+      .join(", ");
   }
   if (
     (s.frequency === "weekly" || s.frequency === "biweekly") &&
@@ -583,8 +610,12 @@ function DistributionScheduleDialog({
   const [timezone, setTimezone] = useState(detectBrowserTimezone);
   /** Days of month 1–31 for monthly schedules */
   const [scheduleDays, setScheduleDays] = useState<number[]>([]);
-  /** Day of week 0–6 for weekly (Sun–Sat) */
-  const [weeklyDay, setWeeklyDay] = useState("1");
+  /** Weekdays 0–6 (Sun–Sat), for weekly / biweekly (multi-select) */
+  const [weekdaySelection, setWeekdaySelection] = useState<number[]>([1]);
+  /** Advanced schedule: one-line recurrence pattern (same family as calendar “custom repeat”). */
+  const [customRRule, setCustomRRule] = useState("");
+  /** Optional anchor for custom rule (datetime-local in local browser tz) */
+  const [customDtstartLocal, setCustomDtstartLocal] = useState("");
   const [recipientListId, setRecipientListId] = useState("");
   const [recipientEmails, setRecipientEmails] = useState("");
   const [autoInviteDirectEmails, setAutoInviteDirectEmails] = useState(true);
@@ -604,28 +635,52 @@ function DistributionScheduleDialog({
       scheduleTime,
       timezone,
       scheduleDays,
-      weeklyDay,
+      weekdaySelection,
+      customRRule,
+      customDtstartLocal,
     ],
-    queryFn: () =>
-      api.previewDistributionSchedule(
+    queryFn: () => {
+      const base = {
+        schedule_time: scheduleTime,
+        timezone,
+        count: 3,
+      };
+      if (frequency === "custom") {
+        return api.previewDistributionSchedule(
+          {
+            frequency: "custom",
+            recurrence_rule: customRRule.trim(),
+            ...(customDtstartLocal
+              ? { recurrence_dtstart: new Date(customDtstartLocal).toISOString() }
+              : {}),
+            ...base,
+          },
+          tenantId,
+        );
+      }
+      return api.previewDistributionSchedule(
         {
           frequency,
-          schedule_time: scheduleTime,
-          timezone,
+          ...base,
           ...(frequency === "monthly" ? { schedule_days: scheduleDays } : {}),
           ...(frequency === "weekly" || frequency === "biweekly"
-            ? { schedule_day: Number(weeklyDay) }
+            ? weekdaySelection.length > 0
+              ? { schedule_weekdays: weekdaySelection }
+              : {}
             : {}),
-          count: 3,
         },
         tenantId,
-      ),
+      );
+    },
     enabled:
       !!tenantId &&
       open &&
       frequency !== "one_time" &&
       (frequency !== "monthly" || scheduleDays.length > 0) &&
-      (frequency === "weekly" || frequency === "biweekly" ? weeklyDay !== "" : true),
+      (frequency === "weekly" || frequency === "biweekly"
+        ? weekdaySelection.length > 0
+        : true) &&
+      (frequency === "custom" ? customRRule.trim().length > 0 : true),
   });
 
   useEffect(() => {
@@ -663,11 +718,46 @@ function DistributionScheduleDialog({
       }
       if (
         (schedule.frequency === "weekly" || schedule.frequency === "biweekly") &&
+        Array.isArray(schedule.schedule_weekdays) &&
+        (schedule.schedule_weekdays as unknown[]).length > 0
+      ) {
+        setWeekdaySelection(
+          [...(schedule.schedule_weekdays as unknown[])]
+            .map((n: unknown) => Number(n))
+            .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6)
+            .sort((a, b) => a - b),
+        );
+      } else if (
+        (schedule.frequency === "weekly" || schedule.frequency === "biweekly") &&
         schedule.schedule_day != null
       ) {
-        setWeeklyDay(String(Math.max(0, Math.min(6, Number(schedule.schedule_day)))));
+        setWeekdaySelection([
+          Math.max(0, Math.min(6, Number(schedule.schedule_day))),
+        ]);
       } else {
-        setWeeklyDay("1");
+        setWeekdaySelection([1]);
+      }
+      if (schedule.frequency === "custom") {
+        setCustomRRule(
+          typeof schedule.recurrence_rule === "string" ? schedule.recurrence_rule : "",
+        );
+        const raw = schedule.recurrence_dtstart as string | undefined;
+        if (raw) {
+          const d = new Date(raw);
+          if (!Number.isNaN(d.getTime())) {
+            const pad = (n: number) => String(n).padStart(2, "0");
+            setCustomDtstartLocal(
+              `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`,
+            );
+          } else {
+            setCustomDtstartLocal("");
+          }
+        } else {
+          setCustomDtstartLocal("");
+        }
+      } else {
+        setCustomRRule("");
+        setCustomDtstartLocal("");
       }
     } else {
       setName("");
@@ -678,7 +768,9 @@ function DistributionScheduleDialog({
       setScheduleTime("08:00");
       setTimezone(detectBrowserTimezone());
       setScheduleDays([]);
-      setWeeklyDay("1");
+      setWeekdaySelection([1]);
+      setCustomRRule("");
+      setCustomDtstartLocal("");
       setRecipientListId("");
       setRecipientEmails("");
       setAutoInviteDirectEmails(true);
@@ -693,6 +785,16 @@ function DistributionScheduleDialog({
     );
   };
 
+  const toggleWeekDay = (dow: number) => {
+    setWeekdaySelection((prev) => {
+      if (prev.includes(dow)) {
+        const next = prev.filter((x) => x !== dow).sort((a, b) => a - b);
+        return next.length ? next : prev;
+      }
+      return [...prev, dow].sort((a, b) => a - b);
+    });
+  };
+
   const handleSubmit = () => {
     if (frequency === "monthly" && scheduleDays.length === 0) {
       toast({
@@ -702,13 +804,22 @@ function DistributionScheduleDialog({
       });
       return;
     }
+    if (frequency === "custom" && !customRRule.trim()) {
+      toast({
+        title: "Recurrence pattern required",
+        description:
+          "Choose a starter button above or paste a one-line pattern (for example Tue & Fri).",
+        variant: "destructive",
+      });
+      return;
+    }
     if (
       (frequency === "weekly" || frequency === "biweekly") &&
-      (weeklyDay === "" || Number.isNaN(Number(weeklyDay)))
+      weekdaySelection.length === 0
     ) {
       toast({
-        title: "Pick a day of the week",
-        description: "Weekly and biweekly schedules need a weekday.",
+        title: "Pick day(s) of the week",
+        description: "Select at least one weekday.",
         variant: "destructive",
       });
       return;
@@ -733,7 +844,17 @@ function DistributionScheduleDialog({
       payload.schedule_days = scheduleDays;
     }
     if (frequency === "weekly" || frequency === "biweekly") {
-      payload.schedule_day = Number(weeklyDay);
+      payload.schedule_weekdays = weekdaySelection;
+      payload.schedule_day = weekdaySelection[0];
+    } else {
+      payload.schedule_weekdays = null;
+    }
+    if (frequency === "custom") {
+      payload.recurrence_rule = customRRule.trim();
+      if (customDtstartLocal) {
+        payload.recurrence_dtstart = new Date(customDtstartLocal).toISOString();
+      }
+      payload.schedule_day = null;
     }
     if (frequency !== "monthly") {
       payload.schedule_days = null;
@@ -814,6 +935,7 @@ function DistributionScheduleDialog({
               onValueChange={(v) => {
                 setFrequency(v);
                 if (v !== "monthly") setScheduleDays([]);
+                if (v === "custom") setScheduleDays([]);
               }}
             >
               <SelectTrigger>
@@ -854,20 +976,91 @@ function DistributionScheduleDialog({
             </div>
           </div>
           {(frequency === "weekly" || frequency === "biweekly") && (
-            <div>
-              <Label>Day of week</Label>
-              <Select value={weeklyDay} onValueChange={setWeeklyDay}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {WEEKDAYS.map((d) => (
-                    <SelectItem key={d.value} value={d.value}>
-                      {d.label}
-                    </SelectItem>
+            <div className="space-y-2">
+              <Label>Days of week</Label>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Select one or more weekdays (e.g. Tuesday and Friday).
+              </p>
+              <div className="flex flex-wrap gap-3 border rounded-md p-3 bg-slate-50/80 dark:bg-slate-900/50">
+                {WEEKDAYS.map((d) => {
+                  const dow = Number(d.value);
+                  return (
+                    <label
+                      key={d.value}
+                      className="flex items-center gap-2 text-sm cursor-pointer"
+                    >
+                      <Checkbox
+                        checked={weekdaySelection.includes(dow)}
+                        onCheckedChange={() => toggleWeekDay(dow)}
+                      />
+                      <span>{d.label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {frequency === "custom" && (
+            <div className="space-y-4 rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/40 p-4">
+              <div>
+                <Label className="text-base">Advanced schedule</Label>
+                <p className="text-sm text-slate-600 dark:text-slate-400 mt-1.5 leading-relaxed">
+                  For repeating patterns that are not covered by the presets above. Pick a
+                  starter below, then adjust the text if you need to—same kind of
+                  &quot;custom repeat&quot; line many calendar apps use.
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                  Start from a common pattern
+                </p>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {CUSTOM_SCHEDULE_SNIPPETS.map(({ label, rule }) => (
+                    <Button
+                      key={label}
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="h-8 text-xs"
+                      onClick={() => setCustomRRule(rule)}
+                    >
+                      {label}
+                    </Button>
                   ))}
-                </SelectContent>
-              </Select>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="custom-recurrence-pattern">Recurrence pattern</Label>
+                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                  One line only. Days of week use two-letter codes in order: Sun{" "}
+                  <code className="text-[11px]">SU</code>, Mon <code className="text-[11px]">MO</code>
+                  , … Sat <code className="text-[11px]">SA</code>. Example: every Tuesday and
+                  Friday looks like{" "}
+                  <code className="text-[11px] whitespace-nowrap">FREQ=WEEKLY;BYDAY=TU,FR</code>.
+                </p>
+                <Textarea
+                  id="custom-recurrence-pattern"
+                  value={customRRule}
+                  onChange={(e) => setCustomRRule(e.target.value)}
+                  placeholder="e.g. FREQ=WEEKLY;BYDAY=TU,FR"
+                  rows={3}
+                  className="font-mono text-sm"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="custom-anchor">First run anchor (optional)</Label>
+                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Leave blank unless you need a specific calendar moment to start counting from.
+                  If blank, the server uses the current date at your schedule time in the
+                  timezone above.
+                </p>
+                <Input
+                  id="custom-anchor"
+                  type="datetime-local"
+                  value={customDtstartLocal}
+                  onChange={(e) => setCustomDtstartLocal(e.target.value)}
+                />
+              </div>
             </div>
           )}
           {frequency === "monthly" && (
@@ -966,10 +1159,17 @@ function DistributionScheduleDialog({
                   </p>
                 )}
               {(frequency === "weekly" || frequency === "biweekly") &&
-                weeklyDay === "" &&
+                weekdaySelection.length === 0 &&
                 !previewQuery.isLoading && (
                   <p className="text-xs text-slate-500">
-                    Pick a day of the week to see preview times.
+                    Select at least one weekday to see preview times.
+                  </p>
+                )}
+              {frequency === "custom" &&
+                !customRRule.trim() &&
+                !previewQuery.isLoading && (
+                  <p className="text-xs text-slate-500">
+                    Enter a recurrence pattern above to see preview times.
                   </p>
                 )}
             </div>

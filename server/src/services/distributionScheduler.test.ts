@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   computeNextRunAt,
+  computeNextRunAtFromRow,
   computeNextScheduleRuns,
   computeWeeklyNextRun,
   normalizeMonthlyDays,
 } from './distributionScheduler.js';
+import { buildPersistedDtstart, encodeRRuleBodyFromLegacy } from './distributionRecurrence.js';
 
 describe('normalizeMonthlyDays', () => {
   it('sorts unique integers in 1..31', () => {
@@ -29,14 +31,37 @@ describe('computeNextRunAt biweekly', () => {
   it('first upcoming run matches weekly when not advancing after send', () => {
     const after = new Date('2026-05-11T12:00:00.000Z');
     const next = computeNextRunAt('biweekly', '09:00', 1, 'UTC', null, after);
+    expect(next).not.toBeNull();
     expect(next!.toISOString()).toBe('2026-05-18T09:00:00.000Z');
   });
 
-  it('after a send, advances two weekly slots (same weekday, +14 days)', () => {
+  it('after a send, next run uses stored recurrence anchor (RRULE)', () => {
     const after = new Date('2026-05-18T09:00:05.000Z');
-    const next = computeNextRunAt('biweekly', '09:00', 1, 'UTC', null, after, {
-      advancingAfterSend: true,
-    });
+    const anchorCreate = new Date('2026-05-11T12:00:00.000Z');
+    const dt0 = buildPersistedDtstart(
+      'biweekly',
+      '09:00',
+      'UTC',
+      1,
+      null,
+      null,
+      anchorCreate
+    );
+    expect(dt0).not.toBeNull();
+    const row = {
+      frequency: 'biweekly',
+      schedule_time: '09:00',
+      schedule_day: 1,
+      timezone: 'UTC',
+      recurrence_rule: encodeRRuleBodyFromLegacy({
+        frequency: 'biweekly',
+        scheduleDay: 1,
+        scheduleDays: null,
+        scheduleWeekdays: null,
+      }),
+      recurrence_dtstart: dt0,
+    };
+    const next = computeNextRunAtFromRow(row, after);
     expect(next!.toISOString()).toBe('2026-06-01T09:00:00.000Z');
   });
 });

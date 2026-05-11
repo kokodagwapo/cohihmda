@@ -7,7 +7,23 @@ test.describe("@critical Distributions workflows", () => {
     await expect(userPage.getByRole("button", { name: /New schedule/i })).toBeVisible();
   });
 
-  it('handles monthly day picker and preview text', async ({ userPage }) => {
+  test("multi-day weekday selection shows preview runs", async ({ userPage }) => {
+    await userPage.goto("/workbench/distributions", { waitUntil: "domcontentloaded" });
+    await userPage.getByRole("button", { name: /New schedule|Create schedule/i }).first().click();
+    await expect(
+      userPage.getByRole("heading", { name: /New distribution schedule/i }),
+    ).toBeVisible();
+    await expect(userPage.getByText(/Days of week/i)).toBeVisible();
+    // Default is Monday; add Tue + Fri then remove Monday → Tue+Fr
+    await userPage.getByText("Tuesday", { exact: true }).click();
+    await userPage.getByText("Friday", { exact: true }).click();
+    await userPage.getByText("Monday", { exact: true }).click();
+    await expect(userPage.locator("ul.text-xs li").first()).toBeVisible({
+      timeout: 15_000,
+    });
+  });
+
+  test('handles monthly day picker and preview text', async ({ userPage }) => {
     await userPage.goto("/workbench/distributions", { waitUntil: "domcontentloaded" });
     await userPage.getByRole("button", { name: /New schedule|Create schedule/i }).first().click();
     await expect(
