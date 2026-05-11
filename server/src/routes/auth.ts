@@ -85,6 +85,10 @@ function normalizeTenantSlugInput(tenantSlug?: string): string | undefined {
   return trimmed ? trimmed.toLowerCase() : undefined;
 }
 
+function normalizeEmailInput(email: string): string {
+  return email.trim();
+}
+
 function getManagementPool(): pg.Pool {
   if (!managementPool) {
     const dbHost = (process.env.DB_HOST || "localhost").trim();
@@ -183,7 +187,10 @@ function getJwtSecret(): string {
 const signInSchema = z.object({
   email: z.string().min(1, "Email is required"),
   password: z.string().min(1, "Password is required"),
-  tenantSlug: z.string().optional(), // Optional - if not provided, check super admin first
+  tenantSlug: z.preprocess(
+    (value) => (value === null ? undefined : value),
+    z.string().optional(),
+  ), // Optional - if not provided, check super admin first
 });
 
 const signUpSchema = z.object({
@@ -209,7 +216,7 @@ async function findSuperAdmin(email: string): Promise<
       `SELECT id, email, encrypted_password, full_name, role, is_active, 
               failed_login_attempts, locked_until
        FROM coheus_users 
-       WHERE email = $1`,
+       WHERE LOWER(email) = LOWER($1)`,
       [email],
     );
 
@@ -272,7 +279,7 @@ async function findTenantUser(
                   persona,
                   loan_scope
            FROM users 
-           WHERE email = $1`,
+           WHERE LOWER(email) = LOWER($1)`,
           [email],
         );
 
@@ -405,10 +412,15 @@ async function issueAppToken(
 router.post("/signin", authLimiter, async (req, res) => {
   try {
     const { email, password, tenantSlug } = signInSchema.parse(req.body);
+    const submittedEmail = normalizeEmailInput(email);
+    const normalizedTenantSlug = normalizeTenantSlugInput(tenantSlug);
+    const userHint = await findUserByEmail(submittedEmail, normalizedTenantSlug);
+    const cognitoEmail = userHint?.user.email || submittedEmail;
 
     logInfo("[Auth] Sign in attempt", {
-      email,
-      tenantSlug: tenantSlug || "auto-detect",
+      email: submittedEmail,
+      cognitoEmail,
+      tenantSlug: normalizedTenantSlug || "auto-detect",
       useCognito: cognitoAuth.isCognitoAuthEnabled(),
     });
 
@@ -417,7 +429,7 @@ router.post("/signin", authLimiter, async (req, res) => {
       logError(
         "[Auth] Cognito password auth is disabled while /signin was requested",
         new Error("COGNITO_PASSWORD_AUTH_DISABLED"),
-        { email, tenantSlug: tenantSlug || "auto-detect" },
+        { email: submittedEmail, tenantSlug: normalizedTenantSlug || "auto-detect" },
       );
       return res.status(503).json({
         error:
@@ -427,7 +439,7 @@ router.post("/signin", authLimiter, async (req, res) => {
 
     // --- Cognito auth path (single source of truth for all users when enabled) ---
     try {
-      const result = await cognitoAuth.signIn(email, password);
+      const result = await cognitoAuth.signIn(cognitoEmail, password);
 
       if (!result.authenticated && result.challengeName) {
         if (
@@ -439,7 +451,7 @@ router.post("/signin", authLimiter, async (req, res) => {
             mfaRequired: true,
             challengeName: result.challengeName,
             session: result.session,
-            email,
+            email: cognitoEmail,
           });
         }
         if (result.challengeName === "MFA_SETUP") {
@@ -447,14 +459,14 @@ router.post("/signin", authLimiter, async (req, res) => {
             mfaSetupRequired: true,
             challengeName: result.challengeName,
             session: result.session,
-            email,
+            email: cognitoEmail,
           });
         }
         if (result.challengeName === "NEW_PASSWORD_REQUIRED") {
           return res.json({
             newPasswordRequired: true,
             session: result.session,
-            email,
+            email: cognitoEmail,
           });
         }
         return res
@@ -463,7 +475,8 @@ router.post("/signin", authLimiter, async (req, res) => {
       }
 
       // Cognito auth succeeded -- find user in DB
-      const found = await findUserByEmail(email, tenantSlug);
+      const found =
+        userHint || (await findUserByEmail(cognitoEmail, normalizedTenantSlug));
       if (!found) {
         return res.status(401).json({ error: "User not found in application" });
       }
@@ -471,11 +484,11 @@ router.post("/signin", authLimiter, async (req, res) => {
       // Hardened enforcement: never issue an app token until Cognito MFA is enabled.
       // This prevents bypass when pool MFA is OPTIONAL and user has not enrolled yet.
       try {
-        const userMfa = await cognitoAuth.getUser(email);
+        const userMfa = await cognitoAuth.getUser(cognitoEmail);
         if (!userMfa.mfaEnabled) {
           return res.status(403).json({
             mfaSetupRequired: true,
-            email,
+            email: cognitoEmail,
             cognitoAccessToken: result.accessToken,
           });
         }
@@ -483,7 +496,7 @@ router.post("/signin", authLimiter, async (req, res) => {
         logWarn(
           "[Auth] Failed to evaluate Cognito MFA status, failing closed",
           {
-            email,
+            email: cognitoEmail,
             error:
               mfaStatusError instanceof Error
                 ? mfaStatusError.message
@@ -492,7 +505,7 @@ router.post("/signin", authLimiter, async (req, res) => {
         );
         return res.status(403).json({
           mfaSetupRequired: true,
-          email,
+          email: cognitoEmail,
           cognitoAccessToken: result.accessToken,
         });
       }
@@ -512,7 +525,7 @@ router.post("/signin", authLimiter, async (req, res) => {
         req,
       );
 
-      logInfo("[Auth] Cognito sign in successful", { email });
+      logInfo("[Auth] Cognito sign in successful", { email: cognitoEmail });
 
       return res.json({
         user: buildUserResponse(found.user, found.isSuperAdmin),
@@ -522,7 +535,7 @@ router.post("/signin", authLimiter, async (req, res) => {
       });
     } catch (cognitoError: any) {
       await logFailedLogin({
-        email,
+        email: cognitoEmail,
         ipAddress: req.ip,
         userAgent: req.get("user-agent"),
         failureReason: cognitoError.code || "cognito_error",
@@ -558,9 +571,12 @@ router.post("/new-password", authLimiter, async (req, res) => {
           .min(10, "Password must be at least 10 characters"),
       })
       .parse(req.body);
+    const submittedEmail = normalizeEmailInput(email);
+    const userHint = await findUserByEmail(submittedEmail);
+    const cognitoEmail = userHint?.user.email || submittedEmail;
 
     const result = await cognitoAuth.respondToNewPasswordChallenge(
-      email,
+      cognitoEmail,
       session,
       newPassword,
     );
@@ -572,7 +588,7 @@ router.post("/new-password", authLimiter, async (req, res) => {
         mfaSetupRequired: result.challengeName === "MFA_SETUP",
         challengeName: result.challengeName,
         session: result.session,
-        email,
+        email: cognitoEmail,
       });
     }
 
@@ -581,7 +597,7 @@ router.post("/new-password", authLimiter, async (req, res) => {
       refreshToken: result.refreshToken,
       cognitoAccessToken: result.accessToken,
       mfaSetupRequired: true,
-      email,
+      email: cognitoEmail,
     });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
@@ -607,12 +623,19 @@ router.post("/mfa/verify", authLimiter, async (req, res) => {
         challengeName: z
           .enum(["SOFTWARE_TOKEN_MFA", "EMAIL_OTP", "SMS_MFA"])
           .optional(),
-        tenantSlug: z.string().optional(),
+        tenantSlug: z.preprocess(
+          (value) => (value === null ? undefined : value),
+          z.string().optional(),
+        ),
       })
       .parse(req.body);
+    const submittedEmail = normalizeEmailInput(email);
+    const normalizedTenantSlug = normalizeTenantSlugInput(tenantSlug);
+    const userHint = await findUserByEmail(submittedEmail, normalizedTenantSlug);
+    const cognitoEmail = userHint?.user.email || submittedEmail;
 
     const result = await cognitoAuth.respondToMfaChallenge(
-      email,
+      cognitoEmail,
       session,
       code,
       challengeName || "SOFTWARE_TOKEN_MFA",
@@ -622,7 +645,7 @@ router.post("/mfa/verify", authLimiter, async (req, res) => {
       return res.status(401).json({ error: "MFA verification failed" });
     }
 
-    const found = await findUserByEmail(email, tenantSlug);
+    const found = userHint || (await findUserByEmail(cognitoEmail, normalizedTenantSlug));
     if (!found) {
       return res.status(401).json({ error: "User not found in application" });
     }
@@ -637,7 +660,7 @@ router.post("/mfa/verify", authLimiter, async (req, res) => {
 
     const { token } = await issueAppToken(found.user, found.isSuperAdmin, req);
 
-    logInfo("[Auth] MFA verification successful", { email });
+    logInfo("[Auth] MFA verification successful", { email: cognitoEmail });
 
     return res.json({
       user: buildUserResponse(found.user, found.isSuperAdmin),
@@ -921,7 +944,10 @@ router.get("/tenants", async (req, res) => {
 
 const passwordResetRequestSchema = z.object({
   email: z.string().email("Invalid email"),
-  tenantSlug: z.string().optional(),
+  tenantSlug: z.preprocess(
+    (value) => (value === null ? undefined : value),
+    z.string().optional(),
+  ),
 });
 
 /**

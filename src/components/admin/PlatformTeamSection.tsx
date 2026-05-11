@@ -40,6 +40,7 @@ import {
   Search,
   RefreshCw,
   Edit2,
+  Trash2,
   Shield,
   Loader2,
   CheckCircle2,
@@ -75,6 +76,7 @@ export function PlatformTeamSection() {
   const [platformUsers, setPlatformUsers] = useState<PlatformUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   
   // Dialog states
@@ -127,15 +129,28 @@ export function PlatformTeamSection() {
 
   const handleCreateUser = async () => {
     try {
-      await api.request('/api/admin/super-admins', {
+      const trimmedPassword = formData.password.trim();
+      const created = await api.request('/api/admin/users', {
         method: 'POST',
         body: JSON.stringify({
           email: formData.email,
-          password: formData.password,
+          password: trimmedPassword || undefined,
           full_name: formData.full_name,
-          role: formData.role,
+          // /api/admin/users currently accepts super_admin|tenant_admin|user.
+          // Create as super_admin first, then apply selected platform role.
+          role: 'super_admin',
         }),
       });
+
+      const createdUserId = created?.user?.id as string | undefined;
+      if (createdUserId && formData.role !== 'super_admin') {
+        await api.request(`/api/admin/super-admins/${createdUserId}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            role: formData.role,
+          }),
+        });
+      }
       
       toast({
         title: 'Success',
@@ -194,6 +209,45 @@ export function PlatformTeamSection() {
       role: user.role,
     });
     setEditDialogOpen(true);
+  };
+
+  const handleDeleteUser = async (user: PlatformUser) => {
+    if (user.id === currentUser?.id) {
+      toast({
+        title: 'Cannot Delete Current User',
+        description: 'You cannot delete your own account.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete ${user.full_name || user.email}? This permanently removes platform access for this account.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setDeletingUserId(user.id);
+      await api.request(`/api/admin/users/${user.id}`, {
+        method: 'DELETE',
+      });
+
+      toast({
+        title: 'Success',
+        description: 'Team member deleted successfully',
+      });
+      await loadPlatformUsers();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to delete team member',
+        variant: 'destructive',
+      });
+    } finally {
+      setDeletingUserId(null);
+    }
   };
 
   const resetForm = () => {
@@ -338,6 +392,7 @@ export function PlatformTeamSection() {
                         {formatDate(user.last_login_at)}
                       </TableCell>
                       <TableCell className="text-right">
+                        <div className="inline-flex items-center gap-1">
                         <Button
                           variant="ghost"
                           size="sm"
@@ -346,6 +401,20 @@ export function PlatformTeamSection() {
                         >
                           <Edit2 className="h-4 w-4" />
                         </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDeleteUser(user)}
+                          disabled={user.id === currentUser?.id || deletingUserId === user.id}
+                          className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20"
+                        >
+                          {deletingUserId === user.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-4 w-4" />
+                          )}
+                        </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
@@ -394,6 +463,9 @@ export function PlatformTeamSection() {
                 onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
                 placeholder="••••••••"
               />
+              <p className="text-xs text-slate-500">
+                Leave blank to send a Cognito invite email with a temporary password.
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="role">Role</Label>
@@ -404,7 +476,7 @@ export function PlatformTeamSection() {
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent position="popper" className="z-[9999]">
+                <SelectContent position="popper" className="z-[calc(var(--z-modal)+20)]">
                   <SelectItem value="super_admin">Super Admin</SelectItem>
                   <SelectItem value="platform_admin">Platform Admin</SelectItem>
                   <SelectItem value="support">Support</SelectItem>
@@ -454,7 +526,7 @@ export function PlatformTeamSection() {
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent position="popper" className="z-[9999]">
+                <SelectContent position="popper" className="z-[calc(var(--z-modal)+20)]">
                   <SelectItem value="super_admin">Super Admin</SelectItem>
                   <SelectItem value="platform_admin">Platform Admin</SelectItem>
                   <SelectItem value="support">Support</SelectItem>
