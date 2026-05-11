@@ -33,7 +33,7 @@ import {
   migrateContextUploadToTable,
 } from "./uploadProcessor.js";
 import type { ResearchWidgetContext } from "../../types/researchWidgetContext.js";
-import { getUserLoanAccessFilter } from "../userLoanAccessService.js";
+import { getLoanAccessContext } from "../userLoanAccessService.js";
 
 // ============================================================================
 // Types
@@ -105,6 +105,11 @@ export interface ResearchSession {
   uploadIds?: string[];
   /** Client-snapshotted widget catalog for the analyst (COHI-366). */
   widgetContext?: ResearchWidgetContext;
+}
+
+export interface ResearchAccessPrincipal {
+  userRole?: string;
+  isSuperAdmin?: boolean;
 }
 
 // ============================================================================
@@ -689,7 +694,8 @@ function emitSessionEvent(session: ResearchSession, event: SSEEvent): void {
 
 export async function runResearchPipeline(
   sessionId: string,
-  tenantPool: pg.Pool
+  tenantPool: pg.Pool,
+  principal?: ResearchAccessPrincipal
 ): Promise<void> {
   const session = sessions.get(sessionId);
   if (!session) {
@@ -705,10 +711,15 @@ export async function runResearchPipeline(
   const isQuickMode = session.mode === "quick";
 
   try {
-    const loanAccessFilter = await getUserLoanAccessFilter(
-      session.userId,
+    const loanAccessCtx = await getLoanAccessContext(
+      {
+        userId: session.userId,
+        userRole: principal?.userRole,
+        isSuperAdmin: principal?.isSuperAdmin,
+      },
       tenantPool
     );
+    const loanAccessFilter = loanAccessCtx.getFilter();
     const apiKey = await getOpenAIKey(session.tenantId);
     const [schemaContext, metricDefs, knowledgeContext, priorSessionSummaries, businessKnowledge, trackedInsightContext] = await Promise.all([
       getSchemaContext(session.tenantId),
@@ -1015,7 +1026,8 @@ export async function runResearchPipeline(
 export async function runFollowUp(
   sessionId: string,
   question: string,
-  tenantPool: pg.Pool
+  tenantPool: pg.Pool,
+  principal?: ResearchAccessPrincipal
 ): Promise<void> {
   const session = sessions.get(sessionId);
   if (!session) {
@@ -1042,10 +1054,15 @@ export async function runFollowUp(
   });
 
   try {
-    const loanAccessFilter = await getUserLoanAccessFilter(
-      session.userId,
+    const loanAccessCtx = await getLoanAccessContext(
+      {
+        userId: session.userId,
+        userRole: principal?.userRole,
+        isSuperAdmin: principal?.isSuperAdmin,
+      },
       tenantPool
     );
+    const loanAccessFilter = loanAccessCtx.getFilter();
     const apiKey = await getOpenAIKey(session.tenantId);
     const [schemaContext, metricDefs, knowledgeContext, trackedInsightCtx] = await Promise.all([
       getSchemaContext(session.tenantId),

@@ -206,7 +206,10 @@ router.get(
     res.write(`data: ${JSON.stringify({ type: "heartbeat", data: { sessionId: id }, timestamp: Date.now() })}\n\n`);
 
     if (!isSessionRunning(id) && session.phase !== "complete" && session.phase !== "error") {
-      runResearchPipeline(id, tenantPool).catch((err: any) => {
+      runResearchPipeline(id, tenantPool, {
+        userRole: req.userRole,
+        isSuperAdmin: req.isSuperAdmin,
+      }).catch((err: any) => {
         console.error(`[Research] Pipeline failed for session ${id}:`, err);
       });
     }
@@ -344,7 +347,10 @@ router.post(
       cleanup();
     });
 
-    runFollowUp(id, question, tenantPool).catch((err: any) => {
+    runFollowUp(id, question, tenantPool, {
+      userRole: req.userRole,
+      isSuperAdmin: req.isSuperAdmin,
+    }).catch((err: any) => {
       console.error(`[Research] Follow-up failed for session ${id}:`, err);
     });
   }
