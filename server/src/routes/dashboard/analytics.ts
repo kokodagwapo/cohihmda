@@ -11,6 +11,7 @@ import {
   getLeaderboardData,
   getHighPerformersRankings,
   getInsights,
+  getMyInsights,
   getClosingFalloutForecast,
   getDashboardOverview,
   getFinancialModelingBaseline,
@@ -49,6 +50,11 @@ import {
   generateInsightsForCategory,
   isCategoryGenerationRunning,
 } from "../../services/insights/agents/insightOrchestrator.js";
+import {
+  runUserInsightGeneration,
+  isUserInsightGenerationRunning,
+  runMyInsightsForTenant,
+} from "../../services/insights/agents/userInsightOrchestrator.js";
 import { FUNCTIONAL_CATEGORIES } from "../../services/insights/agents/categoryDefinitions.js";
 import { createJob, updateProgress, completeJob, failJob } from "../../services/jobManager.js";
 
@@ -230,6 +236,262 @@ router.get(
 );
 
 /**
+ * GET /api/dashboard/insights/my
+ * Personalized My Insights for the current user (user_generated_insights).
+ */
+router.get(
+  "/insights/my",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantContext = getTenantContext(req);
+      const { dateFilter = "ytd" } = req.query;
+      const userId = req.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      const accessCtx = await getLoanAccessContext(req, tenantContext.tenantPool);
+      if (accessCtx.hasNoAccess) {
+        return res.json({
+          insights: [],
+          generatedAt: new Date().toISOString(),
+          dateFilter,
+          usedLLM: true,
+          needsGeneration: false,
+          noAccess: true,
+          summary: {
+            totalLoans: 0,
+            revenue: 0,
+            pullThroughRate: "0",
+            avgCycleTime: 0,
+            totalInsights: 0,
+            bySource: {
+              business_overview: 0,
+              leaderboard: 0,
+              industry_news: 0,
+              loan_funnel: 0,
+            },
+          },
+        });
+      }
+      const result = await getMyInsights(tenantContext.tenantPool, userId, {
+        tenantId: tenantContext.tenantId,
+        dateFilter: dateFilter as string,
+      });
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error fetching My Insights:", error);
+      if (handleDatabaseError(error, res, "Failed to fetch My Insights")) {
+        return;
+      }
+      res.status(500).json({ error: "Failed to fetch My Insights" });
+    }
+  }
+);
+
+/**
+ * POST /api/dashboard/insights/my/refresh
+ * Recompute interest profile and run My Insights generation only (no tenant-wide insight job).
+ * Query: fresh=true|false (default true) — ignore prior headlines when planning/evaluating.
+ */
+router.post(
+  "/insights/my/refresh",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantContext = getTenantContext(req);
+      const userId = req.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      const { fresh = "true" } = req.query;
+      const accessCtx = await getLoanAccessContext(req, tenantContext.tenantPool);
+      if (accessCtx.hasNoAccess) {
+        return res.status(403).json({ error: "No loan access", noAccess: true });
+      }
+
+      const busy = isUserInsightGenerationRunning(tenantContext.tenantId, userId);
+      if (busy.running) {
+        return res.status(409).json({
+          error: "My Insights generation already in progress",
+          batch: busy.batch,
+        });
+      }
+
+      const job = createJob("my-insights-refresh", userId, tenantContext.tenantId);
+      res.status(202).json({ jobId: job.id, status: "processing" });
+
+      setImmediate(async () => {
+        try {
+          updateProgress(job.id, 5, "Updating your interest profile…");
+          const result = await runUserInsightGeneration(
+            tenantContext.tenantId,
+            tenantContext.tenantPool,
+            userId,
+            {
+              forceFresh: fresh === "true",
+              skipProfileUnchanged: false,
+              manualRefresh: true,
+            }
+          );
+
+          if (!result.success) {
+            failJob(job.id, result.error || "My Insights generation failed");
+            return;
+          }
+
+          updateProgress(job.id, 95, "Finishing up…");
+          completeJob(job.id, result);
+        } catch (error: any) {
+          console.error("[my-insights-refresh] error:", error);
+          failJob(job.id, error.message || "My Insights refresh failed");
+        }
+      });
+    } catch (error: any) {
+      console.error("Error starting My Insights refresh:", error);
+      if (handleDatabaseError(error, res, "Failed to start My Insights refresh")) {
+        return;
+      }
+      res.status(500).json({ error: "Failed to start My Insights refresh" });
+    }
+  }
+);
+
+/**
+ * POST /api/dashboard/insights/my/refresh-all-users
+ * Super admin only: recompute profiles and My Insights for every active tenant user (skips users with no tenant login in past 7 days).
+ */
+router.post(
+  "/insights/my/refresh-all-users",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const isSuper =
+        req.userRole === "super_admin" || req.isSuperAdmin === true;
+      if (!isSuper) {
+        return res.status(403).json({ error: "Super admin only" });
+      }
+
+      const tenantContext = getTenantContext(req);
+      const userId = req.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      const { fresh = "true" } = req.query;
+      const accessCtx = await getLoanAccessContext(req, tenantContext.tenantPool);
+      if (accessCtx.hasNoAccess) {
+        return res.status(403).json({ error: "No loan access", noAccess: true });
+      }
+
+      const job = createJob("my-insights-refresh-all", userId, tenantContext.tenantId);
+      res.status(202).json({ jobId: job.id, status: "processing" });
+
+      setImmediate(async () => {
+        try {
+          updateProgress(job.id, 5, "Running My Insights for all users…");
+          const result = await runMyInsightsForTenant(
+            tenantContext.tenantId,
+            tenantContext.tenantPool,
+            {
+              forceFresh: fresh === "true",
+              adminRefresh: true,
+            }
+          );
+          updateProgress(job.id, 95, "Finishing up…");
+          completeJob(job.id, result);
+        } catch (error: any) {
+          console.error("[my-insights-refresh-all] error:", error);
+          failJob(job.id, error.message || "My Insights bulk refresh failed");
+        }
+      });
+    } catch (error: any) {
+      console.error("Error starting My Insights bulk refresh:", error);
+      if (handleDatabaseError(error, res, "Failed to start My Insights bulk refresh")) {
+        return;
+      }
+      res.status(500).json({ error: "Failed to start My Insights bulk refresh" });
+    }
+  }
+);
+
+const myInsightPromptBodySchema = z.object({
+  title: z.string().min(1),
+  prompt_text: z.string().min(1),
+  specifiers: z.record(z.unknown()).optional(),
+  schedule: z.enum(["batch", "on_demand"]).optional(),
+  enabled: z.boolean().optional(),
+});
+
+/**
+ * GET /api/dashboard/insights/my/prompts — list current user's custom prompts
+ */
+router.get(
+  "/insights/my/prompts",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantContext = getTenantContext(req);
+      const userId = req.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      const r = await tenantContext.tenantPool.query(
+        `SELECT id, title, prompt_text, specifiers, schedule, enabled, scope, created_at, updated_at
+         FROM public.user_insight_prompts
+         WHERE user_id = $1 AND scope = 'user'
+         ORDER BY updated_at DESC`,
+        [userId]
+      );
+      res.json({ prompts: r.rows });
+    } catch (error: any) {
+      console.error("Error listing My Insight prompts:", error);
+      res.status(500).json({ error: "Failed to list prompts" });
+    }
+  }
+);
+
+/**
+ * POST /api/dashboard/insights/my/prompts — create a user-scoped custom prompt
+ */
+router.post(
+  "/insights/my/prompts",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const parsed = myInsightPromptBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+      }
+      const tenantContext = getTenantContext(req);
+      const userId = req.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      const { title, prompt_text, specifiers, schedule, enabled } = parsed.data;
+      const r = await tenantContext.tenantPool.query(
+        `INSERT INTO public.user_insight_prompts
+          (user_id, title, prompt_text, specifiers, schedule, enabled, scope)
+         VALUES ($1, $2, $3, $4::jsonb, COALESCE($5, 'batch'), COALESCE($6, true), 'user')
+         RETURNING id, title, prompt_text, specifiers, schedule, enabled, scope, created_at, updated_at`,
+        [
+          userId,
+          title,
+          prompt_text,
+          JSON.stringify(specifiers ?? {}),
+          schedule ?? "batch",
+          enabled ?? true,
+        ]
+      );
+      res.status(201).json(r.rows[0]);
+    } catch (error: any) {
+      console.error("Error creating My Insight prompt:", error);
+      res.status(500).json({ error: "Failed to create prompt" });
+    }
+  }
+);
+
+/**
  * GET /api/dashboard/insights
  * Get comprehensive insights based on loan data, business overview, leaderboard, and industry news
  * Respects user-level loan access filtering
@@ -370,6 +632,23 @@ router.post(
               generationMethod: "agent",
             }
           );
+
+          updateProgress(job.id, 95, "Generating My Insights for your account...");
+          if (req.userId) {
+            try {
+              await runUserInsightGeneration(
+                tenantContext.tenantId,
+                tenantContext.tenantPool,
+                req.userId,
+                {
+                  forceFresh: req.query.fresh === "true",
+                  skipProfileUnchanged: false,
+                }
+              );
+            } catch (myErr: any) {
+              console.warn("[insight-refresh] My Insights generation failed:", myErr?.message);
+            }
+          }
 
           completeJob(job.id, refreshed);
         } catch (error: any) {

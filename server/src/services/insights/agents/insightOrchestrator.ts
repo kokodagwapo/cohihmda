@@ -873,7 +873,7 @@ function sanitizeSqlIdentifier(identifier: string): string | null {
   return /^[a-z_][a-z0-9_]*$/i.test(identifier) ? identifier : null;
 }
 
-async function verifyDataQualityForInsights(
+export async function verifyDataQualityForInsights(
   tenantPool: pg.Pool,
   insights: EvaluatedInsight[],
   findings: InsightFinding[]
@@ -1365,7 +1365,7 @@ function buildDetailDataFromFinding(
 }
 
 /** Adds validated headlineMetricSignature for watchlist SQL; never stores unvalidated headline SQL. */
-async function finalizeAgentDetailData(
+export async function finalizeAgentDetailData(
   tenantPool: pg.Pool,
   insight: EvaluatedInsight,
   finding: InsightFinding
@@ -1442,7 +1442,7 @@ async function fetchTrackedInsights(
   }
 }
 
-async function fetchMarketContext(): Promise<string> {
+export async function fetchMarketContext(): Promise<string> {
   try {
     await initializeMarketRateCache();
 
@@ -1514,7 +1514,7 @@ async function fetchMarketContext(): Promise<string> {
   }
 }
 
-async function fetchStaleLoanStats(
+export async function fetchStaleLoanStats(
   tenantPool: pg.Pool
 ): Promise<{ staleCount: number; totalActive: number; stalePct: number }> {
   try {
@@ -1534,7 +1534,7 @@ async function fetchStaleLoanStats(
   }
 }
 
-function buildStaleLoanContext(stats: { staleCount: number; totalActive: number; stalePct: number }): string {
+export function buildStaleLoanContext(stats: { staleCount: number; totalActive: number; stalePct: number }): string {
   if (stats.totalActive === 0) return "";
   if (stats.stalePct < 5) {
     return `STALE LOAN DATA: This tenant has virtually no stale loans (${stats.staleCount} of ${stats.totalActive} active loans are 6+ months old, ${stats.stalePct.toFixed(1)}%). Do NOT generate questions about stale/abandoned pipeline — there is nothing to find. Focus investigation budget on higher-value areas.`;
@@ -1563,7 +1563,7 @@ function isAbsenceInsight(insight: EvaluatedInsight): boolean {
   return absencePatterns.some((p) => p.test(text));
 }
 
-function computeValueScore(
+export function computeValueScore(
   insight: EvaluatedInsight,
   finding: InsightFinding
 ): number {
@@ -1755,7 +1755,7 @@ function isPositiveFindingText(text: string): boolean {
   ].some((k) => normalized.includes(k));
 }
 
-async function fetchIndustryNewsContext(): Promise<string> {
+export async function fetchIndustryNewsContext(): Promise<string> {
   try {
     const news = await getIndustryNews();
     const headlines = (news.newsFeed || [])
@@ -1780,7 +1780,7 @@ async function fetchIndustryNewsContext(): Promise<string> {
   }
 }
 
-async function fetchFieldPopulationSummary(tenantPool: pg.Pool): Promise<string> {
+export async function fetchFieldPopulationSummary(tenantPool: pg.Pool): Promise<string> {
   try {
     // Quick population check on key fields
     const result = await tenantPool.query(`

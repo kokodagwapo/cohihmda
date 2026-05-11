@@ -43,6 +43,8 @@ export interface CohiInsight {
   cited_numbers?: string[];
   /** Dashboard insights: by-period metrics for evidence table */
   supporting_data?: { byPeriod?: Array<{ period: string; periodLabel?: string; averagePullThrough?: number; totalUnits?: number; totalVolume?: number; topPerformerName?: string; topPerformerUnits?: number; topPerformerVolume?: number }> };
+  /** My Insights: why this card matches your interest profile */
+  profile_relevance?: string | null;
 }
 
 export interface InsightsMetadata {
@@ -181,9 +183,13 @@ export const useCohiData = (
       const tenantParam = selectedTenantId
         ? `&tenant_id=${selectedTenantId}`
         : "";
+      const channelParam =
+        selectedChannel && selectedChannel !== "All"
+          ? `&channel_group=${encodeURIComponent(selectedChannel)}`
+          : "";
 
       const resp = await api.request<{ jobId: string }>(
-        `/api/dashboard/insights/refresh-all-channels?dateFilter=${dateFilter}${tenantParam}`,
+        `/api/dashboard/insights/refresh?dateFilter=${dateFilter}${tenantParam}${channelParam}`,
         { method: "POST" }
       );
 
@@ -195,6 +201,25 @@ export const useCohiData = (
       return null;
     }
   }, [dateFilter, selectedTenantId, selectedChannel]);
+
+  /** Super admin: My Insights for every active user in the tenant (async job). */
+  const refreshMyInsightsAllUsers = useCallback(async (): Promise<string | null> => {
+    setInsightsError(null);
+    try {
+      const tenantParam = selectedTenantId
+        ? `&tenant_id=${selectedTenantId}`
+        : "";
+      const resp = await api.request<{ jobId: string }>(
+        `/api/dashboard/insights/my/refresh-all-users?fresh=true${tenantParam}`,
+        { method: "POST" }
+      );
+      return resp.jobId;
+    } catch (error: any) {
+      console.error("Error refreshing My Insights for all users:", error);
+      setInsightsError(error.message || "Failed to refresh My Insights for all users");
+      return null;
+    }
+  }, [selectedTenantId]);
 
   const loadInsightsByMethod = useCallback(
     async (method: "pipeline" | "agent") => {
@@ -607,6 +632,7 @@ export const useCohiData = (
     metadata,
     needsGeneration,
     refreshInsights,
+    refreshMyInsightsAllUsers,
     refreshBucket,
     generateMoreInsights,
     reloadInsightsFromDb,

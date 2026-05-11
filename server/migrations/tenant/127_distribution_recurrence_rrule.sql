@@ -1,5 +1,5 @@
 -- =============================================================================
--- Migration 125: RFC 5545 recurrence (RRULE) for distribution schedules
+-- Migration 127: RFC 5545 recurrence (RRULE) for distribution schedules
 -- =============================================================================
 -- Adds recurrence_rule, recurrence_dtstart, recurrence_exdates, schedule_weekdays,
 -- extends frequency CHECK for 'custom', and backfills from legacy columns.
