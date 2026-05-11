@@ -221,3 +221,4 @@ INTERNAL_DISCOVERY.md
 !server/scripts/qa/ai/llm/prompts/**
 
 server/scripts/qa/cleanupStalePipelineEvidence.ts
+.obsidian/workspace.json

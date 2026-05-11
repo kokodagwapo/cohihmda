@@ -1,4 +1,4 @@
--- Migration 123: My Insights — per-user generated insights, interest profiles, custom prompts
+-- Migration 125: My Insights — per-user generated insights, interest profiles, custom prompts
 
 -- ---------------------------------------------------------------------------
 -- user_interest_profiles: cached behavioral / explicit signals summary per user
