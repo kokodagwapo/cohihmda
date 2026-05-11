@@ -36,6 +36,83 @@ export function normalizeMonthlyDays(
   return null;
 }
 
+/** YYYY-MM-DD for a calendar day in `tz` (en-CA locale). */
+function formatYmdInTz(d: Date, tz: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d);
+}
+
+function parseYmd(s: string): { y: number; m: number; d: number } {
+  const parts = s.split('-').map((x) => parseInt(x, 10));
+  const y = parts[0]!;
+  const mo = parts[1]!;
+  const d = parts[2]!;
+  return { y, m: mo - 1, d };
+}
+
+/** Gregorian civil date + delta days (UTC date math matches calendar days). */
+function addCalendarDays(y: number, m: number, d: number, delta: number): { y: number; m: number; d: number } {
+  const t = new Date(Date.UTC(y, m, d + delta));
+  return { y: t.getUTCFullYear(), m: t.getUTCMonth(), d: t.getUTCDate() };
+}
+
+/** Find an instant whose calendar date in `tz` is exactly (y, m0+1, d). */
+function instantForLocalYmd(y: number, m0: number, d: number, tz: string): Date {
+  const pad = (n: number, w: number) => String(n).padStart(w, '0');
+  const target = `${pad(y, 4)}-${pad(m0 + 1, 2)}-${pad(d, 2)}`;
+  const start = Date.UTC(y, m0, d) - 48 * 3600000;
+  for (let h = 0; h < 96; h++) {
+    const guess = new Date(start + h * 3600000);
+    if (formatYmdInTz(guess, tz) === target) return guess;
+  }
+  return new Date(Date.UTC(y, m0, d, 12, 0, 0));
+}
+
+function weekdayNumberInTz(refUtc: Date, tz: string): number {
+  const localFmt = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' });
+  const dayParts = Object.fromEntries(
+    localFmt.formatToParts(refUtc).map((p) => [p.type, p.value])
+  );
+  const dayMap: Record<string, number> = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+  };
+  return dayMap[dayParts.weekday as string] ?? 0;
+}
+
+/**
+ * Next run on a chosen weekday (0=Sun..6=Sat) at wall-clock time in `tz`,
+ * strictly after `floor`, walking **local calendar days** in `tz` (DST-safe).
+ */
+export function computeWeeklyNextRun(
+  hours: number,
+  minutes: number,
+  tz: string,
+  scheduleDay: number,
+  floor: Date
+): Date | null {
+  const targetDow = Math.max(0, Math.min(6, scheduleDay));
+  let cur = parseYmd(formatYmdInTz(floor, tz));
+  for (let i = 0; i < 370; i++) {
+    const ref = instantForLocalYmd(cur.y, cur.m, cur.d, tz);
+    const inst = wallClockToUtc(hours, minutes, tz, ref);
+    if (weekdayNumberInTz(ref, tz) === targetDow && inst.getTime() > floor.getTime()) {
+      return inst;
+    }
+    cur = addCalendarDays(cur.y, cur.m, cur.d, 1);
+  }
+  return null;
+}
+
 /**
  * Convert a wall-clock time (HH:MM) in a given IANA timezone to a UTC Date
  * on or after `referenceDate`.
@@ -155,6 +232,7 @@ function computeMonthlyNextRun(
  * The returned Date is UTC (TIMESTAMPTZ-compatible).
  *
  * @param afterExclusive optional — only instants strictly after this time are considered (for preview chaining).
+ * @param options.advancingAfterSend when true and frequency is biweekly, advance by two weekly slots (used after a successful send).
  */
 export function computeNextRunAt(
   frequency: string,
@@ -162,7 +240,8 @@ export function computeNextRunAt(
   scheduleDay: number | null,
   timezone: string,
   scheduleDays?: number[] | null,
-  afterExclusive?: Date | null
+  afterExclusive?: Date | null,
+  options?: { advancingAfterSend?: boolean }
 ): Date | null {
   try {
     const [hours, minutes] = scheduleTime.split(':').map((s) => parseInt(s, 10) || 0);
@@ -182,37 +261,24 @@ export function computeNextRunAt(
       return next;
     }
 
-    if (frequency === 'weekly' && scheduleDay != null) {
-      const targetDow = Math.max(0, Math.min(6, scheduleDay));
-      for (let offset = 0; offset <= 7; offset++) {
-        const candidate = new Date(floor.getTime() + offset * 86_400_000);
-        const candidateUtc = wallClockToUtc(hours, minutes, tz, candidate);
-        const localFmt = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' });
-        const dayParts = Object.fromEntries(
-          localFmt.formatToParts(candidate).map((p) => [p.type, p.value])
-        );
-        const dayMap: Record<string, number> = {
-          Sun: 0,
-          Mon: 1,
-          Tue: 2,
-          Wed: 3,
-          Thu: 4,
-          Fri: 5,
-          Sat: 6,
-        };
-        const candidateDow = dayMap[dayParts.weekday] ?? candidate.getUTCDay();
-
-        if (candidateDow === targetDow && candidateUtc.getTime() > floor.getTime()) {
-          return candidateUtc;
-        }
-      }
-      const fallback = new Date(floor.getTime() + 7 * 86_400_000);
-      return wallClockToUtc(hours, minutes, tz, fallback);
+    if (frequency === 'weekly' && scheduleDay != null && !Number.isNaN(Number(scheduleDay))) {
+      const d = Math.max(0, Math.min(6, Number(scheduleDay)));
+      return computeWeeklyNextRun(hours, minutes, tz, d, floor);
     }
 
     if (frequency === 'biweekly') {
-      const twoWeeksOut = new Date(floor.getTime() + 14 * 86_400_000);
-      return wallClockToUtc(hours, minutes, tz, twoWeeksOut);
+      if (scheduleDay != null && !Number.isNaN(scheduleDay)) {
+        const d = Math.max(0, Math.min(6, scheduleDay));
+        if (options?.advancingAfterSend) {
+          const w1 = computeWeeklyNextRun(hours, minutes, tz, d, floor);
+          return w1
+            ? computeWeeklyNextRun(hours, minutes, tz, d, new Date(w1.getTime() + 1))
+            : null;
+        }
+        return computeWeeklyNextRun(hours, minutes, tz, d, floor);
+      }
+      const anchor = new Date(floor.getTime() + 14 * 86_400_000);
+      return wallClockToUtc(hours, minutes, tz, anchor);
     }
 
     if (frequency === 'monthly') {
@@ -242,6 +308,31 @@ export function computeNextScheduleRuns(
   count: number
 ): Date[] {
   const runs: Date[] = [];
+  const [hours, minutes] = scheduleTime.split(':').map((s) => parseInt(s, 10) || 0);
+  const tz = timezone || 'America/New_York';
+
+  if (
+    frequency === 'biweekly' &&
+    scheduleDay != null &&
+    !Number.isNaN(scheduleDay)
+  ) {
+    const d = Math.max(0, Math.min(6, scheduleDay));
+    let ref = new Date();
+    const first = computeWeeklyNextRun(hours, minutes, tz, d, ref);
+    if (!first) return [];
+    runs.push(first);
+    ref = new Date(first.getTime() + 1);
+    for (let i = 1; i < count; i++) {
+      const w1 = computeWeeklyNextRun(hours, minutes, tz, d, ref);
+      if (!w1) break;
+      const w2 = computeWeeklyNextRun(hours, minutes, tz, d, new Date(w1.getTime() + 1));
+      if (!w2) break;
+      runs.push(w2);
+      ref = new Date(w2.getTime() + 1);
+    }
+    return runs;
+  }
+
   let ref = new Date();
   for (let i = 0; i < count; i++) {
     const next = computeNextRunAt(
@@ -309,15 +400,16 @@ async function processDistributionSchedule(
       'link'
     );
 
+    const success = result.status === 'success' || result.successfulCount > 0;
     const nextRun = computeNextRunAt(
       schedule.frequency,
       schedule.schedule_time || '08:00',
       schedule.schedule_day,
       schedule.timezone || 'America/New_York',
-      schedule.schedule_days ?? null
+      schedule.schedule_days ?? null,
+      null,
+      success && schedule.frequency === 'biweekly' ? { advancingAfterSend: true } : undefined
     );
-
-    const success = result.status === 'success' || result.successfulCount > 0;
     if (success) {
       await tenantPool.query(
         `UPDATE public.distribution_schedules

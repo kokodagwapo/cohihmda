@@ -16,6 +16,7 @@ import {
   getTenantContext,
 } from '../middleware/tenantContext.js';
 import { buildDashboardInsightDeepDiveCanvas } from '../services/workbench/fromDashboardInsightCanvas.js';
+import { generateDeepDiveWidgets, type SourceInsightMeta } from '../services/workbench/insightDeepDive.js';
 
 const router = Router();
 
@@ -682,9 +683,90 @@ router.put(
 );
 
 // ---------------------------------------------------------------------------
+// POST /:id/transfer-ownership — Move canvas owner to another tenant user
+// Current owner (or super/platform admin) only. Previous owner gets editor share.
+// ---------------------------------------------------------------------------
+router.post(
+  '/:id/transfer-ownership',
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const { id } = req.params;
+      const { new_owner_user_id } = (req.body ?? {}) as { new_owner_user_id?: string };
+      const { tenantPool } = getTenantContext(req);
+      const hasFullCanvasAccess = FULL_CANVAS_ACCESS_ROLES.includes(req.userRole || '');
+
+      if (!new_owner_user_id || typeof new_owner_user_id !== 'string') {
+        return res.status(400).json({ error: 'new_owner_user_id is required' });
+      }
+
+      const canvasRes = await tenantPool.query(
+        `SELECT id, user_id FROM public.workbench_canvases WHERE id = $1`,
+        [id],
+      );
+      if (canvasRes.rows.length === 0) {
+        return res.status(404).json({ error: 'Canvas not found' });
+      }
+      const oldOwnerId: string = canvasRes.rows[0].user_id;
+      if (oldOwnerId === new_owner_user_id) {
+        return res.status(400).json({ error: 'That user is already the owner' });
+      }
+
+      const isCurrentOwner = oldOwnerId === req.userId;
+      if (!isCurrentOwner && !hasFullCanvasAccess) {
+        return res.status(403).json({ error: 'Only the canvas owner can transfer ownership' });
+      }
+
+      const newUserRes = await tenantPool.query(
+        `SELECT id FROM public.users WHERE id = $1 AND COALESCE(is_active, true) = true`,
+        [new_owner_user_id],
+      );
+      if (newUserRes.rows.length === 0) {
+        return res.status(404).json({ error: 'New owner not found or inactive in this tenant' });
+      }
+
+      const client = await tenantPool.connect();
+      try {
+        await client.query('BEGIN');
+
+        await client.query(
+          `UPDATE public.workbench_canvases SET user_id = $1, updated_at = NOW() WHERE id = $2`,
+          [new_owner_user_id, id],
+        );
+
+        await client.query(
+          `DELETE FROM public.canvas_share_entries WHERE canvas_id = $1 AND user_id = $2`,
+          [id, new_owner_user_id],
+        );
+
+        await client.query(
+          `INSERT INTO public.canvas_share_entries (canvas_id, user_id, permission, shared_by)
+           VALUES ($1, $2, 'editor', $3)
+           ON CONFLICT (canvas_id, user_id) WHERE user_id IS NOT NULL
+           DO UPDATE SET permission = 'editor', shared_by = COALESCE(EXCLUDED.shared_by, canvas_share_entries.shared_by)`,
+          [id, oldOwnerId, new_owner_user_id],
+        );
+
+        await client.query('COMMIT');
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
+
+      res.json({ success: true, user_id: new_owner_user_id });
+    } catch (error: any) {
+      console.error('[Workbench] Error transferring ownership:', error.message);
+      res.status(500).json({ error: 'Failed to transfer ownership', message: error.message });
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
 // POST /from-insight  — Create a deep-dive canvas from a stored insight
 // ---------------------------------------------------------------------------
-import { generateDeepDiveWidgets, type SourceInsightMeta } from '../services/workbench/insightDeepDive.js';
 
 router.post(
   '/from-insight',

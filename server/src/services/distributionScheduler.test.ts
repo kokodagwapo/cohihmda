@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   computeNextRunAt,
+  computeNextScheduleRuns,
+  computeWeeklyNextRun,
   normalizeMonthlyDays,
 } from './distributionScheduler.js';
 
@@ -11,6 +13,53 @@ describe('normalizeMonthlyDays', () => {
 
   it('falls back to legacy schedule_day', () => {
     expect(normalizeMonthlyDays(null, 7)).toEqual([7]);
+  });
+});
+
+describe('computeNextRunAt weekly', () => {
+  it('returns next matching weekday in UTC (civil calendar)', () => {
+    const after = new Date('2026-05-13T15:00:00.000Z');
+    const next = computeNextRunAt('weekly', '09:00', 1, 'UTC', null, after);
+    expect(next).not.toBeNull();
+    expect(next!.toISOString()).toBe('2026-05-18T09:00:00.000Z');
+  });
+});
+
+describe('computeNextRunAt biweekly', () => {
+  it('first upcoming run matches weekly when not advancing after send', () => {
+    const after = new Date('2026-05-11T12:00:00.000Z');
+    const next = computeNextRunAt('biweekly', '09:00', 1, 'UTC', null, after);
+    expect(next!.toISOString()).toBe('2026-05-18T09:00:00.000Z');
+  });
+
+  it('after a send, advances two weekly slots (same weekday, +14 days)', () => {
+    const after = new Date('2026-05-18T09:00:05.000Z');
+    const next = computeNextRunAt('biweekly', '09:00', 1, 'UTC', null, after, {
+      advancingAfterSend: true,
+    });
+    expect(next!.toISOString()).toBe('2026-06-01T09:00:00.000Z');
+  });
+});
+
+describe('computeNextScheduleRuns biweekly', () => {
+  it('spaces preview runs by two weeks', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-11T12:00:00.000Z'));
+    const runs = computeNextScheduleRuns('biweekly', '09:00', 1, 'UTC', null, 3);
+    vi.useRealTimers();
+    expect(runs.map((d) => d.toISOString())).toEqual([
+      '2026-05-18T09:00:00.000Z',
+      '2026-06-01T09:00:00.000Z',
+      '2026-06-15T09:00:00.000Z',
+    ]);
+  });
+});
+
+describe('computeWeeklyNextRun', () => {
+  it('finds same-week occurrence when floor is earlier same day', () => {
+    const floor = new Date('2026-05-18T07:00:00.000Z');
+    const next = computeWeeklyNextRun(9, 0, 'UTC', 1, floor);
+    expect(next!.toISOString()).toBe('2026-05-18T09:00:00.000Z');
   });
 });
 

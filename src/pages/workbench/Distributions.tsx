@@ -68,7 +68,7 @@ const CONTENT_TYPES = [
 const FREQUENCIES = [
   { value: "daily", label: "Daily" },
   { value: "weekly", label: "Weekly" },
-  { value: "biweekly", label: "Every 2 weeks" },
+  { value: "biweekly", label: "Every 2 weeks (pick day of week)" },
   { value: "monthly", label: "Monthly" },
   { value: "one_time", label: "One time" },
 ] as const;
@@ -107,6 +107,25 @@ function detectBrowserTimezone(): string {
 function formatTzLabel(tzValue: string): string {
   const found = COMMON_TIMEZONES.find((tz) => tz.value === tzValue);
   return found ? found.label : tzValue;
+}
+
+function scheduleTableSubtitle(s: Record<string, unknown>): string | null {
+  if (
+    s.frequency === "monthly" &&
+    Array.isArray(s.schedule_days) &&
+    (s.schedule_days as unknown[]).length > 0
+  ) {
+    return `Days: ${(s.schedule_days as number[]).join(", ")}`;
+  }
+  if (
+    (s.frequency === "weekly" || s.frequency === "biweekly") &&
+    s.schedule_day != null &&
+    !Number.isNaN(Number(s.schedule_day))
+  ) {
+    const idx = Math.max(0, Math.min(6, Number(s.schedule_day)));
+    return WEEKDAYS[idx]?.label ?? null;
+  }
+  return null;
 }
 
 export default function Distributions() {
@@ -392,13 +411,14 @@ export default function Distributions() {
                               {FREQUENCIES.find((f) => f.value === s.frequency)
                                 ?.label ?? s.frequency}{" "}
                               at {s.schedule_time?.slice(0, 5) ?? "08:00"}
-                              {s.frequency === "monthly" &&
-                                Array.isArray(s.schedule_days) &&
-                                s.schedule_days.length > 0 && (
+                              {(() => {
+                                const sub = scheduleTableSubtitle(s);
+                                return sub ? (
                                   <span className="block text-xs text-slate-600 dark:text-slate-400">
-                                    Days: {s.schedule_days.join(", ")}
+                                    {sub}
                                   </span>
-                                )}
+                                ) : null;
+                              })()}
                               <span className="block text-xs text-slate-500">
                                 {formatTzLabel(s.timezone || "America/New_York")}
                               </span>
@@ -593,7 +613,7 @@ function DistributionScheduleDialog({
           schedule_time: scheduleTime,
           timezone,
           ...(frequency === "monthly" ? { schedule_days: scheduleDays } : {}),
-          ...(frequency === "weekly"
+          ...(frequency === "weekly" || frequency === "biweekly"
             ? { schedule_day: Number(weeklyDay) }
             : {}),
           count: 3,
@@ -605,7 +625,7 @@ function DistributionScheduleDialog({
       open &&
       frequency !== "one_time" &&
       (frequency !== "monthly" || scheduleDays.length > 0) &&
-      (frequency === "weekly" ? weeklyDay !== "" : true),
+      (frequency === "weekly" || frequency === "biweekly" ? weeklyDay !== "" : true),
   });
 
   useEffect(() => {
@@ -641,7 +661,10 @@ function DistributionScheduleDialog({
       } else {
         setScheduleDays([]);
       }
-      if (schedule.frequency === "weekly" && schedule.schedule_day != null) {
+      if (
+        (schedule.frequency === "weekly" || schedule.frequency === "biweekly") &&
+        schedule.schedule_day != null
+      ) {
         setWeeklyDay(String(Math.max(0, Math.min(6, Number(schedule.schedule_day)))));
       } else {
         setWeeklyDay("1");
@@ -679,6 +702,17 @@ function DistributionScheduleDialog({
       });
       return;
     }
+    if (
+      (frequency === "weekly" || frequency === "biweekly") &&
+      (weeklyDay === "" || Number.isNaN(Number(weeklyDay)))
+    ) {
+      toast({
+        title: "Pick a day of the week",
+        description: "Weekly and biweekly schedules need a weekday.",
+        variant: "destructive",
+      });
+      return;
+    }
     const emails = recipientEmails
       .split(/[,;\s]+/)
       .map((e) => e.trim())
@@ -698,8 +732,11 @@ function DistributionScheduleDialog({
     if (frequency === "monthly") {
       payload.schedule_days = scheduleDays;
     }
-    if (frequency === "weekly") {
+    if (frequency === "weekly" || frequency === "biweekly") {
       payload.schedule_day = Number(weeklyDay);
+    }
+    if (frequency !== "monthly") {
+      payload.schedule_days = null;
     }
     onSave(payload);
   };
@@ -816,7 +853,7 @@ function DistributionScheduleDialog({
               </Select>
             </div>
           </div>
-          {frequency === "weekly" && (
+          {(frequency === "weekly" || frequency === "biweekly") && (
             <div>
               <Label>Day of week</Label>
               <Select value={weeklyDay} onValueChange={setWeeklyDay}>
@@ -841,6 +878,44 @@ function DistributionScheduleDialog({
                 month (e.g. 31 in April), the send runs on the last day of that
                 month.
               </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  onClick={() => setScheduleDays([1])}
+                >
+                  1st only
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  onClick={() => setScheduleDays([15])}
+                >
+                  15th only
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  onClick={() => setScheduleDays([1, 15].sort((a, b) => a - b))}
+                >
+                  {"1st & 15th"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  onClick={() => setScheduleDays([1, 15, 28].sort((a, b) => a - b))}
+                >
+                  {"1st, 15th & 28th"}
+                </Button>
+              </div>
               <div className="grid grid-cols-7 gap-2 max-h-48 overflow-y-auto border rounded-md p-3 bg-slate-50/80 dark:bg-slate-900/50">
                 {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
                   <label
@@ -888,6 +963,13 @@ function DistributionScheduleDialog({
                 !previewQuery.isLoading && (
                   <p className="text-xs text-slate-500">
                     Select at least one day to see preview times.
+                  </p>
+                )}
+              {(frequency === "weekly" || frequency === "biweekly") &&
+                weeklyDay === "" &&
+                !previewQuery.isLoading && (
+                  <p className="text-xs text-slate-500">
+                    Pick a day of the week to see preview times.
                   </p>
                 )}
             </div>

@@ -308,6 +308,18 @@ router.post(
         }
         scheduleDaysOut = normalized;
         scheduleDayOut = normalized[0];
+      } else {
+        scheduleDaysOut = null;
+        if (frequency === 'weekly' || frequency === 'biweekly') {
+          const dow =
+            scheduleDayOut != null && scheduleDayOut !== '' ? Number(scheduleDayOut) : NaN;
+          if (Number.isNaN(dow) || dow < 0 || dow > 6) {
+            return res.status(400).json({
+              error:
+                'Weekly and biweekly schedules require schedule_day between 0 (Sunday) and 6 (Saturday).',
+            });
+          }
+        }
       }
 
       const nextRunAt =
@@ -402,6 +414,14 @@ router.post(
               'Monthly schedules require at least one day (schedule_days 1–31 or legacy schedule_day)',
           });
         }
+      } else if (frequency === 'weekly' || frequency === 'biweekly') {
+        const dow = dayNum != null && dayNum !== '' ? Number(dayNum) : NaN;
+        if (Number.isNaN(dow) || dow < 0 || dow > 6) {
+          return res.status(400).json({
+            error:
+              'Weekly and biweekly schedules require schedule_day between 0 (Sunday) and 6 (Saturday).',
+          });
+        }
       }
 
       const runs = computeNextScheduleRuns(
@@ -464,6 +484,14 @@ router.put(
       const { tenantPool } = getTenantContext(req);
       const { id } = req.params;
       const body = req.body ?? {};
+      const curRow = await tenantPool.query(
+        'SELECT frequency FROM public.distribution_schedules WHERE id = $1',
+        [id]
+      );
+      if (curRow.rows.length === 0) {
+        return res.status(404).json({ error: 'Distribution schedule not found' });
+      }
+      const currentFrequency = curRow.rows[0].frequency as string;
       const fields = [
         'name', 'description', 'content_type', 'content_id', 'content_config',
         'frequency', 'schedule_time', 'schedule_day', 'schedule_days', 'timezone',
@@ -487,6 +515,10 @@ router.put(
             values.push(sanitizedContentConfig);
             idx++;
           } else if (f === 'schedule_days') {
+            const effectiveFreq = (body.frequency as string | undefined) ?? currentFrequency;
+            if (effectiveFreq !== 'monthly') {
+              continue;
+            }
             if (body[f] === null) {
               setClause.push(`schedule_days = $${idx}`);
               values.push(null);
@@ -563,6 +595,22 @@ router.put(
             if (body.schedule_day === undefined) {
               setClause.push(`schedule_day = $${idx}`);
               values.push(normalized[0]);
+              idx++;
+            }
+          } else {
+            daysMerged = null;
+            if (freq === 'weekly' || freq === 'biweekly') {
+              const dow = day != null ? Number(day) : NaN;
+              if (Number.isNaN(dow) || dow < 0 || dow > 6) {
+                return res.status(400).json({
+                  error:
+                    'Weekly and biweekly schedules require schedule_day between 0 (Sunday) and 6 (Saturday).',
+                });
+              }
+            }
+            if (!setClause.some((c) => c.startsWith('schedule_days'))) {
+              setClause.push(`schedule_days = $${idx}`);
+              values.push(null);
               idx++;
             }
           }
@@ -721,15 +769,19 @@ router.post(
       );
       if (fullSchedule.rows.length > 0) {
         const s = fullSchedule.rows[0];
-        const nextRunAt = s.frequency !== 'one_time'
-          ? computeNextRunAt(
-              s.frequency,
-              s.schedule_time || '08:00',
-              s.schedule_day,
-              s.timezone || 'America/New_York',
-              s.schedule_days ?? null
-            )
-          : null;
+        const sendOk = result.status === 'success' || result.successfulCount > 0;
+        const nextRunAt =
+          s.frequency !== 'one_time'
+            ? computeNextRunAt(
+                s.frequency,
+                s.schedule_time || '08:00',
+                s.schedule_day,
+                s.timezone || 'America/New_York',
+                s.schedule_days ?? null,
+                null,
+                sendOk && s.frequency === 'biweekly' ? { advancingAfterSend: true } : undefined
+              )
+            : null;
         await tenantPool.query(
           `UPDATE public.distribution_schedules
            SET last_sent_at = NOW(), next_run_at = $2, updated_at = NOW()
