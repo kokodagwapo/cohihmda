@@ -172,6 +172,44 @@ export function registerInsightHooks(): void {
   );
 
   registerPostSyncHook(
+    "my-insights-generation",
+    async (ctx: PostSyncContext) => {
+      try {
+        const policy = await loadPostSyncInsightPolicyForHook(ctx);
+        if (!policy.insightsAutoEnabled) {
+          return;
+        }
+        if (
+          !shouldRunInsightHookForPolicy({
+            trigger: insightTrigger(ctx),
+            scheduledInsightsEnabled: ctx.scheduledInsightsEnabled,
+            policy,
+          })
+        ) {
+          logInfo(
+            `[PostSyncHook] Skipping My Insights generation (business-day insight policy, trigger=${insightTrigger(
+              ctx,
+            )}) for connection ${ctx.connectionId}`,
+          );
+          return;
+        }
+
+        const { runMyInsightsForTenant } = await import(
+          "../insights/agents/userInsightOrchestrator.js"
+        );
+        logInfo(`[PostSyncHook] Running My Insights generation for tenant ${ctx.tenantId}`);
+        const result = await runMyInsightsForTenant(ctx.tenantId, ctx.tenantPool, {});
+        logInfo(
+          `[PostSyncHook] My Insights: users=${result.usersProcessed} errors=${result.errors} insights=${result.insightsTotal}`,
+        );
+      } catch (err: any) {
+        logError(`[PostSyncHook] My Insights generation failed: ${err.message}`, err);
+      }
+    },
+    150
+  );
+
+  registerPostSyncHook(
     "tracked-insight-evaluation",
     async (ctx: PostSyncContext) => {
       try {

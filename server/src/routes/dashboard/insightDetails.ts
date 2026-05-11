@@ -24,6 +24,56 @@ const router = Router();
 // Helper: load detail_data from the generated_insights table
 // ============================================================================
 
+async function loadUserMyInsightDetail(
+  tenantPool: any,
+  insightId: number,
+  userId: string
+): Promise<{
+  detailData: Record<string, any> | null;
+  generatedAt: string | null;
+  etm: Record<string, any> | null;
+  profileRelevance: string | null;
+}> {
+  const empty = {
+    detailData: null,
+    generatedAt: null,
+    etm: null,
+    profileRelevance: null,
+  };
+  try {
+    const result = await tenantPool.query(
+      `SELECT detail_data, generated_at, evidence, profile_relevance
+       FROM public.user_generated_insights
+       WHERE id = $1 AND user_id = $2::uuid`,
+      [insightId, userId]
+    );
+    if (result.rows.length === 0) return empty;
+    const row = result.rows[0];
+    const ev = row.evidence || {};
+    return {
+      detailData: row.detail_data || null,
+      generatedAt: row.generated_at || null,
+      etm:
+        ev.what_changed || ev.why || ev.business_impact
+          ? {
+              what_changed: ev.what_changed,
+              why: ev.why,
+              business_impact: ev.business_impact,
+              risk_if_ignored: ev.risk_if_ignored,
+              recommended_action: ev.recommended_action,
+              owner: ev.owner,
+            }
+          : null,
+      profileRelevance:
+        typeof row.profile_relevance === "string" && row.profile_relevance.trim()
+          ? row.profile_relevance.trim()
+          : null,
+    };
+  } catch {
+    return empty;
+  }
+}
+
 async function loadInsightDetail(
   tenantPool: any,
   insightId: number
@@ -226,6 +276,45 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
         ...(row.generated_at ? { dataAsOf: row.generated_at } : {}),
         comparison: detailData.comparison || null,
         audit: detailData.audit || null,
+      });
+    }
+
+    // My Insights: per-user store
+    if (source === "my") {
+      const userId = req.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      const { detailData, generatedAt, etm, profileRelevance } = await loadUserMyInsightDetail(
+        tenantPool,
+        insightIdNum,
+        userId
+      );
+      if (detailData && (detailData.title || detailData.summary)) {
+        return res.json({
+          source: "my",
+          dateFilter,
+          title: detailData.title || "Insight",
+          summary: detailData.summary || {},
+          rows: detailData.rows || [],
+          displayConfig: detailData.displayConfig || { columns: [], summaryMetrics: [] },
+          etm: etm || detailData.etm || null,
+          profile_relevance: profileRelevance,
+          dateRange: {
+            label: dateRangeLabel,
+            startDate: startDate.toISOString(),
+            endDate: endDate.toISOString(),
+          },
+          ...(generatedAt ? { dataAsOf: generatedAt } : {}),
+          comparison: detailData.comparison || null,
+          audit: detailData.audit || null,
+        });
+      }
+      return res.status(404).json({
+        error: "Insight not found",
+        message: "My Insight not found or has no detail data.",
+        source: "my",
+        insightId: insightIdNum,
       });
     }
 

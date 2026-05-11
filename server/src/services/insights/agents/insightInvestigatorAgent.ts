@@ -20,6 +20,7 @@ import {
   type LLMMessage,
   type QueryResult,
 } from "../../research/tools.js";
+import type { LoanAccessFilter } from "../../userLoanAccessService.js";
 import type { InvestigationQuestion } from "../../research/agents/plannerAgent.js";
 import type { EvidenceItem } from "../../research/agents/dataAnalystAgent.js";
 import { VIZ_STANDARDS_MEDIUM } from "../../../config/visualizationStandards.js";
@@ -195,7 +196,9 @@ export async function runInsightInvestigator(
   marketContext?: string,
   industryNewsContext?: string,
   knowledgeContext?: string,
-  revenueFormula?: string
+  revenueFormula?: string,
+  accessFilter?: LoanAccessFilter | null,
+  tenantIdForSql?: string
 ): Promise<InsightFinding> {
   const now = new Date();
   const todayStr = now.toISOString().split("T")[0];
@@ -300,7 +303,11 @@ export async function runInsightInvestigator(
 
       let result: QueryResult;
       try {
-        result = await safeExecuteSQL(parsed.sql, tenantPool);
+        const params = Array.isArray(parsed.params) ? parsed.params : undefined;
+        result = await safeExecuteSQL(parsed.sql, tenantPool, params, {
+          accessFilter: accessFilter ?? undefined,
+          tenantId: tenantIdForSql,
+        });
       } catch (err: any) {
         emit({
           iteration,
