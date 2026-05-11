@@ -1233,6 +1233,7 @@ router.post(
     });
     
     const validated = schema.parse(req.body);
+    const normalizedEmail = validated.email.trim().toLowerCase();
     const useCognitoInvite = cognitoAuth.isCognitoAuthEnabled();
     if (!useCognitoInvite && !validated.password) {
       return res.status(400).json({ error: "Password is required when Cognito password auth is not enabled" });

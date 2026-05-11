@@ -187,7 +187,10 @@ function getJwtSecret(): string {
 const signInSchema = z.object({
   email: z.string().min(1, "Email is required"),
   password: z.string().min(1, "Password is required"),
-  tenantSlug: z.string().optional(), // Optional - if not provided, check super admin first
+  tenantSlug: z.preprocess(
+    (value) => (value === null ? undefined : value),
+    z.string().optional(),
+  ), // Optional - if not provided, check super admin first
 });
 
 const signUpSchema = z.object({
@@ -620,7 +623,10 @@ router.post("/mfa/verify", authLimiter, async (req, res) => {
         challengeName: z
           .enum(["SOFTWARE_TOKEN_MFA", "EMAIL_OTP", "SMS_MFA"])
           .optional(),
-        tenantSlug: z.string().optional(),
+        tenantSlug: z.preprocess(
+          (value) => (value === null ? undefined : value),
+          z.string().optional(),
+        ),
       })
       .parse(req.body);
     const submittedEmail = normalizeEmailInput(email);
@@ -938,7 +944,10 @@ router.get("/tenants", async (req, res) => {
 
 const passwordResetRequestSchema = z.object({
   email: z.string().email("Invalid email"),
-  tenantSlug: z.string().optional(),
+  tenantSlug: z.preprocess(
+    (value) => (value === null ? undefined : value),
+    z.string().optional(),
+  ),
 });
 
 /**
