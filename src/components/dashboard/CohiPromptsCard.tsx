@@ -64,6 +64,8 @@ import {
   getEstimatedNextSyncAt,
 } from "@/utils/losSyncDisplay";
 import { useJobStatus } from "@/hooks/useJobStatus";
+
+const MY_INSIGHTS_JOB_POLL_MS = 2000;
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 import { JobProgress } from "@/components/ui/JobProgress";
@@ -1188,8 +1190,6 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
     needsGeneration,
     refreshInsights,
     refreshMyInsightsAllUsers,
-    refreshMyInsightsProfile,
-    refreshMyInsightsInsightsOnly,
     refreshBucket,
     generateMoreInsights,
     reloadInsightsFromDb,
@@ -1218,17 +1218,8 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
   const [refreshJobId, setRefreshJobId] = useState<string | null>(null);
   const refreshJob = useJobStatus(refreshJobId);
 
-  const [myInsightsAllUsersJobId, setMyInsightsAllUsersJobId] = useState<string | null>(null);
-  const myInsightsAllUsersJob = useJobStatus(myInsightsAllUsersJobId);
+  const [myInsightsAllUsersBusy, setMyInsightsAllUsersBusy] = useState(false);
   const [myInsightsAllUsersError, setMyInsightsAllUsersError] = useState<string | null>(null);
-
-  const [myProfileRefreshJobId, setMyProfileRefreshJobId] = useState<string | null>(null);
-  const myProfileRefreshJob = useJobStatus(myProfileRefreshJobId);
-  const [myProfileRefreshError, setMyProfileRefreshError] = useState<string | null>(null);
-
-  const [myInsightsOnlyJobId, setMyInsightsOnlyJobId] = useState<string | null>(null);
-  const myInsightsOnlyJob = useJobStatus(myInsightsOnlyJobId);
-  const [myInsightsOnlyError, setMyInsightsOnlyError] = useState<string | null>(null);
 
   const [myPrompts, setMyPrompts] = useState<UserMyInsightPrompt[]>([]);
   const [myPromptsLoading, setMyPromptsLoading] = useState(false);
@@ -1246,8 +1237,11 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
   const [specifierValuesSearch, setSpecifierValuesSearch] = useState("");
   const [promptFormBusy, setPromptFormBusy] = useState(false);
   const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
-  const [myPromptRunJobId, setMyPromptRunJobId] = useState<string | null>(null);
-  const myPromptRunJob = useJobStatus(myPromptRunJobId);
+  /** Prompt run: poll-only job tracking (no WebSocket); mirrors refreshBucket in useCohiData. */
+  const [myPromptRunUi, setMyPromptRunUi] = useState<
+    | { kind: "idle" }
+    | { kind: "processing"; progress: number; message?: string }
+  >({ kind: "idle" });
 
   const [agentJobId, setAgentJobId] = useState<string | null>(null);
   const agentJob = useJobStatus(agentJobId);
@@ -1300,15 +1294,10 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
   }, [fetchAndBuildPipelineMap]);
 
   const isRefreshing = refreshJob.status === "processing";
-  const isMyInsightsAllUsersRefreshing = myInsightsAllUsersJob.status === "processing";
-  const isMyProfileRefreshing = myProfileRefreshJob.status === "processing";
-  const isMyInsightsOnlyRefreshing = myInsightsOnlyJob.status === "processing";
-  const isMyPromptRunBusy = myPromptRunJob.status === "processing";
+  const isMyInsightsAllUsersRefreshing = myInsightsAllUsersBusy;
+  const isMyPromptRunBusy = myPromptRunUi.kind === "processing";
   const isAnyMyInsightsActionBusy =
-    isMyInsightsAllUsersRefreshing ||
-    isMyProfileRefreshing ||
-    isMyInsightsOnlyRefreshing ||
-    isMyPromptRunBusy;
+    isMyInsightsAllUsersRefreshing || isMyPromptRunBusy;
   const isAgentGenerating = agentJob.status === "processing";
 
   const loadMyInsights = useCallback(async () => {
@@ -1355,6 +1344,44 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
       setMyPromptsLoading(false);
     }
   }, [selectedTenantId]);
+
+  /** Poll GET /api/jobs/:id until complete or failed (same pattern as useCohiData.refreshBucket). */
+  const pollJobUntilComplete = useCallback(
+    async (
+      jobId: string,
+      onProgress?: (p: { progress: number; message?: string }) => void
+    ): Promise<void> => {
+      await new Promise<void>((resolve, reject) => {
+        const run = async () => {
+          try {
+            const data = await api.request<{
+              status: string;
+              progress?: number;
+              message?: string;
+              error?: string;
+            }>(`/api/jobs/${jobId}`);
+            if (data.status === "complete") {
+              resolve();
+              return;
+            }
+            if (data.status === "failed") {
+              reject(new Error(data.error || "Job failed"));
+              return;
+            }
+            onProgress?.({
+              progress: data.progress ?? 0,
+              message: data.message,
+            });
+            setTimeout(run, MY_INSIGHTS_JOB_POLL_MS);
+          } catch (e: unknown) {
+            reject(e instanceof Error ? e : new Error(String(e)));
+          }
+        };
+        run();
+      });
+    },
+    []
+  );
 
   const loadDistinctForRow = useCallback(
     async (rowId: string, col: string) => {
@@ -1433,58 +1460,6 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
   }, [refreshJob.status, reloadInsightsFromDb, loadMyInsights]);
 
   useEffect(() => {
-    if (myInsightsAllUsersJob.status === "complete") {
-      setMyInsightsAllUsersError(null);
-      void loadMyInsights();
-      setMyInsightsAllUsersJobId(null);
-    } else if (myInsightsAllUsersJob.status === "failed") {
-      setMyInsightsAllUsersError(
-        myInsightsAllUsersJob.error || "Bulk My Insights refresh failed"
-      );
-      void loadMyInsights();
-      setMyInsightsAllUsersJobId(null);
-    }
-  }, [myInsightsAllUsersJob.status, myInsightsAllUsersJob.error, loadMyInsights]);
-
-  useEffect(() => {
-    if (myProfileRefreshJob.status === "complete") {
-      setMyProfileRefreshError(null);
-      void loadMyInsights();
-      setMyProfileRefreshJobId(null);
-    } else if (myProfileRefreshJob.status === "failed") {
-      setMyProfileRefreshError(
-        myProfileRefreshJob.error || "Interest profile refresh failed"
-      );
-      void loadMyInsights();
-      setMyProfileRefreshJobId(null);
-    }
-  }, [myProfileRefreshJob.status, myProfileRefreshJob.error, loadMyInsights]);
-
-  useEffect(() => {
-    if (myInsightsOnlyJob.status === "complete") {
-      setMyInsightsOnlyError(null);
-      void loadMyInsights();
-      setMyInsightsOnlyJobId(null);
-    } else if (myInsightsOnlyJob.status === "failed") {
-      setMyInsightsOnlyError(myInsightsOnlyJob.error || "My Insights refresh failed");
-      void loadMyInsights();
-      setMyInsightsOnlyJobId(null);
-    }
-  }, [myInsightsOnlyJob.status, myInsightsOnlyJob.error, loadMyInsights]);
-
-  useEffect(() => {
-    if (myPromptRunJob.status === "complete") {
-      setMyPromptsError(null);
-      void loadMyPrompts();
-      void loadMyInsights();
-      setMyPromptRunJobId(null);
-    } else if (myPromptRunJob.status === "failed") {
-      setMyPromptsError(myPromptRunJob.error || "Prompt run failed");
-      setMyPromptRunJobId(null);
-    }
-  }, [myPromptRunJob.status, myPromptRunJob.error, loadMyPrompts, loadMyInsights]);
-
-  useEffect(() => {
     if (agentJob.status === "complete") {
       loadInsightsByMethod("agent").catch(() => {});
       setAgentJobId(null);
@@ -1507,29 +1482,28 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
   const handleRefreshMyInsightsAllUsers = useCallback(async () => {
     if (!isSuperAdminUser || isAnyMyInsightsActionBusy) return;
     setMyInsightsAllUsersError(null);
-    setMyProfileRefreshError(null);
-    setMyInsightsOnlyError(null);
-    const jobId = await refreshMyInsightsAllUsers();
-    if (jobId) setMyInsightsAllUsersJobId(jobId);
-  }, [isSuperAdminUser, refreshMyInsightsAllUsers, isAnyMyInsightsActionBusy]);
-
-  const handleRefreshMyUserProfile = useCallback(async () => {
-    if (isAnyMyInsightsActionBusy) return;
-    setMyProfileRefreshError(null);
-    setMyInsightsAllUsersError(null);
-    setMyInsightsOnlyError(null);
-    const jobId = await refreshMyInsightsProfile();
-    if (jobId) setMyProfileRefreshJobId(jobId);
-  }, [refreshMyInsightsProfile, isAnyMyInsightsActionBusy]);
-
-  const handleRefreshMyInsightsOnly = useCallback(async () => {
-    if (isAnyMyInsightsActionBusy) return;
-    setMyInsightsOnlyError(null);
-    setMyInsightsAllUsersError(null);
-    setMyProfileRefreshError(null);
-    const jobId = await refreshMyInsightsInsightsOnly();
-    if (jobId) setMyInsightsOnlyJobId(jobId);
-  }, [refreshMyInsightsInsightsOnly, isAnyMyInsightsActionBusy]);
+    setMyInsightsAllUsersBusy(true);
+    try {
+      const jobId = await refreshMyInsightsAllUsers();
+      if (!jobId) return;
+      await pollJobUntilComplete(jobId);
+      setMyInsightsAllUsersError(null);
+      void loadMyInsights();
+    } catch (e: unknown) {
+      setMyInsightsAllUsersError(
+        e instanceof Error ? e.message : "Bulk My Insights refresh failed"
+      );
+      void loadMyInsights();
+    } finally {
+      setMyInsightsAllUsersBusy(false);
+    }
+  }, [
+    isSuperAdminUser,
+    isAnyMyInsightsActionBusy,
+    refreshMyInsightsAllUsers,
+    pollJobUntilComplete,
+    loadMyInsights,
+  ]);
 
   const resetMyPromptForm = useCallback(() => {
     setEditingPromptId(null);
@@ -1662,14 +1636,33 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
     async (id: string) => {
       if (isAnyMyInsightsActionBusy) return;
       setMyPromptsError(null);
+      setMyPromptRunUi({ kind: "processing", progress: 0, message: "Starting…" });
       try {
         const resp = await api.runMyInsightPrompt(id, selectedTenantId);
-        if (resp.jobId) setMyPromptRunJobId(resp.jobId);
+        if (!resp.jobId) {
+          setMyPromptRunUi({ kind: "idle" });
+          return;
+        }
+        await pollJobUntilComplete(resp.jobId, ({ progress, message }) => {
+          setMyPromptRunUi({ kind: "processing", progress, message });
+        });
+        setMyPromptsError(null);
+        void loadMyPrompts();
+        void loadMyInsights();
+        setMyPromptRunUi({ kind: "idle" });
       } catch (e: unknown) {
-        setMyPromptsError(e instanceof Error ? e.message : "Run failed");
+        const msg = e instanceof Error ? e.message : "Run failed";
+        setMyPromptsError(msg);
+        setMyPromptRunUi({ kind: "idle" });
       }
     },
-    [selectedTenantId, isAnyMyInsightsActionBusy]
+    [
+      selectedTenantId,
+      isAnyMyInsightsActionBusy,
+      pollJobUntilComplete,
+      loadMyPrompts,
+      loadMyInsights,
+    ]
   );
 
   const handleTabSwitch = useCallback(
@@ -2392,37 +2385,9 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
         {/* ===== My Insights Tab (personal feed + tracked section) ===== */}
         {activeTab === "my_insights" && (
           <>
-            <div className="mb-6 flex flex-col items-end gap-2">
-              <div className="flex flex-wrap justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => void handleRefreshMyUserProfile()}
-                  disabled={isAnyMyInsightsActionBusy}
-                  className="inline-flex shrink-0 items-center justify-center gap-2 px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 text-sm font-medium hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50"
-                  title="Recompute your behavioral interest profile from recent activity (no insight run)"
-                >
-                  {isMyProfileRefreshing ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <RefreshCw className="w-4 h-4" />
-                  )}
-                  Regenerate my user profile
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleRefreshMyInsightsOnly()}
-                  disabled={isAnyMyInsightsActionBusy}
-                  className="inline-flex shrink-0 items-center justify-center gap-2 px-4 py-2 rounded-lg bg-teal-600 hover:bg-teal-500 text-white text-sm font-medium disabled:opacity-50 shadow-sm shadow-teal-600/20"
-                  title="Regenerate My Insights for your account using your saved profile"
-                >
-                  {isMyInsightsOnlyRefreshing ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <RefreshCw className="w-4 h-4" />
-                  )}
-                  Regenerate my insights
-                </button>
-                {isSuperAdminUser && (
+            {isSuperAdminUser && (
+              <div className="mb-6 flex flex-col items-end gap-2">
+                <div className="flex flex-wrap justify-end gap-2">
                   <button
                     type="button"
                     onClick={() => void handleRefreshMyInsightsAllUsers()}
@@ -2437,16 +2402,14 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
                     )}
                     Regenerate for all users
                   </button>
+                </div>
+                {myInsightsAllUsersError && (
+                  <p className="text-xs text-rose-600 dark:text-rose-400 text-right max-w-md" role="alert">
+                    {myInsightsAllUsersError}
+                  </p>
                 )}
               </div>
-              {(myProfileRefreshError || myInsightsOnlyError || myInsightsAllUsersError) && (
-                <p className="text-xs text-rose-600 dark:text-rose-400 text-right max-w-md" role="alert">
-                  {[myProfileRefreshError, myInsightsOnlyError, myInsightsAllUsersError]
-                    .filter(Boolean)
-                    .join(" ")}
-                </p>
-              )}
-            </div>
+            )}
             {myInsightsLoading && !hasMyInsights && (
               <div className="flex flex-col gap-4 mb-6">
                 {[0, 1].map((i) => (
@@ -2460,10 +2423,9 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
             {!myInsightsLoading && myInsightsNeedsGen && !hasMyInsights && (
               <div className="rounded-2xl border border-slate-200/60 dark:border-slate-700/60 bg-slate-50/80 dark:bg-slate-800/40 backdrop-blur-sm p-6 text-center mb-6">
                 <p className="text-sm text-slate-600 dark:text-slate-400">
-                  No personalized insights yet for your account. They generate after data sync, or use
-                  Regenerate my user profile and Regenerate my insights above.
+                  No personalized insights yet for your account. They generate automatically after each data sync.
                   {isSuperAdminUser
-                    ? " Super admins can also use Regenerate for all users to refresh every active user in this tenant."
+                    ? " Super admins can use Regenerate for all users above to refresh every active user in this tenant."
                     : ""}
                 </p>
               </div>
@@ -2546,12 +2508,11 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
                   {myPromptsError}
                 </p>
               )}
-              {(myPromptRunJob.status === "processing" || myPromptRunJob.status === "failed") && (
+              {myPromptRunUi.kind === "processing" && (
                 <JobProgress
-                  status={myPromptRunJob.status}
-                  progress={myPromptRunJob.progress}
-                  message={myPromptRunJob.message}
-                  error={myPromptRunJob.error}
+                  status="processing"
+                  progress={myPromptRunUi.progress}
+                  message={myPromptRunUi.message}
                   className="mb-3"
                 />
               )}
