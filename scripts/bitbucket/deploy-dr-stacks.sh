@@ -21,8 +21,12 @@
 #   - DR_SECONDARY_REGION       - Secondary region (default: us-east-1)
 #   - SKIP_AURORA               - Set to "true" to skip Aurora deploy
 #   - SKIP_BACKUP               - Set to "true" to skip Backup deploy
+#   - ENABLE_GLOBAL_DB          - Set to "true" to enable Aurora Global Database
+#                                 on the management cluster (Phase 2 prerequisite)
 #   - DEPLOY_SECONDARY          - Set to "true" to deploy secondary region stack
 #                                 (default: false — requires Org SCP approval)
+#   - GLOBAL_CLUSTER_ID         - Global Cluster identifier from primary region
+#                                 (required when DEPLOY_SECONDARY=true)
 #
 # OIDC Environment (set by pipeline setup-oidc script):
 #   - AWS_WEB_IDENTITY_TOKEN_FILE
@@ -119,6 +123,7 @@ deploy_stack() {
     local template_file=$2
     local region=$3
     local label=$4
+    local param_overrides="${5:-}"
 
     echo ""
     echo "========================================="
@@ -127,7 +132,15 @@ deploy_stack() {
     echo "Stack name: $stack_name"
     echo "Template: $template_file"
     echo "Region: $region"
+    if [ -n "$param_overrides" ]; then
+        echo "Parameter overrides: $param_overrides"
+    fi
     echo ""
+
+    local params_flag=""
+    if [ -n "$param_overrides" ]; then
+        params_flag="--parameters $param_overrides"
+    fi
 
     if ! aws cloudformation describe-stacks --stack-name "$stack_name" --region "$region" > /dev/null 2>&1; then
         echo "Stack does not exist — creating..."
@@ -136,6 +149,7 @@ deploy_stack() {
             --template-body "file://$template_file" \
             --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
             --region "$region" \
+            $params_flag \
             --output json > /dev/null
 
         echo "Waiting for stack creation to complete..."
@@ -166,13 +180,24 @@ deploy_stack() {
     CHANGE_SET_NAME="pipeline-dr-$(date +%Y%m%d%H%M%S)"
     echo "Creating change set: $CHANGE_SET_NAME"
 
+    local merged_params
+    merged_params=$(get_stack_parameters_for_template "$stack_name" "$template_file")
+
+    if [ -n "$param_overrides" ]; then
+        for override in $param_overrides; do
+            local override_key
+            override_key=$(echo "$override" | sed 's/ParameterKey=\([^,]*\),.*/\1/')
+            merged_params=$(echo "$merged_params" | sed "s/{\"ParameterKey\":\"$override_key\",\"UsePreviousValue\":true}/{\"ParameterKey\":\"$override_key\",\"ParameterValue\":\"$(echo "$override" | sed 's/.*ParameterValue=\(.*\)/\1/')\"}/" )
+        done
+    fi
+
     aws cloudformation create-change-set \
         --stack-name "$stack_name" \
         --change-set-name "$CHANGE_SET_NAME" \
         --template-body "file://$template_file" \
         --no-use-previous-template \
         --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-        --parameters "$(get_stack_parameters_for_template "$stack_name" "$template_file")" \
+        --parameters "$merged_params" \
         --region "$region" \
         --output json > /dev/null
 
@@ -252,6 +277,7 @@ main() {
     if [ "${SKIP_AURORA:-false}" != "true" ]; then
         local aurora_stack="${CF_STACK_AURORA_MGMT:-coheus-${ENV}-aurora-management}"
         local aurora_template="infrastructure/cloudformation/coheus_aurora_cluster_stack.yaml"
+        local enable_global="${ENABLE_GLOBAL_DB:-false}"
 
         echo ""
         echo "Validating $aurora_template..."
@@ -260,7 +286,8 @@ main() {
             --region "$AWS_DEFAULT_REGION" > /dev/null
         echo "✓ Template valid"
 
-        deploy_stack "$aurora_stack" "$aurora_template" "$AWS_DEFAULT_REGION" "Aurora Management Cluster"
+        local aurora_overrides="ParameterKey=EnableGlobalDatabaseParam,ParameterValue=${enable_global}"
+        deploy_stack "$aurora_stack" "$aurora_template" "$AWS_DEFAULT_REGION" "Aurora Management Cluster" "$aurora_overrides"
     else
         echo "Skipping Aurora deploy (SKIP_AURORA=true)"
     fi
@@ -287,6 +314,27 @@ main() {
         local secondary_region="${DR_SECONDARY_REGION:-us-east-1}"
         local secondary_stack="${CF_STACK_AURORA_SECONDARY:-coheus-${ENV}-aurora-secondary}"
         local secondary_template="infrastructure/cloudformation/coheus_aurora_secondary_stack.yaml"
+        local aurora_stack="${CF_STACK_AURORA_MGMT:-coheus-${ENV}-aurora-management}"
+
+        # Auto-resolve Global Cluster ID from primary stack if not explicitly provided
+        if [ -z "${GLOBAL_CLUSTER_ID:-}" ]; then
+            echo ""
+            echo "GLOBAL_CLUSTER_ID not set — looking up GlobalClusterId output from $aurora_stack..."
+            GLOBAL_CLUSTER_ID=$(aws cloudformation describe-stacks \
+                --stack-name "$aurora_stack" \
+                --region "$AWS_DEFAULT_REGION" \
+                --query "Stacks[0].Outputs[?OutputKey=='GlobalClusterId'].OutputValue" \
+                --output text 2>/dev/null) || true
+
+            if [ -z "$GLOBAL_CLUSTER_ID" ] || [ "$GLOBAL_CLUSTER_ID" == "None" ]; then
+                echo ""
+                echo "ERROR: Could not find GlobalClusterId output on stack $aurora_stack."
+                echo "  Make sure ENABLE_GLOBAL_DB=true was set and the Aurora stack deployed"
+                echo "  successfully before deploying the secondary stack."
+                exit 1
+            fi
+            echo "Resolved Global Cluster ID: $GLOBAL_CLUSTER_ID"
+        fi
 
         echo ""
         echo "Validating $secondary_template..."
@@ -298,9 +346,41 @@ main() {
         echo ""
         echo "NOTE: Secondary stack deploys to region $secondary_region."
         echo "Ensure Org SCP allows Cohi resources in this region before proceeding."
+        echo "Global Cluster ID: $GLOBAL_CLUSTER_ID"
         echo ""
 
-        deploy_stack "$secondary_stack" "$secondary_template" "$secondary_region" "Aurora Secondary (DR — $secondary_region)"
+        local secondary_params="ParameterKey=GlobalClusterIdentifier,ParameterValue=${GLOBAL_CLUSTER_ID} ParameterKey=Environment,ParameterValue=${ENV}"
+
+        if ! aws cloudformation describe-stacks --stack-name "$secondary_stack" --region "$secondary_region" > /dev/null 2>&1; then
+            echo "========================================="
+            echo "Deploying Aurora Secondary (DR — $secondary_region)"
+            echo "========================================="
+            echo "Stack name: $secondary_stack"
+            echo "Region: $secondary_region"
+            echo ""
+            echo "Stack does not exist — creating..."
+            aws cloudformation create-stack \
+                --stack-name "$secondary_stack" \
+                --template-body "file://$secondary_template" \
+                --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+                --region "$secondary_region" \
+                --parameters $secondary_params \
+                --output json > /dev/null
+
+            echo "Waiting for stack creation to complete (this may take 10+ minutes)..."
+            if aws cloudformation wait stack-create-complete --stack-name "$secondary_stack" --region "$secondary_region"; then
+                echo "✓ Secondary stack created successfully!"
+            else
+                echo "ERROR: Secondary stack creation failed."
+                aws cloudformation describe-stack-events \
+                    --stack-name "$secondary_stack" --region "$secondary_region" \
+                    --query 'StackEvents[0:10].{Time:Timestamp,Status:ResourceStatus,Resource:LogicalResourceId,Reason:ResourceStatusReason}' \
+                    --output table
+                exit 1
+            fi
+        else
+            deploy_stack "$secondary_stack" "$secondary_template" "$secondary_region" "Aurora Secondary (DR — $secondary_region)"
+        fi
     else
         echo ""
         echo "Skipping secondary region deploy (DEPLOY_SECONDARY != true)"
