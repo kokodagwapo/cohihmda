@@ -1120,7 +1120,86 @@ async function gatherInsightMetrics(
   );
   metrics.funding = recentFunding[0] || {};
 
+  // Conversion reliability context:
+  // short windows can look "bad" simply because funding lags application by 30-60+ days.
+  const conversionReliability = await safeQuery(
+    "conversionReliability",
+    `
+    WITH base AS (
+      SELECT
+        l.application_date::date AS app_date,
+        l.funding_date::date AS fund_date,
+        COALESCE(l.current_status_date::date, l.funding_date::date, l.application_date::date) AS status_date,
+        LOWER(COALESCE(l.current_loan_status, '')) AS status_lower
+      FROM public.loans l
+      WHERE l.application_date IS NOT NULL
+        AND (l.is_archived IS DISTINCT FROM TRUE)
+    ),
+    funded_cycle AS (
+      SELECT
+        AVG(GREATEST((fund_date - app_date), 0))::numeric AS avg_cycle_days_180d,
+        COUNT(*)::int AS funded_sample_180d
+      FROM base
+      WHERE fund_date IS NOT NULL
+        AND fund_date >= CURRENT_DATE - INTERVAL '180 days'
+    )
+    SELECT
+      COUNT(*) FILTER (WHERE app_date >= CURRENT_DATE - INTERVAL '30 days')::int AS apps_30d,
+      COUNT(*) FILTER (WHERE app_date >= CURRENT_DATE - INTERVAL '90 days')::int AS apps_90d,
+      COUNT(*) FILTER (WHERE fund_date >= CURRENT_DATE - INTERVAL '30 days')::int AS funded_30d,
+      COUNT(*) FILTER (WHERE fund_date >= CURRENT_DATE - INTERVAL '90 days')::int AS funded_90d,
+      COUNT(*) FILTER (
+        WHERE status_date >= CURRENT_DATE - INTERVAL '30 days'
+          AND (
+            status_lower LIKE '%withdraw%'
+            OR status_lower LIKE '%not accepted%'
+            OR status_lower LIKE '%incomp%'
+          )
+      )::int AS withdrawn_30d,
+      COUNT(*) FILTER (
+        WHERE status_date >= CURRENT_DATE - INTERVAL '30 days'
+          AND status_lower LIKE '%denied%'
+      )::int AS denied_30d,
+      COALESCE((SELECT avg_cycle_days_180d FROM funded_cycle), 0)::numeric AS avg_cycle_days_180d,
+      COALESCE((SELECT funded_sample_180d FROM funded_cycle), 0)::int AS funded_sample_180d
+    FROM base
+  `
+  );
+  metrics.conversionReliability = conversionReliability[0] || {};
+
   return metrics;
+}
+
+function buildBroadPromptReliabilityContext(
+  insightMetrics?: Record<string, any>
+): string | undefined {
+  if (!insightMetrics) return undefined;
+  const rel = insightMetrics.conversionReliability || {};
+  const avgCycleDays = Number(rel.avg_cycle_days_180d || 0);
+  const fundedSample = Number(rel.funded_sample_180d || 0);
+  const apps30 = Number(rel.apps_30d || 0);
+  const funded30 = Number(rel.funded_30d || 0);
+  const apps90 = Number(rel.apps_90d || 0);
+  const funded90 = Number(rel.funded_90d || 0);
+  const denied30 = Number(rel.denied_30d || 0);
+  const withdrawn30 = Number(rel.withdrawn_30d || 0);
+
+  const hasCycleSignal = avgCycleDays > 0 && fundedSample >= 10;
+  const shortWindowIsImmature = hasCycleSignal && avgCycleDays >= 30 && apps30 > funded30;
+  const reliabilityLabel = shortWindowIsImmature
+    ? "provisional-short-window"
+    : "acceptable-short-window";
+
+  return [
+    "## Broad Prompt Reliability Guardrails",
+    `30D snapshot: applications=${apps30}, funded=${funded30}, withdrawn=${withdrawn30}, denied=${denied30}.`,
+    `90D snapshot: applications=${apps90}, funded=${funded90}.`,
+    `Avg app→fund cycle (funded last 180d): ${avgCycleDays.toFixed(1)} days (sample ${fundedSample}).`,
+    `Short-window reliability: ${reliabilityLabel}.`,
+    "When short-window reliability is provisional, do NOT frame low funded counts as a critical operational failure by default.",
+    "Use neutral wording (pipeline still seasoning) and recommend confirming on 90D/YTD conversion trend before escalation.",
+    "Keep response natural and free-form, but tie claims to these metrics and reliability notes.",
+  ].join("\n");
 }
 
 // ============================================================================
@@ -1745,6 +1824,12 @@ async function generateUnifiedResponse(
             .map((p: any) => p.loan_officer)
             .join(", ")
       );
+    }
+    const reliabilityContext = buildBroadPromptReliabilityContext(
+      gathered.insightMetrics
+    );
+    if (reliabilityContext) {
+      contextParts.push(`\n${reliabilityContext}`);
     }
   }
 
