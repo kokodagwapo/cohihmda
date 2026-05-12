@@ -406,6 +406,15 @@ export async function getUserLoanAccessFilter(
     };
   }
 
+  // Same UUID in management as super_admin / platform_admin: full tenant loan scope for
+  // offline jobs even if a tenant `users` row exists with restrictive loan_scope (dev/prod drift).
+  if (await isCoheusUserWithFullLoanAccess(userId)) {
+    logDebug("[UserLoanAccess] Coheus platform user — full loan access (overrides tenant row)", {
+      userId,
+    });
+    return null;
+  }
+
   return buildLoanAccessFilter(accessInfo, loanTableAlias, startParamIndex);
 }
 
