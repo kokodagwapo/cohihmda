@@ -15,6 +15,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { TopTieringLayout } from '@/components/layout/TopTieringLayout';
 import { TopTieringTopBar } from '@/components/layout/TopTieringTopBar';
 import { DatePeriodPicker, type PeriodSelection, type PeriodPreset, computePresetDateRange } from '@/components/ui/DatePeriodPicker';
+import { useDashboardFilterAnalytics } from '@/hooks/useDashboardFilterAnalytics';
+import { DASHBOARD_PAGE_KEYS } from '@/lib/dashboardPageKeys';
 
 type DateRange = '3-months' | '6-months';
 
@@ -230,6 +232,18 @@ const SalesTrends = () => {
         officer.branchNumber.includes(query)
     );
   }, [searchQuery, loanOfficers]);
+
+  const salesTrendsFilterAnalytics = useMemo(
+    () => ({
+      date_range_preset: dateRange,
+      custom_range_active: Boolean(stCustomDateRange),
+      view_mode: viewMode,
+      search_nonempty: searchQuery.trim().length > 0,
+      data_channel: 'Retail',
+    }),
+    [dateRange, stCustomDateRange, viewMode, searchQuery],
+  );
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.sales_trends, salesTrendsFilterAnalytics);
 
   const formatCurrency = (value: number) => {
     if (value >= 1000000) {

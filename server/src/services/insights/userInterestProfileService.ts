@@ -10,6 +10,25 @@ import { logInfo, logWarn } from "../logger.js";
 
 const ACTIVITY_STALE_DAYS = 7;
 const PROFILE_LOOKBACK_DAYS = 30;
+/** Max rows in page_engagement (raw views + dwell_ms); inclusion ordered by attention score. */
+const PAGE_ENGAGEMENT_ROW_CAP = 50;
+const DASHBOARD_FILTER_EVENTS_CAP = 800;
+
+/** Pathname before `?` — used for exclusions and grouping keys. */
+export function profilePathnameFromPagePath(pagePath: string): string {
+  const t = String(pagePath || "").trim();
+  if (!t) return "";
+  const q = t.indexOf("?");
+  return q >= 0 ? t.slice(0, q) : t;
+}
+
+/** Exclude admin / feedback / research from My Insights personalization signals. */
+export function isExcludedProfilePathname(pathname: string): boolean {
+  const p = pathname.toLowerCase();
+  return (
+    p.startsWith("/admin") || p.startsWith("/feedback") || p.startsWith("/research")
+  );
+}
 
 export interface UserInterestProfilePayload {
   /** Plain-text block for the insight planner */
@@ -54,7 +73,13 @@ async function fetchAnalyticsSummary(
        FROM public.analytics_events
        WHERE tenant_id = $1 AND user_id = $2::uuid
          AND created_at >= $3
-         AND page_path IS NOT NULL AND page_path <> ''
+         AND event_type = 'page_view'
+         AND page_path IS NOT NULL AND TRIM(page_path) <> ''
+         AND NOT (
+           SPLIT_PART(TRIM(page_path), '?', 1) LIKE '/admin%'
+           OR SPLIT_PART(TRIM(page_path), '?', 1) LIKE '/feedback%'
+           OR SPLIT_PART(TRIM(page_path), '?', 1) LIKE '/research%'
+         )
        GROUP BY page_path
        ORDER BY c DESC
        LIMIT 12`,
@@ -79,6 +104,133 @@ async function fetchAnalyticsSummary(
   } catch (e: any) {
     logWarn("[UserInterestProfile] analytics summary failed", { message: e.message });
     return { topPaths: [], lastSessionAt: null };
+  }
+}
+
+export interface PageEngagementRow {
+  page_path: string;
+  views: number;
+  dwell_ms: number;
+}
+
+/**
+ * Raw page_view counts and summed page_leave duration per page_path (management DB).
+ * Excludes /admin, /feedback, /research. Rows ordered by attention heuristic for cap only.
+ */
+async function fetchPageEngagement(
+  tenantId: string,
+  userId: string
+): Promise<PageEngagementRow[]> {
+  if (!managementPool) return [];
+  try {
+    const since = new Date();
+    since.setDate(since.getDate() - PROFILE_LOOKBACK_DAYS);
+    const r = await managementPool.query(
+      `WITH per_path AS (
+         SELECT
+           TRIM(page_path) AS page_path,
+           SUM(CASE WHEN event_type = 'page_view' THEN 1 ELSE 0 END)::int AS views,
+           COALESCE(SUM(CASE WHEN event_type = 'page_leave' THEN COALESCE(duration_ms, 0) ELSE 0 END), 0)::bigint AS dwell_ms
+         FROM public.analytics_events
+         WHERE tenant_id = $1 AND user_id = $2::uuid
+           AND created_at >= $3
+           AND page_path IS NOT NULL AND TRIM(page_path) <> ''
+         GROUP BY TRIM(page_path)
+       )
+       SELECT page_path, views, dwell_ms::double precision AS dwell_ms
+       FROM per_path
+       WHERE NOT (
+         SPLIT_PART(page_path, '?', 1) LIKE '/admin%'
+         OR SPLIT_PART(page_path, '?', 1) LIKE '/feedback%'
+         OR SPLIT_PART(page_path, '?', 1) LIKE '/research%'
+       )
+         AND (views > 0 OR dwell_ms > 0)
+       ORDER BY (views::float + COALESCE(dwell_ms, 0)::float / 60000.0) DESC
+       LIMIT $4`,
+      [tenantId, userId, since.toISOString(), PAGE_ENGAGEMENT_ROW_CAP]
+    );
+    return r.rows.map((row: any) => ({
+      page_path: String(row.page_path || ""),
+      views: Number(row.views) || 0,
+      dwell_ms: Math.round(Number(row.dwell_ms) || 0),
+    }));
+  } catch (e: any) {
+    logWarn("[UserInterestProfile] page engagement failed", { message: e.message });
+    return [];
+  }
+}
+
+/**
+ * Roll up cohi_dashboard_filters custom events into structured habits (open-ended filter keys).
+ */
+async function fetchDashboardFilterHabits(
+  tenantId: string,
+  userId: string
+): Promise<Record<string, unknown>> {
+  if (!managementPool) return {};
+  try {
+    const since = new Date();
+    since.setDate(since.getDate() - PROFILE_LOOKBACK_DAYS);
+    const r = await managementPool.query(
+      `SELECT page_path, metadata, created_at
+       FROM public.analytics_events
+       WHERE tenant_id = $1 AND user_id = $2::uuid
+         AND created_at >= $3
+         AND event_type = 'custom'
+         AND event_name = 'cohi_dashboard_filters'
+       ORDER BY created_at DESC
+       LIMIT $4`,
+      [tenantId, userId, since.toISOString(), DASHBOARD_FILTER_EVENTS_CAP]
+    );
+
+    /** page_key -> filterKey -> valueStr -> count */
+    const byPage = new Map<string, Map<string, Map<string, number>>>();
+
+    for (const row of r.rows) {
+      const pagePath = String(row.page_path || "");
+      const pn = profilePathnameFromPagePath(pagePath);
+      if (!pn || isExcludedProfilePathname(pn)) continue;
+      const meta = (row.metadata as Record<string, unknown>) || {};
+      const pageKey = typeof meta.page_key === "string" ? meta.page_key.trim() : "";
+      if (!pageKey) continue;
+      const filters = meta.filters;
+      if (!filters || typeof filters !== "object" || Array.isArray(filters)) continue;
+      const fObj = filters as Record<string, unknown>;
+      let pageMap = byPage.get(pageKey);
+      if (!pageMap) {
+        pageMap = new Map();
+        byPage.set(pageKey, pageMap);
+      }
+      for (const [fk, rawVal] of Object.entries(fObj)) {
+        if (!fk || rawVal === undefined || rawVal === null || rawVal === "") continue;
+        const valStr =
+          typeof rawVal === "object" ? JSON.stringify(rawVal) : String(rawVal);
+        const safeVal = valStr.length > 120 ? valStr.slice(0, 117) + "…" : valStr;
+        let km = pageMap.get(fk);
+        if (!km) {
+          km = new Map();
+          pageMap.set(fk, km);
+        }
+        km.set(safeVal, (km.get(safeVal) || 0) + 1);
+      }
+    }
+
+    const out: Record<string, unknown> = {};
+    for (const [pk, fmap] of byPage) {
+      const keys: Record<string, unknown> = {};
+      for (const [filterKey, valCounts] of fmap) {
+        const top = [...valCounts.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 8)
+          .map(([value, count]) => ({ value, count }));
+        if (top.length) keys[filterKey] = top;
+      }
+      if (Object.keys(keys).length) out[pk] = keys;
+    }
+    return out;
+  } catch (e: any) {
+    logWarn("[UserInterestProfile] dashboard filter habits failed", { message: e.message });
+    return {};
   }
 }
 
@@ -187,7 +339,9 @@ async function fetchTenantSignals(
 function buildProfileText(
   tenantSignals: Record<string, unknown>,
   topPaths: string[],
-  lastActivityAt: Date | null
+  lastActivityAt: Date | null,
+  pageEngagement: PageEngagementRow[] = [],
+  dashboardFilterHabits: Record<string, unknown> = {}
 ): string {
   const lines: string[] = [];
   if (lastActivityAt) {
@@ -195,6 +349,23 @@ function buildProfileText(
   }
   if (topPaths.length) {
     lines.push(`Frequently viewed areas (app paths): ${topPaths.slice(0, 8).join("; ")}.`);
+  }
+  if (pageEngagement.length > 0) {
+    lines.push(
+      `Page engagement (last ${PROFILE_LOOKBACK_DAYS}d; raw counts, not pre-ranked as ratios only):`
+    );
+    lines.push(
+      `Each row is one app path. "views" = count of page_view events. "dwell_ms" = sum of time-on-page from page_leave events in this window (a lower bound if the browser closed without a leave event).`
+    );
+    lines.push(
+      `How to use: higher "views" and higher total "dwell_ms" for a path indicate stronger user attention to that area — when generating My Insights, prioritize mortgage and operations topics aligned with paths that score higher on these two signals; compare rows relatively across the table.`
+    );
+    lines.push(`page_engagement JSON: ${JSON.stringify(pageEngagement)}`);
+  }
+  if (Object.keys(dashboardFilterHabits).length > 0) {
+    lines.push(
+      `Dashboard filter habits (from cohi_dashboard_filters; per page_key, top filter values by frequency): ${JSON.stringify(dashboardFilterHabits)}`
+    );
   }
   const topics = (tenantSignals.research_topics as any[]) || [];
   if (topics.length) {
@@ -314,6 +485,8 @@ export async function computeAndPersistUserInterestProfile(
 ): Promise<UserInterestProfilePayload> {
   const { topPaths, lastSessionAt } = await fetchAnalyticsSummary(tenantId, userId);
   const tenantSignals = await fetchTenantSignals(tenantPool, userId);
+  const pageEngagement = await fetchPageEngagement(tenantId, userId);
+  const dashboardFilterHabits = await fetchDashboardFilterHabits(tenantId, userId);
 
   const tenantDates: Date[] = [];
   for (const key of ["research_topics", "workbench_titles"]) {
@@ -365,10 +538,20 @@ export async function computeAndPersistUserInterestProfile(
   const profileJson: Record<string, unknown> = {
     top_paths: topPaths,
     ...tenantSignals,
+    page_engagement: pageEngagement,
+    ...(Object.keys(dashboardFilterHabits).length > 0
+      ? { dashboard_filter_habits: dashboardFilterHabits }
+      : {}),
     computed_at: new Date().toISOString(),
   };
   const contentHash = hashPayload(profileJson);
-  const profileText = buildProfileText(tenantSignals, topPaths, lastActivityAt);
+  const profileText = buildProfileText(
+    tenantSignals,
+    topPaths,
+    lastActivityAt,
+    pageEngagement,
+    dashboardFilterHabits
+  );
 
   try {
     await tenantPool.query(
@@ -390,6 +573,67 @@ export async function computeAndPersistUserInterestProfile(
   logInfo("[UserInterestProfile] computed", { userId, contentHash: contentHash.slice(0, 12), lastActivityAt });
 
   return { profileText, profileJson, contentHash, lastActivityAt };
+}
+
+/**
+ * Rebuild planner-facing profile text from the last persisted row (for insight-only regeneration).
+ */
+export async function loadPersistedUserInterestProfilePayload(
+  tenantPool: pg.Pool,
+  userId: string
+): Promise<UserInterestProfilePayload | null> {
+  try {
+    const r = await tenantPool.query(
+      `SELECT profile_json, content_hash, last_activity_at
+       FROM public.user_interest_profiles WHERE user_id = $1::uuid`,
+      [userId]
+    );
+    const row = r.rows[0];
+    if (!row?.profile_json || !row.content_hash) return null;
+    const pj = row.profile_json as Record<string, unknown>;
+    if (!pj || typeof pj !== "object") return null;
+    const topPaths = Array.isArray(pj.top_paths)
+      ? (pj.top_paths as unknown[]).map((x) => String(x)).filter(Boolean)
+      : [];
+    const { top_paths: _tp, computed_at: _ca, page_engagement: _pe, dashboard_filter_habits: _df, ...tenantSignals } =
+      pj;
+    const pageEngagement: PageEngagementRow[] = Array.isArray(pj.page_engagement)
+      ? (pj.page_engagement as unknown[]).map((row: unknown) => {
+          const o = row as Record<string, unknown>;
+          return {
+            page_path: String(o.page_path || ""),
+            views: Number(o.views) || 0,
+            dwell_ms: Math.round(Number(o.dwell_ms) || 0),
+          };
+        })
+      : [];
+    const dashboardFilterHabits =
+      pj.dashboard_filter_habits &&
+      typeof pj.dashboard_filter_habits === "object" &&
+      !Array.isArray(pj.dashboard_filter_habits)
+        ? (pj.dashboard_filter_habits as Record<string, unknown>)
+        : {};
+    const lastActivityAt = row.last_activity_at
+      ? row.last_activity_at instanceof Date
+        ? row.last_activity_at
+        : new Date(row.last_activity_at)
+      : null;
+    const profileText = buildProfileText(
+      tenantSignals,
+      topPaths,
+      lastActivityAt,
+      pageEngagement,
+      dashboardFilterHabits
+    );
+    return {
+      profileText,
+      profileJson: pj,
+      contentHash: String(row.content_hash),
+      lastActivityAt,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function loadCachedProfileHash(

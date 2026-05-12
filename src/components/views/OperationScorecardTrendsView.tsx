@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useDashboardFilterAnalytics } from '@/hooks/useDashboardFilterAnalytics';
+import { DASHBOARD_PAGE_KEYS } from '@/lib/dashboardPageKeys';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -37,6 +39,18 @@ export function OperationScorecardTrendsView({ selectedTenantId, selectedChannel
     selectedTenantId,
     selectedChannel
   );
+
+  const operationScorecardTrendsFilterAnalytics = useMemo(
+    () => ({
+      selected_actor: selectedActor,
+      comparison_view: comparisonView,
+      search_nonempty: searchQuery.trim().length > 0,
+      fullscreen: isFullscreen,
+      selected_channel: selectedChannel ?? 'All',
+    }),
+    [selectedActor, comparisonView, searchQuery, isFullscreen, selectedChannel]
+  );
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.operation_scorecard_trends, operationScorecardTrendsFilterAnalytics);
 
   useEffect(() => {
     localStorage.setItem('op-scorecard-trends-actor', selectedActor);

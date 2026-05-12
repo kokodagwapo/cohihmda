@@ -1,4 +1,6 @@
 import { useState, useMemo, useRef } from 'react';
+import { useDashboardFilterAnalytics } from '@/hooks/useDashboardFilterAnalytics';
+import { DASHBOARD_PAGE_KEYS } from '@/lib/dashboardPageKeys';
 import { BarChart3, ChevronLeft, X, Sparkles } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
@@ -20,6 +22,12 @@ export const CompanyDetailView = ({ onBack, onTabChange }: CompanyDetailViewProp
   const [showRawData, setShowRawData] = useState(false);
   const [year, setYear] = useState(new Date().getFullYear());
   const { toast } = useToast();
+
+  const companyDetailFilterAnalytics = useMemo(
+    () => ({ year, show_raw_data: showRawData }),
+    [year, showRawData]
+  );
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.company_detail, companyDetailFilterAnalytics);
 
   // Fetch data using hooks
   const { data: companyData, loading: dataLoading } = useCompanyData(year);

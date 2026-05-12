@@ -66,6 +66,8 @@ import {
 } from "@/hooks/useDashboardInsights";
 import { DashboardInsightsStrip } from "@/components/dashboard/DashboardInsightsStrip";
 import { useWorkflowConversionBookmarks } from "@/hooks/useWorkflowConversionBookmarks";
+import { useDashboardFilterAnalytics } from "@/hooks/useDashboardFilterAnalytics";
+import { DASHBOARD_PAGE_KEYS } from "@/lib/dashboardPageKeys";
 import {
   stateToWorkflowBookmarkPayload,
   workflowBookmarkPayloadToState,
@@ -249,6 +251,33 @@ export function WorkflowConversionView({
     () => makePageStateStorageScopeKey(selectedTenantId, selectedChannel),
     [selectedTenantId, selectedChannel],
   );
+
+  const workflowFilterAnalytics = useMemo(() => {
+    const ps = periodSelection;
+    const dr = ps.dateRange;
+    return {
+      period_type: ps.type,
+      period_preset: ps.type === "preset" ? ps.preset : null,
+      period_year: ps.type === "year" ? ps.year ?? null : null,
+      period_start: dr?.start ?? null,
+      period_end: dr?.end ?? null,
+      calculationType,
+      grouping,
+      segments,
+      selectedChannel: selectedChannel ?? "All",
+      selectedBookmarkId,
+    };
+  }, [
+    periodSelection,
+    calculationType,
+    grouping,
+    segments,
+    selectedChannel,
+    selectedBookmarkId,
+  ]);
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.workflow_conversion, workflowFilterAnalytics, {
+    enabled: !embeddedInWorkbench,
+  });
 
   const {
     bookmarks,

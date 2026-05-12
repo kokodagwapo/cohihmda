@@ -13,6 +13,8 @@ import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@
 import { useTenantStore } from "@/stores/tenantStore";
 import { useChannelStore } from "@/stores/channelStore";
 import { useAuth } from "@/contexts/AuthContext";
+import { useDashboardFilterAnalytics } from "@/hooks/useDashboardFilterAnalytics";
+import { DASHBOARD_PAGE_KEYS } from "@/lib/dashboardPageKeys";
 import {
   useProductionTrendsData,
   type ProductionDateType,
@@ -756,6 +758,30 @@ const ProductionTrends = () => {
     channelGroup: selectedChannel,
     sliceFilters,
   });
+
+  const productionTrendsFilterAnalytics = useMemo(
+    () => ({
+      date_type: dateType,
+      measure,
+      dimension,
+      year_months_count: yearMonths.length,
+      slice_categories_count: sliceCategories.length,
+      slice_line_months_count: sliceLineMonths.length,
+      drilldown_active: Boolean(sliceDrilldown && !isDrilldownSliceEmpty(sliceDrilldown)),
+      selected_channel: selectedChannel ?? "All",
+    }),
+    [
+      dateType,
+      measure,
+      dimension,
+      yearMonths,
+      sliceCategories,
+      sliceLineMonths,
+      sliceDrilldown,
+      selectedChannel,
+    ],
+  );
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.production_trends, productionTrendsFilterAnalytics);
 
   const toggleSliceCategory = useCallback((cat: string) => {
     setSliceCategories((prev) => {

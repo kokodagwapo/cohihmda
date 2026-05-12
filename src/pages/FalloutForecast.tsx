@@ -1,4 +1,7 @@
+import { useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
+import { useDashboardFilterAnalytics } from "@/hooks/useDashboardFilterAnalytics";
+import { DASHBOARD_PAGE_KEYS } from "@/lib/dashboardPageKeys";
 import { TopTieringLayout } from "@/components/layout/TopTieringLayout";
 import { TopTieringTopBar } from "@/components/layout/TopTieringTopBar";
 import { ClosingFalloutForecast } from "@/components/dashboard/ClosingFalloutForecast";
@@ -10,6 +13,16 @@ const FalloutForecast = () => {
   const { selectedTenantId } = useTenantStore();
   const { selectedChannel } = useChannelStore();
   const openLoanId = searchParams.get("loan") ?? undefined;
+
+  const falloutFilterAnalytics = useMemo(
+    () => ({
+      date_filter: "mtd" as const,
+      open_loan_id: openLoanId ?? null,
+      selected_channel: selectedChannel ?? "All",
+    }),
+    [openLoanId, selectedChannel]
+  );
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.fallout_forecast, falloutFilterAnalytics);
 
   const handleLoanIdHandled = () => {
     if (!openLoanId) return;

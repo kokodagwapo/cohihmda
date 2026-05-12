@@ -18,6 +18,8 @@ import {
 import { useTenantStore } from "@/stores/tenantStore";
 import { useChannelStore } from "@/stores/channelStore";
 import { useAuth } from "@/contexts/AuthContext";
+import { useDashboardFilterAnalytics } from "@/hooks/useDashboardFilterAnalytics";
+import { DASHBOARD_PAGE_KEYS } from "@/lib/dashboardPageKeys";
 import { cn } from "@/lib/utils";
 import {
   Activity,
@@ -556,6 +558,16 @@ const SalesCompanyOverview = () => {
     selectedChannel,
     sliceFilters,
   );
+
+  const salesCompanyOverviewFilterAnalytics = useMemo(
+    () => ({
+      selected_channel: selectedChannel ?? "All",
+      loan_type_filter_count: loanTypeFilters.length,
+      aging_bucket_filter_count: agingBucketFilters.length,
+    }),
+    [selectedChannel, loanTypeFilters, agingBucketFilters],
+  );
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.sales_company_overview, salesCompanyOverviewFilterAnalytics);
 
   const toggleLoanType = useCallback((name: string) => {
     setLoanTypeFilters((prev) => {

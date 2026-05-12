@@ -24,6 +24,8 @@ import { KPICard, formatKPIValue } from '@/components/widgets/components/KPICard
 import { api } from '@/lib/api';
 import { DashboardInsightsStrip } from '@/components/dashboard/DashboardInsightsStrip';
 import { useDashboardInsights, type DashboardInsightItem } from '@/hooks/useDashboardInsights';
+import { useDashboardFilterAnalytics } from '@/hooks/useDashboardFilterAnalytics';
+import { DASHBOARD_PAGE_KEYS } from '@/lib/dashboardPageKeys';
 
 const CompanyScorecard = () => {
   const detailTableRef = useRef<HTMLDivElement>(null);
@@ -86,6 +88,33 @@ const CompanyScorecard = () => {
     actorStatusFilter,
   };
   const { data, loading, error } = useCompanyScorecardData(filters);
+  const companyScorecardFilterAnalytics = useMemo(
+    () => ({
+      year: selectedYear,
+      date_start: dateRange.start,
+      date_end: dateRange.end,
+      branch: selectedBranch,
+      application: selectedApplication,
+      loan_officer: selectedLoanOfficer,
+      active_tab: activeTab,
+      detail_actor: detailActor,
+      actor_status_filter: actorStatusFilter,
+      selected_channel: selectedChannel ?? "All",
+    }),
+    [
+      selectedYear,
+      dateRange.start,
+      dateRange.end,
+      selectedBranch,
+      selectedApplication,
+      selectedLoanOfficer,
+      activeTab,
+      detailActor,
+      actorStatusFilter,
+      selectedChannel,
+    ],
+  );
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.company_scorecard, companyScorecardFilterAnalytics);
   const prevCompanyScorecardLoadingRef = useRef<boolean>(loading);
   const pendingExpectedLoadingRef = useRef<boolean>(false);
 

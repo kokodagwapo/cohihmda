@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useDashboardFilterAnalytics } from "@/hooks/useDashboardFilterAnalytics";
+import { DASHBOARD_PAGE_KEYS } from "@/lib/dashboardPageKeys";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -329,6 +331,37 @@ export function EstimatedClosingsRiskView({
     pageSliceFilters,
     detailColumnFilters,
   });
+
+  const estimatedClosingsFilterAnalytics = useMemo(() => {
+    const activeDetailCols = Object.keys(detailColumnFilters).filter((col) =>
+      isFilterActive(detailColumnFilters[col] as ColumnFilterState[string])
+    );
+    return {
+      date_range_type: dateRangeType,
+      ecd_slice: ecdSlice,
+      complexity_bar_bucket: complexityBarBucket,
+      remaining_complexity_group: remainingComplexityGroup,
+      remaining_processing_stage: remainingProcessingStage,
+      detail_filtered_columns: activeDetailCols,
+      detail_active_filter_count: activeDetailCols.length,
+      selected_channel: selectedChannel ?? "All",
+      complexity_sort: complexitySort,
+      stage_sort: stageSort,
+      detail_sort: detailSort,
+    };
+  }, [
+    dateRangeType,
+    ecdSlice,
+    complexityBarBucket,
+    remainingComplexityGroup,
+    remainingProcessingStage,
+    detailColumnFilters,
+    selectedChannel,
+    complexitySort,
+    stageSort,
+    detailSort,
+  ]);
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.estimated_closings_risk, estimatedClosingsFilterAnalytics);
 
   useEffect(() => {
     if (!isPersistenceEnabled || !persistedViewState.preferenceKey) {

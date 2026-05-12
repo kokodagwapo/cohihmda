@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
+import { useDashboardFilterAnalytics } from "@/hooks/useDashboardFilterAnalytics";
+import { DASHBOARD_PAGE_KEYS } from "@/lib/dashboardPageKeys";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -213,6 +215,20 @@ export function FinancialModelingSandboxView({ selectedTenantId, onDataReady }: 
       setOtherSupport(t.other ?? DEFAULT_TARGET_OTHER);
     }
   }, [baseline]);
+
+  const financialModelingFilterAnalytics = useMemo(
+    () => ({
+      margin_increase_bp: marginIncreaseBP,
+      pull_through_percent: pullThroughPercent,
+      mlo,
+      processor,
+      underwriter,
+      closer,
+      other_support: otherSupport,
+    }),
+    [marginIncreaseBP, pullThroughPercent, mlo, processor, underwriter, closer, otherSupport]
+  );
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.financial_modeling_sandbox, financialModelingFilterAnalytics);
 
   const resetSliders = () => {
     const pullThrough = baseline?.pullThroughRate && baseline.pullThroughRate > 0 ? baseline.pullThroughRate : FALLBACK_PULL_THROUGH;

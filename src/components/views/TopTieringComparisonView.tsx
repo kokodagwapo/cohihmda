@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useDashboardFilterAnalytics } from "@/hooks/useDashboardFilterAnalytics";
+import { DASHBOARD_PAGE_KEYS } from "@/lib/dashboardPageKeys";
 import { useIsMobile } from "@/hooks/use-mobile";
 import {
   Card,
@@ -456,6 +458,38 @@ export function TopTieringComparisonView({
     undefined,
     actorStatusFilter,
   );
+
+  const topTieringComparisonFilterAnalytics = useMemo(
+    () => ({
+      selected_actor: selectedActor,
+      time_filter: timeFilter,
+      custom_date_range: customDateRange ?? null,
+      revenue_chart_sorting: revenueChartSorting,
+      units_chart_sorting: unitsChartSorting,
+      bps_chart_sorting: bpsChartSorting,
+      selected_chart_tab: selectedChartTab,
+      selected_revenue_tab: selectedRevenueTab,
+      search_nonempty: searchQuery.trim().length > 0,
+      actor_status_filter: actorStatusFilter,
+      selection_count: selectedIds.size,
+      selected_channel: selectedChannel ?? "All",
+    }),
+    [
+      selectedActor,
+      timeFilter,
+      customDateRange,
+      revenueChartSorting,
+      unitsChartSorting,
+      bpsChartSorting,
+      selectedChartTab,
+      selectedRevenueTab,
+      searchQuery,
+      actorStatusFilter,
+      selectedIds,
+      selectedChannel,
+    ]
+  );
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.toptiering_comparison, topTieringComparisonFilterAnalytics);
 
   const dashboardInsightFilters = useMemo(() => ({}), []);
   const {

@@ -161,6 +161,8 @@ export interface InsightPlannerContext {
    * When omitted (tenant-wide runs), the planner prompt is unchanged.
    */
   userInterestProfile?: string;
+  /** My Insights: enabled user prompts (batch + on-demand) — planner must cover each with ≥1 question. */
+  userCustomPrompts?: { title: string; prompt_text: string }[];
 }
 
 function buildUserPrompt(ctx: InsightPlannerContext): string {
@@ -218,7 +220,21 @@ function buildUserPrompt(ctx: InsightPlannerContext): string {
 
   if (ctx.userInterestProfile && ctx.userInterestProfile.trim()) {
     prompt += `## User interest profile\n${ctx.userInterestProfile.trim()}\n\n`;
-    prompt += `Prioritize investigation questions that align with this user's demonstrated interests and responsibilities, while still including a balanced mix of risk, performance, and context as in the global rules.\n\n`;
+    prompt += `Prioritize investigation questions that align with this user's demonstrated interests and responsibilities, while still including a balanced mix of risk, performance, and context as in the global rules.\n`;
+    if (ctx.userInterestProfile.includes("page_engagement")) {
+      prompt += `If this section contains page_engagement JSON, interpret raw "views" and "dwell_ms" per the instructions embedded there.\n`;
+    }
+    prompt += "\n";
+  }
+
+  if (ctx.userCustomPrompts && ctx.userCustomPrompts.length > 0) {
+    prompt += `## User-authored custom prompts\n`;
+    ctx.userCustomPrompts.forEach((p, i) => {
+      const body =
+        p.prompt_text.length > 1200 ? `${p.prompt_text.slice(0, 1200)}… (truncated)` : p.prompt_text;
+      prompt += `${i + 1}. **${p.title}**\n${body}\n\n`;
+    });
+    prompt += `MANDATORY (My Insights): For EACH listed custom prompt above, include at least one investigation question whose topic or hypothesis explicitly ties to that prompt's intent (reference the prompt title in the topic text). These questions are required in addition to your balanced mix of risk, performance, and context questions.\n\n`;
   }
 
   if (ctx.bucketFocus) {

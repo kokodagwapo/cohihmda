@@ -22,6 +22,8 @@ import type {
   HighPerformersTimePeriod,
   HighPerformerRow,
 } from "@/hooks/useHighPerformersData";
+import { useDashboardFilterAnalytics } from "@/hooks/useDashboardFilterAnalytics";
+import { DASHBOARD_PAGE_KEYS } from "@/lib/dashboardPageKeys";
 import { useChannelStore } from "@/stores/channelStore";
 import { useTenantStore } from "@/stores/tenantStore";
 import { useAuth } from "@/contexts/AuthContext";
@@ -314,6 +316,29 @@ export default function HighPerformers() {
     { channelGroup: selectedChannel, tenantId }
   );
   const hasError = !!leftError || !!rightError;
+  const highPerformersFilterAnalytics = useMemo(
+    () => ({
+      date_type: dateType,
+      left_period: leftPeriod,
+      right_period: rightPeriod,
+      left_branch_search_nonempty: leftBranchSearch.trim().length > 0,
+      left_lo_search_nonempty: leftLOSearch.trim().length > 0,
+      right_branch_search_nonempty: rightBranchSearch.trim().length > 0,
+      right_lo_search_nonempty: rightLOSearch.trim().length > 0,
+      selected_channel: selectedChannel ?? "All",
+    }),
+    [
+      dateType,
+      leftPeriod,
+      rightPeriod,
+      leftBranchSearch,
+      leftLOSearch,
+      rightBranchSearch,
+      rightLOSearch,
+      selectedChannel,
+    ]
+  );
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.high_performers, highPerformersFilterAnalytics);
   const errorMessage = leftError || rightError;
 
   const leftPeriodLabel =

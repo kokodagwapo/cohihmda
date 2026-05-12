@@ -1453,6 +1453,66 @@ export class ApiClient {
     });
   }
 
+  private _myInsightsTq(tenantId?: string | null): string {
+    return tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+  }
+
+  async listMyInsightPrompts(tenantId?: string | null) {
+    return this.request<{ prompts: Record<string, unknown>[] }>(
+      `/api/dashboard/insights/my/prompts${this._myInsightsTq(tenantId)}`
+    );
+  }
+
+  async createMyInsightPrompt(
+    body: {
+      title: string;
+      prompt_text: string;
+      specifiers?: Record<string, unknown>;
+      schedule?: "batch" | "on_demand";
+      enabled?: boolean;
+    },
+    tenantId?: string | null
+  ) {
+    return this.request<Record<string, unknown>>(`/api/dashboard/insights/my/prompts${this._myInsightsTq(tenantId)}`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async updateMyInsightPrompt(
+    id: string,
+    body: Partial<{
+      title: string;
+      prompt_text: string;
+      specifiers: Record<string, unknown>;
+      schedule: "batch" | "on_demand";
+      enabled: boolean;
+    }>,
+    tenantId?: string | null
+  ) {
+    return this.request<Record<string, unknown>>(
+      `/api/dashboard/insights/my/prompts/${encodeURIComponent(id)}${this._myInsightsTq(tenantId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }
+    );
+  }
+
+  async deleteMyInsightPrompt(id: string, tenantId?: string | null) {
+    return this.request<void>(
+      `/api/dashboard/insights/my/prompts/${encodeURIComponent(id)}${this._myInsightsTq(tenantId)}`,
+      { method: "DELETE" }
+    );
+  }
+
+  async runMyInsightPrompt(id: string, tenantId?: string | null) {
+    return this.request<{ jobId: string; status: string }>(
+      `/api/dashboard/insights/my/prompts/${encodeURIComponent(id)}/run${this._myInsightsTq(tenantId)}`,
+      { method: "POST" }
+    );
+  }
+
   // Report distributions
   private _distTq(tenantId?: string | null): string {
     return tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";

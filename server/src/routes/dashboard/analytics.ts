@@ -54,11 +54,19 @@ import {
   runUserInsightGeneration,
   isUserInsightGenerationRunning,
   runMyInsightsForTenant,
+  runSingleUserCustomPromptInsight,
 } from "../../services/insights/agents/userInsightOrchestrator.js";
+import { computeAndPersistUserInterestProfile } from "../../services/insights/userInterestProfileService.js";
 import { FUNCTIONAL_CATEGORIES } from "../../services/insights/agents/categoryDefinitions.js";
 import { createJob, updateProgress, completeJob, failJob } from "../../services/jobManager.js";
 
 const router = Router();
+
+function promptIdFromParams(params: { promptId?: string | string[] }): string | undefined {
+  const v = params.promptId;
+  if (v == null) return undefined;
+  return Array.isArray(v) ? v[0] : v;
+}
 
 // Validation schemas
 const yearQuerySchema = z.object({
@@ -360,6 +368,131 @@ router.post(
 );
 
 /**
+ * POST /api/dashboard/insights/my/profile/refresh
+ * Recompute and persist the current user's interest profile only (no insight generation).
+ */
+router.post(
+  "/insights/my/profile/refresh",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantContext = getTenantContext(req);
+      const userId = req.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      const accessCtx = await getLoanAccessContext(req, tenantContext.tenantPool);
+      if (accessCtx.hasNoAccess) {
+        return res.status(403).json({ error: "No loan access", noAccess: true });
+      }
+
+      const busy = isUserInsightGenerationRunning(tenantContext.tenantId, userId);
+      if (busy.running) {
+        return res.status(409).json({
+          error: "My Insights generation already in progress",
+          batch: busy.batch,
+        });
+      }
+
+      const job = createJob("my-insights-profile-refresh", userId, tenantContext.tenantId);
+      res.status(202).json({ jobId: job.id, status: "processing" });
+
+      setImmediate(async () => {
+        try {
+          updateProgress(job.id, 10, "Recomputing your interest profile…");
+          const profile = await computeAndPersistUserInterestProfile(
+            tenantContext.tenantId,
+            tenantContext.tenantPool,
+            userId
+          );
+          updateProgress(job.id, 100, "Profile updated.");
+          completeJob(job.id, { profileHash: profile.contentHash });
+        } catch (error: any) {
+          console.error("[my-insights-profile-refresh] error:", error);
+          failJob(job.id, error.message || "Profile refresh failed");
+        }
+      });
+    } catch (error: any) {
+      console.error("Error starting interest profile refresh:", error);
+      if (handleDatabaseError(error, res, "Failed to start profile refresh")) {
+        return;
+      }
+      res.status(500).json({ error: "Failed to start profile refresh" });
+    }
+  }
+);
+
+/**
+ * POST /api/dashboard/insights/my/insights/refresh
+ * Regenerate My Insights for the current user using the saved profile (does not recompute the profile row).
+ */
+router.post(
+  "/insights/my/insights/refresh",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantContext = getTenantContext(req);
+      const userId = req.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      const { fresh = "true" } = req.query;
+      const accessCtx = await getLoanAccessContext(req, tenantContext.tenantPool);
+      if (accessCtx.hasNoAccess) {
+        return res.status(403).json({ error: "No loan access", noAccess: true });
+      }
+
+      const busy = isUserInsightGenerationRunning(tenantContext.tenantId, userId);
+      if (busy.running) {
+        return res.status(409).json({
+          error: "My Insights generation already in progress",
+          batch: busy.batch,
+        });
+      }
+
+      const job = createJob("my-insights-insights-refresh", userId, tenantContext.tenantId);
+      res.status(202).json({ jobId: job.id, status: "processing" });
+
+      setImmediate(async () => {
+        try {
+          updateProgress(job.id, 5, "Regenerating My Insights…");
+          const result = await runUserInsightGeneration(
+            tenantContext.tenantId,
+            tenantContext.tenantPool,
+            userId,
+            {
+              forceFresh: fresh === "true",
+              skipProfileUnchanged: false,
+              manualRefresh: true,
+              insightsOnly: true,
+            }
+          );
+
+          if (!result.success) {
+            failJob(job.id, result.error || "My Insights generation failed");
+            return;
+          }
+
+          updateProgress(job.id, 95, "Finishing up…");
+          completeJob(job.id, result);
+        } catch (error: any) {
+          console.error("[my-insights-insights-refresh] error:", error);
+          failJob(job.id, error.message || "My Insights refresh failed");
+        }
+      });
+    } catch (error: any) {
+      console.error("Error starting My Insights-only refresh:", error);
+      if (handleDatabaseError(error, res, "Failed to start My Insights refresh")) {
+        return;
+      }
+      res.status(500).json({ error: "Failed to start My Insights refresh" });
+    }
+  }
+);
+
+/**
  * POST /api/dashboard/insights/my/refresh-all-users
  * Super admin only: recompute profiles and My Insights for every active tenant user (skips users with no tenant login in past 7 days).
  */
@@ -420,6 +553,14 @@ router.post(
 const myInsightPromptBodySchema = z.object({
   title: z.string().min(1),
   prompt_text: z.string().min(1),
+  specifiers: z.record(z.unknown()).optional(),
+  schedule: z.enum(["batch", "on_demand"]).optional(),
+  enabled: z.boolean().optional(),
+});
+
+const myInsightPromptPatchSchema = z.object({
+  title: z.string().min(1).optional(),
+  prompt_text: z.string().min(1).optional(),
   specifiers: z.record(z.unknown()).optional(),
   schedule: z.enum(["batch", "on_demand"]).optional(),
   enabled: z.boolean().optional(),
@@ -487,6 +628,173 @@ router.post(
     } catch (error: any) {
       console.error("Error creating My Insight prompt:", error);
       res.status(500).json({ error: "Failed to create prompt" });
+    }
+  }
+);
+
+/**
+ * PATCH /api/dashboard/insights/my/prompts/:promptId — update a user-scoped custom prompt
+ */
+router.patch(
+  "/insights/my/prompts/:promptId",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const parsed = myInsightPromptPatchSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+      }
+      const promptId = promptIdFromParams(req.params);
+      if (!promptId) {
+        return res.status(400).json({ error: "Missing prompt id" });
+      }
+      const tenantContext = getTenantContext(req);
+      const userId = req.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      const d = parsed.data;
+      const sets: string[] = [];
+      const vals: unknown[] = [];
+      let p = 1;
+      if (d.title !== undefined) {
+        sets.push(`title = $${p++}`);
+        vals.push(d.title);
+      }
+      if (d.prompt_text !== undefined) {
+        sets.push(`prompt_text = $${p++}`);
+        vals.push(d.prompt_text);
+      }
+      if (d.specifiers !== undefined) {
+        sets.push(`specifiers = $${p++}::jsonb`);
+        vals.push(JSON.stringify(d.specifiers));
+      }
+      if (d.schedule !== undefined) {
+        sets.push(`schedule = $${p++}`);
+        vals.push(d.schedule);
+      }
+      if (d.enabled !== undefined) {
+        sets.push(`enabled = $${p++}`);
+        vals.push(d.enabled);
+      }
+      if (sets.length === 0) {
+        return res.status(400).json({ error: "No fields to update" });
+      }
+      sets.push("updated_at = now()");
+      const idPh = p++;
+      const userPh = p++;
+      vals.push(promptId, userId);
+      const r = await tenantContext.tenantPool.query(
+        `UPDATE public.user_insight_prompts
+         SET ${sets.join(", ")}
+         WHERE id = $${idPh}::uuid AND user_id = $${userPh}::uuid AND scope = 'user'
+         RETURNING id, title, prompt_text, specifiers, schedule, enabled, scope, created_at, updated_at`,
+        vals
+      );
+      if (r.rows.length === 0) {
+        return res.status(404).json({ error: "Prompt not found" });
+      }
+      res.json(r.rows[0]);
+    } catch (error: any) {
+      console.error("Error updating My Insight prompt:", error);
+      res.status(500).json({ error: "Failed to update prompt" });
+    }
+  }
+);
+
+/**
+ * DELETE /api/dashboard/insights/my/prompts/:promptId — delete a user-scoped custom prompt
+ */
+router.delete(
+  "/insights/my/prompts/:promptId",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantContext = getTenantContext(req);
+      const userId = req.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      const promptId = promptIdFromParams(req.params);
+      if (!promptId) {
+        return res.status(400).json({ error: "Missing prompt id" });
+      }
+      const r = await tenantContext.tenantPool.query(
+        `DELETE FROM public.user_insight_prompts
+         WHERE id = $1::uuid AND user_id = $2::uuid AND scope = 'user'
+         RETURNING id`,
+        [promptId, userId]
+      );
+      if (r.rows.length === 0) {
+        return res.status(404).json({ error: "Prompt not found" });
+      }
+      res.status(204).send();
+    } catch (error: any) {
+      console.error("Error deleting My Insight prompt:", error);
+      res.status(500).json({ error: "Failed to delete prompt" });
+    }
+  }
+);
+
+/**
+ * POST /api/dashboard/insights/my/prompts/:promptId/run
+ * Run one custom prompt now (async job); execution uses runUserCustomPromptLlm path on the server.
+ */
+router.post(
+  "/insights/my/prompts/:promptId/run",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantContext = getTenantContext(req);
+      const userId = req.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      const promptId = promptIdFromParams(req.params);
+      if (!promptId) {
+        return res.status(400).json({ error: "Missing prompt id" });
+      }
+      const accessCtx = await getLoanAccessContext(req, tenantContext.tenantPool);
+      if (accessCtx.hasNoAccess) {
+        return res.status(403).json({ error: "No loan access", noAccess: true });
+      }
+
+      const busy = isUserInsightGenerationRunning(tenantContext.tenantId, userId);
+      if (busy.running) {
+        return res.status(409).json({
+          error: "My Insights generation already in progress",
+          batch: busy.batch,
+        });
+      }
+
+      const job = createJob("my-insights-custom-prompt-run", userId, tenantContext.tenantId);
+      res.status(202).json({ jobId: job.id, status: "processing" });
+
+      setImmediate(async () => {
+        try {
+          updateProgress(job.id, 10, "Running your saved prompt…");
+          const result = await runSingleUserCustomPromptInsight(
+            tenantContext.tenantId,
+            tenantContext.tenantPool,
+            userId,
+            promptId
+          );
+          if (!result.success) {
+            failJob(job.id, result.error || "Custom prompt run failed");
+            return;
+          }
+          updateProgress(job.id, 100, "Done.");
+          completeJob(job.id, { ok: true });
+        } catch (error: any) {
+          console.error("[my-insights-custom-prompt-run] error:", error);
+          failJob(job.id, error.message || "Custom prompt run failed");
+        }
+      });
+    } catch (error: any) {
+      console.error("Error starting custom prompt run:", error);
+      if (handleDatabaseError(error, res, "Failed to start custom prompt run")) {
+        return;
+      }
+      res.status(500).json({ error: "Failed to start custom prompt run" });
     }
   }
 );

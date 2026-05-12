@@ -1,4 +1,6 @@
 import { useState, useMemo } from 'react';
+import { useDashboardFilterAnalytics } from '@/hooks/useDashboardFilterAnalytics';
+import { DASHBOARD_PAGE_KEYS } from '@/lib/dashboardPageKeys';
 import { BarChart3, Share2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
@@ -44,6 +46,18 @@ export const SalesView = ({
     
     return { startDate: startOfYear, endDate };
   }, [dateFilterType, year, customDateRange.start, customDateRange.end]);
+
+  const salesFilterAnalytics = useMemo(
+    () => ({
+      date_filter_type: dateFilterType,
+      year,
+      date_range: dateRange,
+      selected_channel: selectedChannel ?? 'All',
+      show_company_detail: showDetailView,
+    }),
+    [dateFilterType, year, dateRange, selectedChannel, showDetailView]
+  );
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.sales_view, salesFilterAnalytics);
   
   const { companyOverviewData, loading } = useSalesData(dateRange, selectedTenantId, selectedChannel);
 
