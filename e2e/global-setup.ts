@@ -1,6 +1,6 @@
 import { chromium, type FullConfig, type Page } from "@playwright/test";
-import { randomBytes } from "node:crypto";
-import { mkdir } from "node:fs/promises";
+import { createHmac, randomBytes } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   AUTH_DIR,
@@ -178,6 +178,133 @@ function getRunId(): string {
     process.env.BUILD_BUILDNUMBER ||
     `${Date.now()}`;
   return raw.replace(/[^a-zA-Z0-9_-]/g, "").toLowerCase();
+}
+
+type SeedAuthContext = {
+  userId?: string;
+  email?: string;
+  role?: string;
+  isSuperAdmin?: boolean;
+  tenantId?: string;
+  tenantSlug?: string;
+  persona?: "tenant_admin" | "tenant_user" | "tenant_canvas_only_user";
+};
+
+function base64UrlEncode(input: string | Buffer): string {
+  return Buffer.from(input)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  try {
+    const payload = Buffer.from(parts[1], "base64url").toString("utf8");
+    const parsed = JSON.parse(payload) as Record<string, unknown>;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function signHs256Jwt(payload: Record<string, unknown>, secret: string): string {
+  const header = { alg: "HS256", typ: "JWT" };
+  const encodedHeader = base64UrlEncode(JSON.stringify(header));
+  const encodedPayload = base64UrlEncode(JSON.stringify(payload));
+  const data = `${encodedHeader}.${encodedPayload}`;
+  const signature = createHmac("sha256", secret).update(data).digest("base64url");
+  return `${data}.${signature}`;
+}
+
+async function readSeedContextFromExistingAdminState(): Promise<SeedAuthContext | null> {
+  try {
+    const raw = await readFile(ADMIN_STATE, "utf8");
+    const parsed = JSON.parse(raw) as {
+      origins?: Array<{ localStorage?: Array<{ name?: string; value?: string }> }>;
+    };
+    const token = parsed.origins
+      ?.flatMap((o) => o.localStorage ?? [])
+      .find((kv) => kv.name === "auth_token")?.value;
+    if (!token) return null;
+    const payload = decodeJwtPayload(token);
+    if (!payload) return null;
+    return {
+      userId: typeof payload.userId === "string" ? payload.userId : undefined,
+      email: typeof payload.email === "string" ? payload.email : undefined,
+      role: typeof payload.role === "string" ? payload.role : undefined,
+      isSuperAdmin:
+        typeof payload.isSuperAdmin === "boolean" ? payload.isSuperAdmin : undefined,
+      tenantId: typeof payload.tenantId === "string" ? payload.tenantId : undefined,
+      tenantSlug: typeof payload.tenantSlug === "string" ? payload.tenantSlug : undefined,
+      persona:
+        payload.persona === "tenant_admin" ||
+        payload.persona === "tenant_user" ||
+        payload.persona === "tenant_canvas_only_user"
+          ? payload.persona
+          : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function resolveJwtSecretForSyntheticAuth(): Promise<string> {
+  if (process.env.JWT_SECRET?.trim()) return process.env.JWT_SECRET.trim();
+  const candidates = [
+    path.join(process.cwd(), "server", ".env.local"),
+    path.join(process.cwd(), "server", ".env"),
+  ];
+  for (const file of candidates) {
+    try {
+      const content = await readFile(file, "utf8");
+      let lastValue: string | null = null;
+      for (const rawLine of content.split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith("#")) continue;
+        const normalized = line.startsWith("export ") ? line.slice(7).trim() : line;
+        const sep = normalized.indexOf("=");
+        if (sep === -1) continue;
+        const key = normalized.slice(0, sep).trim();
+        if (key !== "JWT_SECRET") continue;
+        const raw = normalized.slice(sep + 1).trim();
+        const unquoted =
+          (raw.startsWith('"') && raw.endsWith('"')) ||
+          (raw.startsWith("'") && raw.endsWith("'"))
+            ? raw.slice(1, -1)
+            : raw;
+        if (unquoted) lastValue = unquoted;
+      }
+      if (lastValue) return lastValue;
+    } catch {
+      // Ignore missing/unreadable local env files; keep searching.
+    }
+  }
+  throw new Error(
+    "[E2E] Synthetic auth mode needs JWT_SECRET (env or server/.env[.local]).",
+  );
+}
+
+async function writeSyntheticStorageState(
+  baseURL: string,
+  outputPath: string,
+  token: string,
+): Promise<void> {
+  const state = {
+    cookies: [] as Array<unknown>,
+    origins: [
+      {
+        origin: baseURL,
+        localStorage: [
+          { name: "auth_token", value: token },
+          { name: "user_timezone", value: "America/New_York" },
+        ],
+      },
+    ],
+  };
+  await writeFile(outputPath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
 }
 
 function makePassword(seed: string): string {
@@ -608,6 +735,66 @@ async function createProvisionedUser(
 
 export default async function globalSetup(config: FullConfig) {
   const baseURL = normalizeBaseUrl(config.projects[0]?.use.baseURL as string);
+  if (process.env.E2E_USE_SYNTHETIC_AUTH === "true") {
+    await mkdir(AUTH_DIR, { recursive: true });
+    const seed = await readSeedContextFromExistingAdminState();
+    const userId = process.env.E2E_SYNTHETIC_USER_ID?.trim() || seed?.userId;
+    const email =
+      process.env.E2E_SYNTHETIC_EMAIL?.trim() ||
+      seed?.email ||
+      "synthetic-e2e-admin@coheus.test";
+    const role = process.env.E2E_SYNTHETIC_ROLE?.trim() || seed?.role || "tenant_admin";
+    const isSuperAdmin =
+      process.env.E2E_SYNTHETIC_SUPER_ADMIN === "true" ||
+      (seed?.isSuperAdmin ?? false);
+    const tenantId = process.env.E2E_SYNTHETIC_TENANT_ID?.trim() || seed?.tenantId;
+    const tenantSlug = normalizeTenantSlug(
+      process.env.E2E_SYNTHETIC_TENANT_SLUG?.trim() ||
+        process.env.E2E_ADMIN_TENANT_SLUG?.trim() ||
+        seed?.tenantSlug,
+    );
+    if (!userId || !tenantId || !tenantSlug) {
+      throw new Error(
+        "[E2E] Synthetic auth mode requires userId, tenantId, and tenantSlug (from existing e2e/.auth/admin.json seed or E2E_SYNTHETIC_* env vars).",
+      );
+    }
+    const secret = await resolveJwtSecretForSyntheticAuth();
+    const nowSec = Math.floor(Date.now() / 1000);
+    const exp = nowSec + 60 * 60 * 12; // 12h
+    const claimsBase = {
+      userId,
+      email,
+      role,
+      isSuperAdmin,
+      tenantId,
+      tenantSlug,
+      iat: nowSec,
+      exp,
+    };
+
+    const adminToken = signHs256Jwt(
+      { ...claimsBase, persona: "tenant_admin" },
+      secret,
+    );
+    const userToken = signHs256Jwt(
+      { ...claimsBase, persona: "tenant_user" },
+      secret,
+    );
+    const canvasOnlyToken = signHs256Jwt(
+      { ...claimsBase, persona: "tenant_canvas_only_user" },
+      secret,
+    );
+
+    await writeSyntheticStorageState(baseURL, ADMIN_STATE, adminToken);
+    await writeSyntheticStorageState(baseURL, USER_STATE, userToken);
+    await writeSyntheticStorageState(baseURL, CANVAS_ONLY_STATE, canvasOnlyToken);
+
+    console.log(
+      `[E2E] Synthetic auth states generated for ${tenantSlug} (${userId}).`,
+    );
+    return;
+  }
+
   const admin = await getAdminSession(baseURL);
   await mkdir(AUTH_DIR, { recursive: true });
 

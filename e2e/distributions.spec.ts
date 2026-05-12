@@ -30,7 +30,8 @@ test.describe("@critical @COHI-400 Distributions workflows", () => {
       userPage.getByRole("heading", { name: /New distribution schedule/i }),
     ).toBeVisible();
 
-    await userPage.getByRole("button", { name: /Weekly/i }).click();
+    const frequencyField = userPage.locator("label", { hasText: "Frequency" }).locator("..");
+    await frequencyField.getByRole("combobox").first().click();
     await userPage.getByRole("option", { name: /^Monthly$/ }).click();
 
     await expect(userPage.getByText(/Days of month/i)).toBeVisible();
