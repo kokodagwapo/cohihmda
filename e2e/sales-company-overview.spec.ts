@@ -256,6 +256,16 @@ async function setupWorkbenchSalesCompanyOverviewMocks(page: Page): Promise<{
     });
   });
 
+  // MyDashboard waits on GET /api/workbench/canvases before leaving "Loading workbench...".
+  // Without a fast stub, CI can sit in hydration until timeout and never mount the Add menu.
+  await page.route(/\/api\/workbench\/canvases(\?|$)/, async (route: Route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ canvases: [] }),
+    });
+  });
+
   await page.route(/\/api\/loans\/sales-company-overview(\?|$)/, async (route: Route) => {
     const reqUrl = route.request().url();
     overviewRequestUrls.push(reqUrl);
@@ -300,10 +310,14 @@ test.describe("Sales Company Overview (COHI-344)", () => {
     await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
     await dismissBlockingOverlays(userPage);
 
-    // Use stable selectors
+    // Use stable selectors (layout + data can trail `domcontentloaded` in CI)
     await expect(userPage).toHaveURL(/\/sales-company-overview/);
-    await expect(userPage.getByRole("heading", { name: "Sales Company Overview" })).toBeVisible();
-    await expect(userPage.getByRole("heading", { name: "Company Overview", exact: true })).toBeVisible();
+    await expect(userPage.getByRole("heading", { name: "Sales Company Overview" })).toBeVisible({
+      timeout: 45_000,
+    });
+    await expect(userPage.getByRole("heading", { name: "Company Overview", exact: true })).toBeVisible({
+      timeout: 45_000,
+    });
     await expect(userPage.getByText("Active Loans", { exact: true })).toBeVisible();
     await expect(userPage.getByText("Submitted Loans MTD", { exact: true })).toBeVisible();
     await expect(userPage.getByText("Funded Loans MTD", { exact: true })).toBeVisible();
@@ -318,7 +332,9 @@ test.describe("Sales Company Overview (COHI-344)", () => {
     await dismissBlockingOverlays(userPage);
 
     // Use stable selectors
-    await expect(userPage.getByRole("heading", { name: "Company Overview", exact: true })).toBeVisible();
+    await expect(userPage.getByRole("heading", { name: "Company Overview", exact: true })).toBeVisible({
+      timeout: 45_000,
+    });
     const activeLoansCard = userPage
       .locator("div")
       .filter({ has: userPage.getByText("Active Loans", { exact: true }) })
@@ -341,7 +357,9 @@ test.describe("Sales Company Overview (COHI-344)", () => {
     await dismissBlockingOverlays(userPage);
 
     // Use stable selectors
-    await userPage.locator(".recharts-bar-rectangle").first().click();
+    const firstBar = userPage.locator(".recharts-bar-rectangle").first();
+    await expect(firstBar).toBeVisible({ timeout: 45_000 });
+    await firstBar.click();
     await expect(userPage.getByText("Aging (active days): 0-15", { exact: true })).toBeVisible();
     const activeLoansCard = userPage
       .locator("div")
