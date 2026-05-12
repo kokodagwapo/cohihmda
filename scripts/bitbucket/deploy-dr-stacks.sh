@@ -314,14 +314,26 @@ main() {
         local secondary_region="${DR_SECONDARY_REGION:-us-east-1}"
         local secondary_stack="${CF_STACK_AURORA_SECONDARY:-coheus-${ENV}-aurora-secondary}"
         local secondary_template="infrastructure/cloudformation/coheus_aurora_secondary_stack.yaml"
+        local aurora_stack="${CF_STACK_AURORA_MGMT:-coheus-${ENV}-aurora-management}"
 
+        # Auto-resolve Global Cluster ID from primary stack if not explicitly provided
         if [ -z "${GLOBAL_CLUSTER_ID:-}" ]; then
             echo ""
-            echo "ERROR: DEPLOY_SECONDARY=true but GLOBAL_CLUSTER_ID is not set."
-            echo "  You must first enable Global Database on the primary Aurora cluster"
-            echo "  (EnableGlobalDatabaseParam=true) and pass the GlobalClusterId output"
-            echo "  as GLOBAL_CLUSTER_ID to this pipeline."
-            exit 1
+            echo "GLOBAL_CLUSTER_ID not set — looking up GlobalClusterId output from $aurora_stack..."
+            GLOBAL_CLUSTER_ID=$(aws cloudformation describe-stacks \
+                --stack-name "$aurora_stack" \
+                --region "$AWS_DEFAULT_REGION" \
+                --query "Stacks[0].Outputs[?OutputKey=='GlobalClusterId'].OutputValue" \
+                --output text 2>/dev/null) || true
+
+            if [ -z "$GLOBAL_CLUSTER_ID" ] || [ "$GLOBAL_CLUSTER_ID" == "None" ]; then
+                echo ""
+                echo "ERROR: Could not find GlobalClusterId output on stack $aurora_stack."
+                echo "  Make sure ENABLE_GLOBAL_DB=true was set and the Aurora stack deployed"
+                echo "  successfully before deploying the secondary stack."
+                exit 1
+            fi
+            echo "Resolved Global Cluster ID: $GLOBAL_CLUSTER_ID"
         fi
 
         echo ""
