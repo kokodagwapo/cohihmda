@@ -554,6 +554,11 @@ pipelines:
             allowed-values:
               - "false"
               - "true"
+          - name: DEPLOY_SECONDARY
+            default: "false"
+            allowed-values:
+              - "false"
+              - "true"
       - step:
           name: Deploy DR Stacks to Dev
           oidc: true
@@ -571,6 +576,11 @@ pipelines:
               - "false"
               - "true"
           - name: SKIP_BACKUP
+            default: "false"
+            allowed-values:
+              - "false"
+              - "true"
+          - name: DEPLOY_SECONDARY
             default: "false"
             allowed-values:
               - "false"

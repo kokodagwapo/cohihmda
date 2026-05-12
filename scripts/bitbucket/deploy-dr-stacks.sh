@@ -5,10 +5,7 @@
 # Deploys CloudFormation stacks that are NOT part of the regular dev pipeline:
 #   1. Aurora cluster stack(s) — retention, reader instance, Global DB
 #   2. AWS Backup stack — vault, plan, tag-based selection
-#
-# The Aurora secondary stack (us-east-1) is NOT deployed here — it requires
-# Org SCP approval and a separate region. Deploy it manually per
-# docs/deployment/DR_DEPLOY_CHECKLIST.md.
+#   3. Aurora secondary stack (us-east-1) — cross-region DR replica (opt-in)
 #
 # Required Environment Variables:
 #   - AWS_ROLE_ARN              - IAM role ARN for OIDC
@@ -19,8 +16,13 @@
 # Optional:
 #   - CF_STACK_BACKUP           - Backup stack name
 #                                 (default: coheus-${ENV}-backup)
+#   - CF_STACK_AURORA_SECONDARY - Secondary Aurora stack name
+#                                 (default: coheus-${ENV}-aurora-secondary)
+#   - DR_SECONDARY_REGION       - Secondary region (default: us-east-1)
 #   - SKIP_AURORA               - Set to "true" to skip Aurora deploy
 #   - SKIP_BACKUP               - Set to "true" to skip Backup deploy
+#   - DEPLOY_SECONDARY          - Set to "true" to deploy secondary region stack
+#                                 (default: false — requires Org SCP approval)
 #
 # OIDC Environment (set by pipeline setup-oidc script):
 #   - AWS_WEB_IDENTITY_TOKEN_FILE
@@ -280,6 +282,31 @@ main() {
         echo "Skipping Backup deploy (SKIP_BACKUP=true)"
     fi
 
+    # --- Aurora secondary stack (cross-region, opt-in) ---
+    if [ "${DEPLOY_SECONDARY:-false}" == "true" ]; then
+        local secondary_region="${DR_SECONDARY_REGION:-us-east-1}"
+        local secondary_stack="${CF_STACK_AURORA_SECONDARY:-coheus-${ENV}-aurora-secondary}"
+        local secondary_template="infrastructure/cloudformation/coheus_aurora_secondary_stack.yaml"
+
+        echo ""
+        echo "Validating $secondary_template..."
+        aws cloudformation validate-template \
+            --template-body "file://$secondary_template" \
+            --region "$secondary_region" > /dev/null
+        echo "✓ Template valid"
+
+        echo ""
+        echo "NOTE: Secondary stack deploys to region $secondary_region."
+        echo "Ensure Org SCP allows Cohi resources in this region before proceeding."
+        echo ""
+
+        deploy_stack "$secondary_stack" "$secondary_template" "$secondary_region" "Aurora Secondary (DR — $secondary_region)"
+    else
+        echo ""
+        echo "Skipping secondary region deploy (DEPLOY_SECONDARY != true)"
+        echo "  Set DEPLOY_SECONDARY=true once Org SCP allows resources in the DR region."
+    fi
+
     echo ""
     echo "========================================="
     echo "DR Stack Deployment Complete!"
@@ -288,6 +315,10 @@ main() {
     echo "Next steps:"
     echo "  - Verify Aurora reader instance(s) in RDS console"
     echo "  - Verify first backup job in AWS Backup console (within 24h)"
+    if [ "${DEPLOY_SECONDARY:-false}" == "true" ]; then
+        echo "  - Verify secondary Aurora cluster in ${DR_SECONDARY_REGION:-us-east-1} console"
+        echo "  - Verify Global Database replication lag in RDS console"
+    fi
     echo "  - Follow docs/deployment/DR_DEPLOY_CHECKLIST.md for remaining phases"
     echo ""
 }
