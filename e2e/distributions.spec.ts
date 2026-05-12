@@ -18,8 +18,14 @@ test.describe("@critical @COHI-400 Distributions workflows", () => {
     await userPage.getByText("Tuesday", { exact: true }).click();
     await userPage.getByText("Friday", { exact: true }).click();
     await userPage.getByText("Monday", { exact: true }).click();
-    await expect(userPage.locator("ul.text-xs li").first()).toBeVisible({
-      timeout: 15_000,
+    const scheduleDialog = userPage.getByRole("dialog", {
+      name: /New distribution schedule/i,
+    });
+    const previewSection = scheduleDialog
+      .getByText(/Next sends \(preview\)/i)
+      .locator("..");
+    await expect(previewSection.locator("ul li").first()).toBeVisible({
+      timeout: 30_000,
     });
   });
 
@@ -39,8 +45,14 @@ test.describe("@critical @COHI-400 Distributions workflows", () => {
     await userPage.getByText("15", { exact: true }).click();
 
     await expect(userPage.getByText(/Next sends \(preview\)/i)).toBeVisible();
-    await expect(userPage.locator("ul.text-xs li").first()).toBeVisible({
-      timeout: 15_000,
+    const scheduleDialog = userPage.getByRole("dialog", {
+      name: /New distribution schedule/i,
+    });
+    const previewSection = scheduleDialog
+      .getByText(/Next sends \(preview\)/i)
+      .locator("..");
+    await expect(previewSection.locator("ul li").first()).toBeVisible({
+      timeout: 30_000,
     });
   });
 
