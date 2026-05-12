@@ -688,7 +688,8 @@ Resources:
                 Bucket: !Ref PodcastReplicationDestinationBucketArn
                 ReplicationTime:
                   Status: Enabled
-                  Time: 15
+                  Time:
+                    Minutes: 15
               DeleteMarkerReplication:
                 Status: Disabled
         - !Ref AWS::NoValue
