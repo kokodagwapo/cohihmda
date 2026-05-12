@@ -256,6 +256,16 @@ async function setupWorkbenchSalesCompanyOverviewMocks(page: Page): Promise<{
     });
   });
 
+  // MyDashboard waits on GET /api/workbench/canvases before leaving "Loading workbench...".
+  // Without a fast stub, CI can sit in hydration until timeout and never mount the Add menu.
+  await page.route(/\/api\/workbench\/canvases(\?|$)/, async (route: Route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ canvases: [] }),
+    });
+  });
+
   await page.route(/\/api\/loans\/sales-company-overview(\?|$)/, async (route: Route) => {
     const reqUrl = route.request().url();
     overviewRequestUrls.push(reqUrl);

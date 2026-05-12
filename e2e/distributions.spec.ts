@@ -26,6 +26,10 @@ function scheduleRow(userPage: Page, scheduleName: string) {
 }
 
 async function deleteScheduleIfPresent(userPage: Page, scheduleName: string): Promise<void> {
+  // Schedules only exist in this table — ensure we're on this route before counting rows,
+  // and again before the post-delete assertion. Otherwise `reload` would keep a different
+  // route and `scheduleRow` would always be empty (false pass).
+  await userPage.goto("/workbench/distributions", { waitUntil: "domcontentloaded" });
   const row = scheduleRow(userPage, scheduleName).first();
   const exists = (await row.count()) > 0;
   if (!exists) return;
@@ -33,7 +37,7 @@ async function deleteScheduleIfPresent(userPage: Page, scheduleName: string): Pr
   await userPage.keyboard.press("Escape").catch(() => {});
   userPage.once("dialog", (dialog) => dialog.accept());
   await row.getByTitle("Delete").click({ force: true });
-  await userPage.reload({ waitUntil: "domcontentloaded" });
+  await userPage.goto("/workbench/distributions", { waitUntil: "domcontentloaded" });
   await expect(scheduleRow(userPage, scheduleName)).toHaveCount(0, { timeout: 20_000 });
 }
 
