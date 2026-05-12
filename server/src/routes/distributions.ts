@@ -492,7 +492,7 @@ router.post(
         content_type,
         content_id
       );
-      if (!access.ok) {
+      if ('status' in access) {
         return res.status(access.status).json({ error: access.message });
       }
       if (!frequency || !['daily', 'weekly', 'biweekly', 'monthly', 'one_time', 'custom'].includes(frequency)) {
@@ -787,7 +787,7 @@ router.put(
         targetContentType,
         targetContentId
       );
-      if (!targetAccess.ok) {
+      if ('status' in targetAccess) {
         return res.status(targetAccess.status).json({ error: targetAccess.message });
       }
 
