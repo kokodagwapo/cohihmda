@@ -22,10 +22,10 @@ test.describe("@critical Consolidated role access matrix", () => {
   test("tenant_canvas_only_user is constrained to canvas-only experience", async ({
     canvasOnlyPage,
   }) => {
-    // Canvas-only users are redirected off full-app routes into the workbench/canvas shell
-    // (see AccessModeGate + /my-dashboard → /workbench redirect in App.tsx).
+    // Canvas-only users are redirected off full-app routes into the allowed shell:
+    // `/workbench`, `/my-dashboard`, or `/my-dashboard/:canvasId` (AccessModeGate).
     await canvasOnlyPage.goto("/insights", { waitUntil: "domcontentloaded" });
-    await expect(canvasOnlyPage).toHaveURL(/\/workbench/);
+    await expect(canvasOnlyPage).toHaveURL(/\/(workbench|my-dashboard)/);
 
     // Canvas-only layout should render and hide full-app nav.
     await expect(canvasOnlyPage.getByText("Cohi Dashboards")).toBeVisible();
