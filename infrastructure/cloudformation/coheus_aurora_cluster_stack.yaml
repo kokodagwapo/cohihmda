@@ -101,7 +101,7 @@ Parameters:
 
   BackupRetentionDays:
     Type: Number
-    Default: 7
+    Default: 35
     MinValue: 1
     MaxValue: 35
     Description: Number of days to retain automated backups
@@ -135,6 +135,10 @@ Conditions:
   HasAlertsTopic: !Not [!Equals [!Ref AlertsTopicArn, '']]
   EnablePerfInsights: !Equals [!Ref EnablePerformanceInsights, 'true']
   HasECSSecurityGroup: !Not [!Equals [!Ref ECSSecurityGroupId, '']]
+  # Prod management cluster only — attach to Aurora Global Database for cross-region DR
+  EnableGlobalDatabase: !And
+    - !Condition IsProdEnvironment
+    - !Condition IsManagementCluster
 
 Resources:
   # ============================================================================
@@ -346,6 +350,8 @@ Resources:
           Value: !Ref ClusterType
         - Key: Environment
           Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
 
   # ============================================================================
   # Aurora Serverless v2 Instance (Writer)
@@ -373,6 +379,56 @@ Resources:
             - IsManagementCluster
             - !Sub '${ProjectName}-${Environment}-aurora-management-instance'
             - !Sub '${ProjectName}-${Environment}-aurora-tenant-${ClusterIdentifier}-instance'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ============================================================================
+  # Aurora Serverless v2 Instance (Reader — second AZ capacity)
+  # ============================================================================
+  AuroraReaderInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !If
+        - IsManagementCluster
+        - !Sub '${ProjectName}-${Environment}-management-instance-2'
+        - !Sub '${ProjectName}-${Environment}-tenant-${ClusterIdentifier}-instance-2'
+      DBClusterIdentifier: !Ref AuroraCluster
+      DBInstanceClass: db.serverless
+      Engine: aurora-postgresql
+      EnablePerformanceInsights: !If [EnablePerfInsights, true, false]
+      PerformanceInsightsKMSKeyId: !If
+        - EnablePerfInsights
+        - !If [CreateKMSKey, !Ref EncryptionKey, !Ref KMSKeyArn]
+        - !Ref AWS::NoValue
+      PerformanceInsightsRetentionPeriod: !If [EnablePerfInsights, 7, !Ref AWS::NoValue]
+      PubliclyAccessible: false
+      PromotionTier: 15
+      Tags:
+        - Key: Name
+          Value: !If
+            - IsManagementCluster
+            - !Sub '${ProjectName}-${Environment}-aurora-management-instance-2'
+            - !Sub '${ProjectName}-${Environment}-aurora-tenant-${ClusterIdentifier}-instance-2'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ============================================================================
+  # Aurora Global Database (prod management only)
+  # ============================================================================
+  GlobalCluster:
+    Type: AWS::RDS::GlobalCluster
+    Condition: EnableGlobalDatabase
+    DependsOn: AuroraReaderInstance
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      DeletionProtection: true
+      GlobalClusterIdentifier: !Sub '${ProjectName}-${Environment}-global'
+      SourceDBClusterIdentifier: !GetAtt AuroraCluster.DBClusterArn
 
   # ============================================================================
   # CloudWatch Alarms
@@ -497,6 +553,11 @@ Outputs:
         - IsManagementCluster
         - !Sub '${ProjectName}-${Environment}-aurora-management-cluster'
         - !Sub '${ProjectName}-${Environment}-aurora-tenant-${ClusterIdentifier}-cluster'
+
+  GlobalClusterId:
+    Condition: EnableGlobalDatabase
+    Description: Global database identifier for coheus_aurora_secondary_stack (prod management only)
+    Value: !Ref GlobalCluster
 
   ClusterEndpoint:
     Description: Aurora cluster writer endpoint
