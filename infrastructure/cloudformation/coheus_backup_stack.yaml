@@ -55,14 +55,14 @@ Resources:
         BackupPlanName: !Sub '${ProjectName}-${Environment}-cohi-backup-plan'
         BackupPlanRule:
           - RuleName: DailySnapshots
-            TargetBackupVaultName: !Ref CoheusBackupVault
+            TargetBackupVault: !Ref CoheusBackupVault
             ScheduleExpression: cron(0 5 ? * * *)
             StartWindowMinutes: 60
             CompletionWindowMinutes: 180
             Lifecycle:
               DeleteAfterDays: 35
           - RuleName: MonthlySnapshots
-            TargetBackupVaultName: !Ref CoheusBackupVault
+            TargetBackupVault: !Ref CoheusBackupVault
             ScheduleExpression: cron(0 6 1 * ? *)
             StartWindowMinutes: 60
             CompletionWindowMinutes: 300
