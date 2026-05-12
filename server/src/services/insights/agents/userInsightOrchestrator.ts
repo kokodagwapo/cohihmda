@@ -32,7 +32,7 @@ import {
 } from "./insightOrchestrator.js";
 import { getTenantRevenueExpression } from "../../../utils/scorecard-utils.js";
 import { buildUnderstoryBullets } from "../understoryBullets.js";
-import { getUserLoanAccessFilter } from "../../userLoanAccessService.js";
+import { getUserLoanAccessFilter, COHEUS_FULL_LOAN_ACCESS_ROLES } from "../../userLoanAccessService.js";
 import { pool as managementPool } from "../../../config/managementDatabase.js";
 import {
   ACTIVITY_STALE_DAYS,
@@ -722,8 +722,7 @@ export async function runSingleUserCustomPromptInsight(
 
 /**
  * All active management `coheus_users` eligible for tenant-scoped My Insights bulk runs.
- * Uses the same role cohort as {@link isCoheusUserWithFullLoanAccess} (super_admin / platform_admin).
- * These users may have no row in the tenant `public.users` table (e.g. dev super admins).
+ * Role filter uses {@link COHEUS_FULL_LOAN_ACCESS_ROLES} so it stays aligned with {@link isCoheusUserWithFullLoanAccess}.
  */
 async function listActiveCoheusMyInsightsBulkUserIds(): Promise<string[]> {
   try {
@@ -731,7 +730,8 @@ async function listActiveCoheusMyInsightsBulkUserIds(): Promise<string[]> {
       `SELECT cu.id::text AS id
        FROM public.coheus_users cu
        WHERE cu.is_active = true
-         AND cu.role IN ('super_admin', 'platform_admin')`
+         AND cu.role = ANY($1::text[])`,
+      [[...COHEUS_FULL_LOAN_ACCESS_ROLES]]
     );
     return r.rows.map((row: { id: string }) => String(row.id));
   } catch (e: any) {
@@ -742,7 +742,7 @@ async function listActiveCoheusMyInsightsBulkUserIds(): Promise<string[]> {
 
 /**
  * Post-sync or super-admin bulk refresh: every active tenant `users` row plus every active
- * management `coheus_users` platform staff row (super_admin / platform_admin), deduped by id.
+ * management `coheus_users` row whose role is in {@link COHEUS_FULL_LOAN_ACCESS_ROLES}, deduped by id.
  * @param options.adminRefresh When true, runs generation even if profile hash unchanged (still skips if no tenant login in past 7 days).
  */
 export async function runMyInsightsForTenant(

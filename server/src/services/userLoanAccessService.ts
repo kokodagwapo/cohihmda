@@ -91,8 +91,11 @@ export interface LoanAccessContext {
 // Roles that have full loan access
 const FULL_ACCESS_ROLES = ["tenant_admin", "super_admin", "platform_admin"];
 
-/** Roles in management `coheus_users` that mirror HTTP full-loan access for platform staff. */
-const COHEUS_FULL_LOAN_ACCESS_ROLES = ["super_admin", "platform_admin"];
+/**
+ * Roles in management `coheus_users` that mirror HTTP full-loan access for platform staff.
+ * Keep in sync with {@link isCoheusUserWithFullLoanAccess} and bulk My Insights user listing.
+ */
+export const COHEUS_FULL_LOAN_ACCESS_ROLES = ["super_admin", "platform_admin"] as const;
 
 /**
  * True when `userId` is an active coheus platform user who should see all tenant loans
@@ -105,7 +108,7 @@ export async function isCoheusUserWithFullLoanAccess(userId: string): Promise<bo
        WHERE id = $1::uuid AND is_active = true
          AND role = ANY($2::text[])
        LIMIT 1`,
-      [userId, COHEUS_FULL_LOAN_ACCESS_ROLES]
+      [userId, [...COHEUS_FULL_LOAN_ACCESS_ROLES]]
     );
     return r.rows.length > 0;
   } catch (error: any) {
