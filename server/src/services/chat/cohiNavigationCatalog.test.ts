@@ -57,6 +57,12 @@ describe("cohiNavigationCatalog", () => {
     // resolveNavigationAnswer may still match keywords; cohiChatService only uses it when isNavigationIntent passes.
   });
 
+  it("does not route broad daily-summary asks to navigation fallback", () => {
+    const q = "What's important to know today?";
+    expect(isNavigationIntent(q)).toBe(false);
+    expect(resolveNavigationAnswer(q)).toBeNull();
+  });
+
   it("buildGuidanceResponse includes help and insights links", () => {
     const g = buildGuidanceResponse();
     const safe = sanitizeNavigationHints(g.hints);

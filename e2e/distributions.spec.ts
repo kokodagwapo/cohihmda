@@ -1,6 +1,6 @@
 import { test, expect } from "./fixtures";
 
-test.describe("@critical Distributions workflows", () => {
+test.describe("@critical @COHI-400 Distributions workflows", () => {
   test("@smoke distributions page renders with schedule controls", async ({ userPage }) => {
     await userPage.goto("/workbench/distributions", { waitUntil: "domcontentloaded" });
     await expect(userPage.getByRole("heading", { name: "Communications Center" })).toBeVisible();
@@ -30,7 +30,8 @@ test.describe("@critical Distributions workflows", () => {
       userPage.getByRole("heading", { name: /New distribution schedule/i }),
     ).toBeVisible();
 
-    await userPage.getByRole("button", { name: /Weekly/i }).click();
+    const frequencyField = userPage.locator("label", { hasText: "Frequency" }).locator("..");
+    await frequencyField.getByRole("combobox").first().click();
     await userPage.getByRole("option", { name: /^Monthly$/ }).click();
 
     await expect(userPage.getByText(/Days of month/i)).toBeVisible();
