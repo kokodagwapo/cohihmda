@@ -14,13 +14,13 @@ test.describe("@critical @COHI-400 Distributions workflows", () => {
       userPage.getByRole("heading", { name: /New distribution schedule/i }),
     ).toBeVisible();
     await expect(userPage.getByText(/Days of week/i)).toBeVisible();
-    // Default is Monday; add Tue + Fri then remove Monday → Tue+Fr
-    await userPage.getByText("Tuesday", { exact: true }).click();
-    await userPage.getByText("Friday", { exact: true }).click();
-    await userPage.getByText("Monday", { exact: true }).click();
     const scheduleDialog = userPage.getByRole("dialog", {
       name: /New distribution schedule/i,
     });
+    // Default is Monday; add Tue + Fri then remove Monday → Tue+Fr
+    await scheduleDialog.getByRole("checkbox", { name: "Tuesday" }).click();
+    await scheduleDialog.getByRole("checkbox", { name: "Friday" }).click();
+    await scheduleDialog.getByRole("checkbox", { name: "Monday" }).click();
     const previewSection = scheduleDialog
       .getByText(/Next sends \(preview\)/i)
       .locator("..");

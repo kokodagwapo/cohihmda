@@ -41,6 +41,11 @@ function policyMiddleware(policy: AccessPolicy): Handler[] {
         authenticateToken as Handler,
         requireRole("tenant_admin", "super_admin", "platform_admin") as Handler,
       ];
+    case "distributions_operator":
+      return [
+        authenticateToken as Handler,
+        requireRole("tenant_admin", "super_admin", "platform_admin", "user") as Handler,
+      ];
     default:
       return [authenticateToken as Handler];
   }
@@ -111,7 +116,7 @@ export function createRoleHarnessApp(): express.Express {
   app.post(
     "/api/distributions/__functional/send-now",
     authenticateToken,
-    requireRole("tenant_admin", "super_admin", "platform_admin"),
+    requireRole("tenant_admin", "super_admin", "platform_admin", "user"),
     ((req: Request, res: Response) => res.status(200).json({ sent: true })) as Handler,
   );
   app.get(
