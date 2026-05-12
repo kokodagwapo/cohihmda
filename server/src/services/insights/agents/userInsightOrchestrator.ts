@@ -33,6 +33,7 @@ import {
 import { getTenantRevenueExpression } from "../../../utils/scorecard-utils.js";
 import { buildUnderstoryBullets } from "../understoryBullets.js";
 import { getUserLoanAccessFilter } from "../../userLoanAccessService.js";
+import { pool as managementPool } from "../../../config/managementDatabase.js";
 import {
   ACTIVITY_STALE_DAYS,
   computeAndPersistUserInterestProfile,
@@ -720,6 +721,29 @@ export async function runSingleUserCustomPromptInsight(
 }
 
 /**
+ * Management-DB users linked to a tenant via `user_tenant_mappings` who may have no row in tenant `public.users`.
+ * Restricted to `super_admin` / `platform_admin` in `coheus_users` (aligned with `isCoheusUserWithFullLoanAccess` in userLoanAccessService).
+ */
+async function listCoheusStaffUserIdsMappedToTenant(tenantId: string): Promise<string[]> {
+  try {
+    const r = await managementPool.query(
+      `SELECT DISTINCT m.user_id::text AS id
+       FROM public.user_tenant_mappings m
+       INNER JOIN public.coheus_users cu ON cu.id = m.user_id AND cu.is_active = true
+       WHERE m.tenant_id = $1::uuid
+         AND cu.role IN ('super_admin', 'platform_admin')`,
+      [tenantId]
+    );
+    return r.rows.map((row: { id: string }) => String(row.id));
+  } catch (e: any) {
+    logWarn(
+      `[UserInsightOrchestrator] Could not load coheus staff for tenant ${tenantId}: ${e.message}`
+    );
+    return [];
+  }
+}
+
+/**
  * Post-sync or super-admin bulk refresh: all active users in tenant.
  * @param options.adminRefresh When true, runs generation even if profile hash unchanged (still skips if no tenant login in past 7 days).
  */
@@ -739,6 +763,15 @@ export async function runMyInsightsForTenant(
   } catch (e: any) {
     logError(`[UserInsightOrchestrator] Failed to list users: ${e.message}`);
     return { usersProcessed: 0, errors: 1, insightsTotal: 0 };
+  }
+
+  const seen = new Set(userRows.map((u) => String(u.id)));
+  const coheusMapped = await listCoheusStaffUserIdsMappedToTenant(tenantId);
+  for (const id of coheusMapped) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      userRows.push({ id });
+    }
   }
 
   for (const u of userRows) {

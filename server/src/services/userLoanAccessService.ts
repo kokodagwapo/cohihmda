@@ -22,6 +22,7 @@
 import pg from "pg";
 import { logDebug, logWarn, logInfo, logError } from "./logger.js";
 import { EncompassApiService } from "./encompassApiService.js";
+import { pool as managementPool } from "../config/managementDatabase.js";
 
 // =============================================================================
 // TYPES & INTERFACES
@@ -90,6 +91,32 @@ export interface LoanAccessContext {
 // Roles that have full loan access
 const FULL_ACCESS_ROLES = ["tenant_admin", "super_admin", "platform_admin"];
 
+/** Roles in management `coheus_users` that mirror HTTP full-loan access for platform staff. */
+const COHEUS_FULL_LOAN_ACCESS_ROLES = ["super_admin", "platform_admin"];
+
+/**
+ * True when `userId` is an active coheus platform user who should see all tenant loans
+ * even without a row in the tenant `users` table (same idea as {@link getLoanAccessContext} for JWT platform roles).
+ */
+export async function isCoheusUserWithFullLoanAccess(userId: string): Promise<boolean> {
+  try {
+    const r = await managementPool.query(
+      `SELECT 1 FROM public.coheus_users
+       WHERE id = $1::uuid AND is_active = true
+         AND role = ANY($2::text[])
+       LIMIT 1`,
+      [userId, COHEUS_FULL_LOAN_ACCESS_ROLES]
+    );
+    return r.rows.length > 0;
+  } catch (error: any) {
+    logWarn("[UserLoanAccess] coheus_users full-access lookup failed", {
+      userId,
+      error: error.message,
+    });
+    return false;
+  }
+}
+
 // =============================================================================
 // CONTEXT BUILDER (Primary API for Routes)
 // =============================================================================
@@ -136,8 +163,22 @@ export async function getLoanAccessContext(
   const accessInfo = await getUserAccessInfo(userId, pool);
   
   if (!accessInfo) {
-    // User not found in tenant DB - could be a platform user
-    // Check if they should have access based on JWT role
+    // User not found in tenant DB — coheus super_admin / platform_admin still get full scope
+    if (await isCoheusUserWithFullLoanAccess(userId)) {
+      logDebug("[UserLoanAccess] Coheus platform user granted full access (no tenant users row)", {
+        userId,
+        userRole,
+      });
+      return createAccessContext({
+        userId,
+        role: userRole && FULL_ACCESS_ROLES.includes(userRole) ? userRole : "super_admin",
+        persona: "tenant_admin",
+        loanScope: "all",
+        loanAccessMode: "full_access",
+        isAdmin: true,
+        isTenantAdmin: false,
+      });
+    }
     logWarn("[UserLoanAccess] User not found in tenant database", { userId, userRole });
     return createNoAccessContext(userId);
   }
@@ -350,7 +391,14 @@ export async function getUserLoanAccessFilter(
   const accessInfo = await getUserAccessInfo(userId, pool);
 
   if (!accessInfo) {
-    // User not found or inactive - block all access
+    // No tenant row: platform super_admin / platform_admin still get full loan scope
+    // (matches getLoanAccessContext for offline jobs e.g. My Insights).
+    if (await isCoheusUserWithFullLoanAccess(userId)) {
+      logDebug("[UserLoanAccess] Coheus platform user — full loan access (no tenant users row)", {
+        userId,
+      });
+      return null;
+    }
     return {
       sql: "FALSE",
       params: [],
