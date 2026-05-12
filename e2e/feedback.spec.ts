@@ -53,10 +53,12 @@ async function openHelpMenuAndGoToFeedback(page: import("@playwright/test").Page
     await dismissBlockingOverlays(page);
     await waitForBackdropToClear(page);
 
+    await expect(helpOptionsButton).toBeVisible({ timeout: 15_000 });
+
     const isMenuVisible = await helpMenu.isVisible().catch(() => false);
     if (!isMenuVisible) {
       // Primary path: hover opens the menu on desktop.
-      await helpOptionsButton.hover();
+      await helpOptionsButton.hover({ timeout: 15_000 });
     }
 
     const ready = await helpMenu.isVisible({ timeout: 2_500 }).catch(() => false);
@@ -207,6 +209,13 @@ test.describe("Feedback flow (COHI-322)", () => {
     await userPage.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
     await dismissBlockingOverlays(userPage);
     await waitForBackdropToClear(userPage);
+
+    await expect(
+      userPage.getByRole("navigation", { name: /main navigation/i }),
+    ).toBeVisible({ timeout: 60_000 });
+    await expect(userPage.getByRole("button", { name: "Help options" })).toBeVisible({
+      timeout: 30_000,
+    });
 
     // Use stable selectors
     await openHelpMenuAndGoToFeedback(userPage);
