@@ -183,6 +183,62 @@ Resources:
               - ssm:*
             Resource: "*"
 
+          # RDS / Aurora (cluster, instance, subnet group, global database)
+          - Sid: RDS
+            Effect: Allow
+            Action:
+              - rds:CreateDBCluster
+              - rds:ModifyDBCluster
+              - rds:DeleteDBCluster
+              - rds:DescribeDBClusters
+              - rds:CreateDBInstance
+              - rds:ModifyDBInstance
+              - rds:DeleteDBInstance
+              - rds:DescribeDBInstances
+              - rds:CreateDBSubnetGroup
+              - rds:ModifyDBSubnetGroup
+              - rds:DeleteDBSubnetGroup
+              - rds:DescribeDBSubnetGroups
+              - rds:CreateGlobalCluster
+              - rds:ModifyGlobalCluster
+              - rds:DeleteGlobalCluster
+              - rds:DescribeGlobalClusters
+              - rds:RemoveFromGlobalCluster
+              - rds:AddTagsToResource
+              - rds:RemoveTagsFromResource
+              - rds:ListTagsForResource
+              - rds:DescribeDBClusterParameters
+              - rds:DescribeDBClusterParameterGroups
+              - rds:DescribeDBParameterGroups
+              - rds:DescribeEngineDefaultClusterParameters
+              - rds:DescribeOrderableDBInstanceOptions
+            Resource: "*"
+
+          # AWS Backup (vault, plan, selection)
+          - Sid: Backup
+            Effect: Allow
+            Action:
+              - backup:CreateBackupVault
+              - backup:DeleteBackupVault
+              - backup:DescribeBackupVault
+              - backup:PutBackupVaultAccessPolicy
+              - backup:PutBackupVaultNotifications
+              - backup:GetBackupVaultAccessPolicy
+              - backup:ListBackupVaults
+              - backup:CreateBackupPlan
+              - backup:DeleteBackupPlan
+              - backup:UpdateBackupPlan
+              - backup:GetBackupPlan
+              - backup:ListBackupPlans
+              - backup:CreateBackupSelection
+              - backup:DeleteBackupSelection
+              - backup:GetBackupSelection
+              - backup:ListBackupSelections
+              - backup:TagResource
+              - backup:UntagResource
+              - backup:ListTags
+            Resource: "*"
+
           # STS identity verification
           - Sid: STS
             Effect: Allow
