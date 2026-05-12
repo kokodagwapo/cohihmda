@@ -1,6 +1,6 @@
 import { test, expect } from "./fixtures";
 
-test.describe("@critical Distributions workflows", () => {
+test.describe("@critical @COHI-400 Distributions workflows", () => {
   test("@smoke distributions page renders with schedule controls", async ({ userPage }) => {
     await userPage.goto("/workbench/distributions", { waitUntil: "domcontentloaded" });
     await expect(userPage.getByRole("heading", { name: "Communications Center" })).toBeVisible();
@@ -14,12 +14,18 @@ test.describe("@critical Distributions workflows", () => {
       userPage.getByRole("heading", { name: /New distribution schedule/i }),
     ).toBeVisible();
     await expect(userPage.getByText(/Days of week/i)).toBeVisible();
+    const scheduleDialog = userPage.getByRole("dialog", {
+      name: /New distribution schedule/i,
+    });
     // Default is Monday; add Tue + Fri then remove Monday → Tue+Fr
-    await userPage.getByText("Tuesday", { exact: true }).click();
-    await userPage.getByText("Friday", { exact: true }).click();
-    await userPage.getByText("Monday", { exact: true }).click();
-    await expect(userPage.locator("ul.text-xs li").first()).toBeVisible({
-      timeout: 15_000,
+    await scheduleDialog.getByRole("checkbox", { name: "Tuesday" }).click();
+    await scheduleDialog.getByRole("checkbox", { name: "Friday" }).click();
+    await scheduleDialog.getByRole("checkbox", { name: "Monday" }).click();
+    const previewSection = scheduleDialog
+      .getByText(/Next sends \(preview\)/i)
+      .locator("..");
+    await expect(previewSection.locator("ul li").first()).toBeVisible({
+      timeout: 30_000,
     });
   });
 
@@ -30,7 +36,8 @@ test.describe("@critical Distributions workflows", () => {
       userPage.getByRole("heading", { name: /New distribution schedule/i }),
     ).toBeVisible();
 
-    await userPage.getByRole("button", { name: /Weekly/i }).click();
+    const frequencyField = userPage.locator("label", { hasText: "Frequency" }).locator("..");
+    await frequencyField.getByRole("combobox").first().click();
     await userPage.getByRole("option", { name: /^Monthly$/ }).click();
 
     await expect(userPage.getByText(/Days of month/i)).toBeVisible();
@@ -38,8 +45,14 @@ test.describe("@critical Distributions workflows", () => {
     await userPage.getByText("15", { exact: true }).click();
 
     await expect(userPage.getByText(/Next sends \(preview\)/i)).toBeVisible();
-    await expect(userPage.locator("ul.text-xs li").first()).toBeVisible({
-      timeout: 15_000,
+    const scheduleDialog = userPage.getByRole("dialog", {
+      name: /New distribution schedule/i,
+    });
+    const previewSection = scheduleDialog
+      .getByText(/Next sends \(preview\)/i)
+      .locator("..");
+    await expect(previewSection.locator("ul li").first()).toBeVisible({
+      timeout: 30_000,
     });
   });
 

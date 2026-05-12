@@ -10,7 +10,8 @@ export type AccessPolicy =
   | "any_admin"
   | "tenant_admin_or_super"
   | "analytics_admin"
-  | "distributions_admin";
+  | "distributions_admin"
+  | "distributions_operator";
 
 export interface RouteExpectation {
   routeGroup: string;
@@ -95,6 +96,16 @@ const DISTRIBUTIONS_ADMIN_EXPECTED: Record<RoleKey, number> = {
   unauthenticated: 401,
 };
 
+const DISTRIBUTIONS_OPERATOR_EXPECTED: Record<RoleKey, number> = {
+  super_admin: 200,
+  platform_admin: 200,
+  support: 403,
+  tenant_admin: 200,
+  user: 200,
+  canvas_only_user: 403,
+  unauthenticated: 401,
+};
+
 const PUBLIC_EXPECTED: Record<RoleKey, number> = {
   super_admin: 200,
   platform_admin: 200,
@@ -149,7 +160,7 @@ export const ROLE_MATRIX: RouteExpectation[] = [
   { routeGroup: "/api/workbench/canvases", method: "GET", path: "/api/workbench/canvases/__rbac_probe", policy: "auth", expect: AUTH_EXPECTED },
   { routeGroup: "/api/groups", method: "GET", path: "/api/groups/__rbac_probe", policy: "any_admin", expect: ANY_ADMIN_EXPECTED },
   { routeGroup: "/api/workbench/reports", method: "GET", path: "/api/workbench/reports/__rbac_probe", policy: "auth", expect: AUTH_BLOCKS_CANVAS_ONLY },
-  { routeGroup: "/api/distributions", method: "GET", path: "/api/distributions/__rbac_probe", policy: "distributions_admin", expect: DISTRIBUTIONS_ADMIN_EXPECTED },
+  { routeGroup: "/api/distributions", method: "GET", path: "/api/distributions/__rbac_probe", policy: "distributions_operator", expect: DISTRIBUTIONS_OPERATOR_EXPECTED },
   { routeGroup: "/api/research", method: "GET", path: "/api/research/__rbac_probe", policy: "auth", expect: AUTH_BLOCKS_CANVAS_ONLY },
   { routeGroup: "/api/research", method: "POST", path: "/api/research/artifacts/__rbac_probe", policy: "auth", expect: AUTH_BLOCKS_CANVAS_ONLY },
   { routeGroup: "/api/research", method: "GET", path: "/api/research/artifacts/__rbac_probe", policy: "auth", expect: AUTH_BLOCKS_CANVAS_ONLY },

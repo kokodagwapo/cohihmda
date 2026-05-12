@@ -85,6 +85,17 @@ function levenshteinDistance(a: string, b: string): number {
 
 function fuzzyTokenEquals(token: string, target: string): boolean {
   if (token === target) return true;
+  // Keep short-token matching strict to avoid false positives like "to" ~= "go",
+  // while still allowing dropped-last-letter typos (e.g. "se" for "see").
+  if (token.length <= 2 || target.length <= 2) {
+    const shorter = token.length < target.length ? token : target;
+    const longer = token.length < target.length ? target : token;
+    return (
+      longer.length - shorter.length === 1 &&
+      longer.startsWith(shorter) &&
+      longer[0] === shorter[0]
+    );
+  }
   const lenDelta = Math.abs(token.length - target.length);
   if (lenDelta > 2) return false;
   const maxDistance = target.length >= 8 ? 2 : 1;

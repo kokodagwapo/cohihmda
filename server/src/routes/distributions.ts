@@ -1,7 +1,10 @@
 /**
  * Report Distribution API Routes
  * CRUD for distribution_schedules and distribution_recipient_lists (tenant DB).
- * Authorization: tenant_admin, super_admin, platform_admin.
+ * Authorization:
+ * - Recipient lists: tenant_admin, super_admin, platform_admin.
+ * - Schedule operations: tenant_admin, super_admin, platform_admin, and tenant users
+ *   (tenant users are constrained to canvases they can edit).
  */
 import { Router } from 'express';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
@@ -117,6 +120,71 @@ const requireDistributionsAdmin = requireRole(
   'super_admin',
   'platform_admin'
 );
+const requireDistributionsOperator = requireRole(
+  'tenant_admin',
+  'super_admin',
+  'platform_admin',
+  'user'
+);
+
+function isDistributionsAdminRole(role?: string | null): boolean {
+  return role === 'tenant_admin' || role === 'super_admin' || role === 'platform_admin';
+}
+
+async function canUserEditCanvas(
+  tenantPool: { query: (sql: string, params?: any[]) => Promise<{ rows: any[] }> },
+  userId: string,
+  canvasId: string
+): Promise<boolean> {
+  const result = await tenantPool.query(
+    `SELECT 1
+     FROM public.workbench_canvases c
+     WHERE c.id = $1
+       AND (
+         c.user_id = $2
+         OR EXISTS (
+           SELECT 1
+           FROM public.canvas_share_entries e
+           WHERE e.canvas_id = c.id
+             AND e.user_id = $2
+             AND e.permission = 'editor'
+         )
+         OR EXISTS (
+           SELECT 1
+           FROM public.canvas_share_entries e
+           INNER JOIN public.user_group_memberships m ON m.group_id = e.group_id
+           WHERE e.canvas_id = c.id
+             AND m.user_id = $2
+             AND e.permission = 'editor'
+         )
+       )
+     LIMIT 1`,
+    [canvasId, userId]
+  );
+  return result.rows.length > 0;
+}
+
+async function ensureScheduleCanvasEditAccess(
+  req: AuthRequest,
+  tenantPool: { query: (sql: string, params?: any[]) => Promise<{ rows: any[] }> },
+  contentType: unknown,
+  contentId: unknown
+): Promise<{ ok: true } | { ok: false; status: number; message: string }> {
+  if (isDistributionsAdminRole(req.userRole)) return { ok: true };
+  const userId = req.userId;
+  if (!userId) return { ok: false, status: 401, message: 'Unauthorized' };
+  if (contentType !== 'canvas') {
+    return { ok: false, status: 403, message: 'Tenant users can only manage canvas distributions.' };
+  }
+  if (typeof contentId !== 'string' || !contentId.trim()) {
+    return { ok: false, status: 400, message: 'content_id is required for canvas distributions.' };
+  }
+  const allowed = await canUserEditCanvas(tenantPool, userId, contentId);
+  if (!allowed) {
+    return { ok: false, status: 403, message: 'You do not have edit access to this canvas.' };
+  }
+  return { ok: true };
+}
 
 // ---------------------------------------------------------------------------
 // Recipient lists (must be before /:id to avoid "recipient-lists" as id)
@@ -294,23 +362,62 @@ router.get(
   '/',
   authenticateToken,
   attachTenantContext,
-  requireDistributionsAdmin,
+  requireDistributionsOperator,
   async (req: AuthRequest, res) => {
     try {
       const { tenantPool } = getTenantContext(req);
       const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 100);
       const offset = Math.max(0, parseInt(req.query.offset as string, 10) || 0);
       const isActive = req.query.is_active;
-      let listWhere = '';
-      let countWhere = '';
       const listParams: any[] = [limit, offset];
       const countParams: any[] = [];
+      const listFilters: string[] = [];
+      const countFilters: string[] = [];
       if (isActive === 'true' || isActive === 'false') {
-        listWhere = ' WHERE d.is_active = $3';
-        countWhere = ' WHERE d.is_active = $1';
         listParams.push(isActive === 'true');
         countParams.push(isActive === 'true');
+        listFilters.push(`d.is_active = $${listParams.length}`);
+        countFilters.push(`d.is_active = $${countParams.length}`);
       }
+      if (!isDistributionsAdminRole(req.userRole)) {
+        if (!req.userId) {
+          return res.status(401).json({ error: 'Unauthorized' });
+        }
+        listParams.push(req.userId);
+        countParams.push(req.userId);
+        const listUserRef = `$${listParams.length}`;
+        const countUserRef = `$${countParams.length}`;
+        const canvasAccessFilter = (userRef: string) => `(
+          d.content_type = 'canvas'
+          AND EXISTS (
+            SELECT 1
+            FROM public.workbench_canvases c
+            WHERE c.id = d.content_id
+              AND (
+                c.user_id = ${userRef}
+                OR EXISTS (
+                  SELECT 1
+                  FROM public.canvas_share_entries e
+                  WHERE e.canvas_id = c.id
+                    AND e.user_id = ${userRef}
+                    AND e.permission = 'editor'
+                )
+                OR EXISTS (
+                  SELECT 1
+                  FROM public.canvas_share_entries e
+                  INNER JOIN public.user_group_memberships m ON m.group_id = e.group_id
+                  WHERE e.canvas_id = c.id
+                    AND m.user_id = ${userRef}
+                    AND e.permission = 'editor'
+                )
+              )
+          )
+        )`;
+        listFilters.push(canvasAccessFilter(listUserRef));
+        countFilters.push(canvasAccessFilter(countUserRef));
+      }
+      const listWhere = listFilters.length ? ` WHERE ${listFilters.join(' AND ')}` : '';
+      const countWhere = countFilters.length ? ` WHERE ${countFilters.join(' AND ')}` : '';
       const result = await tenantPool.query(
         `SELECT d.id, d.name, d.description, d.created_by, d.content_type, d.content_id, d.content_config,
                 d.frequency, d.schedule_time, d.schedule_day, d.schedule_days, d.schedule_weekdays,
@@ -346,7 +453,7 @@ router.post(
   '/',
   authenticateToken,
   attachTenantContext,
-  requireDistributionsAdmin,
+  requireDistributionsOperator,
   async (req: AuthRequest, res) => {
     try {
       const { tenantPool } = getTenantContext(req);
@@ -378,6 +485,15 @@ router.post(
       }
       if (!content_type || !['report', 'dashboard', 'canvas', 'insight_digest'].includes(content_type)) {
         return res.status(400).json({ error: 'content_type must be report, dashboard, canvas, or insight_digest' });
+      }
+      const access = await ensureScheduleCanvasEditAccess(
+        req,
+        tenantPool,
+        content_type,
+        content_id
+      );
+      if ('status' in access) {
+        return res.status(access.status).json({ error: access.message });
       }
       if (!frequency || !['daily', 'weekly', 'biweekly', 'monthly', 'one_time', 'custom'].includes(frequency)) {
         return res.status(400).json({
@@ -501,7 +617,7 @@ router.post(
   '/preview-schedule',
   authenticateToken,
   attachTenantContext,
-  requireDistributionsAdmin,
+  requireDistributionsOperator,
   async (req: AuthRequest, res) => {
     try {
       const {
@@ -598,7 +714,7 @@ router.get(
   '/:id',
   authenticateToken,
   attachTenantContext,
-  requireDistributionsAdmin,
+  requireDistributionsOperator,
   async (req: AuthRequest, res) => {
     try {
       const { tenantPool } = getTenantContext(req);
@@ -610,6 +726,15 @@ router.get(
         [req.params.id]
       );
       if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Distribution schedule not found' });
+      }
+      const access = await ensureScheduleCanvasEditAccess(
+        req,
+        tenantPool,
+        result.rows[0].content_type,
+        result.rows[0].content_id
+      );
+      if (!access.ok) {
         return res.status(404).json({ error: 'Distribution schedule not found' });
       }
       res.json(result.rows[0]);
@@ -628,7 +753,7 @@ router.put(
   '/:id',
   authenticateToken,
   attachTenantContext,
-  requireDistributionsAdmin,
+  requireDistributionsOperator,
   async (req: AuthRequest, res) => {
     try {
       const { tenantPool } = getTenantContext(req);
@@ -642,7 +767,29 @@ router.put(
         return res.status(404).json({ error: 'Distribution schedule not found' });
       }
       const baseline = existing.rows[0];
+      const baselineAccess = await ensureScheduleCanvasEditAccess(
+        req,
+        tenantPool,
+        baseline.content_type,
+        baseline.content_id
+      );
+      if (!baselineAccess.ok) {
+        return res.status(404).json({ error: 'Distribution schedule not found' });
+      }
       const currentFrequency = baseline.frequency as string;
+      const targetContentType =
+        body.content_type !== undefined ? body.content_type : baseline.content_type;
+      const targetContentId =
+        body.content_id !== undefined ? body.content_id : baseline.content_id;
+      const targetAccess = await ensureScheduleCanvasEditAccess(
+        req,
+        tenantPool,
+        targetContentType,
+        targetContentId
+      );
+      if ('status' in targetAccess) {
+        return res.status(targetAccess.status).json({ error: targetAccess.message });
+      }
 
       if (body.frequency !== undefined) {
         const ff = String(body.frequency);
@@ -897,11 +1044,27 @@ router.delete(
   '/:id',
   authenticateToken,
   attachTenantContext,
-  requireDistributionsAdmin,
+  requireDistributionsOperator,
   async (req: AuthRequest, res) => {
     try {
       const { tenantPool } = getTenantContext(req);
       const { id } = req.params;
+      const schedule = await tenantPool.query(
+        'SELECT content_type, content_id FROM public.distribution_schedules WHERE id = $1',
+        [id]
+      );
+      if (schedule.rows.length === 0) {
+        return res.status(404).json({ error: 'Distribution schedule not found' });
+      }
+      const access = await ensureScheduleCanvasEditAccess(
+        req,
+        tenantPool,
+        schedule.rows[0].content_type,
+        schedule.rows[0].content_id
+      );
+      if (!access.ok) {
+        return res.status(404).json({ error: 'Distribution schedule not found' });
+      }
       await tenantPool.query(
         `DELETE FROM public.distribution_send_log WHERE schedule_id = $1`,
         [id]
@@ -929,11 +1092,27 @@ router.get(
   '/:id/history',
   authenticateToken,
   attachTenantContext,
-  requireDistributionsAdmin,
+  requireDistributionsOperator,
   async (req: AuthRequest, res) => {
     try {
       const { tenantPool } = getTenantContext(req);
       const { id } = req.params;
+      const schedule = await tenantPool.query(
+        'SELECT content_type, content_id FROM public.distribution_schedules WHERE id = $1',
+        [id]
+      );
+      if (schedule.rows.length === 0) {
+        return res.status(404).json({ error: 'Distribution schedule not found' });
+      }
+      const access = await ensureScheduleCanvasEditAccess(
+        req,
+        tenantPool,
+        schedule.rows[0].content_type,
+        schedule.rows[0].content_id
+      );
+      if (!access.ok) {
+        return res.status(404).json({ error: 'Distribution schedule not found' });
+      }
       const limit = Math.min(parseInt(req.query.limit as string, 10) || 20, 100);
       const result = await tenantPool.query(
         `SELECT id, schedule_id, sent_at, status, recipients_count, successful_count,
@@ -944,11 +1123,11 @@ router.get(
          LIMIT $2`,
         [id, limit]
       );
-      const schedule = await tenantPool.query(
+      const scheduleExists = await tenantPool.query(
         'SELECT id FROM public.distribution_schedules WHERE id = $1',
         [id]
       );
-      if (schedule.rows.length === 0) {
+      if (scheduleExists.rows.length === 0) {
         return res.status(404).json({ error: 'Distribution schedule not found' });
       }
       res.json({ history: result.rows });
@@ -967,7 +1146,7 @@ router.post(
   '/:id/send-now',
   authenticateToken,
   attachTenantContext,
-  requireDistributionsAdmin,
+  requireDistributionsOperator,
   async (req: AuthRequest, res) => {
     try {
       const ctx = getTenantContext(req);
@@ -985,6 +1164,17 @@ router.post(
         });
       }
       const schedule = scheduleResult.rows[0];
+      const access = await ensureScheduleCanvasEditAccess(
+        req,
+        tenantPool,
+        schedule.content_type,
+        schedule.content_id
+      );
+      if (!access.ok) {
+        return res.status(404).json({
+          error: 'Distribution schedule not found or inactive',
+        });
+      }
       const { sendDistribution, logDistributionSend } = await import(
         '../services/distributionEmailSender.js'
       );
@@ -1048,7 +1238,7 @@ router.post(
   '/:id/preview',
   authenticateToken,
   attachTenantContext,
-  requireDistributionsAdmin,
+  requireDistributionsOperator,
   async (req: AuthRequest, res) => {
     try {
       const { tenantPool } = getTenantContext(req);
@@ -1058,6 +1248,15 @@ router.post(
         [id]
       );
       if (scheduleResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Distribution schedule not found' });
+      }
+      const access = await ensureScheduleCanvasEditAccess(
+        req,
+        tenantPool,
+        scheduleResult.rows[0].content_type,
+        scheduleResult.rows[0].content_id
+      );
+      if (!access.ok) {
         return res.status(404).json({ error: 'Distribution schedule not found' });
       }
       // Phase 2 will generate content and return it; for now return placeholder
