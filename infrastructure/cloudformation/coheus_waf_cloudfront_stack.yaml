@@ -75,6 +75,11 @@ Parameters:
       - https-only
     Description: CloudFront-to-ALB protocol. Use https-only when ALB has an HTTPS listener (CertificateArn in backend stack) and BackendOriginDomain is a custom domain (e.g. api.cohi.io) with that cert. See docs/deployment/HTTPS_AND_CERTIFICATES.md.
 
+  DRSecondaryBackendOriginDomain:
+    Type: String
+    Default: ""
+    Description: Secondary region ALB hostname for API origin failover (CloudFront origin group). Leave empty to disable. Requires EnableBackendOrigin=true and BackendOriginDomain set.
+
 Conditions:
   HasCustomDomain: !Not [!Equals [!Ref DomainName, ""]]
   HasCertificate: !Not [!Equals [!Ref CertificateArn, ""]]
@@ -82,6 +87,9 @@ Conditions:
   HasBackendOrigin: !And
     - !Equals [!Ref EnableBackendOrigin, "true"]
     - !Not [!Equals [!Ref BackendOriginDomain, ""]]
+  HasBackendOriginFailover: !And
+    - !Condition HasBackendOrigin
+    - !Not [!Equals [!Ref DRSecondaryBackendOriginDomain, ""]]
 
 Resources:
   # ============================================================================
@@ -355,6 +363,38 @@ Resources:
                 OriginReadTimeout: 60
                 OriginKeepaliveTimeout: 60
             - !Ref AWS::NoValue
+          - !If
+            - HasBackendOriginFailover
+            - Id: BackendOriginSecondary
+              DomainName: !Ref DRSecondaryBackendOriginDomain
+              CustomOriginConfig:
+                HTTPPort: 80
+                HTTPSPort: 443
+                OriginProtocolPolicy:
+                  !If [BackendOriginUseHTTPS, https-only, http-only]
+                OriginSSLProtocols: !If
+                  - BackendOriginUseHTTPS
+                  - - TLSv1.2
+                  - !Ref AWS::NoValue
+                OriginReadTimeout: 60
+                OriginKeepaliveTimeout: 60
+            - !Ref AWS::NoValue
+
+        OriginGroups: !If
+          - HasBackendOriginFailover
+          - Quantity: 1
+            Items:
+              - Id: BackendApiOriginGroup
+                FailoverCriteria:
+                  StatusCodes:
+                    Quantity: 4
+                    Items: [500, 502, 503, 504]
+                Members:
+                  Quantity: 2
+                  Items:
+                    - OriginId: BackendOrigin
+                    - OriginId: BackendOriginSecondary
+          - !Ref AWS::NoValue
 
         # Default cache behavior (S3 static assets)
         # The SPA routing function rewrites non-file requests (e.g. /admin/settings)
@@ -382,7 +422,10 @@ Resources:
           - !If
             - HasBackendOrigin
             - PathPattern: "/api/*"
-              TargetOriginId: BackendOrigin
+              TargetOriginId: !If
+                - HasBackendOriginFailover
+                - BackendApiOriginGroup
+                - BackendOrigin
               ViewerProtocolPolicy: redirect-to-https
               AllowedMethods:
                 - DELETE
@@ -404,7 +447,10 @@ Resources:
           - !If
             - HasBackendOrigin
             - PathPattern: "/health"
-              TargetOriginId: BackendOrigin
+              TargetOriginId: !If
+                - HasBackendOriginFailover
+                - BackendApiOriginGroup
+                - BackendOrigin
               ViewerProtocolPolicy: redirect-to-https
               AllowedMethods:
                 - GET

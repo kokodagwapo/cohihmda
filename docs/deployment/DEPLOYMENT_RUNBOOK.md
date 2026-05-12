@@ -686,6 +686,67 @@ aws cloudformation describe-stacks \
 
 ---
 
+## Secrets Manager re-seed and rotation (Cohi ECS stack)
+
+This section covers secrets created or referenced by [`infrastructure/cloudformation/coheus_ecs_fargate_stack.yaml`](../../infrastructure/cloudformation/coheus_ecs_fargate_stack.yaml). All stack-managed secrets use the stack’s **KMS customer managed key** (`EncryptionKey`). Rotating a secret does not rotate the KMS key unless you perform a separate key rotation (KMS automatic rotation is enabled on that key).
+
+**Force ECS tasks to pick up new secret values** (after any `put-secret-value`):
+
+```bash
+aws ecs update-service \
+  --cluster "${PROJECT_NAME}-${ENVIRONMENT}-cluster" \
+  --service "${PROJECT_NAME}-${ENVIRONMENT}-service" \
+  --force-new-deployment \
+  --region "${AWS_REGION}"
+
+# Repeat for the worker service if used:
+aws ecs update-service \
+  --cluster "${PROJECT_NAME}-${ENVIRONMENT}-cluster" \
+  --service "${PROJECT_NAME}-${ENVIRONMENT}-worker-service" \
+  --force-new-deployment \
+  --region "${AWS_REGION}"
+```
+
+Adjust cluster/service names to match your deployed naming (see [Stack Names](#stack-names)).
+
+### Aurora database credentials (not defined in ECS template)
+
+- **ARN:** Passed in as stack parameter `AuroraSecretArn` (created by `coheus_aurora_cluster_stack.yaml`).
+- **Rotation:** Use Secrets Manager rotation for RDS, or `aws secretsmanager put-secret-value` with a new JSON payload `{"username":"...","password":"..."}` consistent with your app. Coordinate with Aurora `ModifyDBCluster` if the master password must change at the engine level.
+- **ECS:** Force new deployment after rotation.
+
+### JWT signing (`JwtSecret` parameter vs `JWTSecret` resource)
+
+- **Runtime:** The API task currently receives `JWT_SECRET` from the **CloudFormation parameter** `JwtSecret` (plain environment variable in the task definition), not from the `JWTSecret` Secrets Manager resource.
+- **To rotate JWT for running tasks:** Update the ECS stack with a new `JwtSecret` parameter value **or** change the task definition to use `secrets` with `ValueFrom` pointing to `JWTSecret` (requires a small template + deploy change).
+- **Secrets Manager path (if you align task def to SM):** `coheus/${ENVIRONMENT}/jwt` — JSON key `secret`.
+
+### Cognito client secret (`CognitoClientSecret` parameter)
+
+- **Not stored in Secrets Manager** by this stack; supplied at deploy time as a NoEcho parameter.
+- **Rotation:** Rotate the app client secret in Cognito, then **update the CloudFormation stack** (or task definition) with the new `CognitoClientSecret` value, then force new deployment.
+
+### Stack-defined Secrets Manager secrets (name pattern `coheus/${ENVIRONMENT}/...`)
+
+| Logical name | Secret name pattern | Used by ECS task? | Rotation notes |
+| -------------- | ------------------- | ----------------- | -------------- |
+| JWTSecret | `coheus/${ENV}/jwt` | Optional / future use | `put-secret-value` with `{"secret":"..."}` |
+| QaRunnerApiKeySecret | `coheus/${ENV}/qa-runner/api-key` | Yes (secret ref) | `put-secret-value` or rotate via SM; update any external callers |
+| QaRunnerHmacSecret | `coheus/${ENV}/qa-runner/hmac` | Yes | Same |
+| QaAtlassianApiTokenSecret | `coheus/${ENV}/qa-runner/atlassian-api-token` | Not in default task IAM list; external / automation | Set real token via `put-secret-value` |
+| QaAiOpenAiKeySecret | `coheus/${ENV}/qa-runner/openai-api-key` | Yes | `put-secret-value` |
+| QaAgentCredentialsSecret | `coheus/${ENV}/qa-runner/agent-credentials` | Yes | JSON `username` / `password` |
+| QaEvidenceSigningSecret | `coheus/${ENV}/qa-runner/evidence-signing` | Yes | Regenerate via `put-secret-value` or SM rotation |
+| JiraWebhookSecret | `coheus/${ENV}/qa-runner/jira-webhook` | Yes | `put-secret-value` — update Jira webhook configuration to match |
+
+**OpenAI (optional):** If `OpenAIApiKeySecretArn` is set, that secret lives outside this template; rotate with `put-secret-value` on that ARN.
+
+### KMS dependency
+
+Task execution roles include `kms:Decrypt` (and related) on the stack encryption key. If you create **new** secrets encrypted with a **different** KMS key, add that key to the task role policy or re-encrypt secrets with the stack key.
+
+---
+
 ## Support
 
 For deployment issues:

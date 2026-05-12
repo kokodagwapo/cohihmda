@@ -8,20 +8,35 @@ Date created: 2026-05-12.
 
 ## 1. Purpose and scope
 
-These tests validate that the recovery capabilities listed in `DISASTER_RECOVERY.md` §4 actually work end-to-end. All tests are designed to run **against the dev environment** (`coheus-dev-*`) in `us-east-2`. None of these tests touch prod data or prod services.
+These tests validate that the recovery capabilities listed in [`DISASTER_RECOVERY.md`](./DISASTER_RECOVERY.md) §4 actually work end-to-end.
 
-In scope for this plan:
+### 1.1 Core scope (always-on drills)
+
+The procedures in **§3–§5** are written to run **against the dev environment** (`coheus-dev-*`) in `us-east-2` unless you explicitly promote a test to prod under change control. They do not require Global Database, CRR, or multi-region SCP exceptions.
 
 - Aurora Serverless v2 point-in-time recovery (PITR)
 - ECS Fargate rollout / rollback
 - Frontend S3 + CloudFront rebuild
 
-Out of scope (require architectural changes before they can be tested):
+### 1.2 Extended scope (Phase 2+ — after architectural rollout)
 
-- Cross-region failover
-- Aurora Global Database promotion
-- KMS CMK loss recovery
-- Region-wide outage failover
+Once the following are true, add the **§9** technical tests to your cadence and log them in **§6** like any other drill:
+
+- Org SCP allows the DR region (e.g. `us-east-1`) for the roles you use.
+- [`coheus_aurora_cluster_stack.yaml`](../../infrastructure/cloudformation/coheus_aurora_cluster_stack.yaml) GlobalCluster is deployed for the cluster under test (today: **prod + management** only in the template).
+- [`coheus_aurora_secondary_stack.yaml`](../../infrastructure/cloudformation/coheus_aurora_secondary_stack.yaml) is deployed in the DR region.
+- Optional: [`coheus_ecs_fargate_stack.yaml`](../../infrastructure/cloudformation/coheus_ecs_fargate_stack.yaml) podcast CRR parameters and [`coheus_waf_cloudfront_stack.yaml`](../../infrastructure/cloudformation/coheus_waf_cloudfront_stack.yaml) `DRSecondaryBackendOriginDomain` for API failover.
+
+Extended tests cover what was previously listed as “out of scope” without IaC:
+
+| Former gap | Now covered by |
+| ---------- | -------------- |
+| Cross-region failover | §9.2 CloudFront origin-group behavior; §8 tabletop for DNS and ECS |
+| Aurora Global Database promotion | §9.1 Replication health; §9.3 promotion **sandbox only** (read AWS docs before running) |
+| KMS CMK loss recovery | §9.5 — **no** live destructive test; tabletop + key-management runbook |
+| Region-wide outage failover | §8 tabletop + §9.2 partial technical validation |
+
+Deployment order and parameters: [`DR_DEPLOY_CHECKLIST.md`](./DR_DEPLOY_CHECKLIST.md).
 
 ---
 
@@ -35,7 +50,7 @@ Out of scope (require architectural changes before they can be tested):
 | DB connectivity | Either ECS exec into a running dev task or a one-shot Fargate task in a Cohi private subnet with the dev DB security group |
 | Tools | AWS CLI v2, PowerShell 7 (commands below assume PowerShell), `psql` client available somewhere inside the VPC |
 | Test window | Low-traffic period (dev only — coordinate with anyone actively using dev) |
-| Backup retention status | Aurora dev cluster `BackupRetentionPeriod >= 7` (already true) |
+| Backup retention status | Aurora dev cluster `BackupRetentionPeriod` matches policy (default **35** after stack update) |
 
 Before each test, **announce the test in the team channel**, including the test number, expected duration, and resources you will create.
 
@@ -43,7 +58,7 @@ Before each test, **announce the test in the team channel**, including the test 
 
 ## 3. Test 1 — Aurora point-in-time recovery (PITR)
 
-Validates that the 7-day automated-backup window for Aurora is usable.
+Validates that the automated backup / PITR window for Aurora is usable (default retention **35 days** after template rollout).
 
 - Source: `coheus-dev-management`
 - Target: temporary cluster `coheus-dev-management-drtest`
@@ -255,11 +270,14 @@ Pass criteria: site renders correctly using only assets produced by CI; nothing 
 
 ## 6. Result log
 
-Record each test in this table (append rows; do not overwrite past results). When this grows large, archive it into a quarterly file under `docs/deployment/`.
+Record each test in this table (append rows; do not overwrite past results). Include **§3–§5** (core) and **§9** (Phase 2+) drills when executed. When this grows large, archive it into a quarterly file under `docs/deployment/`.
 
 | Date | Test | Operator | Duration | Outcome | RTO observed | Notes / follow-ups |
 | ---- | ---- | -------- | -------- | ------- | ------------ | ------------------ |
-|      |      |          |          |         |              |                    |
+| 2026-05-12 | Test 1 — Aurora PITR (baseline) | *pending operator* | *TBD* | Pending | *TBD* | CLI smoke test recommended before full drill ([`DR_DEPLOY_CHECKLIST.md`](./DR_DEPLOY_CHECKLIST.md) Phase 0). |
+| *Post Phase 1* | Test 1 — Aurora PITR | | | Pending | | Re-run after reader + backup stack ([`DR_BACKLOG.md`](./DR_BACKLOG.md) COHI-DR-009). |
+| *Post Phase 1* | Test 2 — ECS rollback | | | Pending | | |
+| *Post Phase 1* | Test 3 — Frontend rebuild | | | Pending | | |
 
 ---
 
@@ -272,20 +290,113 @@ Recommended minimum cadence (until a formal DR policy supersedes this):
 | Test 1 — Aurora PITR | Quarterly |
 | Test 2 — ECS rollback | Quarterly (or after every change to deployment config) |
 | Test 3 — Frontend rebuild | Twice per year |
-| Tabletop region-loss exercise | Annual (cannot be executed against AWS today — see `DISASTER_RECOVERY.md` §5.3) |
+| Tabletop region-loss exercise | Annual — engineering + product (see §8) |
+| Phase 2+ suite (§9.1, §9.2, §9.4; §9.3 sandbox only; §9.5 process review) | Quarterly once DR region is live; after each DR-templating change |
 
 ---
 
-## 8. Safety rules
+## 8. Region-loss tabletop (Phase 2)
 
-1. **Never run any of these tests against prod identifiers** without an explicit, written change request and a second operator on the call.
-2. **Always run §3.5, §4.4, §5.5 cleanups** — these tests create billable resources or leave a service on an unwanted task definition.
+Run after cross-region building blocks are documented and stakeholders are available (no AWS changes required).
+
+### 8.1 Participants
+
+- Incident commander (facilitator)
+- Primary on-call engineer
+- Product or customer success representative
+
+### 8.2 Scenario
+
+Assume **primary region (`us-east-2`) is unavailable** for 4+ hours. AWS status indicates a regional impairment; your data plane in the secondary region is deployed per [`DR_DEPLOY_CHECKLIST.md`](./DR_DEPLOY_CHECKLIST.md).
+
+### 8.3 Discussion prompts (60–90 minutes)
+
+1. Who declares a disaster vs. a transient outage? What evidence is required?
+2. What is the exact order of operations to **promote** the Aurora secondary cluster (if using Global Database) and point the application at it?
+3. How do customers reach the app if DNS still points to primary CloudFront / ALB?
+4. Which secrets and certificates must be valid in the secondary region?
+5. What do we communicate, and when, using [`DR_POLICY.md`](./DR_POLICY.md) §5?
+6. What did we **not** automate (e.g. warm secondary ECS), and what is the time cost?
+
+### 8.4 Record
+
+Capture: date, attendees, top 5 gaps, owner per gap, and target dates. Store with incident readiness materials or link from [`DR_BACKLOG.md`](./DR_BACKLOG.md) story COHI-DR-015.
+
+---
+
+## 9. Phase 2+ technical tests (extended scope)
+
+Run only after **§1.2** preconditions are met. Prefer a **dedicated DR rehearsal** account or strictly time-boxed windows; several steps are unsafe on production without executive approval.
+
+### 9.1 Aurora Global Database — replication health
+
+**Goal:** Prove the secondary cluster is attached and replicating.
+
+1. `aws rds describe-db-clusters --region <primary> --db-cluster-identifier <management-cluster>` — note `GlobalWriteForwardingStatus` / membership as applicable.
+2. `aws rds describe-db-clusters --region <dr-region> --db-cluster-identifier <secondary-cluster-id>` — status `available`.
+3. CloudWatch: `AuroraGlobalDBReplicationLag` (or equivalent) below your policy threshold for 24h after any major deploy.
+
+**Pass:** Secondary cluster `available`; lag metric within threshold. **Log row in §6.**
+
+### 9.2 CloudFront API origin-group failover
+
+**Goal:** Prove viewers fail over when the **primary** custom origin returns 5xx (matches origin-group status codes in [`coheus_waf_cloudfront_stack.yaml`](../../infrastructure/cloudformation/coheus_waf_cloudfront_stack.yaml)).
+
+**Preconditions:** `DRSecondaryBackendOriginDomain` set; secondary ALB (or TLS hostname) healthy in DR region.
+
+**Procedure (outline):**
+
+1. From a machine outside the VPC, `curl -sI https://<cloudfront-domain>/health` — expect `200` from primary.
+2. In a **controlled** way, make the primary origin return `503` (temporary rule on primary ALB listener, or scale primary service to `0` in **dev** only).
+3. Repeat `curl`; within TTL for that path (should be none — caching disabled for `/health`), confirm traffic succeeds if secondary is healthy.
+4. Restore primary; confirm CloudFront returns to primary behavior.
+
+**Pass:** Failover observed without manual DNS edits; primary restored cleanly. **Log row in §6.**
+
+### 9.3 Aurora secondary promotion (sandbox / game-day only)
+
+**Goal:** Exercise **removing the secondary from the global cluster and promoting it** to a standalone writer for RTO measurement.
+
+**Warning:** Wrong ordering can strand writes or split-brain. Do **not** run against prod until a written runbook is reviewed by a second DBA. Use AWS’s current documentation for `remove-from-global-cluster` / `failover-global-cluster` APIs.
+
+**Sandbox pass criteria:** promoted cluster accepts writes; application (or psql smoke test) connects using credentials rotated for that rehearsal; teardown restores global topology or destroys the sandbox stack.
+
+**Log in §6** with “sandbox promotion drill” and measured minutes end-to-end.
+
+### 9.4 S3 cross-region replication (podcast bucket)
+
+**Goal:** Objects written to `coheus-<env>-podcast-audio-<account>` in the primary region appear in the replica bucket from [`coheus_aurora_secondary_stack.yaml`](../../infrastructure/cloudformation/coheus_aurora_secondary_stack.yaml) (or equivalent), per [`DR_DEPLOY_CHECKLIST.md`](./DR_DEPLOY_CHECKLIST.md) Appendix A.
+
+**Procedure:**
+
+1. Upload a uniquely named small object to the primary podcast bucket.
+2. Within **15 minutes** (RTC rule), `aws s3api head-object --bucket <replica> --key <same-key> --region <dr-region>` succeeds.
+
+**Pass:** Object exists in replica with expected size/etag. **Log row in §6.**
+
+### 9.5 KMS CMK loss / break-glass (no live destructive test)
+
+**Goal:** Validate **process**, not AWS behavior (CMK deletion is irreversible and must not be drilled in a shared account).
+
+Use instead:
+
+- Tabletop **§8** item covering “KMS unavailable” and who holds break-glass access.
+- Verify [`DEPLOYMENT_RUNBOOK.md`](./DEPLOYMENT_RUNBOOK.md) Secrets section + IAM policies reference the correct CMK ARNs after any key rotation.
+
+**Pass:** Documented decision in tabletop notes; no CMK `ScheduleKeyDeletion` in any drill.
+
+---
+
+## 10. Safety rules
+
+1. **Never run any of these tests against prod identifiers** without an explicit, written change request and a second operator on the call. **§9.3** (Aurora promotion) is **sandbox or game-day only** until a signed prod runbook exists.
+2. **Always run §3.5, §4.4, §5.5 cleanups** — these tests create billable resources or leave a service on an unwanted task definition. **§9** drills must restore primary ALB / ECS scale / global topology (or destroy rehearsal stacks) the same day.
 3. **If any pass criterion fails**, stop and capture: AWS console screenshots, the failing command output, and the time. File a follow-up in the team tracker before re-running.
 4. **Do not run more than one test concurrently** in the same dev environment.
 
 ---
 
-## 9. References
+## 11. References
 
 - [`DISASTER_RECOVERY.md`](./DISASTER_RECOVERY.md) — current state and recommendations
 - [`DEPLOYMENT_RUNBOOK.md`](./DEPLOYMENT_RUNBOOK.md) — general deploy/operations runbook
@@ -293,3 +404,6 @@ Recommended minimum cadence (until a formal DR policy supersedes this):
 - `infrastructure/cloudformation/coheus_aurora_cluster_stack.yaml`
 - `infrastructure/cloudformation/coheus_ecs_fargate_stack.yaml`
 - `infrastructure/cloudformation/coheus_frontend_cloud_front_s3_stack.yaml`
+- `infrastructure/cloudformation/coheus_waf_cloudfront_stack.yaml`
+- `infrastructure/cloudformation/coheus_aurora_secondary_stack.yaml`
+- [`DR_DEPLOY_CHECKLIST.md`](./DR_DEPLOY_CHECKLIST.md)
