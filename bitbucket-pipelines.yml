@@ -554,11 +554,18 @@ pipelines:
             allowed-values:
               - "false"
               - "true"
+          - name: ENABLE_GLOBAL_DB
+            default: "false"
+            allowed-values:
+              - "false"
+              - "true"
           - name: DEPLOY_SECONDARY
             default: "false"
             allowed-values:
               - "false"
               - "true"
+          - name: GLOBAL_CLUSTER_ID
+            default: ""
       - step:
           name: Deploy DR Stacks to Dev
           oidc: true
@@ -580,11 +587,18 @@ pipelines:
             allowed-values:
               - "false"
               - "true"
+          - name: ENABLE_GLOBAL_DB
+            default: "false"
+            allowed-values:
+              - "false"
+              - "true"
           - name: DEPLOY_SECONDARY
             default: "false"
             allowed-values:
               - "false"
               - "true"
+          - name: GLOBAL_CLUSTER_ID
+            default: ""
       - step:
           name: Deploy DR Stacks to Prod
           oidc: true
