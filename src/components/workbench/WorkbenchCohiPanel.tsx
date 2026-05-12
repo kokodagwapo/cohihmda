@@ -232,7 +232,7 @@ function MessageBubble({
   if (isUser) {
     return (
       <div className="flex w-full min-w-0 pr-2 justify-end">
-        <div className="rounded-2xl max-w-[88%] bg-gradient-to-br from-blue-500 to-indigo-600 text-white px-4 py-2.5 shadow-sm">
+        <div className="rounded-2xl max-w-[88%] bg-gradient-to-br from-blue-100 to-blue-200 text-blue-900 dark:from-blue-900/40 dark:to-indigo-900/40 dark:text-blue-100 px-4 py-2.5 shadow-sm">
           <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p>
         </div>
       </div>

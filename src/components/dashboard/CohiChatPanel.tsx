@@ -2502,7 +2502,7 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
           "rounded-2xl min-w-0",
           isUser ? "max-w-[88%] w-auto" : "w-full max-w-[calc(100%-8px)]",
           isUser
-            ? "bg-gradient-to-br from-blue-500 to-indigo-600 text-white px-4 py-2.5 shadow-sm"
+            ? "bg-gradient-to-br from-blue-100 to-blue-200 text-blue-900 dark:from-blue-900/40 dark:to-indigo-900/40 dark:text-blue-100 px-4 py-2.5 shadow-sm"
             : "border border-slate-200/80 dark:border-slate-700/80 bg-slate-50/80 dark:bg-slate-800/60 shadow-sm min-w-0 overflow-x-hidden overflow-y-visible"
         )}
       >
