@@ -32,7 +32,7 @@ import {
 } from "./insightOrchestrator.js";
 import { getTenantRevenueExpression } from "../../../utils/scorecard-utils.js";
 import { buildUnderstoryBullets } from "../understoryBullets.js";
-import { getUserLoanAccessFilter } from "../../userLoanAccessService.js";
+import { getUserLoanAccessFilter, COHEUS_FULL_LOAN_ACCESS_ROLES } from "../../userLoanAccessService.js";
 import { pool as managementPool } from "../../../config/managementDatabase.js";
 import {
   ACTIVITY_STALE_DAYS,
@@ -721,30 +721,28 @@ export async function runSingleUserCustomPromptInsight(
 }
 
 /**
- * Management-DB users linked to a tenant via `user_tenant_mappings` who may have no row in tenant `public.users`.
- * Restricted to `super_admin` / `platform_admin` in `coheus_users` (aligned with `isCoheusUserWithFullLoanAccess` in userLoanAccessService).
+ * All active management `coheus_users` eligible for tenant-scoped My Insights bulk runs.
+ * Role filter uses {@link COHEUS_FULL_LOAN_ACCESS_ROLES} so it stays aligned with {@link isCoheusUserWithFullLoanAccess}.
  */
-async function listCoheusStaffUserIdsMappedToTenant(tenantId: string): Promise<string[]> {
+async function listActiveCoheusMyInsightsBulkUserIds(): Promise<string[]> {
   try {
     const r = await managementPool.query(
-      `SELECT DISTINCT m.user_id::text AS id
-       FROM public.user_tenant_mappings m
-       INNER JOIN public.coheus_users cu ON cu.id = m.user_id AND cu.is_active = true
-       WHERE m.tenant_id = $1::uuid
-         AND cu.role IN ('super_admin', 'platform_admin')`,
-      [tenantId]
+      `SELECT cu.id::text AS id
+       FROM public.coheus_users cu
+       WHERE cu.is_active = true
+         AND cu.role = ANY($1::text[])`,
+      [[...COHEUS_FULL_LOAN_ACCESS_ROLES]]
     );
     return r.rows.map((row: { id: string }) => String(row.id));
   } catch (e: any) {
-    logWarn(
-      `[UserInsightOrchestrator] Could not load coheus staff for tenant ${tenantId}: ${e.message}`
-    );
+    logWarn(`[UserInsightOrchestrator] Could not load coheus_users for My Insights bulk: ${e.message}`);
     return [];
   }
 }
 
 /**
- * Post-sync or super-admin bulk refresh: all active users in tenant.
+ * Post-sync or super-admin bulk refresh: every active tenant `users` row plus every active
+ * management `coheus_users` row whose role is in {@link COHEUS_FULL_LOAN_ACCESS_ROLES}, deduped by id.
  * @param options.adminRefresh When true, runs generation even if profile hash unchanged (still skips if no tenant login in past 7 days).
  */
 export async function runMyInsightsForTenant(
@@ -766,8 +764,8 @@ export async function runMyInsightsForTenant(
   }
 
   const seen = new Set(userRows.map((u) => String(u.id)));
-  const coheusMapped = await listCoheusStaffUserIdsMappedToTenant(tenantId);
-  for (const id of coheusMapped) {
+  const coheusIds = await listActiveCoheusMyInsightsBulkUserIds();
+  for (const id of coheusIds) {
     if (!seen.has(id)) {
       seen.add(id);
       userRows.push({ id });
