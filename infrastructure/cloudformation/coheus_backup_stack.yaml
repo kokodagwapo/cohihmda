@@ -23,11 +23,9 @@ Resources:
     Type: AWS::Backup::BackupVault
     Properties:
       BackupVaultName: !Sub '${ProjectName}-${Environment}-cohi-backup'
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
-        - Key: Environment
-          Value: !Ref Environment
+      BackupVaultTags:
+        Project: !Ref ProjectName
+        Environment: !Ref Environment
 
   BackupServiceRole:
     Type: AWS::IAM::Role
@@ -79,15 +77,16 @@ Resources:
     Type: AWS::Backup::BackupSelection
     Properties:
       BackupPlanId: !Ref BackupPlan
-      BackupSelectionName: !Sub '${ProjectName}-${Environment}-tagged-cohi-resources'
-      IamRoleArn: !GetAtt BackupServiceRole.Arn
-      ListOfTags:
-        - ConditionType: STRINGEQUALS
-          ConditionKey: Project
-          ConditionValue: !Ref ProjectName
-        - ConditionType: STRINGEQUALS
-          ConditionKey: Environment
-          ConditionValue: !Ref Environment
+      BackupSelection:
+        SelectionName: !Sub '${ProjectName}-${Environment}-tagged-cohi-resources'
+        IamRoleArn: !GetAtt BackupServiceRole.Arn
+        # AND: resources must match both tags (ListOfTags is OR-only in AWS Backup)
+        Conditions:
+          StringEquals:
+            - ConditionKey: aws:ResourceTag/Project
+              ConditionValue: !Ref ProjectName
+            - ConditionKey: aws:ResourceTag/Environment
+              ConditionValue: !Ref Environment
 
 Outputs:
   BackupVaultName:
