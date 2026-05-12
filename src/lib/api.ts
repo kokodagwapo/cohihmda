@@ -1473,10 +1473,12 @@ export class ApiClient {
     },
     tenantId?: string | null
   ) {
-    return this.request<Record<string, unknown>>(`/api/dashboard/insights/my/prompts${this._myInsightsTq(tenantId)}`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    const result = await this.request<Record<string, unknown>>(
+      `/api/dashboard/insights/my/prompts${this._myInsightsTq(tenantId)}`,
+      { method: "POST", body: JSON.stringify(body) }
+    );
+    this.invalidateCacheFor("/dashboard/insights/my/prompts");
+    return result;
   }
 
   async updateMyInsightPrompt(
@@ -1490,27 +1492,35 @@ export class ApiClient {
     }>,
     tenantId?: string | null
   ) {
-    return this.request<Record<string, unknown>>(
+    const result = await this.request<Record<string, unknown>>(
       `/api/dashboard/insights/my/prompts/${encodeURIComponent(id)}${this._myInsightsTq(tenantId)}`,
       {
         method: "PATCH",
         body: JSON.stringify(body),
       }
     );
+    this.invalidateCacheFor("/dashboard/insights/my/prompts");
+    return result;
   }
 
   async deleteMyInsightPrompt(id: string, tenantId?: string | null) {
-    return this.request<void>(
+    const result = await this.request<void>(
       `/api/dashboard/insights/my/prompts/${encodeURIComponent(id)}${this._myInsightsTq(tenantId)}`,
       { method: "DELETE" }
     );
+    this.invalidateCacheFor("/dashboard/insights/my/prompts");
+    return result;
   }
 
   async runMyInsightPrompt(id: string, tenantId?: string | null) {
-    return this.request<{ jobId: string; status: string }>(
+    const result = await this.request<{ jobId: string; status: string }>(
       `/api/dashboard/insights/my/prompts/${encodeURIComponent(id)}/run${this._myInsightsTq(tenantId)}`,
       { method: "POST" }
     );
+    // The run produces a new user_generated_insights row on success; bust both
+    // the prompt list and the My Insights feed so the UI sees the change.
+    this.invalidateCacheFor("/dashboard/insights/my");
+    return result;
   }
 
   // Report distributions
