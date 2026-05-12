@@ -1,4 +1,4 @@
-﻿AWSTemplateFormatVersion: "2010-09-09"
+AWSTemplateFormatVersion: "2010-09-09"
 Description: |
   Coheus ECS Fargate Backend Stack (Compute Only)
 
@@ -689,6 +689,10 @@ Resources:
                 ReplicationTime:
                   Status: Enabled
                   Time:
+                    Minutes: 15
+                Metrics:
+                  Status: Enabled
+                  EventThreshold:
                     Minutes: 15
               DeleteMarkerReplication:
                 Status: Disabled
