@@ -80,11 +80,12 @@ Resources:
       BackupSelection:
         SelectionName: !Sub '${ProjectName}-${Environment}-tagged-cohi-resources'
         IamRoleArn: !GetAtt BackupServiceRole.Arn
-        # AND: resources must match both tags (ListOfTags is OR-only in AWS Backup)
+        ListOfTags:
+          - ConditionType: STRINGEQUALS
+            ConditionKey: Project
+            ConditionValue: !Ref ProjectName
         Conditions:
           StringEquals:
-            - ConditionKey: aws:ResourceTag/Project
-              ConditionValue: !Ref ProjectName
             - ConditionKey: aws:ResourceTag/Environment
               ConditionValue: !Ref Environment
 
