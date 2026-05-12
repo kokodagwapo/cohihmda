@@ -29,6 +29,8 @@ import { useTenantStore } from '@/stores/tenantStore';
 import { useAuth } from '@/contexts/AuthContext';
 import { DatePeriodPicker, useDatePeriodState, computePresetDateRange, type PeriodPreset } from '@/components/ui/DatePeriodPicker';
 import { useDashboardInsights, type DashboardInsightItem } from "@/hooks/useDashboardInsights";
+import { useDashboardFilterAnalytics } from "@/hooks/useDashboardFilterAnalytics";
+import { DASHBOARD_PAGE_KEYS } from "@/lib/dashboardPageKeys";
 import { DashboardInsightsStrip } from "@/components/dashboard/DashboardInsightsStrip";
 
 interface Loan {
@@ -126,6 +128,38 @@ export default function CreditRiskManagement() {
     dateRange,
     tenantId: tenantId
   });
+
+  const creditRiskFilterAnalytics = useMemo(
+    () => ({
+      application_type: applicationType,
+      year: selectedYear,
+      date_start: dateRange.start,
+      date_end: dateRange.end,
+      period_selection_type: periodSelection?.type ?? null,
+      loan_mix_tab: loanMixTab,
+      fico_card_range: ficoDateRange,
+      ltv_card_range: ltvDateRange,
+      dti_card_range: dtiDateRange,
+      selected_ranges_count: selectedRanges.size,
+      selected_channel: selectedChannel ?? "All",
+      canvas_mode: canvasMode,
+    }),
+    [
+      applicationType,
+      selectedYear,
+      dateRange.start,
+      dateRange.end,
+      periodSelection?.type,
+      loanMixTab,
+      ficoDateRange,
+      ltvDateRange,
+      dtiDateRange,
+      selectedRanges,
+      selectedChannel,
+      canvasMode,
+    ],
+  );
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.credit_risk_management, creditRiskFilterAnalytics);
 
   const handleGenerateInsights = useCallback(async () => {
     setGenerateLoading(true);

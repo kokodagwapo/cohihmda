@@ -36,6 +36,7 @@ import { getUserLoanAccessFilter } from "../../userLoanAccessService.js";
 import {
   ACTIVITY_STALE_DAYS,
   computeAndPersistUserInterestProfile,
+  loadPersistedUserInterestProfilePayload,
   passesMyInsightsLoginRecencyGate,
   shouldSkipGenerationForUnchangedProfile,
   updateLastGenerationMeta,
@@ -44,12 +45,54 @@ import { runUserCustomPromptLlm, specifiersToSummary } from "./userInsightCustom
 import { buildProfileRelevanceRationales } from "./userInsightProfileRelevance.js";
 
 const MAX_CONCURRENT_INVESTIGATORS = 5;
-/** Planner questions for user-specific insights only (tenant-wide pipeline uses a larger budget elsewhere). */
-const MAX_PLANNER_QUESTIONS_USER = 6;
+/** Base planner question cap for My Insights; grows when user custom prompts need coverage. */
+const MAX_PLANNER_QUESTIONS_USER_BASE = 6;
+const MAX_PLANNER_QUESTIONS_USER_ABS_CAP = 14;
 /** Max behavior-origin insights persisted per user after ranking/DQ (custom prompts are separate). */
 const USER_BEHAVIOR_INSIGHT_CAP = 5;
 
 const activeUserGenerations = new Map<string, { startedAt: number; batch: string }>();
+
+async function loadUserCustomPromptsForPlanner(
+  tenantPool: pg.Pool,
+  userId: string
+): Promise<{ title: string; prompt_text: string }[]> {
+  try {
+    const r = await tenantPool.query(
+      `SELECT title, prompt_text
+       FROM public.user_insight_prompts
+       WHERE user_id = $1::uuid AND enabled = true AND scope = 'user'
+         AND schedule IN ('batch', 'on_demand')
+       ORDER BY updated_at DESC
+       LIMIT 24`,
+      [userId]
+    );
+    return r.rows.map((x: any) => ({
+      title: String(x.title || "").trim(),
+      prompt_text: String(x.prompt_text || "").trim(),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function stubCustomPromptEvaluatedInsight(title: string, reason: string): EvaluatedInsight {
+  return {
+    headline: `Custom insight: ${title}`,
+    understory: reason,
+    bucket: "attention",
+    priority: "YELLOW",
+    insight_type: "warning",
+    severity_score: 0.45,
+    value_score: 0.45,
+    source: "operations",
+    impact: { type: "custom_prompt_stub" },
+    evidence: { metrics: [] },
+    confidence: "low",
+    findingIndex: 0,
+    for_podcast: false,
+  };
+}
 
 export function isUserInsightGenerationRunning(
   tenantId: string,
@@ -224,6 +267,8 @@ export async function runUserInsightGeneration(
     skipProfileUnchanged?: boolean;
     /** User explicitly requested refresh — bypass “profile unchanged since last generation” only; users without a tenant login in the past 7 days are still skipped. */
     manualRefresh?: boolean;
+    /** Use saved `user_interest_profiles` row only (no recompute). Requires an existing profile row. */
+    insightsOnly?: boolean;
   }
 ): Promise<UserInsightGenerationResult> {
   const lockKey = `${tenantId}:${userId}`;
@@ -247,7 +292,24 @@ export async function runUserInsightGeneration(
     insightLogStart(tenantId, "ytd");
     insightLog(`[UserInsights] Starting batch ${generationBatch} user=${userId}`);
 
-    const profile = await computeAndPersistUserInterestProfile(tenantId, tenantPool, userId);
+    let profile: Awaited<ReturnType<typeof computeAndPersistUserInterestProfile>>;
+    if (options?.insightsOnly) {
+      const loaded = await loadPersistedUserInterestProfilePayload(tenantPool, userId);
+      if (!loaded?.contentHash) {
+        activeUserGenerations.delete(lockKey);
+        return {
+          success: false,
+          userId,
+          insightCount: 0,
+          generationBatch,
+          durationMs: Date.now() - start,
+          error: "No saved interest profile. Regenerate your user profile first.",
+        };
+      }
+      profile = loaded;
+    } else {
+      profile = await computeAndPersistUserInterestProfile(tenantId, tenantPool, userId);
+    }
 
     if (!(await passesMyInsightsLoginRecencyGate(tenantPool, userId))) {
       insightLog(
@@ -266,6 +328,7 @@ export async function runUserInsightGeneration(
 
     const skipForUnchangedProfile =
       !options?.manualRefresh &&
+      !options?.insightsOnly &&
       options?.skipProfileUnchanged !== false &&
       !options?.forceFresh;
 
@@ -316,6 +379,15 @@ export async function runUserInsightGeneration(
       ? []
       : await fetchUserPreviousHeadlines(tenantPool, userId);
 
+    const userCustomPrompts = await loadUserCustomPromptsForPlanner(tenantPool, userId);
+    const plannerQuestionCap = Math.min(
+      MAX_PLANNER_QUESTIONS_USER_ABS_CAP,
+      Math.max(
+        MAX_PLANNER_QUESTIONS_USER_BASE,
+        MAX_PLANNER_QUESTIONS_USER_BASE + userCustomPrompts.length
+      )
+    );
+
     const plannerContext: InsightPlannerContext = {
       schemaContext,
       metricDefinitions,
@@ -326,10 +398,11 @@ export async function runUserInsightGeneration(
       industryNewsContext: industryNewsContext || undefined,
       staleLoanContext: staleLoanContext || undefined,
       userInterestProfile: profile.profileText,
+      userCustomPrompts: userCustomPrompts.length ? userCustomPrompts : undefined,
     };
 
     const plan = await runInsightPlannerAgent(apiKey, plannerContext);
-    const questions = plan.questions.slice(0, MAX_PLANNER_QUESTIONS_USER);
+    const questions = plan.questions.slice(0, plannerQuestionCap);
 
     const accessFilter = await getUserLoanAccessFilter(userId, tenantPool);
 
@@ -482,8 +555,16 @@ async function runBatchCustomPrompts(
         unknown
       >;
       const summary = specifiersToSummary(specifiers);
-      const ev = await runUserCustomPromptLlm(apiKey, row.title, row.prompt_text, summary);
-      if (!ev) continue;
+      let ev = await runUserCustomPromptLlm(apiKey, row.title, row.prompt_text, summary);
+      if (!ev) {
+        ev = await runUserCustomPromptLlm(apiKey, row.title, row.prompt_text, summary);
+      }
+      if (!ev) {
+        ev = stubCustomPromptEvaluatedInsight(
+          row.title,
+          "The automated answer for this saved prompt could not be generated right now (model or data error). Try again after a refresh, or edit the prompt if it may be unclear."
+        );
+      }
       evaluated.push(ev);
       promptIds.push(row.id);
       synthetic.push({
@@ -496,6 +577,20 @@ async function runBatchCustomPrompts(
       });
     } catch (e: any) {
       logWarn(`[UserInsightOrchestrator] Custom prompt ${row.id} failed: ${e.message}`);
+      const stub = stubCustomPromptEvaluatedInsight(
+        row.title,
+        `This saved prompt hit an unexpected error: ${e.message || "unknown"}.`
+      );
+      evaluated.push(stub);
+      promptIds.push(row.id);
+      synthetic.push({
+        questionId: 0,
+        title: row.title,
+        summary: stub.understory,
+        confidence: "low",
+        evidence: [],
+        keyMetrics: {},
+      });
     }
   }
 
@@ -509,6 +604,119 @@ async function runBatchCustomPrompts(
     insightOrigin: "custom_prompt",
     userInsightPromptIds: promptIds,
   });
+
+  try {
+    const gap = await tenantPool.query<{ id: string; title: string }>(
+      `SELECT p.id, p.title FROM public.user_insight_prompts p
+       WHERE p.user_id = $1::uuid AND p.enabled = true AND p.schedule = 'batch' AND p.scope = 'user'
+       AND NOT EXISTS (
+         SELECT 1 FROM public.user_generated_insights i
+         WHERE i.user_id = p.user_id AND i.user_insight_prompt_id = p.id
+           AND i.insight_origin = 'custom_prompt'
+           AND i.generation_batch = $2
+       )`,
+      [userId, generationBatch]
+    );
+    for (const g of gap.rows) {
+      logWarn(
+        `[UserInsightOrchestrator] custom_prompt gap recovery for prompt ${g.id} (${g.title}) in batch ${generationBatch}`
+      );
+      const ev = stubCustomPromptEvaluatedInsight(
+        g.title,
+        "This saved prompt did not receive a persisted card in the primary batch. This recovery stub avoids a silent gap; try Regenerate my insights or edit the prompt if it persists."
+      );
+      ev.findingIndex = 0;
+      await persistUserInsights(
+        tenantPool,
+        userId,
+        [ev],
+        [
+          {
+            questionId: 0,
+            title: g.title,
+            summary: ev.understory,
+            confidence: "low",
+            evidence: [],
+            keyMetrics: {},
+          },
+        ],
+        generationBatch,
+        { insightOrigin: "custom_prompt", userInsightPromptIds: [g.id] }
+      );
+    }
+  } catch (e: any) {
+    logWarn(`[UserInsightOrchestrator] custom_prompt post-batch verify failed: ${e.message}`);
+  }
+}
+
+/**
+ * Run one user-scoped custom prompt now (on-demand). Replaces prior custom_prompt rows for that prompt id.
+ */
+export async function runSingleUserCustomPromptInsight(
+  tenantId: string,
+  tenantPool: pg.Pool,
+  userId: string,
+  promptId: string
+): Promise<{ success: boolean; error?: string }> {
+  let row: { id: string; title: string; prompt_text: string; specifiers: unknown };
+  try {
+    const r = await tenantPool.query(
+      `SELECT id, title, prompt_text, specifiers
+       FROM public.user_insight_prompts
+       WHERE id = $1::uuid AND user_id = $2::uuid AND scope = 'user'`,
+      [promptId, userId]
+    );
+    if (r.rows.length === 0) return { success: false, error: "Prompt not found" };
+    row = r.rows[0] as { id: string; title: string; prompt_text: string; specifiers: unknown };
+  } catch (e: any) {
+    return { success: false, error: e.message || "Lookup failed" };
+  }
+
+  const apiKey = await getOpenAIKey(tenantId);
+  const generationBatch = uuidv4();
+  try {
+    await tenantPool.query(
+      `DELETE FROM public.user_generated_insights
+       WHERE user_id = $1::uuid AND user_insight_prompt_id = $2::uuid AND insight_origin = 'custom_prompt'`,
+      [userId, promptId]
+    );
+  } catch {
+    /* ignore */
+  }
+
+  const specifiers = (row.specifiers && typeof row.specifiers === "object" ? row.specifiers : {}) as Record<
+    string,
+    unknown
+  >;
+  const summary = specifiersToSummary(specifiers);
+  let ev = await runUserCustomPromptLlm(apiKey, row.title, row.prompt_text, summary);
+  if (!ev) {
+    ev = await runUserCustomPromptLlm(apiKey, row.title, row.prompt_text, summary);
+  }
+  if (!ev) {
+    ev = stubCustomPromptEvaluatedInsight(
+      row.title,
+      "The automated answer for this saved prompt could not be generated right now (model or data error). Try again after a refresh."
+    );
+  }
+  ev.findingIndex = 0;
+
+  const synthetic: InsightFinding[] = [
+    {
+      questionId: 0,
+      title: row.title,
+      summary: ev.understory,
+      confidence: "medium",
+      evidence: [],
+      keyMetrics: {},
+    },
+  ];
+
+  await persistUserInsights(tenantPool, userId, [ev], synthetic, generationBatch, {
+    insightOrigin: "custom_prompt",
+    userInsightPromptIds: [row.id],
+  });
+  return { success: true };
 }
 
 /**

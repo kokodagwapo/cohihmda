@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AlertTriangle, Database, Gauge, Loader2 } from "lucide-react";
 import { TopTieringLayout } from "@/components/layout/TopTieringLayout";
@@ -22,6 +22,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useSearchParams } from "react-router-dom";
+import { useDashboardFilterAnalytics } from "@/hooks/useDashboardFilterAnalytics";
+import { DASHBOARD_PAGE_KEYS } from "@/lib/dashboardPageKeys";
 
 export default function DataQualityDashboard() {
   const { user } = useAuth();
@@ -177,6 +179,16 @@ export default function DataQualityDashboard() {
       setActiveTab("warnings");
     }
   }, [deepLinkTab, highlightedWarningId]);
+
+  const dataQualityFilterAnalytics = useMemo(
+    () => ({
+      active_tab: activeTab,
+      deeplink_tab: deepLinkTab,
+      highlight_warning: Boolean(highlightedWarningId),
+    }),
+    [activeTab, deepLinkTab, highlightedWarningId],
+  );
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.data_quality, dataQualityFilterAnalytics);
 
   return (
     <TopTieringLayout>

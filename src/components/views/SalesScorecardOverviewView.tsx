@@ -4,6 +4,8 @@
  */
 
 import React, { useMemo, useCallback, useEffect } from "react";
+import { useDashboardFilterAnalytics } from "@/hooks/useDashboardFilterAnalytics";
+import { DASHBOARD_PAGE_KEYS } from "@/lib/dashboardPageKeys";
 import {
   useSalesScorecardOverviewData,
   type SalesScorecardOverviewMeasure,
@@ -196,6 +198,19 @@ export function SalesScorecardOverviewView({
     }),
     [measure, periodSelection.dateRange, timeMeasure, branch, loanOfficer, dimensionFilters, selectedMilestoneColumns]
   );
+
+  const salesScorecardOverviewFilterAnalytics = useMemo(
+    () => ({
+      ...filters,
+      embedded: embeddedInWorkbench,
+      group_id: groupId,
+      variant,
+    }),
+    [filters, embeddedInWorkbench, groupId, variant]
+  );
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.sales_scorecard_overview, salesScorecardOverviewFilterAnalytics, {
+    enabled: !embeddedInWorkbench,
+  });
 
   const tenantId = selectedTenantId ?? null;
   const {

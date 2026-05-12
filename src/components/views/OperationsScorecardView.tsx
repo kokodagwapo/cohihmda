@@ -30,6 +30,8 @@ import { useOperationsScorecardActorLoans, type OperationsActorLoan } from '@/ho
 import { DatePeriodPicker, computePresetDateRange, type PeriodSelection, type PeriodPreset } from '@/components/ui/DatePeriodPicker';
 import { format } from 'date-fns';
 import { exportDataAsExcel } from '@/utils/exportUtils';
+import { useDashboardFilterAnalytics } from "@/hooks/useDashboardFilterAnalytics";
+import { DASHBOARD_PAGE_KEYS } from "@/lib/dashboardPageKeys";
 
 type ScorecardActor = OperationsActorType;
 type DateRange = DateRangeType;
@@ -297,6 +299,29 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
     10000,
     0,
   );
+
+  const opsScorecardFilterAnalytics = useMemo(
+    () => ({
+      selectedActor,
+      dateRange,
+      opsCustomStart: opsCustomDateRange?.start ?? null,
+      opsCustomEnd: opsCustomDateRange?.end ?? null,
+      scorecardView,
+      showComparison,
+      activeFilters,
+      selectedChannel: selectedChannel ?? "All",
+    }),
+    [
+      selectedActor,
+      dateRange,
+      opsCustomDateRange,
+      scorecardView,
+      showComparison,
+      activeFilters,
+      selectedChannel,
+    ]
+  );
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.operations_scorecard, opsScorecardFilterAnalytics);
 
   const sortedActorLoans = useMemo(() => {
     const dir = actorLoansSortDirection === "asc" ? 1 : -1;

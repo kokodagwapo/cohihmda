@@ -4,6 +4,8 @@
  */
 
 import React, { useState, useMemo, useCallback, useEffect } from "react";
+import { useDashboardFilterAnalytics } from "@/hooks/useDashboardFilterAnalytics";
+import { DASHBOARD_PAGE_KEYS } from "@/lib/dashboardPageKeys";
 import {
   Card,
   CardContent,
@@ -345,6 +347,26 @@ export function PricingDashboardView({
       selectedEntityOrActor,
     ]
   );
+
+  const pricingFilterAnalytics = useMemo(
+    () => ({
+      ...filters,
+      active_tab: activeTab,
+      report_sort: { key: reportSortKey, dir: reportSortDir },
+      detail_sort: { key: detailSortKey, dir: detailSortDir },
+      selected_entity_or_actor: selectedEntityOrActor,
+    }),
+    [
+      filters,
+      activeTab,
+      reportSortKey,
+      reportSortDir,
+      detailSortKey,
+      detailSortDir,
+      selectedEntityOrActor,
+    ]
+  );
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.pricing_dashboard, pricingFilterAnalytics);
 
   const clearEntityOrActorFilter = useCallback(() => setSelectedEntityOrActor(null), []);
 

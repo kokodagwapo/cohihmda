@@ -1,6 +1,10 @@
 /**
  * My Insights — user-authored custom prompts (batch path).
  * Single LLM call per prompt; output normalized to EvaluatedInsight-like shape for persistence.
+ *
+ * Spec audit: user-scoped `user_insight_prompts`, specifier summary → cohort narrative (no free-text SQL),
+ * batch + on-demand schedules, JSON insight card shape, and failure stubs align with the My Insights MVP.
+ * Deferred per spec: `condition` JSONB / hybrid SQL gate, tenant-wide prompts (P2).
  */
 
 import { callLLM, type LLMMessage } from "../../research/tools.js";
@@ -9,6 +13,8 @@ import { logWarn } from "../../logger.js";
 
 const CUSTOM_PROMPT_SYSTEM = `You are an executive insight author for a mortgage lending analytics platform.
 Given the user's saved question and optional cohort description, produce ONE dashboard insight card.
+
+Each invocation must directly answer that single saved user request; the headline should clearly reflect the prompt title or intent where natural.
 
 Respond with JSON only:
 {
@@ -111,6 +117,12 @@ export function specifiersToSummary(specifiers: Record<string, unknown>): string
   const parts: string[] = [];
   for (const [k, v] of Object.entries(specifiers)) {
     if (v === undefined || v === null || v === "") continue;
+    if (Array.isArray(v)) {
+      const items = v.map((x) => String(x)).filter((s) => s.length > 0);
+      if (items.length === 0) continue;
+      parts.push(`${k}: ${items.join(", ")}`);
+      continue;
+    }
     parts.push(`${k}: ${typeof v === "object" ? JSON.stringify(v) : String(v)}`);
   }
   return parts.join("\n");

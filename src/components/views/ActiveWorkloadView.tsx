@@ -1,4 +1,6 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useDashboardFilterAnalytics } from "@/hooks/useDashboardFilterAnalytics";
+import { DASHBOARD_PAGE_KEYS } from "@/lib/dashboardPageKeys";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -476,6 +478,37 @@ export function ActiveWorkloadView({ selectedTenantId, selectedChannel }: Active
     showDetailColumnFilters,
     detailSort,
   ]);
+
+  const activeWorkloadFilterAnalytics = useMemo(() => {
+    const activeDetailCols = Object.keys(appliedDetailFilters).filter((k) =>
+      isFilterActive(appliedDetailFilters[k] as ColumnFilter)
+    );
+    return {
+      actor,
+      aggregation,
+      day_calc_type: dayCalcType,
+      slice_milestones: sliceMilestones,
+      slice_drilldown: sliceDrilldown,
+      detail_filtered_columns: activeDetailCols,
+      detail_active_filter_count: activeDetailCols.length,
+      selected_channel: selectedChannel ?? "All",
+      detail_sort: detailSort,
+      drill_sort: drillSort,
+      render_stage: renderStage,
+    };
+  }, [
+    actor,
+    aggregation,
+    dayCalcType,
+    sliceMilestones,
+    sliceDrilldown,
+    appliedDetailFilters,
+    selectedChannel,
+    detailSort,
+    drillSort,
+    renderStage,
+  ]);
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.active_workload, activeWorkloadFilterAnalytics);
 
   useEffect(() => {
     if (!selectedTenantId) {

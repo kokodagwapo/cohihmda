@@ -15,6 +15,8 @@ import {
   persistProductionSummaryByWeekFiltersLocally,
   useProductionSummaryByWeekViewState,
 } from "@/hooks/useProductionSummaryByWeekViewState";
+import { useDashboardFilterAnalytics } from "@/hooks/useDashboardFilterAnalytics";
+import { DASHBOARD_PAGE_KEYS } from "@/lib/dashboardPageKeys";
 import { ArrowDown, ArrowUp, Download, Loader2, Maximize2, X } from "lucide-react";
 import { endOfWeek, getWeek, startOfWeek } from "date-fns";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -824,6 +826,21 @@ export function ProductionSummaryByWeekView({
     localSelectedYearWeeksByField,
     sectionFilters?.productionSummaryByWeekYearWeeks,
   ]);
+
+  const productionSummaryByWeekFilterAnalytics = useMemo(() => {
+    const yw = selectedYearWeeksByField;
+    return {
+      widget_variant: widgetVariant,
+      started_date_weeks: yw.started_date.length,
+      application_date_weeks: yw.application_date.length,
+      investor_lock_date_weeks: yw.investor_lock_date.length,
+      funding_date_weeks: yw.funding_date.length,
+      closing_date_weeks: yw.closing_date.length,
+    };
+  }, [widgetVariant, selectedYearWeeksByField]);
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.production_summary_by_week, productionSummaryByWeekFilterAnalytics, {
+    enabled: !embeddedInWorkbench,
+  });
 
   const setSelectedYearWeeksByField = (
     updater:

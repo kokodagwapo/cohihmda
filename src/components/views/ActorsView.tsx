@@ -6,6 +6,8 @@
 
 import React, { useState, useCallback, useMemo, useEffect } from "react";
 import { format } from "date-fns";
+import { useDashboardFilterAnalytics } from "@/hooks/useDashboardFilterAnalytics";
+import { DASHBOARD_PAGE_KEYS } from "@/lib/dashboardPageKeys";
 import {
   Card,
   CardContent,
@@ -214,6 +216,41 @@ export function ActorsView({
     selectedStatus,
     tableDimensions,
   ]);
+
+  const actorsFilterAnalytics = useMemo(
+    () => ({
+      period_type: periodSelection.type,
+      ...(periodSelection.type === "preset" ? { preset: periodSelection.preset } : {}),
+      date_start: dateRange.start,
+      date_end: dateRange.end,
+      calculation,
+      turn_time_type: turnTimeType,
+      date_range_type: dateRangeType,
+      measure,
+      ...(selectedActor
+        ? { selected_actor_type: selectedActor.type, selected_actor_name: selectedActor.name }
+        : {}),
+      ...(selectedStatus ? { selected_status: selectedStatus } : {}),
+      table_dimensions: tableDimensions,
+      search_nonempty: searchQueries.some((q) => q.trim().length > 0),
+      selected_channel: selectedChannel ?? "All",
+    }),
+    [
+      periodSelection,
+      dateRange.start,
+      dateRange.end,
+      calculation,
+      turnTimeType,
+      dateRangeType,
+      measure,
+      selectedActor,
+      selectedStatus,
+      tableDimensions,
+      searchQueries,
+      selectedChannel,
+    ]
+  );
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.actors, actorsFilterAnalytics);
 
   const turnTimeLabel =
     calculation === "median"

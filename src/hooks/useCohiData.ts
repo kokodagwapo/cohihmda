@@ -45,6 +45,8 @@ export interface CohiInsight {
   supporting_data?: { byPeriod?: Array<{ period: string; periodLabel?: string; averagePullThrough?: number; totalUnits?: number; totalVolume?: number; topPerformerName?: string; topPerformerUnits?: number; topPerformerVolume?: number }> };
   /** My Insights: why this card matches your interest profile */
   profile_relevance?: string | null;
+  /** My Insights: produced from a user-authored saved prompt (custom prompt path) */
+  fromCustomPrompt?: boolean;
 }
 
 export interface InsightsMetadata {
@@ -217,6 +219,43 @@ export const useCohiData = (
     } catch (error: any) {
       console.error("Error refreshing My Insights for all users:", error);
       setInsightsError(error.message || "Failed to refresh My Insights for all users");
+      return null;
+    }
+  }, [selectedTenantId]);
+
+  /** Current user: recompute interest profile only (async job). */
+  const refreshMyInsightsProfile = useCallback(async (): Promise<string | null> => {
+    setInsightsError(null);
+    try {
+      const tenantParam = selectedTenantId
+        ? `?tenant_id=${encodeURIComponent(selectedTenantId)}`
+        : "";
+      const resp = await api.request<{ jobId: string }>(
+        `/api/dashboard/insights/my/profile/refresh${tenantParam}`,
+        { method: "POST" }
+      );
+      return resp.jobId;
+    } catch (error: any) {
+      console.error("Error refreshing interest profile:", error);
+      setInsightsError(error.message || "Failed to refresh interest profile");
+      return null;
+    }
+  }, [selectedTenantId]);
+
+  /** Current user: regenerate My Insights from saved profile only (async job). */
+  const refreshMyInsightsInsightsOnly = useCallback(async (): Promise<string | null> => {
+    setInsightsError(null);
+    try {
+      const tenantQ = new URLSearchParams({ fresh: "true" });
+      if (selectedTenantId) tenantQ.set("tenant_id", selectedTenantId);
+      const resp = await api.request<{ jobId: string }>(
+        `/api/dashboard/insights/my/insights/refresh?${tenantQ.toString()}`,
+        { method: "POST" }
+      );
+      return resp.jobId;
+    } catch (error: any) {
+      console.error("Error refreshing My Insights (insights only):", error);
+      setInsightsError(error.message || "Failed to refresh My Insights");
       return null;
     }
   }, [selectedTenantId]);
@@ -633,6 +672,8 @@ export const useCohiData = (
     needsGeneration,
     refreshInsights,
     refreshMyInsightsAllUsers,
+    refreshMyInsightsProfile,
+    refreshMyInsightsInsightsOnly,
     refreshBucket,
     generateMoreInsights,
     reloadInsightsFromDb,

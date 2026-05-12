@@ -5,6 +5,8 @@ import { CohiBuilderEmbedded } from '@/cohibuilder/CohiBuilderEmbedded';
 import { CohiBuilderPortfolioProvider } from '@/cohibuilder/contexts/CohiBuilderPortfolioContext';
 import '@/cohibuilder/cohibuilder.css';
 import { TopTieringLayout } from '@/components/layout/TopTieringLayout';
+import { useDashboardFilterAnalytics } from '@/hooks/useDashboardFilterAnalytics';
+import { DASHBOARD_PAGE_KEYS } from '@/lib/dashboardPageKeys';
 import { cn } from '@/lib/utils';
 import { FunnelPeriodControl } from '@/cohibuilder/components/FunnelPeriodControl';
 
@@ -48,6 +50,12 @@ const CaptureAnalysis = () => {
       : viewParam === 'respa' || viewParam === 'respa-detail'
         ? 'trid'
         : 'builder';
+
+  const captureAnalysisFilterAnalytics = useMemo(
+    () => ({ active_section: activeTab }),
+    [activeTab],
+  );
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.capture_analysis, captureAnalysisFilterAnalytics);
 
   useEffect(() => {
     const st = location.state as CaptureAnalysisLocationState | null;

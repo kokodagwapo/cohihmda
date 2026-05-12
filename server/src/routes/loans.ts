@@ -298,50 +298,55 @@ router.get(
       const tenantPool = getTenantContext(req).tenantPool;
       const column = req.params.column as string;
 
-      // Whitelist of columns that can be queried for distinct values (prevent SQL injection)
-      const allowedColumns = [
-        "current_loan_status",
-        "loan_type",
-        "loan_purpose",
-        "loan_program",
-        "product_type",
-        "property_state",
-        "property_city",
-        "property_county",
-        "property_type",
-        "occupancy_type",
-        "branch",
-        "channel",
-        "investor",
-        "loan_officer",
-        "processor",
-        "underwriter",
-        "closer",
-        "lien_position",
-        "refinance_cash_out_type",
-        "atr_loan_type",
-        "qm_loan_type",
-      ];
+      /** Safe unquoted PG identifier fragment (validated against information_schema). */
+      const isSafeLoansColumnName = (name: string) =>
+        /^[a-z_][a-z0-9_]*$/i.test(name) && name.length <= 120;
 
-      if (!allowedColumns.includes(column)) {
+      const assertLoansColumn = async (col: string): Promise<boolean> => {
+        if (!isSafeLoansColumnName(col)) return false;
+        const r = await tenantPool.query(
+          `SELECT 1 FROM information_schema.columns
+           WHERE table_schema = 'public' AND table_name = 'loans' AND column_name = $1
+           LIMIT 1`,
+          [col],
+        );
+        return r.rows.length > 0;
+      };
+
+      const quoteIdent = (col: string) => `"${col.replace(/"/g, '""')}"`;
+
+      if (!(await assertLoansColumn(column))) {
         return res
           .status(400)
-          .json({ error: "Invalid column for distinct values query" });
+          .json({ error: "Invalid or unknown loans column for distinct values" });
       }
 
       // Optional cascading filter: narrow results by another column's value
       const filterBy = req.query.filterBy as string | undefined;
       const filterValue = req.query.filterValue as string | undefined;
 
+      const q = quoteIdent(column);
       let query: string;
       let params: string[];
 
-      if (filterBy && filterValue && allowedColumns.includes(filterBy)) {
-        // Cascading: e.g. loan_officer WHERE branch = $1
-        query = `SELECT DISTINCT ${column} as value FROM public.loans WHERE ${column} IS NOT NULL AND ${column} != '' AND ${filterBy} = $1 ORDER BY ${column} LIMIT 100`;
-        params = [filterValue];
+      if (
+        filterBy &&
+        filterValue != null &&
+        String(filterValue).trim() !== "" &&
+        (await assertLoansColumn(filterBy))
+      ) {
+        const qf = quoteIdent(filterBy);
+        query = `SELECT DISTINCT ${q}::text AS value FROM public.loans
+          WHERE ${q} IS NOT NULL AND TRIM(${q}::text) <> ''
+            AND TRIM(${qf}::text) = TRIM($1::text)
+          ORDER BY 1
+          LIMIT 100`;
+        params = [String(filterValue)];
       } else {
-        query = `SELECT DISTINCT ${column} as value FROM public.loans WHERE ${column} IS NOT NULL AND ${column} != '' ORDER BY ${column} LIMIT 100`;
+        query = `SELECT DISTINCT ${q}::text AS value FROM public.loans
+          WHERE ${q} IS NOT NULL AND TRIM(${q}::text) <> ''
+          ORDER BY 1
+          LIMIT 100`;
         params = [];
       }
 

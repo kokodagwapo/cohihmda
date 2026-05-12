@@ -1,4 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { useDashboardFilterAnalytics } from '@/hooks/useDashboardFilterAnalytics';
+import { DASHBOARD_PAGE_KEYS } from '@/lib/dashboardPageKeys';
 import { format } from 'date-fns';
 import { BarChart3, ChevronRight, AlertTriangle, Zap, Calendar as CalendarIcon, X } from 'lucide-react';
 import { LOSFunnelData } from '@/lib/losSchema';
@@ -70,6 +72,20 @@ export const LoanFunnelViewLegacy = ({
       endDate: endDate,
     };
   }, [dateFilterType, year, customDateRange.start, customDateRange.end]);
+
+  const loanFunnelLegacyFilterAnalytics = useMemo(
+    () => ({
+      view,
+      year,
+      date_filter_type: dateFilterType,
+      custom_has_range: Boolean(customDateRange.start && customDateRange.end),
+      active_tab: activeTab,
+      date_filter: dateFilter,
+      selected_channel: selectedChannel ?? 'All',
+    }),
+    [view, year, dateFilterType, customDateRange, activeTab, dateFilter, selectedChannel]
+  );
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.loan_funnel_legacy, loanFunnelLegacyFilterAnalytics);
 
   // Build additional filters including channel
   const additionalFilters = useMemo(() => ({

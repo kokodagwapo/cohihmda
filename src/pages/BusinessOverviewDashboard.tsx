@@ -1,7 +1,10 @@
+import { useMemo } from "react";
 import { TopTieringLayout } from "@/components/layout/TopTieringLayout";
 import { TopTieringTopBar } from "@/components/layout/TopTieringTopBar";
 import { ExecutiveDashboard } from "@/components/dashboard/ExecutiveDashboard";
 import { useDashboardFilters } from "@/hooks/useDashboardFilters";
+import { useDashboardFilterAnalytics } from "@/hooks/useDashboardFilterAnalytics";
+import { DASHBOARD_PAGE_KEYS } from "@/lib/dashboardPageKeys";
 import { useChannelStore } from "@/stores/channelStore";
 import { useTenantStore } from "@/stores/tenantStore";
 import { useAuth } from "@/contexts/AuthContext";
@@ -12,6 +15,16 @@ export default function BusinessOverviewDashboard() {
   const { selectedTenantId } = useTenantStore();
   const { user } = useAuth();
   const tenantId = selectedTenantId ?? user?.tenant_id ?? null;
+
+  const businessOverviewFilterAnalytics = useMemo(
+    () => ({
+      date_filter: dateFilter,
+      year: currentYear,
+      selected_channel: selectedChannel ?? "All",
+    }),
+    [dateFilter, currentYear, selectedChannel]
+  );
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.business_overview, businessOverviewFilterAnalytics);
 
   return (
     <TopTieringLayout>

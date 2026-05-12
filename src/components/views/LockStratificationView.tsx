@@ -29,6 +29,8 @@ import {
   type PullThroughPeriod,
   type InterestRateDrill,
 } from "@/hooks/useLockStratificationData";
+import { useDashboardFilterAnalytics } from "@/hooks/useDashboardFilterAnalytics";
+import { DASHBOARD_PAGE_KEYS } from "@/lib/dashboardPageKeys";
 import { Loader2, ChevronRight, Download, Info, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -295,6 +297,38 @@ export function LockStratificationView({
   ]);
 
   const filters: LockStratFilters = useMemo(() => ({ locked, measure }), [locked, measure]);
+
+  const filterAnalyticsSnapshot = useMemo(
+    () => ({
+      locked,
+      measure,
+      milestoneGroupBy,
+      milestoneView,
+      pullThroughPeriod,
+      interest_rate_drill_level: interestRateDrill.level,
+      interest_rate_drill_min: interestRateDrill.min ?? null,
+      interest_rate_drill_max: interestRateDrill.max ?? null,
+      selectedExpirationBucket,
+      selectedMilestoneGroup,
+      selectedChannel: selectedChannel ?? "All",
+    }),
+    [
+      locked,
+      measure,
+      milestoneGroupBy,
+      milestoneView,
+      pullThroughPeriod,
+      interestRateDrill.level,
+      interestRateDrill.min,
+      interestRateDrill.max,
+      selectedExpirationBucket,
+      selectedMilestoneGroup,
+      selectedChannel,
+    ]
+  );
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.lock_stratification, filterAnalyticsSnapshot, {
+    enabled: !embeddedInWorkbench,
+  });
 
   const {
     kpis,

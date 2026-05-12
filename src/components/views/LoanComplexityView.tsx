@@ -50,6 +50,8 @@ import {
   type DashboardInsightItem,
 } from "@/hooks/useDashboardInsights";
 import { DashboardInsightsStrip } from "@/components/dashboard/DashboardInsightsStrip";
+import { useDashboardFilterAnalytics } from "@/hooks/useDashboardFilterAnalytics";
+import { DASHBOARD_PAGE_KEYS } from "@/lib/dashboardPageKeys";
 
 const PERIOD_PRESETS: PeriodPreset[] = [
   "mtd",
@@ -346,6 +348,30 @@ export function LoanComplexityView({
   } = useDashboardInsights("loan-complexity", dashboardInsightFilters, {
     tenantId: selectedTenantId,
   });
+
+  const lcFilterAnalytics = useMemo(() => {
+    const ps = periodSelection;
+    return {
+      period_type: ps.type,
+      period_preset: ps.type === "preset" ? ps.preset : null,
+      period_year: ps.type === "year" ? ps.year ?? null : null,
+      period_start: ps.dateRange?.start ?? null,
+      period_end: ps.dateRange?.end ?? null,
+      groupBy,
+      actorType,
+      currentLoanStatusFilter,
+      selectedChannel: selectedChannel ?? "All",
+      selectedGroups_count: selectedGroups.length,
+    };
+  }, [
+    periodSelection,
+    groupBy,
+    actorType,
+    currentLoanStatusFilter,
+    selectedChannel,
+    selectedGroups.length,
+  ]);
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.loan_complexity, lcFilterAnalytics);
 
   const handleGenerateInsights = useCallback(async () => {
     setGenerateLoading(true);

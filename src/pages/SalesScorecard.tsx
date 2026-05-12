@@ -39,6 +39,8 @@ import { useChannelStore } from "@/stores/channelStore";
 import { useTenantStore } from "@/stores/tenantStore";
 import { TopTieringLayout } from "@/components/layout/TopTieringLayout";
 import { TopTieringTopBar } from "@/components/layout/TopTieringTopBar";
+import { useDashboardFilterAnalytics } from "@/hooks/useDashboardFilterAnalytics";
+import { DASHBOARD_PAGE_KEYS } from "@/lib/dashboardPageKeys";
 import {
   ActorStatusBadge,
   ActorStatusFilter,
@@ -146,6 +148,30 @@ const SalesScorecard = () => {
     undefined,
     actorStatusFilter,
   );
+
+  const salesScorecardFilterAnalytics = useMemo(
+    () => ({
+      actor: selectedActor,
+      active_tab: activeTab,
+      year: selectedYear,
+      period_selection_type: periodSelection?.type ?? null,
+      period_preset:
+        periodSelection?.type === "preset" ? periodSelection.preset ?? null : null,
+      actor_status: actorStatusFilter,
+      search_nonempty: searchQuery.trim().length > 0,
+      selected_channel: selectedChannel ?? "All",
+    }),
+    [
+      selectedActor,
+      activeTab,
+      selectedYear,
+      periodSelection,
+      actorStatusFilter,
+      searchQuery,
+      selectedChannel,
+    ],
+  );
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.sales_scorecard, salesScorecardFilterAnalytics);
 
   useEffect(() => {
     localStorage.setItem("sales-scorecard-actor", selectedActor);

@@ -41,8 +41,20 @@ import {
   FlaskConical,
   Telescope,
   ExternalLink,
+  Trash2,
+  Play,
+  Pencil,
+  ChevronDown,
 } from "lucide-react";
-import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { cn } from "@/lib/utils";
 import { useCohiData, CohiInsight } from "@/hooks/useCohiData";
 import { useTenantLosLastSyncedAt } from "@/hooks/useTenantLosLastSyncedAt";
 import {
@@ -55,6 +67,14 @@ import { useJobStatus } from "@/hooks/useJobStatus";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 import { JobProgress } from "@/components/ui/JobProgress";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { CohiBriefingControl } from "@/components/cohi/CohiBriefingControl";
 import { InsightDetailModal } from "./InsightDetailModal";
 import { DashboardInsightEvidenceModal, type DashboardInsightEvidenceModalInsight } from "./DashboardInsightEvidenceModal";
@@ -289,6 +309,84 @@ const CATEGORY_TABS: CategoryTab[] = [
 // Props
 // ============================================================================
 
+interface UserMyInsightPrompt {
+  id: string;
+  title: string;
+  prompt_text: string;
+  specifiers?: Record<string, unknown> | null;
+  schedule: "batch" | "on_demand";
+  enabled: boolean;
+}
+
+/** Loans table column metadata from GET /api/loans/schema */
+interface LoanColumnMeta {
+  name: string;
+  type: string;
+  nullable: boolean;
+  displayName: string;
+  category: string;
+}
+
+interface PromptSpecifierRow {
+  id: string;
+  column: string;
+  values: string[];
+  options: string[];
+  optionsLoading: boolean;
+  optionsError: string | null;
+}
+
+function createEmptySpecifierRow(): PromptSpecifierRow {
+  return {
+    id: `sr-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+    column: "",
+    values: [],
+    options: [],
+    optionsLoading: false,
+    optionsError: null,
+  };
+}
+
+function specifiersObjectFromRows(rows: PromptSpecifierRow[]): Record<string, unknown> {
+  const out: Record<string, string[]> = {};
+  for (const r of rows) {
+    const key = r.column.trim();
+    if (!key || r.values.length === 0) continue;
+    const set = new Set(out[key] ?? []);
+    for (const v of r.values) set.add(v);
+    out[key] = Array.from(set);
+  }
+  return out;
+}
+
+function rowsFromSpecifiersObject(spec: Record<string, unknown> | null | undefined): PromptSpecifierRow[] {
+  if (!spec || typeof spec !== "object") return [];
+  const rows: PromptSpecifierRow[] = [];
+  for (const [k, v] of Object.entries(spec)) {
+    if (v === undefined || v === null) continue;
+    const row = createEmptySpecifierRow();
+    if (Array.isArray(v)) {
+      const vals = v.map((x) => String(x)).filter((s) => s.length > 0);
+      if (!vals.length) continue;
+      rows.push({ ...row, column: k, values: vals });
+    } else if (["string", "number", "boolean"].includes(typeof v)) {
+      rows.push({ ...row, column: k, values: [String(v)] });
+    } else {
+      rows.push({ ...row, column: k, values: [JSON.stringify(v)] });
+    }
+  }
+  return rows;
+}
+
+function summarizeSpecifierValues(values: string[]): string {
+  if (values.length === 0) return "Choose values…";
+  if (values.length === 1) {
+    const s = values[0];
+    return s.length > 44 ? `${s.slice(0, 42)}…` : s;
+  }
+  return `${values.length} selected`;
+}
+
 interface CohiPromptsCardProps {
   dateFilter: "today" | "mtd" | "ytd" | "custom";
   onDataAvailabilityChange?: (hasData: boolean) => void;
@@ -437,6 +535,8 @@ function mapMyInsightsResponse(data: { insights?: Record<string, unknown>[] }): 
       typeof insight.profile_relevance === "string" && insight.profile_relevance.trim()
         ? insight.profile_relevance.trim()
         : null,
+    fromCustomPrompt:
+      insight.source === "custom_prompt" || insight.insight_origin === "custom_prompt",
   }));
 }
 
@@ -599,6 +699,11 @@ function BucketLane({
               {dqMeta?.flagged && (
                 <span className="inline-flex items-center rounded-lg px-2.5 py-1 text-[11px] font-semibold leading-none bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-200 ring-1 ring-amber-200/80 dark:ring-amber-800/60">
                   Data quality
+                </span>
+              )}
+              {insight.fromCustomPrompt && (
+                <span className="inline-flex items-center rounded-lg px-2.5 py-1 text-[11px] font-semibold leading-none bg-indigo-100 dark:bg-indigo-900/40 text-indigo-900 dark:text-indigo-200 ring-1 ring-indigo-200/80 dark:ring-indigo-800/60">
+                  Custom Insight
                 </span>
               )}
               <p
@@ -1083,6 +1188,8 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
     needsGeneration,
     refreshInsights,
     refreshMyInsightsAllUsers,
+    refreshMyInsightsProfile,
+    refreshMyInsightsInsightsOnly,
     refreshBucket,
     generateMoreInsights,
     reloadInsightsFromDb,
@@ -1114,6 +1221,33 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
   const [myInsightsAllUsersJobId, setMyInsightsAllUsersJobId] = useState<string | null>(null);
   const myInsightsAllUsersJob = useJobStatus(myInsightsAllUsersJobId);
   const [myInsightsAllUsersError, setMyInsightsAllUsersError] = useState<string | null>(null);
+
+  const [myProfileRefreshJobId, setMyProfileRefreshJobId] = useState<string | null>(null);
+  const myProfileRefreshJob = useJobStatus(myProfileRefreshJobId);
+  const [myProfileRefreshError, setMyProfileRefreshError] = useState<string | null>(null);
+
+  const [myInsightsOnlyJobId, setMyInsightsOnlyJobId] = useState<string | null>(null);
+  const myInsightsOnlyJob = useJobStatus(myInsightsOnlyJobId);
+  const [myInsightsOnlyError, setMyInsightsOnlyError] = useState<string | null>(null);
+
+  const [myPrompts, setMyPrompts] = useState<UserMyInsightPrompt[]>([]);
+  const [myPromptsLoading, setMyPromptsLoading] = useState(false);
+  const [myPromptsError, setMyPromptsError] = useState<string | null>(null);
+  const [promptFormTitle, setPromptFormTitle] = useState("");
+  const [promptFormText, setPromptFormText] = useState("");
+  const [promptFormSchedule, setPromptFormSchedule] = useState<"batch" | "on_demand">("batch");
+  const [myPromptModalOpen, setMyPromptModalOpen] = useState(false);
+  const [loanSchemaColumns, setLoanSchemaColumns] = useState<LoanColumnMeta[]>([]);
+  const [loanSchemaLoading, setLoanSchemaLoading] = useState(false);
+  const [promptSpecifierRows, setPromptSpecifierRows] = useState<PromptSpecifierRow[]>([]);
+  const [specifierColumnPopoverRowId, setSpecifierColumnPopoverRowId] = useState<string | null>(null);
+  const [specifierColumnSearch, setSpecifierColumnSearch] = useState("");
+  const [specifierValuesPopoverRowId, setSpecifierValuesPopoverRowId] = useState<string | null>(null);
+  const [specifierValuesSearch, setSpecifierValuesSearch] = useState("");
+  const [promptFormBusy, setPromptFormBusy] = useState(false);
+  const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
+  const [myPromptRunJobId, setMyPromptRunJobId] = useState<string | null>(null);
+  const myPromptRunJob = useJobStatus(myPromptRunJobId);
 
   const [agentJobId, setAgentJobId] = useState<string | null>(null);
   const agentJob = useJobStatus(agentJobId);
@@ -1167,6 +1301,14 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
 
   const isRefreshing = refreshJob.status === "processing";
   const isMyInsightsAllUsersRefreshing = myInsightsAllUsersJob.status === "processing";
+  const isMyProfileRefreshing = myProfileRefreshJob.status === "processing";
+  const isMyInsightsOnlyRefreshing = myInsightsOnlyJob.status === "processing";
+  const isMyPromptRunBusy = myPromptRunJob.status === "processing";
+  const isAnyMyInsightsActionBusy =
+    isMyInsightsAllUsersRefreshing ||
+    isMyProfileRefreshing ||
+    isMyInsightsOnlyRefreshing ||
+    isMyPromptRunBusy;
   const isAgentGenerating = agentJob.status === "processing";
 
   const loadMyInsights = useCallback(async () => {
@@ -1188,6 +1330,99 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
       setMyInsightsLoading(false);
     }
   }, [dateFilter, selectedTenantId]);
+
+  const loadMyPrompts = useCallback(async () => {
+    setMyPromptsLoading(true);
+    setMyPromptsError(null);
+    try {
+      const res = await api.listMyInsightPrompts(selectedTenantId);
+      const raw = (res.prompts || []) as Record<string, unknown>[];
+      const mapped: UserMyInsightPrompt[] = raw.map((p) => ({
+        id: String(p.id),
+        title: String(p.title ?? ""),
+        prompt_text: String(p.prompt_text ?? ""),
+        specifiers:
+          p.specifiers && typeof p.specifiers === "object" ? (p.specifiers as Record<string, unknown>) : null,
+        schedule: p.schedule === "on_demand" ? "on_demand" : "batch",
+        enabled: Boolean(p.enabled),
+      }));
+      setMyPrompts(mapped);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Failed to load prompts";
+      setMyPromptsError(msg);
+      setMyPrompts([]);
+    } finally {
+      setMyPromptsLoading(false);
+    }
+  }, [selectedTenantId]);
+
+  const loadDistinctForRow = useCallback(
+    async (rowId: string, col: string) => {
+      if (!col.trim()) {
+        setPromptSpecifierRows((prev) =>
+          prev.map((r) =>
+            r.id === rowId ? { ...r, options: [], optionsLoading: false, optionsError: null } : r
+          )
+        );
+        return;
+      }
+      setPromptSpecifierRows((prev) =>
+        prev.map((r) => (r.id === rowId ? { ...r, optionsLoading: true, optionsError: null } : r))
+      );
+      try {
+        const tenantParam = selectedTenantId
+          ? `?tenant_id=${encodeURIComponent(selectedTenantId)}`
+          : "";
+        const data = await api.request<{ values: string[] }>(
+          `/api/loans/distinct-values/${encodeURIComponent(col)}${tenantParam}`
+        );
+        const vals = (data.values || []).map((v) => String(v));
+        setPromptSpecifierRows((prev) =>
+          prev.map((r) =>
+            r.id === rowId
+              ? {
+                  ...r,
+                  options: vals,
+                  optionsLoading: false,
+                  optionsError: null,
+                  values: r.values.filter((x) => vals.includes(x)),
+                }
+              : r
+          )
+        );
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Could not load values";
+        setPromptSpecifierRows((prev) =>
+          prev.map((r) =>
+            r.id === rowId ? { ...r, options: [], optionsLoading: false, optionsError: msg } : r
+          )
+        );
+      }
+    },
+    [selectedTenantId]
+  );
+
+  useEffect(() => {
+    if (!myPromptModalOpen) return;
+    let cancelled = false;
+    setLoanSchemaLoading(true);
+    void (async () => {
+      try {
+        const tenantParam = selectedTenantId
+          ? `?tenant_id=${encodeURIComponent(selectedTenantId)}`
+          : "";
+        const data = await api.request<{ columns: LoanColumnMeta[] }>(`/api/loans/schema${tenantParam}`);
+        if (!cancelled) setLoanSchemaColumns(data.columns || []);
+      } catch {
+        if (!cancelled) setLoanSchemaColumns([]);
+      } finally {
+        if (!cancelled) setLoanSchemaLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [myPromptModalOpen, selectedTenantId]);
 
   useEffect(() => {
     if (refreshJob.status === "complete") {
@@ -1212,6 +1447,44 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
   }, [myInsightsAllUsersJob.status, myInsightsAllUsersJob.error, loadMyInsights]);
 
   useEffect(() => {
+    if (myProfileRefreshJob.status === "complete") {
+      setMyProfileRefreshError(null);
+      void loadMyInsights();
+      setMyProfileRefreshJobId(null);
+    } else if (myProfileRefreshJob.status === "failed") {
+      setMyProfileRefreshError(
+        myProfileRefreshJob.error || "Interest profile refresh failed"
+      );
+      void loadMyInsights();
+      setMyProfileRefreshJobId(null);
+    }
+  }, [myProfileRefreshJob.status, myProfileRefreshJob.error, loadMyInsights]);
+
+  useEffect(() => {
+    if (myInsightsOnlyJob.status === "complete") {
+      setMyInsightsOnlyError(null);
+      void loadMyInsights();
+      setMyInsightsOnlyJobId(null);
+    } else if (myInsightsOnlyJob.status === "failed") {
+      setMyInsightsOnlyError(myInsightsOnlyJob.error || "My Insights refresh failed");
+      void loadMyInsights();
+      setMyInsightsOnlyJobId(null);
+    }
+  }, [myInsightsOnlyJob.status, myInsightsOnlyJob.error, loadMyInsights]);
+
+  useEffect(() => {
+    if (myPromptRunJob.status === "complete") {
+      setMyPromptsError(null);
+      void loadMyPrompts();
+      void loadMyInsights();
+      setMyPromptRunJobId(null);
+    } else if (myPromptRunJob.status === "failed") {
+      setMyPromptsError(myPromptRunJob.error || "Prompt run failed");
+      setMyPromptRunJobId(null);
+    }
+  }, [myPromptRunJob.status, myPromptRunJob.error, loadMyPrompts, loadMyInsights]);
+
+  useEffect(() => {
     if (agentJob.status === "complete") {
       loadInsightsByMethod("agent").catch(() => {});
       setAgentJobId(null);
@@ -1232,11 +1505,172 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
   }, [refreshInsights, isRefreshing]);
 
   const handleRefreshMyInsightsAllUsers = useCallback(async () => {
-    if (!isSuperAdminUser || isMyInsightsAllUsersRefreshing) return;
+    if (!isSuperAdminUser || isAnyMyInsightsActionBusy) return;
     setMyInsightsAllUsersError(null);
+    setMyProfileRefreshError(null);
+    setMyInsightsOnlyError(null);
     const jobId = await refreshMyInsightsAllUsers();
     if (jobId) setMyInsightsAllUsersJobId(jobId);
-  }, [isSuperAdminUser, refreshMyInsightsAllUsers, isMyInsightsAllUsersRefreshing]);
+  }, [isSuperAdminUser, refreshMyInsightsAllUsers, isAnyMyInsightsActionBusy]);
+
+  const handleRefreshMyUserProfile = useCallback(async () => {
+    if (isAnyMyInsightsActionBusy) return;
+    setMyProfileRefreshError(null);
+    setMyInsightsAllUsersError(null);
+    setMyInsightsOnlyError(null);
+    const jobId = await refreshMyInsightsProfile();
+    if (jobId) setMyProfileRefreshJobId(jobId);
+  }, [refreshMyInsightsProfile, isAnyMyInsightsActionBusy]);
+
+  const handleRefreshMyInsightsOnly = useCallback(async () => {
+    if (isAnyMyInsightsActionBusy) return;
+    setMyInsightsOnlyError(null);
+    setMyInsightsAllUsersError(null);
+    setMyProfileRefreshError(null);
+    const jobId = await refreshMyInsightsInsightsOnly();
+    if (jobId) setMyInsightsOnlyJobId(jobId);
+  }, [refreshMyInsightsInsightsOnly, isAnyMyInsightsActionBusy]);
+
+  const resetMyPromptForm = useCallback(() => {
+    setEditingPromptId(null);
+    setPromptFormTitle("");
+    setPromptFormText("");
+    setPromptFormSchedule("batch");
+    setPromptSpecifierRows([]);
+    setSpecifierColumnPopoverRowId(null);
+    setSpecifierColumnSearch("");
+    setSpecifierValuesPopoverRowId(null);
+    setSpecifierValuesSearch("");
+  }, []);
+
+  const addSpecifierRow = useCallback(() => {
+    setPromptSpecifierRows((prev) => [...prev, createEmptySpecifierRow()]);
+  }, []);
+
+  const removeSpecifierRow = useCallback((rowId: string) => {
+    setSpecifierColumnPopoverRowId((id) => (id === rowId ? null : id));
+    setSpecifierValuesPopoverRowId((id) => (id === rowId ? null : id));
+    setPromptSpecifierRows((prev) => prev.filter((r) => r.id !== rowId));
+  }, []);
+
+  const setSpecifierRowColumn = useCallback(
+    (rowId: string, col: string) => {
+      setPromptSpecifierRows((prev) =>
+        prev.map((r) => (r.id === rowId ? { ...r, column: col, values: [] } : r))
+      );
+      void loadDistinctForRow(rowId, col);
+    },
+    [loadDistinctForRow]
+  );
+
+  const setSpecifierRowValues = useCallback((rowId: string, values: string[]) => {
+    setPromptSpecifierRows((prev) => prev.map((r) => (r.id === rowId ? { ...r, values } : r)));
+  }, []);
+
+  const handleSubmitMyPrompt = useCallback(async () => {
+    const title = promptFormTitle.trim();
+    const prompt_text = promptFormText.trim();
+    if (!title || !prompt_text) {
+      setMyPromptsError("Title and prompt text are required.");
+      return;
+    }
+    const specifiers = specifiersObjectFromRows(promptSpecifierRows) as Record<string, unknown>;
+    setPromptFormBusy(true);
+    setMyPromptsError(null);
+    try {
+      if (editingPromptId) {
+        await api.updateMyInsightPrompt(
+          editingPromptId,
+          { title, prompt_text, specifiers, schedule: promptFormSchedule },
+          selectedTenantId
+        );
+      } else {
+        await api.createMyInsightPrompt(
+          { title, prompt_text, specifiers, schedule: promptFormSchedule, enabled: true },
+          selectedTenantId
+        );
+      }
+      resetMyPromptForm();
+      setMyPromptModalOpen(false);
+      await loadMyPrompts();
+    } catch (e: unknown) {
+      setMyPromptsError(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setPromptFormBusy(false);
+    }
+  }, [
+    promptFormTitle,
+    promptFormText,
+    promptSpecifierRows,
+    editingPromptId,
+    promptFormSchedule,
+    selectedTenantId,
+    resetMyPromptForm,
+    loadMyPrompts,
+  ]);
+
+  const handleEditMyPrompt = useCallback(
+    (p: UserMyInsightPrompt) => {
+      const rows = rowsFromSpecifiersObject(
+        p.specifiers && typeof p.specifiers === "object" ? p.specifiers : null
+      );
+      setEditingPromptId(p.id);
+      setPromptFormTitle(p.title);
+      setPromptFormText(p.prompt_text);
+      setPromptFormSchedule(p.schedule);
+      setPromptSpecifierRows(rows);
+      setMyPromptsError(null);
+      setMyPromptModalOpen(true);
+      for (const r of rows) {
+        if (r.column) void loadDistinctForRow(r.id, r.column);
+      }
+    },
+    [loadDistinctForRow]
+  );
+
+  const handleTogglePromptEnabled = useCallback(
+    async (p: UserMyInsightPrompt) => {
+      try {
+        await api.updateMyInsightPrompt(p.id, { enabled: !p.enabled }, selectedTenantId);
+        await loadMyPrompts();
+      } catch (e: unknown) {
+        setMyPromptsError(e instanceof Error ? e.message : "Update failed");
+      }
+    },
+    [selectedTenantId, loadMyPrompts]
+  );
+
+  const handleDeleteMyPrompt = useCallback(
+    async (id: string) => {
+      if (!window.confirm("Delete this saved prompt?")) return;
+      const wasEditing = editingPromptId === id;
+      try {
+        await api.deleteMyInsightPrompt(id, selectedTenantId);
+        if (wasEditing) {
+          resetMyPromptForm();
+          setMyPromptModalOpen(false);
+        }
+        await loadMyPrompts();
+      } catch (e: unknown) {
+        setMyPromptsError(e instanceof Error ? e.message : "Delete failed");
+      }
+    },
+    [selectedTenantId, loadMyPrompts, editingPromptId, resetMyPromptForm]
+  );
+
+  const handleRunMyPrompt = useCallback(
+    async (id: string) => {
+      if (isAnyMyInsightsActionBusy) return;
+      setMyPromptsError(null);
+      try {
+        const resp = await api.runMyInsightPrompt(id, selectedTenantId);
+        if (resp.jobId) setMyPromptRunJobId(resp.jobId);
+      } catch (e: unknown) {
+        setMyPromptsError(e instanceof Error ? e.message : "Run failed");
+      }
+    },
+    [selectedTenantId, isAnyMyInsightsActionBusy]
+  );
 
   const handleTabSwitch = useCallback(
     async (tab: "pipeline" | "agent" | "my_insights") => {
@@ -1245,9 +1679,10 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
         await loadInsightsByMethod(tab);
       } else if (tab === "my_insights") {
         await loadMyInsights();
+        await loadMyPrompts();
       }
     },
-    [loadInsightsByMethod, loadMyInsights]
+    [loadInsightsByMethod, loadMyInsights, loadMyPrompts]
   );
 
   const handleCategoryRefresh = useCallback(
@@ -1620,6 +2055,11 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
   const hasMyInsights = myInsights.length > 0;
   const activeCategoryDef = CATEGORY_TABS.find((c) => c.id === activeCategoryId);
 
+  const sortedLoanSchemaColumns = useMemo(
+    () => [...loanSchemaColumns].sort((a, b) => a.displayName.localeCompare(b.displayName)),
+    [loanSchemaColumns]
+  );
+
   return (
     <div className="mb-6 sm:mb-10 Cohi-prompts-card">
       <motion.div
@@ -1952,29 +2392,61 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
         {/* ===== My Insights Tab (personal feed + tracked section) ===== */}
         {activeTab === "my_insights" && (
           <>
-            {isSuperAdminUser && (
-              <div className="mb-6 flex flex-col items-end gap-2">
+            <div className="mb-6 flex flex-col items-end gap-2">
+              <div className="flex flex-wrap justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => void handleRefreshMyInsightsAllUsers()}
-                  disabled={isMyInsightsAllUsersRefreshing}
-                  className="inline-flex shrink-0 items-center justify-center gap-2 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium disabled:opacity-50"
-                  title="Super admin: refresh My Insights for all tenant users"
+                  onClick={() => void handleRefreshMyUserProfile()}
+                  disabled={isAnyMyInsightsActionBusy}
+                  className="inline-flex shrink-0 items-center justify-center gap-2 px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 text-sm font-medium hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50"
+                  title="Recompute your behavioral interest profile from recent activity (no insight run)"
                 >
-                  {isMyInsightsAllUsersRefreshing ? (
+                  {isMyProfileRefreshing ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
                   ) : (
                     <RefreshCw className="w-4 h-4" />
                   )}
-                  Regenerate for all users
+                  Regenerate my user profile
                 </button>
-                {myInsightsAllUsersError && (
-                  <p className="text-xs text-rose-600 dark:text-rose-400 text-right max-w-md" role="alert">
-                    {myInsightsAllUsersError}
-                  </p>
+                <button
+                  type="button"
+                  onClick={() => void handleRefreshMyInsightsOnly()}
+                  disabled={isAnyMyInsightsActionBusy}
+                  className="inline-flex shrink-0 items-center justify-center gap-2 px-4 py-2 rounded-lg bg-teal-600 hover:bg-teal-500 text-white text-sm font-medium disabled:opacity-50 shadow-sm shadow-teal-600/20"
+                  title="Regenerate My Insights for your account using your saved profile"
+                >
+                  {isMyInsightsOnlyRefreshing ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-4 h-4" />
+                  )}
+                  Regenerate my insights
+                </button>
+                {isSuperAdminUser && (
+                  <button
+                    type="button"
+                    onClick={() => void handleRefreshMyInsightsAllUsers()}
+                    disabled={isAnyMyInsightsActionBusy}
+                    className="inline-flex shrink-0 items-center justify-center gap-2 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium disabled:opacity-50"
+                    title="Super admin: refresh My Insights for all tenant users"
+                  >
+                    {isMyInsightsAllUsersRefreshing ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="w-4 h-4" />
+                    )}
+                    Regenerate for all users
+                  </button>
                 )}
               </div>
-            )}
+              {(myProfileRefreshError || myInsightsOnlyError || myInsightsAllUsersError) && (
+                <p className="text-xs text-rose-600 dark:text-rose-400 text-right max-w-md" role="alert">
+                  {[myProfileRefreshError, myInsightsOnlyError, myInsightsAllUsersError]
+                    .filter(Boolean)
+                    .join(" ")}
+                </p>
+              )}
+            </div>
             {myInsightsLoading && !hasMyInsights && (
               <div className="flex flex-col gap-4 mb-6">
                 {[0, 1].map((i) => (
@@ -1988,9 +2460,11 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
             {!myInsightsLoading && myInsightsNeedsGen && !hasMyInsights && (
               <div className="rounded-2xl border border-slate-200/60 dark:border-slate-700/60 bg-slate-50/80 dark:bg-slate-800/40 backdrop-blur-sm p-6 text-center mb-6">
                 <p className="text-sm text-slate-600 dark:text-slate-400">
+                  No personalized insights yet for your account. They generate after data sync, or use
+                  Regenerate my user profile and Regenerate my insights above.
                   {isSuperAdminUser
-                    ? "No personalized insights yet for your account. They generate after data sync, or use Regenerate for all users to refresh every active user in this tenant."
-                    : "No personalized insights yet. They are created automatically after data sync."}
+                    ? " Super admins can also use Regenerate for all users to refresh every active user in this tenant."
+                    : ""}
                 </p>
               </div>
             )}
@@ -2044,6 +2518,403 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
                 }}
               />
             </div>
+
+            <div className="mt-10 rounded-2xl border border-slate-200/60 dark:border-slate-700/60 bg-slate-50/50 dark:bg-slate-800/30 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
+                <div className="min-w-0">
+                  <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-1">My Prompts</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 max-w-2xl">
+                    Saved questions can narrow which loans apply using specifiers (pick a loans-table column, then one
+                    or more values). Batch prompts run with My Insights sync; use Run for an immediate card. A full My
+                    Insights job cannot run at the same time as a single-prompt run.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetMyPromptForm();
+                    setMyPromptModalOpen(true);
+                  }}
+                  className="inline-flex shrink-0 items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium shadow-sm shadow-blue-600/20"
+                >
+                  <Plus className="w-4 h-4" strokeWidth={2} />
+                  Add Prompt
+                </button>
+              </div>
+              {myPromptsError && (
+                <p className="text-xs text-rose-600 dark:text-rose-400 mb-2" role="alert">
+                  {myPromptsError}
+                </p>
+              )}
+              {(myPromptRunJob.status === "processing" || myPromptRunJob.status === "failed") && (
+                <JobProgress
+                  status={myPromptRunJob.status}
+                  progress={myPromptRunJob.progress}
+                  message={myPromptRunJob.message}
+                  error={myPromptRunJob.error}
+                  className="mb-3"
+                />
+              )}
+              {myPromptsLoading ? (
+                <p className="text-xs text-slate-500 dark:text-slate-400">Loading prompts…</p>
+              ) : myPrompts.length === 0 ? (
+                <p className="text-xs text-slate-500 dark:text-slate-400">No saved prompts yet.</p>
+              ) : (
+                <ul className="flex flex-col gap-2">
+                  {myPrompts.map((p) => (
+                    <li
+                      key={p.id}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200/80 dark:border-slate-600/80 bg-white/80 dark:bg-slate-900/50 px-3 py-2"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-slate-800 dark:text-slate-100 truncate">
+                          {p.title}{" "}
+                          <span className="text-xs font-normal text-slate-500 dark:text-slate-400">
+                            ({p.schedule === "on_demand" ? "on demand" : "batch"})
+                          </span>
+                        </div>
+                        <div className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2">
+                          {p.prompt_text}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <label className="text-xs flex items-center gap-1 cursor-pointer text-slate-600 dark:text-slate-300">
+                          <input
+                            type="checkbox"
+                            checked={p.enabled}
+                            onChange={() => void handleTogglePromptEnabled(p)}
+                            className="rounded border-slate-300"
+                          />
+                          On
+                        </label>
+                        <button
+                          type="button"
+                          title="Run this prompt now"
+                          onClick={() => void handleRunMyPrompt(p.id)}
+                          disabled={isAnyMyInsightsActionBusy || !p.enabled}
+                          className="p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40"
+                        >
+                          <Play className="w-4 h-4 text-teal-600" strokeWidth={2} />
+                        </button>
+                        <button
+                          type="button"
+                          title="Edit"
+                          onClick={() => handleEditMyPrompt(p)}
+                          className="p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800"
+                        >
+                          <Pencil className="w-4 h-4 text-slate-600 dark:text-slate-300" strokeWidth={2} />
+                        </button>
+                        <button
+                          type="button"
+                          title="Delete"
+                          onClick={() => void handleDeleteMyPrompt(p.id)}
+                          className="p-1.5 rounded hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                        >
+                          <Trash2 className="w-4 h-4 text-rose-600" strokeWidth={2} />
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <Dialog
+              open={myPromptModalOpen}
+              onOpenChange={(open) => {
+                setMyPromptModalOpen(open);
+                if (!open) resetMyPromptForm();
+              }}
+            >
+              <DialogContent className="flex max-h-[min(90dvh,calc(100dvh-2rem))] w-[min(100vw-2rem,52rem)] max-w-3xl flex-col gap-0 overflow-y-auto p-6 sm:p-8">
+                <DialogHeader className="flex-shrink-0 pb-3">
+                  <DialogTitle>{editingPromptId ? "Edit saved prompt" : "Add prompt"}</DialogTitle>
+                  <DialogDescription>
+                    Batch prompts run when My Insights syncs; on-demand prompts run when you use Run on the list.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-2 py-1 sm:px-3 sm:py-2">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+                      Title
+                      <input
+                        type="text"
+                        value={promptFormTitle}
+                        onChange={(e) => setPromptFormTitle(e.target.value)}
+                        className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:focus-visible:ring-offset-slate-950"
+                        placeholder="Short label"
+                      />
+                    </label>
+                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+                      Schedule
+                      <select
+                        value={promptFormSchedule}
+                        onChange={(e) => setPromptFormSchedule(e.target.value as "batch" | "on_demand")}
+                        className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:focus-visible:ring-offset-slate-950"
+                      >
+                        <option value="batch">Batch (with My Insights sync)</option>
+                        <option value="on_demand">On demand</option>
+                      </select>
+                    </label>
+                  </div>
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+                    Prompt text
+                    <textarea
+                      value={promptFormText}
+                      onChange={(e) => setPromptFormText(e.target.value)}
+                      rows={4}
+                      className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:focus-visible:ring-offset-slate-950"
+                      placeholder="What you want summarized as a My Insights card…"
+                    />
+                  </label>
+                  <div>
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs font-medium text-slate-600 dark:text-slate-300">Specifiers</span>
+                      <button
+                        type="button"
+                        onClick={addSpecifierRow}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                      >
+                        <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+                        Add specifier
+                      </button>
+                    </div>
+                    {loanSchemaLoading ? (
+                      <p className="text-xs text-slate-500 dark:text-slate-400">Loading loan columns…</p>
+                    ) : null}
+                    {promptSpecifierRows.length === 0 ? (
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        No specifiers — prompt applies to your full loan scope. Add a row to filter by column values.
+                      </p>
+                    ) : (
+                      <div className="flex flex-col gap-3">
+                        {promptSpecifierRows.map((row) => {
+                          const colMeta = sortedLoanSchemaColumns.find((c) => c.name === row.column);
+                          const columnTriggerLabel = colMeta
+                            ? `${colMeta.displayName} (${colMeta.name})`
+                            : "Select column…";
+                          const colQ =
+                            specifierColumnPopoverRowId === row.id
+                              ? specifierColumnSearch.trim().toLowerCase()
+                              : "";
+                          const colsFiltered = colQ
+                            ? sortedLoanSchemaColumns.filter(
+                                (c) =>
+                                  c.name.toLowerCase().includes(colQ) ||
+                                  c.displayName.toLowerCase().includes(colQ)
+                              )
+                            : sortedLoanSchemaColumns;
+                          const mergedValueOptions = Array.from(
+                            new Set([
+                              ...row.values.filter((v) => !row.options.includes(v)),
+                              ...row.options,
+                            ])
+                          );
+                          const valQ =
+                            specifierValuesPopoverRowId === row.id
+                              ? specifierValuesSearch.trim().toLowerCase()
+                              : "";
+                          const valuesFiltered = valQ
+                            ? mergedValueOptions.filter((v) => v.toLowerCase().includes(valQ))
+                            : mergedValueOptions;
+                          const orderedValues = [...valuesFiltered].sort((a, b) => {
+                            const as = row.values.includes(a) ? 1 : 0;
+                            const bs = row.values.includes(b) ? 1 : 0;
+                            if (as !== bs) return bs - as;
+                            return a.localeCompare(b, undefined, { numeric: true });
+                          });
+                          return (
+                            <div
+                              key={row.id}
+                              className="flex flex-wrap items-start gap-3 rounded-xl border border-slate-200/80 bg-white/90 p-3 dark:border-slate-600/80 dark:bg-slate-900/50"
+                            >
+                              <div className="min-w-[min(100%,220px)] flex-1">
+                                <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                                  Column
+                                </label>
+                                <Popover
+                                  open={specifierColumnPopoverRowId === row.id}
+                                  onOpenChange={(open) => {
+                                    if (open) {
+                                      setSpecifierColumnPopoverRowId(row.id);
+                                      setSpecifierColumnSearch("");
+                                    } else {
+                                      setSpecifierColumnPopoverRowId((cur) => (cur === row.id ? null : cur));
+                                      setSpecifierColumnSearch("");
+                                    }
+                                  }}
+                                >
+                                  <PopoverTrigger asChild>
+                                    <button
+                                      type="button"
+                                      disabled={loanSchemaLoading}
+                                      className={cn(
+                                        "flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm text-slate-900 shadow-sm dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100",
+                                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-slate-950",
+                                        loanSchemaLoading && "cursor-not-allowed opacity-50"
+                                      )}
+                                    >
+                                      <span className="min-w-0 flex-1 truncate">{columnTriggerLabel}</span>
+                                      <ChevronDown className="h-4 w-4 shrink-0 opacity-50" aria-hidden />
+                                    </button>
+                                  </PopoverTrigger>
+                                  <PopoverContent align="start" className="w-80 p-0" sideOffset={6}>
+                                    <Command shouldFilter={false}>
+                                      <CommandInput
+                                        placeholder="Search columns…"
+                                        value={specifierColumnSearch}
+                                        onValueChange={setSpecifierColumnSearch}
+                                      />
+                                      <CommandList className="max-h-[min(40vh,260px)]">
+                                        <CommandEmpty>No columns found.</CommandEmpty>
+                                        {colsFiltered.map((col) => (
+                                          <CommandItem
+                                            key={col.name}
+                                            value={`${col.displayName} ${col.name}`}
+                                            onSelect={() => {
+                                              setSpecifierRowColumn(row.id, col.name);
+                                              setSpecifierColumnPopoverRowId(null);
+                                              setSpecifierColumnSearch("");
+                                            }}
+                                            className={cn(
+                                              "cursor-pointer",
+                                              row.column === col.name
+                                                ? "!bg-accent !text-accent-foreground"
+                                                : ""
+                                            )}
+                                          >
+                                            <span className="mr-2">{row.column === col.name ? "✓" : ""}</span>
+                                            <span className="truncate">
+                                              {col.displayName}{" "}
+                                              <span className="text-slate-500 dark:text-slate-400">({col.name})</span>
+                                            </span>
+                                          </CommandItem>
+                                        ))}
+                                      </CommandList>
+                                    </Command>
+                                  </PopoverContent>
+                                </Popover>
+                              </div>
+                              <div className="min-w-[min(100%,260px)] flex-[2]">
+                                <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                                  Values
+                                </label>
+                                {row.optionsLoading ? (
+                                  <div className="flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-500 dark:border-slate-600 dark:bg-slate-900">
+                                    <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                                    Loading values…
+                                  </div>
+                                ) : row.optionsError ? (
+                                  <p className="text-xs text-rose-600 dark:text-rose-400">{row.optionsError}</p>
+                                ) : (
+                                  <Popover
+                                    open={specifierValuesPopoverRowId === row.id}
+                                    onOpenChange={(open) => {
+                                      if (open) {
+                                        setSpecifierValuesPopoverRowId(row.id);
+                                        setSpecifierValuesSearch("");
+                                      } else {
+                                        setSpecifierValuesPopoverRowId((cur) => (cur === row.id ? null : cur));
+                                        setSpecifierValuesSearch("");
+                                      }
+                                    }}
+                                  >
+                                    <PopoverTrigger asChild>
+                                      <button
+                                        type="button"
+                                        disabled={!row.column}
+                                        className={cn(
+                                          "flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm text-slate-900 shadow-sm dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100",
+                                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-slate-950",
+                                          !row.column && "cursor-not-allowed opacity-50"
+                                        )}
+                                      >
+                                        <span className="min-w-0 flex-1 truncate text-slate-700 dark:text-slate-200">
+                                          {summarizeSpecifierValues(row.values)}
+                                        </span>
+                                        <ChevronDown className="h-4 w-4 shrink-0 opacity-50" aria-hidden />
+                                      </button>
+                                    </PopoverTrigger>
+                                    <PopoverContent align="start" className="w-80 p-0" sideOffset={6}>
+                                      <Command shouldFilter={false}>
+                                        <CommandInput
+                                          placeholder="Search values…"
+                                          value={specifierValuesSearch}
+                                          onValueChange={setSpecifierValuesSearch}
+                                        />
+                                        <CommandList className="max-h-[min(40vh,260px)]">
+                                          <CommandEmpty>No values found.</CommandEmpty>
+                                          {orderedValues.map((v) => {
+                                            const sel = row.values.includes(v);
+                                            return (
+                                              <CommandItem
+                                                key={v}
+                                                value={v}
+                                                onSelect={() => {
+                                                  const next = sel
+                                                    ? row.values.filter((x) => x !== v)
+                                                    : [...row.values, v];
+                                                  setSpecifierRowValues(row.id, next);
+                                                }}
+                                                className={cn(
+                                                  "cursor-pointer hover:!bg-transparent hover:!text-foreground data-[selected=true]:!bg-transparent data-[selected=true]:!text-foreground",
+                                                  sel
+                                                    ? "!bg-accent !text-accent-foreground hover:!bg-accent data-[selected=true]:!bg-accent data-[selected=true]:!text-accent-foreground"
+                                                    : ""
+                                                )}
+                                              >
+                                                <span className="mr-2">{sel ? "✓" : ""}</span>
+                                                <span className="break-all">{v}</span>
+                                              </CommandItem>
+                                            );
+                                          })}
+                                        </CommandList>
+                                      </Command>
+                                    </PopoverContent>
+                                  </Popover>
+                                )}
+                                {!row.optionsLoading &&
+                                row.column &&
+                                mergedValueOptions.length === 0 &&
+                                !row.optionsError ? (
+                                  <p className="mt-1 text-xs text-slate-500">No distinct values for this column.</p>
+                                ) : null}
+                              </div>
+                              <button
+                                type="button"
+                                title="Remove specifier"
+                                onClick={() => removeSpecifierRow(row.id)}
+                                className="mt-5 shrink-0 rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50 hover:text-rose-600 dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-rose-400"
+                              >
+                                <X className="h-4 w-4" strokeWidth={2} />
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <DialogFooter className="flex-shrink-0 flex-col gap-2 border-t border-slate-200/80 pt-5 dark:border-slate-700/80 sm:flex-row sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setMyPromptModalOpen(false)}
+                    className="inline-flex justify-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-100 dark:hover:bg-slate-800"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleSubmitMyPrompt()}
+                    disabled={promptFormBusy || isAnyMyInsightsActionBusy}
+                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+                  >
+                    {promptFormBusy ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden /> : null}
+                    {editingPromptId ? "Save changes" : "Create prompt"}
+                  </button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </>
         )}
 

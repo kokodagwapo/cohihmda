@@ -27,6 +27,8 @@ import {
 import { Calendar } from "@/components/ui/calendar";
 import { Button } from "@/components/ui/button";
 import { DatePeriodPicker, type PeriodSelection, type DateRange as DPDateRange } from "@/components/ui/DatePeriodPicker";
+import { useDashboardFilterAnalytics } from "@/hooks/useDashboardFilterAnalytics";
+import { DASHBOARD_PAGE_KEYS } from "@/lib/dashboardPageKeys";
 
 interface LoanFunnelViewProps {
   view: "funnel" | "bar" | "revenue" | "units" | "volume" | "detail";
@@ -71,6 +73,21 @@ export const LoanFunnelView = ({
     start: Date | null;
     end: Date | null;
   }>({ start: null, end: null });
+
+  const loanFunnelFilterAnalytics = useMemo(
+    () => ({
+      view,
+      year,
+      dateFilterType,
+      custom_start: customDateRange.start ? format(customDateRange.start, "yyyy-MM-dd") : null,
+      custom_end: customDateRange.end ? format(customDateRange.end, "yyyy-MM-dd") : null,
+      activeTab,
+      comparisonView,
+      selectedChannel: selectedChannel ?? "All",
+    }),
+    [view, year, dateFilterType, customDateRange, activeTab, comparisonView, selectedChannel]
+  );
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.loan_funnel, loanFunnelFilterAnalytics);
 
   // Handle DatePeriodPicker changes (replaces manual year buttons + custom date logic)
   const handleFunnelPeriodChange = useCallback((selection: PeriodSelection) => {

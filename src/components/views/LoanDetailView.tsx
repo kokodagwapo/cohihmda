@@ -5,6 +5,8 @@
  */
 
 import { useEffect, useRef, useCallback, useState, useMemo, useTransition, memo } from "react";
+import { useDashboardFilterAnalytics } from "@/hooks/useDashboardFilterAnalytics";
+import { DASHBOARD_PAGE_KEYS } from "@/lib/dashboardPageKeys";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   useLoanDetailData,
@@ -860,6 +862,30 @@ export function LoanDetailView({
         .map(([columnId]) => columnId),
     )
   ), [appliedFilters]);
+  const loanDetailFilterAnalytics = useMemo(
+    () => ({
+      sort_column_id: sortColumnId,
+      sort_direction: sortDirection,
+      selected_channel: selectedChannel ?? "All",
+      has_active_filters: hasActiveFilters,
+      active_filter_columns: [...activeFilterColumnIds],
+      active_filter_count: activeFilterColumnIds.size,
+      selected_bookmark_id: selectedBookmarkId,
+      show_filters_panel: showFilters,
+      controlled_mode: isControlled,
+    }),
+    [
+      sortColumnId,
+      sortDirection,
+      selectedChannel,
+      hasActiveFilters,
+      activeFilterColumnIds,
+      selectedBookmarkId,
+      showFilters,
+      isControlled,
+    ]
+  );
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.loan_detail, loanDetailFilterAnalytics);
   const filteredCount = filteredLoans.length;
   const baseCount = loans.length;
   // WAC = sum of (Loan Amount * Interest Rate), formatted as #,##0.000

@@ -1,4 +1,6 @@
 import { useMemo } from 'react';
+import { useDashboardFilterAnalytics } from '@/hooks/useDashboardFilterAnalytics';
+import { DASHBOARD_PAGE_KEYS } from '@/lib/dashboardPageKeys';
 import { BarChart3, ArrowUp, ArrowDown } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useOpsData } from '@/hooks/useOpsData';
@@ -39,6 +41,17 @@ export const OpsView = ({
     
     return { startDate: startOfYear, endDate };
   }, [dateFilterType, year, customDateRange.start, customDateRange.end]);
+
+  const opsFilterAnalytics = useMemo(
+    () => ({
+      date_filter_type: dateFilterType,
+      year,
+      date_range: dateRange,
+      selected_channel: selectedChannel ?? 'All',
+    }),
+    [dateFilterType, year, dateRange, selectedChannel]
+  );
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.ops_view, opsFilterAnalytics);
   
   const { opsData, loading } = useOpsData(dateRange, selectedTenantId, selectedChannel);
 

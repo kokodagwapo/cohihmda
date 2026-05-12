@@ -45,6 +45,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tooltip as UITooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
+import { useDashboardFilterAnalytics } from "@/hooks/useDashboardFilterAnalytics";
+import { DASHBOARD_PAGE_KEYS } from "@/lib/dashboardPageKeys";
 
 export type PipelineViewMode = "week" | "month";
 
@@ -286,6 +288,32 @@ export function PipelineAnalysisView({
     startDateField,
     filters: filtersForApi,
   });
+
+  const pipelineFilterAnalytics = useMemo(
+    () => ({
+      viewMode,
+      pctMetric,
+      dataViewTab,
+      startDateField,
+      selectedWeekValues,
+      selectedMonths,
+      appliedFilters,
+      selectedYearRange: effectiveYearRange,
+      selectedChannel: selectedChannel ?? "All",
+    }),
+    [
+      viewMode,
+      pctMetric,
+      dataViewTab,
+      startDateField,
+      selectedWeekValues,
+      selectedMonths,
+      appliedFilters,
+      effectiveYearRange,
+      selectedChannel,
+    ]
+  );
+  useDashboardFilterAnalytics(DASHBOARD_PAGE_KEYS.pipeline_analysis, pipelineFilterAnalytics);
 
   const { data: treasury10yData, loading: treasury10yLoading, error: treasury10yError } = useTreasury10y(
     from && to ? from : null,
