@@ -1,0 +1,245 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  Coheus DR — secondary region (deploy in us-east-1 after primary Aurora Global Cluster exists).
+  Creates minimal VPC, Aurora Serverless v2 reader cluster member, and S3 bucket for podcast CRR target.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: coheus
+
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+
+  GlobalClusterIdentifier:
+    Type: String
+    Description: Identifier from primary region (output GlobalClusterId from coheus_aurora_cluster_stack)
+
+  VpcCidr:
+    Type: String
+    Default: 10.30.0.0/16
+    Description: CIDR for the DR VPC (must not overlap primary VPC)
+
+  PrimaryReplicationRoleArn:
+    Type: String
+    Default: ''
+    Description: IAM role ARN from primary region trusted by s3.amazonaws.com for podcast CRR. Leave empty on first deploy; update stack after role exists.
+
+Conditions:
+  HasReplicationPrincipal: !Not [!Equals [!Ref PrimaryReplicationRoleArn, '']]
+
+Resources:
+  DRVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-dr-vpc'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  DRPrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DRVpc
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 10.30.1.0/24
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-dr-private-1'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  DRPrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DRVpc
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.30.2.0/24
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-dr-private-2'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  DRDbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub 'DR subnet group for ${ProjectName} ${Environment}'
+      SubnetIds:
+        - !Ref DRPrivateSubnet1
+        - !Ref DRPrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-dr-db-subnets'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  DRClusterSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub 'DR Aurora for ${ProjectName} ${Environment}'
+      VpcId: !Ref DRVpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: !Ref VpcCidr
+          Description: PostgreSQL from DR VPC
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-dr-aurora-sg'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  DRAuroraKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub 'DR Aurora encryption for ${ProjectName} ${Environment}'
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EnableRoot
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: AllowRDS
+            Effect: Allow
+            Principal:
+              Service: rds.amazonaws.com
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey*
+              - kms:CreateGrant
+              - kms:DescribeKey
+            Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-dr-aurora-kms'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  SecondaryAuroraCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      DBClusterIdentifier: !Sub '${ProjectName}-${Environment}-dr-secondary'
+      Engine: aurora-postgresql
+      EngineVersion: '17.7'
+      Port: 5432
+      GlobalClusterIdentifier: !Ref GlobalClusterIdentifier
+      DBSubnetGroupName: !Ref DRDbSubnetGroup
+      VpcSecurityGroupIds:
+        - !Ref DRClusterSecurityGroup
+      StorageEncrypted: true
+      KmsKeyId: !Ref DRAuroraKmsKey
+      CopyTagsToSnapshot: true
+      ServerlessV2ScalingConfiguration:
+        MinCapacity: 0.5
+        MaxCapacity: 4
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-dr-aurora-secondary'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  SecondaryAuroraInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub '${ProjectName}-${Environment}-dr-secondary-1'
+      DBClusterIdentifier: !Ref SecondaryAuroraCluster
+      DBInstanceClass: db.serverless
+      Engine: aurora-postgresql
+      PubliclyAccessible: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-dr-secondary-instance'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  PodcastReplicaBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub '${ProjectName}-${Environment}-podcast-audio-replica-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-podcast-audio-replica'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  PodcastReplicaBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: HasReplicationPrincipal
+    Properties:
+      Bucket: !Ref PodcastReplicaBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowS3ReplicationFromPrimaryRole
+            Effect: Allow
+            Principal:
+              AWS: !Ref PrimaryReplicationRoleArn
+            Action:
+              - s3:ReplicateObject
+              - s3:ReplicateDelete
+              - s3:ReplicateTags
+              - s3:ObjectOwnerOverrideToBucketOwner
+              - s3:GetObjectVersionTagging
+            Resource: !Sub '${PodcastReplicaBucket.Arn}/*'
+
+Outputs:
+  SecondaryClusterEndpoint:
+    Description: DR Aurora cluster endpoint (reader in global DB)
+    Value: !GetAtt SecondaryAuroraCluster.Endpoint.Address
+
+  PodcastReplicaBucketArn:
+    Description: Pass as PodcastReplicationDestinationBucketArn to primary coheus_ecs_fargate_stack
+    Value: !GetAtt PodcastReplicaBucket.Arn
+
+  DRVpcId:
+    Description: DR VPC ID (for future secondary ECS)
+    Value: !Ref DRVpc

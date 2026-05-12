@@ -539,6 +539,76 @@ pipelines:
     infrastructure-prod:
       - step: *deploy-infra-prod
 
+    # DR stacks — Aurora cluster + AWS Backup (manual trigger only)
+    # These are NOT part of the regular dev/prod branch pipeline.
+    # Run after the normal infra deploy when DR template changes are merged.
+    dr-stacks-dev:
+      - variables:
+          - name: SKIP_AURORA
+            default: "false"
+            allowed-values:
+              - "false"
+              - "true"
+          - name: SKIP_BACKUP
+            default: "false"
+            allowed-values:
+              - "false"
+              - "true"
+          - name: ENABLE_GLOBAL_DB
+            default: "false"
+            allowed-values:
+              - "false"
+              - "true"
+          - name: DEPLOY_SECONDARY
+            default: "false"
+            allowed-values:
+              - "false"
+              - "true"
+          - name: GLOBAL_CLUSTER_ID
+            default: ""
+      - step:
+          name: Deploy DR Stacks to Dev
+          oidc: true
+          deployment: dev
+          script:
+            - *setup-oidc
+            - chmod +x ./scripts/bitbucket/deploy-dr-stacks.sh
+            - ./scripts/bitbucket/deploy-dr-stacks.sh
+
+    dr-stacks-prod:
+      - variables:
+          - name: SKIP_AURORA
+            default: "false"
+            allowed-values:
+              - "false"
+              - "true"
+          - name: SKIP_BACKUP
+            default: "false"
+            allowed-values:
+              - "false"
+              - "true"
+          - name: ENABLE_GLOBAL_DB
+            default: "false"
+            allowed-values:
+              - "false"
+              - "true"
+          - name: DEPLOY_SECONDARY
+            default: "false"
+            allowed-values:
+              - "false"
+              - "true"
+          - name: GLOBAL_CLUSTER_ID
+            default: ""
+      - step:
+          name: Deploy DR Stacks to Prod
+          oidc: true
+          deployment: production
+          trigger: manual
+          script:
+            - *setup-oidc
+            - chmod +x ./scripts/bitbucket/deploy-dr-stacks.sh
+            - ./scripts/bitbucket/deploy-dr-stacks.sh
+
     # Full deploy with test gates
     deploy-all-dev:
       - parallel:

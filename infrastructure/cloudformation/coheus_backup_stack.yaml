@@ -1,0 +1,103 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  Coheus AWS Backup — vault, plan, and tag-based selection for Cohi resources
+  tagged with Project + Environment (matches Aurora and ECS-created S3 buckets).
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: coheus
+    Description: Project tag value to match (must match Project tag on protected resources)
+
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Environment tag value to match
+
+Resources:
+  CoheusBackupVault:
+    Type: AWS::Backup::BackupVault
+    Properties:
+      BackupVaultName: !Sub '${ProjectName}-${Environment}-cohi-backup'
+      BackupVaultTags:
+        Project: !Ref ProjectName
+        Environment: !Ref Environment
+
+  BackupServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-${Environment}-aws-backup-service'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: backup.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-aws-backup-service'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  BackupPlan:
+    Type: AWS::Backup::BackupPlan
+    Properties:
+      BackupPlan:
+        BackupPlanName: !Sub '${ProjectName}-${Environment}-cohi-backup-plan'
+        BackupPlanRule:
+          - RuleName: DailySnapshots
+            TargetBackupVault: !Ref CoheusBackupVault
+            ScheduleExpression: cron(0 5 ? * * *)
+            StartWindowMinutes: 60
+            CompletionWindowMinutes: 180
+            Lifecycle:
+              DeleteAfterDays: 35
+          - RuleName: MonthlySnapshots
+            TargetBackupVault: !Ref CoheusBackupVault
+            ScheduleExpression: cron(0 6 1 * ? *)
+            StartWindowMinutes: 60
+            CompletionWindowMinutes: 300
+            Lifecycle:
+              DeleteAfterDays: 365
+      BackupPlanTags:
+        Name: !Sub '${ProjectName}-${Environment}-cohi-backup-plan'
+        Project: !Ref ProjectName
+        Environment: !Ref Environment
+
+  TagBasedBackupSelection:
+    Type: AWS::Backup::BackupSelection
+    Properties:
+      BackupPlanId: !Ref BackupPlan
+      BackupSelection:
+        SelectionName: !Sub '${ProjectName}-${Environment}-tagged-cohi-resources'
+        IamRoleArn: !GetAtt BackupServiceRole.Arn
+        ListOfTags:
+          - ConditionType: STRINGEQUALS
+            ConditionKey: Project
+            ConditionValue: !Ref ProjectName
+        Conditions:
+          StringEquals:
+            - ConditionKey: aws:ResourceTag/Environment
+              ConditionValue: !Ref Environment
+
+Outputs:
+  BackupVaultName:
+    Description: AWS Backup vault name
+    Value: !Ref CoheusBackupVault
+
+  BackupPlanId:
+    Description: AWS Backup plan ID
+    Value: !Ref BackupPlan
+
+  BackupServiceRoleArn:
+    Description: IAM role used by AWS Backup for this plan
+    Value: !GetAtt BackupServiceRole.Arn

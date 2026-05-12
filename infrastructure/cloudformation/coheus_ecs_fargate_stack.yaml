@@ -1,4 +1,4 @@
-﻿AWSTemplateFormatVersion: "2010-09-09"
+AWSTemplateFormatVersion: "2010-09-09"
 Description: |
   Coheus ECS Fargate Backend Stack (Compute Only)
 
@@ -233,6 +233,16 @@ Parameters:
     Default: ""
     Description: Optional Secrets Manager ARN whose SecretString is the raw OpenAI API key
 
+  PodcastReplicationDestinationBucketArn:
+    Type: String
+    Default: ""
+    Description: Full ARN of the DR-region replica bucket for podcast audio (S3 CRR). Leave empty to disable replication.
+
+  PodcastReplicationServiceRoleArn:
+    Type: String
+    Default: ""
+    Description: IAM role ARN trusted by s3.amazonaws.com for CRR (see docs/deployment/DR_DEPLOY_CHECKLIST.md). Required when PodcastReplicationDestinationBucketArn is set.
+
 Conditions:
   CreateNewVPC: !Equals [!Ref NetworkMode, "new"]
   IsDevEnvironment: !Equals [!Ref Environment, "dev"]
@@ -241,6 +251,9 @@ Conditions:
   HasCognito: !Not [!Equals [!Ref CognitoUserPoolId, ""]]
   HasOpenAISecret: !Not [!Equals [!Ref OpenAIApiKeySecretArn, ""]]
   WorkerDesiredCountNonZero: !Not [!Equals [!Ref WorkerDesiredCount, 0]]
+  EnablePodcastReplication: !And
+    - !Not [!Equals [!Ref PodcastReplicationDestinationBucketArn, ""]]
+    - !Not [!Equals [!Ref PodcastReplicationServiceRoleArn, ""]]
 
 Rules:
   ExistingVPCRequiresSubnets:
@@ -263,6 +276,8 @@ Resources:
   # ============================================================================
   EncryptionKey:
     Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       Description: !Sub "KMS key for ${ProjectName} ${Environment} encryption"
       EnableKeyRotation: true
@@ -633,6 +648,10 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-${Environment}-qa-artifacts"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
 
   PodcastAudioBucket:
     Type: AWS::S3::Bucket
@@ -657,9 +676,34 @@ Resources:
           - Id: ExpireOldPodcastAssets
             Status: Enabled
             ExpirationInDays: 14
+      ReplicationConfiguration: !If
+        - EnablePodcastReplication
+        - Role: !Ref PodcastReplicationServiceRoleArn
+          Rules:
+            - Id: ReplicatePodcastToDR
+              Status: Enabled
+              Priority: 1
+              Filter: {}
+              Destination:
+                Bucket: !Ref PodcastReplicationDestinationBucketArn
+                ReplicationTime:
+                  Status: Enabled
+                  Time:
+                    Minutes: 15
+                Metrics:
+                  Status: Enabled
+                  EventThreshold:
+                    Minutes: 15
+              DeleteMarkerReplication:
+                Status: Disabled
+        - !Ref AWS::NoValue
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-${Environment}-podcast-audio"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
 
   # ============================================================================
   # Application Load Balancer
