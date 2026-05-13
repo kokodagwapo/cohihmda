@@ -324,7 +324,7 @@ export async function evaluateSingleTrackedInsight(
     );
 
     // Pattern B: persist derived numeric comparison keys once for agent insights (UI + alerts).
-    if (insight.source_type === "agent") {
+    if (insight.source_type === "agent" || insight.source_type === "user_insights") {
       const ms = insight.metric_signature;
       const explicit = (ms.comparisonKeyFields || []).filter((k) =>
         ms.keyFields.includes(k)

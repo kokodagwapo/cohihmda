@@ -1277,9 +1277,18 @@ router.post(
   }
 );
 
+type InsightFeedbackRef = "generated_insights" | "user_generated_insights";
+
+function parseInsightFeedbackRef(query: unknown): InsightFeedbackRef {
+  const raw = typeof query === "string" ? query.trim() : "";
+  if (raw === "user_generated_insights") return "user_generated_insights";
+  return "generated_insights";
+}
+
 /**
  * POST /api/dashboard/insights/:id/feedback
  * Submit feedback (thumbs up/down, tags, comment) on a specific insight.
+ * Query: insight_ref=generated_insights (default) | user_generated_insights (My Insights).
  * Requires authentication. Stores user_id/email/name from JWT.
  */
 router.post(
@@ -1295,6 +1304,8 @@ router.post(
         return res.status(400).json({ error: "Invalid insight ID" });
       }
 
+      const insightRef = parseInsightFeedbackRef(req.query.insight_ref);
+
       const feedbackSchema = z.object({
         rating: z.union([z.literal(-1), z.literal(1)]),
         tags: z.array(z.string()).optional().default([]),
@@ -1303,24 +1314,41 @@ router.post(
 
       const { rating, tags, comment } = feedbackSchema.parse(req.body);
 
-      // Fetch insight headline/bucket for denormalized storage
-      const insightResult = await tenantContext.tenantPool.query(
-        `SELECT headline, bucket FROM generated_insights WHERE id = $1`,
-        [insightId]
-      );
+      let headline: string;
+      let bucket: string | null;
 
-      if (insightResult.rows.length === 0) {
-        return res.status(404).json({ error: "Insight not found" });
+      if (insightRef === "user_generated_insights") {
+        const insightResult = await tenantContext.tenantPool.query(
+          `SELECT headline, bucket FROM public.user_generated_insights WHERE id = $1 AND user_id = $2`,
+          [insightId, req.userId]
+        );
+        if (insightResult.rows.length === 0) {
+          return res.status(404).json({ error: "Insight not found" });
+        }
+        headline = insightResult.rows[0].headline;
+        bucket = insightResult.rows[0].bucket ?? null;
+      } else {
+        const insightResult = await tenantContext.tenantPool.query(
+          `SELECT headline, bucket FROM generated_insights WHERE id = $1`,
+          [insightId]
+        );
+        if (insightResult.rows.length === 0) {
+          return res.status(404).json({ error: "Insight not found" });
+        }
+        headline = insightResult.rows[0].headline;
+        bucket = insightResult.rows[0].bucket ?? null;
       }
 
-      const { headline, bucket } = insightResult.rows[0];
-
-      // Upsert feedback (one rating per user per insight)
-      const result = await tenantContext.tenantPool.query(
-        `INSERT INTO insight_feedback (insight_id, user_id, user_email, user_name, rating, tags, comment, insight_headline, insight_bucket)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         ON CONFLICT ON CONSTRAINT insight_feedback_pkey DO NOTHING
-         RETURNING id`,
+      await tenantContext.tenantPool.query(
+        `INSERT INTO insight_feedback (insight_id, user_id, user_email, user_name, rating, tags, comment, insight_headline, insight_bucket, insight_ref)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         ON CONFLICT (insight_ref, insight_id, user_id) DO UPDATE SET
+           rating = EXCLUDED.rating,
+           tags = EXCLUDED.tags,
+           comment = EXCLUDED.comment,
+           insight_headline = EXCLUDED.insight_headline,
+           insight_bucket = EXCLUDED.insight_bucket,
+           created_at = NOW()`,
         [
           insightId,
           req.userId,
@@ -1331,20 +1359,11 @@ router.post(
           comment,
           headline,
           bucket,
+          insightRef,
         ]
       );
 
-      // If the insert was a no-op because the user already rated, update instead
-      if (result.rows.length === 0) {
-        await tenantContext.tenantPool.query(
-          `UPDATE insight_feedback
-           SET rating = $1, tags = $2, comment = $3, created_at = NOW()
-           WHERE insight_id = $4 AND user_id = $5`,
-          [rating, tags, comment, insightId, req.userId]
-        );
-      }
-
-      res.json({ success: true, insightId, rating });
+      res.json({ success: true, insightId, rating, insight_ref: insightRef });
     } catch (error: any) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: "Invalid feedback data", details: error.errors });
@@ -1361,7 +1380,7 @@ router.post(
 
 /**
  * GET /api/dashboard/insights/:id/feedback
- * Get feedback for a specific insight. Returns all feedback entries.
+ * Query: insight_ref=generated_insights (default) | user_generated_insights
  */
 router.get(
   "/insights/:id/feedback",
@@ -1376,12 +1395,14 @@ router.get(
         return res.status(400).json({ error: "Invalid insight ID" });
       }
 
+      const insightRef = parseInsightFeedbackRef(req.query.insight_ref);
+
       const result = await tenantContext.tenantPool.query(
-        `SELECT id, insight_id, user_id, user_email, user_name, rating, tags, comment, created_at
+        `SELECT id, insight_id, insight_ref, user_id, user_email, user_name, rating, tags, comment, created_at
          FROM insight_feedback
-         WHERE insight_id = $1
+         WHERE insight_id = $1 AND insight_ref = $2
          ORDER BY created_at DESC`,
-        [insightId]
+        [insightId, insightRef]
       );
 
       // Also get the current user's feedback for this insight (for UI state)
@@ -1391,6 +1412,7 @@ router.get(
         feedback: result.rows,
         myFeedback,
         total: result.rows.length,
+        insight_ref: insightRef,
       });
     } catch (error: any) {
       console.error("Error fetching insight feedback:", error);

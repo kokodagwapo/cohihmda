@@ -15,7 +15,7 @@ import type { Page, Route } from "@playwright/test";
  *  6. [UI]        "Add Prompt" opens dialog titled "Add prompt" with Title, Schedule (Batch / On demand), Prompt text, Specifiers; clicking Create with either field empty does not POST.
  *  7. [MUTATION]  Self-scoped prompt prefixed qaAgentRunTag- is created via POST /api/dashboard/insights/my/prompts, visible in the list, then removed via DELETE.
  *  8. [API]       POST /api/dashboard/insights/my/prompts/:promptId/run for an enabled on-demand prompt produces a custom_prompt user_generated_insights row.
- *  9. [UI]        custom_prompt cards show the "Custom Insight" badge; behavior cards show "Why you're seeing this — <profile_relevance>".
+ *  9. [UI]        custom_prompt cards show the "Custom Insight" badge and "Why you're seeing this — <prompt title>"; behavior cards show profile_relevance in the same line.
  * 10. [UI]        My Insights tab renders a "Tracked insights" section using TrackedInsightsWatchlist (no standalone /watchlist route).
  * 11. [API]       /my/refresh-all-users is hidden for non-super-admin users; super-admin path covered by separate suite.
  * 12. [ASSERTION] Create-prompt request body persists `specifiers` as a JSON object (not a stringified WHERE clause).
@@ -61,6 +61,7 @@ const MOCK_CUSTOM_PROMPT_INSIGHT = {
   source: "custom_prompt",
   insight_origin: "custom_prompt",
   user_insight_prompt_id: "qa-prompt-7",
+  custom_prompt_title: "QA: Custom prompt fixture title",
   headline: "QA: Branch 204 weekly health summary",
   understory: "Pull-through improved 4 points week-over-week.",
   functional_category: "operations",
@@ -581,7 +582,11 @@ test.describe("My Insights — Phase 1 (COHI-367)", () => {
       timeout: 10_000,
     });
 
-    // AC 9: behavior cards expose the profile_relevance line as
+    await expect(
+      insights.getByText(MOCK_CUSTOM_PROMPT_INSIGHT.custom_prompt_title, { exact: false }),
+    ).toBeVisible();
+
+    // AC 9: behavior cards expose profile_relevance as
     // "Why you're seeing this — <text>" (apostrophe rendered from &apos;).
     // Both behavior insights in the fixture carry profile_relevance, so the
     // label appears twice — assert at least one rendering plus the unique

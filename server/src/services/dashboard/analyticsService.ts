@@ -158,6 +158,8 @@ export interface Insight {
   supporting_data?: { byPeriod?: Array<{ period: string; periodLabel?: string; averagePullThrough?: number; totalUnits?: number; totalVolume?: number; topPerformerName?: string; topPerformerUnits?: number; topPerformerVolume?: number }> };
   /** My Insights: sentence tying the card to the user's interest profile */
   profile_relevance?: string | null;
+  /** My Insights: title of the saved prompt when insight_origin is custom_prompt */
+  custom_prompt_title?: string | null;
 }
 
 /**
@@ -3391,17 +3393,18 @@ export async function getMyInsights(
     }
 
     const result = await tenantPool.query(
-      `SELECT *
-       FROM public.user_generated_insights
-       WHERE user_id = $1 AND date_filter = $2
+      `SELECT u.*, p.title AS custom_prompt_title
+       FROM public.user_generated_insights u
+       LEFT JOIN public.user_insight_prompts p ON p.id = u.user_insight_prompt_id
+       WHERE u.user_id = $1 AND u.date_filter = $2
        ORDER BY
-         CASE bucket
+         CASE u.bucket
            WHEN 'critical' THEN 0
            WHEN 'attention' THEN 1
            WHEN 'working' THEN 2
            WHEN 'context' THEN 3
          END,
-         COALESCE(value_score, severity_score) DESC NULLS LAST`,
+         COALESCE(u.value_score, u.severity_score) DESC NULLS LAST`,
       [userId, dateFilter]
     );
 
@@ -3474,6 +3477,10 @@ export async function getMyInsights(
           detail_data: row.detail_data || null,
           functional_category: row.functional_category || null,
           profile_relevance: row.profile_relevance ?? null,
+          custom_prompt_title:
+            row.insight_origin === "custom_prompt" && typeof row.custom_prompt_title === "string"
+              ? row.custom_prompt_title.trim() || null
+              : null,
         };
       })
     );
