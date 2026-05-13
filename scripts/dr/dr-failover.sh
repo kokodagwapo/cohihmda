@@ -93,7 +93,7 @@ done
 
 [[ -n "$ENVIRONMENT" ]] || { echo "ERROR: --environment required (dev|staging|prod)"; exit 1; }
 
-AWS=(aws "${PROFILE_ARGS[@]:-}")
+AWS=(aws ${PROFILE_ARGS[@]+"${PROFILE_ARGS[@]}"})
 DR_LANDING_STACK="coheus-${ENVIRONMENT}-aurora-secondary"
 DR_BACKEND_STACK="coheus-${ENVIRONMENT}-dr-backend"
 PRIMARY_STACK="coheus-${ENVIRONMENT}-backend"
