@@ -361,7 +361,6 @@ definitions:
         name: DR Full Failover (Dev) — restore + deploy + report
         oidc: true
         deployment: dev
-        trigger: manual
         max-time: 60
         script:
           - *setup-oidc
@@ -375,7 +374,6 @@ definitions:
         name: DR Full Failover (Prod) — restore + deploy + report
         oidc: true
         deployment: production
-        trigger: manual
         max-time: 60
         script:
           - *setup-oidc
@@ -389,7 +387,6 @@ definitions:
         name: DR Deploy Backend Only (Dev, us-east-1)
         oidc: true
         deployment: dev
-        trigger: manual
         script:
           - *setup-oidc
           - export AWS_REGION="${DR_AWS_REGION:-us-east-1}"
@@ -401,7 +398,6 @@ definitions:
         name: DR Deploy Backend Only (Prod, us-east-1)
         oidc: true
         deployment: production
-        trigger: manual
         script:
           - *setup-oidc
           - export AWS_REGION="${DR_AWS_REGION:-us-east-1}"
@@ -413,7 +409,6 @@ definitions:
         name: DR Deploy Frontend (Dev, us-east-1)
         oidc: true
         deployment: dev
-        trigger: manual
         caches:
           - npm
         script:
@@ -426,7 +421,6 @@ definitions:
         name: DR Deploy Frontend (Prod, us-east-1)
         oidc: true
         deployment: production
-        trigger: manual
         caches:
           - npm
         script:
@@ -439,7 +433,6 @@ definitions:
         name: DR Run Migrations (Dev, us-east-1)
         oidc: true
         deployment: dev
-        trigger: manual
         script:
           - *setup-oidc
           - export AWS_REGION="${DR_AWS_REGION:-us-east-1}"
@@ -454,7 +447,6 @@ definitions:
         name: DR Teardown Compute (Dev)
         oidc: true
         deployment: dev
-        trigger: manual
         script:
           - *setup-oidc
           - export AWS_REGION="${DR_AWS_REGION:-us-east-1}"
