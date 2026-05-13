@@ -102,6 +102,7 @@ CLUSTER_ID="${CLUSTER_ID:-coheus-${ENVIRONMENT}-dr-restore}"
 INSTANCE_ID="${CLUSTER_ID}-1"
 TEMPLATE="infrastructure/cloudformation/coheus_ecs_fargate_stack.yaml"
 LANDING_TEMPLATE="infrastructure/cloudformation/coheus_aurora_secondary_stack.yaml"
+CF_S3_BUCKET="${CF_S3_BUCKET:-coheus-sam-artifacts-339712788893}"
 
 get_primary_param() {
   "${AWS[@]}" cloudformation describe-stacks \
@@ -393,6 +394,7 @@ echo ">>> Deploying ${DR_BACKEND_STACK} in ${DR_REGION}..."
 "${AWS[@]}" cloudformation deploy \
   --stack-name "$DR_BACKEND_STACK" \
   --template-file "$TEMPLATE" \
+  --s3-bucket "$CF_S3_BUCKET" --s3-prefix "dr-deploy" \
   --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
   --region "$DR_REGION" \
   --no-fail-on-empty-changeset \
