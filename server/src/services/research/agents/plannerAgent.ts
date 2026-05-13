@@ -22,6 +22,8 @@ export interface InvestigationQuestion {
   category: string;
   /** When the user asks for a specific output format (e.g. table showing X by Y), describe it here. */
   outputHint?: string | null;
+  /** My Insights: ties this question to a saved `user_insight_prompts.id` for data-backed custom cards. */
+  userInsightPromptId?: string | null;
 }
 
 export interface ResearchPlan {

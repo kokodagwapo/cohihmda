@@ -65,6 +65,24 @@ const MOCK_CUSTOM_PROMPT_INSIGHT = {
   understory: "Pull-through improved 4 points week-over-week.",
   functional_category: "operations",
   generation_method: "user_agent",
+  detail_data: {
+    type: "agent_finding",
+    title: "QA: Branch 204 weekly health summary",
+    summary: "Pull-through improved 4 points week-over-week.",
+    confidence: "medium",
+    keyMetrics: { pull_through_pct: 72 },
+    keyMetricDescriptions: { pull_through_pct: "Pull-through rate for the cohort" },
+    keyMetricFormats: { pull_through_pct: "percent" },
+    evidence: [
+      {
+        sql: "SELECT 72::numeric AS pull_through_pct",
+        explanation: "Fixture headline KPI",
+        rows: [{ pull_through_pct: 72 }],
+        rowCount: 1,
+        fields: ["pull_through_pct"],
+      },
+    ],
+  },
 };
 
 const MOCK_BEHAVIOR_INSIGHT_ATTENTION = {

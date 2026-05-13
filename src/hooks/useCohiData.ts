@@ -31,7 +31,7 @@ export interface CohiInsight {
   risk_if_ignored?: string;
   recommended_action?: string;
   owner?: string;
-  generation_method?: "pipeline" | "agent";
+  generation_method?: "pipeline" | "agent" | "user_agent";
   detail_data?: any;
   functional_category?: string | null;
   /** Dashboard insights: link back to originating page and restore filters */
@@ -255,6 +255,27 @@ export const useCohiData = (
       return resp.jobId;
     } catch (error: any) {
       console.error("Error refreshing My Insights (insights only):", error);
+      setInsightsError(error.message || "Failed to refresh My Insights");
+      return null;
+    }
+  }, [selectedTenantId]);
+
+  /**
+   * Current user: recompute interest profile and regenerate My Insights (full pipeline).
+   * Same as POST /insights/my/refresh — intended for super-admin testing UI; any caller may use it.
+   */
+  const refreshMyInsightsSelfFull = useCallback(async (): Promise<string | null> => {
+    setInsightsError(null);
+    try {
+      const tenantQ = new URLSearchParams({ fresh: "true" });
+      if (selectedTenantId) tenantQ.set("tenant_id", selectedTenantId);
+      const resp = await api.request<{ jobId: string }>(
+        `/api/dashboard/insights/my/refresh?${tenantQ.toString()}`,
+        { method: "POST" }
+      );
+      return resp.jobId;
+    } catch (error: any) {
+      console.error("Error running full My Insights refresh (profile + insights):", error);
       setInsightsError(error.message || "Failed to refresh My Insights");
       return null;
     }
@@ -674,6 +695,7 @@ export const useCohiData = (
     refreshMyInsightsAllUsers,
     refreshMyInsightsProfile,
     refreshMyInsightsInsightsOnly,
+    refreshMyInsightsSelfFull,
     refreshBucket,
     generateMoreInsights,
     reloadInsightsFromDb,

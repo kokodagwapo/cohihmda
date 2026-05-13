@@ -198,7 +198,9 @@ export async function runInsightInvestigator(
   knowledgeContext?: string,
   revenueFormula?: string,
   accessFilter?: LoanAccessFilter | null,
-  tenantIdForSql?: string
+  tenantIdForSql?: string,
+  /** Appended to user prompt: cohort rules the server enforces on SQL execution (e.g. My Insights specifiers). */
+  mandatoryCohortMarkdown?: string
 ): Promise<InsightFinding> {
   const now = new Date();
   const todayStr = now.toISOString().split("T")[0];
@@ -234,6 +236,14 @@ export async function runInsightInvestigator(
   if (revenueFormula) {
     userContentParts.push(
       `\n## TENANT REVENUE FORMULA (MUST USE)\nThis tenant's configured revenue SQL expression:\n\`\`\`sql\n${revenueFormula}\n\`\`\`\nUse this EXACTLY when computing revenue. Do NOT invent your own formula or reference fields not in this expression.`
+    );
+  }
+
+  if (mandatoryCohortMarkdown && mandatoryCohortMarkdown.trim()) {
+    userContentParts.push(
+      `\n## Mandatory cohort filters\n${mandatoryCohortMarkdown.trim()}\n\n` +
+        "The server injects these predicates on every SELECT you run against `public.loans l` (alongside loan access rules). " +
+        "Queries must still use `FROM public.loans l`; do not try to bypass cohort scope."
     );
   }
 

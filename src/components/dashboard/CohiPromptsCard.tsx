@@ -542,6 +542,12 @@ function mapMyInsightsResponse(data: { insights?: Record<string, unknown>[] }): 
   }));
 }
 
+/** True when drill-down should use agent-finding evidence UI (tenant agent or My Insights user_agent). */
+function isAgentFindingDrillDown(insight: CohiInsight): boolean {
+  const gm = insight.generation_method as string | undefined;
+  return (gm === "agent" || gm === "user_agent") && insight.detail_data?.type === "agent_finding";
+}
+
 interface BucketLaneProps {
   config: BucketConfig;
   insights: CohiInsight[];
@@ -1190,6 +1196,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
     needsGeneration,
     refreshInsights,
     refreshMyInsightsAllUsers,
+    refreshMyInsightsSelfFull,
     refreshBucket,
     generateMoreInsights,
     reloadInsightsFromDb,
@@ -1220,6 +1227,9 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
 
   const [myInsightsAllUsersBusy, setMyInsightsAllUsersBusy] = useState(false);
   const [myInsightsAllUsersError, setMyInsightsAllUsersError] = useState<string | null>(null);
+
+  const [myInsightsSelfBusy, setMyInsightsSelfBusy] = useState(false);
+  const [myInsightsSelfError, setMyInsightsSelfError] = useState<string | null>(null);
 
   const [myPrompts, setMyPrompts] = useState<UserMyInsightPrompt[]>([]);
   const [myPromptsLoading, setMyPromptsLoading] = useState(false);
@@ -1295,9 +1305,10 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
 
   const isRefreshing = refreshJob.status === "processing";
   const isMyInsightsAllUsersRefreshing = myInsightsAllUsersBusy;
+  const isMyInsightsSelfRefreshing = myInsightsSelfBusy;
   const isMyPromptRunBusy = myPromptRunUi.kind === "processing";
   const isAnyMyInsightsActionBusy =
-    isMyInsightsAllUsersRefreshing || isMyPromptRunBusy;
+    isMyInsightsAllUsersRefreshing || isMyInsightsSelfRefreshing || isMyPromptRunBusy;
   const isAgentGenerating = agentJob.status === "processing";
 
   const loadMyInsights = useCallback(async () => {
@@ -1482,6 +1493,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
   const handleRefreshMyInsightsAllUsers = useCallback(async () => {
     if (!isSuperAdminUser || isAnyMyInsightsActionBusy) return;
     setMyInsightsAllUsersError(null);
+    setMyInsightsSelfError(null);
     setMyInsightsAllUsersBusy(true);
     try {
       const jobId = await refreshMyInsightsAllUsers();
@@ -1501,6 +1513,33 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
     isSuperAdminUser,
     isAnyMyInsightsActionBusy,
     refreshMyInsightsAllUsers,
+    pollJobUntilComplete,
+    loadMyInsights,
+  ]);
+
+  const handleRefreshMyInsightsSelf = useCallback(async () => {
+    if (!isSuperAdminUser || isAnyMyInsightsActionBusy) return;
+    setMyInsightsSelfError(null);
+    setMyInsightsAllUsersError(null);
+    setMyInsightsSelfBusy(true);
+    try {
+      const jobId = await refreshMyInsightsSelfFull();
+      if (!jobId) return;
+      await pollJobUntilComplete(jobId);
+      setMyInsightsSelfError(null);
+      void loadMyInsights();
+    } catch (e: unknown) {
+      setMyInsightsSelfError(
+        e instanceof Error ? e.message : "My Insights refresh failed"
+      );
+      void loadMyInsights();
+    } finally {
+      setMyInsightsSelfBusy(false);
+    }
+  }, [
+    isSuperAdminUser,
+    isAnyMyInsightsActionBusy,
+    refreshMyInsightsSelfFull,
     pollJobUntilComplete,
     loadMyInsights,
   ]);
@@ -1739,7 +1778,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
   // Drill-down logic — all insights are drillable now (evidence tables are self-describing)
   const handleInsightClick = useCallback(
     (insight: CohiInsight) => {
-      if (insight.generation_method === "agent" && insight.detail_data?.type === "agent_finding") {
+      if (isAgentFindingDrillDown(insight)) {
         const dd = insight.detail_data;
         const finding: Finding = {
           questionId: 0,
@@ -1854,9 +1893,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
             );
           } else {
             // Agent / pipeline: send signature hints; server normalizes for agent/pipeline.
-            const isAgentInsight =
-              insight.generation_method === "agent" &&
-              insight.detail_data?.type === "agent_finding";
+            const isAgentInsight = isAgentFindingDrillDown(insight);
 
             let metric_signature: { sql: string; keyFields: string[] };
             let source_type: string;
@@ -2390,6 +2427,20 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
                 <div className="flex flex-wrap justify-end gap-2">
                   <button
                     type="button"
+                    onClick={() => void handleRefreshMyInsightsSelf()}
+                    disabled={isAnyMyInsightsActionBusy}
+                    className="inline-flex shrink-0 items-center justify-center gap-2 px-4 py-2 rounded-lg border border-amber-600 bg-white hover:bg-amber-50 dark:bg-slate-900 dark:hover:bg-amber-950/30 text-amber-900 dark:text-amber-200 text-sm font-medium disabled:opacity-50"
+                    title="Super admin (testing): recompute your interest profile and regenerate My Insights for the account you are logged in as"
+                  >
+                    {isMyInsightsSelfRefreshing ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="w-4 h-4" />
+                    )}
+                    Regenerate My Insights
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => void handleRefreshMyInsightsAllUsers()}
                     disabled={isAnyMyInsightsActionBusy}
                     className="inline-flex shrink-0 items-center justify-center gap-2 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium disabled:opacity-50"
@@ -2403,9 +2454,9 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
                     Regenerate for all users
                   </button>
                 </div>
-                {myInsightsAllUsersError && (
+                {(myInsightsSelfError || myInsightsAllUsersError) && (
                   <p className="text-xs text-rose-600 dark:text-rose-400 text-right max-w-md" role="alert">
-                    {myInsightsAllUsersError}
+                    {[myInsightsSelfError, myInsightsAllUsersError].filter(Boolean).join(" · ")}
                   </p>
                 )}
               </div>
@@ -2425,7 +2476,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
                 <p className="text-sm text-slate-600 dark:text-slate-400">
                   No personalized insights yet for your account. They generate automatically after each data sync.
                   {isSuperAdminUser
-                    ? " Super admins can use Regenerate for all users above to refresh every active user in this tenant."
+                    ? " Super admins can use Regenerate My Insights (your profile + feed) or Regenerate for all users above."
                     : ""}
                 </p>
               </div>

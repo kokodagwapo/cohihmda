@@ -4,7 +4,8 @@
  */
 
 import pg from "pg";
-import { safeExecuteSQL } from "../research/tools.js";
+import { safeExecuteSQL, type SafeExecuteSqlOptions } from "../research/tools.js";
+import type { LoanAccessFilter } from "../userLoanAccessService.js";
 import { inferTrackedMetricPolarity } from "./trackedPolarityInference.js";
 import { logWarn } from "../logger.js";
 import { safeParseMetricSpec } from "../metrics/metricSpec.js";
@@ -35,7 +36,8 @@ function derivePolarities(
 }
 
 function parseRawHeadlineSig(
-  raw: unknown
+  raw: unknown,
+  metricComposeAccessFilter?: LoanAccessFilter | null
 ):
   | {
       sql: string;
@@ -57,7 +59,7 @@ function parseRawHeadlineSig(
     const sp = safeParseMetricSpec(o.metricSpec);
     if (!sp.success) return null;
     try {
-      const composed = composeMetricSql(sp.data, null);
+      const composed = composeMetricSql(sp.data, metricComposeAccessFilter ?? null);
       sql = composed.sql.trim();
       params = composed.params;
     } catch {
@@ -98,6 +100,14 @@ function coerceFiniteNumber(v: unknown): number | null {
   return null;
 }
 
+export type ValidateHeadlineMetricSqlOptions = Pick<
+  SafeExecuteSqlOptions,
+  "tenantId" | "accessFilter"
+> & {
+  /** When headline uses metricSpec, pass the same composed loan-scope filter used at investigation time. */
+  metricComposeAccessFilter?: LoanAccessFilter | null;
+};
+
 /**
  * Dry-run headline SQL; on success returns normalized shape for detail_data.
  * keyMetrics: optional loose numeric sanity check (logs warning on &gt;8% relative drift).
@@ -105,9 +115,10 @@ function coerceFiniteNumber(v: unknown): number | null {
 export async function validateHeadlineMetricSignatureForPersist(
   tenantPool: pg.Pool,
   raw: unknown,
-  keyMetrics: Record<string, string | number> | undefined
+  keyMetrics: Record<string, string | number> | undefined,
+  sqlOptions?: ValidateHeadlineMetricSqlOptions
 ): Promise<HeadlineMetricValidationResult> {
-  const parsed = parseRawHeadlineSig(raw);
+  const parsed = parseRawHeadlineSig(raw, sqlOptions?.metricComposeAccessFilter);
   if (!parsed) {
     return {
       ok: false as const,
@@ -116,9 +127,17 @@ export async function validateHeadlineMetricSignatureForPersist(
     };
   }
 
+  const execOpts: SafeExecuteSqlOptions | undefined =
+    sqlOptions?.tenantId != null || sqlOptions?.accessFilter != null
+      ? {
+          tenantId: sqlOptions.tenantId,
+          accessFilter: sqlOptions.accessFilter,
+        }
+      : undefined;
+
   let queryResult;
   try {
-    queryResult = await safeExecuteSQL(parsed.sql, tenantPool, parsed.params);
+    queryResult = await safeExecuteSQL(parsed.sql, tenantPool, parsed.params, execOpts);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     return { ok: false as const, error: `SQL error: ${msg}` };
