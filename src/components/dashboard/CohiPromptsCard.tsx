@@ -542,6 +542,12 @@ function mapMyInsightsResponse(data: { insights?: Record<string, unknown>[] }): 
   }));
 }
 
+/** True when drill-down should use agent-finding evidence UI (tenant agent or My Insights user_agent). */
+function isAgentFindingDrillDown(insight: CohiInsight): boolean {
+  const gm = insight.generation_method as string | undefined;
+  return (gm === "agent" || gm === "user_agent") && insight.detail_data?.type === "agent_finding";
+}
+
 interface BucketLaneProps {
   config: BucketConfig;
   insights: CohiInsight[];
@@ -1739,7 +1745,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
   // Drill-down logic — all insights are drillable now (evidence tables are self-describing)
   const handleInsightClick = useCallback(
     (insight: CohiInsight) => {
-      if (insight.generation_method === "agent" && insight.detail_data?.type === "agent_finding") {
+      if (isAgentFindingDrillDown(insight)) {
         const dd = insight.detail_data;
         const finding: Finding = {
           questionId: 0,
@@ -1854,9 +1860,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
             );
           } else {
             // Agent / pipeline: send signature hints; server normalizes for agent/pipeline.
-            const isAgentInsight =
-              insight.generation_method === "agent" &&
-              insight.detail_data?.type === "agent_finding";
+            const isAgentInsight = isAgentFindingDrillDown(insight);
 
             let metric_signature: { sql: string; keyFields: string[] };
             let source_type: string;

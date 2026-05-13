@@ -736,7 +736,7 @@ router.delete(
 
 /**
  * POST /api/dashboard/insights/my/prompts/:promptId/run
- * Run one custom prompt now (async job); execution uses runUserCustomPromptLlm path on the server.
+ * Run one custom prompt now (async job); execution uses the data-backed investigator + evaluator on the server.
  */
 router.post(
   "/insights/my/prompts/:promptId/run",

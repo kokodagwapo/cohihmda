@@ -64,10 +64,19 @@ import {
   rankRelevantVerifiedTests,
 } from "../dataQualityInsightMatcher.js";
 import { getDataQualityTestById } from "../../dataQuality/dataQualityTests.js";
+import type { LoanAccessFilter } from "../../userLoanAccessService.js";
 
 // ============================================================================
 // Types
 // ============================================================================
+
+export interface FinalizeAgentDetailDataOptions {
+  tenantId?: string;
+  /** Composed loan access + optional specifier cohort; applied when validating/running headline SQL. */
+  accessFilter?: LoanAccessFilter | null;
+  /** When set, used for metricSpec headline composition only (defaults to accessFilter). */
+  metricComposeAccessFilter?: LoanAccessFilter | null;
+}
 
 export interface InsightGenerationResult {
   success: boolean;
@@ -1368,7 +1377,8 @@ function buildDetailDataFromFinding(
 export async function finalizeAgentDetailData(
   tenantPool: pg.Pool,
   insight: EvaluatedInsight,
-  finding: InsightFinding
+  finding: InsightFinding,
+  options?: FinalizeAgentDetailDataOptions
 ): Promise<any> {
   const dd = buildDetailDataFromFinding(insight, finding);
   const rawHeadline = finding.headlineMetricSignature;
@@ -1378,10 +1388,19 @@ export async function finalizeAgentDetailData(
       "Investigator did not provide headlineMetricSignature";
     return dd;
   }
+  const metricCompose =
+    options?.metricComposeAccessFilter !== undefined
+      ? options.metricComposeAccessFilter
+      : options?.accessFilter;
   const validation = await validateHeadlineMetricSignatureForPersist(
     tenantPool,
     rawHeadline,
-    finding.keyMetrics
+    finding.keyMetrics,
+    {
+      tenantId: options?.tenantId,
+      accessFilter: options?.accessFilter,
+      metricComposeAccessFilter: metricCompose,
+    }
   );
   if (validation.ok) {
     dd.headlineMetricSignature = validation.normalized;

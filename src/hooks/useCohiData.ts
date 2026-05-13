@@ -31,7 +31,7 @@ export interface CohiInsight {
   risk_if_ignored?: string;
   recommended_action?: string;
   owner?: string;
-  generation_method?: "pipeline" | "agent";
+  generation_method?: "pipeline" | "agent" | "user_agent";
   detail_data?: any;
   functional_category?: string | null;
   /** Dashboard insights: link back to originating page and restore filters */

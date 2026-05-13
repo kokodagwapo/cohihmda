@@ -14,6 +14,48 @@ import type { CategoryDefinition } from "./categoryDefinitions.js";
 
 export type { InvestigationQuestion, ResearchPlan };
 
+/**
+ * Ensure each My Insights custom prompt id is bound to exactly one question (first wins).
+ * Append a template question for any missing id.
+ */
+export function repairMyInsightsCustomPromptQuestions(
+  questions: InvestigationQuestion[],
+  customPrompts: { id: string; title: string; prompt_text: string }[]
+): InvestigationQuestion[] {
+  if (!customPrompts.length) return questions;
+  const validIds = new Set(customPrompts.map((p) => p.id).filter((id) => id.length > 0));
+  const seen = new Set<string>();
+  const out: InvestigationQuestion[] = questions.map((q) => {
+    const raw = (q as InvestigationQuestion & { userInsightPromptId?: string | null })
+      .userInsightPromptId;
+    const pid = typeof raw === "string" ? raw.trim() : "";
+    if (!pid || !validIds.has(pid) || seen.has(pid)) {
+      const { userInsightPromptId: _drop, ...rest } = q as InvestigationQuestion & {
+        userInsightPromptId?: string | null;
+      };
+      return rest as InvestigationQuestion;
+    }
+    seen.add(pid);
+    return { ...q, userInsightPromptId: pid };
+  });
+
+  for (const p of customPrompts) {
+    if (!p.id || seen.has(p.id)) continue;
+    out.push({
+      id: 0,
+      topic: `Custom prompt — ${p.title}`,
+      hypothesis:
+        "Produce SQL-backed evidence that answers this saved user question; cohort filters from specifiers are enforced server-side.",
+      approach: `Use public.loans l. Address: ${p.prompt_text.slice(0, 1200)}`,
+      priority: "high",
+      category: "my_insights_custom_prompt",
+      userInsightPromptId: p.id,
+    });
+    seen.add(p.id);
+  }
+  return out;
+}
+
 // ============================================================================
 // System Prompt
 // ============================================================================
@@ -40,7 +82,8 @@ Your output is a JSON object:
       "hypothesis": "What you expect to find",
       "approach": "Specific SQL investigation strategy — mention column names, date expressions using CURRENT_DATE, aggregation methods",
       "priority": "high" | "medium" | "low",
-      "category": "free-form category name"
+      "category": "free-form category name",
+      "userInsightPromptId": "optional UUID string when this question fulfills a listed My Insights custom prompt"
     }
   ]
 }
@@ -162,7 +205,7 @@ export interface InsightPlannerContext {
    */
   userInterestProfile?: string;
   /** My Insights: enabled user prompts (batch + on-demand) — planner must cover each with ≥1 question. */
-  userCustomPrompts?: { title: string; prompt_text: string }[];
+  userCustomPrompts?: { id: string; title: string; prompt_text: string }[];
 }
 
 function buildUserPrompt(ctx: InsightPlannerContext): string {
@@ -232,9 +275,9 @@ function buildUserPrompt(ctx: InsightPlannerContext): string {
     ctx.userCustomPrompts.forEach((p, i) => {
       const body =
         p.prompt_text.length > 1200 ? `${p.prompt_text.slice(0, 1200)}… (truncated)` : p.prompt_text;
-      prompt += `${i + 1}. **${p.title}**\n${body}\n\n`;
+      prompt += `${i + 1}. **id=${p.id}** **${p.title}**\n${body}\n\n`;
     });
-    prompt += `MANDATORY (My Insights): For EACH listed custom prompt above, include at least one investigation question whose topic or hypothesis explicitly ties to that prompt's intent (reference the prompt title in the topic text). These questions are required in addition to your balanced mix of risk, performance, and context questions.\n\n`;
+    prompt += `MANDATORY (My Insights): For EACH listed custom prompt above, include at least one investigation question whose topic or hypothesis explicitly ties to that prompt's intent. Set the JSON field "userInsightPromptId" to that prompt's id (the value after id= in the header). Each listed id must appear on exactly one question.\n\n`;
   }
 
   if (ctx.bucketFocus) {
@@ -290,6 +333,13 @@ export async function runInsightPlannerAgent(
 
   if (!parsed.questions || !Array.isArray(parsed.questions) || parsed.questions.length === 0) {
     throw new Error("Insight planner returned no investigation questions.");
+  }
+
+  if (context.userCustomPrompts && context.userCustomPrompts.length > 0) {
+    parsed.questions = repairMyInsightsCustomPromptQuestions(
+      parsed.questions as InvestigationQuestion[],
+      context.userCustomPrompts
+    );
   }
 
   parsed.questions = parsed.questions.map((q, i) => ({ ...q, id: i + 1 }));
