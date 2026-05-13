@@ -96,7 +96,7 @@ echo "    KMS: ${KMS}"
 
 RESTORE_SOURCE=()
 if [[ -n "${SNAPSHOT_ARN}" ]]; then
-  RESTORE_SOURCE=(--snapshot-arn "${SNAPSHOT_ARN}")
+  RESTORE_SOURCE=(--snapshot-identifier "${SNAPSHOT_ARN}")
 else
   RESTORE_SOURCE=(--snapshot-identifier "${SNAPSHOT_ID}")
 fi
