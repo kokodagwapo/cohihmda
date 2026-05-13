@@ -271,7 +271,18 @@ echo ""
 echo ">>> Reading primary stack params (${PRIMARY_STACK})..."
 
 DR_IMAGE_TAG="${DR_IMAGE_TAG:-$(get_primary_param ContainerImageTag)}"
-DR_JWT_SECRET="${DR_JWT_SECRET:-$(get_primary_param JwtSecret)}"
+
+# JwtSecret has NoEcho=true so CloudFormation returns ****; read from DR region replica
+if [[ -z "${DR_JWT_SECRET:-}" ]]; then
+  DR_JWT_SECRET=$("${AWS[@]}" secretsmanager get-secret-value \
+    --secret-id "coheus/${ENVIRONMENT}/jwt" --region "$DR_REGION" \
+    --query 'SecretString' --output text 2>/dev/null | jq -r '.secret // empty' 2>/dev/null || echo "")
+  if [[ -z "$DR_JWT_SECRET" ]]; then
+    echo "ERROR: Could not read JWT secret from coheus/${ENVIRONMENT}/jwt in $DR_REGION"
+    echo "       Run: scripts/dr/setup-secret-replicas.sh to replicate secrets to DR region"
+    exit 1
+  fi
+fi
 DR_CERTIFICATE_ARN="${DR_CERTIFICATE_ARN:-}"
 
 # Auto-find wildcard cert in DR region if not set
@@ -292,7 +303,16 @@ if [[ "$SKIP_COGNITO" == "true" ]]; then
 fi
 DR_COGNITO_USER_POOL_ID="${DR_COGNITO_USER_POOL_ID:-$(get_primary_param CognitoUserPoolId)}"
 DR_COGNITO_CLIENT_ID="${DR_COGNITO_CLIENT_ID:-$(get_primary_param CognitoClientId)}"
-DR_COGNITO_CLIENT_SECRET="${DR_COGNITO_CLIENT_SECRET:-$(get_primary_param CognitoClientSecret)}"
+
+# CognitoClientSecret has NoEcho=true so CloudFormation returns ****; read from Cognito API
+if [[ -z "${DR_COGNITO_CLIENT_SECRET:-}" && -n "$DR_COGNITO_USER_POOL_ID" && "$DR_COGNITO_USER_POOL_ID" != "None" ]]; then
+  DR_COGNITO_CLIENT_SECRET=$("${AWS[@]}" cognito-idp describe-user-pool-client \
+    --user-pool-id "$DR_COGNITO_USER_POOL_ID" \
+    --client-id "$DR_COGNITO_CLIENT_ID" \
+    --region "$PRIMARY_REGION" \
+    --query 'UserPoolClient.ClientSecret' --output text 2>/dev/null || echo "")
+fi
+DR_COGNITO_CLIENT_SECRET="${DR_COGNITO_CLIENT_SECRET:-}"
 DR_COGNITO_DOMAIN="${DR_COGNITO_DOMAIN:-$(get_primary_param CognitoDomain)}"
 DR_COGNITO_REGION="${DR_COGNITO_REGION:-${PRIMARY_REGION}}"
 DR_FRONTEND_URL="${DR_FRONTEND_URL:-$(get_primary_param FrontendUrl)}"
@@ -359,7 +379,8 @@ while read -r KEY; do
     OpenAIApiKeySecretArn) VAL="$DR_OPENAI_SECRET_ARN" ;;
     *)                     VAL="$(get_primary_param "$KEY")" ;;
   esac
-  if [[ -z "$VAL" || "$VAL" == "None" ]]; then
+  # NoEcho params come back as **** from describe-stacks; treat as empty
+  if [[ -z "$VAL" || "$VAL" == "None" || "$VAL" == "****" ]]; then
     if is_optional_empty_ok "$KEY"; then continue; fi
     echo "ERROR: Missing value for parameter '$KEY'."
     exit 1
