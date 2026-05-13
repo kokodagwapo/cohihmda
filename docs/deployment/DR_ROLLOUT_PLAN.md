@@ -29,10 +29,10 @@ Tax, support uplift, and savings plans are not modeled. All prices are USD.
 | ----- | ------------ | ------------------ | ---------------------------------- |
 | **Phase 0** — policy + safe IaC tweaks | Documented RTO/RPO, longer PITR, KMS protected from accidental delete, versioned prod frontend, Secrets re-seed runbook | 1–2 dev days | **~$1–3** |
 | **Phase 1** — in-region resilience and AWS Backup | Hot Aurora reader in second AZ, AWS Backup vault with 90-day retention, formal DR test cadence | 3–5 dev days | **~$55–90** |
-| **Phase 2** — cross-region (only after Org SCP review) | Aurora Global Database secondary cluster, S3 CRR for persistent buckets, CloudFront origin failover | 5–10 dev days, plus Org SCP change | **~$50–80** additional |
-| **Total at full coverage** | — | ~10–17 dev days end-to-end | **~$110–175 / month** |
+| **Phase 2** — cross-region (only after Org SCP review) | DR landing zone (VPC + DR backup vault), **daily AWS Backup copy** to DR, CloudFront origin failover | 3–6 dev days, plus Org SCP change | **~$1–5** additional (tiny backup copy storage; **no** hot Aurora in DR, no S3 CRR needed) |
+| **Total at full coverage** | — | ~8–13 dev days end-to-end | **~$58–100 / month** |
 
-For context, the existing prod Aurora cluster runs around $50–80/month at observed ACU; this plan adds **roughly 1–2× current Aurora cost** to achieve full DR coverage. Cohi has no other large stateful workloads, so the cost is largely Aurora-side.
+For context, the existing prod Aurora cluster runs around $50–80/month at observed ACU; Phase 1 adds a reader; **Phase 2 cold DR** adds only storage-level cross-region costs unless you later stand up warm ECS in DR.
 
 ---
 
@@ -139,25 +139,19 @@ These are the only items in scope for surviving a full `us-east-2` outage. They 
 | AWS cost | $0 |
 | Risk | None technical; policy decision only |
 
-### 5.2 Aurora Global Database
+### 5.2 DR landing zone + AWS Backup cross-region copy
 
 | Item | Detail |
 | ---- | ------ |
-| Change | Add `AWS::RDS::GlobalCluster` wrapping the prod cluster in `coheus_aurora_cluster_stack.yaml`; new stack `coheus_aurora_secondary_stack.yaml` deployed to the secondary region, provisioning a minimal-capacity reader cluster (0.5–1.0 max ACU) attached to the global cluster |
-| Effort | 3 days (template work, secrets replication, runbook for promotion) |
-| AWS cost | Secondary cluster minimum 0.5 ACU sustained = **$0.50 × $0.12 × 730 ≈ $44/month**. Replicated storage **$0.10/GB-month × 1.2 GB ≈ $0.15/month**. Cross-region transfer **$0.02/GB** — at observed write volumes, **< $2/month**. Total **~$46–60/month**. |
-| RPO improvement | Typical Aurora Global Database replication lag is < 1 second; documented RPO target 1 minute |
-| RTO improvement | Promotion-to-standalone takes ~1 minute via CLI |
-| Risk | Adds replication lag monitoring; requires a tested promotion runbook |
+| Change | Deploy [`coheus_aurora_secondary_stack.yaml`](../../infrastructure/cloudformation/coheus_aurora_secondary_stack.yaml) to the DR region (VPC, DB subnet group, SG, KMS, **DR backup vault**, optional replica S3). Update [`coheus_backup_stack.yaml`](../../infrastructure/cloudformation/coheus_backup_stack.yaml) in the primary region so the **DailySnapshots** rule includes `CopyActions` to that vault (template defaults `EnableCrossRegionBackupCopy=true`). |
+| Effort | 2 days (template + pipeline + runbook for [`scripts/dr/restore-from-snapshot.sh`](../../scripts/dr/restore-from-snapshot.sh)) |
+| AWS cost | DR VPC endpoints/nat-free private subnets: **$0** baseline. Backup copy warm storage at tiny dataset size → **pennies/month**. |
+| RPO / RTO | RPO **up to 24h** (daily backup + copy); cross-region RTO **8–24 hours** (DB restore + ECS rebuild + app cutover + validation). |
+| Risk | Copy jobs fail loudly if DR vault missing — deploy landing stack **before** enabling copy. |
 
-### 5.3 S3 cross-region replication for persistent buckets
+### 5.3 S3 cross-region replication — NOT REQUIRED
 
-| Item | Detail |
-| ---- | ------ |
-| Change | Add `ReplicationConfiguration` and a replication-target bucket in the secondary region for `*-podcast-audio` (only if you ever retain it beyond the current 14-day lifecycle) and any future audit buckets. Frontend bucket does not need CRR — it's rebuilt from CI. |
-| Effort | 0.5 day per bucket |
-| AWS cost | Per-object PUT × replication × destination storage; at current bucket sizes, **< $2/month** |
-| Risk | Adds an IAM replication role; otherwise transparent |
+Podcast audio is **regenerable** from source data stored in Aurora (which is backed up). QA artifacts are ephemeral (30-day lifecycle). Neither bucket requires cross-region replication. If a future audit-log bucket is introduced that holds non-regenerable data, revisit this decision.
 
 ### 5.4 CloudFront origin failover or Route 53 health-based routing
 
@@ -166,11 +160,11 @@ These are the only items in scope for surviving a full `us-east-2` outage. They 
 | Change | Either (a) add a secondary `Origin` to the CloudFront distribution in `coheus_waf_cloudfront_stack.yaml` with an `OriginGroup` and failover criteria, or (b) front the API ALBs with a Route 53 record that has health checks on both regions |
 | Effort | 1 day |
 | AWS cost | CloudFront origin failover: $0 extra at the CloudFront layer. Route 53 health checks: **$0.50/month per check**, plus **$0.75/month** if HTTPS endpoint checks. Allow **~$2/month**. |
-| Dependency | Phase 2 secondary cluster + a working secondary ECS service (out of scope for this plan; the plan covers the data-layer portion). To fully use CloudFront failover you also need a stood-up secondary backend, which is **additional** ECS cost not included above. |
+| Dependency | A working secondary ECS service in DR is **out of scope** for the minimum Phase 2. To fully use CloudFront failover you need a stood-up secondary backend, which is **additional** ECS cost not included above. |
 
-> **Note on a secondary ECS deployment.** The numbers in §5.4 do **not** include running a warm secondary ECS service. Doing so would add roughly the current ECS Fargate cost (a few hundred dollars/month) for the secondary region. The minimum viable Phase 2 is **data-layer only** (Aurora Global, S3 CRR) plus a documented "build ECS from CloudFormation on failover" runbook — that keeps cost low but lengthens RTO to ~30 minutes.
+> **Note on a secondary ECS deployment.** The numbers in §5.4 do **not** include running a warm secondary ECS service. Doing so would add roughly the current ECS Fargate cost (a few hundred dollars/month) for the secondary region. The minimum viable Phase 2 is **data-layer only** (**AWS Backup cross-region copy** + S3 CRR) plus a documented "build ECS from CloudFormation on failover" runbook — that keeps cost low but lengthens full-stack RTO.
 
-**Phase 2 totals:** ~4.5 dev days, **~$50–80/month** for the data-layer-only minimum.
+**Phase 2 totals:** ~3 dev days, **~$1–5/month** for the data-layer-only minimum (excludes optional warm ECS in DR). S3 CRR is not needed — podcast audio is regenerable from source data.
 
 ---
 
@@ -182,7 +176,7 @@ Assuming a single engineer working on this part-time:
 | ---- | ---- |
 | Week 1 | Phase 0 PR (policy, retention, KMS Retain, versioning, Secrets runbook). Run Test 1 (PITR) on the dev cluster the same week using `DR_TEST_PLAN.md`. |
 | Weeks 2–3 | Phase 1 PR (second Aurora reader, AWS Backup stack). Maintenance-window deploy. Run all three tests in `DR_TEST_PLAN.md` against dev. |
-| Weeks 4–5 | Phase 2 prerequisites — Org SCP change. Once approved, build `coheus_aurora_secondary_stack.yaml` and test promotion in dev. |
+| Weeks 4–5 | Phase 2 prerequisites — Org SCP change. Once approved, deploy DR landing + backup copy in dev; run snapshot restore sandbox per `DR_TEST_PLAN.md` §9.3. |
 | Week 6 | Phase 2 completion (CRR + CloudFront failover). Tabletop region-loss exercise. Finalize updated DR policy with measured RTO/RPO. |
 
 ---
@@ -194,15 +188,16 @@ Recurring monthly costs at the end of Phase 2 (prod only, list price, observed u
 | Line item | Monthly |
 | --------- | ------- |
 | Aurora reader, 2nd AZ (Phase 1) | $48 |
-| AWS Backup vault, 90-day retention (Phase 1) | $3 |
-| Aurora Global Database secondary cluster (Phase 2) | $46 |
-| Cross-region storage + transfer (Phase 2) | $2 |
+| AWS Backup vault, 35-day retention + DR copy (Phase 1–2) | $3 |
+| DR landing VPC + backup copy storage (Phase 2) | < $0.50 |
 | Route 53 health checks (Phase 2) | $2 |
 | Extended Aurora PITR storage (Phase 0) | $1 |
 | Frontend bucket versioning (Phase 0) | $0.10 |
-| **Total** | **~$102/month** |
+| **Total** | **~$54/month** |
 
-Engineering effort to reach full coverage: **~10 dev days** spread over **~6 weeks**, plus the Org SCP coordination.
+S3 cross-region replication is **not included** — podcast audio is regenerable from source data, QA artifacts are ephemeral.
+
+Engineering effort to reach full coverage: **~7 dev days** spread over **~6 weeks**, plus the Org SCP coordination.
 
 Excluded from this number:
 

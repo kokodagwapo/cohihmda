@@ -27,12 +27,15 @@ This policy applies to the Cohi multi-tenant SaaS deployment defined in `infrast
 
 These numbers are **targets** until ratified. Replace placeholders in §6 with values measured during drills in [`DR_TEST_PLAN.md`](./DR_TEST_PLAN.md).
 
+Cohi is **not** critical financial infrastructure — there is no real-time payment processing, regulatory uptime SLA, or time-sensitive transaction flow. Targets reflect a practical balance between cost and acceptable downtime.
+
 | Tier | Component | RPO (max acceptable data loss) | RTO (max acceptable outage) | Primary controls |
 | ---- | --------- | ------------------------------ | ---------------------------- | ------------------ |
-| T1 | Aurora PostgreSQL (management + tenant clusters) | 1 minute (async replication lag when Global DB enabled); otherwise last automated backup / PITR | 30 minutes (in-region); 4 hours (full region rebuild without warm secondary ECS) | PITR, snapshots, optional Global Database, second reader |
-| T2 | API / worker (ECS Fargate) | Stateless — none | 30 minutes | Redeploy task definition, ECR images retained |
-| T3 | Frontend (S3 + CloudFront) | None if rebuilt from CI | 1 hour | CI redeploy, optional S3 versioning |
-| T4 | Ephemeral files (QA artifacts, podcast audio per lifecycle) | Per bucket lifecycle (14–30 days) | Best effort | S3 Retain, optional cross-region replication |
+| T1 | Aurora PostgreSQL (management + tenant clusters) | **Near-zero** for in-region incidents (Aurora PITR — restore to any second within the last 35 days); **up to 24 hours** for regional loss (last successful daily AWS Backup copy to DR vault) | **4 hours** (in-region restore); **8–24 hours** (cold cross-region restore from DR snapshot + full app cutover) | PITR, snapshots, second reader, AWS Backup daily/monthly, **cross-region backup copy** |
+| T2 | API / worker (ECS Fargate) | Stateless — none | **4 hours** | Redeploy task definition, ECR images retained |
+| T3 | Frontend (S3 + CloudFront) | None if rebuilt from CI | **4 hours** | CI redeploy, optional S3 versioning |
+| T4 | QA artifacts | Per bucket lifecycle (30 days) | Best effort | S3 Retain |
+| — | Podcast audio | **N/A** — regenerable from source data | **N/A** — regenerate, do not restore | Not backed up; 14-day S3 lifecycle |
 
 ---
 
@@ -70,8 +73,8 @@ Use after internal severity is confirmed. Replace bracketed fields.
 
 | Drill date | Test | RTO observed | RPO observed | Notes |
 | ---------- | ---- | ------------ | ------------ | ----- |
-| _TBD_ | Aurora PITR (dev) | | | From [`DR_TEST_PLAN.md`](./DR_TEST_PLAN.md) §6 |
-| _TBD_ | ECS rollback (dev) | | | |
+| 2026-05-12 | Aurora PITR (dev) | ~12 min (infra only) | ≤30 min (restore target offset) | Full SQL verify pending; see [`DR_TEST_REPORT_2026-05-12.md`](./DR_TEST_REPORT_2026-05-12.md). |
+| 2026-05-12 | ECS rollback (dev) | ~12 min (auto-rollback) | N/A (stateless) | Pass. Circuit breaker tripped at `failedTasks=4`, auto-rolled back to known-good. |
 | _TBD_ | Frontend rebuild (dev) | | | |
 | _TBD_ | Region-loss tabletop | | | N/A for RPO; documents decisions |
 
