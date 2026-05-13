@@ -47,6 +47,8 @@ export interface CohiInsight {
   profile_relevance?: string | null;
   /** My Insights: produced from a user-authored saved prompt (custom prompt path) */
   fromCustomPrompt?: boolean;
+  /** My Insights: saved prompt title for custom_prompt cards ("Why you're seeing this") */
+  customPromptTitle?: string | null;
 }
 
 export interface InsightsMetadata {
@@ -219,7 +221,7 @@ export const useCohiData = (
     } catch (error: any) {
       console.error("Error refreshing My Insights for all users:", error);
       setInsightsError(error.message || "Failed to refresh My Insights for all users");
-      return null;
+      throw error;
     }
   }, [selectedTenantId]);
 
@@ -238,7 +240,7 @@ export const useCohiData = (
     } catch (error: any) {
       console.error("Error refreshing interest profile:", error);
       setInsightsError(error.message || "Failed to refresh interest profile");
-      return null;
+      throw error;
     }
   }, [selectedTenantId]);
 
@@ -256,7 +258,7 @@ export const useCohiData = (
     } catch (error: any) {
       console.error("Error refreshing My Insights (insights only):", error);
       setInsightsError(error.message || "Failed to refresh My Insights");
-      return null;
+      throw error;
     }
   }, [selectedTenantId]);
 
@@ -277,7 +279,7 @@ export const useCohiData = (
     } catch (error: any) {
       console.error("Error running full My Insights refresh (profile + insights):", error);
       setInsightsError(error.message || "Failed to refresh My Insights");
-      return null;
+      throw error;
     }
   }, [selectedTenantId]);
 
@@ -479,14 +481,18 @@ export const useCohiData = (
       insightId: number,
       rating: -1 | 1,
       tags?: string[],
-      comment?: string
+      comment?: string,
+      insightRef: "generated_insights" | "user_generated_insights" = "generated_insights"
     ) => {
       try {
-        const tenantParam = selectedTenantId
-          ? `?tenant_id=${selectedTenantId}`
-          : "";
+        const params = new URLSearchParams();
+        if (selectedTenantId) params.set("tenant_id", selectedTenantId);
+        if (insightRef !== "generated_insights") {
+          params.set("insight_ref", insightRef);
+        }
+        const qs = params.toString();
         await api.request<any>(
-          `/api/dashboard/insights/${insightId}/feedback${tenantParam}`,
+          `/api/dashboard/insights/${insightId}/feedback${qs ? `?${qs}` : ""}`,
           {
             method: "POST",
             body: JSON.stringify({ rating, tags: tags || [], comment: comment || "" }),
@@ -503,13 +509,19 @@ export const useCohiData = (
 
   // Fetch feedback for a specific insight (used in detail views)
   const getFeedback = useCallback(
-    async (insightId: number) => {
+    async (
+      insightId: number,
+      insightRef: "generated_insights" | "user_generated_insights" = "generated_insights"
+    ) => {
       try {
-        const tenantParam = selectedTenantId
-          ? `?tenant_id=${selectedTenantId}`
-          : "";
+        const params = new URLSearchParams();
+        if (selectedTenantId) params.set("tenant_id", selectedTenantId);
+        if (insightRef !== "generated_insights") {
+          params.set("insight_ref", insightRef);
+        }
+        const qs = params.toString();
         const data = await api.request<any>(
-          `/api/dashboard/insights/${insightId}/feedback${tenantParam}`
+          `/api/dashboard/insights/${insightId}/feedback${qs ? `?${qs}` : ""}`
         );
         return data;
       } catch (error: any) {

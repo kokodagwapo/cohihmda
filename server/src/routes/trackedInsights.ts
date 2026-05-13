@@ -261,6 +261,7 @@ router.post(
         source_type === "dashboard_insights" && source_insight_id != null;
       const isAgentTrack = source_type === "agent";
       const isPipelineTrack = source_type === "pipeline";
+      const isUserInsightsTrack = source_type === "user_insights";
       const isResearchTrack = source_type === "research";
 
       if (!headline) {
@@ -305,7 +306,10 @@ router.post(
             error: "Invalid metric_signature shape for dashboard insight",
           });
         }
-      } else if ((isAgentTrack || isPipelineTrack) && source_insight_id != null) {
+      } else if (
+        (isAgentTrack || isPipelineTrack || isUserInsightsTrack) &&
+        source_insight_id != null
+      ) {
         const sourceId = Number(source_insight_id);
         if (!Number.isFinite(sourceId) || sourceId <= 0) {
           return res.status(400).json({
@@ -313,13 +317,21 @@ router.post(
           });
         }
 
-        const sourceResult = await ctx.tenantPool.query(
-          `SELECT id, detail_data, bucket, priority, severity_score
-           FROM generated_insights
-           WHERE id = $1
-           LIMIT 1`,
-          [sourceId]
-        );
+        const sourceResult = isUserInsightsTrack
+          ? await ctx.tenantPool.query(
+              `SELECT id, detail_data, bucket, priority, severity_score, generation_method
+               FROM user_generated_insights
+               WHERE id = $1 AND user_id = $2
+               LIMIT 1`,
+              [sourceId, req.userId]
+            )
+          : await ctx.tenantPool.query(
+              `SELECT id, detail_data, bucket, priority, severity_score
+               FROM generated_insights
+               WHERE id = $1
+               LIMIT 1`,
+              [sourceId]
+            );
         if (sourceResult.rows.length === 0) {
           return res.status(404).json({ error: "Source insight not found" });
         }
@@ -329,6 +341,7 @@ router.post(
           bucket: string | null;
           priority: string | null;
           severity_score: number | null;
+          generation_method?: string | null;
         };
         const sourceDetailData =
           sourceRow.detail_data && typeof sourceRow.detail_data === "object"
@@ -338,7 +351,13 @@ router.post(
           sourceRow.detail_data
         );
 
-        if (isAgentTrack) {
+        const useAgentPath =
+          (isAgentTrack && !isUserInsightsTrack) ||
+          (isUserInsightsTrack &&
+            String(sourceRow.generation_method ?? "") === "user_agent" &&
+            sourceDetailData?.type === "agent_finding");
+
+        if (useAgentPath) {
           const headlineValidated =
             sourceDetailData?.headlineMetricSignatureValidated === true;
           const headlineRaw = sourceDetailData?.headlineMetricSignature;
@@ -368,7 +387,7 @@ router.post(
             original_priority: sourceRow.priority,
             original_severity_score: sourceRow.severity_score,
           });
-        } else {
+        } else if (isPipelineTrack || isUserInsightsTrack) {
           // pipeline: prefer source derivation, fallback to payload if valid
           const sourceSigRaw = sourceDetailData?.metricSignature;
           const sourceSig = normalizeMetricSignature(sourceSigRaw, {
@@ -394,6 +413,10 @@ router.post(
             original_bucket: sourceRow.bucket,
             original_priority: sourceRow.priority,
             original_severity_score: sourceRow.severity_score,
+          });
+        } else {
+          return res.status(400).json({
+            error: "Invalid source_type for source_insight_id tracking",
           });
         }
       } else if (isResearchTrack && researchArtifactIdRaw != null && String(researchArtifactIdRaw).trim()) {

@@ -77,7 +77,7 @@ router.get(
           );
 
           const result = await tenantPool.query(
-            `SELECT f.id, f.insight_id, f.user_id, f.user_email, f.user_name, f.rating, f.tags, f.comment, f.insight_headline, f.insight_bucket, f.created_at
+            `SELECT f.id, f.insight_id, f.insight_ref, f.user_id, f.user_email, f.user_name, f.rating, f.tags, f.comment, f.insight_headline, f.insight_bucket, f.created_at
              FROM insight_feedback f
              ${whereClause}
              ORDER BY f.created_at DESC

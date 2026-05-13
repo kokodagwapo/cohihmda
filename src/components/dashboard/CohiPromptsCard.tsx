@@ -537,6 +537,10 @@ function mapMyInsightsResponse(data: { insights?: Record<string, unknown>[] }): 
       typeof insight.profile_relevance === "string" && insight.profile_relevance.trim()
         ? insight.profile_relevance.trim()
         : null,
+    customPromptTitle:
+      typeof insight.custom_prompt_title === "string" && insight.custom_prompt_title.trim()
+        ? insight.custom_prompt_title.trim()
+        : null,
     fromCustomPrompt:
       insight.source === "custom_prompt" || insight.insight_origin === "custom_prompt",
   }));
@@ -721,15 +725,22 @@ function BucketLane({
                 {insight.headline || insight.message}
               </p>
             </div>
-            {insight.profile_relevance?.trim() && (
+            {(() => {
+              const whyLine =
+                insight.fromCustomPrompt && insight.customPromptTitle?.trim()
+                  ? insight.customPromptTitle.trim()
+                  : insight.profile_relevance?.trim() || "";
+              if (!whyLine) return null;
+              return (
               <p
                 className="mt-1.5 text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 leading-snug border-l-2 border-blue-300/80 dark:border-blue-600/50 pl-2.5"
                 data-testid="insight-profile-relevance"
               >
                 <span className="font-semibold text-slate-600 dark:text-slate-300">Why you&apos;re seeing this</span>
-                <span className="font-normal"> — {insight.profile_relevance}</span>
+                <span className="font-normal"> — {whyLine}</span>
               </p>
-            )}
+              );
+            })()}
             {insight.source === "dashboard_insights" && insight.sourcePageId && insight.sourcePageName && (
               <GoToDashboardPageButton
                 sourcePageId={insight.sourcePageId}
@@ -1261,26 +1272,36 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
   const isCategoryRefreshing = categoryJob.status === "processing";
   const [dqTabRefreshing, setDqTabRefreshing] = useState(false);
 
-  // ---- Tracked insights (watchlist) for pipeline insights ----
-  // Map<source_insight_id, tracked_uuid> drives both UI and delete logic.
-  type TrackedInsightRow = { id: string; source_insight_id?: number | null; status?: string };
+  // ---- Tracked insights (watchlist): pipeline/agent/dashboard vs My Insights (user_insights) ----
+  type TrackedInsightRow = {
+    id: string;
+    source_insight_id?: number | null;
+    status?: string;
+    source_type?: string;
+  };
   const [trackedPipelineMap, setTrackedPipelineMap] = useState<Map<number, string>>(new Map());
+  const [trackedUserInsightMap, setTrackedUserInsightMap] = useState<Map<number, string>>(new Map());
   const [watchlistRefreshTrigger, setWatchlistRefreshTrigger] = useState(0);
   const [trackedReevalLoading, setTrackedReevalLoading] = useState(false);
 
-  const fetchAndBuildPipelineMap = useCallback(async (bustCache = false) => {
+  const fetchAndBuildTrackedMaps = useCallback(async (bustCache = false) => {
     if (bustCache) api.invalidateCacheFor("/insights/tracked");
     const data = ((await api.getTrackedInsights(selectedTenantId)) || []) as TrackedInsightRow[];
-    const map = new Map<number, string>();
+    const pipelineMap = new Map<number, string>();
+    const userInsightMap = new Map<number, string>();
     for (const row of data) {
       if (
         (row.status === "active" || row.status === "resolved") &&
         row.source_insight_id != null
       ) {
-        map.set(row.source_insight_id, row.id);
+        if (row.source_type === "user_insights") {
+          userInsightMap.set(row.source_insight_id, row.id);
+        } else {
+          pipelineMap.set(row.source_insight_id, row.id);
+        }
       }
     }
-    return map;
+    return { pipelineMap, userInsightMap };
   }, [selectedTenantId]);
 
   const handleRunTrackedReevaluation = useCallback(async () => {
@@ -1289,19 +1310,27 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
       await api.runTrackedReevaluation(selectedTenantId);
       api.invalidateCacheFor("/insights/tracked");
       setWatchlistRefreshTrigger((t) => t + 1);
-      fetchAndBuildPipelineMap(true).then(setTrackedPipelineMap).catch(() => {});
+      fetchAndBuildTrackedMaps(true)
+        .then(({ pipelineMap, userInsightMap }) => {
+          setTrackedPipelineMap(pipelineMap);
+          setTrackedUserInsightMap(userInsightMap);
+        })
+        .catch(() => {});
     } catch (err) {
       console.error("Tracked re-evaluation failed:", err);
     } finally {
       setTrackedReevalLoading(false);
     }
-  }, [selectedTenantId, fetchAndBuildPipelineMap]);
+  }, [selectedTenantId, fetchAndBuildTrackedMaps]);
 
   useEffect(() => {
-    fetchAndBuildPipelineMap().then(setTrackedPipelineMap).catch((err) =>
-      console.error("Failed to load tracked insights:", err)
-    );
-  }, [fetchAndBuildPipelineMap]);
+    fetchAndBuildTrackedMaps()
+      .then(({ pipelineMap, userInsightMap }) => {
+        setTrackedPipelineMap(pipelineMap);
+        setTrackedUserInsightMap(userInsightMap);
+      })
+      .catch((err) => console.error("Failed to load tracked insights:", err));
+  }, [fetchAndBuildTrackedMaps]);
 
   const isRefreshing = refreshJob.status === "processing";
   const isMyInsightsAllUsersRefreshing = myInsightsAllUsersBusy;
@@ -1857,21 +1886,26 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
     async (insight: CohiInsight) => {
       if (insight.insightId == null) return;
       const sourceId = insight.insightId;
-      const currentlyTracked = trackedPipelineMap.has(sourceId);
+      const isMyInsight = insight.source === "my";
+      const activeMap = isMyInsight ? trackedUserInsightMap : trackedPipelineMap;
+      const setActiveMap = isMyInsight ? setTrackedUserInsightMap : setTrackedPipelineMap;
+      const currentlyTracked = activeMap.has(sourceId);
 
-      // Optimistic toggle
-      setTrackedPipelineMap((prev) => {
+      setActiveMap((prev) => {
         const next = new Map(prev);
-        if (currentlyTracked) next.delete(sourceId); else next.set(sourceId, "pending");
+        if (currentlyTracked) next.delete(sourceId);
+        else next.set(sourceId, "pending");
         return next;
       });
 
       try {
         if (currentlyTracked) {
-          let trackedId = trackedPipelineMap.get(sourceId);
+          let trackedId = activeMap.get(sourceId);
           if (!trackedId || trackedId === "pending") {
-            const freshMap = await fetchAndBuildPipelineMap(true);
-            trackedId = freshMap.get(sourceId);
+            const fresh = await fetchAndBuildTrackedMaps(true);
+            trackedId = isMyInsight
+              ? fresh.userInsightMap.get(sourceId)
+              : fresh.pipelineMap.get(sourceId);
           }
           if (trackedId && trackedId !== "pending") {
             await api.deleteTrackedInsight(trackedId, selectedTenantId);
@@ -1880,7 +1914,6 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
           const isDashboardInsight =
             (insight.source || "").trim().toLowerCase() === "dashboard_insights";
 
-          // Plan §8 / Stage 4: dashboard rows — server derives metric_signature from dashboard_generated_insights; do not post empty sql.
           if (isDashboardInsight) {
             await api.trackInsight(
               {
@@ -1891,8 +1924,17 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
               },
               selectedTenantId
             );
+          } else if (isMyInsight) {
+            await api.trackInsight(
+              {
+                headline: insight.headline || insight.message,
+                understory: insight.understory || insight.reasoning,
+                source_insight_id: sourceId,
+                source_type: "user_insights",
+              },
+              selectedTenantId
+            );
           } else {
-            // Agent / pipeline: send signature hints; server normalizes for agent/pipeline.
             const isAgentInsight = isAgentFindingDrillDown(insight);
 
             let metric_signature: { sql: string; keyFields: string[] };
@@ -1929,20 +1971,26 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
             );
           }
         }
-        const freshMap = await fetchAndBuildPipelineMap(true);
-        setTrackedPipelineMap(freshMap);
+        const fresh = await fetchAndBuildTrackedMaps(true);
+        setTrackedPipelineMap(fresh.pipelineMap);
+        setTrackedUserInsightMap(fresh.userInsightMap);
         setWatchlistRefreshTrigger((t) => t + 1);
       } catch (err) {
         console.error("Error toggling tracked insight:", err);
-        // Revert on failure
-        setTrackedPipelineMap((prev) => {
+        setActiveMap((prev) => {
           const reverted = new Map(prev);
-          if (currentlyTracked) reverted.set(sourceId, "reverted"); else reverted.delete(sourceId);
+          if (currentlyTracked) reverted.set(sourceId, "reverted");
+          else reverted.delete(sourceId);
           return reverted;
         });
       }
     },
-    [selectedTenantId, trackedPipelineMap, fetchAndBuildPipelineMap]
+    [
+      selectedTenantId,
+      trackedPipelineMap,
+      trackedUserInsightMap,
+      fetchAndBuildTrackedMaps,
+    ]
   );
 
   const handleInvestigate = useCallback(
@@ -2495,9 +2543,13 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
                       isDrillable={isDrillable}
                       globalExpanded={globalExpanded}
                       expandToggleKey={expandToggleKey}
-                      onSubmitFeedback={undefined}
-                      isTracked={() => false}
-                      onToggleTrack={undefined}
+                      onSubmitFeedback={(insightId, rating, tags, comment) =>
+                        submitFeedback(insightId, rating, tags, comment, "user_generated_insights")
+                      }
+                      isTracked={(i) =>
+                        i.insightId != null && trackedUserInsightMap.has(i.insightId)
+                      }
+                      onToggleTrack={handleToggleTrack}
                       isAdmin={isAdmin}
                     />
                   );
@@ -2527,7 +2579,12 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
                 selectedTenantId={selectedTenantId}
                 refreshTrigger={watchlistRefreshTrigger}
                 onInsightRemoved={() => {
-                  fetchAndBuildPipelineMap(true).then(setTrackedPipelineMap).catch(() => {});
+                  fetchAndBuildTrackedMaps(true)
+                    .then(({ pipelineMap, userInsightMap }) => {
+                      setTrackedPipelineMap(pipelineMap);
+                      setTrackedUserInsightMap(userInsightMap);
+                    })
+                    .catch(() => {});
                 }}
               />
             </div>
@@ -3144,7 +3201,13 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
           recommended_action: selectedInsight.recommended_action,
           owner: selectedInsight.owner,
         } : undefined}
-        isTracked={selectedInsight != null && selectedInsight.insightId != null && trackedPipelineMap.has(selectedInsight.insightId)}
+        isTracked={
+          selectedInsight != null &&
+          selectedInsight.insightId != null &&
+          (selectedInsight.source === "my"
+            ? trackedUserInsightMap.has(selectedInsight.insightId)
+            : trackedPipelineMap.has(selectedInsight.insightId))
+        }
         onToggleTrack={selectedInsight ? () => handleToggleTrack(selectedInsight) : undefined}
         onDetailUnavailable={selectedInsight?.source === "dashboard_insights" ? () => setUseDashboardEvidenceModalFallback(true) : undefined}
       />
@@ -3189,20 +3252,28 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
                     )}
                     {isCreatingResearch ? 'Opening...' : 'Research Lab'}
                   </button>
-                  {agentFindingInsight && (
+                  {agentFindingInsight && (() => {
+                    const afId = agentFindingInsight.insightId;
+                    const afTracked =
+                      afId != null &&
+                      (agentFindingInsight.source === "my"
+                        ? trackedUserInsightMap.has(afId)
+                        : trackedPipelineMap.has(afId));
+                    return (
                     <button
                       onClick={() => handleToggleTrack(agentFindingInsight)}
                       className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                        agentFindingInsight.insightId != null && trackedPipelineMap.has(agentFindingInsight.insightId)
+                        afTracked
                           ? "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
                           : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-amber-100 dark:hover:bg-amber-900/30 hover:text-amber-700 dark:hover:text-amber-300"
                       }`}
-                      title={agentFindingInsight.insightId != null && trackedPipelineMap.has(agentFindingInsight.insightId) ? "Remove from watchlist" : "Track this insight"}
+                      title={afTracked ? "Remove from watchlist" : "Track this insight"}
                     >
-                      <Bookmark className={`w-3.5 h-3.5 ${agentFindingInsight.insightId != null && trackedPipelineMap.has(agentFindingInsight.insightId) ? "text-amber-500 fill-amber-500 dark:text-amber-400 dark:fill-amber-400" : ""}`} />
-                      {agentFindingInsight.insightId != null && trackedPipelineMap.has(agentFindingInsight.insightId) ? "Tracked" : "Track This Insight"}
+                      <Bookmark className={`w-3.5 h-3.5 ${afTracked ? "text-amber-500 fill-amber-500 dark:text-amber-400 dark:fill-amber-400" : ""}`} />
+                      {afTracked ? "Tracked" : "Track This Insight"}
                     </button>
-                  )}
+                    );
+                  })()}
                 </div>
                 <FindingDrillDown
                   finding={agentFinding}
