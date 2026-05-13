@@ -18,6 +18,24 @@ Parameters:
       - prod
     Description: Environment tag value to match
 
+  DrCopyRegion:
+    Type: String
+    Default: us-east-1
+    Description: |
+      Region where coheus_aurora_secondary_stack creates the DR backup vault
+      (${ProjectName}-${Environment}-cohi-dr-copy). Daily backups are copied there for cold DR.
+
+  EnableCrossRegionBackupCopy:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Set to false only if the DR vault stack is not deployed in DrCopyRegion
+
+Conditions:
+  EnableCrossRegionCopy: !Equals [!Ref EnableCrossRegionBackupCopy, 'true']
+
 Resources:
   CoheusBackupVault:
     Type: AWS::Backup::BackupVault
@@ -61,6 +79,12 @@ Resources:
             CompletionWindowMinutes: 180
             Lifecycle:
               DeleteAfterDays: 35
+            CopyActions: !If
+              - EnableCrossRegionCopy
+              - - DestinationBackupVaultArn: !Sub 'arn:aws:backup:${DrCopyRegion}:${AWS::AccountId}:backup-vault:${ProjectName}-${Environment}-cohi-dr-copy'
+                  Lifecycle:
+                    DeleteAfterDays: 35
+              - !Ref AWS::NoValue
           - RuleName: MonthlySnapshots
             TargetBackupVault: !Ref CoheusBackupVault
             ScheduleExpression: cron(0 6 1 * ? *)
@@ -88,6 +112,8 @@ Resources:
           StringEquals:
             - ConditionKey: aws:ResourceTag/Environment
               ConditionValue: !Ref Environment
+        NotResources:
+          - 'arn:aws:rds:*:*:db:*'
 
 Outputs:
   BackupVaultName:
