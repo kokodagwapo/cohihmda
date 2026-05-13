@@ -221,7 +221,7 @@ export const useCohiData = (
     } catch (error: any) {
       console.error("Error refreshing My Insights for all users:", error);
       setInsightsError(error.message || "Failed to refresh My Insights for all users");
-      return null;
+      throw error;
     }
   }, [selectedTenantId]);
 
@@ -240,7 +240,7 @@ export const useCohiData = (
     } catch (error: any) {
       console.error("Error refreshing interest profile:", error);
       setInsightsError(error.message || "Failed to refresh interest profile");
-      return null;
+      throw error;
     }
   }, [selectedTenantId]);
 
@@ -258,7 +258,7 @@ export const useCohiData = (
     } catch (error: any) {
       console.error("Error refreshing My Insights (insights only):", error);
       setInsightsError(error.message || "Failed to refresh My Insights");
-      return null;
+      throw error;
     }
   }, [selectedTenantId]);
 
@@ -279,7 +279,7 @@ export const useCohiData = (
     } catch (error: any) {
       console.error("Error running full My Insights refresh (profile + insights):", error);
       setInsightsError(error.message || "Failed to refresh My Insights");
-      return null;
+      throw error;
     }
   }, [selectedTenantId]);
 
