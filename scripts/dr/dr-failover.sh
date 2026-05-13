@@ -169,7 +169,7 @@ else
 
   RESTORE_SRC=()
   if [[ -n "$SNAPSHOT_ARN" ]]; then
-    RESTORE_SRC=(--snapshot-arn "$SNAPSHOT_ARN")
+    RESTORE_SRC=(--snapshot-identifier "$SNAPSHOT_ARN")
   else
     RESTORE_SRC=(--snapshot-identifier "$SNAPSHOT_ID")
   fi
