@@ -35,6 +35,20 @@
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
+# Install AWS CLI if missing (Bitbucket node:20 image doesn't include it)
+# ---------------------------------------------------------------------------
+if ! command -v aws &>/dev/null; then
+  echo ">>> Installing AWS CLI..."
+  apt-get update -qq
+  apt-get install -y -qq unzip curl > /dev/null
+  curl -sS "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+  unzip -qq /tmp/awscliv2.zip -d /tmp
+  /tmp/aws/install --update
+  rm -rf /tmp/awscliv2.zip /tmp/aws
+  echo "    $(aws --version)"
+fi
+
+# ---------------------------------------------------------------------------
 # Timing + report helpers
 # ---------------------------------------------------------------------------
 T_START=$(date +%s)
