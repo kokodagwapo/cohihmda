@@ -102,7 +102,7 @@ CLUSTER_ID="${CLUSTER_ID:-coheus-${ENVIRONMENT}-dr-restore}"
 INSTANCE_ID="${CLUSTER_ID}-1"
 TEMPLATE="infrastructure/cloudformation/coheus_ecs_fargate_stack.yaml"
 LANDING_TEMPLATE="infrastructure/cloudformation/coheus_aurora_secondary_stack.yaml"
-CF_S3_BUCKET="${CF_S3_BUCKET:-coheus-sam-artifacts-339712788893}"
+CF_S3_BUCKET="${CF_S3_BUCKET:-coheus-dev-cf-artifacts-us-east-1}"
 
 get_primary_param() {
   "${AWS[@]}" cloudformation describe-stacks \
@@ -216,9 +216,32 @@ DR_AURORA_SECRET_ARN=$("${AWS[@]}" rds describe-db-clusters \
   --query 'DBClusters[0].MasterUserSecret.SecretArn' --output text 2>/dev/null || echo "")
 
 if [[ -z "$DR_AURORA_SECRET_ARN" || "$DR_AURORA_SECRET_ARN" == "None" ]]; then
-  # Snapshot restores from AWS Backup don't always carry MasterUserSecret; fall back to primary
-  DR_AURORA_SECRET_ARN="$(get_primary_param AuroraSecretArn)"
-  echo "    (No MasterUserSecret on restored cluster; using primary AuroraSecretArn: ${DR_AURORA_SECRET_ARN})"
+  # Snapshot restores from AWS Backup don't carry MasterUserSecret.
+  # ECS tasks in DR need a secret in the same region (cross-region KMS access fails).
+  # Copy the primary secret's value into DR, updating the host to the restored endpoint.
+  PRIMARY_SECRET_ARN="$(get_primary_param AuroraSecretArn)"
+  DR_SECRET_NAME="coheus/${ENVIRONMENT}/aurora/management"
+
+  # Check if we already have a DR copy
+  DR_AURORA_SECRET_ARN=$("${AWS[@]}" secretsmanager describe-secret \
+    --secret-id "$DR_SECRET_NAME" --region "$DR_REGION" \
+    --query 'ARN' --output text 2>/dev/null || echo "")
+
+  if [[ -z "$DR_AURORA_SECRET_ARN" || "$DR_AURORA_SECRET_ARN" == "None" ]]; then
+    echo "    Creating Aurora secret in $DR_REGION from primary..."
+    PRIMARY_SECRET_VAL=$("${AWS[@]}" secretsmanager get-secret-value \
+      --secret-id "$PRIMARY_SECRET_ARN" --region "$PRIMARY_REGION" \
+      --query 'SecretString' --output text)
+    # Update host to DR endpoint
+    DR_SECRET_VAL=$(echo "$PRIMARY_SECRET_VAL" | jq -c --arg h "$DR_AURORA_ENDPOINT" '.host = $h')
+    DR_AURORA_SECRET_ARN=$("${AWS[@]}" secretsmanager create-secret \
+      --name "$DR_SECRET_NAME" --secret-string "$DR_SECRET_VAL" \
+      --kms-key-id "$("${AWS[@]}" cloudformation describe-stacks \
+        --stack-name "$DR_LANDING_STACK" --region "$DR_REGION" \
+        --query "Stacks[0].Outputs[?OutputKey=='DRAuroraKmsKeyArn'].OutputValue | [0]" --output text)" \
+      --region "$DR_REGION" --query 'ARN' --output text)
+  fi
+  echo "    Aurora secret in DR: $DR_AURORA_SECRET_ARN"
 fi
 
 echo ">>> Aurora ready: ${DR_AURORA_ENDPOINT}"
@@ -273,14 +296,20 @@ echo ">>> Reading primary stack params (${PRIMARY_STACK})..."
 
 DR_IMAGE_TAG="${DR_IMAGE_TAG:-$(get_primary_param ContainerImageTag)}"
 
-# JwtSecret has NoEcho=true so CloudFormation returns ****; read from DR region replica
+# JwtSecret has NoEcho=true so CloudFormation returns ****; read from Secrets Manager
 if [[ -z "${DR_JWT_SECRET:-}" ]]; then
-  DR_JWT_SECRET=$("${AWS[@]}" secretsmanager get-secret-value \
-    --secret-id "coheus/${ENVIRONMENT}/jwt" --region "$DR_REGION" \
-    --query 'SecretString' --output text 2>/dev/null | jq -r '.secret // empty' 2>/dev/null || echo "")
+  # Try DR region first (if replicated), fall back to primary
+  for jwt_region in "$DR_REGION" "$PRIMARY_REGION"; do
+    DR_JWT_SECRET=$("${AWS[@]}" secretsmanager get-secret-value \
+      --secret-id "coheus/${ENVIRONMENT}/jwt" --region "$jwt_region" \
+      --query 'SecretString' --output text 2>/dev/null | jq -r '.secret // empty' 2>/dev/null || echo "")
+    if [[ -n "$DR_JWT_SECRET" ]]; then
+      echo "    JWT secret read from $jwt_region"
+      break
+    fi
+  done
   if [[ -z "$DR_JWT_SECRET" ]]; then
-    echo "ERROR: Could not read JWT secret from coheus/${ENVIRONMENT}/jwt in $DR_REGION"
-    echo "       Run: scripts/dr/setup-secret-replicas.sh to replicate secrets to DR region"
+    echo "ERROR: Could not read JWT secret from coheus/${ENVIRONMENT}/jwt in either region"
     exit 1
   fi
 fi
@@ -338,6 +367,32 @@ echo "    Frontend URL:  ${DR_FRONTEND_URL}"
 step_pass "resolve-params"
 
 # =========================================================================
+# Step 4b: Ensure DR ECR repo has the image
+# =========================================================================
+DR_ECR_REPO="coheus-dr-backend"
+SRC_ECR_REPO="coheus-backend"
+DR_ECR_URI="${AWS_ACCOUNT_ID:-$("${AWS[@]}" sts get-caller-identity --query Account --output text)}.dkr.ecr.${DR_REGION}.amazonaws.com"
+
+# Create DR ECR repo if it doesn't exist
+"${AWS[@]}" ecr describe-repositories --repository-names "$DR_ECR_REPO" --region "$DR_REGION" &>/dev/null || \
+  "${AWS[@]}" ecr create-repository --repository-name "$DR_ECR_REPO" --region "$DR_REGION" --output text >/dev/null
+
+# Check if the image tag already exists in DR repo
+if ! "${AWS[@]}" ecr describe-images --repository-name "$DR_ECR_REPO" --image-ids "imageTag=${DR_IMAGE_TAG}" \
+     --region "$DR_REGION" &>/dev/null; then
+  echo ">>> Copying image ${DR_IMAGE_TAG} from ${SRC_ECR_REPO} to ${DR_ECR_REPO}..."
+  # ECR login
+  "${AWS[@]}" ecr get-login-password --region "$DR_REGION" | \
+    docker login --username AWS --password-stdin "$DR_ECR_URI" 2>/dev/null || true
+  docker pull "${DR_ECR_URI}/${SRC_ECR_REPO}:${DR_IMAGE_TAG}"
+  docker tag  "${DR_ECR_URI}/${SRC_ECR_REPO}:${DR_IMAGE_TAG}" "${DR_ECR_URI}/${DR_ECR_REPO}:${DR_IMAGE_TAG}"
+  docker push "${DR_ECR_URI}/${DR_ECR_REPO}:${DR_IMAGE_TAG}"
+  echo "    Image copied."
+else
+  echo ">>> Image ${DR_IMAGE_TAG} already in ${DR_ECR_REPO}"
+fi
+
+# =========================================================================
 # Step 5: Deploy ECS backend
 # =========================================================================
 echo ""
@@ -358,6 +413,7 @@ while read -r KEY; do
   [[ -z "$KEY" ]] && continue
   VAL=""
   case "$KEY" in
+    ProjectName)           VAL="coheus-dr" ;;
     NetworkMode)           VAL="existing" ;;
     ExistingVPCId)         VAL="$DR_VPC_ID" ;;
     ExistingPublicSubnet1) VAL="$DR_PUB1" ;;
@@ -378,6 +434,10 @@ while read -r KEY; do
     FrontendUrl)           VAL="$DR_FRONTEND_URL" ;;
     JwtSecret)             VAL="$DR_JWT_SECRET" ;;
     OpenAIApiKeySecretArn) VAL="$DR_OPENAI_SECRET_ARN" ;;
+    DesiredCount)          VAL="1" ;;
+    MinCount)              VAL="1" ;;
+    MaxCount)              VAL="2" ;;
+    WorkerDesiredCount)    VAL="0" ;;
     *)                     VAL="$(get_primary_param "$KEY")" ;;
   esac
   # NoEcho params come back as **** from describe-stacks; treat as empty

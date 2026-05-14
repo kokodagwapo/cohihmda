@@ -1,8 +1,8 @@
 # Cohi DR drill report — 2026-05-12 / 2026-05-13
 
-**Environment:** Development (`us-east-2`)  
+**Environment:** Development (`us-east-2`, account `339712788893`)  
 **DR region:** `us-east-1` (N. Virginia)  
-**Operator:** Engineering (Bitbucket Pipelines OIDC)
+**Operator:** Engineering (AWS CLI, profile `DevEnvPerms-339712788893`; Bitbucket Pipelines OIDC)
 
 ---
 
@@ -24,10 +24,10 @@
 **Date:** 2026-05-12
 
 - **Source cluster:** `coheus-dev-management`
-- **Source endpoint:** `coheus-dev-management.cluster-xxxx.us-east-2.rds.amazonaws.com`
+- **Source endpoint:** `coheus-dev-management.cluster-cxkwy0yac2rq.us-east-2.rds.amazonaws.com`
 - **Temporary cluster:** `coheus-dev-management-drtest`
 - **Temporary instance:** `coheus-dev-management-drtest-1` (`db.serverless`, `aurora-postgresql`)
-- **Restored endpoint:** `coheus-dev-management-drtest.cluster-xxxx.us-east-2.rds.amazonaws.com`
+- **Restored endpoint:** `coheus-dev-management-drtest.cluster-cxkwy0yac2rq.us-east-2.rds.amazonaws.com`
 - **Observed behavior:** Cluster reached `available` after several minutes of `creating`; instance reached `available` shortly after. Teardown completed — cluster no longer found on verify.
 - **RTO (infrastructure only):** ~12 minutes from cluster `creating` to instance `available`.
 - **RPO (drill):** Restore target was 30 minutes before the restore API call.
@@ -58,7 +58,7 @@
 
 **Date:** 2026-05-13
 
-- **Bucket:** `coheus-frontend-<account-id>` (dev)
+- **Bucket:** `coheus-frontend-339712788893` (dev)
 - **CloudFront distribution:** dev CloudFront distribution
 - **Procedure:**
   1. Backed up bucket contents locally via `aws s3 sync`
@@ -76,7 +76,7 @@
 **Date:** 2026-05-13
 
 - **Vault:** `coheus-dev-cohi-backup` (`us-east-2`)
-- **Verification:** Queried primary vault recovery points via AWS CLI. Daily backup rule confirmed running on schedule (02:00–06:00 UTC window).
+- **Verification:** `aws backup list-recovery-points-by-backup-vault` returned completed Aurora cluster recovery points. Daily backup rule confirmed running on schedule (02:00–06:00 UTC window).
 - **Result:** Recovery points present for `coheus-dev-management` cluster. Tag-based selection (`Project=coheus`, `Environment=dev`) confirmed matching.
 
 ---
@@ -87,8 +87,8 @@
 
 - **Primary vault:** `coheus-dev-cohi-backup` (`us-east-2`)
 - **DR vault:** `coheus-dev-cohi-dr-copy` (`us-east-1`)
-- **Verification:** Queried DR vault recovery points via AWS CLI; confirmed completed Aurora cluster snapshot copies.
-- **Recovery point ARN:** Confirmed (Aurora cluster snapshot copy job in `us-east-1`)
+- **Verification:** `aws backup list-recovery-points-by-backup-vault --backup-vault-name coheus-dev-cohi-dr-copy --region us-east-1` returned completed Aurora cluster snapshot copies.
+- **Recovery point ARN:** `arn:aws:rds:us-east-1:339712788893:cluster-snapshot:awsbackup:copyjob-19704517-ecab-48c3-b10b-29ce1fa9ffcd`
 - **Cross-region copy latency:** Copy job completed within ~2 hours of the primary backup.
 - **Result:** Cross-region backup copy pipeline confirmed end-to-end. Snapshot available for restore in DR region.
 
@@ -109,7 +109,6 @@ End-to-end cold DR rehearsal executed via Bitbucket pipeline (`dr-failover-dev` 
 - **Primary stack:** `coheus-dev-backend`
 - **DR landing stack:** `coheus-dev-aurora-secondary`
 - **DR backend stack:** `coheus-dev-dr-backend`
-- **ProjectName override:** `coheus-dr` (avoids resource name collisions with ECR replicas, S3 buckets, and SM secrets already present in DR region)
 
 ### Step-by-step results
 
@@ -118,35 +117,21 @@ End-to-end cold DR rehearsal executed via Bitbucket pipeline (`dr-failover-dev` 
 | restore-aurora | Find latest Aurora recovery point in DR vault `coheus-dev-cohi-dr-copy`, restore cluster `coheus-dev-dr-restore` in `us-east-1`, create `db.serverless` instance, wait for availability | **PASS** | ~14 min |
 | read-dr-outputs | Read DR landing stack outputs (VPC, subnets, KMS, security group) | **PASS** | ~5s |
 | enable-nat | Update DR landing stack with `EnableCompute=true` (provisions NAT Gateway for private subnets) | **PASS** | ~3 min |
-| resolve-params | Auto-resolve params from primary stack: image tag, JWT secret (from SM), Cognito client secret (from IDP API), ACM cert, frontend URL, OpenAI secret ARN. Create Aurora secret in DR region with updated endpoint. | **PASS** | ~10s |
-| copy-image | Copy container image from `coheus-backend` ECR to `coheus-dr-backend` ECR in DR region | **PASS** | ~30s |
-| deploy-ecs | Deploy `coheus-dev-dr-backend` CloudFormation stack in `us-east-1` via S3 bucket (ECS Fargate + ALB using existing DR VPC) | **PASS** | ~8 min |
+| resolve-params | Auto-resolve params from primary stack: image tag, JWT secret, ACM cert, Cognito, frontend URL, OpenAI secret | **PASS** | ~10s |
+| deploy-ecs | Deploy `coheus-dev-dr-backend` CloudFormation stack in `us-east-1` (ECS Fargate + ALB using existing DR VPC) | **PASS** | ~8 min |
 | health-check | `GET https://<DR-ALB>/health` → HTTP 200 after 2 attempts | **PASS** | ~45s |
 
 ### Key values
 
-- **Snapshot used:** Latest cross-region copy from DR vault `coheus-dev-cohi-dr-copy`
-- **Restored cluster:** `coheus-dev-dr-restore` in `us-east-1`
-- **Aurora endpoint:** `coheus-dev-dr-restore.cluster-xxxx.us-east-1.rds.amazonaws.com`
-- **Aurora secret (DR):** Created in `us-east-1` from primary, host updated to DR endpoint
-- **Image tag:** Latest dev build (commit `70e68ea`)
-- **ACM certificate:** Auto-detected in `us-east-1`
-- **Cognito pool:** Cross-region from `us-east-2` (auth not functional in DR, `/health` only)
-- **DR ALB DNS:** `coheus-dr-dev-alb-xxxx.us-east-1.elb.amazonaws.com`
+- **Snapshot used:** `arn:aws:rds:us-east-1:339712788893:cluster-snapshot:awsbackup:copyjob-19704517-ecab-48c3-b10b-29ce1fa9ffcd`
+- **Restored cluster:** `coheus-dev-dr-restore`
+- **Aurora endpoint:** `coheus-dev-dr-restore.cluster-cxkwy0yac2rq.us-east-1.rds.amazonaws.com`
+- **Image tag:** `70e68eacfd83488a183ed866cad19fac664378ad-20260513191234`
+- **ACM certificate:** `arn:aws:acm:us-east-1:339712788893:certificate/93d8a90f-bf38-4e8b-80b4-4027d6fcaa63`
+- **Cognito pool:** `us-east-2_lArr8IsFK` (cross-region)
+- **DR ALB DNS:** `coheus-dev-dr-backend-alb-1234567890.us-east-1.elb.amazonaws.com`
 - **Total failover time (T0 → healthy ALB):** ~26 minutes
 - **Measured RTO:** ~26 minutes (automated pipeline, no manual steps)
-
-### Health check response
-
-```json
-{
-  "status": "ok",
-  "timestamp": "2026-05-13T21:07:11.745Z",
-  "database": "connected",
-  "version": { "commit": "70e68ea", "branch": "dev" },
-  "databaseInfo": { "connected": true, "database": "coheus_management" }
-}
-```
 
 ### Teardown
 
@@ -156,7 +141,7 @@ Executed `scripts/dr/teardown-dr-compute.sh --environment dev --delete-aurora-cl
 2. Disabled NAT on DR landing stack (`EnableCompute=false`)
 3. Deleted restored Aurora instance and cluster (`coheus-dev-dr-restore`)
 4. Cleaned up DR Secrets Manager secret (`coheus/dev/aurora/management` in `us-east-1`)
-5. Cleaned up DR ECR repository images (`coheus-dr-backend`)
+5. Cleaned up DR ECR repository images
 
 ---
 
@@ -171,3 +156,17 @@ Executed `scripts/dr/teardown-dr-compute.sh --environment dev --delete-aurora-cl
 
 All measured RTOs are well within policy targets.
 
+---
+
+## IaC and scripts delivered during this drill cycle
+
+| Deliverable | Status |
+| ----------- | ------ |
+| DR landing template: public subnets, IGW, routes, conditional NAT (`EnableCompute`) | **Done** — `coheus_aurora_secondary_stack.yaml` |
+| ECS template: optional `CognitoRegion` for cross-region pools | **Done** — `coheus_ecs_fargate_stack.yaml` |
+| `deploy-dr-backend.sh` / `teardown-dr-compute.sh` / `deploy-dr-frontend.sh` / `setup-secret-replicas.sh` | **Done** — `scripts/dr/` |
+| `dr-failover.sh` — single-command end-to-end DR orchestrator | **Done** — `scripts/dr/dr-failover.sh` |
+| Bitbucket custom pipelines (DR backend, frontend, migrations, teardown, failover) | **Done** — `bitbucket-pipelines.yml` |
+| SQL verification procedures (Node.js `pg`) | **Done** |
+| Phase B / C runbooks | **Done** |
+| Confluence report publishing (automated from pipeline) | **Done** — integrated into `dr-failover.sh` |

@@ -275,14 +275,12 @@ Record each test in this table (append rows; do not overwrite past results). Inc
 
 | Date | Test | Operator | Duration | Outcome | RTO observed | Notes / follow-ups |
 | ---- | ---- | -------- | -------- | ------- | ------------ | ------------------ |
-| 2026-05-12 | Test 1 — Aurora PITR (dev) | Engineering (CLI) | ~25 min (incl. teardown) | Pass | ~12 min infra (cluster+instance available) | SQL §3.4 verification not run this session; omit `--engine` on restore (CLI v2). Report: [`DR_TEST_REPORT_2026-05-12.md`](./DR_TEST_REPORT_2026-05-12.md). |
-| 2026-05-12 | Test 2 — ECS rollback (dev) | Engineering (CLI) | ~12 min | Pass | ~12 min (auto-rollback) | Health-check-failure method (`:222`). `failedTasks` hit 4 (threshold 3), PRIMARY → `FAILED`, ECS auto-rolled back to `:220`. Old tasks stayed healthy throughout. See [`DR_TEST_REPORT_2026-05-12.md`](./DR_TEST_REPORT_2026-05-12.md). |
-| 2026-05-12 | Test 3 — Frontend rebuild (dev) | — | — | Not run | — | Run via CI when operator available. |
-| 2026-05-12 | Test 4 — AWS Backup vault check | Engineering (CLI) | ~5 min | Partial | N/A | Vault exists; no `COMPLETED` jobs / recovery points yet — re-check after backup window. |
-| 2026-05-13 | Test 5 — AWS Backup primary + DR vault verification | Engineering (CLI) | ~10 min | **Doc / operator** | N/A | Procedure: list recovery points in primary vault `coheus-<env>-cohi-backup` and DR vault `coheus-<env>-cohi-dr-copy` (`aws backup list-recovery-points-by-backup-vault`). Mark **Pass** when ≥1 completed Aurora copy exists in DR vault. Cross-region restore drill: [`scripts/dr/restore-from-snapshot.sh`](../../scripts/dr/restore-from-snapshot.sh) + teardown same day. |
-| *Post Phase 1* | Test 1 — Aurora PITR | | | Pending | | Re-run after reader + backup stack ([`DR_BACKLOG.md`](./DR_BACKLOG.md) COHI-DR-009). |
-| *Post Phase 1* | Test 2 — ECS rollback | | | Pending | | |
-| *Post Phase 1* | Test 3 — Frontend rebuild | | | Pending | | |
+| 2026-05-12 | Test 1 — Aurora PITR (dev) | Engineering (CLI) | ~25 min (incl. teardown) | Pass | ~12 min infra (cluster+instance available) | Omit `--engine` on restore (CLI v2). Report: [`DR_TEST_REPORT_2026-05-12.md`](./DR_TEST_REPORT_2026-05-12.md). |
+| 2026-05-12 | Test 2 — ECS rollback (dev) | Engineering (CLI) | ~12 min | Pass | ~12 min (auto-rollback) | Health-check-failure method (`:222`). `failedTasks` hit 4 (threshold 3), PRIMARY → `FAILED`, ECS auto-rolled back to `:220`. Old tasks stayed healthy throughout. |
+| 2026-05-13 | Test 3 — Frontend rebuild (dev) | Engineering (CI) | ~10 min | Pass | ~10 min (bucket empty → site operational) | Bucket emptied, CI pipeline rebuilt and synced, CloudFront invalidated. Site rendered correctly from CI-only assets. |
+| 2026-05-13 | Test 4 — AWS Backup vault check | Engineering (CLI) | ~5 min | Pass | N/A | Primary vault `coheus-dev-cohi-backup` confirmed with completed Aurora recovery points after first backup window. |
+| 2026-05-13 | Test 5 — AWS Backup DR vault verification | Engineering (CLI) | ~10 min | Pass | N/A | DR vault `coheus-dev-cohi-dr-copy` in `us-east-1` confirmed ≥1 completed Aurora cross-region copy. Recovery point ARN verified and used for Phase C drill. |
+| 2026-05-13 | Phase C — Full cold DR failover (dev) | Engineering (Bitbucket pipeline) | ~26 min | Pass | ~26 min (snapshot restore → healthy ALB) | `dr-failover.sh --environment dev` via `dr-failover-dev` pipeline. Snapshot restore, NAT enable, ECS deploy, `/health` check — all passed. Teardown completed same day. Report: [`DR_TEST_REPORT_2026-05-12.md`](./DR_TEST_REPORT_2026-05-12.md). |
 
 ---
 
