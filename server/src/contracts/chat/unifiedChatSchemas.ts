@@ -1,3 +1,10 @@
+export const UNIFIED_CHAT_TYPE_ENUM = [
+  "chat",
+  "research",
+  "insight_builder",
+  "workbench",
+] as const;
+
 export const unifiedChatRequestSchema: Record<string, unknown> = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
   $id: "https://cohi.local/schemas/chat/v1/request.json",
@@ -6,6 +13,12 @@ export const unifiedChatRequestSchema: Record<string, unknown> = {
   required: ["message"],
   properties: {
     message: { type: "string", minLength: 1, description: "User message text." },
+    chat_type: {
+      type: "string",
+      enum: [...UNIFIED_CHAT_TYPE_ENUM],
+      default: "chat",
+      description: "Product mode; default chat for new sessions (meeting spec §10 #1).",
+    },
     conversationId: {
       type: "string",
       format: "uuid",
@@ -91,10 +104,46 @@ export const unifiedChatRequestSchema: Record<string, unknown> = {
           default: "auto",
           description: "Whether to use planner loop vs single-shot completion for complex turns.",
         },
+        research: {
+          type: "object",
+          description: "Research-only options (deep analysis when chat_type is research).",
+          properties: {
+            deepAnalysis: {
+              type: "boolean",
+              default: false,
+              description: "Deep analysis mode; only meaningful when chat_type is research.",
+            },
+          },
+          additionalProperties: false,
+        },
       },
       additionalProperties: false,
     },
   },
+  allOf: [
+    {
+      if: {
+        properties: {
+          options: {
+            type: "object",
+            properties: {
+              research: {
+                type: "object",
+                properties: { deepAnalysis: { const: true } },
+                required: ["deepAnalysis"],
+              },
+            },
+            required: ["research"],
+          },
+        },
+        required: ["options"],
+      },
+      then: {
+        properties: { chat_type: { const: "research" } },
+        required: ["chat_type"],
+      },
+    },
+  ],
   additionalProperties: false,
 };
 
@@ -137,6 +186,11 @@ export const unifiedChatResponseSchema: Record<string, unknown> = {
           description: "Monotonic cursor after transcript/snapshot compaction (opaque).",
         },
         suggestedQuestions: { type: "array", items: { type: "string" } },
+        chatType: {
+          type: "string",
+          enum: [...UNIFIED_CHAT_TYPE_ENUM],
+          description: "Echo of request chat_type for this turn.",
+        },
       },
       additionalProperties: true,
     },
@@ -302,6 +356,53 @@ export const unifiedChatStreamEventSchema: Record<string, unknown> = {
       },
     },
     metadata: { type: "object" },
+  },
+  additionalProperties: false,
+};
+
+const scopeSchema: Record<string, unknown> = {
+  type: "object",
+  required: ["type"],
+  properties: {
+    type: {
+      type: "string",
+      enum: ["global_session", "canvas", "draft", "insight", "widget_edit", "workbench_hub"],
+    },
+    id: { type: "string", description: "Scoped entity id when applicable." },
+  },
+  additionalProperties: false,
+};
+
+/** POST /api/chat/v1/conversations */
+export const unifiedChatConversationCreateBodySchema: Record<string, unknown> = {
+  $schema: "https://json-schema.org/draft/2020-12/schema",
+  $id: "https://cohi.local/schemas/chat/v1/conversation-create.json",
+  title: "CohiUnifiedChatConversationCreate",
+  type: "object",
+  required: ["scope"],
+  properties: {
+    scope: scopeSchema,
+    chat_type: {
+      type: "string",
+      enum: [...UNIFIED_CHAT_TYPE_ENUM],
+      default: "chat",
+    },
+    title: { type: "string", maxLength: 200 },
+    legacy_ref: { type: "string", maxLength: 500, description: "Optional pointer for COHI-395 legacy bridge." },
+  },
+  additionalProperties: false,
+};
+
+/** POST /api/chat/v1/conversations/:id/rebind */
+export const unifiedChatConversationRebindBodySchema: Record<string, unknown> = {
+  $schema: "https://json-schema.org/draft/2020-12/schema",
+  $id: "https://cohi.local/schemas/chat/v1/conversation-rebind.json",
+  title: "CohiUnifiedChatConversationRebind",
+  type: "object",
+  required: ["scope"],
+  properties: {
+    scope: scopeSchema,
+    chat_type: { type: "string", enum: [...UNIFIED_CHAT_TYPE_ENUM] },
   },
   additionalProperties: false,
 };

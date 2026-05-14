@@ -20,9 +20,13 @@ import {
 } from "./policyEngine.js";
 import { hashPromptModules } from "./promptComposer.js";
 import { filterKnownWidgetActions } from "./widgetActionGate.js";
+import type { UnifiedConversationChatType } from "./unifiedConversationService.js";
+
+export type UnifiedChatType = UnifiedConversationChatType;
 
 export interface UnifiedChatRequestBody {
   message: string;
+  chat_type?: UnifiedChatType;
   conversationId?: string;
   clientMessageId?: string;
   scope?: {
@@ -61,6 +65,7 @@ export interface UnifiedChatRequestBody {
     personaHints?: string[];
     qaAgentRunTag?: string;
     planningMode?: "auto" | "always" | "never";
+    research?: { deepAnalysis?: boolean };
   };
 }
 
@@ -90,6 +95,14 @@ function mapHistoryToCohiMessages(
     content: m.content,
     timestamp: new Date(),
   }));
+}
+
+function normalizeChatType(body: UnifiedChatRequestBody): UnifiedChatType {
+  const t = body.chat_type;
+  if (t === "research" || t === "insight_builder" || t === "workbench" || t === "chat") {
+    return t;
+  }
+  return "chat";
 }
 
 function shouldUseWorkbench(body: UnifiedChatRequestBody): boolean {
@@ -154,6 +167,7 @@ export async function processUnifiedChatMessage(
     throw err;
   }
 
+  const chatType = normalizeChatType(body);
   const conversationId = body.conversationId ?? randomUUID();
   const turnId = randomUUID();
 
@@ -174,6 +188,7 @@ export async function processUnifiedChatMessage(
       turn: { id: turnId, blocks },
       metadata: {
         promptHash: summarizePromptModules("workbench", body),
+        chatType,
         contextManifest: [
           { tier: "identity", included: true, truncated: false },
           {
@@ -208,6 +223,7 @@ export async function processUnifiedChatMessage(
     turn: { id: turnId, blocks },
     metadata: {
       promptHash: summarizePromptModules("global", body),
+      chatType,
       contextManifest: [
         { tier: "identity", included: true, truncated: false },
         {
