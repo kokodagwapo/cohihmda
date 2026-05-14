@@ -17,6 +17,45 @@ export function isDateFilterBlankOnlyShortcut(shortcut: string | undefined): boo
   return (shortcut ?? "").trim() === DATE_FILTER_BLANK_SHORTCUT;
 }
 
+/**
+ * Display values for the "Relative to date(s)" controls. Empty when a preset/year
+ * shortcut is active (user should clear presets or use the calendar row above).
+ */
+export function getRelativeDateFieldValues(filter: DateColumnFilter): { from: string; to: string } {
+  const sc = (filter.shortcut ?? "").trim();
+  if (sc === "after") return { from: filter.from ?? "", to: "" };
+  if (sc === "before") return { from: "", to: filter.to ?? "" };
+  if (!sc || sc === DATE_FILTER_BLANK_SHORTCUT) {
+    return { from: filter.from ?? "", to: filter.to ?? "" };
+  }
+  return { from: "", to: "" };
+}
+
+/**
+ * One date: on/after `from`, or on/before `to`. Two dates: inclusive range.
+ * If both are set and `from > to`, the other bound is cleared: editing **From**
+ * keeps From (clears To); editing **To** keeps To (clears From). If `lastTouched`
+ * is omitted, To wins (From cleared), matching a To-side edit.
+ */
+export function dateFilterFromRelativeFields(
+  fromStr: string,
+  toStr: string,
+  lastTouched?: "from" | "to",
+): DateColumnFilter {
+  const f = (fromStr ?? "").trim();
+  const t = (toStr ?? "").trim();
+  if (!f && !t) return { kind: "date" };
+  if (f && !t) return { kind: "date", shortcut: "after", from: f, to: "" };
+  if (!f && t) return { kind: "date", shortcut: "before", from: "", to: t };
+  if (f > t) {
+    if (lastTouched === "from") {
+      return { kind: "date", shortcut: "after", from: f, to: "" };
+    }
+    return { kind: "date", shortcut: "before", from: "", to: t };
+  }
+  return { kind: "date", from: f, to: t, shortcut: undefined };
+}
+
 export type TextColumnFilter = {
   kind: "text";
   selectedValues: string[];
@@ -98,7 +137,7 @@ export function parseFilterDate(value: unknown): Date | null {
   const direct = new Date(str);
   if (!Number.isNaN(direct.getTime())) return direct;
 
-  const usMatch = str.match(/^(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})$/);
+  const usMatch = str.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
   if (usMatch) {
     const [, month, day, year] = usMatch;
     const d = new Date(Number(year), Number(month) - 1, Number(day));
@@ -136,7 +175,16 @@ function getShortcutRange(shortcut: string): { start: Date | null; end: Date | n
     token === "last 30 days"
       ? ("last-30-days" as const) // back-compat
       : (token as PeriodPreset);
-  const presetTokens: PeriodPreset[] = ["last-30-days", "mtd", "ytd", "last-month", "rolling-13", "rolling-12"];
+  const presetTokens: PeriodPreset[] = [
+    "last-30-days",
+    "mtd",
+    "qtd",
+    "ytd",
+    "last-month",
+    "last-quarter",
+    "rolling-13",
+    "rolling-12",
+  ];
   if (presetTokens.includes(preset)) {
     const range = computePresetDateRange(preset);
     const start = new Date(range.start);
@@ -207,6 +255,20 @@ function matchesDateFilter(filter: DateColumnFilter, rawValue: unknown): boolean
   const valueDate = parseFilterDate(rawValue);
   if (!valueDate) return false;
   valueDate.setHours(0, 0, 0, 0);
+
+  const sc = (filter.shortcut ?? "").trim().toLowerCase();
+  if (sc === "after") {
+    const from = parseFilterDate(filter.from);
+    if (!from) return true;
+    from.setHours(0, 0, 0, 0);
+    return valueDate >= from;
+  }
+  if (sc === "before") {
+    const to = parseFilterDate(filter.to);
+    if (!to) return true;
+    to.setHours(0, 0, 0, 0);
+    return valueDate <= to;
+  }
 
   if (filter.shortcut?.trim()) {
     const { start, end } = getShortcutRange(filter.shortcut);
