@@ -130,7 +130,9 @@ Parameters:
     AllowedValues:
       - 'true'
       - 'false'
-    Description: Enable Aurora Global Database for cross-region DR. Only applies to management clusters.
+    Description: |
+      Legacy Aurora Global Database (hot cross-region replica). Default false.
+      Preferred DR: AWS Backup cross-region copy + DR landing stack (`coheus_aurora_secondary_stack`) + `scripts/dr/restore-from-snapshot.sh`.
 
 Conditions:
   IsManagementCluster: !Equals [!Ref ClusterType, 'management']

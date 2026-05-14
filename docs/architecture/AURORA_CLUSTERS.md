@@ -491,9 +491,12 @@ resource "aws_cloudwatch_metric_alarm" "aurora_max_acu" {
 
 | Backup Type | Frequency | Retention | Purpose |
 |-------------|-----------|-----------|---------|
-| Automated | Continuous | 7 days | Point-in-time recovery |
-| Manual Snapshots | Weekly | 30 days | Long-term recovery |
-| Cross-Region | Daily | 7 days | Regional disaster |
+| Automated PITR | Continuous | **35 days** | Point-in-time recovery (in-region) |
+| AWS Backup (daily) | Daily (02:00–06:00 UTC) | 35 days | Centralized backup with cross-region copy |
+| AWS Backup (monthly) | 1st of month | 365 days | Long-term retention |
+| Cross-region copy | Daily (via AWS Backup `CopyActions`) | 35 days (DR vault) | Cold DR — restore in `us-east-1` from snapshot |
+
+**RTO / RPO:** In-region restore ~4 hours; cross-region cold restore 8–24 hours. RPO up to 24 hours for cross-region (last daily backup). Cohi is not critical financial infrastructure — these targets reflect a practical cost/downtime balance.
 
 ### Point-in-Time Recovery
 
@@ -507,38 +510,21 @@ aws rds restore-db-cluster-to-point-in-time \
   --db-subnet-group-name coheus-db-subnet-group
 ```
 
-### Cross-Region Replication
+### Cross-Region DR (Cold Snapshot)
 
-```hcl
-# Enable Global Database for cross-region DR
-resource "aws_rds_global_cluster" "coheus" {
-  global_cluster_identifier = "coheus-global"
-  source_db_cluster_identifier = aws_rds_cluster.primary.arn
-}
+> **Production Cohi default (2026-05):** cross-region DR is **cold** — AWS Backup `CopyActions` copy daily cluster snapshots to vault `coheus-<env>-cohi-dr-copy` in `us-east-1`, plus a DR landing VPC from `coheus_aurora_secondary_stack.yaml`. Restore runbook: [`scripts/dr/restore-from-snapshot.sh`](../../scripts/dr/restore-from-snapshot.sh).
 
-resource "aws_rds_cluster" "secondary" {
-  provider = aws.secondary_region
-  
-  cluster_identifier        = "coheus-tenant-001-secondary"
-  global_cluster_identifier = aws_rds_global_cluster.coheus.id
-  engine                    = "aurora-postgresql"
-  engine_mode               = "provisioned"
-  
-  serverlessv2_scaling_configuration {
-    min_capacity = 0.5
-    max_capacity = 4  # Secondary can be smaller
-  }
-}
-```
+Aurora Global Database is **not used**. The `EnableGlobalDatabaseParam` parameter in `coheus_aurora_cluster_stack.yaml` remains for legacy compatibility but defaults to `false`.
 
-### Failover Procedure
+### Cross-Region Restore Procedure
 
-1. **Detect**: CloudWatch alarm triggers on primary region failure
-2. **Assess**: Determine if failover is necessary
-3. **Promote**: Promote secondary cluster to standalone
-4. **Update**: Update management DB with new endpoints
-5. **Route**: Update application to use new cluster endpoints
-6. **Notify**: Alert customers of failover
+1. **Detect**: CloudWatch alarm / manual assessment indicates primary region (`us-east-2`) is unavailable
+2. **Assess**: Determine if cross-region failover is necessary (expected to be hours, not minutes)
+3. **Restore**: Run `scripts/dr/restore-from-snapshot.sh` to create a new Aurora cluster in `us-east-1` from the latest DR vault recovery point
+4. **Cutover**: Update Secrets Manager, ECS task definitions, and DNS/CloudFront to point at the new cluster endpoint
+5. **Regenerate**: Trigger podcast audio regeneration from restored tenant data (podcasts are not backed up)
+6. **Validate**: Confirm application health before directing production traffic
+7. **Notify**: Alert customers of the incident and recovery
 
 ---
 

@@ -1,7 +1,9 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: |
-  Coheus DR — secondary region (deploy in us-east-1 after primary Aurora Global Cluster exists).
-  Creates minimal VPC, Aurora Serverless v2 reader cluster member, and S3 bucket for podcast CRR target.
+  Coheus DR — secondary region landing zone (deploy in us-east-1).
+  Provides VPC, private + public subnets, IGW, DB subnet group, security group, KMS key for cold restores,
+  AWS Backup vault for cross-region snapshot copies, optional S3 podcast replica bucket,
+  and optional NAT (EnableCompute=true) for ECS cold DR drills.
 
 Parameters:
   ProjectName:
@@ -16,10 +18,6 @@ Parameters:
       - staging
       - prod
 
-  GlobalClusterIdentifier:
-    Type: String
-    Description: Identifier from primary region (output GlobalClusterId from coheus_aurora_cluster_stack)
-
   VpcCidr:
     Type: String
     Default: 10.30.0.0/16
@@ -30,8 +28,19 @@ Parameters:
     Default: ''
     Description: IAM role ARN from primary region trusted by s3.amazonaws.com for podcast CRR. Leave empty on first deploy; update stack after role exists.
 
+  EnableCompute:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: >
+      When true, creates NAT Gateway + private routes for ECS cold DR (billable while active).
+      Keep false between drills to avoid NAT hourly charges.
+
 Conditions:
   HasReplicationPrincipal: !Not [!Equals [!Ref PrimaryReplicationRoleArn, '']]
+  ComputeEnabled: !Equals [!Ref EnableCompute, 'true']
 
 Resources:
   DRVpc:
@@ -75,6 +84,147 @@ Resources:
           Value: !Ref ProjectName
         - Key: Environment
           Value: !Ref Environment
+
+  DRInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-dr-igw'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  DRInternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref DRInternetGateway
+      VpcId: !Ref DRVpc
+
+  DRPublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DRVpc
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 10.30.10.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-dr-public-1'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  DRPublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DRVpc
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.30.11.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-dr-public-2'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  DRPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref DRVpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-dr-public-rt'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  DRPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: DRInternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref DRPublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref DRInternetGateway
+
+  DRPublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref DRPublicRouteTable
+      SubnetId: !Ref DRPublicSubnet1
+
+  DRPublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref DRPublicRouteTable
+      SubnetId: !Ref DRPublicSubnet2
+
+  DRNatEIP:
+    Type: AWS::EC2::EIP
+    Condition: ComputeEnabled
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-dr-nat-eip'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  DRNatGateway:
+    Type: AWS::EC2::NatGateway
+    Condition: ComputeEnabled
+    Properties:
+      AllocationId: !GetAtt DRNatEIP.AllocationId
+      SubnetId: !Ref DRPublicSubnet1
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-dr-nat'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  DRPrivateNatRouteTable:
+    Type: AWS::EC2::RouteTable
+    Condition: ComputeEnabled
+    Properties:
+      VpcId: !Ref DRVpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-dr-private-nat-rt'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  DRPrivateNatRoute:
+    Type: AWS::EC2::Route
+    Condition: ComputeEnabled
+    Properties:
+      RouteTableId: !Ref DRPrivateNatRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref DRNatGateway
+
+  DRPrivateSubnet1NatRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: ComputeEnabled
+    Properties:
+      RouteTableId: !Ref DRPrivateNatRouteTable
+      SubnetId: !Ref DRPrivateSubnet1
+
+  DRPrivateSubnet2NatRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: ComputeEnabled
+    Properties:
+      RouteTableId: !Ref DRPrivateNatRouteTable
+      SubnetId: !Ref DRPrivateSubnet2
 
   DRDbSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
@@ -145,53 +295,22 @@ Resources:
         - Key: Environment
           Value: !Ref Environment
 
-  SecondaryAuroraCluster:
-    Type: AWS::RDS::DBCluster
+  # Cross-region backup copy destination (primary coheus_backup_stack CopyActions target this vault)
+  DRBackupVault:
+    Type: AWS::Backup::BackupVault
     Properties:
-      DBClusterIdentifier: !Sub '${ProjectName}-${Environment}-dr-secondary'
-      Engine: aurora-postgresql
-      EngineVersion: '17.7'
-      Port: 5432
-      GlobalClusterIdentifier: !Ref GlobalClusterIdentifier
-      DBSubnetGroupName: !Ref DRDbSubnetGroup
-      VpcSecurityGroupIds:
-        - !Ref DRClusterSecurityGroup
-      StorageEncrypted: true
-      KmsKeyId: !Ref DRAuroraKmsKey
-      CopyTagsToSnapshot: true
-      ServerlessV2ScalingConfiguration:
-        MinCapacity: 0.5
-        MaxCapacity: 4
-      Tags:
-        - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-dr-aurora-secondary'
-        - Key: Project
-          Value: !Ref ProjectName
-        - Key: Environment
-          Value: !Ref Environment
-
-  SecondaryAuroraInstance:
-    Type: AWS::RDS::DBInstance
-    Properties:
-      DBInstanceIdentifier: !Sub '${ProjectName}-${Environment}-dr-secondary-1'
-      DBClusterIdentifier: !Ref SecondaryAuroraCluster
-      DBInstanceClass: db.serverless
-      Engine: aurora-postgresql
-      PubliclyAccessible: false
-      Tags:
-        - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-dr-secondary-instance'
-        - Key: Project
-          Value: !Ref ProjectName
-        - Key: Environment
-          Value: !Ref Environment
+      BackupVaultName: !Sub '${ProjectName}-${Environment}-cohi-dr-copy'
+      BackupVaultTags:
+        Project: !Ref ProjectName
+        Environment: !Ref Environment
 
   PodcastReplicaBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
-      BucketName: !Sub '${ProjectName}-${Environment}-podcast-audio-replica-${AWS::AccountId}'
+      # No fixed BucketName: a retained bucket from a prior stack delete would block recreate with
+      # "AlreadyExists". Use stack output PodcastReplicaBucketArn for CRR / IAM (stable contract).
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -232,14 +351,46 @@ Resources:
             Resource: !Sub '${PodcastReplicaBucket.Arn}/*'
 
 Outputs:
-  SecondaryClusterEndpoint:
-    Description: DR Aurora cluster endpoint (reader in global DB)
-    Value: !GetAtt SecondaryAuroraCluster.Endpoint.Address
+  DrBackupVaultArn:
+    Description: Pass to primary region coheus_backup_stack CopyActions (DailySnapshots destination)
+    Value: !GetAtt DRBackupVault.BackupVaultArn
+
+  DrBackupVaultName:
+    Description: Backup vault name in DR region
+    Value: !Ref DRBackupVault
 
   PodcastReplicaBucketArn:
     Description: Pass as PodcastReplicationDestinationBucketArn to primary coheus_ecs_fargate_stack
     Value: !GetAtt PodcastReplicaBucket.Arn
 
   DRVpcId:
-    Description: DR VPC ID (for future secondary ECS)
+    Description: DR VPC ID (for restore script and future secondary ECS)
     Value: !Ref DRVpc
+
+  DRPublicSubnet1Id:
+    Description: Public subnet 1 (ALB / NAT) for DR ECS
+    Value: !Ref DRPublicSubnet1
+
+  DRPublicSubnet2Id:
+    Description: Public subnet 2 (ALB / NAT) for DR ECS
+    Value: !Ref DRPublicSubnet2
+
+  DRPrivateSubnet1Id:
+    Description: Private subnet 1 (ECS tasks / Aurora restore)
+    Value: !Ref DRPrivateSubnet1
+
+  DRPrivateSubnet2Id:
+    Description: Private subnet 2 (ECS tasks / Aurora restore)
+    Value: !Ref DRPrivateSubnet2
+
+  DRDbSubnetGroupName:
+    Description: DB subnet group for restore-from-snapshot
+    Value: !Ref DRDbSubnetGroup
+
+  DRClusterSecurityGroupId:
+    Description: Security group for restored Aurora cluster
+    Value: !Ref DRClusterSecurityGroup
+
+  DRAuroraKmsKeyArn:
+    Description: KMS key ARN for encrypting restored clusters
+    Value: !GetAtt DRAuroraKmsKey.Arn

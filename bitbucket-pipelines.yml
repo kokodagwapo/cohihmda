@@ -37,6 +37,19 @@
 #   - ATLASSIAN_EMAIL / ATLASSIAN_SITE_URL
 #   - Atlassian API token is fetched from Secrets Manager via backend stack output
 #   - (Optional) E2E_MANAGED_EMAIL_PREFIX      - defaults to "e2e.auto"
+#
+# DR / failover custom pipelines (manual trigger):
+#   dr-failover-dev/prod — one-click: auto-finds snapshot, restores Aurora, deploys ECS,
+#     runs health check, publishes Confluence test report.
+#     Variables: DR_AWS_REGION (default us-east-1). Everything else auto-resolved.
+#     For Confluence report: ATLASSIAN_EMAIL, ATLASSIAN_SITE_URL (reuse from QA deployment),
+#       DR_CONFLUENCE_PARENT_PAGE_ID (default 1379270657). Token fetched from Secrets Manager.
+#   dr-deploy-backend-dev/prod — backend-only (requires all DR_* vars below, use for reruns).
+#     DR_AURORA_ENDPOINT, DR_AURORA_SECRET_ARN, DR_IMAGE_TAG, DR_JWT_SECRET,
+#     DR_CERTIFICATE_ARN, DR_COGNITO_*, DR_FRONTEND_URL, optional DR_OPENAI_SECRET_ARN
+#   dr-deploy-frontend-dev/prod — DR_S3_FRONTEND_BUCKET, CLOUDFRONT_DISTRIBUTION_ID
+#   dr-run-migrations-dev — DR_ECS_CLUSTER, DR_ECS_SERVICE
+#   dr-teardown-compute-dev — no extra vars (reads stack names from environment)
 # ============================================================================
 
 image: node:20
@@ -344,6 +357,103 @@ definitions:
           - chmod +x ./scripts/bitbucket/deploy-backend-ecs.sh
           - ./scripts/bitbucket/deploy-backend-ecs.sh
 
+    - step: &dr-failover-dev
+        name: DR Full Failover (Dev) — restore + deploy + report
+        oidc: true
+        deployment: dev
+        max-time: 60
+        script:
+          - *setup-oidc
+          - apt-get update -qq && apt-get install -y -qq curl jq
+          - export AWS_REGION="${DR_AWS_REGION:-us-east-1}"
+          - export AWS_DEFAULT_REGION="${DR_AWS_REGION:-us-east-1}"
+          - chmod +x ./scripts/dr/dr-failover.sh
+          - ./scripts/dr/dr-failover.sh --environment dev --skip-cognito
+
+    - step: &dr-failover-prod
+        name: DR Full Failover (Prod) — restore + deploy + report
+        oidc: true
+        deployment: production
+        max-time: 60
+        script:
+          - *setup-oidc
+          - apt-get update -qq && apt-get install -y -qq curl jq
+          - export AWS_REGION="${DR_AWS_REGION:-us-east-1}"
+          - export AWS_DEFAULT_REGION="${DR_AWS_REGION:-us-east-1}"
+          - chmod +x ./scripts/dr/dr-failover.sh
+          - ./scripts/dr/dr-failover.sh --environment prod
+
+    - step: &dr-deploy-backend-dev
+        name: DR Deploy Backend Only (Dev, us-east-1)
+        oidc: true
+        deployment: dev
+        script:
+          - *setup-oidc
+          - export AWS_REGION="${DR_AWS_REGION:-us-east-1}"
+          - export AWS_DEFAULT_REGION="${DR_AWS_REGION:-us-east-1}"
+          - chmod +x ./scripts/dr/deploy-dr-backend.sh
+          - ./scripts/dr/deploy-dr-backend.sh
+
+    - step: &dr-deploy-backend-prod
+        name: DR Deploy Backend Only (Prod, us-east-1)
+        oidc: true
+        deployment: production
+        script:
+          - *setup-oidc
+          - export AWS_REGION="${DR_AWS_REGION:-us-east-1}"
+          - export AWS_DEFAULT_REGION="${DR_AWS_REGION:-us-east-1}"
+          - chmod +x ./scripts/dr/deploy-dr-backend.sh
+          - ./scripts/dr/deploy-dr-backend.sh
+
+    - step: &dr-deploy-frontend-dev
+        name: DR Deploy Frontend (Dev, us-east-1)
+        oidc: true
+        deployment: dev
+        caches:
+          - npm
+        script:
+          - *setup-oidc
+          - export AWS_DEFAULT_REGION="${DR_AWS_REGION:-us-east-1}"
+          - chmod +x ./scripts/dr/deploy-dr-frontend.sh
+          - ./scripts/dr/deploy-dr-frontend.sh
+
+    - step: &dr-deploy-frontend-prod
+        name: DR Deploy Frontend (Prod, us-east-1)
+        oidc: true
+        deployment: production
+        caches:
+          - npm
+        script:
+          - *setup-oidc
+          - export AWS_DEFAULT_REGION="${DR_AWS_REGION:-us-east-1}"
+          - chmod +x ./scripts/dr/deploy-dr-frontend.sh
+          - ./scripts/dr/deploy-dr-frontend.sh
+
+    - step: &dr-run-migrations-dev
+        name: DR Run Migrations (Dev, us-east-1)
+        oidc: true
+        deployment: dev
+        script:
+          - *setup-oidc
+          - export AWS_REGION="${DR_AWS_REGION:-us-east-1}"
+          - export AWS_DEFAULT_REGION="${DR_AWS_REGION:-us-east-1}"
+          - export ECS_CLUSTER="${DR_ECS_CLUSTER:?Set DR_ECS_CLUSTER}"
+          - export ECS_SERVICE="${DR_ECS_SERVICE:?Set DR_ECS_SERVICE}"
+          - apt-get update && apt-get install -y curl
+          - chmod +x ./scripts/bitbucket/run-migrations.sh
+          - ./scripts/bitbucket/run-migrations.sh
+
+    - step: &dr-teardown-compute-dev
+        name: DR Teardown Compute (Dev)
+        oidc: true
+        deployment: dev
+        script:
+          - *setup-oidc
+          - export AWS_REGION="${DR_AWS_REGION:-us-east-1}"
+          - export AWS_DEFAULT_REGION="${DR_AWS_REGION:-us-east-1}"
+          - chmod +x ./scripts/dr/teardown-dr-compute.sh
+          - ./scripts/dr/teardown-dr-compute.sh
+
     - step: &deploy-infra-dev
         name: Deploy Infrastructure to Dev
         oidc: true
@@ -539,7 +649,7 @@ pipelines:
     infrastructure-prod:
       - step: *deploy-infra-prod
 
-    # DR stacks — Aurora cluster + AWS Backup (manual trigger only)
+    # DR stacks — Aurora cluster + AWS Backup + optional DR landing (manual trigger only)
     # These are NOT part of the regular dev/prod branch pipeline.
     # Run after the normal infra deploy when DR template changes are merged.
     dr-stacks-dev:
@@ -554,18 +664,11 @@ pipelines:
             allowed-values:
               - "false"
               - "true"
-          - name: ENABLE_GLOBAL_DB
+          - name: DEPLOY_DR_LANDING
             default: "false"
             allowed-values:
               - "false"
               - "true"
-          - name: DEPLOY_SECONDARY
-            default: "false"
-            allowed-values:
-              - "false"
-              - "true"
-          - name: GLOBAL_CLUSTER_ID
-            default: ""
       - step:
           name: Deploy DR Stacks to Dev
           oidc: true
@@ -587,18 +690,11 @@ pipelines:
             allowed-values:
               - "false"
               - "true"
-          - name: ENABLE_GLOBAL_DB
+          - name: DEPLOY_DR_LANDING
             default: "false"
             allowed-values:
               - "false"
               - "true"
-          - name: DEPLOY_SECONDARY
-            default: "false"
-            allowed-values:
-              - "false"
-              - "true"
-          - name: GLOBAL_CLUSTER_ID
-            default: ""
       - step:
           name: Deploy DR Stacks to Prod
           oidc: true
@@ -608,6 +704,30 @@ pipelines:
             - *setup-oidc
             - chmod +x ./scripts/bitbucket/deploy-dr-stacks.sh
             - ./scripts/bitbucket/deploy-dr-stacks.sh
+
+    dr-failover-dev:
+      - step: *dr-failover-dev
+
+    dr-failover-prod:
+      - step: *dr-failover-prod
+
+    dr-deploy-backend-dev:
+      - step: *dr-deploy-backend-dev
+
+    dr-deploy-backend-prod:
+      - step: *dr-deploy-backend-prod
+
+    dr-deploy-frontend-dev:
+      - step: *dr-deploy-frontend-dev
+
+    dr-deploy-frontend-prod:
+      - step: *dr-deploy-frontend-prod
+
+    dr-run-migrations-dev:
+      - step: *dr-run-migrations-dev
+
+    dr-teardown-compute-dev:
+      - step: *dr-teardown-compute-dev
 
     # Full deploy with test gates
     deploy-all-dev:

@@ -183,7 +183,7 @@ Resources:
               - ssm:*
             Resource: "*"
 
-          # RDS / Aurora (cluster, instance, subnet group, global database)
+          # RDS / Aurora (cluster, instance, subnet group, global database, DR restore)
           - Sid: RDS
             Effect: Allow
             Action:
@@ -212,6 +212,17 @@ Resources:
               - rds:DescribeDBParameterGroups
               - rds:DescribeEngineDefaultClusterParameters
               - rds:DescribeOrderableDBInstanceOptions
+              - rds:RestoreDBClusterFromSnapshot
+              - rds:DescribeDBClusterSnapshots
+              - rds:CopyDBClusterSnapshot
+            Resource: "*"
+
+          # ACM (certificate lookup for DR)
+          - Sid: ACM
+            Effect: Allow
+            Action:
+              - acm:ListCertificates
+              - acm:DescribeCertificate
             Resource: "*"
 
           # AWS Backup (vault, plan, selection) + backup-storage (vault capsule mount)

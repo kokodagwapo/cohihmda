@@ -170,48 +170,31 @@ Epic link field: set parent to the Epic after creation.
 
 ---
 
-### Story: COHI-DR-011 — Aurora Global Cluster (prod management)
+### Story: COHI-DR-011 — ~~Aurora Global Cluster~~ CANCELLED
 
-**Description:** Deploy `AWS::RDS::GlobalCluster` change in `coheus_aurora_cluster_stack.yaml` for **prod + management** only; validate global ID output.
-
-**AC**
-
-- [ ] `aws rds describe-global-clusters` shows expected identifier  
-- [ ] No unexpected writer endpoint change lasting >5 min  
-
-**Estimate:** 5  
-**Depends on:** COHI-DR-005, COHI-DR-006  
-**Labels:** `dr`, `phase-2`, `iac`
+**Status:** Cancelled — Aurora Global Database is **not used**. Cold snapshot DR via AWS Backup cross-region copy is the production default. The `EnableGlobalDatabaseParam` in `coheus_aurora_cluster_stack.yaml` remains for legacy compatibility but defaults to `false`.
 
 ---
 
-### Story: COHI-DR-012 — Secondary region stack (`us-east-1`)
+### Story: COHI-DR-012 — DR landing zone stack (`us-east-1`)
 
-**Description:** Deploy [`coheus_aurora_secondary_stack.yaml`](../infrastructure/cloudformation/coheus_aurora_secondary_stack.yaml) with VPC, secondary Aurora cluster + instance, podcast replica bucket.
+**Description:** Deploy [`coheus_aurora_secondary_stack.yaml`](../infrastructure/cloudformation/coheus_aurora_secondary_stack.yaml) as a **landing zone** (VPC, DB subnet group, SG, KMS, DR backup vault). No always-on Aurora cluster. Enable cross-region backup copy on the primary backup stack.
 
 **AC**
 
-- [ ] Secondary cluster `available` and attached to global cluster  
+- [ ] Stack `CREATE_COMPLETE` with outputs: `DrBackupVaultArn`, `DRDbSubnetGroupName`, `DRClusterSecurityGroupId`, `DRAuroraKmsKeyArn`  
+- [ ] At least one successful copy job to DR vault within 48h  
 - [ ] Outputs captured in [`DR_DEPLOY_CHECKLIST.md`](./DR_DEPLOY_CHECKLIST.md)  
 
-**Estimate:** 8  
-**Depends on:** COHI-DR-011  
+**Estimate:** 5  
+**Depends on:** COHI-DR-005  
 **Labels:** `dr`, `phase-2`, `iac`
 
 ---
 
-### Story: COHI-DR-013 — S3 cross-region replication (podcast bucket)
+### Story: COHI-DR-013 — ~~S3 cross-region replication (podcast bucket)~~ CANCELLED
 
-**Description:** Two-phase deploy per checklist: secondary bucket policy with replication role ARN; enable `PodcastReplicationDestinationBucketArn` on primary ECS stack.
-
-**AC**
-
-- [ ] Objects replicate to `us-east-1` replica bucket (sample key check)  
-- [ ] `PodcastReplicationDestinationBucketArn` and `PodcastReplicationServiceRoleArn` set on primary ECS stack (see [`DR_DEPLOY_CHECKLIST.md`](./DR_DEPLOY_CHECKLIST.md) — avoids IAM/bucket circular dependency)
-
-**Estimate:** 3  
-**Depends on:** COHI-DR-012  
-**Labels:** `dr`, `phase-2`, `iac`
+**Status:** Cancelled — podcast audio is **regenerable** from source data stored in Aurora. S3 CRR is not needed for DR. QA artifacts are ephemeral (30-day lifecycle). If a future non-regenerable bucket is introduced, re-open this story.
 
 ---
 
@@ -246,6 +229,6 @@ Epic link field: set parent to the Epic after creation.
 ## Import checklist (for whoever creates Jira issues)
 
 1. Create Epic **COHI-DR-EPIC** (or one epic per your naming convention).  
-2. Create stories in dependency order: COHI-DR-005 early (parallel), COHI-DR-003 → COHI-DR-004 → COHI-DR-007 → COHI-DR-006 → COHI-DR-008 → COHI-DR-009 → COHI-DR-011+ .  
+2. Create stories in dependency order: COHI-DR-005 early (parallel), COHI-DR-003 → COHI-DR-004 → COHI-DR-007 → COHI-DR-006 → COHI-DR-008 → COHI-DR-009 → COHI-DR-012 → COHI-DR-014 → COHI-DR-015. **COHI-DR-011 and COHI-DR-013 are cancelled.**  
 3. Link Epic as parent for all stories.  
 4. Attach links: `DISASTER_RECOVERY.md`, `DR_ROLLOUT_PLAN.md`, `DR_TEST_PLAN.md`, `DR_DEPLOY_CHECKLIST.md`.

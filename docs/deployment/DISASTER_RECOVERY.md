@@ -45,7 +45,7 @@ Live verification (`aws rds describe-db-clusters --region us-east-2`):
 - `coheus-prod-management` — Encrypted **true**, Retention **7**, DeletionProtection **true**, `MultiAZ: False`.
 - `coheus-dev-management` — Encrypted **true**, Retention **7**, DeletionProtection **false**.
 - Most recent automated snapshot observed for prod: `rds:coheus-prod-management-2026-05-06-03-05`.
-- `aws rds describe-global-clusters` → empty (no Aurora Global Database).
+- `aws rds describe-global-clusters` → typically **empty** (`EnableGlobalDatabaseParam` defaults to **false**). Cross-region database durability is via **AWS Backup copy** to vault `coheus-<env>-cohi-dr-copy` in `us-east-1` when [`coheus_backup_stack.yaml`](../infrastructure/cloudformation/coheus_backup_stack.yaml) and the DR landing stack are deployed.
 
 ### 2.2 ECS Fargate backend
 
@@ -62,12 +62,12 @@ Live verification: ECS cluster `coheus-prod-cluster` in `us-east-2` contains `co
 
 ### 2.3 Application S3 buckets (created inside ECS stack)
 
-| Bucket | DeletionPolicy | Versioning | Encryption | Lifecycle |
-| ------ | -------------- | ---------- | ---------- | --------- |
-| `${ProjectName}-${Environment}-qa-artifacts-${AWS::AccountId}` | Retain | No | KMS (CMK) | Expire after 30 days |
-| `${ProjectName}-${Environment}-podcast-audio-${AWS::AccountId}` | Retain | Enabled | KMS (CMK) | Expire after 14 days |
+| Bucket | DeletionPolicy | Versioning | Encryption | Lifecycle | Backed up? |
+| ------ | -------------- | ---------- | ---------- | --------- | ---------- |
+| `${ProjectName}-${Environment}-qa-artifacts-${AWS::AccountId}` | Retain | No | KMS (CMK) | Expire after 30 days | No — ephemeral |
+| `${ProjectName}-${Environment}-podcast-audio-${AWS::AccountId}` | Retain | Enabled | KMS (CMK) | Expire after 14 days | **No** — regenerable from source data on demand |
 
-Both buckets block public access and use the stack's CMK.
+Both buckets block public access and use the stack's CMK. **Neither bucket is included in AWS Backup or cross-region replication** — QA artifacts are ephemeral and podcast audio is generated from tenant data stored in Aurora (which *is* backed up).
 
 ### 2.4 Frontend S3 + CloudFront
 
@@ -104,8 +104,8 @@ These shorten **detection time** but do not perform any recovery action.
 The following gaps remain **until deployed and ratified** (templates and runbooks may already exist in `infrastructure/cloudformation/` and `docs/deployment/`):
 
 1. **DR policy not ratified.** [`DR_POLICY.md`](./DR_POLICY.md) is a **draft** until the checklist there is completed.
-2. **Cross-region Aurora not live in AWS.** [`coheus_aurora_cluster_stack.yaml`](../infrastructure/cloudformation/coheus_aurora_cluster_stack.yaml) (GlobalCluster) and [`coheus_aurora_secondary_stack.yaml`](../infrastructure/cloudformation/coheus_aurora_secondary_stack.yaml) must be deployed; `describe-global-clusters` will stay empty until then. Blocked on Org SCP for the DR region.
-3. **No automated cross-region snapshot copy** beyond Global Database + S3 CRR parameters (operator-driven).
+2. **Cross-region Aurora is cold DR.** Hot standby in DR is **not** deployed by default. [`coheus_aurora_secondary_stack.yaml`](../infrastructure/cloudformation/coheus_aurora_secondary_stack.yaml) defines the **landing zone** (VPC, public/private networking, conditional NAT for ECS drills, DR backup vault, KMS, optional S3 replica). Restore runbook: [`scripts/dr/restore-from-snapshot.sh`](../../scripts/dr/restore-from-snapshot.sh); ECS-in-DR scripts: [`scripts/dr/README.md`](../../scripts/dr/README.md). Blocked on Org SCP for the DR region until approved.
+3. **Automated cross-region snapshot copy** requires the DR backup vault + `CopyActions` on the primary-region backup plan (see template); verify **Copy jobs** in AWS Backup after deploy.
 4. **Second DB instance must be rolled out.** The template now defines a **reader** instance; existing environments need a stack update to materialize it.
 5. **AWS Backup stack must be deployed and verified.** [`coheus_backup_stack.yaml`](../infrastructure/cloudformation/coheus_backup_stack.yaml) is new — confirm `BACKUP_JOB_COMPLETED` in console.
 6. **Recurring DR drills are procedural** — use [`DR_TEST_PLAN.md`](./DR_TEST_PLAN.md) and [`DR_DEPLOY_CHECKLIST.md`](./DR_DEPLOY_CHECKLIST.md); calendar ownership is still required.
@@ -125,7 +125,7 @@ The following gaps remain **until deployed and ratified** (templates and runbook
 | Loss of secrets in Secrets Manager | Partial | Secrets are KMS-encrypted but no documented re-seed procedure; manual rotation required |
 | Loss of KMS CMK | No | Key deletion is irreversible after the pending window; nothing in IaC enforces multi-key strategy |
 | Data loss older than PITR window (35 days) plus no AWS Backup recovery | No | Enable and verify [`coheus_backup_stack.yaml`](../infrastructure/cloudformation/coheus_backup_stack.yaml) jobs; extend vault retention as needed |
-| Full `us-east-2` regional outage | No | No cross-region cluster, no replicated S3, no DNS failover plan |
+| Full `us-east-2` regional outage | Partial (data) | AWS Backup copies / snapshots in `us-east-1` can be restored to a new Aurora cluster; **RTO 8–24 hours** without pre-built ECS in DR. See [`DR_POLICY.md`](./DR_POLICY.md) T1. Podcast audio is regenerable post-restore. |
 
 ---
 
@@ -137,7 +137,7 @@ Each recommendation maps to a concrete change in `infrastructure/` so the policy
 
 1. **Confirm prod backup retention** is **35 days** (default in `coheus_aurora_cluster_stack.yaml`) after stack update; adjust parameter only if policy requires a different value (max 35 for Aurora PITR).
 2. **Deploy [`coheus_backup_stack.yaml`](../infrastructure/cloudformation/coheus_backup_stack.yaml)** per [`DR_DEPLOY_CHECKLIST.md`](./DR_DEPLOY_CHECKLIST.md); confirm backup jobs complete for tagged resources.
-3. **Optional:** extend AWS Backup with **cross-region copy** once Org SCP allows a backup vault in the DR region (see [`DR_ROLLOUT_PLAN.md`](./DR_ROLLOUT_PLAN.md)).
+3. **Optional:** extend AWS Backup with **cross-region copy** once Org SCP allows a backup vault in the DR region (see [`DR_ROLLOUT_PLAN.md`](./DR_ROLLOUT_PLAN.md)); **defaults are now enabled in `coheus_backup_stack.yaml`** after the DR vault stack exists.
 4. **Secrets re-seed** — completed in [`DEPLOYMENT_RUNBOOK.md`](./DEPLOYMENT_RUNBOOK.md) (Secrets Manager section).
 
 ### 5.2 P1 — improve in-region resilience
@@ -148,9 +148,10 @@ Each recommendation maps to a concrete change in `infrastructure/` so the policy
 
 ### 5.3 P2 — multi-region (requires Org SCP review first)
 
-1. **Deploy GlobalCluster + `coheus_aurora_secondary_stack.yaml`** in an SCP-approved region (see [`DR_DEPLOY_CHECKLIST.md`](./DR_DEPLOY_CHECKLIST.md)).
+1. **Deploy `coheus_aurora_secondary_stack.yaml` + enable backup `CopyActions`** in an SCP-approved region (see [`DR_DEPLOY_CHECKLIST.md`](./DR_DEPLOY_CHECKLIST.md)). One-time teardown of any legacy Global Database: [`scripts/dr/teardown-global-dr.sh`](../../scripts/dr/teardown-global-dr.sh).
 2. **CloudFront origin failover** — set `DRSecondaryBackendOriginDomain` on `coheus_waf_cloudfront_stack.yaml` when a secondary ALB exists.
-3. **S3 CRR** — set `PodcastReplicationDestinationBucketArn` and `PodcastReplicationServiceRoleArn` on `coheus_ecs_fargate_stack.yaml` per checklist Appendix A.
+
+S3 cross-region replication for the podcast audio bucket is **not required** — podcast audio is generated from source data in Aurora and can be regenerated after a restore.
 
 ### 5.4 P3 — policy and process
 
