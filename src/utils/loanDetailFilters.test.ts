@@ -4,6 +4,8 @@ import {
   EMPTY_FILTER_TOKEN,
   evaluateLoanDetailFilters,
   isFilterActive,
+  dateFilterFromRelativeFields,
+  getRelativeDateFieldValues,
   type ColumnFilterState,
 } from "@/utils/loanDetailFilters";
 
@@ -88,5 +90,63 @@ describe("loanDetailFilters", () => {
     const filtered = evaluateLoanDetailFilters(dateRows, blankDate, (row, columnId) => row[columnId as keyof DateRow]);
     expect(filtered).toHaveLength(1);
     expect(filtered[0].loanDate).toBeNull();
+  });
+
+  it("dateFilterFromRelativeFields: after, before, or inclusive range", () => {
+    expect(dateFilterFromRelativeFields("", "")).toEqual({ kind: "date" });
+    expect(dateFilterFromRelativeFields("2025-01-01", "")).toEqual({
+      kind: "date",
+      shortcut: "after",
+      from: "2025-01-01",
+      to: "",
+    });
+    expect(dateFilterFromRelativeFields("", "2025-06-01")).toEqual({
+      kind: "date",
+      shortcut: "before",
+      from: "",
+      to: "2025-06-01",
+    });
+    expect(dateFilterFromRelativeFields("2025-03-01", "2025-01-01")).toEqual({
+      kind: "date",
+      shortcut: "before",
+      from: "",
+      to: "2025-01-01",
+    });
+    expect(dateFilterFromRelativeFields("2025-03-01", "2025-01-01", "from")).toEqual({
+      kind: "date",
+      shortcut: "after",
+      from: "2025-03-01",
+      to: "",
+    });
+    expect(dateFilterFromRelativeFields("2025-03-01", "2025-01-01", "to")).toEqual({
+      kind: "date",
+      shortcut: "before",
+      from: "",
+      to: "2025-01-01",
+    });
+    expect(dateFilterFromRelativeFields("2025-01-01", "2025-03-01")).toEqual({
+      kind: "date",
+      from: "2025-01-01",
+      to: "2025-03-01",
+      shortcut: undefined,
+    });
+  });
+
+  it("getRelativeDateFieldValues clears inputs when a preset shortcut is active", () => {
+    expect(getRelativeDateFieldValues({ kind: "date", shortcut: "ytd", from: "2025-01-01", to: "2025-05-01" })).toEqual({
+      from: "",
+      to: "",
+    });
+    expect(
+      getRelativeDateFieldValues({ kind: "date", shortcut: "after", from: "2025-02-01", to: "" }),
+    ).toEqual({ from: "2025-02-01", to: "" });
+  });
+
+  it("evaluates inclusive date range from relative fields", () => {
+    const range: ColumnFilterState = {
+      closingDate: dateFilterFromRelativeFields("2025-01-05", "2025-02-20"),
+    };
+    const filtered = evaluateLoanDetailFilters(rows, range, (row, columnId) => row[columnId as keyof Row]);
+    expect(filtered.map((r) => r.closingDate).sort()).toEqual(["2025-01-10", "2025-02-15"]);
   });
 });

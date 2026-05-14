@@ -49,6 +49,7 @@ import { runUserCustomPromptEvaluator } from "./userInsightCustomPromptEvaluator
 import {
   buildSpecifierPredicateSql,
   composeAccessAndSpecifierFilters,
+  parsePromptFunctionalCategoryFromSpecifiers,
 } from "../userInsightSpecifierPredicate.js";
 import { getColumnsForTenant } from "../../ai/schemaContextService.js";
 import { isSqlEvidenceItem } from "../../research/agents/dataAnalystAgent.js";
@@ -102,6 +103,14 @@ function stubCustomPromptEvaluatedInsight(title: string, reason: string): Evalua
     findingIndex: 0,
     for_podcast: false,
   };
+}
+
+function stampCustomPromptFunctionalCategory(
+  insight: EvaluatedInsight,
+  specifiers: Record<string, unknown> | null | undefined,
+): void {
+  const fc = parsePromptFunctionalCategoryFromSpecifiers(specifiers ?? undefined);
+  if (fc) insight.functional_category = fc;
 }
 
 export function isUserInsightGenerationRunning(
@@ -633,6 +642,7 @@ async function runDataBackedBatchCustomPrompts(
             ", "
           )}. Only loans-table columns from your tenant schema may be used. Edit the specifiers and try again.`
         );
+        stampCustomPromptFunctionalCategory(stub, specifiers);
         evaluated.push(stub);
         promptIds.push(pid);
         synthetic.push({
@@ -677,6 +687,7 @@ async function runDataBackedBatchCustomPrompts(
           row.title,
           `Investigation failed for this prompt: ${e.message || "unknown error"}.`
         );
+        stampCustomPromptFunctionalCategory(stub, specifiers);
         evaluated.push(stub);
         promptIds.push(pid);
         synthetic.push({
@@ -712,6 +723,7 @@ async function runDataBackedBatchCustomPrompts(
         );
       }
 
+      stampCustomPromptFunctionalCategory(ev, specifiers);
       evaluated.push(ev);
       promptIds.push(pid);
       synthetic.push(finding);
@@ -721,6 +733,10 @@ async function runDataBackedBatchCustomPrompts(
       const stub = stubCustomPromptEvaluatedInsight(
         row.title,
         `This saved prompt hit an unexpected error: ${e.message || "unknown"}.`
+      );
+      stampCustomPromptFunctionalCategory(
+        stub,
+        row.specifiers && typeof row.specifiers === "object" ? (row.specifiers as Record<string, unknown>) : undefined,
       );
       evaluated.push(stub);
       promptIds.push(pid);
@@ -870,6 +886,7 @@ export async function runSingleUserCustomPromptInsight(
       )}. Only loans-table columns from your tenant schema may be used. Edit the specifiers and try again.`
     );
     stub.findingIndex = 0;
+    stampCustomPromptFunctionalCategory(stub, specifiers);
     await persistUserInsights(
       tenantPool,
       userId,
@@ -920,6 +937,7 @@ export async function runSingleUserCustomPromptInsight(
       `Investigation failed for this prompt: ${e.message || "unknown error"}.`
     );
     stub.findingIndex = 0;
+    stampCustomPromptFunctionalCategory(stub, specifiers);
     await persistUserInsights(
       tenantPool,
       userId,
@@ -961,6 +979,7 @@ export async function runSingleUserCustomPromptInsight(
     );
   }
   ev.findingIndex = 0;
+  stampCustomPromptFunctionalCategory(ev, specifiers);
 
   await persistUserInsights(tenantPool, userId, [ev], [finding], generationBatch, {
     insightOrigin: "custom_prompt",

@@ -112,11 +112,25 @@ export async function runUserCustomPromptLlm(
   }
 }
 
+const PROMPT_TAG_LABELS: Record<string, string> = {
+  operations: "Operations",
+  sales: "Sales",
+  finance: "Finance",
+  secondary_marketing: "Secondary Marketing",
+  compliance: "Compliance",
+};
+
 export function specifiersToSummary(specifiers: Record<string, unknown>): string {
   if (!specifiers || typeof specifiers !== "object") return "";
   const parts: string[] = [];
   for (const [k, v] of Object.entries(specifiers)) {
     if (v === undefined || v === null || v === "") continue;
+    if (k === "_prompt_tag") {
+      const id = String(v).trim().toLowerCase();
+      if (!id) continue;
+      parts.push(`Tag: ${PROMPT_TAG_LABELS[id] ?? id}`);
+      continue;
+    }
     if (Array.isArray(v)) {
       const items = v.map((x) => String(x)).filter((s) => s.length > 0);
       if (items.length === 0) continue;

@@ -88,6 +88,9 @@ import { getInsightDataQuality } from "@/lib/insightDataQuality";
 import { ExportMenu } from "@/components/common/ExportMenu";
 import type { ExportData } from "@/utils/exportUtils";
 import type { Finding } from "@/hooks/useResearchSession";
+import type { ColumnFilter, LoanDetailFilterKind } from "@/utils/loanDetailFilters";
+import { EMPTY_FILTER_TOKEN, isFilterActive } from "@/utils/loanDetailFilters";
+import { MyInsightSpecifierFilterPanel } from "./MyInsightSpecifierFilterPanel";
 
 // ============================================================================
 // Go to dashboard page (for escalated dashboard insights)
@@ -329,10 +332,46 @@ interface LoanColumnMeta {
   category: string;
 }
 
+const MY_INSIGHT_PROMPT_TAG_OPTIONS: Array<{ id: string; label: string }> = [
+  { id: "", label: "(blank)" },
+  { id: "operations", label: "Operations" },
+  { id: "sales", label: "Sales" },
+  { id: "finance", label: "Finance" },
+  { id: "secondary_marketing", label: "Secondary Marketing" },
+  { id: "compliance", label: "Compliance" },
+];
+
+function inferFilterKindFromPgColumn(meta: LoanColumnMeta | undefined, columnName: string): LoanDetailFilterKind {
+  if (!meta) {
+    return columnName.toLowerCase().includes("date") ? "date" : "text";
+  }
+  const t = meta.type.toLowerCase();
+  if (t === "boolean") return "boolean";
+  if (
+    t.includes("numeric") ||
+    t === "integer" ||
+    t === "bigint" ||
+    t === "double precision" ||
+    t === "real" ||
+    t === "smallint"
+  ) {
+    return "number";
+  }
+  if (t.includes("date") || t.includes("timestamp")) return "date";
+  return "text";
+}
+
+function defaultFilterForKind(kind: LoanDetailFilterKind): ColumnFilter {
+  if (kind === "boolean") return { kind: "boolean", value: "all" };
+  if (kind === "number") return { kind: "number", mode: "all", selectedValues: [] };
+  if (kind === "date") return { kind: "date" };
+  return { kind: "text", selectedValues: [] };
+}
+
 interface PromptSpecifierRow {
   id: string;
   column: string;
-  values: string[];
+  filter: ColumnFilter;
   options: string[];
   optionsLoading: boolean;
   optionsError: string | null;
@@ -342,51 +381,145 @@ function createEmptySpecifierRow(): PromptSpecifierRow {
   return {
     id: `sr-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
     column: "",
-    values: [],
+    filter: { kind: "text", selectedValues: [] },
     options: [],
     optionsLoading: false,
     optionsError: null,
   };
 }
 
-function specifiersObjectFromRows(rows: PromptSpecifierRow[]): Record<string, unknown> {
-  const out: Record<string, string[]> = {};
+function specifiersObjectFromRows(
+  rows: PromptSpecifierRow[],
+  promptTag: string
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
   for (const r of rows) {
     const key = r.column.trim();
-    if (!key || r.values.length === 0) continue;
-    const set = new Set(out[key] ?? []);
-    for (const v of r.values) set.add(v);
-    out[key] = Array.from(set);
+    if (!key || !isFilterActive(r.filter)) continue;
+    out[key] = r.filter;
+  }
+  const tag = promptTag.trim().toLowerCase();
+  if (
+    tag &&
+    ["operations", "sales", "finance", "secondary_marketing", "compliance"].includes(tag)
+  ) {
+    out._prompt_tag = tag;
   }
   return out;
 }
 
-function rowsFromSpecifiersObject(spec: Record<string, unknown> | null | undefined): PromptSpecifierRow[] {
+function tryParseStoredFilter(v: unknown): ColumnFilter | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const o = v as Record<string, unknown>;
+  if (typeof o.kind !== "string") return null;
+  if (o.kind === "text" && Array.isArray(o.selectedValues)) {
+    return { kind: "text", selectedValues: o.selectedValues.map((x) => String(x)) };
+  }
+  if (o.kind === "number" && typeof o.mode === "string") {
+    const mode = o.mode as "all" | "range" | "min" | "max";
+    if (!["all", "range", "min", "max"].includes(mode)) return null;
+    return {
+      kind: "number",
+      mode,
+      selectedValues: Array.isArray(o.selectedValues) ? o.selectedValues.map((x) => String(x)) : [],
+      min: o.min != null ? String(o.min) : undefined,
+      max: o.max != null ? String(o.max) : undefined,
+      value: o.value != null ? String(o.value) : undefined,
+    };
+  }
+  if (o.kind === "date") {
+    return {
+      kind: "date",
+      from: o.from != null ? String(o.from) : undefined,
+      to: o.to != null ? String(o.to) : undefined,
+      shortcut: o.shortcut != null ? String(o.shortcut) : undefined,
+    };
+  }
+  if (o.kind === "boolean" && typeof o.value === "string" && ["all", "yes", "no"].includes(o.value)) {
+    return { kind: "boolean", value: o.value as "all" | "yes" | "no" };
+  }
+  return null;
+}
+
+function legacyArrayToFilter(arr: string[], kind: LoanDetailFilterKind): ColumnFilter {
+  if (kind === "number") return { kind: "number", mode: "all", selectedValues: arr };
+  if (kind === "boolean") {
+    const s = arr[0]?.toLowerCase();
+    if (s === "yes" || s === "no") return { kind: "boolean", value: s };
+    return { kind: "boolean", value: "all" };
+  }
+  return { kind: "text", selectedValues: arr };
+}
+
+function rowsFromSpecifiersObject(
+  spec: Record<string, unknown> | null | undefined,
+  columns: LoanColumnMeta[]
+): PromptSpecifierRow[] {
   if (!spec || typeof spec !== "object") return [];
   const rows: PromptSpecifierRow[] = [];
   for (const [k, v] of Object.entries(spec)) {
+    if (k === "_prompt_tag") continue;
     if (v === undefined || v === null) continue;
     const row = createEmptySpecifierRow();
+    const colMeta = columns.find((c) => c.name === k);
+    const fk = inferFilterKindFromPgColumn(colMeta, k);
     if (Array.isArray(v)) {
       const vals = v.map((x) => String(x)).filter((s) => s.length > 0);
       if (!vals.length) continue;
-      rows.push({ ...row, column: k, values: vals });
-    } else if (["string", "number", "boolean"].includes(typeof v)) {
-      rows.push({ ...row, column: k, values: [String(v)] });
-    } else {
-      rows.push({ ...row, column: k, values: [JSON.stringify(v)] });
+      rows.push({ ...row, column: k, filter: legacyArrayToFilter(vals, fk) });
+      continue;
+    }
+    const parsed = tryParseStoredFilter(v);
+    if (parsed) {
+      rows.push({ ...row, column: k, filter: parsed });
+      continue;
+    }
+    if (["string", "number", "boolean"].includes(typeof v)) {
+      rows.push({ ...row, column: k, filter: legacyArrayToFilter([String(v)], fk) });
     }
   }
   return rows;
 }
 
-function summarizeSpecifierValues(values: string[]): string {
-  if (values.length === 0) return "Choose values…";
-  if (values.length === 1) {
-    const s = values[0];
-    return s.length > 44 ? `${s.slice(0, 42)}…` : s;
+function summarizeSpecifierFilterButton(
+  colMeta: LoanColumnMeta | undefined,
+  column: string,
+  filter: ColumnFilter
+): string {
+  if (!column.trim()) return "Choose column…";
+  if (!isFilterActive(filter)) return "Set filter…";
+  const name = colMeta?.displayName ?? column;
+  if (filter.kind === "boolean") {
+    return `${name}: ${filter.value === "all" ? "All" : filter.value === "yes" ? "Yes" : "No"}`;
   }
-  return `${values.length} selected`;
+  if (filter.kind === "date") {
+    const sc = (filter.shortcut ?? "").trim();
+    if (sc === "-") return `${name}: No date (blank)`;
+    if (sc === "after" && filter.from) return `${name}: After ${filter.from}`;
+    if (sc === "before" && filter.to) return `${name}: Before ${filter.to}`;
+    if (sc && filter.from && filter.to) return `${name}: ${sc} (${filter.from}–${filter.to})`;
+    if (filter.from && filter.to) return `${name}: ${filter.from}–${filter.to}`;
+    if (filter.from) return `${name}: from ${filter.from}`;
+    if (filter.to) return `${name}: to ${filter.to}`;
+    return `${name}: date filter`;
+  }
+  if (filter.kind === "number") {
+    if (filter.mode === "all")
+      return filter.selectedValues.length <= 1
+        ? `${name}: ${filter.selectedValues[0] === EMPTY_FILTER_TOKEN ? "(Blank)" : filter.selectedValues[0] ?? ""}`
+        : `${name}: ${filter.selectedValues.length} values`;
+    if (filter.mode === "range") return `${name}: ${filter.min ?? "…"} – ${filter.max ?? "…"}`;
+    if (filter.mode === "min") return `${name}: ≥ ${filter.value ?? ""}`;
+    return `${name}: ≤ ${filter.value ?? ""}`;
+  }
+  const n = filter.selectedValues.length;
+  if (n === 0) return "Set filter…";
+  if (n === 1) {
+    const s = filter.selectedValues[0] === EMPTY_FILTER_TOKEN ? "(Blank)" : filter.selectedValues[0];
+    const t = s.length > 36 ? `${s.slice(0, 34)}…` : s;
+    return `${name}: ${t}`;
+  }
+  return `${name}: ${n} selected`;
 }
 
 interface CohiPromptsCardProps {
@@ -1248,6 +1381,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
   const [promptFormTitle, setPromptFormTitle] = useState("");
   const [promptFormText, setPromptFormText] = useState("");
   const [promptFormSchedule, setPromptFormSchedule] = useState<"batch" | "on_demand">("batch");
+  const [promptFormTag, setPromptFormTag] = useState("");
   const [myPromptModalOpen, setMyPromptModalOpen] = useState(false);
   const [loanSchemaColumns, setLoanSchemaColumns] = useState<LoanColumnMeta[]>([]);
   const [loanSchemaLoading, setLoanSchemaLoading] = useState(false);
@@ -1433,6 +1567,16 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
         );
         return;
       }
+      const meta = loanSchemaColumns.find((c) => c.name === col);
+      const fk = inferFilterKindFromPgColumn(meta, col);
+      if (fk === "boolean" || fk === "date") {
+        setPromptSpecifierRows((prev) =>
+          prev.map((r) =>
+            r.id === rowId ? { ...r, options: [], optionsLoading: false, optionsError: null } : r
+          )
+        );
+        return;
+      }
       setPromptSpecifierRows((prev) =>
         prev.map((r) => (r.id === rowId ? { ...r, optionsLoading: true, optionsError: null } : r))
       );
@@ -1444,18 +1588,35 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
           `/api/loans/distinct-values/${encodeURIComponent(col)}${tenantParam}`
         );
         const vals = (data.values || []).map((v) => String(v));
+        const withBlank =
+          fk === "text" || fk === "number"
+            ? vals.includes(EMPTY_FILTER_TOKEN)
+              ? vals
+              : [EMPTY_FILTER_TOKEN, ...vals]
+            : vals;
         setPromptSpecifierRows((prev) =>
-          prev.map((r) =>
-            r.id === rowId
-              ? {
-                  ...r,
-                  options: vals,
-                  optionsLoading: false,
-                  optionsError: null,
-                  values: r.values.filter((x) => vals.includes(x)),
-                }
-              : r
-          )
+          prev.map((r) => {
+            if (r.id !== rowId) return r;
+            let nextFilter = r.filter;
+            if (r.filter.kind === "text") {
+              nextFilter = {
+                ...r.filter,
+                selectedValues: r.filter.selectedValues.filter((x) => x === EMPTY_FILTER_TOKEN || withBlank.includes(x)),
+              };
+            } else if (r.filter.kind === "number" && r.filter.mode === "all") {
+              nextFilter = {
+                ...r.filter,
+                selectedValues: r.filter.selectedValues.filter((x) => x === EMPTY_FILTER_TOKEN || withBlank.includes(x)),
+              };
+            }
+            return {
+              ...r,
+              options: withBlank,
+              optionsLoading: false,
+              optionsError: null,
+              filter: nextFilter,
+            };
+          })
         );
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : "Could not load values";
@@ -1466,7 +1627,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
         );
       }
     },
-    [selectedTenantId]
+    [selectedTenantId, loanSchemaColumns]
   );
 
   useEffect(() => {
@@ -1578,6 +1739,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
     setPromptFormTitle("");
     setPromptFormText("");
     setPromptFormSchedule("batch");
+    setPromptFormTag("");
     setPromptSpecifierRows([]);
     setSpecifierColumnPopoverRowId(null);
     setSpecifierColumnSearch("");
@@ -1597,16 +1759,29 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
 
   const setSpecifierRowColumn = useCallback(
     (rowId: string, col: string) => {
+      const meta = loanSchemaColumns.find((c) => c.name === col);
+      const fk = inferFilterKindFromPgColumn(meta, col);
       setPromptSpecifierRows((prev) =>
-        prev.map((r) => (r.id === rowId ? { ...r, column: col, values: [] } : r))
+        prev.map((r) =>
+          r.id === rowId
+            ? {
+                ...r,
+                column: col,
+                filter: defaultFilterForKind(fk),
+                options: [],
+                optionsLoading: false,
+                optionsError: null,
+              }
+            : r
+        )
       );
       void loadDistinctForRow(rowId, col);
     },
-    [loadDistinctForRow]
+    [loadDistinctForRow, loanSchemaColumns]
   );
 
-  const setSpecifierRowValues = useCallback((rowId: string, values: string[]) => {
-    setPromptSpecifierRows((prev) => prev.map((r) => (r.id === rowId ? { ...r, values } : r)));
+  const setSpecifierRowFilter = useCallback((rowId: string, filter: ColumnFilter) => {
+    setPromptSpecifierRows((prev) => prev.map((r) => (r.id === rowId ? { ...r, filter } : r)));
   }, []);
 
   const handleSubmitMyPrompt = useCallback(async () => {
@@ -1616,7 +1791,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
       setMyPromptsError("Title and prompt text are required.");
       return;
     }
-    const specifiers = specifiersObjectFromRows(promptSpecifierRows) as Record<string, unknown>;
+    const specifiers = specifiersObjectFromRows(promptSpecifierRows, promptFormTag) as Record<string, unknown>;
     setPromptFormBusy(true);
     setMyPromptsError(null);
     try {
@@ -1644,6 +1819,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
     promptFormTitle,
     promptFormText,
     promptSpecifierRows,
+    promptFormTag,
     editingPromptId,
     promptFormSchedule,
     selectedTenantId,
@@ -1653,13 +1829,27 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
 
   const handleEditMyPrompt = useCallback(
     (p: UserMyInsightPrompt) => {
-      const rows = rowsFromSpecifiersObject(
-        p.specifiers && typeof p.specifiers === "object" ? p.specifiers : null
-      );
+      const raw =
+        p.specifiers && typeof p.specifiers === "object"
+          ? (p.specifiers as Record<string, unknown>)
+          : null;
+      const tagRaw =
+        raw && typeof raw._prompt_tag === "string" ? raw._prompt_tag.trim().toLowerCase() : "";
+      const allowedTag = ["operations", "sales", "finance", "secondary_marketing", "compliance"].includes(tagRaw)
+        ? tagRaw
+        : "";
+      const specNoTag =
+        raw == null
+          ? null
+          : (Object.fromEntries(
+              Object.entries(raw).filter(([key]) => key !== "_prompt_tag")
+            ) as Record<string, unknown>);
+      const rows = rowsFromSpecifiersObject(specNoTag, loanSchemaColumns);
       setEditingPromptId(p.id);
       setPromptFormTitle(p.title);
       setPromptFormText(p.prompt_text);
       setPromptFormSchedule(p.schedule);
+      setPromptFormTag(allowedTag);
       setPromptSpecifierRows(rows);
       setMyPromptsError(null);
       setMyPromptModalOpen(true);
@@ -1667,7 +1857,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
         if (r.column) void loadDistinctForRow(r.id, r.column);
       }
     },
-    [loadDistinctForRow]
+    [loadDistinctForRow, loanSchemaColumns]
   );
 
   const handleTogglePromptEnabled = useCallback(
@@ -2594,9 +2784,9 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
                 <div className="min-w-0">
                   <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-1">My Prompts</h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400 max-w-2xl">
-                    Saved questions can narrow which loans apply using specifiers (pick a loans-table column, then one
-                    or more values). Batch prompts run with My Insights sync; use Run for an immediate card. A full My
-                    Insights job cannot run at the same time as a single-prompt run.
+                    Saved questions can narrow which loans apply using specifiers (pick a loans-table column, then a
+                    filter: values, ranges, dates, or yes/no). Batch prompts run with My Insights sync; use Run for an
+                    immediate card. A full My Insights job cannot run at the same time as a single-prompt run.
                   </p>
                 </div>
                 <button
@@ -2736,6 +2926,23 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
                       placeholder="What you want summarized as a My Insights card…"
                     />
                   </label>
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+                    Tag
+                    <select
+                      value={promptFormTag}
+                      onChange={(e) => setPromptFormTag(e.target.value)}
+                      className="mt-1.5 w-full max-w-md rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:focus-visible:ring-offset-slate-950"
+                    >
+                      {MY_INSIGHT_PROMPT_TAG_OPTIONS.map((opt) => (
+                        <option key={opt.id || "__blank__"} value={opt.id}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="mt-1 block text-[11px] text-slate-500 dark:text-slate-400">
+                      Optional. Tags the generated My Insights card for the category tabs. Default is (blank).
+                    </span>
+                  </label>
                   <div>
                     <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                       <span className="text-xs font-medium text-slate-600 dark:text-slate-300">Specifiers</span>
@@ -2753,7 +2960,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
                     ) : null}
                     {promptSpecifierRows.length === 0 ? (
                       <p className="text-xs text-slate-500 dark:text-slate-400">
-                        No specifiers — prompt applies to your full loan scope. Add a row to filter by column values.
+                        No specifiers — prompt applies to your full loan scope. Add a row to filter the loan cohort.
                       </p>
                     ) : (
                       <div className="flex flex-col gap-3">
@@ -2773,25 +2980,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
                                   c.displayName.toLowerCase().includes(colQ)
                               )
                             : sortedLoanSchemaColumns;
-                          const mergedValueOptions = Array.from(
-                            new Set([
-                              ...row.values.filter((v) => !row.options.includes(v)),
-                              ...row.options,
-                            ])
-                          );
-                          const valQ =
-                            specifierValuesPopoverRowId === row.id
-                              ? specifierValuesSearch.trim().toLowerCase()
-                              : "";
-                          const valuesFiltered = valQ
-                            ? mergedValueOptions.filter((v) => v.toLowerCase().includes(valQ))
-                            : mergedValueOptions;
-                          const orderedValues = [...valuesFiltered].sort((a, b) => {
-                            const as = row.values.includes(a) ? 1 : 0;
-                            const bs = row.values.includes(b) ? 1 : 0;
-                            if (as !== bs) return bs - as;
-                            return a.localeCompare(b, undefined, { numeric: true });
-                          });
+                          const fk = inferFilterKindFromPgColumn(colMeta, row.column);
                           return (
                             <div
                               key={row.id}
@@ -2866,7 +3055,7 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
                               </div>
                               <div className="min-w-[min(100%,260px)] flex-[2]">
                                 <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                                  Values
+                                  Filter
                                 </label>
                                 {row.optionsLoading ? (
                                   <div className="flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-500 dark:border-slate-600 dark:bg-slate-900">
@@ -2899,55 +3088,30 @@ export const CohiPromptsCard = React.memo(function CohiPromptsCard({
                                         )}
                                       >
                                         <span className="min-w-0 flex-1 truncate text-slate-700 dark:text-slate-200">
-                                          {summarizeSpecifierValues(row.values)}
+                                          {summarizeSpecifierFilterButton(colMeta, row.column, row.filter)}
                                         </span>
                                         <ChevronDown className="h-4 w-4 shrink-0 opacity-50" aria-hidden />
                                       </button>
                                     </PopoverTrigger>
-                                    <PopoverContent align="start" className="w-80 p-0" sideOffset={6}>
-                                      <Command shouldFilter={false}>
-                                        <CommandInput
-                                          placeholder="Search values…"
-                                          value={specifierValuesSearch}
-                                          onValueChange={setSpecifierValuesSearch}
-                                        />
-                                        <CommandList className="max-h-[min(40vh,260px)]">
-                                          <CommandEmpty>No values found.</CommandEmpty>
-                                          {orderedValues.map((v) => {
-                                            const sel = row.values.includes(v);
-                                            return (
-                                              <CommandItem
-                                                key={v}
-                                                value={v}
-                                                onSelect={() => {
-                                                  const next = sel
-                                                    ? row.values.filter((x) => x !== v)
-                                                    : [...row.values, v];
-                                                  setSpecifierRowValues(row.id, next);
-                                                }}
-                                                className={cn(
-                                                  "cursor-pointer hover:!bg-transparent hover:!text-foreground data-[selected=true]:!bg-transparent data-[selected=true]:!text-foreground",
-                                                  sel
-                                                    ? "!bg-accent !text-accent-foreground hover:!bg-accent data-[selected=true]:!bg-accent data-[selected=true]:!text-accent-foreground"
-                                                    : ""
-                                                )}
-                                              >
-                                                <span className="mr-2">{sel ? "✓" : ""}</span>
-                                                <span className="break-all">{v}</span>
-                                              </CommandItem>
-                                            );
-                                          })}
-                                        </CommandList>
-                                      </Command>
+                                    <PopoverContent
+                                      align="start"
+                                      className="w-[min(100vw-1rem,420px)] p-0"
+                                      sideOffset={6}
+                                    >
+                                      <MyInsightSpecifierFilterPanel
+                                        columnTitle={colMeta?.displayName ?? row.column}
+                                        filterKind={fk}
+                                        filter={row.filter}
+                                        distinctOptions={row.options}
+                                        filterSearch={
+                                          specifierValuesPopoverRowId === row.id ? specifierValuesSearch : ""
+                                        }
+                                        onFilterSearchChange={setSpecifierValuesSearch}
+                                        onChange={(next) => setSpecifierRowFilter(row.id, next)}
+                                      />
                                     </PopoverContent>
                                   </Popover>
                                 )}
-                                {!row.optionsLoading &&
-                                row.column &&
-                                mergedValueOptions.length === 0 &&
-                                !row.optionsError ? (
-                                  <p className="mt-1 text-xs text-slate-500">No distinct values for this column.</p>
-                                ) : null}
                               </div>
                               <button
                                 type="button"

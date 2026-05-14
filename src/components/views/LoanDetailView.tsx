@@ -54,6 +54,8 @@ import {
   isFilterActive,
   isDateFilterBlankOnlyShortcut,
   isLoanDetailDateMissing,
+  getRelativeDateFieldValues,
+  dateFilterFromRelativeFields,
 } from "@/utils/loanDetailFilters";
 import { useLoanDetailFilterBookmarks, type LoanDetailFilterBookmark } from "@/hooks/useLoanDetailFilterBookmarks";
 import { Loader2, Download, ArrowUp, ArrowDown, Filter, X, Check, Bookmark, Pencil, Trash2, Share2, SlidersHorizontal } from "lucide-react";
@@ -1687,12 +1689,15 @@ export function LoanDetailView({
 
     if (filterKind === "date") {
       const dateFilter = filter?.kind === "date" ? filter : { kind: "date" as const };
+      const relDates = getRelativeDateFieldValues(dateFilter);
       const yearToken = String(new Date().getFullYear());
       const fixedYears = ["2025", "2024", "2023"];
       const dateShortcutOptions: Array<{ token: string; label: string; kind: "preset" | "year" | "ytd" }> = [
         { token: "last-30-days", label: "Last 30 Days", kind: "preset" },
         { token: "mtd", label: "MTD", kind: "preset" },
+        { token: "qtd", label: getPeriodPresetMeta("qtd").label, kind: "preset" },
         { token: "last-month", label: "Last Month", kind: "preset" },
+        { token: "last-quarter", label: getPeriodPresetMeta("last-quarter").label, kind: "preset" },
         { token: "ytd", label: `${yearToken} YTD`, kind: "ytd" },
         ...fixedYears.map((y) => ({ token: y, label: y, kind: "year" as const })),
         { token: "rolling-13", label: getPeriodPresetMeta("rolling-13").label, kind: "preset" }, // L13M
@@ -1759,6 +1764,38 @@ export function LoanDetailView({
                 {opt.label}
               </Button>
             ))}
+          </div>
+          <div className="space-y-2 rounded-md border border-slate-200/80 p-2 dark:border-slate-600/60">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Relative to date(s)
+            </p>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              Select one or both dates. One date: on/after From Date, or on/before To Date. Both dates:
+              inclusive range. If From is later than To, the other bound clears: changing From keeps From;
+              changing To keeps To.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-slate-600 dark:text-slate-300">From</span>
+                <Input
+                  type="date"
+                  value={relDates.from}
+                  onChange={(e) =>
+                    setDraftFilter(col.id, dateFilterFromRelativeFields(e.target.value, relDates.to, "from"))
+                  }
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-slate-600 dark:text-slate-300">To</span>
+                <Input
+                  type="date"
+                  value={relDates.to}
+                  onChange={(e) =>
+                    setDraftFilter(col.id, dateFilterFromRelativeFields(relDates.from, e.target.value, "to"))
+                  }
+                />
+              </div>
+            </div>
           </div>
           <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => clearDraftFilter(col.id)}>
             Clear Selection
