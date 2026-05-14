@@ -114,6 +114,8 @@ Resources:
               ConditionValue: !Ref Environment
         NotResources:
           - 'arn:aws:rds:*:*:db:*'
+          - 'arn:aws:cloudformation:*:*:stack/*'
+          - 'arn:aws:s3:::*'
 
 Outputs:
   BackupVaultName:
