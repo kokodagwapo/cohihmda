@@ -98,12 +98,13 @@ export const unifiedChatRequestSchema: Record<string, unknown> = {
         maxHistoryTurns: { type: "integer", minimum: 0, maximum: 50 },
         personaHints: { type: "array", items: { type: "string" } },
         qaAgentRunTag: { type: "string" },
-        planningMode: {
-          type: "string",
-          enum: ["auto", "always", "never"],
-          default: "auto",
-          description: "Whether to use planner loop vs single-shot completion for complex turns.",
-        },
+        // Deferred — restore with promptComposer + orchestrator planningMode.
+        // planningMode: {
+        //   type: "string",
+        //   enum: ["auto", "always", "never"],
+        //   default: "auto",
+        //   description: "Whether to use planner loop vs single-shot completion for complex turns.",
+        // },
         research: {
           type: "object",
           description: "Research-only options (deep analysis when chat_type is research).",

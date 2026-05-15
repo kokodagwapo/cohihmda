@@ -170,10 +170,20 @@ paths:
 
   "/messages:stream":
     post:
-      summary: Send message; response is SSE (streaming MVP)
+      summary: Send message; response is SSE
       description: |
-        Server completes the full turn first, then emits schema-valid `ChatStreamEvent`
-        lines (`data: {...}`). Not incremental token streaming (COHI-388).
+        Server emits schema-valid `ChatStreamEvent` lines (`data: {...}`) per
+        `docs/planning/schemas/cohi-chat-unified/chat-event-stream.schema.json`.
+
+        - For `chat_type` in {`chat`, `insight_builder`, `workbench`}: server
+          completes the full turn first, then streams blocks as `block.started`
+          → `block.delta`* → `block.completed` → `turn.completed` (COHI-388).
+        - For `chat_type=research`: the Research Lab pipeline runs live and its
+          timeline / plan / agent / synthesis events are mapped to `block.delta`
+          updates on a timeline text block, followed by a final `artifacts`
+          block referencing the Research session (Wave 3 Locked decision #1,
+          Option B). Legacy `GET /api/research/sessions/:id/stream` may remain
+          for backward compatibility but is **not** the primary contract.
       operationId: postUnifiedChatMessageStream
       security:
         - bearerAuth: []
@@ -192,6 +202,8 @@ paths:
                 type: string
         "400":
           description: Validation error
+        "403":
+          description: Access denied (policy gate)
         "409":
           description: Duplicate clientMessageId
 
@@ -286,7 +298,26 @@ components:
         chat_type:
           type: string
           enum: [chat, research, insight_builder, workbench]
-        legacy_ref: { type: string, nullable: true }
+        legacy_ref:
+          type: string
+          nullable: true
+          description: |
+            Opaque identifier from the legacy backing system (Research Lab
+            session id, etc.). No FK to `research_sessions` (COHI-395 §11.2).
+        legacy_source:
+          type: string
+          nullable: true
+          enum: [cohi_chat, research_lab]
+          description: |
+            Origin of the legacy_ref. Populated by the unified write path when
+            mode-specific persistence is involved (COHI-395 §11).
+        folder_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: |
+            Optional folder assignment. FK to `chat_folders` is deferred until
+            COHI-403 ships folders DDL (see migration 130 comment).
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
@@ -332,6 +363,15 @@ components:
             route: { type: string }
         context:
           type: object
+          properties:
+            legacyResearchSessionId:
+              type: string
+              description: |
+                Optional Research Lab session id used to bind a unified
+                `chat_type=research` thread to an existing pipeline. When set
+                and `conversationId` is absent the server reuses the unified
+                row whose `legacy_ref` matches (COHI-402 resume).
+          additionalProperties: true
         history:
           type: array
           items:
@@ -354,9 +394,10 @@ components:
               type: array
               items: { type: string }
             qaAgentRunTag: { type: string }
-            planningMode:
-              type: string
-              enum: [auto, always, never]
+            # planningMode deferred — see unifiedChatSchemas.ts
+            # planningMode:
+            #   type: string
+            #   enum: [auto, always, never]
             research:
               type: object
               properties:

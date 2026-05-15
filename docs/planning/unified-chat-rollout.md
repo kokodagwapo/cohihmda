@@ -6,6 +6,7 @@
 | ----- | -------- | --------------------- |
 | API | `UNIFIED_CHAT_ENABLED=false` | `GET`/`POST`/`DELETE` under `/api/chat/v1/*` returns 404 (non-production default follows `unifiedChatConfig`). |
 | API persistence | `UNIFIED_CHAT_PERSIST=false` | Skip appending turns to `unified_chat_conversations` from the v1 route. |
+| History dual-read | `UNIFIED_CHAT_HISTORY_DUAL_READ=true` | `GET /api/chat/v1/conversations` and `listCanonicalHistory` merge legacy `research_sessions` rows alongside unified rows (COHI-395 §11.3). When unset/false, only unified rows are returned. |
 | Frontend | `VITE_UNIFIED_CHAT=true` | `useCohiChat`, `useWorkbenchCohi`, and hub Ask surfaces call `/api/chat/v1/messages` instead of legacy routes. |
 | E2E override | `sessionStorage.cohi_force_unified_chat = "1"` | Forces the unified client path without a rebuild (used by Playwright). |
 | E2E / debug | `localStorage.cohi_e2e_legacy_chat_only = "1"` | Overrides `VITE_UNIFIED_CHAT` — keeps legacy `/api/cohi-chat/*` (session history + ask). Used by persistence E2E while unified is on locally. |
@@ -29,14 +30,51 @@
 
 ## Idempotency (`clientMessageId`)
 
-- **Default:** Tenant DB table `unified_chat_idempotency_keys` (see tenant migration **128**). Rows include `expires_at` (10 days from insert). Safe across multiple app instances.
+- **Default:** Tenant DB table `unified_chat_idempotency_keys` (see tenant migration **129**). Rows include `expires_at` (10 days from insert). Safe across multiple app instances.
 - **Dev / emergency:** Set `UNIFIED_CHAT_IDEMPOTENCY=memory` to use the legacy in-process map (single-instance only).
-- If migration **128** has not been applied and env is not `memory`, inserts fall back to in-memory with a console warning.
+- If migration **129** has not been applied and env is not `memory`, inserts fall back to in-memory with a console warning.
+
+### Idempotency cleanup (manual SQL — Wave 3, no in-app scheduler)
+
+No background job sweeps `unified_chat_idempotency_keys` in Wave 3. Operators run the cleanup on a schedule (cron / Aurora maintenance window) against each tenant DB:
+
+```sql
+DELETE FROM public.unified_chat_idempotency_keys
+WHERE expires_at < NOW();
+```
+
+Rerun is safe (`DELETE` is idempotent). A later epic can promote this to a worker if the table grows fast; until then the 10-day TTL keeps it bounded for typical chat volumes.
 
 ## Limitations (until hardened)
 
 - **Sessions:** With `VITE_UNIFIED_CHAT=true`, legacy chat session sidebar uses empty list until the client lists `GET /api/chat/v1/conversations`.
 
+## Prompt module overrides (COHI-390 AC3)
+
+`server/src/services/chat/promptComposer.ts` resolves a deterministic module set per `chat_type` / `surface` / `scope`. **Precedence rule (locked):** **repo default < tenant override**. Tenant overrides are not yet stored as DB rows; when added, the composer should read the override (if any) for a given `module.id` and substitute the rendered text while keeping the same `module.id@version` audit key. Until that ships, `bundleHash` reflects repo-only modules; an override that mutates rendered text must bump the module `version` (or include a tenant suffix) so audit attribution stays accurate.
+
+## SQL router (COHI-392 AC2) — documented bypasses
+
+`server/src/services/chat/sqlAndMetricsRouter.ts` exports `SQL_ROUTER_KNOWN_BYPASS_PATHS` listing legacy SQL execution sites that do not yet pass through `runSqlThroughRouter`. Shrink the list over time as each call site is wired through the gate; any new SQL access for `chat_type=research` must be added through the router (Wave 3 lock).
+
 ## Golden replay
 
 See `scripts/replay/unified-chat-golden-prompts.json` for staging replay prompts.
+
+## Legacy Research backfill runbook (COHI-395 §11.5)
+
+`server/scripts/backfill-unified-chat-legacy.ts` walks `research_sessions` per tenant and inserts a matching `unified_chat_conversations` row (`chat_type=research`, `legacy_source=research_lab`, `legacy_ref=<session.id>`) when one does not already exist. Run per tenant:
+
+```bash
+npx tsx server/scripts/backfill-unified-chat-legacy.ts --tenant=<tenantId>
+```
+
+The script prints a single JSON line summary: `{ tenantId, inserted, skipped, total }`. Use that to monitor progress.
+
+| Step | Action |
+| ---- | ------ |
+| Pre-flight | Confirm tenant migrations **122**, **129**, **130** applied. |
+| Metrics | Log `inserted` / `skipped` / `total` per tenant; alert if `inserted` is unexpectedly **0** when `total > 0`. |
+| Pause | If errors exceed ~5% of `total` for a tenant, stop further tenants and inspect logs before continuing. |
+| Rollback | Reverse a tenant with `DELETE FROM public.unified_chat_conversations WHERE legacy_source = 'research_lab' AND messages = '[]'::jsonb;` — only deletes script-inserted shells, not user messages. |
+| Verify | After backfill, `GET /api/chat/v1/conversations?chat_type=research` with `UNIFIED_CHAT_HISTORY_DUAL_READ=true` should match `research_sessions` counts; spot-check a few rows. |

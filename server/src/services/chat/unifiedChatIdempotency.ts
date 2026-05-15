@@ -1,7 +1,7 @@
 /**
  * Idempotency for clientMessageId (COHI-387).
  * Default: Postgres tenant table (multi-instance safe).
- * Set UNIFIED_CHAT_IDEMPOTENCY=memory for single-process dev without migration 128.
+ * Set UNIFIED_CHAT_IDEMPOTENCY=memory for single-process dev without migration 129.
  */
 
 import { tenantDbManager } from "../../config/tenantDatabaseManager.js";
@@ -61,7 +61,7 @@ export async function tryReserveClientMessageId(
   } catch (e: any) {
     if (e?.code === "42P01") {
       console.warn(
-        "[unifiedChatIdempotency] unified_chat_idempotency_keys missing; using in-memory fallback (set UNIFIED_CHAT_IDEMPOTENCY=memory or run tenant migration 128).",
+        "[unifiedChatIdempotency] unified_chat_idempotency_keys missing; using in-memory fallback (set UNIFIED_CHAT_IDEMPOTENCY=memory or run tenant migration 129).",
       );
       return memoryTryReserve(tenantId, userId, clientMessageId) === "duplicate"
         ? "duplicate"

@@ -1,6 +1,10 @@
 -- =============================================================================
--- Migration 128: Unified chat v1 — conversation mode columns + idempotency
+-- Migration 129: Unified chat v1 — conversation mode columns + idempotency
 -- (COHI-401 / COHI-387)
+--
+-- Idempotency cleanup (operator-run, see docs/planning/unified-chat-rollout.md):
+--   DELETE FROM public.unified_chat_idempotency_keys WHERE expires_at < NOW();
+-- No in-app scheduler runs this in Wave 3; run it from a cron or ad-hoc job.
 -- =============================================================================
 
 ALTER TABLE public.unified_chat_conversations

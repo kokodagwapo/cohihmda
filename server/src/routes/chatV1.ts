@@ -23,14 +23,21 @@ import {
 } from "../services/chat/unifiedChatOrchestrator.js";
 import {
   appendUnifiedChatTurns,
-  listUnifiedConversations,
   getUnifiedConversation,
   createUnifiedConversation,
   deleteUnifiedConversation,
   rebindUnifiedConversation,
   type UnifiedConversationChatType,
 } from "../services/chat/unifiedConversationService.js";
-import { checkSectionAccess } from "../services/ai/queryBuilderService.js";
+import { listCanonicalHistory } from "../services/chat/historyRepository.js";
+import {
+  assertUnifiedChatAllowed,
+  buildUnifiedChatPermissions,
+} from "../services/chat/policyEngine.js";
+import { emitValidatedStreamWithDeltas } from "../services/chat/unifiedChatStream.js";
+import { runUnifiedResearchStream } from "../services/chat/unifiedResearchStream.js";
+import { randomUUID } from "crypto";
+import { findUnifiedConversationByLegacyRef } from "../services/chat/unifiedConversationService.js";
 
 const router = Router();
 
@@ -129,16 +136,8 @@ router.get(
           message: "Tenant and user context required",
         });
       }
-      const allowed = await checkSectionAccess("cohi_chat", {
-        userId,
-        tenantId,
-        userRole: req.userRole || "user",
-        userEmail: req.userEmail,
-      });
-      const chatTypes: UnifiedConversationChatType[] = allowed
-        ? ["chat", "research", "insight_builder", "workbench"]
-        : [];
-      res.json({ cohiChat: allowed, chatTypes });
+      const payload = await buildUnifiedChatPermissions(req);
+      res.json(payload);
     } catch (err: any) {
       console.error("[chat/v1/permissions] Error:", err);
       res.status(500).json({
@@ -179,29 +178,35 @@ router.get(
         limitParsed !== undefined && Number.isFinite(limitParsed) ? limitParsed : undefined;
       const offset =
         offsetParsed !== undefined && Number.isFinite(offsetParsed) ? offsetParsed : undefined;
-      const rows = await listUnifiedConversations({
+      const normalizedChatType =
+        chatType === "chat" ||
+        chatType === "research" ||
+        chatType === "insight_builder" ||
+        chatType === "workbench"
+          ? chatType
+          : undefined;
+      const rows = await listCanonicalHistory({
         tenantId,
         userId,
         scopeType: scopeType || undefined,
         scopeKey: scopeKey !== undefined ? scopeKey : undefined,
-        chatType:
-          chatType === "chat" ||
-          chatType === "research" ||
-          chatType === "insight_builder" ||
-          chatType === "workbench"
-            ? chatType
-            : undefined,
+        chatType: normalizedChatType,
         limit,
         offset,
       });
       res.json({
         conversations: rows.map((r) => ({
-          id: r.id,
+          id: r.conversation_id,
           title: r.title,
-          scope: { type: r.scope_type, id: r.scope_key ?? undefined },
+          scope: {
+            type: r.scope_type ?? "global_session",
+            id: r.scope_key ?? undefined,
+          },
           chat_type: r.chat_type,
-          legacy_ref: r.legacy_ref,
-          created_at: r.created_at,
+          legacy_ref: r.legacy_ref ?? null,
+          legacy_source: r.legacy_source ?? null,
+          folder_id: r.folder_id ?? null,
+          created_at: r.created_at ?? r.updated_at,
           updated_at: r.updated_at,
         })),
       });
@@ -301,6 +306,8 @@ router.get(
         scope: { type: row.scope_type, id: row.scope_key ?? undefined },
         chat_type: row.chat_type,
         legacy_ref: row.legacy_ref,
+        legacy_source: row.legacy_source,
+        folder_id: row.folder_id,
         messages: row.messages,
         created_at: row.created_at,
         updated_at: row.updated_at,
@@ -405,6 +412,8 @@ router.post(
         scope: { type: updated.scope_type, id: updated.scope_key ?? undefined },
         chat_type: updated.chat_type,
         legacy_ref: updated.legacy_ref,
+        legacy_source: updated.legacy_source,
+        folder_id: updated.folder_id,
         messages: updated.messages,
         created_at: updated.created_at,
         updated_at: updated.updated_at,
@@ -418,6 +427,94 @@ router.post(
     }
   },
 );
+
+async function handleResearchStream(
+  req: AuthRequest,
+  res: Response,
+  body: UnifiedChatRequestBody,
+  tenantId: string,
+  userId: string,
+): Promise<void> {
+  const gate = await assertUnifiedChatAllowed(req, {
+    surface: body.location?.surface as any,
+    scopeType: body.scope?.type as any,
+    chatType: "research",
+    deepAnalysis: body.options?.research?.deepAnalysis,
+  });
+  if (gate.ok === false) {
+    res.status(403).json({ error: gate.code, message: gate.message });
+    return;
+  }
+  const policy = gate.decision;
+
+  let conversationId = body.conversationId;
+  let legacyRef = body.context?.legacyResearchSessionId ?? null;
+  if (!conversationId && legacyRef) {
+    const existing = await findUnifiedConversationByLegacyRef({
+      tenantId,
+      userId,
+      legacyRef,
+    }).catch(() => null);
+    if (existing) conversationId = existing.id;
+  }
+  if (!conversationId) conversationId = randomUUID();
+  const turnId = randomUUID();
+
+  let result: Awaited<ReturnType<typeof runUnifiedResearchStream>>;
+  try {
+    result = await runUnifiedResearchStream({
+      req,
+      res,
+      conversationId,
+      turnId,
+      message: body.message,
+      legacyRef,
+      deepAnalysis: body.options?.research?.deepAnalysis,
+      policy,
+    });
+  } catch (err: any) {
+    if (!res.headersSent) {
+      const status = Number(err.statusCode) > 0 ? err.statusCode : 500;
+      res.status(status).json({
+        error: err.code ?? "internal_error",
+        message: err.message || "Failed to start research stream",
+      });
+    } else {
+      try {
+        res.end();
+      } catch {
+        /* ignore */
+      }
+    }
+    return;
+  }
+
+  legacyRef = result.legacyRef;
+  res.end();
+
+  if (process.env.UNIFIED_CHAT_PERSIST !== "false") {
+    try {
+      await appendUnifiedChatTurns({
+        tenantId,
+        userId,
+        conversationId,
+        userMessage: body.message,
+        assistantBlocks: result.finalBlocks,
+        assistantTurnId: turnId,
+        scopeType: body.scope?.type,
+        scopeKey:
+          body.scope?.type === "workbench_hub" && body.scope?.id
+            ? body.scope.id
+            : body.scope?.id ?? null,
+        chatType: "research",
+        legacyRef,
+        legacySource: "research_lab",
+      });
+    } catch (persistErr: any) {
+      console.warn("[chat/v1 research stream] Persist skipped:", persistErr?.message);
+    }
+  }
+}
 
 async function handlePostMessage(
   req: AuthRequest,
@@ -455,6 +552,11 @@ async function handlePostMessage(
       return;
     }
 
+    if (options.stream && body.chat_type === "research") {
+      await handleResearchStream(req, res, body, tenantId, userId);
+      return;
+    }
+
     const result = await processUnifiedChatMessage(req, body);
 
     const envelope = {
@@ -486,6 +588,8 @@ async function handlePostMessage(
               ? body.scope.id
               : body.scope?.id ?? null,
           chatType,
+          legacyRef: result.legacyRef ?? null,
+          legacySource: result.legacySource ?? null,
         });
       } catch (persistErr: any) {
         console.warn("[chat/v1] Persist skipped:", persistErr?.message);
@@ -514,7 +618,7 @@ async function handlePostMessage(
     res.setHeader("X-Accel-Buffering", "no");
     (res as Response & { flushHeaders?: () => void }).flushHeaders?.();
 
-    emitValidatedStream(
+    emitValidatedStreamWithDeltas(
       res,
       result.conversationId,
       result.turn.id,
@@ -522,6 +626,7 @@ async function handlePostMessage(
       {
         suggestedQuestions: (result.metadata?.suggestedQuestions as string[]) ?? [],
         chatType: result.metadata?.chatType,
+        promptHash: result.metadata?.promptHash,
       },
     );
     res.end();

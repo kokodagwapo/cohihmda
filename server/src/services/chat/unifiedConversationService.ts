@@ -19,6 +19,8 @@ export interface UnifiedChatTurnRecord {
   at: string;
 }
 
+export type UnifiedLegacySource = "cohi_chat" | "research_lab" | string;
+
 export interface UnifiedConversationListRow {
   id: string;
   title: string;
@@ -26,6 +28,8 @@ export interface UnifiedConversationListRow {
   scope_key: string | null;
   chat_type: UnifiedConversationChatType;
   legacy_ref: string | null;
+  legacy_source: string | null;
+  folder_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -52,7 +56,9 @@ async function ensureTable(tenantId: string): Promise<boolean> {
     await pool.query(`
       ALTER TABLE public.unified_chat_conversations
         ADD COLUMN IF NOT EXISTS chat_type TEXT NOT NULL DEFAULT 'chat',
-        ADD COLUMN IF NOT EXISTS legacy_ref TEXT
+        ADD COLUMN IF NOT EXISTS legacy_ref TEXT,
+        ADD COLUMN IF NOT EXISTS legacy_source TEXT,
+        ADD COLUMN IF NOT EXISTS folder_id UUID
     `);
     return true;
   } catch (e: any) {
@@ -74,6 +80,8 @@ export async function appendUnifiedChatTurns(args: {
   scopeType?: string;
   scopeKey?: string | null;
   chatType?: UnifiedConversationChatType;
+  legacyRef?: string | null;
+  legacySource?: string | null;
 }): Promise<void> {
   const ok = await ensureTable(args.tenantId);
   if (!ok) return;
@@ -102,9 +110,9 @@ export async function appendUnifiedChatTurns(args: {
     await pool.query(
       `
       INSERT INTO public.unified_chat_conversations (
-        id, user_id, scope_type, scope_key, title, chat_type, messages, created_at, updated_at
+        id, user_id, scope_type, scope_key, title, chat_type, legacy_ref, legacy_source, messages, created_at, updated_at
       )
-      VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7::jsonb, NOW(), NOW())
+      VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9::jsonb, NOW(), NOW())
       `,
       [
         args.conversationId,
@@ -113,6 +121,8 @@ export async function appendUnifiedChatTurns(args: {
         args.scopeKey ?? null,
         args.userMessage.substring(0, 80),
         chatType,
+        args.legacyRef ?? null,
+        args.legacySource ?? null,
         chunk,
       ],
     );
@@ -124,10 +134,19 @@ export async function appendUnifiedChatTurns(args: {
     UPDATE public.unified_chat_conversations
     SET messages = COALESCE(messages, '[]'::jsonb) || $2::jsonb,
         title = CASE WHEN title = 'Chat' THEN LEFT($3, 80) ELSE title END,
+        legacy_ref = COALESCE($5, legacy_ref),
+        legacy_source = COALESCE($6, legacy_source),
         updated_at = NOW()
     WHERE id = $1::uuid AND user_id = $4::uuid
     `,
-    [args.conversationId, chunk, args.userMessage, args.userId],
+    [
+      args.conversationId,
+      chunk,
+      args.userMessage,
+      args.userId,
+      args.legacyRef ?? null,
+      args.legacySource ?? null,
+    ],
   );
 }
 
@@ -175,7 +194,7 @@ export async function listUnifiedConversations(args: {
   const offsetPh = `$${i++}::int`;
   params.push(offset);
   const q = `
-    SELECT id, title, scope_type, scope_key, chat_type, legacy_ref, created_at, updated_at
+    SELECT id, title, scope_type, scope_key, chat_type, legacy_ref, legacy_source, folder_id, created_at, updated_at
     FROM public.unified_chat_conversations
     WHERE ${where.join(" AND ")}
     ORDER BY updated_at DESC
@@ -196,7 +215,7 @@ export async function getUnifiedConversation(args: {
   const pool = await tenantDbManager.getTenantPool(args.tenantId);
   const r = await pool.query(
     `
-    SELECT id, title, scope_type, scope_key, chat_type, legacy_ref, messages, created_at, updated_at
+    SELECT id, title, scope_type, scope_key, chat_type, legacy_ref, legacy_source, folder_id, messages, created_at, updated_at
     FROM public.unified_chat_conversations
     WHERE id = $1::uuid AND user_id = $2::uuid
     LIMIT 1
@@ -212,6 +231,8 @@ export async function getUnifiedConversation(args: {
     scope_key: row.scope_key,
     chat_type: row.chat_type,
     legacy_ref: row.legacy_ref,
+    legacy_source: row.legacy_source ?? null,
+    folder_id: row.folder_id ?? null,
     created_at: row.created_at,
     updated_at: row.updated_at,
     messages: Array.isArray(row.messages) ? row.messages : [],
@@ -226,6 +247,8 @@ export async function createUnifiedConversation(args: {
   chatType: UnifiedConversationChatType;
   title?: string;
   legacyRef?: string | null;
+  legacySource?: string | null;
+  folderId?: string | null;
 }): Promise<string> {
   const ok = await ensureTable(args.tenantId);
   if (!ok) throw new Error("unified_chat_conversations unavailable");
@@ -235,9 +258,9 @@ export async function createUnifiedConversation(args: {
   await pool.query(
     `
     INSERT INTO public.unified_chat_conversations (
-      id, user_id, scope_type, scope_key, title, chat_type, legacy_ref, messages, created_at, updated_at
+      id, user_id, scope_type, scope_key, title, chat_type, legacy_ref, legacy_source, folder_id, messages, created_at, updated_at
     )
-    VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, '[]'::jsonb, NOW(), NOW())
+    VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, '[]'::jsonb, NOW(), NOW())
     `,
     [
       id,
@@ -247,9 +270,36 @@ export async function createUnifiedConversation(args: {
       title,
       args.chatType,
       args.legacyRef ?? null,
+      args.legacySource ?? null,
+      args.folderId ?? null,
     ],
   );
   return id;
+}
+
+/**
+ * Look up an existing unified conversation by legacy_ref so research follow-ups
+ * land on the same row (COHI-402: stable conversation_id across resume).
+ */
+export async function findUnifiedConversationByLegacyRef(args: {
+  tenantId: string;
+  userId: string;
+  legacyRef: string;
+}): Promise<UnifiedConversationListRow | null> {
+  const ok = await ensureTable(args.tenantId);
+  if (!ok) return null;
+  const pool = await tenantDbManager.getTenantPool(args.tenantId);
+  const r = await pool.query(
+    `
+    SELECT id, title, scope_type, scope_key, chat_type, legacy_ref, legacy_source, folder_id, created_at, updated_at
+    FROM public.unified_chat_conversations
+    WHERE user_id = $1::uuid AND legacy_ref = $2
+    ORDER BY updated_at DESC
+    LIMIT 1
+    `,
+    [args.userId, args.legacyRef],
+  );
+  return r.rows.length === 0 ? null : (r.rows[0] as UnifiedConversationListRow);
 }
 
 export async function deleteUnifiedConversation(args: {
@@ -286,7 +336,7 @@ export async function rebindUnifiedConversation(args: {
         chat_type = COALESCE($5, chat_type),
         updated_at = NOW()
     WHERE id = $1::uuid AND user_id = $2::uuid
-    RETURNING id, title, scope_type, scope_key, chat_type, legacy_ref, messages, created_at, updated_at
+    RETURNING id, title, scope_type, scope_key, chat_type, legacy_ref, legacy_source, folder_id, messages, created_at, updated_at
     `,
     [
       args.conversationId,
@@ -305,6 +355,8 @@ export async function rebindUnifiedConversation(args: {
     scope_key: row.scope_key,
     chat_type: row.chat_type,
     legacy_ref: row.legacy_ref,
+    legacy_source: row.legacy_source ?? null,
+    folder_id: row.folder_id ?? null,
     created_at: row.created_at,
     updated_at: row.updated_at,
     messages: Array.isArray(row.messages) ? row.messages : [],

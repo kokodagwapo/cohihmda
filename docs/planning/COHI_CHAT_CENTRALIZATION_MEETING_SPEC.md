@@ -264,8 +264,8 @@ When **Research** is selected as the chat type:
 
 ### 11.2 Canonical model (target)
 
-- Introduce or extend a **canonical conversation** record used by the unified UI. Core fields include stable **`conversation_id`**, **`owner_user_id`**, **`tenant_id`** (if applicable), **`chat_type`** (`chat` | `research` | `insight_builder` | `workbench`), **`title`**, **`updated_at`**, and nullable **`folder_id`** (UUID; linkage to a folders table may add a foreign key when that DDL exists).
-- **Legacy lineage (two distinct fields):**
+- Introduce or extend a **canonical conversation** record used by the unified UI. Core fields include stable **`conversation_id`**, **`owner_user_id`**, **`tenant_id`** (if applicable), **`chat_type`** (`chat` | `research` | `insight_builder` | `workbench`), **`title`**, **`updated_at`**, and nullable **`folder_id`** (UUID; linkage to a folders table may add a foreign key when that DDL exists — v1 stores `folder_id` without FK per COHI-395).
+- **Legacy lineage (two distinct fields — both persisted on `unified_chat_conversations`):**
   - **`legacy_source`** — Provenance enum for audit and migration (e.g. `cohi_chat`, `research_lab`, …). Indicates *which product or store* the row originated from.
   - **`legacy_ref`** — Optional opaque **legacy identifier** (e.g. pre-unified Research session id) used for redirects, **`legacy_id` → `conversation_id`** maps (§11.3), and API bridges. This is *not* the same as `legacy_source`: use both when both apply.
 - **Research-specific payload** (timeline, findings, report state) either **remains in existing Research tables** keyed by `conversation_id` / mapped foreign key, or is **copied** once into a unified blob—**prefer normalizing reads** through a service layer before picking physical schema.
@@ -283,7 +283,7 @@ When **Research** is selected as the chat type:
 
 ### 11.5 Backfill job (optional but recommended)
 
-- Offline or gradual job attaches **`legacy_source`** (and **`legacy_ref`** where a stable legacy id is known) and ensures every historical Research session appears in unified history queries (may only populate an index/MV if physical merge is deferred).
+- Offline or gradual job attaches `**legacy_source*`* (and `**legacy_ref**` where a stable legacy id is known) and ensures every historical Research session appears in unified history queries (may only populate an index/MV if physical merge is deferred).
 - Run with **idempotency** and metrics; pause if error rate exceeds threshold.
 
 ### 11.6 Validation / exit criteria

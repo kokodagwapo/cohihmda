@@ -77,4 +77,19 @@ describe("unified chat JSON schemas", () => {
       }),
     ).toBe(true);
   });
+
+  it("accepts block.delta events (COHI-388 streaming)", () => {
+    const cid = "550e8400-e29b-41d4-a716-446655440000";
+    const tid = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
+    expect(
+      validateUnifiedStreamEvent({
+        event: "block.delta",
+        conversationId: cid,
+        turnId: tid,
+        blockIndex: 0,
+        blockType: "text",
+        delta: "Hello ",
+      }),
+    ).toBe(true);
+  });
 });
